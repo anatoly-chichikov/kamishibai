@@ -1,0 +1,178 @@
+{
+  "manga_panel": {
+    "meta": {
+      "spec_version": "1.0.0",
+      "title": "Neon District Confrontation",
+      "description": "A tense standoff in a rain-soaked cyberpunk alley — 3 panels capturing approach, recognition, and tension",
+      "tags": ["cyberpunk", "tension", "urban", "rain", "confrontation"]
+    },
+    "canvas": {
+      "width": 1024,
+      "height": 1024,
+      "format": "square"
+    },
+    "art_style": {
+      "medium": {
+        "base": "indian_ink",
+        "surface": "high_density_smooth",
+        "color_mode": "monochrome_with_screentone"
+      },
+      "line_work": {
+        "outline_weight": "variable",
+        "organic_stroke": "fine_pointed",
+        "structural_stroke": "chiseled",
+        "stroke_confidence": "high",
+        "weight_range": "wide",
+        "contour_emphasis": true
+      },
+      "shading": {
+        "primary_method": "crosshatching",
+        "hatching_density": "high",
+        "hatching_directionality": "form_following",
+        "secondary_method": "screen_tone",
+        "black_fill_zones": true,
+        "white_on_black_highlights": true,
+        "gradient_method": "hatching_density_variation"
+      },
+      "screen_tone": {
+        "enabled": true,
+        "dot_pattern": "fine",
+        "usage": ["skin", "fabric", "atmosphere", "gradients", "metallic_surfaces"]
+      },
+      "contrast": {
+        "range": "extreme",
+        "distribution": "calculated",
+        "focal_emphasis": true,
+        "value_separation": true
+      },
+      "detail": {
+        "density": "extreme",
+        "texture_differentiation": true,
+        "background_detail_level": "full",
+        "anatomical_precision": "high",
+        "environmental_precision": "high"
+      },
+      "composition": {
+        "cinematic_framing": true,
+        "dynamic_perspective": true,
+        "emotional_closeups": true,
+        "scale_juxtaposition": true,
+        "motion_rendering": "speed_lines_and_blur"
+      }
+    },
+    "panels": [
+      {
+        "id": "p1",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 420
+        },
+        "bleed": true,
+        "scene": {
+          "description": "Wide establishing shot of a narrow cyberpunk alley in heavy rain. Neon signs reflected in puddles. A lone figure in a long coat walks toward camera, face obscured by shadow. Towering buildings with exposed pipes, cables, and ventilation units crowd both sides.",
+          "subject": {
+            "type": "character",
+            "description": "Tall figure in a heavy synthetic trench coat, cybernetic left arm visible at the wrist, hood up, face lost in shadow except for the glint of one augmented eye",
+            "pose": "walking forward, hands in coat pockets, shoulders slightly hunched against rain",
+            "expression": null
+          },
+          "environment": {
+            "setting": "Narrow back-alley in a megacity lower district",
+            "elements": ["neon kanji signage", "steam vents", "puddles reflecting light", "exposed cable bundles", "rusted fire escapes", "rain streaks"],
+            "atmosphere": "oppressive, claustrophobic, wet",
+            "depth": "deep"
+          },
+          "camera": {
+            "angle": "low",
+            "framing": "wide",
+            "perspective": "one_point"
+          },
+          "action": "approaching through rain",
+          "mood": "foreboding",
+          "narrative_weight": "primary"
+        }
+      },
+      {
+        "id": "p2",
+        "bounds": {
+          "x": 0,
+          "y": 428,
+          "width": 520,
+          "height": 588
+        },
+        "bleed": false,
+        "scene": {
+          "description": "Medium shot from the side. The figure has stopped. One hand pulls back the hood slightly, revealing a scarred jaw and the edge of a neural interface port behind the ear. Rain drips off the hood edge. The cybernetic arm is now fully visible — segmented chrome plates, exposed actuator cables at the elbow.",
+          "subject": {
+            "type": "character",
+            "description": "Same figure, hood partially pulled back. Heavy scarring across jaw. Neural port with faint indicator light. Chrome prosthetic arm with visible mechanical detail — each joint, cable, plate rendered individually.",
+            "pose": "standing still, one hand on hood, other arm hanging — chrome fingers slightly curled",
+            "expression": "jaw clenched, controlled tension"
+          },
+          "environment": {
+            "setting": "Same alley, tighter framing — wall textures and a broken surveillance camera visible behind",
+            "elements": ["cracked concrete wall", "defunct camera mount", "rain on chrome arm surface"],
+            "atmosphere": "still, watchful",
+            "depth": "shallow"
+          },
+          "camera": {
+            "angle": "eye_level",
+            "framing": "medium",
+            "perspective": "flat"
+          },
+          "action": "revealing face, pausing",
+          "mood": "recognition",
+          "narrative_weight": "secondary"
+        }
+      },
+      {
+        "id": "p3",
+        "bounds": {
+          "x": 528,
+          "y": 428,
+          "width": 496,
+          "height": 588
+        },
+        "bleed": true,
+        "scene": {
+          "description": "Extreme close-up of the figure's face, straight on. The hood is off. Deep-set eyes with one clearly augmented — the iris is a mechanical aperture, micro-text etched around the rim. Rain runs down the scars. The expression shifts from controlled to something rawer — teeth slightly bared, brow furrowed. Heavy black shadows fill the eye sockets and under the cheekbones. White highlight streaks on the nose bridge and brow from overhead neon.",
+          "subject": {
+            "type": "character",
+            "description": "Face filling the panel. Augmented right eye with mechanical iris. Deep scars crossing from left temple to chin. Short-cropped hair, wet and plastered to skull. Stubble rendered with fine dot work.",
+            "pose": null,
+            "expression": "transition from stoic composure to barely contained fury — emotional duality in one frame"
+          },
+          "environment": {
+            "setting": null,
+            "elements": ["rain droplets on skin surface", "neon light reflection on wet skin"],
+            "atmosphere": "intimate, raw",
+            "depth": "shallow"
+          },
+          "camera": {
+            "angle": "eye_level",
+            "framing": "extreme_closeup",
+            "perspective": "flat"
+          },
+          "action": "staring directly at viewer, emotional shift",
+          "mood": "controlled rage breaking through",
+          "narrative_weight": "primary"
+        }
+      }
+    ],
+    "panel_layout": {
+      "gutter_width": 8,
+      "border_style": "solid_black",
+      "border_weight": 2,
+      "allow_bleed": true,
+      "allow_overlap": false
+    },
+    "constraints": {
+      "style_lock": true,
+      "layout_lock": false,
+      "genre_lock": false,
+      "panel_count_lock": false
+    }
+  }
+}
