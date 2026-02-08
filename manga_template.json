@@ -1,0 +1,95 @@
+{
+  "manga_panel": {
+    "meta": {
+      "spec_version": "1.0.0",
+      "title": "",
+      "description": "",
+      "tags": []
+    },
+    "canvas": {
+      "width": 1024,
+      "height": 1024,
+      "format": "square"
+    },
+    "art_style": {
+      "medium": {
+        "base": "indian_ink",
+        "surface": "high_density_smooth",
+        "color_mode": "monochrome_with_screentone"
+      },
+      "line_work": {
+        "outline_weight": "variable",
+        "organic_stroke": "fine_pointed",
+        "structural_stroke": "chiseled",
+        "stroke_confidence": "high",
+        "weight_range": "wide",
+        "contour_emphasis": true
+      },
+      "shading": {
+        "primary_method": "crosshatching",
+        "hatching_density": "high",
+        "hatching_directionality": "form_following",
+        "secondary_method": "screen_tone",
+        "black_fill_zones": true,
+        "white_on_black_highlights": true,
+        "gradient_method": "hatching_density_variation"
+      },
+      "screen_tone": {
+        "enabled": true,
+        "dot_pattern": "fine",
+        "usage": [
+          "skin",
+          "fabric",
+          "atmosphere",
+          "gradients",
+          "metallic_surfaces"
+        ]
+      },
+      "contrast": {
+        "range": "extreme",
+        "distribution": "calculated",
+        "focal_emphasis": true,
+        "value_separation": true
+      },
+      "detail": {
+        "density": "extreme",
+        "texture_differentiation": true,
+        "background_detail_level": "full",
+        "anatomical_precision": "high",
+        "environmental_precision": "high"
+      },
+      "composition": {
+        "cinematic_framing": true,
+        "dynamic_perspective": true,
+        "emotional_closeups": true,
+        "scale_juxtaposition": true,
+        "motion_rendering": "speed_lines_and_blur"
+      }
+    },
+    "panel_layout": {
+      "gutter_width": 8,
+      "border_style": "solid_black",
+      "border_weight": 2,
+      "allow_bleed": false,
+      "allow_overlap": false,
+      "outer_margin": 16
+    },
+    "constraints": {
+      "style_lock": true,
+      "layout_lock": false,
+      "genre_lock": false,
+      "panel_count_lock": false,
+      "text_rendering": "forbidden"
+    },
+    "rendering_rules": {
+      "text_elements": "none",
+      "speech_bubbles": "none",
+      "sound_effects": "none",
+      "signs_and_labels": "blank_or_hidden",
+      "panel_gutters": "clean_white_no_text",
+      "symbols_or_writing": "none",
+      "outer_border": "16px_pure_white"
+    },
+    "panels": []
+  }
+}

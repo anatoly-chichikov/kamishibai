@@ -3,52 +3,23 @@
 Convert vocabulary JSON to Anki deck with Russian sentences on front (Greek version)
 """
 
-import json
-import genanki
 import hashlib
+import json
 import os
 import random
 import sys
 import wave
-from io import BytesIO
-from PIL import Image
+from datetime import datetime
+
+import genanki
 from google import genai
 from google.genai import types
 
-
-class Cache:
-    """
-    Persistent file cache for generated media
-    """
-
-    def __init__(self, name):
-        self._root = os.path.join(os.path.dirname(__file__), "cache")
-        self._path = os.path.join(self._root, name)
-        os.makedirs(self._path, exist_ok=True)
-
-    def root(self):
-        """
-        Return root cache directory path
-        """
-        return self._root
-
-    def path(self):
-        """
-        Return cache directory path
-        """
-        return self._path
-
-    def exists(self, filename):
-        """
-        Check if file exists in cache
-        """
-        return os.path.exists(os.path.join(self._path, filename))
-
-    def filepath(self, filename):
-        """
-        Return full path to cached file
-        """
-        return os.path.join(self._path, filename)
+from manga import BorderDetector
+from manga import Cache
+from manga import MangaRenderer
+from manga import SceneTranslator
+from manga import TextDetector
 
 
 class AudioGenerator:
@@ -110,76 +81,28 @@ class AudioGenerator:
 
 class ImageGenerator:
     """
-    Generates images from text using Gemini 3 Pro Image
+    Generates manga images via two-step pipeline: sentence → scene → illustration
     """
 
-    def __init__(self, client, cache, prompt):
+    def __init__(self, client, cache, translator, renderer):
         self._client = client
         self._cache = cache
-        self._prompt = prompt
+        self._translator = translator
+        self._renderer = renderer
 
-    def generate(self, text, context=""):
+    def generate(self, sentence, word):
         """
-        Generate image file from text and return tuple of filename and cached flag
+        Generate manga image and return tuple of filename and cached flag
         """
-        combined = f"{text}{context}"
-        digest = hashlib.md5(combined.encode()).hexdigest()[:12]
+        digest = hashlib.md5(sentence.encode()).hexdigest()[:12]
         filename = f"{digest}.jpg"
         if self._cache.exists(filename):
             return (filename, True)
         filepath = self._cache.filepath(filename)
-        instruction = f" Keep in mind the context: {context}." if context else ""
-        prompt = self._prompt.format(text=text, context=instruction)
-        retries = 2
-        for attempt in range(retries):
-            try:
-                response = self._client.models.generate_content(
-                    model="gemini-3-pro-image-preview",
-                    contents=[prompt],
-                    config=types.GenerateContentConfig(
-                        response_modalities=["IMAGE"],
-                        image_config=types.ImageConfig(
-                            aspect_ratio="1:1",
-                        ),
-                        safety_settings=[
-                            types.SafetySetting(
-                                category="HARM_CATEGORY_HARASSMENT",
-                                threshold="BLOCK_NONE",
-                            ),
-                            types.SafetySetting(
-                                category="HARM_CATEGORY_HATE_SPEECH",
-                                threshold="BLOCK_NONE",
-                            ),
-                            types.SafetySetting(
-                                category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                                threshold="BLOCK_NONE",
-                            ),
-                            types.SafetySetting(
-                                category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                                threshold="BLOCK_NONE",
-                            ),
-                        ],
-                    ),
-                )
-                if not response.candidates:
-                    print(f"Warning: No candidates in response for image: {text}")
-                    return (None, False)
-                if not response.candidates[0].content:
-                    print(f"Warning: No content in response for image: {text}")
-                    return (None, False)
-                for part in response.candidates[0].content.parts:
-                    if part.inline_data is not None:
-                        image = Image.open(BytesIO(part.inline_data.data))
-                        gray = image.convert("L")
-                        gray.save(filepath, "JPEG", quality=60)
-                        return (filename, False)
-                print(f"Warning: No image data found in response for image: {text}")
-                return (None, False)
-            except Exception as error:
-                print(f"Error generating image: {error}")
-                return (None, False)
-        print(f"Failed to generate image after {retries} attempts")
-        return (None, False)
+        scene = self._translator.translate(sentence)
+        image = self._renderer.render(scene, word)
+        image.save(filepath, "JPEG", quality=60)
+        return (filename, False)
 
 
 class VocabularyDeck:
@@ -212,12 +135,13 @@ class VocabularyDeck:
                 {"name": "Audio"},
                 {"name": "Image"},
                 {"name": "Context"},
+                {"name": "PronunciationAll"},
             ],
             templates=[
                 {
                     "name": "Card 1",
                     "qfmt": '<div style="text-align: center; padding: 20px;">{{Image}}<div style="font-size: 20px; margin-top: 15px;">{{RussianSentence}}</div></div>',
-                    "afmt": '{{FrontSide}}<hr id="answer">{{Audio}}<div style="font-size: 22px; font-weight: bold; text-align: center; margin: 20px 0;">{{Example}}</div><div style="font-size: 17px; color: #ddd; margin-top: 15px;"><strong>{{Word}}</strong> {{Pronunciation}}</div><div style="font-size: 15px; color: #bbb; margin-top: 3px;">{{Translation}}</div><div style="font-size: 13px; color: #999; margin-top: 8px;">Importance: {{Importance}}/10</div><div style="font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px;">{{Context}}</div>',
+                    "afmt": '{{FrontSide}}<hr id="answer">{{Audio}}<div style="font-size: 22px; font-weight: bold; text-align: center; margin: 20px 0;">{{Example}}</div><div style="font-size: 13px; color: #aaa; margin-top: 4px;">{{PronunciationAll}}</div><div style="font-size: 17px; color: #ddd; margin-top: 15px;"><strong>{{Word}}</strong> {{Pronunciation}}</div><div style="font-size: 15px; color: #bbb; margin-top: 3px;">{{Translation}}</div><div style="font-size: 13px; color: #999; margin-top: 8px;">Importance: {{Importance}}/10</div><div style="font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; text-align: left;">{{Context}}</div>',
                 },
             ],
         )
@@ -233,6 +157,7 @@ class VocabularyDeck:
         audio,
         image,
         context,
+        transcription,
     ):
         """
         Add a note to the deck
@@ -248,7 +173,8 @@ class VocabularyDeck:
                 importance,
                 audio,
                 image,
-                context,
+                context.replace("\n", "<br>"),
+                transcription,
             ],
         )
         self._deck.add_note(note)
@@ -294,6 +220,7 @@ class JsonReader:
                         "sentence": row["sentence_ru"],
                         "context": row.get("context_ru", ""),
                         "importance": str(row.get("importance", "")),
+                        "transcription": row.get("pronunciation_all", ""),
                     }
                 )
         return entries
@@ -306,21 +233,27 @@ def main():
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise ValueError("GEMINI_API_KEY environment variable is not set")
+    client = genai.Client(api_key=key)
+    root = os.path.dirname(os.path.abspath(__file__))
     with open("greek_audio_prompt.txt", "r", encoding="utf-8") as f:
         prompt = f.read().strip()
-    cache = Cache("greek_audio")
-    print(f"Cache directory: {cache.root()}")
-    client = genai.Client(api_key=key)
-    audio = AudioGenerator(client, cache, prompt)
-    with open("greek_image_prompt.txt", "r", encoding="utf-8") as f:
+    audio = AudioGenerator(client, Cache("greek_audio"), prompt)
+    with open(os.path.join(root, "scene_prompt.txt"), "r") as f:
         prompt = f.read().strip()
-    cache = Cache("greek_images")
-    images = ImageGenerator(client, cache, prompt)
+    with open(os.path.join(root, "manga_template.json"), "r") as f:
+        template = json.load(f)
+    translator = SceneTranslator(client, prompt, template)
+    text = TextDetector(60)
+    border = BorderDetector(width=6, brightness=240, margin=10)
+    renderer = MangaRenderer(client, retries=3, text=text, border=border)
+    cache = Cache("greek_manga")
+    print(f"Cache directory: {cache.root()}")
+    images = ImageGenerator(client, cache, translator, renderer)
     default = os.path.expanduser("~/Downloads/vocabulary_greek.json")
     path = sys.argv[1] if len(sys.argv) > 1 else default
     reader = JsonReader(path)
     entries = reader.read()
-    deck = VocabularyDeck("/Users/chichikov/Downloads/vocabulary_greek.json")
+    deck = VocabularyDeck(path)
     failed = []
     for index, entry in enumerate(entries, 1):
         print(f"Processing card {index}/{len(entries)}: {entry['word']}")
@@ -331,7 +264,7 @@ def main():
             failed.append({"word": entry["word"], "reason": "no audio"})
             continue
         status = "cached" if cached else "generated"
-        result = images.generate(entry["example"], entry["context"])
+        result = images.generate(entry["example"], entry["word"])
         imagefile, cached = result
         if imagefile is None:
             print(f"  Skipping - no image")
@@ -341,9 +274,9 @@ def main():
         print(f"  [audio: {status}, image: {tag}]")
         audiopath = Cache("greek_audio").filepath(audiofile)
         deck.attach(audiopath)
-        imagepath = Cache("greek_images").filepath(imagefile)
+        imagepath = Cache("greek_manga").filepath(imagefile)
         deck.attach(imagepath)
-        html = f"<img src='{imagefile}' style='max-width: 100%; height: auto; border-radius: 10px;'>"
+        html = f"<img src='{imagefile}' style='max-width: 512px; width: 100%; height: auto; border-radius: 10px;'>"
         deck.add(
             entry["sentence"],
             entry["word"],
@@ -354,8 +287,11 @@ def main():
             f"[sound:{audiofile}]",
             html,
             entry["context"],
+            entry["transcription"],
         )
-    output = "/Users/chichikov/Downloads/vocabulary_greek.apkg"
+    output = os.path.join(root, "output")
+    os.makedirs(output, exist_ok=True)
+    output = os.path.join(output, f"greek_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.apkg")
     deck.save(output)
     successful = len(entries) - len(failed)
     print(f"\nCreated Anki deck with {successful}/{len(entries)} cards: {output}")
@@ -363,12 +299,6 @@ def main():
         print(f"\nSkipped {len(failed)} card(s):")
         for item in failed:
             print(f"  - {item['word']}: {item['reason']}")
-        path = "/Users/chichikov/Downloads/vocabulary_greek_failed.csv"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("word,reason\n")
-            for item in failed:
-                f.write(f"{item['word']},{item['reason']}\n")
-        print(f"\nFailed cards saved to: {path}")
 
 
 if __name__ == "__main__":
