@@ -122,14 +122,29 @@ class TextDetector:
     Detects text in images using Tesseract OCR
     """
 
-    def __init__(self, threshold):
+    def __init__(self, threshold, lang="eng"):
         self._threshold = threshold
+        self._lang = self._resolved(lang)
+
+    def _resolved(self, lang):
+        """
+        Return only installed Tesseract languages from a plus-separated string
+        """
+        available = pytesseract.get_languages()
+        requested = lang.split("+")
+        supported = [code for code in requested if code in available]
+        if not supported:
+            return "eng"
+        missing = set(requested) - set(supported)
+        if missing:
+            print(f"Tesseract languages not installed: {', '.join(missing)}")
+        return "+".join(supported)
 
     def detected(self, image):
         """
         Return detected text if confidence exceeds threshold, else empty string
         """
-        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+        data = pytesseract.image_to_data(image, lang=self._lang, output_type=pytesseract.Output.DICT)
         words = []
         for i, txt in enumerate(data["text"]):
             stripped = txt.strip()

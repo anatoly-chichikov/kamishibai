@@ -6,11 +6,15 @@ Shared module for vocabulary Anki deck generation
 import hashlib
 import json
 import os
+import subprocess
+import tempfile
 import wave
 from typing import Protocol, final
 
 import genanki
+from fpdf import FPDF
 from google.genai import types
+from PIL import Image
 
 from manga import Cache
 
@@ -31,6 +35,174 @@ class FieldMapping(Protocol):
     def mapped(self, row):
         """Return normalized entry dict or None if row is invalid"""
         ...
+
+
+class ReportLayout(Protocol):
+    """Protocol for formatting entry text lines in a PDF report"""
+
+    def row(self, entry):
+        """Return list of (text, font_size) tuples for a single report entry"""
+        ...
+
+
+@final
+class Transcription:
+    """Wraps a phonetic transcription in standard slash notation"""
+
+    def __init__(self, value):
+        self._value = value
+
+    def formatted(self):
+        """Return transcription wrapped in slashes or empty string if blank"""
+        stripped = self._value.strip("/")
+        return f"/{stripped}/" if stripped else ""
+
+
+@final
+class HtmlLineBreaks:
+    """Converts newlines to HTML line breaks"""
+
+    def __init__(self, value):
+        self._value = value
+
+    def formatted(self):
+        """Return text with newlines replaced by br tags"""
+        return self._value.replace("\n", "<br>") if self._value else ""
+
+
+@final
+class CardModel:
+    """Unified Anki card model for vocabulary decks"""
+
+    def __init__(self, identifier):
+        self._identifier = identifier
+
+    def model(self):
+        """Return genanki Model with 11-field vocabulary template"""
+        return genanki.Model(
+            self._identifier,
+            "Vocabulary Model",
+            fields=[
+                {"name": "RussianSentence"},
+                {"name": "Word"},
+                {"name": "Pronunciation"},
+                {"name": "Translation"},
+                {"name": "Example"},
+                {"name": "Importance"},
+                {"name": "Audio"},
+                {"name": "Image"},
+                {"name": "Hint"},
+                {"name": "Context"},
+                {"name": "PronunciationAll"},
+            ],
+            templates=[
+                {
+                    "name": "Card 1",
+                    "qfmt": (
+                        '<div style="max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;">'
+                        "{{Image}}"
+                        '<div style="font-size: 20px; margin-top: 15px;">{{RussianSentence}}</div>'
+                        "{{#Hint}}"
+                        '<div style="font-size: 14px; color: #888; margin-top: 8px; font-style: italic;">{{Hint}}</div>'
+                        "{{/Hint}}"
+                        "</div>"
+                    ),
+                    "afmt": (
+                        '{{FrontSide}}<hr id="answer">'
+                        '<div style="max-width: 600px; margin: 0 auto; text-align: center;">'
+                        "{{Audio}}"
+                        '<div style="font-size: 22px; font-weight: bold; text-align: center; margin: 20px 0 4px 0;">{{Example}}</div>'
+                        "{{#PronunciationAll}}"
+                        '<div style="font-size: 13px; color: #aaa; margin-top: 4px;">{{PronunciationAll}}</div>'
+                        "{{/PronunciationAll}}"
+                        '<div style="font-size: 17px; margin-top: 15px;"><strong style="color: #ddd;">{{Word}}</strong> <span style="color: #aaa;">{{Pronunciation}}</span></div>'
+                        '<div style="font-size: 15px; color: #bbb; margin-top: 3px;">{{Translation}}</div>'
+                        '<div style="font-size: 13px; color: #999; margin-top: 8px;">Importance: {{Importance}}/10</div>'
+                        '<div style="font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; display: inline-block; text-align: left;">{{Context}}</div>'
+                        "</div>"
+                    ),
+                },
+            ],
+        )
+
+
+@final
+class FontPath:
+    """Resolves a font family name to a filesystem path via fc-match"""
+
+    def __init__(self, family):
+        self._family = family
+
+    def resolved(self):
+        """Return absolute path to the TTF file for the configured family"""
+        result = subprocess.run(
+            ["fc-match", "-f", "%{file}", self._family],
+            capture_output=True,
+            text=True,
+        )
+        path = result.stdout.strip()
+        if not path or not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"Font '{self._family}' not found via fc-match"
+            )
+        return path
+
+
+@final
+class Thumbnail:
+    """Resizes an image to a target pixel size for PDF embedding"""
+
+    def __init__(self, pixels):
+        self._pixels = pixels
+
+    def compressed(self, source, directory):
+        """Return path to a resized JPEG copy in the given directory"""
+        image = Image.open(source)
+        image.thumbnail((self._pixels, self._pixels))
+        name = f"thumb_{os.path.basename(source)}"
+        result = os.path.join(directory, name)
+        image.save(result, "JPEG", quality=60)
+        return result
+
+
+@final
+class Report:
+    """Accumulates vocabulary entries and renders a PDF report"""
+
+    def __init__(self, layout, font, thumbnail):
+        self._layout = layout
+        self._font = font
+        self._thumbnail = thumbnail
+        self._rows = []
+
+    def append(self, entry, imagepath):
+        """Record an entry with its image path for later rendering"""
+        self._rows.append((entry, imagepath))
+
+    def save(self, output):
+        """Render all accumulated entries to a PDF file"""
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_font("dejavu", "", self._font.resolved())
+        pdf.set_font("dejavu", size=10)
+        pdf.add_page()
+        with tempfile.TemporaryDirectory() as thumbdir:
+            for entry, imagepath in self._rows:
+                if pdf.get_y() > 260:
+                    pdf.add_page()
+                top = pdf.get_y()
+                if imagepath and os.path.isfile(imagepath):
+                    thumb = self._thumbnail.compressed(imagepath, thumbdir)
+                    pdf.image(thumb, x=10, y=top, w=25, h=25)
+                indent = 40
+                pdf.set_xy(indent, top)
+                for text, size in self._layout.row(entry):
+                    pdf.set_font_size(size)
+                    pdf.set_x(indent)
+                    pdf.cell(w=0, h=size * 0.6, text=str(text))
+                    pdf.ln(size * 0.6)
+                pdf.ln(4)
+        pdf.output(output)
 
 
 @final
@@ -174,10 +346,11 @@ class VocabularyDeck:
 class Pipeline:
     """Orchestrates audio and image generation for each entry"""
 
-    def __init__(self, audio, illustration, deck):
+    def __init__(self, audio, illustration, deck, report=None):
         self._audio = audio
         self._illustration = illustration
         self._deck = deck
+        self._report = report
 
     def process(self, entries):
         """Process all entries and return list of failures"""
@@ -186,7 +359,7 @@ class Pipeline:
             print(f"Processing card {index}/{len(entries)}: {entry['word']}")
             try:
                 audiofile, cached = self._audio.generate(entry["example"])
-            except ValueError as error:
+            except Exception as error:
                 print(f"  Skipping - {error}")
                 failed.append({"word": entry["word"], "reason": str(error)})
                 continue
@@ -195,7 +368,7 @@ class Pipeline:
                 imagefile, cached = self._illustration.generate(
                     entry["example"], entry["word"]
                 )
-            except ValueError as error:
+            except Exception as error:
                 print(f"  Skipping - {error}")
                 failed.append({"word": entry["word"], "reason": str(error)})
                 continue
@@ -205,6 +378,8 @@ class Pipeline:
             self._deck.attach(audiopath)
             imagepath = self._illustration._cache.filepath(imagefile)
             self._deck.attach(imagepath)
+            if self._report is not None:
+                self._report.append(entry, imagepath)
             sound = f"[sound:{audiofile}]"
             html = f"<img src='{imagefile}' style='{_IMG_STYLE}'>"
             self._deck.add(entry, sound, html)

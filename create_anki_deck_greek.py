@@ -14,10 +14,16 @@ import genanki
 from google import genai
 
 from deck import Audio
+from deck import CardModel
 from deck import FieldMapping
+from deck import FontPath
+from deck import HtmlLineBreaks
 from deck import Illustration
 from deck import NoteFormat
 from deck import Pipeline
+from deck import Report
+from deck import Thumbnail
+from deck import Transcription
 from deck import TtsVoice
 from deck import Vocabulary
 from deck import VocabularyDeck
@@ -37,19 +43,23 @@ class GreekNote:
 
     def note(self, entry, audio, image):
         """Assemble a genanki Note from entry dict"""
+        sentence = entry["sentence"]
+        highlight = entry["highlight"]
+        highlighted = sentence.replace(highlight, f"<strong><em>{highlight}</em></strong>") if highlight else sentence
         return genanki.Note(
             model=self._model,
             fields=[
-                entry["sentence"],
+                highlighted,
                 entry["word"].lower(),
-                entry["pronunciation"],
+                Transcription(entry["pronunciation"]).formatted(),
                 entry["translation"],
                 entry["example"],
                 entry["importance"],
                 audio,
                 image,
-                entry["context"].replace("\n", "<br>"),
-                entry["transcription"],
+                entry["hint"],
+                HtmlLineBreaks(entry["context"]).formatted(),
+                Transcription(entry["transcription"]).formatted(),
             ],
         )
 
@@ -72,10 +82,25 @@ class GreekMapping:
             "translation": row.get("translation_ru", ""),
             "example": row.get("sentence_el", ""),
             "sentence": row["sentence_ru"],
+            "highlight": row.get("highlight_ru", ""),
+            "hint": row.get("hint_ru", ""),
             "context": row.get("context_ru", ""),
             "importance": str(row.get("importance", "")),
             "transcription": row.get("pronunciation_all", ""),
         }
+
+
+@final
+class GreekLayout:
+    """Formats Greek vocabulary entries as text lines for PDF report"""
+
+    def row(self, entry):
+        """Return list of (text, font_size) tuples for a Greek entry"""
+        return [
+            (f'{entry["word"]} — {entry["translation"]}', 14),
+            (entry["sentence"], 10),
+            (entry.get("example", ""), 11),
+        ]
 
 
 def main():
@@ -97,7 +122,7 @@ def main():
     with open(os.path.join(root, "manga_template.json"), "r") as f:
         template = json.load(f)
     translator = SceneTranslator(client, prompt, template)
-    text = TextDetector(60)
+    text = TextDetector(60, "eng+ell")
     border = BorderDetector(width=6, brightness=240, margin=10)
     renderer = MangaRenderer(client, retries=3, text=text, border=border)
     cache = Cache("greek_manga")
@@ -108,42 +133,27 @@ def main():
     mapping = GreekMapping(("word", "sentence_ru"))
     vocabulary = Vocabulary(path, mapping)
     entries = vocabulary.entries()
-    model = genanki.Model(
-        random.randrange(1 << 30, 1 << 31),
-        "Vocabulary Model",
-        fields=[
-            {"name": "RussianSentence"},
-            {"name": "Word"},
-            {"name": "Pronunciation"},
-            {"name": "Translation"},
-            {"name": "Example"},
-            {"name": "Importance"},
-            {"name": "Audio"},
-            {"name": "Image"},
-            {"name": "Context"},
-            {"name": "PronunciationAll"},
-        ],
-        templates=[
-            {
-                "name": "Card 1",
-                "qfmt": '<div style="max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;">{{Image}}<div style="font-size: 20px; margin-top: 15px;">{{RussianSentence}}</div></div>',
-                "afmt": '{{FrontSide}}<hr id="answer"><div style="max-width: 600px; margin: 0 auto;">{{Audio}}<div style="font-size: 22px; font-weight: bold; text-align: center; margin: 20px 0;">{{Example}}</div><div style="font-size: 13px; color: #aaa; margin-top: 4px;">{{PronunciationAll}}</div><div style="font-size: 17px; color: #ddd; margin-top: 15px;"><strong>{{Word}}</strong> {{Pronunciation}}</div><div style="font-size: 15px; color: #bbb; margin-top: 3px;">{{Translation}}</div><div style="font-size: 13px; color: #999; margin-top: 8px;">Importance: {{Importance}}/10</div><div style="font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; text-align: left;">{{Context}}</div></div>',
-            },
-        ],
-    )
+    model = CardModel(random.randrange(1 << 30, 1 << 31)).model()
     format = GreekNote(model)
     deck = genanki.Deck(
         random.randrange(1 << 30, 1 << 31), "Greek Vocabulary"
     )
     container = VocabularyDeck(deck, format, [])
-    pipeline = Pipeline(audio, images, container)
+    layout = GreekLayout()
+    font = FontPath("DejaVu Sans")
+    report = Report(layout, font, Thumbnail(150))
+    pipeline = Pipeline(audio, images, container, report)
     failed = pipeline.process(entries)
     output = os.path.join(root, "output")
     os.makedirs(output, exist_ok=True)
-    output = os.path.join(output, f"greek_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.apkg")
-    container.save(output)
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    apkg = os.path.join(output, f"greek_{stamp}.apkg")
+    container.save(apkg)
+    pdf = os.path.join(output, f"greek_{stamp}.pdf")
+    report.save(pdf)
     successful = len(entries) - len(failed)
-    print(f"\nCreated Anki deck with {successful}/{len(entries)} cards: {output}")
+    print(f"\nCreated Anki deck with {successful}/{len(entries)} cards: {apkg}")
+    print(f"Report: {pdf}")
     if failed:
         print(f"\nSkipped {len(failed)} card(s):")
         for item in failed:
