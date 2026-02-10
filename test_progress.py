@@ -26,10 +26,12 @@ class FakeConsole:
 
     def __init__(self, lines):
         self._lines = lines
+        self._kwargs = []
 
-    def print(self, text):
-        """Record printed text"""
+    def print(self, text, **kwargs):
+        """Record printed text and keyword arguments"""
         self._lines.append(text)
+        self._kwargs.append(kwargs)
 
     def status(self, text, spinner="dots"):
         """Return a FakeSpinner"""
@@ -252,6 +254,32 @@ class TestRichProgress:
             "result did not include rich link markup"
         assert filename in collector[0], \
             "result did not include basename"
+
+
+class TestRichProgressDoneDisablesHighlighting:
+    """RichProgress done disables highlight to prevent number colorization in paths"""
+
+    def test_highlight_disabled(self, collector):
+        console = FakeConsole(collector)
+        spinner = FakeSpinner(collector)
+        progress = RichProgress(console, spinner)
+        path = f"/tmp/{uuid.uuid4().hex[:6]}/greek_2026-02-10.json"
+        progress.done("Composing scene", "cached", path)
+        assert console._kwargs[-1].get("highlight") is False, \
+            "done did not disable highlight for path output"
+
+
+class TestRichProgressResultDisablesHighlighting:
+    """RichProgress result disables highlight to prevent number colorization in paths"""
+
+    def test_highlight_disabled(self, collector):
+        console = FakeConsole(collector)
+        spinner = FakeSpinner(collector)
+        progress = RichProgress(console, spinner)
+        path = f"/tmp/{uuid.uuid4().hex[:6]}/greek_2026-02-10.apkg"
+        progress.result("Anki deck", path)
+        assert console._kwargs[-1].get("highlight") is False, \
+            "result did not disable highlight for path output"
 
 
 class TestProgressSelector:

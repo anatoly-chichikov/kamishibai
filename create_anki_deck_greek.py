@@ -16,7 +16,7 @@ from google import genai
 from deck import Audio
 from deck import CardModel
 from deck import FieldMapping
-from deck import FontPath
+from deck import FontFamily
 from deck import HtmlLineBreaks
 from deck import Illustration
 from deck import NoteFormat
@@ -97,11 +97,28 @@ class GreekLayout:
 
     def row(self, entry):
         """Return list of (text, font_size) tuples for a Greek entry"""
-        return [
-            (f'{entry["word"]} — {entry["translation"]}', 14),
-            (entry["sentence"], 10),
-            (entry.get("example", ""), 11),
-        ]
+        pronunciation = entry.get("pronunciation", "")
+        header = entry["word"]
+        if pronunciation:
+            header += f" /{pronunciation.strip('/')}/"
+        header += f' — {entry["translation"]}'
+        lines = [(header, 11)]
+        example = entry.get("example", "")
+        if example:
+            lines.append((example, 9))
+        sentence = entry.get("sentence", "")
+        if sentence:
+            lines.append((f"Перевод: {sentence}", 9))
+        context = entry.get("context", "")
+        if context:
+            lines.append((f"Контекст: {context}", 8))
+        hint = entry.get("hint", "")
+        if hint:
+            lines.append((f"Подсказка: {hint}", 8))
+        importance = entry.get("importance", "")
+        if importance:
+            lines.append((f"Важность: {importance}/10", 8))
+        return lines
 
 
 def main():
@@ -148,7 +165,7 @@ def main():
     apkg = os.path.join(output, f"greek_{stamp}.apkg")
     container.save(apkg)
     layout = GreekLayout()
-    font = FontPath("DejaVu Sans")
+    font = FontFamily("DejaVu Sans")
     report = Report(layout, font, Thumbnail(150))
     for entry, imagepath in processed:
         report.append(entry, imagepath)
@@ -156,6 +173,7 @@ def main():
     report.save(pdf)
     progress.result("Anki deck", apkg)
     progress.result("Report", pdf)
+    progress.result("Output", output)
     successful = len(entries) - len(failed)
     progress.finish(successful, len(entries), failed)
 

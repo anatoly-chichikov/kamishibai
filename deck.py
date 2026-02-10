@@ -149,6 +149,36 @@ class FontPath:
 
 
 @final
+class FontFamily:
+    """Resolves regular and bold variants of a font family via fc-match"""
+
+    def __init__(self, family):
+        self._family = family
+
+    def regular(self):
+        """Return absolute path to the regular weight TTF file"""
+        return self._match(self._family)
+
+    def bold(self):
+        """Return absolute path to the bold weight TTF file"""
+        return self._match(f"{self._family}:Bold")
+
+    def _match(self, spec):
+        """Return absolute path to the TTF file matching the given fc-match spec"""
+        result = subprocess.run(
+            ["fc-match", "-f", "%{file}", spec],
+            capture_output=True,
+            text=True,
+        )
+        path = result.stdout.strip()
+        if not path or not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"Font '{spec}' not found via fc-match"
+            )
+        return path
+
+
+@final
 class Thumbnail:
     """Resizes an image to a target pixel size for PDF embedding"""
 
@@ -183,24 +213,41 @@ class Report:
         """Render all accumulated entries to a PDF file"""
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_font("dejavu", "", self._font.resolved())
+        pdf.add_font("dejavu", "", self._font.regular())
+        pdf.add_font("dejavu", "B", self._font.bold())
         pdf.set_font("dejavu", size=10)
         pdf.add_page()
         with tempfile.TemporaryDirectory() as thumbdir:
             for entry, imagepath in self._rows:
-                if pdf.get_y() > 260:
+                if pdf.get_y() > 240:
                     pdf.add_page()
                 top = pdf.get_y()
+                page = pdf.page
                 if imagepath and os.path.isfile(imagepath):
                     thumb = self._thumbnail.compressed(imagepath, thumbdir)
                     pdf.image(thumb, x=10, y=top, w=25, h=25)
                 indent = 40
+                width = pdf.w - indent - pdf.r_margin
                 pdf.set_xy(indent, top)
-                for text, size in self._layout.row(entry):
-                    pdf.set_font_size(size)
+                for idx, (text, size) in enumerate(self._layout.row(entry)):
+                    if idx == 0:
+                        pdf.set_font("dejavu", style="B", size=size)
+                        pdf.set_text_color(0, 0, 0)
+                    elif size <= 8:
+                        pdf.set_font("dejavu", style="", size=size)
+                        pdf.set_text_color(120, 120, 120)
+                    else:
+                        pdf.set_font("dejavu", style="", size=size)
+                        pdf.set_text_color(0, 0, 0)
                     pdf.set_x(indent)
-                    pdf.cell(w=0, h=size * 0.6, text=str(text))
-                    pdf.ln(size * 0.6)
+                    pdf.multi_cell(w=width, h=size * 0.5, text=str(text), align="L")
+                if pdf.page != page:
+                    top = pdf.t_margin
+                bottom = max(pdf.get_y(), top + 25)
+                pdf.set_y(bottom)
+                pdf.ln(3)
+                pdf.set_draw_color(200, 200, 200)
+                pdf.line(10, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
                 pdf.ln(4)
         pdf.output(output)
 

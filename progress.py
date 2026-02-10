@@ -102,7 +102,7 @@ class RichProgress:
         """Stop spinner and print checkmark with optional clickable link"""
         self._spinner.stop()
         suffix = f" ([link=file://{path}]{os.path.basename(path)}[/link])" if path else ""
-        self._console.print(f"  [green]\u2714[/green] {name}: {label}{suffix}")
+        self._console.print(f"  [green]\u2714[/green] {name}: {label}{suffix}", highlight=False)
 
     def retry(self, name, attempt, reason):
         """Print retry inline without stopping spinner"""
@@ -120,7 +120,8 @@ class RichProgress:
     def result(self, label, path):
         """Print output artifact with clickable rich link"""
         self._console.print(
-            f"  [green]\u2714[/green] {label}: [link=file://{path}]{os.path.basename(path)}[/link]"
+            f"  [green]\u2714[/green] {label}: [link=file://{path}]{os.path.basename(path)}[/link]",
+            highlight=False,
         )
 
     def finish(self, successful, total, failures):
