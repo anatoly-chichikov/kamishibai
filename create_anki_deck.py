@@ -32,6 +32,7 @@ from manga import Cache
 from manga import MangaRenderer
 from manga import SceneTranslator
 from manga import TextDetector
+from progress import ProgressSelector
 
 
 @final
@@ -125,7 +126,6 @@ def main():
     border = BorderDetector(width=6, brightness=240, margin=10)
     renderer = MangaRenderer(client, retries=3, text=text, border=border)
     cache = Cache("manga")
-    print(f"Cache directory: {cache.root()}")
     images = Illustration(cache, translator, renderer)
     default = os.path.expanduser("~/Downloads/vocabulary.json")
     path = sys.argv[1] if len(sys.argv) > 1 else default
@@ -138,25 +138,25 @@ def main():
         random.randrange(1 << 30, 1 << 31), "English Vocabulary"
     )
     container = VocabularyDeck(deck, format, [])
-    layout = EnglishLayout()
-    font = FontPath("DejaVu Sans")
-    report = Report(layout, font, Thumbnail(150))
-    pipeline = Pipeline(audio, images, container, report)
-    failed = pipeline.process(entries)
+    progress = ProgressSelector(sys.stdout.isatty()).selected()
+    pipeline = Pipeline(audio, images, container, progress)
+    failed, processed = pipeline.process(entries)
     output = os.path.join(root, "output")
     os.makedirs(output, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     apkg = os.path.join(output, f"cards_{stamp}.apkg")
     container.save(apkg)
+    layout = EnglishLayout()
+    font = FontPath("DejaVu Sans")
+    report = Report(layout, font, Thumbnail(150))
+    for entry, imagepath in processed:
+        report.append(entry, imagepath)
     pdf = os.path.join(output, f"cards_{stamp}.pdf")
     report.save(pdf)
+    progress.result("Anki deck", apkg)
+    progress.result("Report", pdf)
     successful = len(entries) - len(failed)
-    print(f"\nCreated Anki deck with {successful}/{len(entries)} cards: {apkg}")
-    print(f"Report: {pdf}")
-    if failed:
-        print(f"\nSkipped {len(failed)} card(s):")
-        for item in failed:
-            print(f"  - {item['word']}: {item['reason']}")
+    progress.finish(successful, len(entries), failed)
 
 
 if __name__ == "__main__":

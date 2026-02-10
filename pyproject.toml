@@ -10,6 +10,7 @@ dependencies = [
     "numpy>=2.0.2",
     "pillow>=10.0.0",
     "pytesseract>=0.3.13",
+    "rich>=14.3.2",
 ]
 
 [build-system]

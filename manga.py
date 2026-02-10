@@ -135,9 +135,6 @@ class TextDetector:
         supported = [code for code in requested if code in available]
         if not supported:
             return "eng"
-        missing = set(requested) - set(supported)
-        if missing:
-            print(f"Tesseract languages not installed: {', '.join(missing)}")
         return "+".join(supported)
 
     def detected(self, image):
@@ -211,7 +208,7 @@ class MangaRenderer:
         self._text = text
         self._border = border
 
-    def render(self, scene, word):
+    def render(self, scene, word, progress):
         """
         Render scene JSON to grayscale PIL Image, retry if text detected or borders bad
         """
@@ -224,16 +221,16 @@ class MangaRenderer:
             found = self._text.detected(gray)
             if found:
                 reason = f"OCR detected text: '{found}'"
-                print(f"  {reason} (attempt {attempt + 1}), retrying...")
+                progress.retry("Rendering manga", attempt + 1, reason)
                 continue
             failed = self._border.borders(gray)
             if failed:
                 reason = f"White border missing on: {', '.join(failed)}"
-                print(f"  {reason} (attempt {attempt + 1}), retrying...")
+                progress.retry("Rendering manga", attempt + 1, reason)
                 continue
             if panels > 1 and not self._border.gutter(gray):
                 reason = "No white gutter found"
-                print(f"  {reason} (attempt {attempt + 1}), retrying...")
+                progress.retry("Rendering manga", attempt + 1, reason)
                 continue
             return gray
         raise ValueError(

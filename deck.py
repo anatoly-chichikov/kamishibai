@@ -238,13 +238,17 @@ class Audio:
         self._prompt = prompt
         self._voice = voice
 
+    def filepath(self, filename):
+        """Return full path to a cached audio file"""
+        return self._cache.filepath(filename)
+
     def generate(self, text):
         """Generate audio file and return tuple of filename and cached flag"""
         digest = hashlib.md5(text.encode()).hexdigest()[:12]
         filename = f"{digest}.wav"
         if self._cache.exists(filename):
             return (filename, True)
-        filepath = self._cache.filepath(filename)
+        path = self._cache.filepath(filename)
         prompt = self._prompt.format(text=text)
         for model in self._voice.models():
             try:
@@ -261,7 +265,7 @@ class Audio:
                 if not response.candidates[0].content:
                     raise ValueError(f"No content in audio response for '{text}'")
                 data = response.candidates[0].content.parts[0].inline_data.data
-                with wave.open(filepath, "wb") as wf:
+                with wave.open(path, "wb") as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(2)
                     wf.setframerate(24000)
@@ -269,7 +273,6 @@ class Audio:
                 return (filename, False)
             except Exception as error:
                 if "RESOURCE_EXHAUSTED" in str(error):
-                    print(f"Rate limited on {model}, falling back")
                     continue
                 raise
         raise ValueError(f"Failed to generate audio on all models for '{text}'")
@@ -284,16 +287,38 @@ class Illustration:
         self._translator = translator
         self._renderer = renderer
 
-    def generate(self, sentence, word):
+    def filepath(self, filename):
+        """Return full path to a cached illustration file"""
+        return self._cache.filepath(filename)
+
+    def generate(self, sentence, word, progress):
         """Generate manga image and return tuple of filename and cached flag"""
         digest = hashlib.md5(sentence.encode()).hexdigest()[:12]
         filename = f"{digest}.jpg"
+        scenefile = f"{digest}.json"
+        path = self._cache.filepath(filename)
+        scenepath = self._cache.filepath(scenefile)
         if self._cache.exists(filename):
+            if self._cache.exists(scenefile):
+                progress.done("Composing scene", "cached", scenepath)
+            else:
+                progress.done("Composing scene", "cached")
+            progress.done("Rendering manga", "cached", path)
             return (filename, True)
-        filepath = self._cache.filepath(filename)
-        scene = self._translator.translate(sentence)
-        image = self._renderer.render(scene, word)
-        image.save(filepath, "JPEG", quality=60)
+        progress.step("Composing scene")
+        if self._cache.exists(scenefile):
+            with open(scenepath, "r", encoding="utf-8") as handle:
+                scene = json.load(handle)
+            progress.done("Composing scene", "cached", scenepath)
+        else:
+            scene = self._translator.translate(sentence)
+            with open(scenepath, "w", encoding="utf-8") as handle:
+                json.dump(scene, handle, indent=2, ensure_ascii=False)
+            progress.done("Composing scene", "translated", scenepath)
+        progress.step("Rendering manga")
+        image = self._renderer.render(scene, word, progress)
+        image.save(path, "JPEG", quality=60)
+        progress.done("Rendering manga", "rendered", path)
         return (filename, False)
 
 
@@ -346,41 +371,41 @@ class VocabularyDeck:
 class Pipeline:
     """Orchestrates audio and image generation for each entry"""
 
-    def __init__(self, audio, illustration, deck, report=None):
+    def __init__(self, audio, illustration, deck, progress):
         self._audio = audio
         self._illustration = illustration
         self._deck = deck
-        self._report = report
+        self._progress = progress
 
     def process(self, entries):
-        """Process all entries and return list of failures"""
+        """Process all entries and return tuple of failures and processed list"""
         failed = []
+        processed = []
         for index, entry in enumerate(entries, 1):
-            print(f"Processing card {index}/{len(entries)}: {entry['word']}")
+            self._progress.card(index, len(entries), entry["word"])
             try:
+                self._progress.step("Generating audio")
                 audiofile, cached = self._audio.generate(entry["example"])
+                audiopath = self._audio.filepath(audiofile)
+                label = "cached" if cached else "generated"
+                self._progress.done("Generating audio", label, audiopath)
             except Exception as error:
-                print(f"  Skipping - {error}")
+                self._progress.skip(entry["word"], str(error))
                 failed.append({"word": entry["word"], "reason": str(error)})
                 continue
-            status = "cached" if cached else "generated"
             try:
                 imagefile, cached = self._illustration.generate(
-                    entry["example"], entry["word"]
+                    entry["example"], entry["word"], self._progress
                 )
             except Exception as error:
-                print(f"  Skipping - {error}")
+                self._progress.skip(entry["word"], str(error))
                 failed.append({"word": entry["word"], "reason": str(error)})
                 continue
-            tag = "cached" if cached else "generated"
-            print(f"  [audio: {status}, image: {tag}]")
-            audiopath = self._audio._cache.filepath(audiofile)
             self._deck.attach(audiopath)
-            imagepath = self._illustration._cache.filepath(imagefile)
+            imagepath = self._illustration.filepath(imagefile)
             self._deck.attach(imagepath)
-            if self._report is not None:
-                self._report.append(entry, imagepath)
+            processed.append((entry, imagepath))
             sound = f"[sound:{audiofile}]"
             html = f"<img src='{imagefile}' style='{_IMG_STYLE}'>"
             self._deck.add(entry, sound, html)
-        return failed
+        return (failed, processed)
