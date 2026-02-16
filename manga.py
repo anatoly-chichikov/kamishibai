@@ -6,7 +6,9 @@ Two-step manga image generation: sentence → scene JSON → manga illustration
 import json
 import os
 import re
+import tempfile
 from io import BytesIO
+from typing import final
 
 import numpy as np
 import pytesseract
@@ -14,6 +16,7 @@ from google.genai import types
 from PIL import Image
 
 
+@final
 class Cache:
     """
     Persistent file cache for generated media
@@ -22,7 +25,6 @@ class Cache:
     def __init__(self, name):
         self._root = os.path.join(os.path.dirname(__file__), "cache")
         self._path = os.path.join(self._root, name)
-        os.makedirs(self._path, exist_ok=True)
 
     def root(self):
         """
@@ -44,11 +46,28 @@ class Cache:
 
     def filepath(self, filename):
         """
-        Return full path to cached file
+        Return full path to cached file, ensuring directory exists
         """
+        os.makedirs(self._path, exist_ok=True)
         return os.path.join(self._path, filename)
 
+    def stage(self, suffix):
+        """
+        Return a temporary file path in the cache directory for atomic writes
+        """
+        os.makedirs(self._path, exist_ok=True)
+        fd, path = tempfile.mkstemp(suffix=suffix, dir=self._path)
+        os.close(fd)
+        return path
 
+    def commit(self, staged, filename):
+        """
+        Atomically move a staged temp file to its final cache path
+        """
+        os.replace(staged, os.path.join(self._path, filename))
+
+
+@final
 class SceneTranslator:
     """
     Translates an English sentence into a manga_panel JSON via Gemini text model
@@ -117,6 +136,7 @@ class SceneTranslator:
             raise ValueError("No panels found in scene JSON")
 
 
+@final
 class TextDetector:
     """
     Detects text in images using Tesseract OCR
@@ -152,6 +172,7 @@ class TextDetector:
         return ""
 
 
+@final
 class BorderDetector:
     """
     Detects white outer borders and horizontal gutters between manga panels
@@ -197,6 +218,7 @@ class BorderDetector:
         return failures
 
 
+@final
 class MangaRenderer:
     """
     Renders manga_panel JSON into an image via Gemini image model
@@ -238,42 +260,56 @@ class MangaRenderer:
         )
 
     def _generate(self, prompt, word):
-        """
-        Call image model and return PIL Image
-        """
+        """Call image model and return PIL Image"""
         response = self._client.models.generate_content(
             model="gemini-3-pro-image-preview",
             contents=[prompt],
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
-                image_config=types.ImageConfig(
-                    aspect_ratio="1:1",
-                ),
-                safety_settings=[
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_HARASSMENT",
-                        threshold="BLOCK_NONE",
-                    ),
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_HATE_SPEECH",
-                        threshold="BLOCK_NONE",
-                    ),
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                        threshold="BLOCK_NONE",
-                    ),
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                        threshold="BLOCK_NONE",
-                    ),
-                ],
+                image_config=types.ImageConfig(aspect_ratio="1:1"),
+                safety_settings=self._safety(),
             ),
         )
         if not response.candidates:
-            raise ValueError(f"No candidates in image response for '{word}'")
+            raise ValueError(
+                f"No candidates in image response for '{word}': "
+                f"{self._diagnosis(response)}"
+            )
         if not response.candidates[0].content:
             raise ValueError(f"No content in image response for '{word}'")
         for part in response.candidates[0].content.parts:
             if part.inline_data is not None:
                 return Image.open(BytesIO(part.inline_data.data))
         raise ValueError(f"No image data found in response for '{word}'")
+
+    def _safety(self):
+        """Return safety settings that disable all content filters"""
+        return [
+            types.SafetySetting(category=category, threshold="BLOCK_NONE")
+            for category in (
+                "HARM_CATEGORY_HARASSMENT",
+                "HARM_CATEGORY_HATE_SPEECH",
+                "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "HARM_CATEGORY_DANGEROUS_CONTENT",
+            )
+        ]
+
+    def _diagnosis(self, response):
+        """Extract block reason and flagged safety categories from a rejected response"""
+        feedback = getattr(response, 'prompt_feedback', None)
+        if not feedback:
+            return "no prompt_feedback"
+        reason = getattr(feedback.block_reason, 'value', 'unknown')
+        message = feedback.block_reason_message or ''
+        ratings = feedback.safety_ratings or []
+        flagged = [
+            f"{r.category.value}={r.probability.value}"
+            for r in ratings
+            if r.blocked or r.probability.value not in ("NEGLIGIBLE", "LOW")
+        ]
+        parts = [reason]
+        if message:
+            parts.append(message)
+        if flagged:
+            parts.append(f"flagged=[{', '.join(flagged)}]")
+        return ', '.join(parts)
