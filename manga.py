@@ -84,7 +84,7 @@ class SceneTranslator:
         """
         filled = self._prompt.format(sentence=sentence)
         response = self._client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model="gemini-3.1-pro-preview",
             contents=[filled],
         )
         raw = "".join(
