@@ -42,16 +42,16 @@ def _language(code):
     """Build Language configuration for the given language code"""
     if code == "el":
         return Language(
-            AudioProfile("greek_audio_prompt.txt", "Charon", "greek_audio"),
+            AudioProfile("greek_audio_prompt.txt", "greek_audio"),
             ImageProfile("eng+ell", "greek_manga"),
             DeckNaming("Greek Vocabulary", "greek", "vocabulary_greek.json"),
-            VocabularyMapping(("word", "sentence_ru"), "sentence_el", "pronunciation_all"),
+            VocabularyMapping(("word", "sentence_ru"), "sentence_el"),
         )
     return Language(
-        AudioProfile("audio_prompt.txt", "Kore", "audio"),
+        AudioProfile("audio_prompt.txt", "audio"),
         ImageProfile("eng", "manga"),
         DeckNaming("English Vocabulary", "cards", "vocabulary.json"),
-        VocabularyMapping(("word", "sentence_ru"), "sentence_en", ""),
+        VocabularyMapping(("word", "sentence_ru"), "sentence_en"),
     )
 
 
@@ -59,6 +59,7 @@ def main():
     """Main function to convert JSON to Anki deck"""
     parser = argparse.ArgumentParser(description="Convert vocabulary JSON to Anki deck")
     parser.add_argument("--lang", choices=["en", "el"], default="en", help="Language (default: en)")
+    parser.add_argument("--deck", help="Custom deck name (overrides language default)")
     parser.add_argument("path", nargs="?", help="Path to vocabulary JSON file")
     args = parser.parse_args()
     lang = _language(args.lang)
@@ -69,10 +70,7 @@ def main():
     root = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(root, lang.audio().prompt()), "r", encoding="utf-8") as f:
         prompt = f.read().strip()
-    voice = TtsVoice(
-        lang.audio().voice(),
-        ("gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"),
-    )
+    voice = TtsVoice(("gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"))
     audio = Audio(client, Cache(lang.audio().cache()), prompt, voice)
     with open(os.path.join(root, "scene_prompt.txt"), "r", encoding="utf-8") as f:
         prompt = f.read().strip()
@@ -89,6 +87,8 @@ def main():
     vocabulary = Vocabulary(path, lang.mapping())
     entries = vocabulary.entries()
     naming = lang.naming()
+    if args.deck:
+        naming = DeckNaming(args.deck, naming.prefix(), naming.default())
     model = CardModel(StableId(f"{naming.name()} Model").value()).model()
     note = VocabularyNote(model)
     deck = genanki.Deck(StableId(naming.name()).value(), naming.name())
