@@ -6,6 +6,7 @@ Shared module for vocabulary Anki deck generation
 import hashlib
 import json
 import os
+import random
 import subprocess
 import tempfile
 import wave
@@ -62,7 +63,7 @@ class VocabularyNote:
                 entry["word"].lower(),
                 Transcription(entry["pronunciation"]).formatted(),
                 entry["translation"],
-                entry["example"],
+                HtmlLineBreaks(entry["example"]).formatted(),
                 entry["importance"],
                 audio,
                 image,
@@ -77,17 +78,16 @@ class VocabularyNote:
 class VocabularyMapping:
     """Maps vocabulary JSON rows to normalized entry dicts"""
 
-    def __init__(self, required, example, transcription):
+    def __init__(self, required, example):
         self._required = required
         self._example = example
-        self._transcription = transcription
 
     def mapped(self, row):
         """Return normalized entry dict or None if row is invalid"""
         for field in self._required:
             if not row.get(field):
                 return None
-        result = {
+        return {
             "word": row["word"],
             "pronunciation": row.get("pronunciation") or "",
             "translation": row.get("translation_ru") or "",
@@ -97,10 +97,8 @@ class VocabularyMapping:
             "hint": row.get("hint_ru") or "",
             "context": row.get("context_ru") or "",
             "importance": str(row.get("importance") or ""),
+            "transcription": row.get("pronunciation_all") or "",
         }
-        if self._transcription:
-            result["transcription"] = row.get(self._transcription) or ""
-        return result
 
 
 @final
@@ -210,16 +208,18 @@ class CardModel:
                     ),
                     "afmt": (
                         '{{FrontSide}}<hr id="answer">'
-                        '<div style="max-width: 600px; margin: 0 auto; text-align: center;">'
+                        '<div style="max-width: 600px; margin: 0 auto; text-align: left; padding: 0 20px;">'
                         "{{Audio}}"
-                        '<div style="font-size: 22px; font-weight: bold; text-align: center; margin: 20px 0 4px 0;">{{Example}}</div>'
+                        '<div style="font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;">{{Example}}</div>'
                         "{{#PronunciationAll}}"
                         '<div style="font-size: 13px; color: #aaa; margin-top: 4px;">{{PronunciationAll}}</div>'
                         "{{/PronunciationAll}}"
                         '<div style="font-size: 17px; margin-top: 15px;"><strong style="color: #ddd;">{{Word}}</strong> <span style="color: #aaa;">{{Pronunciation}}</span></div>'
                         '<div style="font-size: 15px; color: #bbb; margin-top: 3px;">{{Translation}}</div>'
                         '<div style="font-size: 13px; color: #999; margin-top: 8px;">Importance: {{Importance}}/10</div>'
-                        '<div style="font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; display: inline-block; text-align: left;">{{Context}}</div>'
+                        "{{#Context}}"
+                        '<div style="font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; text-align: left;">{{Context}}</div>'
+                        "{{/Context}}"
                         "</div>"
                     ),
                 },
@@ -344,20 +344,41 @@ class Report:
         pdf.ln(4)
 
 
+class Voice(Protocol):
+    """Protocol for TTS voice configuration"""
+
+    def speech(self):
+        """Return a SpeechConfig for TTS generation"""
+        ...
+
+    def models(self):
+        """Return tuple of model names for fallback iteration"""
+        ...
+
+
 @final
 class TtsVoice:
     """Represents a TTS voice configuration with fallback models"""
 
-    def __init__(self, name, models):
-        self._name = name
+    _VOICES = (
+        "Achernar", "Achird", "Algenib", "Algieba", "Alnilam",
+        "Aoede", "Autonoe", "Callirrhoe", "Charon", "Despina",
+        "Enceladus", "Erinome", "Fenrir", "Gacrux", "Iapetus",
+        "Kore", "Laomedeia", "Leda", "Orus", "Puck",
+        "Pulcherrima", "Rasalgethi", "Sadachbia", "Sadaltager",
+        "Schedar", "Sulafat", "Umbriel", "Vindemiatrix", "Zephyr",
+        "Zubenelgenubi",
+    )
+
+    def __init__(self, models):
         self._models = models
 
     def speech(self):
-        """Return SpeechConfig for this voice"""
+        """Return SpeechConfig with a randomly chosen voice"""
         return types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                    voice_name=self._name,
+                    voice_name=random.choice(self._VOICES),
                 )
             )
         )
@@ -365,6 +386,11 @@ class TtsVoice:
     def models(self):
         """Return tuple of model names for fallback iteration"""
         return self._models
+
+    @staticmethod
+    def pool():
+        """Return the tuple of all available voice names"""
+        return TtsVoice._VOICES
 
 
 @final
