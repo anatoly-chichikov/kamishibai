@@ -7,6 +7,27 @@ import os
 from typing import Protocol, final
 
 
+@final
+class AlignedStatus:
+    """Spinner wrapper that indents to align with checkmark output"""
+
+    def __init__(self, live, spinner):
+        self._live = live
+        self._spinner = spinner
+
+    def update(self, text):
+        """Delegate text update to the underlying spinner"""
+        self._spinner.update(text=text)
+
+    def start(self):
+        """Delegate start to the underlying live display"""
+        self._live.start()
+
+    def stop(self):
+        """Delegate stop to the underlying live display"""
+        self._live.stop()
+
+
 class Progress(Protocol):
     """Notification API for pipeline progress events"""
 
@@ -95,7 +116,7 @@ class RichProgress:
 
     def step(self, name):
         """Start spinner for a step"""
-        self._spinner.update(f"  {name}...")
+        self._spinner.update(f"{name}...")
         self._spinner.start()
 
     def done(self, name, label, path=""):
@@ -150,7 +171,12 @@ class ProgressSelector:
         """Return RichProgress if interactive terminal, PlainProgress otherwise"""
         if self._terminal:
             from rich.console import Console
+            from rich.live import Live
+            from rich.padding import Padding
+            from rich.spinner import Spinner
             console = Console()
-            spinner = console.status("", spinner="dots")
-            return RichProgress(console, spinner)
+            spinner = Spinner("dots")
+            padded = Padding(spinner, pad=(0, 0, 0, 2), expand=False)
+            live = Live(padded, console=console, transient=True, refresh_per_second=12.5)
+            return RichProgress(console, AlignedStatus(live, spinner))
         return PlainProgress(print)

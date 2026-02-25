@@ -70,7 +70,8 @@ def main():
     root = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(root, lang.audio().prompt()), "r", encoding="utf-8") as f:
         prompt = f.read().strip()
-    voice = TtsVoice(("gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"))
+    models = ("gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts")
+    voice = TtsVoice(models)
     audio = Audio(client, Cache(lang.audio().cache()), prompt, voice)
     with open(os.path.join(root, "scene_prompt.txt"), "r", encoding="utf-8") as f:
         prompt = f.read().strip()

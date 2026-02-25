@@ -10,7 +10,7 @@ import uuid
 
 import pytest
 
-from progress import PlainProgress, ProgressSelector, RichProgress
+from progress import AlignedStatus, PlainProgress, ProgressSelector, RichProgress
 
 logging.disable(logging.CRITICAL)
 
@@ -55,6 +55,53 @@ class FakeSpinner:
     def stop(self):
         """Record stop"""
         self._lines.append("spinner:stop")
+
+
+class FakeLive:
+    """Fake rich Live that records start/stop calls"""
+
+    def __init__(self, lines):
+        self._lines = lines
+
+    def start(self):
+        """Record start"""
+        self._lines.append("live:start")
+
+    def stop(self):
+        """Record stop"""
+        self._lines.append("live:stop")
+
+
+class TestAlignedStatus:
+    """Tests for AlignedStatus delegation"""
+
+    def test_update_delegates_to_spinner(self, collector):
+        """AlignedStatus update delegates text to spinner"""
+        spinner = FakeSpinner(collector)
+        live = FakeLive(collector)
+        status = AlignedStatus(live, spinner)
+        text = f"t\u00e4sk-{uuid.uuid4().hex[:4]}..."
+        status.update(text)
+        assert f"spinner:{text}" in collector[0], \
+            "update did not delegate to spinner"
+
+    def test_start_delegates_to_live(self, collector):
+        """AlignedStatus start delegates to live display"""
+        spinner = FakeSpinner(collector)
+        live = FakeLive(collector)
+        status = AlignedStatus(live, spinner)
+        status.start()
+        assert "live:start" in collector, \
+            "start did not delegate to live"
+
+    def test_stop_delegates_to_live(self, collector):
+        """AlignedStatus stop delegates to live display"""
+        spinner = FakeSpinner(collector)
+        live = FakeLive(collector)
+        status = AlignedStatus(live, spinner)
+        status.stop()
+        assert "live:stop" in collector, \
+            "stop did not delegate to live"
 
 
 class TestPlainProgress:

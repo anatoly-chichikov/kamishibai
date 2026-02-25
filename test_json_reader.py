@@ -23,7 +23,7 @@ class TestVocabularyReadsValidEntry:
         word = f"testword_{uuid.uuid4().hex[:8]}"
         data = [{"word": word, "sentence_ru": "Тестовое предложение"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["word"] == word, "word field was not parsed correctly"
@@ -32,7 +32,7 @@ class TestVocabularyReadsValidEntry:
         pronunciation = f"/ˈtɛst_{uuid.uuid4().hex[:4]}/"
         data = [{"word": "test", "pronunciation": pronunciation, "sentence_ru": "Тест"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["pronunciation"] == pronunciation, "pronunciation was not parsed"
@@ -41,7 +41,7 @@ class TestVocabularyReadsValidEntry:
         translation = f"перевод_{uuid.uuid4().hex[:6]}"
         data = [{"word": "test", "translation_ru": translation, "sentence_ru": "Тест"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["translation"] == translation, "translation was not parsed"
@@ -50,7 +50,7 @@ class TestVocabularyReadsValidEntry:
         example = f"Example with comma, and quotes '{uuid.uuid4().hex[:4]}'"
         data = [{"word": "test", "sentence_en": example, "sentence_ru": "Тест"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["example"] == example, "example sentence was not parsed"
@@ -59,7 +59,7 @@ class TestVocabularyReadsValidEntry:
         sentence = f"Русское предложение с запятой, и «кавычками» {uuid.uuid4().hex[:4]}"
         data = [{"word": "test", "sentence_ru": sentence}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["sentence"] == sentence, "Russian sentence was not parsed"
@@ -68,7 +68,7 @@ class TestVocabularyReadsValidEntry:
         context = f"Контекст использования, формальный стиль {uuid.uuid4().hex[:4]}"
         data = [{"word": "test", "context_ru": context, "sentence_ru": "Тест"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["context"] == context, "context was not parsed"
@@ -77,7 +77,7 @@ class TestVocabularyReadsValidEntry:
         importance = 8
         data = [{"word": "test", "importance": importance, "sentence_ru": "Тест"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["importance"] == str(importance), "importance was not converted to string"
@@ -97,7 +97,7 @@ class TestVocabularyFiltersInvalidEntries:
     def test_skips_entry_without_word(self):
         data = [{"sentence_ru": "Предложение без слова"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         with pytest.raises(ValueError):
             vocabulary.entries()
@@ -105,7 +105,7 @@ class TestVocabularyFiltersInvalidEntries:
     def test_skips_entry_without_russian_sentence(self):
         data = [{"word": "test"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         with pytest.raises(ValueError):
             vocabulary.entries()
@@ -115,7 +115,7 @@ class TestVocabularyFiltersInvalidEntries:
         invalid = {"word": "invalid"}
         data = [invalid, valid, {"sentence_ru": "Без слова"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert len(entries) == 1, "only one valid entry should be returned"
@@ -136,7 +136,7 @@ class TestVocabularyCoalescesNullValues:
         """VocabularyMapping returns empty string when pronunciation is null"""
         data = [{"word": "test", "pronunciation": None, "sentence_ru": "\u041f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["pronunciation"] == "", \
@@ -146,7 +146,7 @@ class TestVocabularyCoalescesNullValues:
         """VocabularyMapping returns empty string when context_ru is null"""
         data = [{"word": "test", "context_ru": None, "sentence_ru": "\u041f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["context"] == "", \
@@ -156,7 +156,7 @@ class TestVocabularyCoalescesNullValues:
         """VocabularyMapping returns empty string when importance is null"""
         data = [{"word": "test", "importance": None, "sentence_ru": "\u041f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["importance"] == "", \
@@ -178,7 +178,7 @@ class TestVocabularyHandlesSpecialCharacters:
         sentence = "The king said, 'I will punish you,' and left."
         data = [{"word": "king", "sentence_en": sentence, "sentence_ru": "Король"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["example"] == sentence, "commas in sentence broke parsing"
@@ -187,7 +187,7 @@ class TestVocabularyHandlesSpecialCharacters:
         sentence = 'She whispered: "Don\'t go there."'
         data = [{"word": "whisper", "sentence_en": sentence, "sentence_ru": "Шёпот"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["example"] == sentence, "quotes in sentence broke parsing"
@@ -196,7 +196,7 @@ class TestVocabularyHandlesSpecialCharacters:
         sentence = "Он сказал: «Привет» — и ушёл 🎭"
         data = [{"word": "test", "sentence_ru": sentence}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["sentence"] == sentence, "unicode characters broke parsing"
@@ -219,7 +219,7 @@ class TestVocabularyRejectsNonArrayJson:
         fd, path = tempfile.mkstemp(suffix=".json")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         with pytest.raises(ValueError):
             vocabulary.entries()
@@ -229,7 +229,7 @@ class TestVocabularyRejectsNonArrayJson:
         fd, path = tempfile.mkstemp(suffix=".json")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(f"строка_{uuid.uuid4().hex[:4]}", f, ensure_ascii=False)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         with pytest.raises(ValueError):
             vocabulary.entries()
@@ -245,7 +245,7 @@ class TestVocabularyRejectsEmptyData:
         fd, path = tempfile.mkstemp(suffix=".json")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump([], f)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         with pytest.raises(ValueError):
             vocabulary.entries()
@@ -259,7 +259,7 @@ class TestVocabularyRejectsEmptyData:
         fd, path = tempfile.mkstemp(suffix=".json")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         with pytest.raises(ValueError):
             vocabulary.entries()
@@ -274,7 +274,7 @@ class TestGreekMappingReadsExampleFromSentenceEl:
         example = f"Η γάτα κάθεται στο τραπέζι {uuid.uuid4().hex[:4]}"
         data = [{"word": "γάτα", "sentence_el": example, "sentence_ru": "Кошка"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_el", "pronunciation_all")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_el")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["example"] == example, "Greek example was not read from sentence_el"
@@ -283,18 +283,18 @@ class TestGreekMappingReadsExampleFromSentenceEl:
         transcription = f"i ɣata kaθete sto trapezi {uuid.uuid4().hex[:4]}"
         data = [{"word": "γάτα", "pronunciation_all": transcription, "sentence_ru": "Кошка"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_el", "pronunciation_all")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_el")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
         assert entries[0]["transcription"] == transcription, "transcription was not read from pronunciation_all"
 
-    def test_english_mapping_omits_transcription_key(self):
+    def test_english_mapping_returns_empty_transcription(self):
         data = [{"word": "test", "sentence_ru": "Тест"}]
         path = self._write(data)
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en", "")
+        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
         vocabulary = Vocabulary(path, mapping)
         entries = vocabulary.entries()
-        assert "transcription" not in entries[0], "English mapping should not include transcription key"
+        assert entries[0]["transcription"] == "", "English mapping should return empty transcription"
 
     def _write(self, data):
         fd, path = tempfile.mkstemp(suffix=".json")

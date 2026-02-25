@@ -10,8 +10,8 @@ import uuid
 import pytest
 from PIL import Image
 
-from create_anki_deck import EnglishLayout
 from deck import FontFamily
+from deck import VocabularyLayout
 from deck import FontPath
 from deck import Report
 from deck import Thumbnail
@@ -179,8 +179,8 @@ class TestReportWithThirtyEntriesProducesMultiPagePdf:
             assert os.path.getsize(path) > 3000, "30-entry PDF is suspiciously small"
 
 
-class TestEnglishLayoutReturnsSixRowsForFullEntry:
-    """EnglishLayout returns 6 rows for a fully populated entry"""
+class TestVocabularyLayoutReturnsSixRowsForFullEntry:
+    """VocabularyLayout returns 6 rows for a fully populated entry"""
 
     def test_six_rows(self):
         entry = {
@@ -193,7 +193,7 @@ class TestEnglishLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = EnglishLayout()
+        layout = VocabularyLayout()
         rows = layout.row(entry)
         assert len(rows) == 6, "fully populated entry did not produce 6 rows"
 
@@ -208,7 +208,7 @@ class TestEnglishLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = EnglishLayout()
+        layout = VocabularyLayout()
         rows = layout.row(entry)
         assert rows[2][0].startswith("Перевод:"), "sentence row lacks Перевод label"
 
@@ -223,7 +223,7 @@ class TestEnglishLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = EnglishLayout()
+        layout = VocabularyLayout()
         rows = layout.row(entry)
         assert rows[3][0].startswith("Контекст:"), "context row lacks Контекст label"
 
@@ -238,7 +238,7 @@ class TestEnglishLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = EnglishLayout()
+        layout = VocabularyLayout()
         rows = layout.row(entry)
         assert rows[4][0].startswith("Подсказка:"), "hint row lacks Подсказка label"
 
@@ -253,13 +253,13 @@ class TestEnglishLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = EnglishLayout()
+        layout = VocabularyLayout()
         rows = layout.row(entry)
         assert rows[5][0].startswith("Важность:"), "importance row lacks Важность label"
 
 
-class TestEnglishLayoutReturnsTwoRowsForSparseEntry:
-    """EnglishLayout returns 2 rows for a sparse entry with only header and sentence"""
+class TestVocabularyLayoutReturnsTwoRowsForSparseEntry:
+    """VocabularyLayout returns 2 rows for a sparse entry with only header and sentence"""
 
     def test_two_rows(self):
         entry = {
@@ -272,7 +272,7 @@ class TestEnglishLayoutReturnsTwoRowsForSparseEntry:
             "hint": "",
             "importance": "",
         }
-        layout = EnglishLayout()
+        layout = VocabularyLayout()
         rows = layout.row(entry)
         assert len(rows) == 2, "sparse entry did not produce exactly 2 rows"
 
@@ -287,7 +287,7 @@ class TestEnglishLayoutReturnsTwoRowsForSparseEntry:
             "hint": "",
             "importance": "",
         }
-        layout = EnglishLayout()
+        layout = VocabularyLayout()
         rows = layout.row(entry)
         assert rows[1][0].startswith("Перевод:"), "sparse sentence row lacks Перевод label"
 
