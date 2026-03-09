@@ -208,7 +208,7 @@ class CardModel:
                     ),
                     "afmt": (
                         '{{FrontSide}}<hr id="answer">'
-                        '<div style="max-width: 600px; margin: 0 auto; text-align: left; padding: 0 20px;">'
+                        '<div style="max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;">'
                         "{{Audio}}"
                         '<div style="font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;">{{Example}}</div>'
                         "{{#PronunciationAll}}"
