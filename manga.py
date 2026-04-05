@@ -84,7 +84,7 @@ class SceneTranslator:
         """
         filled = self._prompt.format(sentence=sentence)
         response = self._client.models.generate_content(
-            model="gemini-3.1-pro-preview",
+            model="gemini-3-flash-preview",
             contents=[filled],
         )
         raw = "".join(
@@ -262,7 +262,7 @@ class MangaRenderer:
     def _generate(self, prompt, word):
         """Call image model and return PIL Image"""
         response = self._client.models.generate_content(
-            model="gemini-3-pro-image-preview",
+            model="gemini-3.1-flash-image-preview",
             contents=[prompt],
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
