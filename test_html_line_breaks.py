@@ -5,7 +5,7 @@ Unit tests for HtmlLineBreaks class
 
 import uuid
 
-from deck import HtmlLineBreaks
+from kamishibai.deck import HtmlLineBreaks
 
 
 class TestHtmlLineBreaksReplacesNewlines:

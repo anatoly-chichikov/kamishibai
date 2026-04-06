@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""Unit tests for kamishibai CLI wrappers."""
+"""Unit tests for kamishibai application helpers."""
 
 import uuid
-
-import create_anki_deck
-import create_anki_deck_greek
 
 from kamishibai import app
 
@@ -23,43 +20,68 @@ class TestLanguageSelection:
             "Greek CLI configuration was not selected"
 
 
-class TestLegacyWrappers:
-    """Legacy wrapper scripts delegate into the unified kamishibai CLI."""
+class _Diagnosis:
+    """Records diagnosis output for run error handling tests."""
 
-    def test_default_wrapper_forwards_argv(self, monkeypatch):
-        seen = []
-        code = 17
+    def __init__(self, items):
+        """Store a shared recording list."""
+        self._items = items
+
+    def show(self, message, path):
+        """Record the reported message and path."""
+        self._items.append((message, path))
+
+
+class _Selector:
+    """Returns a recording diagnosis object."""
+
+    def __init__(self, items):
+        """Store a shared recording list."""
+        self._items = items
+
+    def selected(self):
+        """Return a diagnosis recorder."""
+        return _Diagnosis(self._items)
+
+
+class TestRun:
+    """The public run helper maps application outcomes to exit codes."""
+
+    def test_returns_zero_when_main_succeeds(self, monkeypatch):
         value = ["--deck", f"Deck_{uuid.uuid4().hex[:4]}"]
+        monkeypatch.setattr(app, "main", lambda argv: None)
+        assert app.run(value) == 0, \
+            "run did not return zero after successful execution"
 
-        def fake(argv):
-            seen.append(argv)
-            return code
+    def test_returns_130_when_main_is_interrupted(self, monkeypatch):
+        def boom(argv):
+            """Raise KeyboardInterrupt for the test."""
+            raise KeyboardInterrupt
+        monkeypatch.setattr(app, "main", boom)
+        assert app.run([f"λέξη_{uuid.uuid4().hex[:4]}.json"]) == 130, \
+            "run did not translate KeyboardInterrupt to exit code 130"
 
-        monkeypatch.setattr(create_anki_deck, "run_legacy_default", fake)
-        create_anki_deck.main(value)
-        assert seen == [value], \
-            "default wrapper did not forward argv to the unified CLI"
+    def test_returns_one_when_main_fails(self, monkeypatch):
+        items = []
 
-    def test_greek_wrapper_forwards_argv(self, monkeypatch):
-        seen = []
-        code = 19
+        def boom(argv):
+            """Raise ValueError for the test."""
+            raise ValueError("problem")
 
-        def fake(argv):
-            seen.append(argv)
-            return code
+        monkeypatch.setattr(app, "main", boom)
+        monkeypatch.setattr(app, "DiagnosisSelector", lambda terminal: _Selector(items))
+        assert app.run([f"λέξη_{uuid.uuid4().hex[:4]}.json"]) == 1, \
+            "run did not translate ValueError to exit code 1"
 
-        monkeypatch.setattr(create_anki_deck_greek, "run_legacy_greek", fake)
-        value = [f"λέξη_{uuid.uuid4().hex[:4]}.json"]
-        result = create_anki_deck_greek.main(value)
-        assert seen == [value], \
-            "Greek wrapper did not forward argv to the unified CLI"
+    def test_reports_failures_to_diagnosis(self, monkeypatch):
+        items = []
 
-    def test_default_wrapper_returns_delegate_exit_code(self, monkeypatch):
-        monkeypatch.setattr(create_anki_deck, "run_legacy_default", lambda argv: 23)
-        assert create_anki_deck.main([f"--deck=Deck_{uuid.uuid4().hex[:4]}"]) == 23, \
-            "default wrapper did not return the delegate exit code"
+        def boom(argv):
+            """Raise FileNotFoundError for the test."""
+            raise FileNotFoundError(2, "missing", f"/tmp/{uuid.uuid4().hex[:4]}.json")
 
-    def test_greek_wrapper_returns_delegate_exit_code(self, monkeypatch):
-        monkeypatch.setattr(create_anki_deck_greek, "run_legacy_greek", lambda argv: 29)
-        assert create_anki_deck_greek.main([f"λέξη_{uuid.uuid4().hex[:4]}.json"]) == 29, \
-            "Greek wrapper did not return the delegate exit code"
+        monkeypatch.setattr(app, "main", boom)
+        monkeypatch.setattr(app, "DiagnosisSelector", lambda terminal: _Selector(items))
+        app.run([f"λέξη_{uuid.uuid4().hex[:4]}.json"])
+        assert len(items) == 1, \
+            "run did not report the failure through diagnosis"

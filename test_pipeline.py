@@ -7,10 +7,10 @@ import uuid
 
 import pytest
 
-from deck import Pipeline
-from deck import StableId
-from deck import VocabularyDeck
-from language import DeckNaming
+from kamishibai.deck import Pipeline
+from kamishibai.deck import StableId
+from kamishibai.deck import VocabularyDeck
+from kamishibai.language import DeckNaming
 
 
 class _FailingAudio:

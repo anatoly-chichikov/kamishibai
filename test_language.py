@@ -7,11 +7,11 @@ import uuid
 
 import pytest
 
-from deck import VocabularyMapping
-from language import AudioProfile
-from language import DeckNaming
-from language import ImageProfile
-from language import Language
+from kamishibai.deck import VocabularyMapping
+from kamishibai.language import AudioProfile
+from kamishibai.language import DeckNaming
+from kamishibai.language import ImageProfile
+from kamishibai.language import Language
 
 
 class TestAudioProfileReturnsConfiguredValues:

@@ -62,8 +62,8 @@ def _assets():
 
 
 def _root():
-    """Return the repository root that stores generated output and caches."""
-    return Path(__file__).resolve().parent.parent
+    """Return the working directory that stores generated output."""
+    return Path.cwd()
 
 
 def _arguments(argv):
@@ -160,14 +160,3 @@ def run(argv=None):
         diagnosis = DiagnosisSelector(sys.stderr.isatty()).selected()
         diagnosis.show(str(error), getattr(error, "filename", ""))
         return 1
-
-
-def run_legacy_default(argv=None):
-    """Execute the legacy default-language wrapper."""
-    return run(sys.argv[1:] if argv is None else argv)
-
-
-def run_legacy_greek(argv=None):
-    """Execute the legacy Greek wrapper through the unified CLI."""
-    args = list(sys.argv[1:] if argv is None else argv)
-    return run(["--lang", "el", *args])

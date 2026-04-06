@@ -13,9 +13,9 @@ import uuid
 
 import pytest
 
-from diagnosis import DiagnosisSelector
-from diagnosis import PlainDiagnosis
-from diagnosis import RichDiagnosis
+from kamishibai.diagnosis import DiagnosisSelector
+from kamishibai.diagnosis import PlainDiagnosis
+from kamishibai.diagnosis import RichDiagnosis
 
 logging.disable(logging.CRITICAL)
 
@@ -93,14 +93,14 @@ class TestMainExitsOnMissingApiKey:
     """Application exits with code 1 when GEMINI_API_KEY is not set"""
 
     def test_exits_on_missing_api_key(self):
-        """Running create_anki_deck without GEMINI_API_KEY exits with code 1"""
-        script = os.path.join(os.path.dirname(__file__), "create_anki_deck.py")
+        """Running kamishibai without GEMINI_API_KEY exits with code 1"""
         env = {k: v for k, v in os.environ.items() if k != "GEMINI_API_KEY"}
         result = subprocess.run(
-            [sys.executable, script, "/tmp/nonexistent.json"],
+            [sys.executable, "-m", "kamishibai", "/tmp/nonexistent.json"],
             capture_output=True,
             text=True,
             env=env,
+            cwd=os.path.dirname(__file__),
             timeout=10,
         )
         assert result.returncode == 1, \
@@ -111,15 +111,15 @@ class TestMainExitsOnMissingInputFile:
     """Application exits with code 1 when input file does not exist"""
 
     def test_exits_on_missing_input_file(self):
-        """Running create_anki_deck with nonexistent path exits with code 1"""
-        script = os.path.join(os.path.dirname(__file__), "create_anki_deck.py")
+        """Running kamishibai with nonexistent path exits with code 1"""
         missing = f"/tmp/{uuid.uuid4().hex}_отсутствует.json"
         env = dict(os.environ, GEMINI_API_KEY="fake-key-for-test")
         result = subprocess.run(
-            [sys.executable, script, missing],
+            [sys.executable, "-m", "kamishibai", missing],
             capture_output=True,
             text=True,
             env=env,
+            cwd=os.path.dirname(__file__),
             timeout=10,
         )
         assert result.returncode == 1, \

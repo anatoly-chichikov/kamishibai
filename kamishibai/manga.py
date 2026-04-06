@@ -23,10 +23,7 @@ class Cache:
     """
 
     def __init__(self, name):
-        self._root = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "cache",
-        )
+        self._root = os.path.join(os.getcwd(), "cache")
         self._path = os.path.join(self._root, name)
 
     def root(self):
