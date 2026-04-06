@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -18,6 +19,8 @@ from kamishibai.diagnosis import PlainDiagnosis
 from kamishibai.diagnosis import RichDiagnosis
 
 logging.disable(logging.CRITICAL)
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestPlainDiagnosisShowsErrorPrefixAndMessage:
@@ -100,7 +103,7 @@ class TestMainExitsOnMissingApiKey:
             capture_output=True,
             text=True,
             env=env,
-            cwd=os.path.dirname(__file__),
+            cwd=ROOT,
             timeout=10,
         )
         assert result.returncode == 1, \
@@ -119,7 +122,7 @@ class TestMainExitsOnMissingInputFile:
             capture_output=True,
             text=True,
             env=env,
-            cwd=os.path.dirname(__file__),
+            cwd=ROOT,
             timeout=10,
         )
         assert result.returncode == 1, \
