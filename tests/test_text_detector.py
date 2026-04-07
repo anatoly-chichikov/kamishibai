@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from kamishibai.manga import TextDetector
+from kamishibai.manga import TextDetectors
 
 
 class TestTextDetectorResolvesDefaultLanguage:
@@ -54,3 +55,35 @@ class TestTextDetectorFallsBackOnMissing:
         with patch("kamishibai.manga.pytesseract.get_languages", return_value=languages):
             detector = TextDetector(50, f"missing_{uuid.uuid4().hex[:4]}")
         assert detector._lang == "eng", "did not fall back to eng when no languages available"
+
+
+class _Detector:
+    """Records image lookups and returns a fixed value."""
+
+    def __init__(self, value):
+        self._value = value
+        self._calls = 0
+
+    def detected(self, image):
+        """Return the fixed value and count invocations."""
+        self._calls += 1
+        return self._value
+
+
+class TestTextDetectorsSelectsByTargetLanguage:
+    """TextDetectors routes OCR calls by scene target language."""
+
+    def test_uses_target_specific_detector(self):
+        english = _Detector("english")
+        greek = _Detector("greek")
+        detectors = TextDetectors({"en": english, "el": greek}, _Detector("fallback"))
+        scene = {"manga_panel": {"meta": {"target_lang": "el"}}}
+        result = detectors.detected(scene, object())
+        assert result == "greek", "target-specific detector was not selected"
+
+    def test_uses_fallback_for_unknown_target_language(self):
+        fallback = _Detector("fallback")
+        detectors = TextDetectors({"en": _Detector("english")}, fallback)
+        scene = {"manga_panel": {"meta": {"target_lang": f"x_{uuid.uuid4().hex[:4]}"}}}
+        result = detectors.detected(scene, object())
+        assert result == "fallback", "fallback detector was not selected for unknown target language"

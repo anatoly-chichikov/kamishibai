@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
-"""
-Unit tests for language configuration classes
-"""
+"""Unit tests for target configuration classes."""
 
 import uuid
 
-import pytest
-
-from kamishibai.deck import VocabularyMapping
-from kamishibai.language import AudioProfile
-from kamishibai.language import DeckNaming
-from kamishibai.language import ImageProfile
-from kamishibai.language import Language
+from kamishibai.target import AudioProfile
+from kamishibai.target import DeckNaming
+from kamishibai.target import ImageProfile
+from kamishibai.target import TargetProfile
 
 
 class TestAudioProfileReturnsConfiguredValues:
@@ -61,37 +56,33 @@ class TestDeckNamingReturnsConfiguredValues:
         assert naming.default() == default, "default filename was not returned"
 
 
-class TestLanguageReturnsComposedProfiles:
-    """Language returns the composed audio, imagery, naming, and mapping"""
+class TestTargetProfileReturnsComposedProfiles:
+    """TargetProfile returns the composed audio, imagery, and naming"""
 
     def test_returns_audio_profile(self):
         audio = AudioProfile(f"p_{uuid.uuid4().hex[:4]}.txt", "audio")
         imagery = ImageProfile("eng", "manga")
         naming = DeckNaming("Deck", "cards", "vocab.json")
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
-        lang = Language(audio, imagery, naming, mapping)
-        assert lang.audio() is audio, "audio profile was not returned"
+        profile = TargetProfile("en", audio, imagery, naming)
+        assert profile.audio() is audio, "audio profile was not returned"
 
     def test_returns_imagery_profile(self):
         audio = AudioProfile("p.txt", "audio")
         imagery = ImageProfile(f"ocr_{uuid.uuid4().hex[:4]}", "manga")
         naming = DeckNaming("Deck", "cards", "vocab.json")
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
-        lang = Language(audio, imagery, naming, mapping)
-        assert lang.imagery() is imagery, "imagery profile was not returned"
+        profile = TargetProfile("en", audio, imagery, naming)
+        assert profile.imagery() is imagery, "imagery profile was not returned"
 
     def test_returns_naming_configuration(self):
         audio = AudioProfile("p.txt", "audio")
         imagery = ImageProfile("eng", "manga")
         naming = DeckNaming(f"N_{uuid.uuid4().hex[:4]}", "cards", "vocab.json")
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
-        lang = Language(audio, imagery, naming, mapping)
-        assert lang.naming() is naming, "naming configuration was not returned"
+        profile = TargetProfile("en", audio, imagery, naming)
+        assert profile.naming() is naming, "naming configuration was not returned"
 
-    def test_returns_vocabulary_mapping(self):
+    def test_returns_target_code(self):
         audio = AudioProfile("p.txt", "audio")
         imagery = ImageProfile("eng", "manga")
         naming = DeckNaming("Deck", "cards", "vocab.json")
-        mapping = VocabularyMapping(("word", "sentence_ru"), "sentence_en")
-        lang = Language(audio, imagery, naming, mapping)
-        assert lang.mapping() is mapping, "vocabulary mapping was not returned"
+        profile = TargetProfile("el", audio, imagery, naming)
+        assert profile.code() == "el", "target code was not returned"

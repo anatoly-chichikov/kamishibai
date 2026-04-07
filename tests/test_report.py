@@ -40,6 +40,19 @@ class _FakeFont:
         return self._path
 
 
+class _SwitchingFont:
+    """Fake font selector returning one of two configured families."""
+
+    def __init__(self, regular, cjk):
+        self._regular = regular
+        self._cjk = cjk
+
+    def selected(self, entry):
+        if entry.get("target_lang") == "zh":
+            return self._cjk
+        return self._regular
+
+
 def _font():
     return FontFamily("DejaVu Sans")
 
@@ -99,6 +112,22 @@ class TestReportRendersCyrillicAndGreekText:
             path = os.path.join(tmp, f"{uuid.uuid4().hex[:8]}.pdf")
             report.save(path)
             assert os.path.getsize(path) > 0, "multiscript PDF has zero bytes"
+
+
+class TestReportSupportsMixedEntryFonts:
+    """Report can switch font families between entries."""
+
+    def test_renders_entries_with_different_fonts(self):
+        layout = _FakeLayout([("Mixed script", 10)])
+        regular = FontFamily("DejaVu Sans")
+        cjk = FontFamily("Hiragino Sans GB")
+        report = Report(layout, _SwitchingFont(regular, cjk), Thumbnail(150))
+        with tempfile.TemporaryDirectory() as tmp:
+            report.append({"sentence": "plain", "word": "plain", "target_lang": "en"}, None)
+            report.append({"sentence": "朋友在门口等我", "word": "朋友", "target_lang": "zh"}, None)
+            path = os.path.join(tmp, f"{uuid.uuid4().hex[:8]}.pdf")
+            report.save(path)
+            assert os.path.getsize(path) > 0, "mixed-font PDF has zero bytes"
 
 
 class TestFontPathResolvesDejaVuSans:

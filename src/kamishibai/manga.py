@@ -78,7 +78,7 @@ class SceneTranslator:
         self._prompt = prompt
         self._template = template
 
-    def translate(self, sentence):
+    def translate(self, sentence, target):
         """
         Translate sentence to manga_panel dict by merging generated panels into static template
         """
@@ -100,6 +100,7 @@ class SceneTranslator:
         result["manga_panel"]["panels"] = panels
         result["manga_panel"]["meta"]["title"] = sentence[:60]
         result["manga_panel"]["meta"]["description"] = sentence
+        result["manga_panel"]["meta"]["target_lang"] = target
         self._enforce(result)
         self._validate(result)
         return result
@@ -173,6 +174,27 @@ class TextDetector:
 
 
 @final
+class TextDetectors:
+    """
+    Selects a TextDetector from scene metadata and delegates OCR
+    """
+
+    def __init__(self, detectors, fallback):
+        self._detectors = detectors
+        self._fallback = fallback
+
+    def detected(self, scene, image):
+        """
+        Return detected text using the detector selected by scene target language
+        """
+        root = scene.get("manga_panel", {})
+        meta = root.get("meta", {})
+        code = meta.get("target_lang", "")
+        detector = self._detectors.get(code, self._fallback)
+        return detector.detected(image)
+
+
+@final
 class BorderDetector:
     """
     Detects white outer borders and horizontal gutters between manga panels
@@ -240,7 +262,7 @@ class MangaRenderer:
         for attempt in range(self._retries):
             image = self._generate(dumped, word)
             gray = image.convert("L")
-            found = self._text.detected(gray)
+            found = self._text.detected(scene, gray)
             if found:
                 reason = f"OCR detected text: '{found}'"
                 progress.retry("Rendering manga", attempt + 1, reason)

@@ -10,7 +10,7 @@ import pytest
 from kamishibai.deck import Pipeline
 from kamishibai.deck import StableId
 from kamishibai.deck import VocabularyDeck
-from kamishibai.language import DeckNaming
+from kamishibai.target import DeckNaming
 
 
 class _FailingAudio:
@@ -34,7 +34,7 @@ class _FailingIllustration:
     def __init__(self, error):
         self._error = error
 
-    def generate(self, sentence, word, progress):
+    def generate(self, sentence, word, target, progress):
         """Always raise the configured error"""
         raise self._error
 
@@ -58,7 +58,7 @@ class _SuccessAudio:
 class _SuccessIllustration:
     """Fake illustration generator that always succeeds"""
 
-    def generate(self, sentence, word, progress):
+    def generate(self, sentence, word, target, progress):
         """Return a random jpg filename"""
         return (f"{uuid.uuid4().hex[:12]}.jpg", False)
 
@@ -169,7 +169,7 @@ class TestPipelineSkipsEntryWithEmptyExample:
         deck = _FakeDeck()
         progress = _FakeProgress()
         pipeline = Pipeline(audio, illustration, deck, progress)
-        entries = [{"word": word, "example": "", "sentence": "\u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"}]
+        entries = [{"word": word, "example": "", "sentence": "\u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435", "target_lang": "en"}]
         failures, _ = pipeline.process(entries)
         assert len(failures) == 1, \
             "empty example did not produce a failure"
@@ -190,7 +190,7 @@ class TestPipelineSurvivesServerError:
         deck = _FakeDeck()
         progress = _FakeProgress()
         pipeline = Pipeline(audio, illustration, deck, progress)
-        entries = [{"word": word, "example": "a séntence", "sentence": "предложение"}]
+        entries = [{"word": word, "example": "a séntence", "sentence": "предложение", "target_lang": "en"}]
         failures, _ = pipeline.process(entries)
         assert len(failures) == 1, "server error in audio did not record a failure"
 
@@ -203,7 +203,7 @@ class TestPipelineSurvivesServerError:
         deck = _FakeDeck()
         progress = _FakeProgress()
         pipeline = Pipeline(audio, illustration, deck, progress)
-        entries = [{"word": word, "example": "a séntence", "sentence": "предложение"}]
+        entries = [{"word": word, "example": "a séntence", "sentence": "предложение", "target_lang": "en"}]
         failures, _ = pipeline.process(entries)
         assert len(failures) == 1, "server error in image did not record a failure"
 
@@ -217,8 +217,8 @@ class TestPipelineSurvivesServerError:
         word_ok = f"wörd_{uuid.uuid4().hex[:6]}"
         word_fail = f"fäil_{uuid.uuid4().hex[:6]}"
         entries = [
-            {"word": word_fail, "example": "séntence one", "sentence": "предложение"},
-            {"word": word_ok, "example": "séntence two", "sentence": "предложение"},
+            {"word": word_fail, "example": "séntence one", "sentence": "предложение", "target_lang": "en"},
+            {"word": word_ok, "example": "séntence two", "sentence": "предложение", "target_lang": "en"},
         ]
         progress = _FakeProgress()
         pipeline_fail = Pipeline(failing, illustration, _FakeDeck(), progress)

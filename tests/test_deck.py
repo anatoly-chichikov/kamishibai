@@ -55,9 +55,9 @@ class FakeTranslator:
         self._scene = scene
         self._calls = []
 
-    def translate(self, sentence):
+    def translate(self, sentence, target):
         """Record call and return fixed scene"""
-        self._calls.append(sentence)
+        self._calls.append((sentence, target))
         return self._scene
 
 
@@ -140,7 +140,7 @@ class TestIllustrationDoesntCacheOnFailure:
         panel = {"id": uuid.uuid4().hex}
         scene = {"manga_panel": {"panels": [panel], "meta": {"title": "t", "description": "d"}}}
         sentence = f"\u00e9chec-{uuid.uuid4().hex[:6]}"
-        digest = hashlib.md5(sentence.encode()).hexdigest()[:12]
+        digest = hashlib.md5(f"en\0{sentence}".encode()).hexdigest()[:12]
         imagepath = os.path.join(directory, f"{digest}.jpg")
         cache = FakeCache(directory)
         translator = FakeTranslator(scene)
@@ -148,7 +148,7 @@ class TestIllustrationDoesntCacheOnFailure:
         progress = FakeProgress([])
         illustration = Illustration(cache, translator, renderer)
         try:
-            illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", progress)
+            illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", "en", progress)
         except RuntimeError:
             pass
         assert not os.path.exists(imagepath), \
@@ -164,14 +164,14 @@ class TestIllustrationSceneCache:
         panel = {"id": uuid.uuid4().hex}
         scene = {"manga_panel": {"panels": [panel], "meta": {"title": "t", "description": "d"}}}
         sentence = f"\u00e9preuve-{uuid.uuid4().hex[:6]}"
-        digest = hashlib.md5(sentence.encode()).hexdigest()[:12]
+        digest = hashlib.md5(f"en\0{sentence}".encode()).hexdigest()[:12]
         scenepath = os.path.join(directory, f"{digest}.json")
         cache = FakeCache(directory)
         translator = FakeTranslator(scene)
         renderer = FakeRenderer(64)
         progress = FakeProgress([])
         illustration = Illustration(cache, translator, renderer)
-        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", progress)
+        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", "en", progress)
         assert os.path.isfile(scenepath), "scene JSON was not written to cache"
 
     def test_loads_cached_scene_without_translating(self):
@@ -180,7 +180,7 @@ class TestIllustrationSceneCache:
         panel = {"id": uuid.uuid4().hex}
         scene = {"manga_panel": {"panels": [panel], "meta": {"title": "t", "description": "d"}}}
         sentence = f"\u03b1\u03c1\u03c7\u03ae-{uuid.uuid4().hex[:6]}"
-        digest = hashlib.md5(sentence.encode()).hexdigest()[:12]
+        digest = hashlib.md5(f"el\0{sentence}".encode()).hexdigest()[:12]
         scenepath = os.path.join(directory, f"{digest}.json")
         with open(scenepath, "w", encoding="utf-8") as handle:
             json.dump(scene, handle)
@@ -189,7 +189,7 @@ class TestIllustrationSceneCache:
         renderer = FakeRenderer(64)
         progress = FakeProgress([])
         illustration = Illustration(cache, translator, renderer)
-        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", progress)
+        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", "el", progress)
         assert len(translator._calls) == 0, "translator was called despite cached scene"
 
     def test_reports_scene_path_in_progress(self):
@@ -198,7 +198,7 @@ class TestIllustrationSceneCache:
         panel = {"id": uuid.uuid4().hex}
         scene = {"manga_panel": {"panels": [panel], "meta": {"title": "t", "description": "d"}}}
         sentence = f"S\u00e4tz-{uuid.uuid4().hex[:6]}"
-        digest = hashlib.md5(sentence.encode()).hexdigest()[:12]
+        digest = hashlib.md5(f"en\0{sentence}".encode()).hexdigest()[:12]
         scenepath = os.path.join(directory, f"{digest}.json")
         events = []
         cache = FakeCache(directory)
@@ -206,7 +206,7 @@ class TestIllustrationSceneCache:
         renderer = FakeRenderer(64)
         progress = FakeProgress(events)
         illustration = Illustration(cache, translator, renderer)
-        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", progress)
+        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", "en", progress)
         paths = [e[3] for e in events if e[0] == "done" and e[1] == "Composing scene"]
         assert scenepath == paths[0], "scene path was not reported in progress"
 
@@ -216,7 +216,7 @@ class TestIllustrationSceneCache:
         panel = {"id": uuid.uuid4().hex}
         scene = {"manga_panel": {"panels": [panel], "meta": {"title": "t", "description": "d"}}}
         sentence = f"\u0442\u0435\u0441\u0442-{uuid.uuid4().hex[:6]}"
-        digest = hashlib.md5(sentence.encode()).hexdigest()[:12]
+        digest = hashlib.md5(f"en\0{sentence}".encode()).hexdigest()[:12]
         scenepath = os.path.join(directory, f"{digest}.json")
         with open(scenepath, "w", encoding="utf-8") as handle:
             json.dump(scene, handle)
@@ -226,7 +226,7 @@ class TestIllustrationSceneCache:
         renderer = FakeRenderer(64)
         progress = FakeProgress(events)
         illustration = Illustration(cache, translator, renderer)
-        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", progress)
+        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", "en", progress)
         labels = [e[2] for e in events if e[0] == "done" and e[1] == "Composing scene"]
         assert labels[0] == "cached", "scene label did not indicate cache hit"
 
@@ -234,7 +234,7 @@ class TestIllustrationSceneCache:
         """Illustration omits scene path when image cached but scene JSON missing"""
         directory = tempfile.mkdtemp()
         sentence = f"legacy-{uuid.uuid4().hex[:6]}"
-        digest = hashlib.md5(sentence.encode()).hexdigest()[:12]
+        digest = hashlib.md5(f"en\0{sentence}".encode()).hexdigest()[:12]
         imagepath = os.path.join(directory, f"{digest}.jpg")
         Image.new("L", (64, 64), 128).save(imagepath, "JPEG")
         events = []
@@ -244,9 +244,23 @@ class TestIllustrationSceneCache:
         renderer = FakeRenderer(64)
         progress = FakeProgress(events)
         illustration = Illustration(cache, translator, renderer)
-        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", progress)
+        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", "en", progress)
         paths = [e[3] for e in events if e[0] == "done" and e[1] == "Composing scene"]
         assert paths[0] == "", "scene path was shown for legacy cache without JSON"
+
+    def test_passes_target_language_to_translator(self):
+        """Illustration forwards target language to scene translation"""
+        directory = tempfile.mkdtemp()
+        panel = {"id": uuid.uuid4().hex}
+        scene = {"manga_panel": {"panels": [panel], "meta": {"title": "t", "description": "d"}}}
+        sentence = f"λέξη-{uuid.uuid4().hex[:6]}"
+        cache = FakeCache(directory)
+        translator = FakeTranslator(scene)
+        renderer = FakeRenderer(64)
+        progress = FakeProgress([])
+        illustration = Illustration(cache, translator, renderer)
+        illustration.generate(sentence, f"w-{uuid.uuid4().hex[:4]}", "el", progress)
+        assert translator._calls == [(sentence, "el")], "target language was not forwarded to translator"
 
 
 class TestVocabularyNoteProducesElevenFields:

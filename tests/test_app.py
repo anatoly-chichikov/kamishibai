@@ -6,18 +6,81 @@ import uuid
 from kamishibai import app
 
 
-class TestLanguageSelection:
-    """The unified CLI returns language-specific configuration by code."""
+class TestProfileSelection:
+    """The unified CLI returns target profiles by code."""
 
-    def test_selects_default_english_profile(self):
-        language = app._language("en")
-        assert language.naming().name() == "English Vocabulary", \
-            "English CLI configuration was not selected"
+    def test_selects_english_profile(self):
+        profile = app._profile("en")
+        assert profile.naming().name() == "English Vocabulary", \
+            "English target profile was not selected"
 
     def test_selects_greek_profile(self):
-        language = app._language("el")
-        assert language.naming().default() == "vocabulary_greek.json", \
-            "Greek CLI configuration was not selected"
+        profile = app._profile("el")
+        assert profile.naming().default() == "kamishibai.json", \
+            "Greek target profile was not selected"
+
+    def test_selects_spanish_profile(self):
+        profile = app._profile("es")
+        assert profile.audio().prompt() == "Say in natural Spanish: {text}", \
+            "Spanish target profile was not selected"
+
+    def test_selects_german_profile(self):
+        profile = app._profile("de")
+        assert profile.imagery().ocr() == "eng+deu", \
+            "German target profile was not selected"
+
+    def test_selects_chinese_profile(self):
+        profile = app._profile("zh")
+        assert profile.imagery().ocr() == "eng+chi_sim", \
+            "Chinese target profile was not selected"
+
+    def test_rejects_unknown_profile(self):
+        try:
+            app._profile(f"x_{uuid.uuid4().hex[:4]}")
+        except ValueError:
+            pass
+        else:
+            assert False, "unknown target profile was not rejected"
+
+
+class TestNaming:
+    """The application derives generic deck naming from CLI input."""
+
+    def test_uses_generic_default_name(self):
+        naming = app._naming(app._arguments(["file.json"]))
+        assert naming.name() == "Kamishibai Deck", \
+            "default deck name was not used"
+
+    def test_uses_custom_name_when_provided(self):
+        value = f"test deck {uuid.uuid4().hex[:4]}"
+        naming = app._naming(app._arguments(["--deck", value, "file.json"]))
+        assert naming.name() == value, \
+            "custom deck name was not used"
+
+    def test_derives_prefix_from_name(self):
+        value = f"test demo {uuid.uuid4().hex[:4]}"
+        naming = app._naming(app._arguments(["--deck", value, "file.json"]))
+        assert naming.prefix().startswith("test-demo"), \
+            "deck prefix was not derived from the deck name"
+
+
+class TestFontSelection:
+    """The application selects a report font based on each entry target."""
+
+    def test_uses_default_font_when_target_is_missing(self):
+        font = app._Fonts().selected({})
+        assert font._regular._family == "DejaVu Sans", \
+            "default report font was not selected when target language was missing"
+
+    def test_uses_default_font_without_chinese_target(self):
+        font = app._Fonts().selected({"target_lang": "es"})
+        assert font._regular._family == "DejaVu Sans", \
+            "default report font was not selected for non-Chinese target"
+
+    def test_uses_cjk_font_for_chinese_target(self):
+        font = app._Fonts().selected({"target_lang": "zh"})
+        assert font._regular._family == "Hiragino Sans GB", \
+            "CJK report font was not selected for Chinese target"
 
 
 class _Diagnosis:

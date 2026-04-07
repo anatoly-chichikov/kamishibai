@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from importlib.resources import files
@@ -27,33 +28,56 @@ from .deck import VocabularyLayout
 from .deck import VocabularyMapping
 from .deck import VocabularyNote
 from .diagnosis import DiagnosisSelector
-from .language import AudioProfile
-from .language import DeckNaming
-from .language import ImageProfile
-from .language import Language
+from .target import AudioProfile
+from .target import DeckNaming
+from .target import ImageProfile
+from .target import TargetProfile
 from .manga import BorderDetector
 from .manga import Cache
 from .manga import MangaRenderer
 from .manga import SceneTranslator
 from .manga import TextDetector
+from .manga import TextDetectors
 from .progress import ProgressSelector
 
 
-def _language(code):
-    """Build the configured Language object for a supported code."""
-    if code == "el":
-        return Language(
-            AudioProfile("greek_audio_prompt.txt", "greek_audio"),
-            ImageProfile("eng+ell", "greek_manga"),
-            DeckNaming("Greek Vocabulary", "greek", "vocabulary_greek.json"),
-            VocabularyMapping(("word", "sentence_ru"), "sentence_el"),
-        )
-    return Language(
-        AudioProfile("audio_prompt.txt", "audio"),
-        ImageProfile("eng", "manga"),
-        DeckNaming("English Vocabulary", "cards", "vocabulary.json"),
-        VocabularyMapping(("word", "sentence_ru"), "sentence_en"),
-    )
+def _profile(code):
+    """Build the configured TargetProfile for a supported code."""
+    profiles = {
+        "de": TargetProfile(
+            "de",
+            AudioProfile("Say in natural German: {text}", "audio-de"),
+            ImageProfile("eng+deu", "manga-de"),
+            DeckNaming("German Vocabulary", "de", "kamishibai.json"),
+        ),
+        "el": TargetProfile(
+            "el",
+            AudioProfile("Say in natural Greek: {text}", "audio-el"),
+            ImageProfile("eng+ell", "manga-el"),
+            DeckNaming("Greek Vocabulary", "el", "kamishibai.json"),
+        ),
+        "en": TargetProfile(
+            "en",
+            AudioProfile("Say in natural English: {text}", "audio-en"),
+            ImageProfile("eng", "manga-en"),
+            DeckNaming("English Vocabulary", "en", "kamishibai.json"),
+        ),
+        "es": TargetProfile(
+            "es",
+            AudioProfile("Say in natural Spanish: {text}", "audio-es"),
+            ImageProfile("eng+spa", "manga-es"),
+            DeckNaming("Spanish Vocabulary", "es", "kamishibai.json"),
+        ),
+        "zh": TargetProfile(
+            "zh",
+            AudioProfile("Say in natural Mandarin Chinese: {text}", "audio-zh"),
+            ImageProfile("eng+chi_sim", "manga-zh"),
+            DeckNaming("Chinese Vocabulary", "zh", "kamishibai.json"),
+        ),
+    }
+    if code in profiles:
+        return profiles[code]
+    raise ValueError(f"Unsupported target language '{code}'")
 
 
 def _assets():
@@ -69,8 +93,7 @@ def _root():
 def _arguments(argv):
     """Parse CLI arguments for the unified kamishibai application."""
     parser = argparse.ArgumentParser(description="Convert vocabulary JSON to Anki deck")
-    parser.add_argument("--lang", choices=["en", "el"], default="en", help="Language (default: en)")
-    parser.add_argument("--deck", help="Custom deck name (overrides language default)")
+    parser.add_argument("--deck", help="Custom deck name")
     parser.add_argument("path", nargs="?", help="Path to vocabulary JSON file")
     return parser.parse_args(argv)
 
@@ -93,52 +116,102 @@ def _client():
     return genai.Client(api_key=key)
 
 
-def _naming(args, lang):
+def _prefix(name):
+    """Return a filesystem-friendly prefix derived from the deck name."""
+    value = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return value or "deck"
+
+
+def _naming(args):
     """Return the effective deck naming after applying CLI overrides."""
-    naming = lang.naming()
-    if args.deck:
-        return DeckNaming(args.deck, naming.prefix(), naming.default())
-    return naming
+    name = args.deck if args.deck else "Kamishibai Deck"
+    return DeckNaming(name, _prefix(name), "kamishibai.json")
 
 
-def _path(args, lang):
+class _Fonts:
+    """Selects a PDF font family for each processed entry."""
+
+    def __init__(self):
+        self._default = FontFamily("DejaVu Sans")
+        self._cjk = FontFamily("Hiragino Sans GB")
+
+    def selected(self, entry):
+        """Return the report font family for a single entry."""
+        if entry.get("target_lang") == "zh":
+            return self._cjk
+        return self._default
+
+
+def _path(args):
     """Resolve the input vocabulary path from CLI arguments or default Downloads path."""
-    default = os.path.expanduser(f"~/Downloads/{lang.naming().default()}")
+    default = os.path.expanduser("~/Downloads/kamishibai.json")
     return args.path if args.path else default
+
+
+class _Media:
+    """Builds per-target audio and illustration services lazily."""
+
+    def __init__(self, client):
+        self._client = client
+        self._translator = SceneTranslator(client, _text("scene_prompt.txt"), _template())
+        self._renderer = MangaRenderer(
+            client,
+            retries=3,
+            text=TextDetectors(
+                {code: TextDetector(60, _profile(code).imagery().ocr()) for code in ("de", "el", "en", "es", "zh")},
+                TextDetector(60, "eng"),
+            ),
+            border=BorderDetector(width=6, brightness=240, margin=10),
+        )
+        self._audio = {}
+        self._illustration = {}
+
+    def audio(self, entry):
+        """Return the audio service for the entry target language."""
+        code = entry["target_lang"]
+        if code not in self._audio:
+            profile = _profile(code)
+            self._audio[code] = Audio(
+                self._client,
+                Cache(profile.audio().cache()),
+                profile.audio().prompt(),
+                TtsVoice(("gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts")),
+            )
+        return self._audio[code]
+
+    def illustration(self, entry):
+        """Return the illustration service for the entry target language."""
+        code = entry["target_lang"]
+        if code not in self._illustration:
+            profile = _profile(code)
+            self._illustration[code] = Illustration(
+                Cache(profile.imagery().cache()),
+                self._translator,
+                self._renderer,
+            )
+        return self._illustration[code]
 
 
 def main(argv=None):
     """Run the application logic for the provided CLI arguments."""
     args = _arguments(argv)
-    lang = _language(args.lang)
+    vocabulary = Vocabulary(_path(args), VocabularyMapping())
+    document = vocabulary.document()
     client = _client()
-    naming = _naming(args, lang)
-    audio = Audio(
-        client,
-        Cache(lang.audio().cache()),
-        _text(lang.audio().prompt()),
-        TtsVoice(("gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts")),
-    )
-    translator = SceneTranslator(client, _text("scene_prompt.txt"), _template())
-    renderer = MangaRenderer(
-        client,
-        retries=3,
-        text=TextDetector(60, lang.imagery().ocr()),
-        border=BorderDetector(width=6, brightness=240, margin=10),
-    )
-    images = Illustration(Cache(lang.imagery().cache()), translator, renderer)
-    entries = Vocabulary(_path(args, lang), lang.mapping()).entries()
+    naming = _naming(args)
+    media = _Media(client)
+    entries = vocabulary.entries(document)
     model = CardModel(StableId(f"{naming.name()} Model").value()).model()
     deck = genanki.Deck(StableId(naming.name()).value(), naming.name())
     container = VocabularyDeck(deck, VocabularyNote(model), [])
     progress = ProgressSelector(sys.stdout.isatty()).selected()
-    failed, processed = Pipeline(audio, images, container, progress).process(entries)
+    failed, processed = Pipeline(media, media, container, progress).process(entries)
     output = _root() / "output"
     output.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     apkg = output / f"{naming.prefix()}_{stamp}.apkg"
     container.save(str(apkg))
-    report = Report(VocabularyLayout(), FontFamily("DejaVu Sans"), Thumbnail(150))
+    report = Report(VocabularyLayout(), _Fonts(), Thumbnail(150))
     for entry, imagepath in processed:
         report.append(entry, imagepath)
     pdf = output / f"{naming.prefix()}_{stamp}.pdf"

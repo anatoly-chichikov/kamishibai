@@ -78,26 +78,28 @@ class VocabularyNote:
 class VocabularyMapping:
     """Maps vocabulary JSON rows to normalized entry dicts"""
 
-    def __init__(self, required, example):
-        self._required = required
-        self._example = example
-
     def mapped(self, row):
         """Return normalized entry dict or None if row is invalid"""
-        for field in self._required:
-            if not row.get(field):
-                return None
+        if not isinstance(row, dict):
+            return None
+        source = row.get("source")
+        target = row.get("target")
+        if not isinstance(source, dict) or not isinstance(target, dict):
+            return None
+        if not row.get("term") or not source.get("sentence") or not target.get("sentence") or not target.get("lang"):
+            return None
         return {
-            "word": row["word"],
+            "word": row["term"],
             "pronunciation": row.get("pronunciation") or "",
-            "translation": row.get("translation_ru") or "",
-            "example": row.get(self._example) or "" if self._example else "",
-            "sentence": row["sentence_ru"],
-            "highlight": row.get("highlight_ru") or "",
-            "hint": row.get("hint_ru") or "",
-            "context": row.get("context_ru") or "",
+            "translation": row.get("meaning") or "",
+            "example": target["sentence"],
+            "target_lang": target["lang"],
+            "sentence": source["sentence"],
+            "highlight": source.get("highlight") or "",
+            "hint": source.get("hint") or "",
+            "context": source.get("context") or "",
             "importance": str(row.get("importance") or ""),
-            "transcription": row.get("pronunciation_all") or "",
+            "transcription": row.get("transcription") or "",
         }
 
 
@@ -292,6 +294,7 @@ class Report:
         self._font = font
         self._thumbnail = thumbnail
         self._rows = []
+        self._fonts = {}
 
     def append(self, entry, imagepath):
         """Record an entry with its image path for later rendering"""
@@ -301,9 +304,8 @@ class Report:
         """Render all accumulated entries to a PDF file"""
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_font("dejavu", "", self._font.regular())
-        pdf.add_font("dejavu", "B", self._font.bold())
-        pdf.set_font("dejavu", size=10)
+        alias = self._alias(pdf, {})
+        pdf.set_font(alias, size=10)
         pdf.add_page()
         with tempfile.TemporaryDirectory() as thumbdir:
             for entry, imagepath in self._rows:
@@ -312,10 +314,24 @@ class Report:
                 self._row(pdf, entry, imagepath, thumbdir)
         pdf.output(output)
 
+    def _alias(self, pdf, entry):
+        """Return a registered PDF font alias for the given entry."""
+        font = self._font.selected(entry) if hasattr(self._font, "selected") else self._font
+        regular = font.regular()
+        bold = font.bold()
+        key = (regular, bold)
+        if key not in self._fonts:
+            alias = f"font{len(self._fonts)}"
+            pdf.add_font(alias, "", regular)
+            pdf.add_font(alias, "B", bold)
+            self._fonts[key] = alias
+        return self._fonts[key]
+
     def _row(self, pdf, entry, imagepath, thumbdir):
         """Render a single entry row with optional image thumbnail"""
         top = pdf.get_y()
         page = pdf.page
+        alias = self._alias(pdf, entry)
         if imagepath and os.path.isfile(imagepath):
             thumb = self._thumbnail.compressed(imagepath, thumbdir)
             pdf.image(thumb, x=10, y=top, w=25, h=25)
@@ -324,13 +340,13 @@ class Report:
         pdf.set_xy(indent, top)
         for idx, (text, size) in enumerate(self._layout.row(entry)):
             if idx == 0:
-                pdf.set_font("dejavu", style="B", size=size)
+                pdf.set_font(alias, style="B", size=size)
                 pdf.set_text_color(0, 0, 0)
             elif size <= 8:
-                pdf.set_font("dejavu", style="", size=size)
+                pdf.set_font(alias, style="", size=size)
                 pdf.set_text_color(120, 120, 120)
             else:
-                pdf.set_font("dejavu", style="", size=size)
+                pdf.set_font(alias, style="", size=size)
                 pdf.set_text_color(0, 0, 0)
             pdf.set_x(indent)
             pdf.multi_cell(w=width, h=size * 0.5, text=str(text), align="L")
@@ -471,9 +487,9 @@ class Illustration:
         """Return full path to a cached illustration file"""
         return self._cache.filepath(filename)
 
-    def generate(self, sentence, word, progress):
+    def generate(self, sentence, word, target, progress):
         """Generate manga image and return tuple of filename and cached flag"""
-        digest = hashlib.md5(sentence.encode()).hexdigest()[:12]
+        digest = hashlib.md5(f"{target}\0{sentence}".encode()).hexdigest()[:12]
         filename = f"{digest}.jpg"
         scenefile = f"{digest}.json"
         path = self._cache.filepath(filename)
@@ -481,7 +497,7 @@ class Illustration:
             self._cached(scenefile, progress)
             progress.done("Rendering manga", "cached", path)
             return (filename, True)
-        scene = self._scene(sentence, scenefile, progress)
+        scene = self._scene(sentence, target, scenefile, progress)
         progress.step("Rendering manga")
         image = self._renderer.render(scene, word, progress)
         self._commit(image, filename)
@@ -495,7 +511,7 @@ class Illustration:
         else:
             progress.done("Composing scene", "cached")
 
-    def _scene(self, sentence, scenefile, progress):
+    def _scene(self, sentence, target, scenefile, progress):
         """Load scene from cache or translate and cache it"""
         scenepath = self._cache.filepath(scenefile)
         progress.step("Composing scene")
@@ -504,7 +520,7 @@ class Illustration:
                 scene = json.load(handle)
             progress.done("Composing scene", "cached", scenepath)
             return scene
-        scene = self._translator.translate(sentence)
+        scene = self._translator.translate(sentence, target)
         staged = self._cache.stage(".json")
         try:
             with open(staged, "w", encoding="utf-8") as handle:
@@ -537,22 +553,31 @@ class Vocabulary:
         self._path = path
         self._mapping = mapping
 
-    def entries(self):
-        """Load, filter, and return vocabulary entries"""
+    def document(self):
+        """Load and validate the root JSON document."""
         with open(self._path, "r", encoding="utf-8") as file:
             data = json.load(file)
-        if not isinstance(data, list):
+        if not isinstance(data, dict):
             raise ValueError(
-                f"Expected a JSON array in '{self._path}' but found {type(data).__name__}"
+                f"Expected a JSON object in '{self._path}' but found {type(data).__name__}"
             )
+        if not isinstance(data.get("entries"), list):
+            raise ValueError(
+                f"Expected an 'entries' array in '{self._path}'"
+            )
+        return data
+
+    def entries(self, document=None):
+        """Load, filter, and return vocabulary entries"""
+        data = self.document() if document is None else document
         result = []
-        for row in data:
+        for row in data["entries"]:
             entry = self._mapping.mapped(row)
             if entry is not None:
                 result.append(entry)
         if not result:
             raise ValueError(
-                f"No valid entries found in '{self._path}'; each entry requires 'word' and 'sentence_ru'"
+                f"No valid entries found in '{self._path}'; each entry requires 'term', 'source.sentence', 'target.sentence', and 'target.lang'"
             )
         return result
 
@@ -595,32 +620,46 @@ class Pipeline:
         self._deck = deck
         self._progress = progress
 
+    def _audio_service(self, entry):
+        """Return the audio generator for the given entry"""
+        if hasattr(self._audio, "audio"):
+            return self._audio.audio(entry)
+        return self._audio
+
+    def _illustration_service(self, entry):
+        """Return the illustration generator for the given entry"""
+        if hasattr(self._illustration, "illustration"):
+            return self._illustration.illustration(entry)
+        return self._illustration
+
     def process(self, entries):
         """Process all entries and return tuple of failures and processed list"""
         failed = []
         processed = []
         for index, entry in enumerate(entries, 1):
             self._progress.card(index, len(entries), entry["word"])
+            audio = self._audio_service(entry)
             try:
                 self._progress.step("Generating audio")
-                audiofile, cached = self._audio.generate(entry["example"])
-                audiopath = self._audio.filepath(audiofile)
+                audiofile, cached = audio.generate(entry["example"])
+                audiopath = audio.filepath(audiofile)
                 label = "cached" if cached else "generated"
                 self._progress.done("Generating audio", label, audiopath)
             except Exception as error:
                 self._progress.skip(entry["word"], str(error))
                 failed.append({"word": entry["word"], "reason": str(error)})
                 continue
+            illustration = self._illustration_service(entry)
             try:
-                imagefile, cached = self._illustration.generate(
-                    entry["example"], entry["word"], self._progress
+                imagefile, cached = illustration.generate(
+                    entry["example"], entry["word"], entry["target_lang"], self._progress
                 )
             except Exception as error:
                 self._progress.skip(entry["word"], str(error))
                 failed.append({"word": entry["word"], "reason": str(error)})
                 continue
             self._deck.attach(audiopath)
-            imagepath = self._illustration.filepath(imagefile)
+            imagepath = illustration.filepath(imagefile)
             self._deck.attach(imagepath)
             processed.append((entry, imagepath))
             sound = f"[sound:{audiofile}]"
