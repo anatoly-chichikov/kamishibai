@@ -18,3 +18,13 @@ pub fn scene_prompt() -> &'static str {
 pub fn manga_template() -> &'static str {
     MANGA_TEMPLATE.trim()
 }
+
+/// Render the audio prompt template for one language.
+pub fn render_audio_prompt(language: &str) -> String {
+    audio_prompt().replace("{language}", language)
+}
+
+/// Render the scene prompt template for one language.
+pub fn render_scene_prompt(language: &str) -> String {
+    scene_prompt().replace("{language}", language)
+}
