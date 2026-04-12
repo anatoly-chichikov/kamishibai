@@ -5,7 +5,7 @@
 ## Baseline
 
 - На `2026-04-12` Python-реализация проходит `uv run pytest` без пропусков: `176 passed in 5.64s`
-- Reference source of truth: текущие модули в `src/kamishibai/` и manifests в `tests/fixtures/reference/manifests/`
+- Reference source of truth: архивные Python модули в `python_reference/src/kamishibai/` и manifests в `tests/fixtures/reference/manifests/`
 - Regeneration command: `uv run python scripts/regenerate_rust_parity.py`
 
 ## Input Contract
@@ -114,7 +114,7 @@
   - `GEMINI_API_KEY`
   - `tesseract`
   - language packs для Tesseract
-- Python reference generation до cutover:
+- Archived Python reference harness:
   - `fc-match`
 - Rust rewrite version policy:
   - crate versions берутся как latest stable на `2026-04-12`

@@ -1,4 +1,4 @@
-//! Binary entrypoint for the kamishibai Rust rewrite baseline.
+//! Binary entrypoint for the canonical kamishibai runtime.
 
 use std::process::ExitCode;
 

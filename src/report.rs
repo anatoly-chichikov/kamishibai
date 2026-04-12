@@ -3,9 +3,11 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Result, anyhow, bail};
+use font_kit::family_name::FamilyName as QueryName;
+use font_kit::properties::{Properties, Weight};
+use font_kit::source::SystemSource;
 use image::ImageReader;
 use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, GenericImageView};
@@ -131,6 +133,7 @@ where
 /// Resolve one system font family to one filesystem path.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FontPath {
+    bold: bool,
     family: String,
 }
 
@@ -138,32 +141,73 @@ impl FontPath {
     /// Create one regular-weight font path resolver.
     pub fn new(family: impl Into<String>) -> Self {
         Self {
+            bold: false,
             family: family.into(),
         }
     }
 
     /// Create one bold-weight font path resolver.
     pub fn bold(family: impl Into<String>) -> Self {
-        Self::new(format!("{}:Bold", family.into()))
+        Self {
+            bold: true,
+            family: family.into(),
+        }
     }
 
     /// Return the resolved filesystem path for the font.
     pub fn resolved(&self) -> Result<PathBuf> {
-        let output = Command::new("fc-match")
-            .args(["-f", "%{file}", self.family.as_str()])
-            .output()?;
-        let path = String::from_utf8(output.stdout)?.trim().to_string();
-        if !output.status.success() || path.is_empty() {
-            bail!("Font '{}' was not resolved by fc-match", self.family)
+        let font = SystemSource::new()
+            .select_best_match(&[QueryName::Title(self.family.clone())], &self.properties())
+            .map_err(|_| anyhow!("Font '{}' was not resolved by font-kit", self.label()))?
+            .load()
+            .map_err(|_| {
+                anyhow!(
+                    "Font '{}' could not be loaded from the system source",
+                    self.label()
+                )
+            })?;
+        let bytes = font
+            .copy_font_data()
+            .ok_or_else(|| anyhow!("Font '{}' could not expose raw font data", self.label()))?;
+        self.materialized(bytes.as_slice())
+    }
+
+    /// Return the matching system-font properties for the resolver.
+    fn properties(&self) -> Properties {
+        let mut value = Properties::new();
+        if self.bold {
+            value.weight(Weight::BOLD);
         }
-        let result = PathBuf::from(path);
-        if result.is_file() {
-            return Ok(result);
+        value
+    }
+
+    /// Persist the resolved font bytes to one reusable cache path.
+    fn materialized(&self, bytes: &[u8]) -> Result<PathBuf> {
+        let path = std::env::temp_dir()
+            .join("kamishibai-fonts")
+            .join(format!("{:x}.font", md5::compute(bytes)));
+        if !path.exists() {
+            fs::create_dir_all(
+                path.parent()
+                    .ok_or_else(|| anyhow!("Font cache path '{}' has no parent", path.display()))?,
+            )?;
+            fs::write(&path, bytes)?;
+        }
+        if path.is_file() {
+            return Ok(path);
         }
         bail!(
-            "Font '{}' was not resolved to a filesystem path",
-            self.family
+            "Font '{}' was not materialized into a filesystem path",
+            self.label()
         )
+    }
+
+    /// Return the report label for the font variant.
+    fn label(&self) -> String {
+        if self.bold {
+            return format!("{} bold", self.family);
+        }
+        self.family.clone()
     }
 }
 

@@ -4,22 +4,12 @@ Generate illustrated Anki decks from schema-driven vocabulary JSON.
 
 ## Development
 
-Install dependencies with:
+The canonical runtime is Rust. The default developer flow is:
 
 ```bash
-uv sync
-```
-
-Run the test suite with:
-
-```bash
-uv run pytest
-```
-
-Build distributions with:
-
-```bash
-uv build
+cargo fmt
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
 ```
 
 ## Running
@@ -27,25 +17,25 @@ uv build
 The main flow assumes a directory that contains `kamishibai.json`:
 
 ```bash
-uv run kamishibai
+cargo run --
 ```
 
 Pass an explicit file when needed:
 
 ```bash
-uv run kamishibai path/to/my-words.json
+cargo run -- path/to/my-words.json
 ```
 
 Override the deck name:
 
 ```bash
-uv run kamishibai --deck "Core Pack" path/to/my-words.json
+cargo run -- --deck "Core Pack" path/to/my-words.json
 ```
 
 Override output and cache locations:
 
 ```bash
-uv run kamishibai --output ./output --cache ~/.cache/kamishibai path/to/my-words.json
+cargo run -- --output ./output --cache ~/.cache/kamishibai path/to/my-words.json
 ```
 
 Environment variables are also supported:
@@ -54,7 +44,7 @@ Environment variables are also supported:
 KAMISHIBAI_INPUT=path/to/my-words.json
 KAMISHIBAI_OUTPUT=path/to/output
 KAMISHIBAI_CACHE=path/to/cache
-uv run kamishibai
+cargo run --
 ```
 
 ## Input Contract
@@ -96,26 +86,44 @@ Example:
 }
 ```
 
-`source.lang` drives source-side labels and report font selection. `target.lang` drives audio prompt language, scene prompt language, OCR configuration, cache naming, and default deck naming.
+`source.lang` drives report labels. `target.lang` drives audio prompts, scene prompts, OCR configuration, cache naming, and default deck naming.
 
-## Language Profiles
+## Architecture
 
-Language-specific behavior lives in declarative profiles in [`src/kamishibai/config.py`](src/kamishibai/config.py) and [`src/kamishibai/target.py`](src/kamishibai/target.py).
+The shipping runtime lives in Rust modules under `src/`:
 
-Each profile defines:
+- `src/cli.rs`
+- `src/input.rs`
+- `src/profile.rs`
+- `src/paths.rs`
+- `src/assets.rs`
+- `src/gemini.rs`
+- `src/cache.rs`
+- `src/audio.rs`
+- `src/scene.rs`
+- `src/media.rs`
+- `src/anki.rs`
+- `src/report.rs`
+- `src/progress.rs`
+- `src/diagnosis.rs`
 
-- display name for prompts
-- OCR configuration
-- cache directory names
-- default deck naming
-- report font family
-- report labels
+Language-specific behavior belongs only in [`src/profile.rs`](src/profile.rs). Add new languages there instead of branching runtime orchestration.
 
-Adding a new language should only require adding one new profile entry.
+## Archived Python Reference
+
+The old Python runtime is archived in [`python_reference/src/kamishibai`](python_reference/src/kamishibai). It is kept only as a migration oracle for parity fixtures and reference regeneration.
+
+Reference-only Python commands still use `uv`:
+
+```bash
+uv sync
+uv run pytest
+uv run python scripts/regenerate_rust_parity.py
+```
 
 ## External Requirements
 
 - `GEMINI_API_KEY` must be set
 - `tesseract` must be installed
 - required Tesseract language packs must be installed
-- `fc-match` from fontconfig must be available for PDF font resolution
+- `fc-match` is only needed when regenerating archived Python parity artifacts

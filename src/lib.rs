@@ -1,4 +1,4 @@
-//! Rust library surface for the kamishibai rewrite baseline.
+//! Rust library surface for the canonical kamishibai runtime.
 
 #![forbid(unsafe_code)]
 

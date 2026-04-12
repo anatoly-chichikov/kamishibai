@@ -16,7 +16,7 @@ from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
+SRC = ROOT / "python_reference" / "src"
 FIXTURES = ROOT / "tests" / "fixtures" / "reference"
 INPUTS = FIXTURES / "inputs"
 MANIFESTS = FIXTURES / "manifests"
