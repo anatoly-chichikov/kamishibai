@@ -5,6 +5,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressDrawTarget};
+use regex::Regex;
 
 use crate::media::{Failure, PipelineProgress};
 use crate::scene::Progress as SceneProgress;
@@ -406,7 +407,7 @@ pub struct TerminalConsole;
 impl Console for TerminalConsole {
     /// Print one terminal line.
     fn print(&mut self, text: &str, _highlight: bool) {
-        println!("{text}");
+        println!("{}", rendered(text));
     }
 }
 
@@ -455,9 +456,52 @@ fn base(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+/// Return ANSI-rendered terminal output for one rich-markup line.
+fn rendered(text: &str) -> String {
+    let mut value = links(text);
+    for (mark, code) in [
+        ("[bold]", "\u{1b}[1m"),
+        ("[/bold]", "\u{1b}[0m"),
+        ("[green]", "\u{1b}[32m"),
+        ("[/green]", "\u{1b}[0m"),
+        ("[yellow]", "\u{1b}[33m"),
+        ("[/yellow]", "\u{1b}[0m"),
+        ("[red]", "\u{1b}[31m"),
+        ("[/red]", "\u{1b}[0m"),
+        ("[dim]", "\u{1b}[2m"),
+        ("[/dim]", "\u{1b}[0m"),
+    ] {
+        value = value.replace(mark, code);
+    }
+    value
+}
+
+/// Return OSC8 hyperlinks for every rich link tag in one line.
+fn links(text: &str) -> String {
+    let regex = Regex::new(r"\[link=([^\]]+)\]([^\[]+)\[/link\]").expect("link regex must compile");
+    regex
+        .replace_all(text, "\u{1b}]8;;$1\u{1b}\\$2\u{1b}]8;;\u{1b}\\")
+        .into_owned()
+}
+
 impl Output for io::Stdout {
     /// Print one output line.
     fn print(&mut self, text: &str) {
         println!("{text}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rendered;
+
+    /// Terminal rendering converts rich progress markup into ANSI and OSC8 sequences.
+    #[test]
+    fn terminal_rendering_converts_rich_progress_markup_into_ansi_and_osc8_sequences() {
+        assert_eq!(
+            rendered("[bold]whims[/bold]  [green]✔[/green] ([link=file:///tmp/x.wav]x.wav[/link])"),
+            "\u{1b}[1mwhims\u{1b}[0m  \u{1b}[32m✔\u{1b}[0m (\u{1b}]8;;file:///tmp/x.wav\u{1b}\\x.wav\u{1b}]8;;\u{1b}\\)",
+            "terminal rendering no longer converts rich progress markup into ansi and osc8 sequences"
+        );
     }
 }
