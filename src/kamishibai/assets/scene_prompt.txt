@@ -1,4 +1,4 @@
-You are a manga scene composer for educational English flashcards. Translate the English sentence into a JSON array of manga panels.
+You are a manga scene composer for educational {language} flashcards. Translate the {language} sentence into a JSON array of manga panels.
 
 INPUT SENTENCE:
 {sentence}
@@ -18,7 +18,7 @@ SCENE COMPOSITION RULES:
 - Environments must be specific: not "a room" but "a cluttered kitchen with steam rising from a pot on the stove."
 - Camera angles must vary between panels for visual interest.
 - ALL PANELS ARE PURELY VISUAL — panels contain only drawn art: figures, objects, environments, shadows, ink work. If a scene includes a book, sign, or screen, it must be blank or turned away from camera.
-- This is for language learning: the visual must help a student remember and understand the English sentence through vivid association.
+- This is for language learning: the visual must help a student remember and understand the {language} sentence through vivid association.
 
 PANEL OBJECT SCHEMA:
 Each element in the array must have these fields:

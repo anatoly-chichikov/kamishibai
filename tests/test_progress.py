@@ -10,7 +10,7 @@ import uuid
 
 import pytest
 
-from progress import AlignedStatus, PlainProgress, ProgressSelector, RichProgress
+from kamishibai.progress import AlignedStatus, PlainProgress, ProgressSelector, RichProgress
 
 logging.disable(logging.CRITICAL)
 

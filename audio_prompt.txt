@@ -1,1 +1,0 @@
-Say in natural English: {text}

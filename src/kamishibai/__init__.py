@@ -1,0 +1,2 @@
+"""Kamishibai package."""
+

@@ -10,11 +10,12 @@ import uuid
 import pytest
 from PIL import Image
 
-from deck import FontFamily
-from deck import VocabularyLayout
-from deck import FontPath
-from deck import Report
-from deck import Thumbnail
+from kamishibai.report import FontFamily
+from kamishibai.report import FontPath
+from kamishibai.report import Report
+from kamishibai.report import Thumbnail
+from kamishibai.report import VocabularyLayout
+from kamishibai.target import UiLabels
 
 
 class _FakeLayout:
@@ -38,6 +39,29 @@ class _FakeFont:
 
     def bold(self):
         return self._path
+
+
+class _SwitchingFont:
+    """Fake font selector returning one of two configured families."""
+
+    def __init__(self, regular, cjk):
+        self._regular = regular
+        self._cjk = cjk
+
+    def selected(self, entry):
+        if entry.get("target_lang") == "zh":
+            return self._cjk
+        return self._regular
+
+
+class _FakeLabels:
+    """Fake label selector returning one configured label set."""
+
+    def __init__(self, labels):
+        self._labels = labels
+
+    def selected(self, entry):
+        return self._labels
 
 
 def _font():
@@ -99,6 +123,22 @@ class TestReportRendersCyrillicAndGreekText:
             path = os.path.join(tmp, f"{uuid.uuid4().hex[:8]}.pdf")
             report.save(path)
             assert os.path.getsize(path) > 0, "multiscript PDF has zero bytes"
+
+
+class TestReportSupportsMixedEntryFonts:
+    """Report can switch font families between entries."""
+
+    def test_renders_entries_with_different_fonts(self):
+        layout = _FakeLayout([("Mixed script", 10)])
+        regular = FontFamily("DejaVu Sans")
+        cjk = FontFamily("Hiragino Sans GB")
+        report = Report(layout, _SwitchingFont(regular, cjk), Thumbnail(150))
+        with tempfile.TemporaryDirectory() as tmp:
+            report.append({"sentence": "plain", "word": "plain", "target_lang": "en"}, None)
+            report.append({"sentence": "朋友在门口等我", "word": "朋友", "target_lang": "zh"}, None)
+            path = os.path.join(tmp, f"{uuid.uuid4().hex[:8]}.pdf")
+            report.save(path)
+            assert os.path.getsize(path) > 0, "mixed-font PDF has zero bytes"
 
 
 class TestFontPathResolvesDejaVuSans:
@@ -193,7 +233,7 @@ class TestVocabularyLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
         assert len(rows) == 6, "fully populated entry did not produce 6 rows"
 
@@ -208,9 +248,9 @@ class TestVocabularyLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
-        assert rows[2][0].startswith("Перевод:"), "sentence row lacks Перевод label"
+        assert rows[2][0].startswith("Source:"), "sentence row did not use the configured sentence label"
 
     def test_context_has_label(self):
         entry = {
@@ -223,9 +263,9 @@ class TestVocabularyLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
-        assert rows[3][0].startswith("Контекст:"), "context row lacks Контекст label"
+        assert rows[3][0].startswith("Context:"), "context row did not use the configured context label"
 
     def test_hint_has_label(self):
         entry = {
@@ -238,9 +278,9 @@ class TestVocabularyLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
-        assert rows[4][0].startswith("Подсказка:"), "hint row lacks Подсказка label"
+        assert rows[4][0].startswith("Hint:"), "hint row did not use the configured hint label"
 
     def test_importance_has_label(self):
         entry = {
@@ -253,9 +293,9 @@ class TestVocabularyLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
-        assert rows[5][0].startswith("Важность:"), "importance row lacks Важность label"
+        assert rows[5][0].startswith("Importance:"), "importance row did not use the configured importance label"
 
 
 class TestVocabularyLayoutReturnsTwoRowsForSparseEntry:
@@ -272,7 +312,7 @@ class TestVocabularyLayoutReturnsTwoRowsForSparseEntry:
             "hint": "",
             "importance": "",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
         assert len(rows) == 2, "sparse entry did not produce exactly 2 rows"
 
@@ -287,9 +327,9 @@ class TestVocabularyLayoutReturnsTwoRowsForSparseEntry:
             "hint": "",
             "importance": "",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
-        assert rows[1][0].startswith("Перевод:"), "sparse sentence row lacks Перевод label"
+        assert rows[1][0].startswith("Source:"), "sparse sentence row did not use the configured sentence label"
 
 
 class TestReportWithImageAndWrappingTextProducesValidPdf:
