@@ -5,6 +5,7 @@ import uuid
 
 from kamishibai import cli
 from kamishibai.config import Fonts
+from kamishibai.config import Labels
 from kamishibai.config import naming
 from kamishibai.config import profile
 
@@ -37,6 +38,11 @@ class TestProfileSelection:
         assert item.imagery().ocr() == "eng+chi_sim", \
             "Chinese target profile was not selected"
 
+    def test_selects_russian_profile(self):
+        item = profile("ru")
+        assert item.labels().sentence() == "Перевод", \
+            "Russian source profile was not selected"
+
     def test_rejects_unknown_profile(self):
         try:
             profile(f"x_{uuid.uuid4().hex[:4]}")
@@ -47,43 +53,74 @@ class TestProfileSelection:
 
 
 class TestNaming:
-    """The application derives generic deck naming from CLI input."""
+    """The application derives deck naming from CLI input and schema."""
 
-    def test_uses_generic_default_name(self):
-        item = naming(cli.arguments(["file.json"]))
-        assert item.name() == "Kamishibai Deck", \
-            "default deck name was not used"
+    def test_uses_target_profile_name_by_default(self):
+        entries = [{"source_lang": "ru", "target_lang": "el"}]
+        item = naming(cli.arguments(["file.json"]), entries)
+        assert item.name() == "Greek Vocabulary", \
+            "default deck name was not derived from target profile"
 
     def test_uses_custom_name_when_provided(self):
         value = f"test deck {uuid.uuid4().hex[:4]}"
-        item = naming(cli.arguments(["--deck", value, "file.json"]))
+        entries = [{"source_lang": "ru", "target_lang": "el"}]
+        item = naming(cli.arguments(["--deck", value, "file.json"]), entries)
         assert item.name() == value, \
             "custom deck name was not used"
 
     def test_derives_prefix_from_name(self):
         value = f"test demo {uuid.uuid4().hex[:4]}"
-        item = naming(cli.arguments(["--deck", value, "file.json"]))
+        entries = [{"source_lang": "ru", "target_lang": "el"}]
+        item = naming(cli.arguments(["--deck", value, "file.json"]), entries)
         assert item.prefix().startswith("test-demo"), \
             "deck prefix was not derived from the deck name"
+
+    def test_uses_generic_name_for_mixed_targets(self):
+        entries = [
+            {"source_lang": "ru", "target_lang": "el"},
+            {"source_lang": "ru", "target_lang": "zh"},
+        ]
+        item = naming(cli.arguments(["file.json"]), entries)
+        assert item.name() == "Kamishibai Deck", \
+            "mixed targets did not fall back to generic deck name"
 
 
 class TestFontSelection:
     """The application selects a report font based on each entry target."""
 
-    def test_uses_default_font_when_target_is_missing(self):
+    def test_uses_default_font_when_languages_are_missing(self):
         font = Fonts().selected({})
         assert font._regular._family == "DejaVu Sans", \
-            "default report font was not selected when target language was missing"
+            "default report font was not selected when entry languages were missing"
 
     def test_uses_default_font_without_chinese_target(self):
-        font = Fonts().selected({"target_lang": "es"})
+        font = Fonts().selected({"source_lang": "ru", "target_lang": "es"})
         assert font._regular._family == "DejaVu Sans", \
             "default report font was not selected for non-Chinese target"
 
     def test_uses_cjk_font_for_chinese_target(self):
-        font = Fonts().selected({"target_lang": "zh"})
+        font = Fonts().selected({"source_lang": "ru", "target_lang": "zh"})
         assert font._regular._family == "Hiragino Sans GB", \
             "CJK report font was not selected for Chinese target"
+
+    def test_uses_cjk_font_for_chinese_source(self):
+        font = Fonts().selected({"source_lang": "zh", "target_lang": "en"})
+        assert font._regular._family == "Hiragino Sans GB", \
+            "CJK report font was not selected for Chinese source"
+
+
+class TestLabelSelection:
+    """The application selects report labels from source language profiles."""
+
+    def test_uses_russian_labels_for_russian_source(self):
+        labels = Labels().selected({"source_lang": "ru"})
+        assert labels.sentence() == "Перевод", \
+            "Russian source labels were not selected"
+
+    def test_uses_default_labels_when_source_is_missing(self):
+        labels = Labels().selected({})
+        assert labels.sentence() == "Translation", \
+            "default labels were not selected when source language was missing"
 
 
 class _Diagnosis:

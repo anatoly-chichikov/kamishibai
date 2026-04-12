@@ -6,7 +6,7 @@ from importlib.resources import files
 
 from google import genai
 
-from .config import profile
+from .config import profiles
 from .media import Audio
 from .media import Illustration
 from .media import TtsVoice
@@ -54,15 +54,17 @@ def client():
 class Media:
     """Builds per-target audio and illustration services lazily."""
 
-    def __init__(self, client, cache):
+    def __init__(self, client, cache, items=None):
         self._client = client
         self._cache = str(cache)
+        self._items = items if items is not None else profiles()
+        self._detectors = {}
         self._renderer = MangaRenderer(
             client,
             retries=3,
             text=TextDetectors(
-                {code: TextDetector(60, profile(code).imagery().ocr()) for code in ("de", "el", "en", "es", "zh")},
-                TextDetector(60, "eng"),
+                self._detectors,
+                TextDetector(60, self._items.fallback_ocr()),
             ),
             border=BorderDetector(width=6, brightness=240, margin=10),
         )
@@ -74,7 +76,7 @@ class Media:
         """Return the audio service for the entry target language."""
         code = entry["target_lang"]
         if code not in self._audio:
-            item = profile(code)
+            item = self._items.item(code)
             self._audio[code] = Audio(
                 self._client,
                 Cache(item.audio().cache(), self._cache),
@@ -87,13 +89,15 @@ class Media:
         """Return the illustration service for the entry target language."""
         code = entry["target_lang"]
         if code not in self._illustration:
-            item = profile(code)
+            item = self._items.item(code)
             if code not in self._translator:
                 self._translator[code] = SceneTranslator(
                     self._client,
                     scene_prompt(item.audio().language()),
                     template(),
                 )
+            if code not in self._detectors:
+                self._detectors[code] = TextDetector(60, item.imagery().ocr())
             self._illustration[code] = Illustration(
                 Cache(item.imagery().cache(), self._cache),
                 self._translator[code],

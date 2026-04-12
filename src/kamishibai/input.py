@@ -24,13 +24,14 @@ class VocabularyMapping:
         target = row.get("target")
         if not isinstance(source, dict) or not isinstance(target, dict):
             return None
-        if not row.get("term") or not source.get("sentence") or not target.get("sentence") or not target.get("lang"):
+        if not row.get("term") or not source.get("sentence") or not source.get("lang") or not target.get("sentence") or not target.get("lang"):
             return None
         return {
             "word": row["term"],
             "pronunciation": row.get("pronunciation") or "",
             "translation": row.get("meaning") or "",
             "example": target["sentence"],
+            "source_lang": source["lang"],
             "target_lang": target["lang"],
             "sentence": source["sentence"],
             "highlight": source.get("highlight") or "",
@@ -73,6 +74,6 @@ class Vocabulary:
                 result.append(entry)
         if not result:
             raise ValueError(
-                f"No valid entries found in '{self._path}'; each entry requires 'term', 'source.sentence', 'target.sentence', and 'target.lang'"
+                f"No valid entries found in '{self._path}'; each entry requires 'term', 'source.sentence', 'source.lang', 'target.sentence', and 'target.lang'"
             )
         return result

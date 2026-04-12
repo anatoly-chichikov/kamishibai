@@ -45,6 +45,12 @@ class TestVocabularyReadsValidEntry:
         entries = Vocabulary(self._write(data), VocabularyMapping()).entries()
         assert entries[0]["sentence"] == sentence, "source sentence was not parsed"
 
+    def test_reads_source_language_from_json_entry(self):
+        code = f"sr_{uuid.uuid4().hex[:4]}"
+        data = self._document([self._entry(source_lang=code)])
+        entries = Vocabulary(self._write(data), VocabularyMapping()).entries()
+        assert entries[0]["source_lang"] == code, "source language was not parsed"
+
     def test_reads_context_from_json_entry(self):
         context = f"Контекст использования, формальный стиль {uuid.uuid4().hex[:4]}"
         data = self._document([self._entry(context=context)])
@@ -60,7 +66,7 @@ class TestVocabularyReadsValidEntry:
     def _document(self, entries):
         return {"entries": entries}
 
-    def _entry(self, term="test", source="Тест", target="Test", meaning="", pronunciation="", transcription="", highlight="", hint="", context="", importance=""):
+    def _entry(self, term="test", source="Тест", target="Test", meaning="", pronunciation="", transcription="", highlight="", hint="", context="", importance="", source_lang="ru", target_lang="en"):
         return {
             "term": term,
             "meaning": meaning,
@@ -68,13 +74,14 @@ class TestVocabularyReadsValidEntry:
             "transcription": transcription,
             "source": {
                 "sentence": source,
+                "lang": source_lang,
                 "highlight": highlight,
                 "hint": hint,
                 "context": context,
             },
             "target": {
                 "sentence": target,
-                "lang": "en",
+                "lang": target_lang,
             },
             "importance": importance,
         }
@@ -95,28 +102,33 @@ class TestVocabularyFiltersInvalidEntries:
             Vocabulary(self._write(data), VocabularyMapping()).entries()
 
     def test_skips_entry_without_source_sentence(self):
-        data = self._document([{"term": "test", "source": {}, "target": {"sentence": "Sentence", "lang": "en"}}])
+        data = self._document([{"term": "test", "source": {"lang": "ru"}, "target": {"sentence": "Sentence", "lang": "en"}}])
+        with pytest.raises(ValueError):
+            Vocabulary(self._write(data), VocabularyMapping()).entries()
+
+    def test_skips_entry_without_source_language(self):
+        data = self._document([{"term": "test", "source": {"sentence": "Предложение"}, "target": {"sentence": "Sentence", "lang": "en"}}])
         with pytest.raises(ValueError):
             Vocabulary(self._write(data), VocabularyMapping()).entries()
 
     def test_skips_entry_without_target_sentence(self):
-        data = self._document([{"term": "test", "source": {"sentence": "Предложение"}, "target": {"lang": "en"}}])
+        data = self._document([{"term": "test", "source": {"sentence": "Предложение", "lang": "ru"}, "target": {"lang": "en"}}])
         with pytest.raises(ValueError):
             Vocabulary(self._write(data), VocabularyMapping()).entries()
 
     def test_skips_entry_without_target_language(self):
-        data = self._document([{"term": "test", "source": {"sentence": "Предложение"}, "target": {"sentence": "Sentence"}}])
+        data = self._document([{"term": "test", "source": {"sentence": "Предложение", "lang": "ru"}, "target": {"sentence": "Sentence"}}])
         with pytest.raises(ValueError):
             Vocabulary(self._write(data), VocabularyMapping()).entries()
 
     def test_reads_only_valid_entries_from_mixed_data(self):
         valid = {
             "term": f"valid_{uuid.uuid4().hex[:4]}",
-            "source": {"sentence": "Валидное"},
+            "source": {"sentence": "Валидное", "lang": "ru"},
             "target": {"sentence": "Valid", "lang": "en"},
         }
-        invalid = {"term": "invalid", "source": {"sentence": "Есть источник"}, "target": {"lang": "en"}}
-        data = self._document([invalid, valid, {"source": {"sentence": "Без term"}, "target": {"sentence": "No term", "lang": "en"}}])
+        invalid = {"term": "invalid", "source": {"sentence": "Есть источник", "lang": "ru"}, "target": {"lang": "en"}}
+        data = self._document([invalid, valid, {"source": {"sentence": "Без term", "lang": "ru"}, "target": {"sentence": "No term", "lang": "en"}}])
         entries = Vocabulary(self._write(data), VocabularyMapping()).entries()
         assert len(entries) == 1, "only one valid entry should be returned"
 
@@ -157,6 +169,7 @@ class TestVocabularyCoalescesNullValues:
             "pronunciation": pronunciation,
             "source": {
                 "sentence": "Предложение",
+                "lang": "ru",
                 "context": context,
             },
             "target": {
@@ -200,7 +213,7 @@ class TestVocabularyHandlesSpecialCharacters:
     def _entry(self, source="Источник", target="Target"):
         return {
             "term": "test",
-            "source": {"sentence": source},
+            "source": {"sentence": source, "lang": "ru"},
             "target": {"sentence": target, "lang": "en"},
         }
 
@@ -250,6 +263,7 @@ class TestVocabularyRejectsEmptyData:
         data = {
             "entries": [
                 {"source": {"sentence": f"Без term {uuid.uuid4().hex[:4]}"}},
+                {"source": {"sentence": f"Есть язык {uuid.uuid4().hex[:4]}", "lang": "ru"}},
                 {"term": f"без_предложения_{uuid.uuid4().hex[:4]}"},
             ],
         }
@@ -269,7 +283,7 @@ class TestVocabularyReadsTargetMetadata:
             "entries": [
                 {
                     "term": "γάτα",
-                    "source": {"sentence": "Кошка"},
+                    "source": {"sentence": "Кошка", "lang": "ru"},
                     "target": {"sentence": example, "lang": "el"},
                 }
             ],
@@ -284,7 +298,7 @@ class TestVocabularyReadsTargetMetadata:
                 {
                     "term": "γάτα",
                     "transcription": transcription,
-                    "source": {"sentence": "Кошка"},
+                    "source": {"sentence": "Кошка", "lang": "ru"},
                     "target": {"sentence": "Η γάτα κάθεται στο τραπέζι", "lang": "el"},
                 }
             ],
@@ -297,7 +311,7 @@ class TestVocabularyReadsTargetMetadata:
             "entries": [
                 {
                     "term": "test",
-                    "source": {"sentence": "Тест"},
+                    "source": {"sentence": "Тест", "lang": "ru"},
                     "target": {"sentence": "Test", "lang": "en"},
                 }
             ],
@@ -310,13 +324,26 @@ class TestVocabularyReadsTargetMetadata:
             "entries": [
                 {
                     "term": "γάτα",
-                    "source": {"sentence": "Кошка"},
+                    "source": {"sentence": "Кошка", "lang": "ru"},
                     "target": {"sentence": "Η γάτα κάθεται στο τραπέζι", "lang": "el"},
                 }
             ],
         }
         entries = Vocabulary(self._write(data), VocabularyMapping()).entries()
         assert entries[0]["target_lang"] == "el", "target language was not read from target metadata"
+
+    def test_reads_source_language_from_source_metadata(self):
+        data = {
+            "entries": [
+                {
+                    "term": "waga",
+                    "source": {"sentence": "Тяжесть", "lang": "pl"},
+                    "target": {"sentence": "waga", "lang": "pl"},
+                }
+            ],
+        }
+        entries = Vocabulary(self._write(data), VocabularyMapping()).entries()
+        assert entries[0]["source_lang"] == "pl", "source language was not read from source metadata"
 
     def _write(self, data):
         fd, path = tempfile.mkstemp(suffix=".json")

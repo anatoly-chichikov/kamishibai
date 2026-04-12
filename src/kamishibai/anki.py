@@ -95,14 +95,14 @@ class CardModel:
             self._identifier,
             "Vocabulary Model",
             fields=[
-                {"name": "RussianSentence"},
-                {"name": "Word"},
+                {"name": "SourceSentence"},
+                {"name": "Term"},
                 {"name": "Pronunciation"},
-                {"name": "Translation"},
-                {"name": "Example"},
+                {"name": "Meaning"},
+                {"name": "TargetSentence"},
                 {"name": "Importance"},
                 {"name": "Audio"},
-                {"name": "Image"},
+                {"name": "Illustration"},
                 {"name": "Hint"},
                 {"name": "Context"},
                 {"name": "PronunciationAll"},
@@ -112,8 +112,8 @@ class CardModel:
                     "name": "Card 1",
                     "qfmt": (
                         '<div style="max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;">'
-                        "{{Image}}"
-                        '<div style="font-size: 20px; margin-top: 15px;">{{RussianSentence}}</div>'
+                        "{{Illustration}}"
+                        '<div style="font-size: 20px; margin-top: 15px;">{{SourceSentence}}</div>'
                         "{{#Hint}}"
                         '<div style="font-size: 14px; color: #888; margin-top: 8px; font-style: italic;">{{Hint}}</div>'
                         "{{/Hint}}"
@@ -123,13 +123,13 @@ class CardModel:
                         '{{FrontSide}}<hr id="answer">'
                         '<div style="max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;">'
                         "{{Audio}}"
-                        '<div style="font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;">{{Example}}</div>'
+                        '<div style="font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;">{{TargetSentence}}</div>'
                         "{{#PronunciationAll}}"
                         '<div style="font-size: 13px; color: #aaa; margin-top: 4px;">{{PronunciationAll}}</div>'
                         "{{/PronunciationAll}}"
-                        '<div style="font-size: 17px; margin-top: 15px;"><strong style="color: #ddd;">{{Word}}</strong> <span style="color: #aaa;">{{Pronunciation}}</span></div>'
-                        '<div style="font-size: 15px; color: #bbb; margin-top: 3px;">{{Translation}}</div>'
-                        '<div style="font-size: 13px; color: #999; margin-top: 8px;">Importance: {{Importance}}/10</div>'
+                        '<div style="font-size: 17px; margin-top: 15px;"><strong style="color: #ddd;">{{Term}}</strong> <span style="color: #aaa;">{{Pronunciation}}</span></div>'
+                        '<div style="font-size: 15px; color: #bbb; margin-top: 3px;">{{Meaning}}</div>'
+                        '<div style="font-size: 13px; color: #999; margin-top: 8px;">{{Importance}}/10</div>'
                         "{{#Context}}"
                         '<div style="font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; text-align: left;">{{Context}}</div>'
                         "{{/Context}}"

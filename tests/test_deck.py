@@ -266,6 +266,17 @@ class TestIllustrationSceneCache:
 class TestVocabularyNoteProducesElevenFields:
     """VocabularyNote produces a note with 11 fields"""
 
+    def test_model_uses_language_neutral_field_names(self):
+        """CardModel replaces language-specific field names with neutral names"""
+        model = CardModel(StableId(f"Model-{uuid.uuid4().hex[:8]}").value()).model()
+        names = [item["name"] for item in model.fields]
+        assert "SourceSentence" in names and "RussianSentence" not in names, "card model still contains language-specific field names"
+
+    def test_model_omits_hardcoded_importance_label_from_template(self):
+        """CardModel answer template does not hardcode a language-specific importance label"""
+        model = CardModel(StableId(f"Model-{uuid.uuid4().hex[:8]}").value()).model()
+        assert "Importance:" not in model.templates[0]["afmt"], "answer template still hardcoded the importance label"
+
     def test_note_has_eleven_fields(self):
         """VocabularyNote creates a genanki Note with exactly 11 fields"""
         model = CardModel(StableId(f"Model-{uuid.uuid4().hex[:8]}").value()).model()

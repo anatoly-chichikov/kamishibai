@@ -15,6 +15,7 @@ from kamishibai.report import FontPath
 from kamishibai.report import Report
 from kamishibai.report import Thumbnail
 from kamishibai.report import VocabularyLayout
+from kamishibai.target import UiLabels
 
 
 class _FakeLayout:
@@ -51,6 +52,16 @@ class _SwitchingFont:
         if entry.get("target_lang") == "zh":
             return self._cjk
         return self._regular
+
+
+class _FakeLabels:
+    """Fake label selector returning one configured label set."""
+
+    def __init__(self, labels):
+        self._labels = labels
+
+    def selected(self, entry):
+        return self._labels
 
 
 def _font():
@@ -222,7 +233,7 @@ class TestVocabularyLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
         assert len(rows) == 6, "fully populated entry did not produce 6 rows"
 
@@ -237,9 +248,9 @@ class TestVocabularyLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
-        assert rows[2][0].startswith("Перевод:"), "sentence row lacks Перевод label"
+        assert rows[2][0].startswith("Source:"), "sentence row did not use the configured sentence label"
 
     def test_context_has_label(self):
         entry = {
@@ -252,9 +263,9 @@ class TestVocabularyLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
-        assert rows[3][0].startswith("Контекст:"), "context row lacks Контекст label"
+        assert rows[3][0].startswith("Context:"), "context row did not use the configured context label"
 
     def test_hint_has_label(self):
         entry = {
@@ -267,9 +278,9 @@ class TestVocabularyLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
-        assert rows[4][0].startswith("Подсказка:"), "hint row lacks Подсказка label"
+        assert rows[4][0].startswith("Hint:"), "hint row did not use the configured hint label"
 
     def test_importance_has_label(self):
         entry = {
@@ -282,9 +293,9 @@ class TestVocabularyLayoutReturnsSixRowsForFullEntry:
             "hint": "Подскáзка к слóву",
             "importance": "7",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
-        assert rows[5][0].startswith("Важность:"), "importance row lacks Важность label"
+        assert rows[5][0].startswith("Importance:"), "importance row did not use the configured importance label"
 
 
 class TestVocabularyLayoutReturnsTwoRowsForSparseEntry:
@@ -301,7 +312,7 @@ class TestVocabularyLayoutReturnsTwoRowsForSparseEntry:
             "hint": "",
             "importance": "",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
         assert len(rows) == 2, "sparse entry did not produce exactly 2 rows"
 
@@ -316,9 +327,9 @@ class TestVocabularyLayoutReturnsTwoRowsForSparseEntry:
             "hint": "",
             "importance": "",
         }
-        layout = VocabularyLayout()
+        layout = VocabularyLayout(_FakeLabels(UiLabels("Source", "Context", "Hint", "Importance")))
         rows = layout.row(entry)
-        assert rows[1][0].startswith("Перевод:"), "sparse sentence row lacks Перевод label"
+        assert rows[1][0].startswith("Source:"), "sparse sentence row did not use the configured sentence label"
 
 
 class TestReportWithImageAndWrappingTextProducesValidPdf:

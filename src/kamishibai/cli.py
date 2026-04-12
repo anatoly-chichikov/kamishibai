@@ -13,6 +13,7 @@ from .anki import StableId
 from .anki import VocabularyDeck
 from .anki import VocabularyNote
 from .config import Fonts
+from .config import Labels
 from .config import naming
 from .diagnosis import DiagnosisSelector
 from .input import Vocabulary
@@ -31,12 +32,12 @@ from .runtime import client
 def arguments(argv):
     """Parse CLI arguments for the unified kamishibai application."""
     parser = argparse.ArgumentParser(
-        description="Convert vocabulary JSON to an illustrated Anki deck",
+        description="Convert schema-driven vocabulary JSON to an illustrated Anki deck",
         epilog=(
             "Examples:\n"
             "  kamishibai\n"
             "  kamishibai my-words.json\n"
-            "  kamishibai --deck \"Greek Basics\" my-words.json\n"
+            "  kamishibai --deck \"Core Pack\" my-words.json\n"
             "  kamishibai --output ./output --cache ~/.cache/kamishibai my-words.json"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -69,10 +70,10 @@ def main(argv=None):
     resolved = locations(args)
     vocabulary = Vocabulary(resolved.input(), VocabularyMapping())
     document = vocabulary.document()
-    item = client()
-    decknaming = naming(args)
-    media = Media(item, resolved.cache())
     entries = vocabulary.entries(document)
+    item = client()
+    decknaming = naming(args, entries)
+    media = Media(item, resolved.cache())
     model = CardModel(StableId(f"{decknaming.name()} Model").value()).model()
     deck = genanki.Deck(StableId(decknaming.name()).value(), decknaming.name())
     container = VocabularyDeck(deck, VocabularyNote(model), [])
@@ -83,7 +84,7 @@ def main(argv=None):
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     apkg = output / f"{decknaming.prefix()}_{stamp}.apkg"
     container.save(str(apkg))
-    report = Report(VocabularyLayout(), Fonts(), Thumbnail(150))
+    report = Report(VocabularyLayout(Labels()), Fonts(), Thumbnail(150))
     for entry, imagepath in processed:
         report.append(entry, imagepath)
     pdf = output / f"{decknaming.prefix()}_{stamp}.pdf"

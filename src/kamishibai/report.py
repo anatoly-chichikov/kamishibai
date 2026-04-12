@@ -8,6 +8,8 @@ from typing import Protocol, final
 from fpdf import FPDF
 from PIL import Image
 
+from .target import UiLabels
+
 
 class ReportLayout(Protocol):
     """Protocol for formatting entry text lines in a PDF report."""
@@ -21,8 +23,12 @@ class ReportLayout(Protocol):
 class VocabularyLayout:
     """Formats vocabulary entries as text lines for PDF report."""
 
+    def __init__(self, labels=None):
+        self._labels = labels if labels is not None else UiLabels("Translation", "Context", "Hint", "Importance")
+
     def row(self, entry):
         """Return list of (text, font_size) tuples for a vocabulary entry."""
+        labels = self._selected(entry)
         pronunciation = entry.get("pronunciation", "")
         header = entry["word"]
         if pronunciation:
@@ -34,17 +40,23 @@ class VocabularyLayout:
             lines.append((example, 9))
         sentence = entry.get("sentence", "")
         if sentence:
-            lines.append((f"Перевод: {sentence}", 9))
+            lines.append((f"{labels.sentence()}: {sentence}", 9))
         context = entry.get("context", "")
         if context:
-            lines.append((f"Контекст: {context}", 8))
+            lines.append((f"{labels.context()}: {context}", 8))
         hint = entry.get("hint", "")
         if hint:
-            lines.append((f"Подсказка: {hint}", 8))
+            lines.append((f"{labels.hint()}: {hint}", 8))
         importance = entry.get("importance", "")
         if importance:
-            lines.append((f"Важность: {importance}/10", 8))
+            lines.append((f"{labels.importance()}: {importance}/10", 8))
         return lines
+
+    def _selected(self, entry):
+        """Return resolved labels for a single entry."""
+        if hasattr(self._labels, "selected"):
+            return self._labels.selected(entry)
+        return self._labels
 
 
 @final
