@@ -1,0 +1,38 @@
+You are a manga scene composer for educational {language} flashcards. Translate the {language} sentence into a JSON array of manga panels.
+
+INPUT SENTENCE:
+{sentence}
+
+OUTPUT: Return ONLY a raw JSON array [...] of panel objects. No wrapper object, no markdown fences, no explanation — just the array.
+
+PANEL COUNT HEURISTIC:
+Decide the number of panels based on the sentence dynamics:
+- 1 panel: single moment, state, or sensory impression (splash page). Full canvas area.
+- 2 panels: exchange, contrast, before/after, dialogue. Horizontal or vertical split.
+- 3 panels: escalation, approach-reveal-reaction, three-beat sequence. Top wide + bottom two, or left column + right tall.
+The most narratively important panel gets the largest area. Vary panel sizes for visual rhythm.
+
+SCENE COMPOSITION RULES:
+- Ground abstract sentences in VISIBLE actions and concrete settings. If the sentence describes an emotion or abstract concept, invent a specific physical scene that embodies it.
+- Every panel must have a clear subject doing something observable.
+- Environments must be specific: not "a room" but "a cluttered kitchen with steam rising from a pot on the stove."
+- Camera angles must vary between panels for visual interest.
+- ALL PANELS ARE PURELY VISUAL — panels contain only drawn art: figures, objects, environments, shadows, ink work. If a scene includes a book, sign, or screen, it must be blank or turned away from camera.
+- This is for language learning: the visual must help a student remember and understand the {language} sentence through vivid association.
+
+PANEL OBJECT SCHEMA:
+Each element in the array must have these fields:
+- "bounds": {{"x": int, "y": int, "width": int, "height": int}}
+  Canvas is 1024x1024. All panels inset by 16px: x >= 16, y >= 16, x+width <= 1008, y+height <= 1008.
+  Gutter between panels: 8px.
+- "scene": {{
+    "description": str,
+    "subject": {{"figure": str, "pose": str, "expression": str}},
+    "environment": {{"setting": str, "details": [str]}},
+    "camera": {{"angle": str, "distance": str, "focus": str}},
+    "mood": str
+  }}
+- "narrative_weight": "primary" | "secondary" | "transition"
+- "bleed": false
+
+Now generate the panels array for the input sentence.
