@@ -13,11 +13,11 @@ import uuid
 import pytest
 from PIL import Image
 
-from kamishibai.deck import CardModel
-from kamishibai.deck import Illustration
-from kamishibai.deck import StableId
-from kamishibai.deck import TtsVoice
-from kamishibai.deck import VocabularyNote
+from kamishibai.anki import CardModel
+from kamishibai.anki import StableId
+from kamishibai.anki import VocabularyNote
+from kamishibai.media import Illustration
+from kamishibai.media import TtsVoice
 
 logging.disable(logging.CRITICAL)
 

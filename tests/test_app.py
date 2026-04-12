@@ -3,40 +3,43 @@
 
 import uuid
 
-from kamishibai import app
+from kamishibai import cli
+from kamishibai.config import Fonts
+from kamishibai.config import naming
+from kamishibai.config import profile
 
 
 class TestProfileSelection:
     """The unified CLI returns target profiles by code."""
 
     def test_selects_english_profile(self):
-        profile = app._profile("en")
-        assert profile.naming().name() == "English Vocabulary", \
+        item = profile("en")
+        assert item.naming().name() == "English Vocabulary", \
             "English target profile was not selected"
 
     def test_selects_greek_profile(self):
-        profile = app._profile("el")
-        assert profile.naming().default() == "kamishibai.json", \
+        item = profile("el")
+        assert item.naming().default() == "kamishibai.json", \
             "Greek target profile was not selected"
 
     def test_selects_spanish_profile(self):
-        profile = app._profile("es")
-        assert profile.audio().prompt() == "Say in natural Spanish: {text}", \
+        item = profile("es")
+        assert item.audio().language() == "Spanish", \
             "Spanish target profile was not selected"
 
     def test_selects_german_profile(self):
-        profile = app._profile("de")
-        assert profile.imagery().ocr() == "eng+deu", \
+        item = profile("de")
+        assert item.imagery().ocr() == "eng+deu", \
             "German target profile was not selected"
 
     def test_selects_chinese_profile(self):
-        profile = app._profile("zh")
-        assert profile.imagery().ocr() == "eng+chi_sim", \
+        item = profile("zh")
+        assert item.imagery().ocr() == "eng+chi_sim", \
             "Chinese target profile was not selected"
 
     def test_rejects_unknown_profile(self):
         try:
-            app._profile(f"x_{uuid.uuid4().hex[:4]}")
+            profile(f"x_{uuid.uuid4().hex[:4]}")
         except ValueError:
             pass
         else:
@@ -47,20 +50,20 @@ class TestNaming:
     """The application derives generic deck naming from CLI input."""
 
     def test_uses_generic_default_name(self):
-        naming = app._naming(app._arguments(["file.json"]))
-        assert naming.name() == "Kamishibai Deck", \
+        item = naming(cli.arguments(["file.json"]))
+        assert item.name() == "Kamishibai Deck", \
             "default deck name was not used"
 
     def test_uses_custom_name_when_provided(self):
         value = f"test deck {uuid.uuid4().hex[:4]}"
-        naming = app._naming(app._arguments(["--deck", value, "file.json"]))
-        assert naming.name() == value, \
+        item = naming(cli.arguments(["--deck", value, "file.json"]))
+        assert item.name() == value, \
             "custom deck name was not used"
 
     def test_derives_prefix_from_name(self):
         value = f"test demo {uuid.uuid4().hex[:4]}"
-        naming = app._naming(app._arguments(["--deck", value, "file.json"]))
-        assert naming.prefix().startswith("test-demo"), \
+        item = naming(cli.arguments(["--deck", value, "file.json"]))
+        assert item.prefix().startswith("test-demo"), \
             "deck prefix was not derived from the deck name"
 
 
@@ -68,17 +71,17 @@ class TestFontSelection:
     """The application selects a report font based on each entry target."""
 
     def test_uses_default_font_when_target_is_missing(self):
-        font = app._Fonts().selected({})
+        font = Fonts().selected({})
         assert font._regular._family == "DejaVu Sans", \
             "default report font was not selected when target language was missing"
 
     def test_uses_default_font_without_chinese_target(self):
-        font = app._Fonts().selected({"target_lang": "es"})
+        font = Fonts().selected({"target_lang": "es"})
         assert font._regular._family == "DejaVu Sans", \
             "default report font was not selected for non-Chinese target"
 
     def test_uses_cjk_font_for_chinese_target(self):
-        font = app._Fonts().selected({"target_lang": "zh"})
+        font = Fonts().selected({"target_lang": "zh"})
         assert font._regular._family == "Hiragino Sans GB", \
             "CJK report font was not selected for Chinese target"
 
@@ -112,16 +115,16 @@ class TestRun:
 
     def test_returns_zero_when_main_succeeds(self, monkeypatch):
         value = ["--deck", f"Deck_{uuid.uuid4().hex[:4]}"]
-        monkeypatch.setattr(app, "main", lambda argv: None)
-        assert app.run(value) == 0, \
+        monkeypatch.setattr(cli, "main", lambda argv: None)
+        assert cli.run(value) == 0, \
             "run did not return zero after successful execution"
 
     def test_returns_130_when_main_is_interrupted(self, monkeypatch):
         def boom(argv):
             """Raise KeyboardInterrupt for the test."""
             raise KeyboardInterrupt
-        monkeypatch.setattr(app, "main", boom)
-        assert app.run([f"λέξη_{uuid.uuid4().hex[:4]}.json"]) == 130, \
+        monkeypatch.setattr(cli, "main", boom)
+        assert cli.run([f"λέξη_{uuid.uuid4().hex[:4]}.json"]) == 130, \
             "run did not translate KeyboardInterrupt to exit code 130"
 
     def test_returns_one_when_main_fails(self, monkeypatch):
@@ -131,9 +134,9 @@ class TestRun:
             """Raise ValueError for the test."""
             raise ValueError("problem")
 
-        monkeypatch.setattr(app, "main", boom)
-        monkeypatch.setattr(app, "DiagnosisSelector", lambda terminal: _Selector(items))
-        assert app.run([f"λέξη_{uuid.uuid4().hex[:4]}.json"]) == 1, \
+        monkeypatch.setattr(cli, "main", boom)
+        monkeypatch.setattr(cli, "DiagnosisSelector", lambda terminal: _Selector(items))
+        assert cli.run([f"λέξη_{uuid.uuid4().hex[:4]}.json"]) == 1, \
             "run did not translate ValueError to exit code 1"
 
     def test_reports_failures_to_diagnosis(self, monkeypatch):
@@ -143,8 +146,8 @@ class TestRun:
             """Raise FileNotFoundError for the test."""
             raise FileNotFoundError(2, "missing", f"/tmp/{uuid.uuid4().hex[:4]}.json")
 
-        monkeypatch.setattr(app, "main", boom)
-        monkeypatch.setattr(app, "DiagnosisSelector", lambda terminal: _Selector(items))
-        app.run([f"λέξη_{uuid.uuid4().hex[:4]}.json"])
+        monkeypatch.setattr(cli, "main", boom)
+        monkeypatch.setattr(cli, "DiagnosisSelector", lambda terminal: _Selector(items))
+        cli.run([f"λέξη_{uuid.uuid4().hex[:4]}.json"])
         assert len(items) == 1, \
             "run did not report the failure through diagnosis"

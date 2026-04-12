@@ -10,11 +10,11 @@ import uuid
 import pytest
 from PIL import Image
 
-from kamishibai.deck import FontFamily
-from kamishibai.deck import VocabularyLayout
-from kamishibai.deck import FontPath
-from kamishibai.deck import Report
-from kamishibai.deck import Thumbnail
+from kamishibai.report import FontFamily
+from kamishibai.report import FontPath
+from kamishibai.report import Report
+from kamishibai.report import Thumbnail
+from kamishibai.report import VocabularyLayout
 
 
 class _FakeLayout:

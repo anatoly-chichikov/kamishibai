@@ -10,12 +10,12 @@ from kamishibai.target import TargetProfile
 
 
 class TestAudioProfileReturnsConfiguredValues:
-    """AudioProfile returns the configured prompt and cache values"""
+    """AudioProfile returns the configured language and cache values"""
 
-    def test_returns_prompt_filename(self):
-        filename = f"prompt_{uuid.uuid4().hex[:6]}.txt"
-        profile = AudioProfile(filename, "audio")
-        assert profile.prompt() == filename, "prompt filename was not returned"
+    def test_returns_language_name(self):
+        language = f"Language_{uuid.uuid4().hex[:6]}"
+        profile = AudioProfile(language, "audio")
+        assert profile.language() == language, "language name was not returned"
 
     def test_returns_cache_directory(self):
         cache = f"cache_{uuid.uuid4().hex[:6]}"

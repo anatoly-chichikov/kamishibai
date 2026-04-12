@@ -1,6 +1,6 @@
 """Command line entrypoint for kamishibai."""
 
-from .app import run
+from .cli import run
 
 
 if __name__ == "__main__":

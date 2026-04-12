@@ -8,8 +8,8 @@ import uuid
 
 import pytest
 
-from kamishibai.deck import Vocabulary
-from kamishibai.deck import VocabularyMapping
+from kamishibai.input import Vocabulary
+from kamishibai.input import VocabularyMapping
 
 
 class TestVocabularyReadsValidEntry:

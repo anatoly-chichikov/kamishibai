@@ -8,13 +8,13 @@ from typing import final
 class AudioProfile:
     """Audio generation configuration for a target language."""
 
-    def __init__(self, prompt, cache):
-        self._prompt = prompt
+    def __init__(self, language, cache):
+        self._language = language
         self._cache = cache
 
-    def prompt(self):
-        """Return audio prompt template."""
-        return self._prompt
+    def language(self):
+        """Return display name for the target language."""
+        return self._language
 
     def cache(self):
         """Return cache directory name."""

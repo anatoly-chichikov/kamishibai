@@ -1,1 +1,1 @@
-Say in natural English: {text}
+Say in natural {language}: {text}

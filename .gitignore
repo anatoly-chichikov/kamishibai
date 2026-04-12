@@ -6,3 +6,7 @@ __pycache__/
 *.pyc
 .idea/
 output/
+.uv-cache/
+dist/
+test_output/
+tmp/

@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
-"""
-Two-step manga image generation: sentence → scene JSON → manga illustration
-"""
+"""Image generation primitives for kamishibai."""
 
 import json
 import os
@@ -15,63 +12,49 @@ import pytesseract
 from google.genai import types
 from PIL import Image
 
+from .locations import cache_root
+
 
 @final
 class Cache:
-    """
-    Persistent file cache for generated media
-    """
+    """Persistent file cache for generated media."""
 
-    def __init__(self, name):
-        self._root = os.path.join(os.getcwd(), "cache")
+    def __init__(self, name, root=None):
+        self._root = root if root is not None else str(cache_root())
         self._path = os.path.join(self._root, name)
 
     def root(self):
-        """
-        Return root cache directory path
-        """
+        """Return root cache directory path."""
         return self._root
 
     def path(self):
-        """
-        Return cache directory path
-        """
+        """Return cache directory path."""
         return self._path
 
     def exists(self, filename):
-        """
-        Check if file exists in cache
-        """
+        """Check if file exists in cache."""
         return os.path.exists(os.path.join(self._path, filename))
 
     def filepath(self, filename):
-        """
-        Return full path to cached file, ensuring directory exists
-        """
+        """Return full path to cached file, ensuring directory exists."""
         os.makedirs(self._path, exist_ok=True)
         return os.path.join(self._path, filename)
 
     def stage(self, suffix):
-        """
-        Return a temporary file path in the cache directory for atomic writes
-        """
+        """Return a temporary file path in the cache directory for atomic writes."""
         os.makedirs(self._path, exist_ok=True)
         fd, path = tempfile.mkstemp(suffix=suffix, dir=self._path)
         os.close(fd)
         return path
 
     def commit(self, staged, filename):
-        """
-        Atomically move a staged temp file to its final cache path
-        """
+        """Atomically move a staged temp file to its final cache path."""
         os.replace(staged, os.path.join(self._path, filename))
 
 
 @final
 class SceneTranslator:
-    """
-    Translates an English sentence into a manga_panel JSON via Gemini text model
-    """
+    """Translates a sentence into manga panel JSON via Gemini text model."""
 
     def __init__(self, client, prompt, template):
         self._client = client
@@ -79,9 +62,7 @@ class SceneTranslator:
         self._template = template
 
     def translate(self, sentence, target):
-        """
-        Translate sentence to manga_panel dict by merging generated panels into static template
-        """
+        """Translate sentence to manga_panel dict by merging generated panels into a template."""
         filled = self._prompt.format(sentence=sentence)
         response = self._client.models.generate_content(
             model="gemini-3-flash-preview",
@@ -106,20 +87,18 @@ class SceneTranslator:
         return result
 
     def _enforce(self, panel):
-        """
-        Clamp panel bounds to 16px inset and force per-panel rendering constraints
-        """
+        """Clamp panel bounds and enforce text-free rendering constraints."""
         for entry in panel["manga_panel"]["panels"]:
             entry["bleed"] = False
             bounds = entry.get("bounds", {})
             x = max(bounds.get("x", 0), 16)
             y = max(bounds.get("y", 0), 16)
-            w = bounds.get("width", 992)
-            h = bounds.get("height", 992)
+            width = bounds.get("width", 992)
+            height = bounds.get("height", 992)
             bounds["x"] = x
             bounds["y"] = y
-            bounds["width"] = min(w, 1008 - x)
-            bounds["height"] = min(h, 1008 - y)
+            bounds["width"] = min(width, 1008 - x)
+            bounds["height"] = min(height, 1008 - y)
             entry["bounds"] = bounds
             scene = entry.get("scene") or entry.get("description")
             if isinstance(scene, dict):
@@ -128,9 +107,7 @@ class SceneTranslator:
                 entry["text_in_frame"] = "none"
 
     def _validate(self, panel):
-        """
-        Validate minimal structural requirements
-        """
+        """Validate minimal structural requirements."""
         root = panel["manga_panel"]
         panels = root.get("panels", [])
         if not panels:
@@ -139,18 +116,14 @@ class SceneTranslator:
 
 @final
 class TextDetector:
-    """
-    Detects text in images using Tesseract OCR
-    """
+    """Detects text in images using Tesseract OCR."""
 
     def __init__(self, threshold, lang="eng"):
         self._threshold = threshold
         self._lang = self._resolved(lang)
 
     def _resolved(self, lang):
-        """
-        Return only installed Tesseract languages from a plus-separated string
-        """
+        """Return only installed Tesseract languages from a plus-separated string."""
         available = pytesseract.get_languages()
         requested = lang.split("+")
         supported = [code for code in requested if code in available]
@@ -159,14 +132,12 @@ class TextDetector:
         return "+".join(supported)
 
     def detected(self, image):
-        """
-        Return detected text if confidence exceeds threshold, else empty string
-        """
+        """Return detected text if confidence exceeds threshold, else empty string."""
         data = pytesseract.image_to_data(image, lang=self._lang, output_type=pytesseract.Output.DICT)
         words = []
-        for i, txt in enumerate(data["text"]):
-            stripped = txt.strip()
-            if len(stripped) >= 2 and int(data["conf"][i]) > self._threshold:
+        for index, text in enumerate(data["text"]):
+            stripped = text.strip()
+            if len(stripped) >= 2 and int(data["conf"][index]) > self._threshold:
                 words.append(stripped)
         if words:
             return " ".join(words)
@@ -175,18 +146,14 @@ class TextDetector:
 
 @final
 class TextDetectors:
-    """
-    Selects a TextDetector from scene metadata and delegates OCR
-    """
+    """Selects a TextDetector from scene metadata and delegates OCR."""
 
     def __init__(self, detectors, fallback):
         self._detectors = detectors
         self._fallback = fallback
 
     def detected(self, scene, image):
-        """
-        Return detected text using the detector selected by scene target language
-        """
+        """Return detected text using the detector selected by scene target language."""
         root = scene.get("manga_panel", {})
         meta = root.get("meta", {})
         code = meta.get("target_lang", "")
@@ -196,9 +163,7 @@ class TextDetectors:
 
 @final
 class BorderDetector:
-    """
-    Detects white outer borders and horizontal gutters between manga panels
-    """
+    """Detects outer borders and horizontal gutters between manga panels."""
 
     def __init__(self, width, brightness, margin):
         self._width = width
@@ -206,15 +171,13 @@ class BorderDetector:
         self._margin = margin
 
     def gutter(self, image):
-        """
-        Return True if at least one white horizontal gutter of minimum width exists
-        """
+        """Return True if at least one white horizontal gutter exists."""
         pixels = np.array(image)
         rows = np.mean(pixels, axis=1)
         white = rows > self._brightness
         run = 0
-        for is_white in white:
-            if is_white:
+        for item in white:
+            if item:
                 run += 1
                 if run >= self._width:
                     return True
@@ -223,9 +186,7 @@ class BorderDetector:
         return False
 
     def borders(self, image):
-        """
-        Return list of edge names that fail the white border check
-        """
+        """Return list of edge names that fail the white border check."""
         pixels = np.array(image)
         strip = self._margin
         failures = []
@@ -242,9 +203,7 @@ class BorderDetector:
 
 @final
 class MangaRenderer:
-    """
-    Renders manga_panel JSON into an image via Gemini image model
-    """
+    """Renders manga panel JSON into an image via Gemini image model."""
 
     def __init__(self, client, retries, text, border):
         self._client = client
@@ -253,9 +212,7 @@ class MangaRenderer:
         self._border = border
 
     def render(self, scene, word, progress):
-        """
-        Render scene JSON to grayscale PIL Image, retry if text detected or borders bad
-        """
+        """Render scene JSON to grayscale image, retrying on validation failures."""
         dumped = json.dumps(scene, indent=2)
         panels = len(scene["manga_panel"]["panels"])
         reason = ""
@@ -282,7 +239,7 @@ class MangaRenderer:
         )
 
     def _generate(self, prompt, word):
-        """Call image model and return PIL Image"""
+        """Call image model and return PIL Image."""
         response = self._client.models.generate_content(
             model="gemini-3.1-flash-image-preview",
             contents=[prompt],
@@ -305,7 +262,7 @@ class MangaRenderer:
         raise ValueError(f"No image data found in response for '{word}'")
 
     def _safety(self):
-        """Return safety settings that disable all content filters"""
+        """Return safety settings that disable all content filters."""
         return [
             types.SafetySetting(category=category, threshold="BLOCK_NONE")
             for category in (
@@ -317,21 +274,21 @@ class MangaRenderer:
         ]
 
     def _diagnosis(self, response):
-        """Extract block reason and flagged safety categories from a rejected response"""
-        feedback = getattr(response, 'prompt_feedback', None)
+        """Extract block reason and flagged safety categories from a rejected response."""
+        feedback = getattr(response, "prompt_feedback", None)
         if not feedback:
             return "no prompt_feedback"
-        reason = getattr(feedback.block_reason, 'value', 'unknown')
-        message = feedback.block_reason_message or ''
+        reason = getattr(feedback.block_reason, "value", "unknown")
+        message = feedback.block_reason_message or ""
         ratings = feedback.safety_ratings or []
         flagged = [
-            f"{r.category.value}={r.probability.value}"
-            for r in ratings
-            if r.blocked or r.probability.value not in ("NEGLIGIBLE", "LOW")
+            f"{item.category.value}={item.probability.value}"
+            for item in ratings
+            if item.blocked or item.probability.value not in ("NEGLIGIBLE", "LOW")
         ]
         parts = [reason]
         if message:
             parts.append(message)
         if flagged:
             parts.append(f"flagged=[{', '.join(flagged)}]")
-        return ', '.join(parts)
+        return ", ".join(parts)

@@ -7,9 +7,9 @@ import uuid
 
 import pytest
 
-from kamishibai.deck import Pipeline
-from kamishibai.deck import StableId
-from kamishibai.deck import VocabularyDeck
+from kamishibai.anki import StableId
+from kamishibai.anki import VocabularyDeck
+from kamishibai.media import Pipeline
 from kamishibai.target import DeckNaming
 
 
