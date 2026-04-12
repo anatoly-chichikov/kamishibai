@@ -1,0 +1,13 @@
+[
+  {
+    "source": {
+      "lang": "ru",
+      "sentence": "Нет корня"
+    },
+    "target": {
+      "lang": "en",
+      "sentence": "No root"
+    },
+    "term": "broken"
+  }
+]

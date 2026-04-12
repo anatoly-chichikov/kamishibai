@@ -1,0 +1,4 @@
+{
+  "error": "ValueError",
+  "message": "Expected a JSON object in '/Users/chichikov/Work/eng/tests/fixtures/reference/inputs/invalid-document.json' but found list"
+}

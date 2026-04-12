@@ -1,0 +1,127 @@
+{
+  "codes": [
+    "de",
+    "el",
+    "en",
+    "es",
+    "ru",
+    "zh"
+  ],
+  "fallback_ocr": "eng",
+  "items": [
+    {
+      "audio_cache": "audio-de",
+      "audio_language": "German",
+      "audio_prompt": "Say in natural German: {text}",
+      "code": "de",
+      "deck_default": "kamishibai.json",
+      "deck_name": "German Vocabulary",
+      "deck_prefix": "de",
+      "font": "DejaVu Sans",
+      "image_cache": "manga-de",
+      "labels": {
+        "context": "Kontext",
+        "hint": "Hinweis",
+        "importance": "Wichtigkeit",
+        "sentence": "Übersetzung"
+      },
+      "ocr": "eng+deu",
+      "scene_prompt_prefix": "You are a manga scene composer for educational German flashcards. Translate the German sentence into a JSON array of manga panels."
+    },
+    {
+      "audio_cache": "audio-el",
+      "audio_language": "Greek",
+      "audio_prompt": "Say in natural Greek: {text}",
+      "code": "el",
+      "deck_default": "kamishibai.json",
+      "deck_name": "Greek Vocabulary",
+      "deck_prefix": "el",
+      "font": "DejaVu Sans",
+      "image_cache": "manga-el",
+      "labels": {
+        "context": "Πλαίσιο",
+        "hint": "Υπόδειξη",
+        "importance": "Σπουδαιότητα",
+        "sentence": "Μετάφραση"
+      },
+      "ocr": "eng+ell",
+      "scene_prompt_prefix": "You are a manga scene composer for educational Greek flashcards. Translate the Greek sentence into a JSON array of manga panels."
+    },
+    {
+      "audio_cache": "audio-en",
+      "audio_language": "English",
+      "audio_prompt": "Say in natural English: {text}",
+      "code": "en",
+      "deck_default": "kamishibai.json",
+      "deck_name": "English Vocabulary",
+      "deck_prefix": "en",
+      "font": "DejaVu Sans",
+      "image_cache": "manga-en",
+      "labels": {
+        "context": "Context",
+        "hint": "Hint",
+        "importance": "Importance",
+        "sentence": "Translation"
+      },
+      "ocr": "eng",
+      "scene_prompt_prefix": "You are a manga scene composer for educational English flashcards. Translate the English sentence into a JSON array of manga panels."
+    },
+    {
+      "audio_cache": "audio-es",
+      "audio_language": "Spanish",
+      "audio_prompt": "Say in natural Spanish: {text}",
+      "code": "es",
+      "deck_default": "kamishibai.json",
+      "deck_name": "Spanish Vocabulary",
+      "deck_prefix": "es",
+      "font": "DejaVu Sans",
+      "image_cache": "manga-es",
+      "labels": {
+        "context": "Contexto",
+        "hint": "Pista",
+        "importance": "Importancia",
+        "sentence": "Traducción"
+      },
+      "ocr": "eng+spa",
+      "scene_prompt_prefix": "You are a manga scene composer for educational Spanish flashcards. Translate the Spanish sentence into a JSON array of manga panels."
+    },
+    {
+      "audio_cache": "audio-ru",
+      "audio_language": "Russian",
+      "audio_prompt": "Say in natural Russian: {text}",
+      "code": "ru",
+      "deck_default": "kamishibai.json",
+      "deck_name": "Russian Vocabulary",
+      "deck_prefix": "ru",
+      "font": "DejaVu Sans",
+      "image_cache": "manga-ru",
+      "labels": {
+        "context": "Контекст",
+        "hint": "Подсказка",
+        "importance": "Важность",
+        "sentence": "Перевод"
+      },
+      "ocr": "eng+rus",
+      "scene_prompt_prefix": "You are a manga scene composer for educational Russian flashcards. Translate the Russian sentence into a JSON array of manga panels."
+    },
+    {
+      "audio_cache": "audio-zh",
+      "audio_language": "Mandarin Chinese",
+      "audio_prompt": "Say in natural Mandarin Chinese: {text}",
+      "code": "zh",
+      "deck_default": "kamishibai.json",
+      "deck_name": "Chinese Vocabulary",
+      "deck_prefix": "zh",
+      "font": "Hiragino Sans GB",
+      "image_cache": "manga-zh",
+      "labels": {
+        "context": "语境",
+        "hint": "提示",
+        "importance": "重要性",
+        "sentence": "翻译"
+      },
+      "ocr": "eng+chi_sim",
+      "scene_prompt_prefix": "You are a manga scene composer for educational Mandarin Chinese flashcards. Translate the Mandarin Chinese sentence into a JSON array of manga panels."
+    }
+  ]
+}

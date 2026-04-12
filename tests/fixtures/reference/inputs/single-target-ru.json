@@ -1,0 +1,22 @@
+{
+  "entries": [
+    {
+      "importance": 9,
+      "meaning": "friend",
+      "pronunciation": "péngyou",
+      "source": {
+        "context": "口语",
+        "highlight": "朋友",
+        "hint": "关系",
+        "lang": "zh",
+        "sentence": "朋友在门口等我"
+      },
+      "target": {
+        "lang": "ru",
+        "sentence": "Друг ждёт меня у двери"
+      },
+      "term": "朋友",
+      "transcription": "pengyou"
+    }
+  ]
+}

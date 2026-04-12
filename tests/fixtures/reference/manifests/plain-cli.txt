@@ -1,0 +1,13 @@
+Processing card 1/2: harbor
+  Generating audio: generated (9c0f6ba9a5a7.wav)
+  Composing scene: translated (51a07a17e75e.json)
+  Rendering manga: rendered (51a07a17e75e.jpg)
+Processing card 2/2: φως
+  Generating audio: generated (24d2497f1d81.wav)
+  Composing scene: translated (179104d071c6.json)
+  Rendering manga: rendered (179104d071c6.jpg)
+  Anki deck: mixed-target.apkg ($REPO/tmp/parity/payload/output/mixed-target.apkg)
+  Report: mixed-target.pdf ($REPO/tmp/parity/payload/output/mixed-target.pdf)
+  Output: output ($REPO/tmp/parity/payload/output)
+
+Processed 2/2 cards

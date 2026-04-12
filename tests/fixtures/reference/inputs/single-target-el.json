@@ -1,0 +1,22 @@
+{
+  "entries": [
+    {
+      "importance": 5,
+      "meaning": "λιμάνι",
+      "pronunciation": "ˈhɑːrbər",
+      "source": {
+        "context": "calm evening",
+        "highlight": "harbor",
+        "hint": "coast",
+        "lang": "en",
+        "sentence": "The harbor is quiet tonight"
+      },
+      "target": {
+        "lang": "el",
+        "sentence": "Το λιμάνι είναι ήσυχο απόψε"
+      },
+      "term": "harbor",
+      "transcription": "harbor"
+    }
+  ]
+}

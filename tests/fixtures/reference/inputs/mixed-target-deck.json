@@ -1,0 +1,40 @@
+{
+  "entries": [
+    {
+      "importance": 5,
+      "meaning": "λιμάνι",
+      "pronunciation": "ˈhɑːrbər",
+      "source": {
+        "context": "calm evening",
+        "highlight": "harbor",
+        "hint": "coast",
+        "lang": "en",
+        "sentence": "The harbor is quiet tonight"
+      },
+      "target": {
+        "lang": "el",
+        "sentence": "Το λιμάνι είναι ήσυχο απόψε"
+      },
+      "term": "harbor",
+      "transcription": "harbor"
+    },
+    {
+      "importance": 6,
+      "meaning": "light",
+      "pronunciation": "fos",
+      "source": {
+        "context": "soft scene",
+        "highlight": "φως",
+        "hint": "morning",
+        "lang": "el",
+        "sentence": "Το φως μπαίνει από το παράθυρο"
+      },
+      "target": {
+        "lang": "zh",
+        "sentence": "光从窗户照进来"
+      },
+      "term": "φως",
+      "transcription": "fos"
+    }
+  ]
+}

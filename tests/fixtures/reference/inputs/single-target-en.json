@@ -1,0 +1,22 @@
+{
+  "entries": [
+    {
+      "importance": 7,
+      "meaning": "cat",
+      "pronunciation": "kæt",
+      "source": {
+        "context": "нейтральный стиль\nкороткая сцена",
+        "highlight": "Кошка",
+        "hint": "домашнее животное",
+        "lang": "ru",
+        "sentence": "Кошка спит на окне"
+      },
+      "target": {
+        "lang": "en",
+        "sentence": "The cat is sleeping on the windowsill"
+      },
+      "term": "кошка",
+      "transcription": "kat"
+    }
+  ]
+}

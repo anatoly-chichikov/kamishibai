@@ -1,0 +1,22 @@
+{
+  "entries": [
+    {
+      "importance": 6,
+      "meaning": "light",
+      "pronunciation": "fos",
+      "source": {
+        "context": "soft scene",
+        "highlight": "φως",
+        "hint": "morning",
+        "lang": "el",
+        "sentence": "Το φως μπαίνει από το παράθυρο"
+      },
+      "target": {
+        "lang": "zh",
+        "sentence": "光从窗户照进来"
+      },
+      "term": "φως",
+      "transcription": "fos"
+    }
+  ]
+}
