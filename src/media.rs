@@ -405,7 +405,6 @@ where
 }
 
 /// Orchestrate audio, illustration, deck, and progress for one batch.
-#[derive(Clone, Debug)]
 pub struct Pipeline<A, I, D, P> {
     audio: A,
     illustration: I,
@@ -432,6 +431,11 @@ impl<A, I, D, P> Pipeline<A, I, D, P> {
     /// Return the accumulated progress recorder.
     pub fn progress(&self) -> &P {
         &self.progress
+    }
+
+    /// Return the accumulated progress recorder mutably.
+    pub fn progress_mut(&mut self) -> &mut P {
+        &mut self.progress
     }
 }
 
