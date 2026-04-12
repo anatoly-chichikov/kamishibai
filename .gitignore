@@ -9,4 +9,4 @@ output/
 .uv-cache/
 dist/
 test_output/
-tmp/
+/tmp/
