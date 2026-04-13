@@ -112,8 +112,7 @@
 
 - Runtime:
   - `GEMINI_API_KEY`
-  - `tesseract`
-  - language packs для Tesseract
+  - первый OCR-backed запуск скачивает `PP-OCRv5` model files в cache directory
 - Archived Python reference harness:
   - `fc-match`
 - Rust rewrite version policy:

@@ -33,7 +33,7 @@ uv run python scripts/regenerate_rust_parity.py
 ## Required Environment
 
 - `GEMINI_API_KEY` must be set before running the application
-- `tesseract` and the required language packs must be installed
+- the first OCR-backed run downloads the required `PP-OCRv5` model files into the media cache
 - `fc-match` is only needed when regenerating archived Python parity artifacts
 
 ## Input Schema
@@ -66,6 +66,7 @@ The runtime is split into a few focused modules:
 - `src/profile.rs`: immutable language profiles, naming, labels, and report fonts
 - `src/paths.rs`: resolves input, output, and cache locations from args and env
 - `src/gemini.rs`: talks to Gemini through the frozen direct REST contract
+- `src/ocr.rs`: routes legacy OCR tokens to cached PaddleOCR bundles and downloads model files
 - `src/audio.rs`: writes cached WAV audio
 - `src/scene.rs`: translates scenes, runs OCR checks, and validates manga output
 - `src/media.rs`: wires per-language services and orchestrates the batch pipeline

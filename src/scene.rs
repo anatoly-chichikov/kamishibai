@@ -1,23 +1,24 @@
 //! Scene OCR validation, image rendering, and illustration persistence.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fs;
-use std::io::{BufWriter, Cursor};
+use std::io::BufWriter;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::OnceLock;
+use std::rc::Rc;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use image::codecs::jpeg::JpegEncoder;
-use image::{DynamicImage, GrayImage, ImageFormat};
-use leptess::LepTess;
+use image::{DynamicImage, GrayImage};
+use ocr_rs::OcrResult_;
 use serde_json::Value;
 
 use crate::cache::FileCache;
 use crate::gemini::{GeminiClient, Transport};
+use crate::ocr;
 
 const DEFAULT_LANG: &str = "eng";
-static LANGUAGES: OnceLock<BTreeSet<String>> = OnceLock::new();
+type Lazy = Rc<RefCell<Option<Result<Rc<ocr_rs::OcrEngine>, String>>>>;
 
 /// Report scene and illustration progress events.
 pub trait Progress {
@@ -74,9 +75,11 @@ where
     }
 }
 
-/// Detect text with Tesseract after resolving installed languages.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Detect text with PaddleOCR after resolving one legacy OCR token string.
+#[derive(Clone)]
 pub struct TextDetector {
+    cache: PathBuf,
+    engine: Lazy,
     threshold: i32,
     lang: String,
 }
@@ -84,12 +87,22 @@ pub struct TextDetector {
 impl TextDetector {
     /// Create one detector with the default OCR language.
     pub fn new(threshold: i32) -> Self {
-        Self::listed(threshold, DEFAULT_LANG, installed().iter().cloned())
+        Self::cached(threshold, DEFAULT_LANG, std::env::temp_dir())
     }
 
-    /// Create one detector with a custom OCR language string.
+    /// Create one detector with a custom OCR language string and default cache root.
     pub fn custom(threshold: i32, lang: impl Into<String>) -> Self {
-        Self::listed(threshold, lang, installed().iter().cloned())
+        Self::cached(threshold, lang, std::env::temp_dir())
+    }
+
+    /// Create one detector with a custom OCR language string and explicit cache root.
+    pub fn cached(threshold: i32, lang: impl Into<String>, cache: impl Into<PathBuf>) -> Self {
+        Self {
+            cache: cache.into(),
+            engine: Rc::new(RefCell::new(None)),
+            threshold,
+            lang: lang.into(),
+        }
     }
 
     /// Create one detector from an explicit language inventory.
@@ -101,25 +114,84 @@ impl TextDetector {
         let inventory = available
             .into_iter()
             .map(Into::into)
-            .collect::<BTreeSet<String>>();
-        Self {
-            threshold,
-            lang: resolved(lang.into(), &inventory),
-        }
+            .collect::<Vec<String>>();
+        Self::custom(threshold, resolved(lang.into(), inventory.as_slice()))
     }
 
     /// Return the resolved OCR language selection.
     pub fn selection(&self) -> &str {
         self.lang.as_str()
     }
+
+    /// Return the lazily initialized OCR engine.
+    fn engine(&self) -> Result<Rc<ocr_rs::OcrEngine>> {
+        if self.engine.borrow().is_none() {
+            let item = ocr::engine(self.lang.as_str(), self.cache.as_path())
+                .map(Rc::new)
+                .map_err(|error| error.to_string());
+            *self.engine.borrow_mut() = Some(item);
+        }
+        match self
+            .engine
+            .borrow()
+            .as_ref()
+            .expect("text detector engine state must be initialized")
+        {
+            Ok(item) => Ok(item.clone()),
+            Err(error) => Err(anyhow!(error.clone())),
+        }
+    }
+}
+
+impl std::fmt::Debug for TextDetector {
+    /// Render one stable debug view for test diagnostics.
+    fn fmt(&self, item: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        item.debug_struct("TextDetector")
+            .field("cache", &self.cache)
+            .field("threshold", &self.threshold)
+            .field("lang", &self.lang)
+            .finish()
+    }
+}
+
+impl PartialEq for TextDetector {
+    /// Compare one detector by its stable configuration fields.
+    fn eq(&self, other: &Self) -> bool {
+        self.cache == other.cache && self.threshold == other.threshold && self.lang == other.lang
+    }
+}
+
+impl Eq for TextDetector {}
+
+/// Convert OCR results into one filtered whitespace-normalized text string.
+fn extracted(items: &[OcrResult_], threshold: i32) -> String {
+    let mut rows = items.iter().collect::<Vec<_>>();
+    rows.sort_by_key(|item| (item.bbox.rect.top(), item.bbox.rect.left()));
+    rows.into_iter()
+        .filter_map(|item| word(item, threshold))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Return one filtered OCR text fragment when the result is confident enough.
+fn word(item: &OcrResult_, threshold: i32) -> Option<String> {
+    let score = (item.confidence * 100.0) as i32;
+    let text = item.text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if score > threshold && text.chars().count() >= 2 {
+        return Some(text);
+    }
+    None
 }
 
 impl ImageText for TextDetector {
     /// Return the detected OCR text for one image.
     fn detected(&self, image: &GrayImage) -> Result<String> {
-        let mut engine = LepTess::new(None, self.lang.as_str())?;
-        engine.set_image_from_mem(encoded(image)?.as_slice())?;
-        Ok(extracted(engine.get_tsv_text(0)?.as_str(), self.threshold))
+        let image = DynamicImage::ImageLuma8(image.clone());
+        let items = self
+            .engine()?
+            .recognize(&image)
+            .map_err(|error| anyhow!("OCR failed for '{}': {}", self.lang, error))?;
+        Ok(extracted(items.as_slice(), self.threshold))
     }
 }
 
@@ -393,59 +465,15 @@ where
     }
 }
 
-fn installed() -> &'static BTreeSet<String> {
-    LANGUAGES.get_or_init(system)
-}
-
-fn system() -> BTreeSet<String> {
-    let Ok(output) = Command::new("tesseract").arg("--list-langs").output() else {
-        return BTreeSet::new();
-    };
-    if !output.status.success() {
-        return BTreeSet::new();
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .skip(1)
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(String::from)
-        .collect()
-}
-
-fn resolved(lang: String, available: &BTreeSet<String>) -> String {
+fn resolved(lang: String, available: &[String]) -> String {
     let supported = lang
         .split('+')
-        .filter(|code| available.contains(*code))
+        .filter(|code| available.iter().any(|item| item == *code))
         .collect::<Vec<_>>();
     if supported.is_empty() {
         return String::from(DEFAULT_LANG);
     }
     supported.join("+")
-}
-
-fn encoded(image: &GrayImage) -> Result<Vec<u8>> {
-    let mut cursor = Cursor::new(Vec::new());
-    DynamicImage::ImageLuma8(image.clone()).write_to(&mut cursor, ImageFormat::Png)?;
-    Ok(cursor.into_inner())
-}
-
-fn extracted(tsv: &str, threshold: i32) -> String {
-    tsv.lines()
-        .skip(1)
-        .filter_map(word)
-        .filter(|(score, text)| *score > threshold && text.chars().count() >= 2)
-        .map(|(_, text)| text)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn word(line: &str) -> Option<(i32, String)> {
-    let parts = line.splitn(12, '\t').collect::<Vec<_>>();
-    if parts.len() != 12 {
-        return None;
-    }
-    Some((parts[10].parse().ok()?, String::from(parts[11].trim())))
 }
 
 fn row(image: &GrayImage, y: u32) -> f64 {
@@ -481,27 +509,35 @@ fn write_image(path: &Path, image: &DynamicImage) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TextDetector, extracted};
+    use super::{TextDetector, resolved};
 
-    /// TSV extraction keeps confident multi-character words.
+    /// Explicit inventories keep supported OCR tokens in order.
     #[test]
-    fn tsv_extraction_keeps_confident_multi_character_words() {
-        let tsv = "level\tpage\tblock\tpar\tline\tword\tleft\ttop\twidth\theight\tconf\ttext\n5\t1\t1\t1\t1\t1\t0\t0\t1\t1\t95\tλόγος\n5\t1\t1\t1\t1\t2\t0\t0\t1\t1\t91\tkot";
+    fn explicit_inventories_keep_supported_ocr_tokens_in_order() {
         assert_eq!(
-            extracted(tsv, 60),
-            String::from("λόγος kot"),
-            "TSV extraction no longer keeps confident multi character words"
+            resolved(
+                String::from("eng+ell"),
+                &[
+                    String::from("eng"),
+                    String::from("ell"),
+                    String::from("osd")
+                ]
+            ),
+            String::from("eng+ell"),
+            "explicit inventories no longer keep supported ocr tokens in order"
         );
     }
 
-    /// TSV extraction drops low-confidence and single-character tokens.
+    /// Explicit inventories drop unsupported OCR tokens.
     #[test]
-    fn tsv_extraction_drops_low_confidence_and_single_character_tokens() {
-        let tsv = "level\tpage\tblock\tpar\tline\tword\tleft\ttop\twidth\theight\tconf\ttext\n5\t1\t1\t1\t1\t1\t0\t0\t1\t1\t60\tab\n5\t1\t1\t1\t1\t2\t0\t0\t1\t1\t90\ta\n5\t1\t1\t1\t1\t3\t0\t0\t1\t1\t45\tλόγος";
+    fn explicit_inventories_drop_unsupported_ocr_tokens() {
         assert_eq!(
-            extracted(tsv, 60),
-            String::new(),
-            "TSV extraction no longer drops low confidence and single character tokens"
+            resolved(
+                String::from("eng+ell"),
+                &[String::from("eng"), String::from("osd")]
+            ),
+            String::from("eng"),
+            "explicit inventories no longer drop unsupported ocr tokens"
         );
     }
 

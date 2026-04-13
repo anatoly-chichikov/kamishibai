@@ -336,9 +336,10 @@ where
             );
         }
         if !state.detector.contains_key(code.as_str()) {
-            state
-                .detector
-                .insert(code.clone(), TextDetector::custom(60, item.imagery().ocr()));
+            state.detector.insert(
+                code.clone(),
+                TextDetector::cached(60, item.imagery().ocr(), self.cache.clone()),
+            );
         }
         if !state.illustration.contains_key(code.as_str()) {
             let detector = state
@@ -363,7 +364,7 @@ where
                         3,
                         TextDetectors::new(
                             detectors,
-                            TextDetector::custom(60, self.profiles.fallback()),
+                            TextDetector::cached(60, self.profiles.fallback(), self.cache.clone()),
                         ),
                         BorderDetector::new(6, 240, 10),
                     ),

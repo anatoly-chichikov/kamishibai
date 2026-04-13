@@ -11,6 +11,7 @@ pub mod diagnosis;
 pub mod gemini;
 pub mod input;
 pub mod media;
+mod ocr;
 pub mod paths;
 pub mod profile;
 pub mod progress;

@@ -132,7 +132,7 @@ where
     /// Translate one sentence into the enforced manga scene JSON shape.
     pub fn scene(&self, language: &str, sentence: &str, target: &str) -> Result<Value> {
         let prompt = assets::render_scene_prompt(language).replace("{sentence}", sentence);
-        let response = self.request(SCENE_MODEL, &Request::text(prompt, None))?;
+        let response = self.request(SCENE_MODEL, &Request::text(prompt, None, None))?;
         let raw = response
             .candidates
             .iter()
@@ -163,6 +163,7 @@ where
             &Request::text(
                 serde_json::to_string_pretty(scene)?,
                 Some(GenerationConfig::image()),
+                Some(GenerationConfig::image_safety()),
             ),
         )?;
         if response.candidates.is_empty() {
@@ -189,7 +190,11 @@ where
         for model in TTS_MODELS {
             match self.request(
                 model,
-                &Request::text(String::from(prompt), Some(GenerationConfig::audio(voice))),
+                &Request::text(
+                    String::from(prompt),
+                    Some(GenerationConfig::audio(voice)),
+                    None,
+                ),
             ) {
                 Ok(response) => {
                     if response.candidates.is_empty() {
@@ -232,15 +237,22 @@ struct Request {
     contents: Vec<Content>,
     #[serde(rename = "generationConfig", skip_serializing_if = "Option::is_none")]
     generation_config: Option<GenerationConfig>,
+    #[serde(rename = "safetySettings", skip_serializing_if = "Option::is_none")]
+    safety_settings: Option<Vec<SafetySetting>>,
 }
 
 impl Request {
-    fn text(text: String, generation_config: Option<GenerationConfig>) -> Self {
+    fn text(
+        text: String,
+        generation_config: Option<GenerationConfig>,
+        safety_settings: Option<Vec<SafetySetting>>,
+    ) -> Self {
         Self {
             contents: vec![Content {
                 parts: vec![RequestPart { text: Some(text) }],
             }],
             generation_config,
+            safety_settings,
         }
     }
 }
@@ -264,8 +276,6 @@ struct GenerationConfig {
     image_config: Option<ImageConfig>,
     #[serde(rename = "speechConfig", skip_serializing_if = "Option::is_none")]
     speech_config: Option<SpeechConfig>,
-    #[serde(rename = "safetySettings", skip_serializing_if = "Option::is_none")]
-    safety_settings: Option<Vec<SafetySetting>>,
 }
 
 impl GenerationConfig {
@@ -276,13 +286,17 @@ impl GenerationConfig {
                 aspect_ratio: String::from("1:1"),
             }),
             speech_config: None,
-            safety_settings: Some(vec![
-                SafetySetting::new("HARM_CATEGORY_HARASSMENT"),
-                SafetySetting::new("HARM_CATEGORY_HATE_SPEECH"),
-                SafetySetting::new("HARM_CATEGORY_SEXUALLY_EXPLICIT"),
-                SafetySetting::new("HARM_CATEGORY_DANGEROUS_CONTENT"),
-            ]),
         }
+    }
+
+    /// Return the relaxed image safety settings for the current API shape.
+    fn image_safety() -> Vec<SafetySetting> {
+        vec![
+            SafetySetting::new("HARM_CATEGORY_HARASSMENT"),
+            SafetySetting::new("HARM_CATEGORY_HATE_SPEECH"),
+            SafetySetting::new("HARM_CATEGORY_SEXUALLY_EXPLICIT"),
+            SafetySetting::new("HARM_CATEGORY_DANGEROUS_CONTENT"),
+        ]
     }
 
     fn audio(voice: &str) -> Self {
@@ -296,7 +310,6 @@ impl GenerationConfig {
                     },
                 },
             }),
-            safety_settings: None,
         }
     }
 }

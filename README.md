@@ -99,6 +99,7 @@ The shipping runtime lives in Rust modules under `src/`:
 - `src/assets.rs`
 - `src/gemini.rs`
 - `src/cache.rs`
+- `src/ocr.rs`
 - `src/audio.rs`
 - `src/scene.rs`
 - `src/media.rs`
@@ -124,6 +125,5 @@ uv run python scripts/regenerate_rust_parity.py
 ## External Requirements
 
 - `GEMINI_API_KEY` must be set
-- `tesseract` must be installed
-- required Tesseract language packs must be installed
+- the first OCR-backed run downloads the required `PP-OCRv5` model files into the media cache
 - `fc-match` is only needed when regenerating archived Python parity artifacts

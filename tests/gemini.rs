@@ -136,7 +136,7 @@ fn image_generation_keeps_the_image_modality_and_square_aspect_ratio() -> Result
         (
             request["generationConfig"]["responseModalities"][0].as_str(),
             request["generationConfig"]["imageConfig"]["aspectRatio"].as_str(),
-            request["generationConfig"]["safetySettings"]
+            request["safetySettings"]
                 .as_array()
                 .map(|items| items.len())
         ),
