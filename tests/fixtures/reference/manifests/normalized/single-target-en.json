@@ -1,0 +1,16 @@
+[
+  {
+    "context": "нейтральный стиль\nкороткая сцена",
+    "example": "The cat is sleeping on the windowsill",
+    "highlight": "Кошка",
+    "hint": "домашнее животное",
+    "importance": "7",
+    "pronunciation": "kæt",
+    "sentence": "Кошка спит на окне",
+    "source_lang": "ru",
+    "target_lang": "en",
+    "transcription": "kat",
+    "translation": "cat",
+    "word": "кошка"
+  }
+]

@@ -1,0 +1,76 @@
+{
+  "deck": {
+    "id": 1525230255,
+    "name": "Kamishibai Deck"
+  },
+  "media": {
+    "0": "9c0f6ba9a5a7.wav",
+    "1": "51a07a17e75e.jpg",
+    "2": "24d2497f1d81.wav",
+    "3": "179104d071c6.jpg"
+  },
+  "model": {
+    "fields": [
+      "SourceSentence",
+      "Term",
+      "Pronunciation",
+      "Meaning",
+      "TargetSentence",
+      "Importance",
+      "Audio",
+      "Illustration",
+      "Hint",
+      "Context",
+      "PronunciationAll"
+    ],
+    "id": 1356078637,
+    "name": "Vocabulary Model",
+    "template": {
+      "afmt": "{{FrontSide}}<hr id=\"answer\"><div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;\">{{Audio}}<div style=\"font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;\">{{TargetSentence}}</div>{{#PronunciationAll}}<div style=\"font-size: 13px; color: #aaa; margin-top: 4px;\">{{PronunciationAll}}</div>{{/PronunciationAll}}<div style=\"font-size: 17px; margin-top: 15px;\"><strong style=\"color: #ddd;\">{{Term}}</strong> <span style=\"color: #aaa;\">{{Pronunciation}}</span></div><div style=\"font-size: 15px; color: #bbb; margin-top: 3px;\">{{Meaning}}</div><div style=\"font-size: 13px; color: #999; margin-top: 8px;\">{{Importance}}/10</div>{{#Context}}<div style=\"font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; text-align: left;\">{{Context}}</div>{{/Context}}</div>",
+      "bafmt": "",
+      "bfont": "",
+      "bqfmt": "",
+      "bsize": 0,
+      "did": null,
+      "name": "Card 1",
+      "ord": 0,
+      "qfmt": "<div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;\">{{Illustration}}<div style=\"font-size: 20px; margin-top: 15px;\">{{SourceSentence}}</div>{{#Hint}}<div style=\"font-size: 14px; color: #888; margin-top: 8px; font-style: italic;\">{{Hint}}</div>{{/Hint}}</div>"
+    }
+  },
+  "notes": [
+    [
+      "The <strong><em>harbor</em></strong> is quiet tonight",
+      "harbor",
+      "/ˈhɑːrbər/",
+      "λιμάνι",
+      "Το λιμάνι είναι ήσυχο απόψε",
+      "5",
+      "[sound:9c0f6ba9a5a7.wav]",
+      "<img src='51a07a17e75e.jpg' style='max-width: 100%; height: auto; border-radius: 10px'>",
+      "coast",
+      "calm evening",
+      "/harbor/"
+    ],
+    [
+      "Το <strong><em>φως</em></strong> μπαίνει από το παράθυρο",
+      "φως",
+      "/fos/",
+      "light",
+      "光从窗户照进来",
+      "6",
+      "[sound:24d2497f1d81.wav]",
+      "<img src='179104d071c6.jpg' style='max-width: 100%; height: auto; border-radius: 10px'>",
+      "morning",
+      "soft scene",
+      "/fos/"
+    ]
+  ],
+  "zip_entries": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "collection.anki2",
+    "media"
+  ]
+}

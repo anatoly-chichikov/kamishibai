@@ -1,0 +1,187 @@
+{
+  "audio": {
+    "bytes": 1004,
+    "cached": false,
+    "filename": "1cccf86c1a16.wav",
+    "path": "$REPO/tmp/parity/cache-contract/audio-en/1cccf86c1a16.wav"
+  },
+  "illustration": {
+    "cached": false,
+    "cached_pass": [
+      "  Composing scene: cached (0f7acb8b6e5b.json)",
+      "  Rendering manga: cached (0f7acb8b6e5b.jpg)"
+    ],
+    "filename": "0f7acb8b6e5b.jpg",
+    "first_pass": [
+      "  Composing scene: translated (0f7acb8b6e5b.json)",
+      "  Rendering manga: rendered (0f7acb8b6e5b.jpg)"
+    ],
+    "legacy_pass": [
+      "  Composing scene: cached",
+      "  Rendering manga: cached (0f7acb8b6e5b.jpg)"
+    ],
+    "path": "$REPO/tmp/parity/cache-contract/manga-en/0f7acb8b6e5b.jpg",
+    "scene": {
+      "manga_panel": {
+        "art_style": {
+          "composition": {
+            "cinematic_framing": true,
+            "dynamic_perspective": true,
+            "emotional_closeups": true,
+            "motion_rendering": "speed_lines_and_blur",
+            "scale_juxtaposition": true
+          },
+          "contrast": {
+            "distribution": "calculated",
+            "focal_emphasis": true,
+            "range": "extreme",
+            "value_separation": true
+          },
+          "detail": {
+            "anatomical_precision": "high",
+            "background_detail_level": "full",
+            "density": "extreme",
+            "environmental_precision": "high",
+            "texture_differentiation": true
+          },
+          "line_work": {
+            "contour_emphasis": true,
+            "organic_stroke": "fine_pointed",
+            "outline_weight": "variable",
+            "stroke_confidence": "high",
+            "structural_stroke": "chiseled",
+            "weight_range": "wide"
+          },
+          "medium": {
+            "base": "indian_ink",
+            "color_mode": "monochrome_with_screentone",
+            "surface": "high_density_smooth"
+          },
+          "screen_tone": {
+            "dot_pattern": "fine",
+            "enabled": true,
+            "usage": [
+              "skin",
+              "fabric",
+              "atmosphere",
+              "gradients",
+              "metallic_surfaces"
+            ]
+          },
+          "shading": {
+            "black_fill_zones": true,
+            "gradient_method": "hatching_density_variation",
+            "hatching_density": "high",
+            "hatching_directionality": "form_following",
+            "primary_method": "crosshatching",
+            "secondary_method": "screen_tone",
+            "white_on_black_highlights": true
+          }
+        },
+        "canvas": {
+          "format": "square",
+          "height": 1024,
+          "width": 1024
+        },
+        "constraints": {
+          "genre_lock": false,
+          "layout_lock": false,
+          "panel_count_lock": false,
+          "style_lock": true,
+          "text_rendering": "forbidden"
+        },
+        "meta": {
+          "description": "The cat is sleeping on the windowsill",
+          "spec_version": "1.0.0",
+          "tags": [],
+          "target_lang": "en",
+          "title": "The cat is sleeping on the windowsill"
+        },
+        "panel_layout": {
+          "allow_bleed": false,
+          "allow_overlap": false,
+          "border_style": "solid_black",
+          "border_weight": 2,
+          "gutter_width": 8,
+          "outer_margin": 16
+        },
+        "panels": [
+          {
+            "bleed": false,
+            "bounds": {
+              "height": 420,
+              "width": 480,
+              "x": 32,
+              "y": 32
+            },
+            "narrative_weight": "primary",
+            "scene": {
+              "camera": {
+                "angle": "eye level",
+                "distance": "medium shot",
+                "focus": "cat"
+              },
+              "description": "A learner points at a white cat sleeping on a windowsill",
+              "environment": {
+                "details": [
+                  "white cat",
+                  "open window"
+                ],
+                "setting": "sunlit apartment"
+              },
+              "mood": "gentle",
+              "subject": {
+                "expression": "calm",
+                "figure": "learner",
+                "pose": "pointing"
+              },
+              "text_in_frame": "none"
+            }
+          },
+          {
+            "bleed": false,
+            "bounds": {
+              "height": 420,
+              "width": 456,
+              "x": 520,
+              "y": 32
+            },
+            "narrative_weight": "secondary",
+            "scene": {
+              "camera": {
+                "angle": "wide",
+                "distance": "long shot",
+                "focus": "harbor"
+              },
+              "description": "Moonlight covers a quiet harbor with tied boats",
+              "environment": {
+                "details": [
+                  "lantern reflections",
+                  "rope"
+                ],
+                "setting": "night harbor"
+              },
+              "mood": "quiet",
+              "subject": {
+                "expression": "silent",
+                "figure": "boats",
+                "pose": "still"
+              },
+              "text_in_frame": "none"
+            }
+          }
+        ],
+        "rendering_rules": {
+          "outer_border": "16px_pure_white",
+          "panel_gutters": "clean_white_no_text",
+          "signs_and_labels": "blank_or_hidden",
+          "sound_effects": "none",
+          "speech_bubbles": "none",
+          "symbols_or_writing": "none",
+          "text_elements": "none"
+        }
+      }
+    },
+    "scene_path": "$REPO/tmp/parity/cache-contract/manga-en/0f7acb8b6e5b.json"
+  }
+}

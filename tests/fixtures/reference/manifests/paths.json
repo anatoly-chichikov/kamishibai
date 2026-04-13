@@ -1,0 +1,20 @@
+{
+  "default_output": "output directory beside the input file",
+  "env_vars": [
+    "KAMISHIBAI_INPUT",
+    "KAMISHIBAI_OUTPUT",
+    "KAMISHIBAI_CACHE",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME"
+  ],
+  "exit_codes": [
+    0,
+    1,
+    130
+  ],
+  "fallback_input": "kamishibai.json in current working directory",
+  "tty_modes": [
+    "plain",
+    "rich"
+  ]
+}

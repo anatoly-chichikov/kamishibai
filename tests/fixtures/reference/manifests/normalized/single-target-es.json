@@ -1,0 +1,16 @@
+[
+  {
+    "context": "poetisch",
+    "example": "La nube pasa despacio",
+    "highlight": "Wolke",
+    "hint": "",
+    "importance": "4",
+    "pronunciation": "ˈvɔlkə",
+    "sentence": "Die Wolke zieht langsam vorbei",
+    "source_lang": "de",
+    "target_lang": "es",
+    "transcription": "volke",
+    "translation": "cloud",
+    "word": "Wolke"
+  }
+]

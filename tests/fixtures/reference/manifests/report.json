@@ -1,0 +1,87 @@
+{
+  "entries": [
+    {
+      "font": "DejaVu Sans",
+      "image": "$REPO/tmp/parity/payload/cache/manga-en/51a07a17e75e.jpg",
+      "labels": {
+        "context": "Context",
+        "hint": "Hint",
+        "importance": "Importance",
+        "sentence": "Translation"
+      },
+      "rows": [
+        [
+          "harbor /ˈhɑːrbər/ — λιμάνι",
+          11
+        ],
+        [
+          "Το λιμάνι είναι ήσυχο απόψε",
+          9
+        ],
+        [
+          "Translation: The harbor is quiet tonight",
+          9
+        ],
+        [
+          "Context: calm evening",
+          8
+        ],
+        [
+          "Hint: coast",
+          8
+        ],
+        [
+          "Importance: 5/10",
+          8
+        ]
+      ],
+      "source_lang": "en",
+      "target_lang": "el",
+      "word": "harbor"
+    },
+    {
+      "font": "Hiragino Sans GB",
+      "image": "$REPO/tmp/parity/payload/cache/manga-en/179104d071c6.jpg",
+      "labels": {
+        "context": "Πλαίσιο",
+        "hint": "Υπόδειξη",
+        "importance": "Σπουδαιότητα",
+        "sentence": "Μετάφραση"
+      },
+      "rows": [
+        [
+          "φως /fos/ — light",
+          11
+        ],
+        [
+          "光从窗户照进来",
+          9
+        ],
+        [
+          "Μετάφραση: Το φως μπαίνει από το παράθυρο",
+          9
+        ],
+        [
+          "Πλαίσιο: soft scene",
+          8
+        ],
+        [
+          "Υπόδειξη: morning",
+          8
+        ],
+        [
+          "Σπουδαιότητα: 6/10",
+          8
+        ]
+      ],
+      "source_lang": "el",
+      "target_lang": "zh",
+      "word": "φως"
+    }
+  ],
+  "pdf": {
+    "bytes": 35538,
+    "header": "%PDF-1.3",
+    "page_count": 1
+  }
+}

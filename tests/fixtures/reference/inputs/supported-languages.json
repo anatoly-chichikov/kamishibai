@@ -1,0 +1,112 @@
+{
+  "entries": [
+    {
+      "importance": 7,
+      "meaning": "cat",
+      "pronunciation": "kæt",
+      "source": {
+        "context": "нейтральный стиль\nкороткая сцена",
+        "highlight": "Кошка",
+        "hint": "домашнее животное",
+        "lang": "ru",
+        "sentence": "Кошка спит на окне"
+      },
+      "target": {
+        "lang": "en",
+        "sentence": "The cat is sleeping on the windowsill"
+      },
+      "term": "кошка",
+      "transcription": "kat"
+    },
+    {
+      "importance": 5,
+      "meaning": "λιμάνι",
+      "pronunciation": "ˈhɑːrbər",
+      "source": {
+        "context": "calm evening",
+        "highlight": "harbor",
+        "hint": "coast",
+        "lang": "en",
+        "sentence": "The harbor is quiet tonight"
+      },
+      "target": {
+        "lang": "el",
+        "sentence": "Το λιμάνι είναι ήσυχο απόψε"
+      },
+      "term": "harbor",
+      "transcription": "harbor"
+    },
+    {
+      "importance": null,
+      "meaning": "tomorrow",
+      "pronunciation": null,
+      "source": {
+        "context": null,
+        "highlight": "Mañana",
+        "hint": "tiempo",
+        "lang": "es",
+        "sentence": "Mañana salimos temprano"
+      },
+      "target": {
+        "lang": "de",
+        "sentence": "Morgen fahren wir früh los"
+      },
+      "term": "mañana",
+      "transcription": ""
+    },
+    {
+      "importance": 4,
+      "meaning": "cloud",
+      "pronunciation": "ˈvɔlkə",
+      "source": {
+        "context": "poetisch",
+        "highlight": "Wolke",
+        "hint": "",
+        "lang": "de",
+        "sentence": "Die Wolke zieht langsam vorbei"
+      },
+      "target": {
+        "lang": "es",
+        "sentence": "La nube pasa despacio"
+      },
+      "term": "Wolke",
+      "transcription": "volke"
+    },
+    {
+      "importance": 9,
+      "meaning": "friend",
+      "pronunciation": "péngyou",
+      "source": {
+        "context": "口语",
+        "highlight": "朋友",
+        "hint": "关系",
+        "lang": "zh",
+        "sentence": "朋友在门口等我"
+      },
+      "target": {
+        "lang": "ru",
+        "sentence": "Друг ждёт меня у двери"
+      },
+      "term": "朋友",
+      "transcription": "pengyou"
+    },
+    {
+      "importance": 6,
+      "meaning": "light",
+      "pronunciation": "fos",
+      "source": {
+        "context": "soft scene",
+        "highlight": "φως",
+        "hint": "morning",
+        "lang": "el",
+        "sentence": "Το φως μπαίνει από το παράθυρο"
+      },
+      "target": {
+        "lang": "zh",
+        "sentence": "光从窗户照进来"
+      },
+      "term": "φως",
+      "transcription": "fos"
+    }
+  ]
+}
