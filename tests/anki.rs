@@ -121,9 +121,9 @@ fn manifest(path: &Path) -> Result<Value> {
     }))
 }
 
-/// Stable deck identifiers match the frozen Python oracle.
+/// Stable deck identifiers match the frozen reference manifest.
 #[test]
-fn stable_deck_identifiers_match_the_frozen_python_oracle() {
+fn stable_deck_identifiers_match_the_frozen_reference_manifest() {
     let reference = apkg();
     assert_eq!(
         (
@@ -138,7 +138,7 @@ fn stable_deck_identifiers_match_the_frozen_python_oracle() {
                 .as_i64()
                 .expect("model id must exist"),
         ),
-        "stable deck identifiers no longer match the frozen Python oracle"
+        "stable deck identifiers no longer match the frozen reference manifest"
     );
 }
 
@@ -279,9 +279,9 @@ fn deck_attachment_keeps_insertion_order_while_deduplicating_paths() {
     );
 }
 
-/// Saved APKG archives keep the frozen structural oracle.
+/// Saved APKG archives keep the frozen structural snapshot.
 #[test]
-fn saved_apkg_archives_keep_the_frozen_structural_oracle() -> Result<()> {
+fn saved_apkg_archives_keep_the_frozen_structural_snapshot() -> Result<()> {
     let directory = TempDir::new()?;
     let output = directory.path().join("mixed-target.apkg");
     let media = media(
@@ -318,7 +318,7 @@ fn saved_apkg_archives_keep_the_frozen_structural_oracle() -> Result<()> {
     assert_eq!(
         manifest(&output)?,
         reference,
-        "saved APKG archives no longer keep the frozen structural oracle"
+        "saved APKG archives no longer keep the frozen structural snapshot"
     );
     Ok(())
 }

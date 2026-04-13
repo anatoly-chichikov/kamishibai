@@ -383,9 +383,9 @@ fn reports_near_the_page_bottom_still_avoid_nearly_empty_trailing_pages() -> Res
     Ok(())
 }
 
-/// Reports keep the frozen layout rows, labels, fonts, and page count oracle.
+/// Reports keep the frozen layout rows, labels, fonts, and page count snapshot.
 #[test]
-fn reports_keep_the_frozen_layout_rows_labels_fonts_and_page_count_oracle() -> Result<()> {
+fn reports_keep_the_frozen_layout_rows_labels_fonts_and_page_count_snapshot() -> Result<()> {
     let directory = TempDir::new()?;
     let path = directory.path().join("reference.pdf");
     let reference = report();
@@ -434,7 +434,7 @@ fn reports_keep_the_frozen_layout_rows_labels_fonts_and_page_count_oracle() -> R
                 "page_count": reference["pdf"]["page_count"],
             },
         }),
-        "reports no longer keep the frozen layout rows labels fonts and page count oracle"
+        "reports no longer keep the frozen layout rows labels fonts and page count snapshot"
     );
     Ok(())
 }

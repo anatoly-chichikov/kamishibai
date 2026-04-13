@@ -22,19 +22,10 @@ Run the application:
 cargo run --
 ```
 
-Reference-only Python workflow:
-
-```bash
-uv sync
-uv run pytest
-uv run python scripts/regenerate_rust_parity.py
-```
-
 ## Required Environment
 
 - `GEMINI_API_KEY` must be set before running the application
 - the first OCR-backed run downloads the required `PP-OCRv5` model files into the media cache
-- `fc-match` is only needed when regenerating archived Python parity artifacts
 
 ## Input Schema
 
@@ -88,7 +79,3 @@ Language-specific behavior belongs only in `profile.rs` declarations. A profile 
 - user-facing report labels
 
 If a new language is needed, add a new profile instead of editing runtime orchestration logic.
-
-## Archived Python Reference
-
-The old Python runtime lives in `python_reference/src/kamishibai`. It is kept only as a parity oracle and reference-fixture generator, not as a shipping entrypoint.

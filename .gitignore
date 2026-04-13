@@ -1,13 +1,7 @@
 cache/
-__pycache__/
-.venv/
 .DS_Store
-.pytest_cache/
-*.pyc
 .idea/
 output/
-.uv-cache/
-dist/
 test_output/
 /tmp/
 target/
