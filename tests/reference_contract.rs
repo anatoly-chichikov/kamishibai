@@ -1,4 +1,4 @@
-//! Tests for frozen Rust parity reference artifacts.
+//! Tests for frozen Rust reference artifacts.
 
 use std::fs;
 use std::path::PathBuf;
@@ -23,16 +23,6 @@ fn json(name: &str) -> Value {
             .as_str(),
     )
     .expect("reference manifest must parse")
-}
-
-/// The baseline manifest keeps the recorded pytest result string.
-#[test]
-fn the_baseline_manifest_keeps_the_recorded_pytest_result_string() {
-    assert_eq!(
-        json("baseline.json")["pytest"].as_str(),
-        Some("176 passed in 5.64s"),
-        "the baseline manifest no longer keeps the recorded pytest result string"
-    );
 }
 
 /// Normalized reference entries keep the full twelve-field contract.

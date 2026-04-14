@@ -110,20 +110,7 @@ The shipping runtime lives in Rust modules under `src/`:
 
 Language-specific behavior belongs only in [`src/profile.rs`](src/profile.rs). Add new languages there instead of branching runtime orchestration.
 
-## Archived Python Reference
-
-The old Python runtime is archived in [`python_reference/src/kamishibai`](python_reference/src/kamishibai). It is kept only as a migration oracle for parity fixtures and reference regeneration.
-
-Reference-only Python commands still use `uv`:
-
-```bash
-uv sync
-uv run pytest
-uv run python scripts/regenerate_rust_parity.py
-```
-
 ## External Requirements
 
 - `GEMINI_API_KEY` must be set
 - the first OCR-backed run downloads the required `PP-OCRv5` model files into the media cache
-- `fc-match` is only needed when regenerating archived Python parity artifacts

@@ -2,7 +2,7 @@
   "entries": [
     {
       "font": "DejaVu Sans",
-      "image": "$REPO/tmp/parity/payload/cache/manga-en/51a07a17e75e.jpg",
+      "image": "$REPO/tmp/reference/payload/cache/manga-en/51a07a17e75e.jpg",
       "labels": {
         "context": "Context",
         "hint": "Hint",
@@ -41,7 +41,7 @@
     },
     {
       "font": "Hiragino Sans GB",
-      "image": "$REPO/tmp/parity/payload/cache/manga-en/179104d071c6.jpg",
+      "image": "$REPO/tmp/reference/payload/cache/manga-en/179104d071c6.jpg",
       "labels": {
         "context": "Πλαίσιο",
         "hint": "Υπόδειξη",
