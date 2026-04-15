@@ -2,13 +2,20 @@
 
 use std::io;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use indicatif::{ProgressBar, ProgressDrawTarget};
 use regex::Regex;
 
 use crate::media::{Failure, PipelineProgress};
 use crate::scene::Progress as SceneProgress;
+
+/// Return whether terminal progress should render on stdout.
+pub fn uses_stdout() -> bool {
+    cfg!(any(target_os = "macos", target_os = "ios"))
+}
 
 /// Print one plain output line.
 pub trait Output {
@@ -53,6 +60,15 @@ pub trait AppProgress: PipelineProgress {
     /// Report one final batch summary.
     fn finish(&mut self, successful: usize, total: usize, failures: &[Failure]);
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Stream {
+    Stderr,
+    Stdout,
+}
+
+const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
+const INTERVAL: Duration = Duration::from_millis(200);
 
 /// Align one spinner with a separate live region controller.
 #[derive(Clone, Debug)]
@@ -407,20 +423,28 @@ pub struct TerminalConsole;
 impl Console for TerminalConsole {
     /// Print one terminal line.
     fn print(&mut self, text: &str, _highlight: bool) {
-        println!("{}", rendered(text));
+        if uses_stdout() {
+            println!("{}", rendered(text));
+            return;
+        }
+        eprintln!("{}", rendered(text));
     }
 }
 
 pub struct TerminalStatus {
-    bar: ProgressBar,
+    item: Option<LiveStatus>,
+    stream: Stream,
+    text: Arc<Mutex<String>>,
 }
 
 impl TerminalStatus {
     /// Create one terminal spinner status.
     pub fn new() -> Self {
-        let bar = ProgressBar::new_spinner();
-        bar.set_draw_target(ProgressDrawTarget::stdout());
-        Self { bar }
+        Self {
+            item: None,
+            stream: target(),
+            text: Arc::new(Mutex::new(String::new())),
+        }
     }
 }
 
@@ -434,17 +458,110 @@ impl Default for TerminalStatus {
 impl Status for TerminalStatus {
     /// Update the visible status text.
     fn update(&mut self, text: &str) {
-        self.bar.set_message(String::from(text));
+        *self.text.lock().expect("status text must stay available") = String::from(text);
     }
 
     /// Start the status indicator.
     fn start(&mut self) {
-        self.bar.enable_steady_tick(Duration::from_millis(80));
+        self.stop();
+        self.item = Some(LiveStatus::new(self.stream, self.text.clone(), INTERVAL));
     }
 
     /// Stop the status indicator.
     fn stop(&mut self) {
-        self.bar.finish_and_clear();
+        if let Some(item) = self.item.take() {
+            item.stop();
+        }
+    }
+}
+
+/// Return the active terminal draw target for progress updates.
+fn target() -> Stream {
+    if uses_stdout() {
+        return Stream::Stdout;
+    }
+    Stream::Stderr
+}
+
+#[derive(Debug)]
+struct LiveStatus {
+    join: Option<JoinHandle<()>>,
+    stop: Arc<AtomicBool>,
+    stream: Stream,
+}
+
+impl LiveStatus {
+    /// Create one live terminal spinner session.
+    fn new(stream: Stream, text: Arc<Mutex<String>>, span: Duration) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let join = thread::spawn(move || run(stream, text, flag, span));
+        Self {
+            join: Some(join),
+            stop,
+            stream,
+        }
+    }
+
+    /// Stop one live terminal spinner session.
+    fn stop(mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(item) = self.join.take() {
+            let _ = item.join();
+        }
+        clear(self.stream);
+    }
+}
+
+/// Render one live terminal spinner loop until the stop flag is set.
+fn run(stream: Stream, text: Arc<Mutex<String>>, stop: Arc<AtomicBool>, span: Duration) {
+    let mut item = 0usize;
+    while !stop.load(Ordering::Relaxed) {
+        let line = text
+            .lock()
+            .expect("status text must stay available")
+            .clone();
+        draw(stream, frame(item), line.as_str());
+        item += 1;
+        thread::sleep(span);
+    }
+}
+
+/// Return one spinner frame for the requested tick number.
+fn frame(index: usize) -> &'static str {
+    FRAMES[index % FRAMES.len()]
+}
+
+/// Draw one spinner frame with its text on the target stream.
+fn draw(stream: Stream, frame: &str, text: &str) {
+    write(stream, line(frame, text).as_str());
+}
+
+/// Clear the active spinner line on the target stream.
+fn clear(stream: Stream) {
+    write(stream, "\r\x1b[2K");
+}
+
+/// Return one formatted live spinner line.
+fn line(frame: &str, text: &str) -> String {
+    format!("\r\x1b[2K  {frame} {text}")
+}
+
+/// Write one live terminal control sequence to the target stream.
+fn write(stream: Stream, text: &str) {
+    match stream {
+        Stream::Stdout => {
+            use std::io::Write;
+            let mut item = io::stdout();
+            let _ = item.write_all(text.as_bytes());
+            let _ = item.flush();
+        }
+        Stream::Stderr => {
+            use std::io::Write;
+            let mut item = io::stderr();
+            let _ = item.write_all(text.as_bytes());
+            let _ = item.flush();
+        }
     }
 }
 
@@ -493,7 +610,9 @@ impl Output for io::Stdout {
 
 #[cfg(test)]
 mod tests {
-    use super::rendered;
+    use std::time::Duration;
+
+    use super::{INTERVAL, frame, line, rendered, uses_stdout};
 
     /// Terminal rendering converts rich progress markup into ANSI and OSC8 sequences.
     #[test]
@@ -502,6 +621,46 @@ mod tests {
             rendered("[bold]whims[/bold]  [green]✔[/green] ([link=file:///tmp/x.wav]x.wav[/link])"),
             "\u{1b}[1mwhims\u{1b}[0m  \u{1b}[32m✔\u{1b}[0m (\u{1b}]8;;file:///tmp/x.wav\u{1b}\\x.wav\u{1b}]8;;\u{1b}\\)",
             "terminal rendering no longer converts rich progress markup into ansi and osc8 sequences"
+        );
+    }
+
+    /// Terminal spinner frames keep the circular half-step sequence.
+    #[test]
+    fn terminal_spinner_frames_keep_the_circular_half_step_sequence() {
+        assert_eq!(
+            (frame(0), frame(1), frame(2), frame(3), frame(4)),
+            ("◐", "◓", "◑", "◒", "◐"),
+            "terminal spinner frames no longer keep the circular half step sequence"
+        );
+    }
+
+    /// Terminal spinner lines keep the same left indent as completed steps.
+    #[test]
+    fn terminal_spinner_lines_keep_the_same_left_indent_as_completed_steps() {
+        assert_eq!(
+            line("◐", "Rendering manga..."),
+            String::from("\r\x1b[2K  ◐ Rendering manga..."),
+            "terminal spinner lines no longer keep the same left indent as completed steps"
+        );
+    }
+
+    /// Terminal spinner waits two hundred milliseconds between frames.
+    #[test]
+    fn terminal_spinner_waits_two_hundred_milliseconds_between_frames() {
+        assert_eq!(
+            INTERVAL,
+            Duration::from_millis(200),
+            "terminal spinner no longer waits two hundred milliseconds between frames"
+        );
+    }
+
+    /// Terminal progress keeps stdout on Apple to avoid OCR stderr suppression.
+    #[test]
+    fn terminal_progress_keeps_stdout_on_apple_to_avoid_ocr_stderr_suppression() {
+        assert_eq!(
+            uses_stdout(),
+            cfg!(any(target_os = "macos", target_os = "ios")),
+            "terminal progress no longer keeps stdout on apple to avoid ocr stderr suppression"
         );
     }
 }

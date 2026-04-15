@@ -132,15 +132,19 @@ where
             .cache()
             .map_err(|error| CliError::handled(error.to_string(), None))?,
     );
-    let model =
-        CardModel::new(StableId::new(format!("{} Model", decknaming.name())).value()).model();
+    let model = CardModel::new().model();
     let container = VocabularyDeck::new(
         StableId::new(decknaming.name()).value(),
         decknaming.name(),
         VocabularyNote::new(model),
         Vec::<PathBuf>::new(),
     );
-    let progress = ProgressSelector::new(std::io::stdout().is_terminal()).selected();
+    let progress = ProgressSelector::new(if crate::progress::uses_stdout() {
+        std::io::stdout().is_terminal()
+    } else {
+        std::io::stderr().is_terminal()
+    })
+    .selected();
     let mut pipeline = Pipeline::new(media.clone(), media, container, progress);
     let (failed, processed) = pipeline.process(entries.as_slice());
     let output = resolved

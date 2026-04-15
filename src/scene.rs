@@ -2,10 +2,12 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::fs;
-use std::io::BufWriter;
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Result, anyhow, bail};
 use image::codecs::jpeg::JpegEncoder;
@@ -18,7 +20,7 @@ use crate::gemini::{GeminiClient, Transport};
 use crate::ocr;
 
 const DEFAULT_LANG: &str = "eng";
-type Lazy = Rc<RefCell<Option<Result<Rc<ocr_rs::OcrEngine>, String>>>>;
+type Lazy = Rc<QuietEngine>;
 
 /// Report scene and illustration progress events.
 pub trait Progress {
@@ -65,6 +67,133 @@ pub trait ImageSource {
     fn image(&self, scene: &Value, word: &str) -> Result<Vec<u8>>;
 }
 
+struct Redirect {
+    sink: File,
+    stdout: Option<OwnedFd>,
+    stderr: Option<OwnedFd>,
+}
+
+impl Redirect {
+    /// Redirect stdout and stderr into one sink file.
+    fn new(sink: File) -> Result<Self> {
+        let item = Self {
+            sink,
+            stdout: Some(saved_stdout()?),
+            stderr: Some(saved_stderr()?),
+        };
+        if let Err(error) = item.mute() {
+            let _ = item.restore();
+            return Err(error);
+        }
+        Ok(item)
+    }
+
+    /// Redirect stdout and stderr into the sink file.
+    fn mute(&self) -> Result<()> {
+        flushed()?;
+        muted(&self.sink)
+    }
+
+    /// Restore stdout and stderr after one redirect.
+    fn restore(mut self) -> Result<()> {
+        flushed()?;
+        restored_stdout(
+            self.stdout
+                .take()
+                .ok_or_else(|| anyhow!("Saved stdout descriptor is missing"))?,
+        )?;
+        restored_stderr(
+            self.stderr
+                .take()
+                .ok_or_else(|| anyhow!("Saved stderr descriptor is missing"))?,
+        )
+    }
+}
+
+/// Return the process-wide redirect gate.
+fn gate() -> &'static Mutex<()> {
+    static CELL: OnceLock<Mutex<()>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(()))
+}
+
+/// Run one closure while holding the process-wide redirect gate.
+fn locked<T, F>(action: F) -> Result<T>
+where
+    F: FnOnce() -> Result<T>,
+{
+    let _guard = gate()
+        .lock()
+        .map_err(|_| anyhow!("Redirect gate is poisoned"))?;
+    action()
+}
+
+/// Run one closure while stdout and stderr are redirected to /dev/null.
+fn hush<T, F>(action: F) -> Result<T>
+where
+    F: FnOnce() -> Result<T>,
+{
+    locked(|| quiet(action))
+}
+
+/// Run one closure while stdout and stderr stay redirected to /dev/null.
+fn quiet<T, F>(action: F) -> Result<T>
+where
+    F: FnOnce() -> Result<T>,
+{
+    let sink = File::options().read(true).write(true).open("/dev/null")?;
+    let item = Redirect::new(sink)?;
+    let result = action();
+    item.restore()?;
+    result
+}
+
+/// Drop one value while stdout and stderr stay redirected to /dev/null.
+fn discarded<T>(item: T) -> Result<()> {
+    quiet(|| {
+        drop(item);
+        Ok(())
+    })
+}
+
+/// Flush the noisy output stream before one descriptor swap.
+fn flushed() -> Result<()> {
+    std::io::stdout().flush()?;
+    std::io::stderr().flush()?;
+    Ok(())
+}
+
+/// Return one duplicate of stdout.
+fn saved_stdout() -> Result<OwnedFd> {
+    rustix::io::dup(std::io::stdout())
+        .map_err(|error| anyhow!("Failed to duplicate stdout: {}", error))
+}
+
+/// Return one duplicate of stderr.
+fn saved_stderr() -> Result<OwnedFd> {
+    rustix::io::dup(std::io::stderr())
+        .map_err(|error| anyhow!("Failed to duplicate stderr: {}", error))
+}
+
+/// Redirect stdout and stderr into the sink file.
+fn muted(sink: &File) -> Result<()> {
+    rustix::stdio::dup2_stdout(sink)
+        .map_err(|error| anyhow!("Failed to redirect stdout: {}", error))?;
+    rustix::stdio::dup2_stderr(sink)
+        .map_err(|error| anyhow!("Failed to redirect stderr: {}", error))
+}
+
+/// Restore stdout from the saved descriptor.
+fn restored_stdout(saved: OwnedFd) -> Result<()> {
+    rustix::stdio::dup2_stdout(&saved)
+        .map_err(|error| anyhow!("Failed to restore stdout: {}", error))
+}
+
+/// Restore stderr from the saved descriptor.
+fn restored_stderr(saved: OwnedFd) -> Result<()> {
+    rustix::stdio::dup2_stderr(&saved)
+        .map_err(|error| anyhow!("Failed to restore stderr: {}", error))
+}
+
 impl<T> ImageSource for GeminiClient<T>
 where
     T: Transport,
@@ -72,6 +201,51 @@ where
     /// Return one encoded image payload for the scene and word.
     fn image(&self, scene: &Value, word: &str) -> Result<Vec<u8>> {
         GeminiClient::<T>::image(self, scene, word)
+    }
+}
+
+struct QuietEngine {
+    item: RefCell<Option<Result<Rc<ocr_rs::OcrEngine>, String>>>,
+}
+
+impl QuietEngine {
+    /// Create one shared quiet engine slot.
+    fn new() -> Self {
+        Self {
+            item: RefCell::new(None),
+        }
+    }
+
+    /// Return whether the engine slot is still empty.
+    fn empty(&self) -> bool {
+        self.item.borrow().is_none()
+    }
+
+    /// Store one resolved engine result.
+    fn store(&self, item: Result<Rc<ocr_rs::OcrEngine>, String>) {
+        *self.item.borrow_mut() = Some(item);
+    }
+
+    /// Return one cloned engine handle from the slot.
+    fn engine(&self) -> Result<Rc<ocr_rs::OcrEngine>> {
+        match self
+            .item
+            .borrow()
+            .as_ref()
+            .expect("text detector engine state must be initialized")
+        {
+            Ok(item) => Ok(item.clone()),
+            Err(error) => Err(anyhow!(error.clone())),
+        }
+    }
+}
+
+impl Drop for QuietEngine {
+    /// Drop the cached OCR engine while native diagnostics stay muted.
+    fn drop(&mut self) {
+        if let Some(item) = self.item.get_mut().take() {
+            let _ = locked(|| discarded(item));
+        }
     }
 }
 
@@ -99,7 +273,7 @@ impl TextDetector {
     pub fn cached(threshold: i32, lang: impl Into<String>, cache: impl Into<PathBuf>) -> Self {
         Self {
             cache: cache.into(),
-            engine: Rc::new(RefCell::new(None)),
+            engine: Rc::new(QuietEngine::new()),
             threshold,
             lang: lang.into(),
         }
@@ -125,21 +299,12 @@ impl TextDetector {
 
     /// Return the lazily initialized OCR engine.
     fn engine(&self) -> Result<Rc<ocr_rs::OcrEngine>> {
-        if self.engine.borrow().is_none() {
-            let item = ocr::engine(self.lang.as_str(), self.cache.as_path())
-                .map(Rc::new)
+        if self.engine.empty() {
+            let item = hush(|| ocr::engine(self.lang.as_str(), self.cache.as_path()).map(Rc::new))
                 .map_err(|error| error.to_string());
-            *self.engine.borrow_mut() = Some(item);
+            self.engine.store(item);
         }
-        match self
-            .engine
-            .borrow()
-            .as_ref()
-            .expect("text detector engine state must be initialized")
-        {
-            Ok(item) => Ok(item.clone()),
-            Err(error) => Err(anyhow!(error.clone())),
-        }
+        self.engine.engine()
     }
 }
 
@@ -187,9 +352,8 @@ impl ImageText for TextDetector {
     /// Return the detected OCR text for one image.
     fn detected(&self, image: &GrayImage) -> Result<String> {
         let image = DynamicImage::ImageLuma8(image.clone());
-        let items = self
-            .engine()?
-            .recognize(&image)
+        let engine = self.engine()?;
+        let items = hush(|| Ok(engine.recognize(&image)?))
             .map_err(|error| anyhow!("OCR failed for '{}': {}", self.lang, error))?;
         Ok(extracted(items.as_slice(), self.threshold))
     }
@@ -509,7 +673,77 @@ fn write_image(path: &Path, image: &DynamicImage) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TextDetector, resolved};
+    use std::fs;
+
+    use anyhow::Result;
+
+    use super::{Redirect, TextDetector, discarded, locked, quiet, resolved};
+
+    struct NoisyDrop;
+
+    impl Drop for NoisyDrop {
+        /// Write to stdout and stderr when the test value is dropped.
+        fn drop(&mut self) {
+            let _ = rustix::io::write(std::io::stdout(), "άλφα\n".as_bytes());
+            let _ = rustix::io::write(std::io::stderr(), "βήτα\n".as_bytes());
+        }
+    }
+
+    /// Redirect routes noisy process output into the sink file.
+    #[test]
+    fn redirect_routes_stdout_and_stderr_into_the_sink_file() -> Result<()> {
+        let sink = tempfile::NamedTempFile::new()?;
+        locked(|| {
+            let item = Redirect::new(sink.reopen()?)?;
+            rustix::io::write(std::io::stdout(), "άλφα\n".as_bytes())?;
+            rustix::io::write(std::io::stderr(), "βήτα\n".as_bytes())?;
+            item.restore()
+        })?;
+        assert_eq!(
+            fs::read_to_string(sink.path())?,
+            String::from("άλφα\nβήτα\n"),
+            "redirect no longer routes stdout and stderr into the sink file"
+        );
+        Ok(())
+    }
+
+    /// Quiet redirection discards noisy process output inside the closure.
+    #[test]
+    fn quiet_redirection_discards_stdout_and_stderr_inside_the_closure() -> Result<()> {
+        let sink = tempfile::NamedTempFile::new()?;
+        locked(|| {
+            let item = Redirect::new(sink.reopen()?)?;
+            quiet(|| {
+                rustix::io::write(std::io::stdout(), "άλφα\n".as_bytes())?;
+                rustix::io::write(std::io::stderr(), "βήτα\n".as_bytes())?;
+                Ok(())
+            })?;
+            item.restore()
+        })?;
+        assert_eq!(
+            fs::read_to_string(sink.path())?,
+            String::new(),
+            "quiet redirection no longer discards stdout and stderr inside the closure"
+        );
+        Ok(())
+    }
+
+    /// Discarded drops mute stdout and stderr during value destruction.
+    #[test]
+    fn discarded_drops_mute_stdout_and_stderr_during_value_destruction() -> Result<()> {
+        let sink = tempfile::NamedTempFile::new()?;
+        locked(|| {
+            let item = Redirect::new(sink.reopen()?)?;
+            discarded(NoisyDrop)?;
+            item.restore()
+        })?;
+        assert_eq!(
+            fs::read_to_string(sink.path())?,
+            String::new(),
+            "discarded drops no longer mute stdout and stderr during value destruction"
+        );
+        Ok(())
+    }
 
     /// Explicit inventories keep supported OCR tokens in order.
     #[test]

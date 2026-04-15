@@ -23,8 +23,8 @@
       "Context",
       "PronunciationAll"
     ],
-    "id": 1356078637,
-    "name": "Vocabulary Model",
+    "id": 2020582289,
+    "name": "Kamishibai Vocabulary Model",
     "template": {
       "afmt": "{{FrontSide}}<hr id=\"answer\"><div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;\">{{Audio}}<div style=\"font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;\">{{TargetSentence}}</div>{{#PronunciationAll}}<div style=\"font-size: 13px; color: #aaa; margin-top: 4px;\">{{PronunciationAll}}</div>{{/PronunciationAll}}<div style=\"font-size: 17px; margin-top: 15px;\"><strong style=\"color: #ddd;\">{{Term}}</strong> <span style=\"color: #aaa;\">{{Pronunciation}}</span></div><div style=\"font-size: 15px; color: #bbb; margin-top: 3px;\">{{Meaning}}</div><div style=\"font-size: 13px; color: #999; margin-top: 8px;\">{{Importance}}/10</div>{{#Context}}<div style=\"font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; text-align: left;\">{{Context}}</div>{{/Context}}</div>",
       "bafmt": "",
