@@ -139,7 +139,12 @@ where
         VocabularyNote::new(model),
         Vec::<PathBuf>::new(),
     );
-    let progress = ProgressSelector::new(std::io::stdout().is_terminal()).selected();
+    let progress = ProgressSelector::new(if crate::progress::uses_stdout() {
+        std::io::stdout().is_terminal()
+    } else {
+        std::io::stderr().is_terminal()
+    })
+    .selected();
     let mut pipeline = Pipeline::new(media.clone(), media, container, progress);
     let (failed, processed) = pipeline.process(entries.as_slice());
     let output = resolved
