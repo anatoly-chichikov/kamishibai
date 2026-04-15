@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use anyhow::{Result, anyhow, bail};
 use font_kit::family_name::FamilyName as QueryName;
@@ -283,6 +284,9 @@ struct PageState<'a> {
     fonts: &'a mut BTreeMap<(PathBuf, PathBuf), Pair>,
 }
 
+/// Vertical gap in millimeters between consecutive logical lines in one entry.
+const GAP: f32 = 1.0;
+
 /// Hold thumbnail rendering dependencies for one row.
 struct ImageState<'a> {
     directory: &'a Path,
@@ -382,9 +386,17 @@ where
                 },
             });
         }
-        let mut text = top;
+        let mut text = top + leading(11.0) * 0.75;
         for (index, (line, size)) in self.layout.row(entry).into_iter().enumerate() {
-            for part in wrap(line.as_str(), size, WIDTH) {
+            if index > 0 {
+                text += GAP;
+            }
+            let glyphs = if index == 0 {
+                pair.bold_font.as_ref()
+            } else {
+                pair.regular_font.as_ref()
+            };
+            for part in wrap(line.as_str(), size, WIDTH, glyphs) {
                 let (font, color) = if index == 0 {
                     (pair.bold.clone(), rgb(0, 0, 0))
                 } else if size <= 8.0 {
@@ -392,7 +404,8 @@ where
                 } else {
                     (pair.regular.clone(), rgb(0, 0, 0))
                 };
-                text += self.text(page, part.as_str(), size, font, color, text)?;
+                self.text(page, part.as_str(), size, font, color, text)?;
+                text += leading(size);
             }
         }
         *y = text.max(top + IMAGE) + 7.0;
@@ -417,7 +430,7 @@ where
         Ok(())
     }
 
-    /// Write one text line and return its height increment.
+    /// Write one text line at the target baseline.
     fn text(
         &self,
         page: &mut PageState<'_>,
@@ -426,8 +439,7 @@ where
         font: printpdf::FontId,
         color: Color,
         y: f32,
-    ) -> Result<f32> {
-        let line_height = size * 0.5;
+    ) -> Result<()> {
         page.ops.push(Op::StartTextSection);
         page.ops.push(Op::SetTextCursor {
             pos: Point::new(Mm(INDENT), Mm(HEIGHT - y)),
@@ -442,7 +454,7 @@ where
             items: vec![TextItem::Text(String::from(line))],
         });
         page.ops.push(Op::EndTextSection);
-        Ok(line_height)
+        Ok(())
     }
 
     /// Return cached or newly registered fonts for one entry.
@@ -454,22 +466,26 @@ where
         if let Some(pair) = page.fonts.get(&key) {
             return Ok(pair.clone());
         }
-        let regular = parsed(&regular)?;
-        let bold = parsed(&bold)?;
+        let regular_font = parsed(&regular)?;
+        let bold_font = parsed(&bold)?;
         let pair = Pair {
-            regular: page.doc.add_font(&regular),
-            bold: page.doc.add_font(&bold),
+            regular: page.doc.add_font(&regular_font),
+            bold: page.doc.add_font(&bold_font),
+            regular_font: Rc::new(regular_font),
+            bold_font: Rc::new(bold_font),
         };
         page.fonts.insert(key, pair.clone());
         Ok(pair)
     }
 }
 
-/// Hold one regular and bold PDF font identifier pair.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Hold one regular and bold PDF font identifier pair with their parsed glyph tables.
+#[derive(Clone, Debug)]
 struct Pair {
     bold: printpdf::FontId,
+    bold_font: Rc<ParsedFont>,
     regular: printpdf::FontId,
+    regular_font: Rc<ParsedFont>,
 }
 
 /// Parse one filesystem font file into one PDF font.
@@ -492,42 +508,66 @@ fn raw(image: DynamicImage) -> Result<RawImage> {
     })
 }
 
-/// Wrap one report line to the target text width.
-fn wrap(text: &str, size: f32, width: f32) -> Vec<String> {
-    let limit = ((width / (size * 0.2)).floor() as usize).max(1);
-    if text.chars().count() <= limit {
-        return vec![String::from(text)];
-    }
-    let chars = text.chars().collect::<Vec<_>>();
-    let mut lines = Vec::new();
-    let mut start = 0usize;
-    while start < chars.len() {
-        let mut end = (start + limit).min(chars.len());
-        if end < chars.len() {
-            let cut = chars[start..end]
-                .iter()
-                .rposition(|char| char.is_whitespace())
-                .map(|index| start + index)
-                .filter(|index| *index > start);
-            if let Some(index) = cut {
-                end = index;
+/// Measure one text span in millimeters for one parsed font and point size.
+fn measure(font: &ParsedFont, text: &str, size: f32) -> f32 {
+    let units = f32::from(font.font_metrics.units_per_em).max(1.0);
+    let advance: f32 = text
+        .chars()
+        .map(|ch| {
+            font.lookup_glyph_index(ch as u32)
+                .map(|gid| f32::from(font.get_horizontal_advance(gid)))
+                .unwrap_or_else(|| units * 0.5)
+        })
+        .sum();
+    advance / units * size * 25.4 / 72.0
+}
+
+/// Return the leading for one point size in millimeters.
+fn leading(size: f32) -> f32 {
+    size * 1.2 * 25.4 / 72.0
+}
+
+/// Wrap one report line to fit the target width using actual glyph advances.
+fn wrap(text: &str, size: f32, width: f32, font: &ParsedFont) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let candidate = if current.is_empty() {
+            String::from(word)
+        } else {
+            format!("{current} {word}")
+        };
+        if measure(font, candidate.as_str(), size) <= width {
+            current = candidate;
+            continue;
+        }
+        if !current.is_empty() {
+            lines.push(std::mem::take(&mut current));
+        }
+        if measure(font, word, size) <= width {
+            current = String::from(word);
+            continue;
+        }
+        let mut head = String::new();
+        for ch in word.chars() {
+            let mut next = head.clone();
+            next.push(ch);
+            if measure(font, next.as_str(), size) <= width {
+                head = next;
+                continue;
             }
+            if !head.is_empty() {
+                lines.push(std::mem::take(&mut head));
+            }
+            head.push(ch);
         }
-        let line = chars[start..end]
-            .iter()
-            .collect::<String>()
-            .trim()
-            .to_string();
-        if !line.is_empty() {
-            lines.push(line);
-        }
-        start = if end == start { end + 1 } else { end };
-        while start < chars.len() && chars[start].is_whitespace() {
-            start += 1;
-        }
+        current = head;
+    }
+    if !current.is_empty() {
+        lines.push(current);
     }
     if lines.is_empty() {
-        return vec![String::new()];
+        lines.push(String::new());
     }
     lines
 }
