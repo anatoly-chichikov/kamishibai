@@ -128,7 +128,7 @@ fn stable_deck_identifiers_match_the_frozen_reference_manifest() {
     assert_eq!(
         (
             StableId::new("Kamishibai Deck").value(),
-            StableId::new("Kamishibai Deck Model").value(),
+            CardModel::new().model().id,
         ),
         (
             reference["deck"]["id"]
@@ -182,7 +182,7 @@ fn html_line_break_formatting_keeps_the_frozen_newline_semantics() {
 #[test]
 fn the_card_model_keeps_the_frozen_field_order_and_template_contract() {
     let reference = apkg();
-    let model = CardModel::new(StableId::new("Kamishibai Deck Model").value()).model();
+    let model = CardModel::new().model();
     assert_eq!(
         (
             model.id,
@@ -221,11 +221,21 @@ fn the_card_model_keeps_the_frozen_field_order_and_template_contract() {
     );
 }
 
+/// The card model identifier matches the published model name.
+#[test]
+fn the_card_model_identifier_matches_the_published_model_name() {
+    let model = CardModel::new().model();
+    assert_eq!(
+        model.id,
+        StableId::new(model.name.clone()).value(),
+        "the card model identifier no longer matches the published model name"
+    );
+}
+
 /// Vocabulary notes keep the frozen first-note payload.
 #[test]
 fn vocabulary_notes_keep_the_frozen_first_note_payload() {
-    let note =
-        VocabularyNote::new(CardModel::new(StableId::new("Kamishibai Deck Model").value()).model());
+    let note = VocabularyNote::new(CardModel::new().model());
     let reference = apkg();
     let entry = entries()
         .into_iter()
@@ -259,7 +269,7 @@ fn deck_attachment_keeps_insertion_order_while_deduplicating_paths() {
     let mut deck = VocabularyDeck::new(
         StableId::new("Kamishibai Deck").value(),
         "Kamishibai Deck",
-        VocabularyNote::new(CardModel::new(StableId::new("Kamishibai Deck Model").value()).model()),
+        VocabularyNote::new(CardModel::new().model()),
         Vec::<PathBuf>::new(),
     );
     deck.attach(first.clone());
@@ -298,7 +308,7 @@ fn saved_apkg_archives_keep_the_frozen_structural_snapshot() -> Result<()> {
     let mut deck = VocabularyDeck::new(
         StableId::new("Kamishibai Deck").value(),
         "Kamishibai Deck",
-        VocabularyNote::new(CardModel::new(StableId::new("Kamishibai Deck Model").value()).model()),
+        VocabularyNote::new(CardModel::new().model()),
         Vec::<PathBuf>::new(),
     );
     for path in &media {

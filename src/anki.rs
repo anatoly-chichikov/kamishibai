@@ -23,6 +23,7 @@ const BASE91: [char; 91] = [
     '5', '6', '7', '8', '9', '!', '#', '$', '%', '&', '(', ')', '*', '+', ',', '-', '.', '/', ':',
     ';', '<', '=', '>', '?', '@', '[', ']', '^', '_', '`', '{', '|', '}', '~',
 ];
+const MODEL_NAME: &str = "Kamishibai Vocabulary Model";
 const SCHEMA: &str = "
 CREATE TABLE col (
     id              integer primary key,
@@ -307,10 +308,10 @@ pub struct Model {
 }
 
 impl Model {
-    fn json(&self, timestamp: i64, deck: i64) -> Value {
+    fn json(&self, timestamp: i64) -> Value {
         json!({
             "css": "",
-            "did": deck,
+            "did": Value::Null,
             "flds": self.fields.iter().enumerate().map(|(index, name)| {
                 json!({
                     "font": "Liberation Sans",
@@ -353,12 +354,16 @@ impl Model {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CardModel {
     identifier: i64,
+    name: String,
 }
 
 impl CardModel {
     /// Create one frozen vocabulary card model builder.
-    pub fn new(identifier: i64) -> Self {
-        Self { identifier }
+    pub fn new() -> Self {
+        Self {
+            identifier: StableId::new(MODEL_NAME).value(),
+            name: String::from(MODEL_NAME),
+        }
     }
 
     /// Return the frozen vocabulary model contract.
@@ -378,7 +383,7 @@ impl CardModel {
                 String::from("PronunciationAll"),
             ],
             id: self.identifier,
-            name: String::from("Vocabulary Model"),
+            name: self.name.clone(),
             template: Template {
                 afmt: String::from(
                     "{{FrontSide}}<hr id=\"answer\"><div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;\">{{Audio}}<div style=\"font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;\">{{TargetSentence}}</div>{{#PronunciationAll}}<div style=\"font-size: 13px; color: #aaa; margin-top: 4px;\">{{PronunciationAll}}</div>{{/PronunciationAll}}<div style=\"font-size: 17px; margin-top: 15px;\"><strong style=\"color: #ddd;\">{{Term}}</strong> <span style=\"color: #aaa;\">{{Pronunciation}}</span></div><div style=\"font-size: 15px; color: #bbb; margin-top: 3px;\">{{Meaning}}</div><div style=\"font-size: 13px; color: #999; margin-top: 8px;\">{{Importance}}/10</div>{{#Context}}<div style=\"font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; text-align: left;\">{{Context}}</div>{{/Context}}</div>",
@@ -395,6 +400,13 @@ impl CardModel {
                 ),
             },
         }
+    }
+}
+
+impl Default for CardModel {
+    /// Return the frozen vocabulary card model builder.
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -541,7 +553,7 @@ where
         stored(conn, "decks", Value::Object(decks))?;
         let model = self.format.model();
         let mut models = parsed(conn, "models")?;
-        models.insert(model.id.to_string(), model.json(timestamp, self.id));
+        models.insert(model.id.to_string(), model.json(timestamp));
         stored(conn, "models", Value::Object(models))?;
         for note in &self.notes {
             let note_id = ids.next();

@@ -132,8 +132,7 @@ where
             .cache()
             .map_err(|error| CliError::handled(error.to_string(), None))?,
     );
-    let model =
-        CardModel::new(StableId::new(format!("{} Model", decknaming.name())).value()).model();
+    let model = CardModel::new().model();
     let container = VocabularyDeck::new(
         StableId::new(decknaming.name()).value(),
         decknaming.name(),
