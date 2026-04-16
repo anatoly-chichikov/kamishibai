@@ -7,7 +7,7 @@ use std::rc::Rc;
 use anyhow::Result;
 use assert_cmd::Command;
 use kamishibai::cli::{Arguments, CliError, arguments, handle};
-use kamishibai::diagnosis::Display;
+use kamishibai::runtime::diagnosis::Display;
 
 type DiagnosisItem = (String, Option<PathBuf>);
 type DiagnosisItems = Rc<RefCell<Vec<DiagnosisItem>>>;

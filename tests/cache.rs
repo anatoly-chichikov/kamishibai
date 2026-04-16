@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use kamishibai::cache::{Cache, FileCache};
+use kamishibai::generation::artifact_cache::Cache;
 use tempfile::TempDir;
 
 /// Named cache paths stay absolute and nested under the cache name.

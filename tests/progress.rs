@@ -4,12 +4,12 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use kamishibai::media::{Failure, PipelineProgress};
-use kamishibai::progress::{
-    AlignedStatus, AppProgress, Console, Live, Output, PlainProgress, ProgressSelector,
-    RichProgress, SelectedProgress, Spinner, Status,
+use kamishibai::generation::manga::Progress as SceneProgress;
+use kamishibai::generation::{BuildProgress, SkippedCard};
+use kamishibai::runtime::progress::{
+    AlignedStatus, AppProgress, Console, Live, PlainProgress, ProgressSelector, RichProgress,
+    SelectedProgress, Spinner, Status,
 };
-use kamishibai::scene::Progress as SceneProgress;
 /// Shared line recorder for progress tests.
 #[derive(Clone, Debug, Default)]
 struct Lines {
@@ -42,9 +42,9 @@ struct FakeOutput {
     lines: Lines,
 }
 
-impl Output for FakeOutput {
+impl Console for FakeOutput {
     /// Print one output line.
-    fn print(&mut self, text: &str) {
+    fn print(&mut self, text: &str, _highlight: bool) {
         self.lines.items.borrow_mut().push(String::from(text));
     }
 }
@@ -209,7 +209,7 @@ fn plain_progress_keeps_the_frozen_line_formatting_contract() {
     progress.retry("Rendering", 2, "Ошибка");
     progress.skip("wörd", "problem");
     progress.result("Anki deck", Path::new("/tmp/output/cards.apkg"));
-    progress.finish(9, 10, &[Failure::new("wörd", "problem")]);
+    progress.finish(9, 10, &[SkippedCard::new("wörd", "problem")]);
     assert_eq!(
         lines.values(),
         vec![
@@ -264,7 +264,7 @@ fn rich_progress_keeps_the_frozen_spinner_and_markup_sequence() {
     progress.finish(
         1,
         2,
-        &[Failure::new(
+        &[SkippedCard::new(
             "слово",
             "Cannot generate audio for empty text",
         )],

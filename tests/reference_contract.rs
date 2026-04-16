@@ -25,11 +25,23 @@ fn json(name: &str) -> Value {
     .expect("reference manifest must parse")
 }
 
-/// Normalized reference entries keep the full twelve-field contract.
+/// Canonical reference entries keep the strict nested field contract.
 #[test]
-fn normalized_reference_entries_keep_the_full_twelve_field_contract() {
+fn canonical_reference_entries_keep_the_strict_nested_field_contract() {
     assert_eq!(
-        json("normalized/single-target-en.json")[0]
+        serde_json::from_str::<Value>(
+            fs::read_to_string(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("fixtures")
+                    .join("reference")
+                    .join("inputs")
+                    .join("single-target-en.json"),
+            )
+            .expect("reference input must exist")
+            .as_str(),
+        )
+        .expect("reference input must parse")["entries"][0]
             .as_object()
             .map(|item| item.keys().cloned().collect::<Vec<_>>())
             .map(|mut item| {
@@ -37,20 +49,15 @@ fn normalized_reference_entries_keep_the_full_twelve_field_contract() {
                 item
             }),
         Some(vec![
-            String::from("context"),
-            String::from("example"),
-            String::from("highlight"),
-            String::from("hint"),
             String::from("importance"),
+            String::from("meaning"),
             String::from("pronunciation"),
-            String::from("sentence"),
-            String::from("source_lang"),
-            String::from("target_lang"),
+            String::from("source"),
+            String::from("target"),
+            String::from("term"),
             String::from("transcription"),
-            String::from("translation"),
-            String::from("word"),
         ]),
-        "normalized reference entries no longer keep the full twelve-field contract"
+        "canonical reference entries no longer keep the strict nested field contract"
     );
 }
 

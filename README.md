@@ -52,12 +52,17 @@ cargo run --
 Every entry must contain:
 
 - `term`
+- `meaning`
+- `pronunciation`
+- `transcription`
+- `importance`
 - `source.sentence`
 - `source.lang`
+- `source.highlight`
+- `source.hint`
+- `source.context`
 - `target.sentence`
 - `target.lang`
-
-Optional fields are `meaning`, `pronunciation`, `transcription`, `importance`, `source.highlight`, `source.hint`, and `source.context`.
 
 Example:
 

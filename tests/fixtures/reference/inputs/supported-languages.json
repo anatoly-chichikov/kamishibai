@@ -37,11 +37,11 @@
       "transcription": "harbor"
     },
     {
-      "importance": null,
+      "importance": 8,
       "meaning": "tomorrow",
-      "pronunciation": null,
+      "pronunciation": "maˈɲana",
       "source": {
-        "context": null,
+        "context": "planificación",
         "highlight": "Mañana",
         "hint": "tiempo",
         "lang": "es",
@@ -52,7 +52,7 @@
         "sentence": "Morgen fahren wir früh los"
       },
       "term": "mañana",
-      "transcription": ""
+      "transcription": "manana"
     },
     {
       "importance": 4,
@@ -61,7 +61,7 @@
       "source": {
         "context": "poetisch",
         "highlight": "Wolke",
-        "hint": "",
+        "hint": "weather",
         "lang": "de",
         "sentence": "Die Wolke zieht langsam vorbei"
       },

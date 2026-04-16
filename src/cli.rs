@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::io::IsTerminal;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
@@ -11,14 +11,14 @@ use time::OffsetDateTime;
 use time::format_description::parse;
 
 use crate::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
-use crate::diagnosis::{DiagnosisSelector, Display};
 use crate::gemini::GeminiClient;
-use crate::input::{Vocabulary, VocabularyMapping};
-use crate::media::{Media, Pipeline};
-use crate::paths::{LocationArgs, Locations, SystemContext};
-use crate::profile::{Fonts, Labels, naming};
-use crate::progress::{AppProgress, ProgressSelector};
+use crate::generation::{DeckBuilder, GeneratorCatalog};
+use crate::languages::{ReportFonts, ReportLabels, naming};
 use crate::report::{Report, Thumbnail, VocabularyLayout};
+use crate::runtime::diagnosis::{DiagnosisSelector, Display};
+use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
+use crate::runtime::progress::{AppProgress, ProgressSelector};
+use crate::vocabulary::VocabularyDocument;
 
 /// Parsed CLI arguments for the application contract.
 #[derive(Clone, Debug, Eq, Parser, PartialEq)]
@@ -60,22 +60,6 @@ impl CliError {
             path,
         }
     }
-
-    /// Return the human-facing failure message.
-    pub fn message(&self) -> &str {
-        match self {
-            Self::Failure { message, .. } => message.as_str(),
-            Self::Interrupted => "Interrupted",
-        }
-    }
-
-    /// Return the optional filesystem path context.
-    pub fn path(&self) -> Option<&Path> {
-        match self {
-            Self::Failure { path, .. } => path.as_deref(),
-            Self::Interrupted => None,
-        }
-    }
 }
 
 /// Parse CLI arguments into the public argument shape.
@@ -98,8 +82,8 @@ where
     match main() {
         Ok(()) => 0,
         Err(CliError::Interrupted) => 130,
-        Err(error) => {
-            diagnosis.show(error.message(), error.path());
+        Err(CliError::Failure { message, path }) => {
+            diagnosis.show(message.as_str(), path.as_deref());
             1
         }
     }
@@ -116,17 +100,12 @@ where
     let input = resolved
         .input()
         .map_err(|error| CliError::handled(error.to_string(), None))?;
-    let vocabulary = Vocabulary::new(input.clone(), VocabularyMapping);
-    let document = vocabulary
-        .document()
-        .map_err(|error| CliError::handled(error.to_string(), Some(input.clone())))?;
-    let entries = vocabulary
-        .entries(Some(&document))
+    let document = VocabularyDocument::load(&input)
         .map_err(|error| CliError::handled(error.to_string(), Some(input.clone())))?;
     let client =
         GeminiClient::from_env().map_err(|error| CliError::handled(error.to_string(), None))?;
-    let decknaming = naming(args.deck.as_deref(), entries.as_slice());
-    let media = Media::new(
+    let decknaming = naming(args.deck.as_deref(), document.entries.as_slice());
+    let generators = GeneratorCatalog::new(
         client,
         resolved
             .cache()
@@ -134,44 +113,47 @@ where
     );
     let model = CardModel::new().model();
     let container = VocabularyDeck::new(
-        StableId::new(decknaming.name()).value(),
-        decknaming.name(),
+        StableId::new(decknaming.name.as_str()).value(),
+        decknaming.name.as_str(),
         VocabularyNote::new(model),
         Vec::<PathBuf>::new(),
     );
-    let progress = ProgressSelector::new(if crate::progress::uses_stdout() {
+    let progress = ProgressSelector::new(if crate::runtime::progress::uses_stdout() {
         std::io::stdout().is_terminal()
     } else {
         std::io::stderr().is_terminal()
     })
     .selected();
-    let mut pipeline = Pipeline::new(media.clone(), media, container, progress);
-    let (failed, processed) = pipeline.process(entries.as_slice());
+    let mut builder = DeckBuilder::new(generators, container, progress);
+    let (failed, processed) = builder.process(document.entries.as_slice());
     let output = resolved
         .output()
         .map_err(|error| CliError::handled(error.to_string(), None))?;
     fs::create_dir_all(&output)
         .map_err(|error| CliError::handled(error.to_string(), Some(output.clone())))?;
     let stamp = stamp().map_err(|error| CliError::handled(error.to_string(), None))?;
-    let apkg = output.join(format!("{}_{}.apkg", decknaming.prefix(), stamp));
-    pipeline
+    let apkg = output.join(format!("{}_{}.apkg", decknaming.prefix, stamp));
+    builder
         .deck()
         .save(&apkg)
         .map_err(|error| CliError::handled(error.to_string(), Some(apkg.clone())))?;
-    let mut report = Report::new(VocabularyLayout::new(Labels::default()), Fonts::default());
+    let mut report = Report::new(
+        VocabularyLayout::new(ReportLabels::default()),
+        ReportFonts::default(),
+    );
     for (entry, imagepath) in processed.clone() {
         report.append(&entry, Some(imagepath));
     }
-    let pdf = output.join(format!("{}_{}.pdf", decknaming.prefix(), stamp));
+    let pdf = output.join(format!("{}_{}.pdf", decknaming.prefix, stamp));
     report
         .save(&pdf, &Thumbnail::new(150))
         .map_err(|error| CliError::handled(error.to_string(), Some(pdf.clone())))?;
-    pipeline.progress_mut().result("Anki deck", &apkg);
-    pipeline.progress_mut().result("Report", &pdf);
-    pipeline.progress_mut().result("Output", &output);
-    pipeline.progress_mut().finish(
-        entries.len() - failed.len(),
-        entries.len(),
+    builder.progress_mut().result("Anki deck", &apkg);
+    builder.progress_mut().result("Report", &pdf);
+    builder.progress_mut().result("Output", &output);
+    builder.progress_mut().finish(
+        document.entries.len() - failed.len(),
+        document.entries.len(),
         failed.as_slice(),
     );
     Ok(())

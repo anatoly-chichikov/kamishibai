@@ -4,10 +4,10 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use image::{DynamicImage, GrayImage, Luma};
-use kamishibai::cache::{Cache, FileCache};
-use kamishibai::scene::{Illustration, Progress, Renderer, Translator};
+use kamishibai::generation::artifact_cache::Cache;
+use kamishibai::generation::manga::{Illustration, Progress, Renderer, Translator};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -73,61 +73,6 @@ impl Progress for Recorder {
             String::from(label),
             path.map(PathBuf::from),
         ));
-    }
-}
-
-/// Flaky cache for illustration cleanup tests.
-#[derive(Clone, Debug)]
-struct FlakyCache {
-    path: PathBuf,
-    stages: Rc<RefCell<Vec<PathBuf>>>,
-    commits: Rc<RefCell<usize>>,
-    fail: usize,
-}
-
-impl FlakyCache {
-    /// Create one flaky cache with a specific failing commit index.
-    fn new(path: PathBuf, fail: usize) -> Self {
-        Self {
-            path,
-            stages: Rc::new(RefCell::new(Vec::new())),
-            commits: Rc::new(RefCell::new(0)),
-            fail,
-        }
-    }
-}
-
-impl FileCache for FlakyCache {
-    fn root(&self) -> PathBuf {
-        self.path.clone()
-    }
-    fn path(&self) -> PathBuf {
-        self.path.clone()
-    }
-    fn exists(&self, filename: &str) -> bool {
-        self.path.join(filename).exists()
-    }
-    fn filepath(&self, filename: &str) -> Result<PathBuf> {
-        std::fs::create_dir_all(&self.path)?;
-        Ok(self.path.join(filename))
-    }
-    fn stage(&self, suffix: &str) -> Result<PathBuf> {
-        std::fs::create_dir_all(&self.path)?;
-        let path = self
-            .path
-            .join(format!("stage-{}{}", self.stages.borrow().len(), suffix));
-        std::fs::write(&path, [])?;
-        self.stages.borrow_mut().push(path.clone());
-        Ok(path)
-    }
-    fn commit(&self, staged: &Path, filename: &str) -> Result<()> {
-        let index = *self.commits.borrow();
-        *self.commits.borrow_mut() += 1;
-        if index == self.fail {
-            return Err(anyhow!("commit failed"));
-        }
-        std::fs::rename(staged, self.path.join(filename))?;
-        Ok(())
     }
 }
 
@@ -237,8 +182,8 @@ fn legacy_cached_images_omit_the_missing_scene_path() -> Result<()> {
 #[test]
 fn failed_scene_commits_remove_the_staged_scene_file() -> Result<()> {
     let directory = TempDir::new()?;
-    let cache = FlakyCache::new(directory.path().join("manga-en"), 0);
-    let probe = cache.clone();
+    let cache = Cache::failing("manga-en", directory.path(), 0);
+    let probe = cache.path();
     let illustration = Illustration::new(cache, CountingTranslator::new(scene()), FixedRenderer);
     let _error = illustration
         .generate(
@@ -249,7 +194,7 @@ fn failed_scene_commits_remove_the_staged_scene_file() -> Result<()> {
         )
         .unwrap_err();
     assert!(
-        !probe.stages.borrow()[0].exists(),
+        std::fs::read_dir(probe)?.next().is_none(),
         "failed scene commits no longer remove the staged scene file"
     );
     Ok(())
@@ -259,8 +204,8 @@ fn failed_scene_commits_remove_the_staged_scene_file() -> Result<()> {
 #[test]
 fn failed_image_commits_remove_the_staged_image_file() -> Result<()> {
     let directory = TempDir::new()?;
-    let cache = FlakyCache::new(directory.path().join("manga-en"), 1);
-    let probe = cache.clone();
+    let cache = Cache::failing("manga-en", directory.path(), 1);
+    let probe = cache.path();
     let illustration = Illustration::new(cache, CountingTranslator::new(scene()), FixedRenderer);
     let _error = illustration
         .generate(
@@ -271,7 +216,7 @@ fn failed_image_commits_remove_the_staged_image_file() -> Result<()> {
         )
         .unwrap_err();
     assert!(
-        !probe.stages.borrow()[1].exists(),
+        std::fs::read_dir(probe)?.count() == 1,
         "failed image commits no longer remove the staged image file"
     );
     Ok(())

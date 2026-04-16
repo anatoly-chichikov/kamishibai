@@ -1,13 +1,13 @@
 //! Tests for cached audio persistence.
 
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::fs;
 use std::rc::Rc;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use hound::WavReader;
-use kamishibai::audio::{Audio, Speaker};
-use kamishibai::cache::{Cache, FileCache};
+use kamishibai::generation::artifact_cache::Cache;
+use kamishibai::generation::speech::{Audio, Speaker};
 use tempfile::TempDir;
 
 /// Counting speaker for audio generation tests.
@@ -32,55 +32,6 @@ impl Speaker for CountingSpeaker {
     fn speech(&self, _prompt: &str, _text: &str) -> Result<Vec<u8>> {
         *self.calls.borrow_mut() += 1;
         Ok(self.data.clone())
-    }
-}
-
-/// Failing cache used to assert staged-file cleanup.
-#[derive(Clone, Debug)]
-struct FailingCache {
-    path: PathBuf,
-    stage: Rc<RefCell<Vec<PathBuf>>>,
-}
-
-impl FailingCache {
-    /// Create one failing cache.
-    fn new(path: PathBuf) -> Self {
-        Self {
-            path,
-            stage: Rc::new(RefCell::new(Vec::new())),
-        }
-    }
-}
-
-impl FileCache for FailingCache {
-    /// Return the root cache directory.
-    fn root(&self) -> PathBuf {
-        self.path.clone()
-    }
-    /// Return the named cache directory.
-    fn path(&self) -> PathBuf {
-        self.path.clone()
-    }
-    /// Return whether one cached filename already exists.
-    fn exists(&self, filename: &str) -> bool {
-        self.path.join(filename).exists()
-    }
-    /// Return the absolute path for one cached filename.
-    fn filepath(&self, filename: &str) -> Result<PathBuf> {
-        std::fs::create_dir_all(&self.path)?;
-        Ok(self.path.join(filename))
-    }
-    /// Return one staged temporary file path.
-    fn stage(&self, suffix: &str) -> Result<PathBuf> {
-        std::fs::create_dir_all(&self.path)?;
-        let path = self.path.join(format!("staged{}", suffix));
-        std::fs::write(&path, [])?;
-        self.stage.borrow_mut().push(path.clone());
-        Ok(path)
-    }
-    /// Always fail the final commit.
-    fn commit(&self, _staged: &Path, _filename: &str) -> Result<()> {
-        Err(anyhow!("commit failed"))
     }
 }
 
@@ -152,8 +103,8 @@ fn empty_audio_inputs_keep_the_frozen_validation_message() {
 #[test]
 fn failed_audio_commits_remove_the_staged_file() -> Result<()> {
     let directory = TempDir::new()?;
-    let cache = FailingCache::new(directory.path().join("audio-en"));
-    let probe = cache.clone();
+    let cache = Cache::failing("audio-en", directory.path(), 0);
+    let probe = cache.path();
     let audio = Audio::new(
         cache,
         "Say in natural English: {text}",
@@ -163,7 +114,7 @@ fn failed_audio_commits_remove_the_staged_file() -> Result<()> {
         .generate("The cat is sleeping on the windowsill")
         .unwrap_err();
     assert!(
-        !probe.stage.borrow()[0].exists(),
+        fs::read_dir(probe)?.next().is_none(),
         "failed audio commits no longer remove the staged file"
     );
     Ok(())
