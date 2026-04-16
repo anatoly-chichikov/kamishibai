@@ -3,12 +3,10 @@
 use std::path::Path;
 
 use anyhow::Result;
-use kamishibai::application::media::SceneSource;
-use kamishibai::domain::entry::NormalizedEntry;
-use kamishibai::infrastructure::assets;
-use kamishibai::infrastructure::audio::Speaker;
-use kamishibai::infrastructure::media::Media;
-use kamishibai::infrastructure::scene::ImageSource;
+use kamishibai::generation::manga::ImageSource;
+use kamishibai::generation::prompts as assets;
+use kamishibai::generation::{GeneratorCatalog, SceneSource, Speaker};
+use kamishibai::vocabulary::VocabularyEntry;
 use serde_json::Value;
 
 /// Fake runtime client for media wiring tests.
@@ -46,8 +44,8 @@ impl ImageSource for FakeClient {
 }
 
 /// Return one normalized entry for runtime tests.
-fn entry(target: &str) -> NormalizedEntry {
-    NormalizedEntry {
+fn entry(target: &str) -> VocabularyEntry {
+    VocabularyEntry {
         word: String::from("focal"),
         pronunciation: String::new(),
         translation: String::from("значение"),
@@ -87,11 +85,11 @@ fn scene_prompt_rendering_keeps_the_target_language_and_json_braces() {
     );
 }
 
-/// Media resolves the supported profile cache roots for both service types.
+/// GeneratorCatalog resolves the supported profile cache roots for both service types.
 #[test]
 fn media_resolves_the_supported_profile_cache_roots_for_both_service_types() -> Result<()> {
     let directory = tempfile::TempDir::new()?;
-    let mut media = Media::new(FakeClient, directory.path());
+    let mut media = GeneratorCatalog::new(FakeClient, directory.path());
     let audio = media.audio(&entry("en"))?;
     let illustration = media.illustration(&entry("en"))?;
     assert_eq!(
@@ -109,11 +107,11 @@ fn media_resolves_the_supported_profile_cache_roots_for_both_service_types() -> 
     Ok(())
 }
 
-/// Media keeps the registry fallback OCR policy in illustration wiring.
+/// GeneratorCatalog keeps the registry fallback OCR policy in illustration wiring.
 #[test]
 fn media_keeps_the_registry_fallback_ocr_policy_in_illustration_wiring() -> Result<()> {
     let directory = tempfile::TempDir::new()?;
-    let mut media = Media::new(FakeClient, directory.path());
+    let mut media = GeneratorCatalog::new(FakeClient, directory.path());
     assert!(
         format!("{:?}", media.illustration(&entry("en"))?).contains("\"eng\""),
         "media no longer keeps the registry fallback ocr policy in illustration wiring"

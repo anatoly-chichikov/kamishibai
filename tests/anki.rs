@@ -5,10 +5,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use kamishibai::domain::entry::NormalizedEntry;
-use kamishibai::infrastructure::anki::{
+use kamishibai::anki::{
     CardModel, HtmlLineBreaks, NoteFormat, StableId, Transcription, VocabularyDeck, VocabularyNote,
 };
+use kamishibai::vocabulary::VocabularyEntry;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -23,7 +23,7 @@ fn reference(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn entries() -> Vec<NormalizedEntry> {
+fn entries() -> Vec<VocabularyEntry> {
     serde_json::from_str(
         fs::read_to_string(reference("normalized/mixed-target-deck.json"))
             .expect("reference entries must exist")

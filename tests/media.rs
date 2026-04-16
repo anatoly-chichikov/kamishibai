@@ -4,14 +4,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use kamishibai::application::media::{
-    AudioService, Deck, Failure, IllustrationService, MediaSource, Pipeline, PipelineProgress,
-    SceneSource,
+use kamishibai::generation::manga::{ImageSource, Progress as SceneProgress};
+use kamishibai::generation::{
+    BuildProgress, Deck, DeckBuilder, GeneratorCatalog, GeneratorSource, IllustrationGenerator,
+    SceneSource, SkippedCard, Speaker, SpeechGenerator,
 };
-use kamishibai::domain::entry::NormalizedEntry;
-use kamishibai::infrastructure::audio::Speaker;
-use kamishibai::infrastructure::media::Media;
-use kamishibai::infrastructure::scene::{ImageSource, Progress as SceneProgress};
+use kamishibai::vocabulary::VocabularyEntry;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -19,7 +17,7 @@ use tempfile::TempDir;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct FakeClient;
 
-impl AudioService for AudioFixture {
+impl SpeechGenerator for AudioFixture {
     /// Generate one cached audio filename and cache label.
     fn generate(&self, text: &str) -> Result<(String, bool)> {
         match self {
@@ -37,7 +35,7 @@ impl AudioService for AudioFixture {
     }
 }
 
-impl IllustrationService for IllustrationFixture {
+impl IllustrationGenerator for IllustrationFixture {
     /// Generate one cached illustration filename and cache label.
     fn generate(
         &self,
@@ -92,8 +90,8 @@ impl ImageSource for FakeClient {
 }
 
 /// Return one normalized entry for media tests.
-fn entry(word: &str, example: &str, target: &str) -> NormalizedEntry {
-    NormalizedEntry {
+fn entry(word: &str, example: &str, target: &str) -> VocabularyEntry {
+    VocabularyEntry {
         word: String::from(word),
         pronunciation: String::new(),
         translation: String::from("значение"),
@@ -128,7 +126,7 @@ impl SuccessAudio {
     }
 }
 
-impl AudioService for SuccessAudio {
+impl SpeechGenerator for SuccessAudio {
     /// Generate one cached audio filename and cache label.
     fn generate(&self, text: &str) -> Result<(String, bool)> {
         if text.trim().is_empty() {
@@ -160,7 +158,7 @@ impl FailingAudio {
     }
 }
 
-impl AudioService for FailingAudio {
+impl SpeechGenerator for FailingAudio {
     /// Generate one cached audio filename and cache label.
     fn generate(&self, _text: &str) -> Result<(String, bool)> {
         Err(anyhow!(self.reason.clone()))
@@ -198,7 +196,7 @@ impl SuccessIllustration {
     }
 }
 
-impl IllustrationService for SuccessIllustration {
+impl IllustrationGenerator for SuccessIllustration {
     /// Generate one cached illustration filename and cache label.
     fn generate(
         &self,
@@ -233,7 +231,7 @@ impl FailingIllustration {
     }
 }
 
-impl IllustrationService for FailingIllustration {
+impl IllustrationGenerator for FailingIllustration {
     /// Generate one cached illustration filename and cache label.
     fn generate(
         &self,
@@ -265,17 +263,17 @@ struct FixedMedia {
     illustration: IllustrationFixture,
 }
 
-impl MediaSource for FixedMedia {
+impl GeneratorSource for FixedMedia {
     type Audio = AudioFixture;
     type Illustration = IllustrationFixture;
 
     /// Return the audio service for one entry.
-    fn audio(&mut self, _entry: &NormalizedEntry) -> Result<Self::Audio> {
+    fn audio(&mut self, _entry: &VocabularyEntry) -> Result<Self::Audio> {
         Ok(self.audio.clone())
     }
 
     /// Return the illustration service for one entry.
-    fn illustration(&mut self, _entry: &NormalizedEntry) -> Result<Self::Illustration> {
+    fn illustration(&mut self, _entry: &VocabularyEntry) -> Result<Self::Illustration> {
         Ok(self.illustration.clone())
     }
 }
@@ -287,12 +285,12 @@ struct SwitchingMedia {
     illustration: BTreeMap<String, IllustrationFixture>,
 }
 
-impl MediaSource for SwitchingMedia {
+impl GeneratorSource for SwitchingMedia {
     type Audio = AudioFixture;
     type Illustration = IllustrationFixture;
 
     /// Return the audio service for one entry.
-    fn audio(&mut self, entry: &NormalizedEntry) -> Result<Self::Audio> {
+    fn audio(&mut self, entry: &VocabularyEntry) -> Result<Self::Audio> {
         self.audio
             .get(entry.word.as_str())
             .cloned()
@@ -300,7 +298,7 @@ impl MediaSource for SwitchingMedia {
     }
 
     /// Return the illustration service for one entry.
-    fn illustration(&mut self, entry: &NormalizedEntry) -> Result<Self::Illustration> {
+    fn illustration(&mut self, entry: &VocabularyEntry) -> Result<Self::Illustration> {
         self.illustration
             .get(entry.word.as_str())
             .cloned()
@@ -322,7 +320,7 @@ impl Deck for RecorderDeck {
     }
 
     /// Add one note to the deck.
-    fn add(&mut self, entry: &NormalizedEntry, audio: &str, image: &str) {
+    fn add(&mut self, entry: &VocabularyEntry, audio: &str, image: &str) {
         self.added
             .push((entry.word.clone(), String::from(audio), String::from(image)));
     }
@@ -355,7 +353,7 @@ impl SceneProgress for RecorderProgress {
     }
 }
 
-impl PipelineProgress for RecorderProgress {
+impl BuildProgress for RecorderProgress {
     /// Signal the card position within the batch.
     fn card(&mut self, index: usize, total: usize, word: &str) {
         self.events.push(format!("card:{index}:{total}:{word}"));
@@ -367,11 +365,11 @@ impl PipelineProgress for RecorderProgress {
     }
 }
 
-/// Media uses the supported profile cache names for both service types.
+/// GeneratorCatalog uses the supported profile cache names for both service types.
 #[test]
 fn media_uses_the_supported_profile_cache_names_for_both_service_types() -> Result<()> {
     let directory = TempDir::new()?;
-    let mut media = Media::new(FakeClient, directory.path());
+    let mut media = GeneratorCatalog::new(FakeClient, directory.path());
     let audio = media.audio(&entry("focal", "frása", "en"))?;
     let illustration = media.illustration(&entry("focal", "frása", "en"))?;
     assert_eq!(
@@ -391,11 +389,11 @@ fn media_uses_the_supported_profile_cache_names_for_both_service_types() -> Resu
     Ok(())
 }
 
-/// Media keeps the registry fallback OCR selection in illustration wiring.
+/// GeneratorCatalog keeps the registry fallback OCR selection in illustration wiring.
 #[test]
 fn media_keeps_the_registry_fallback_ocr_selection() -> Result<()> {
     let directory = TempDir::new()?;
-    let mut media = Media::new(FakeClient, directory.path());
+    let mut media = GeneratorCatalog::new(FakeClient, directory.path());
     assert!(
         format!("{:?}", media.illustration(&entry("focal", "frása", "en"))?).contains("\"eng\""),
         "media no longer keeps the registry fallback ocr selection in illustration wiring"
@@ -403,11 +401,11 @@ fn media_keeps_the_registry_fallback_ocr_selection() -> Result<()> {
     Ok(())
 }
 
-/// Pipeline records failures for empty example text.
+/// DeckBuilder records failures for empty example text.
 #[test]
 fn pipeline_records_failures_for_empty_example_text() {
     let directory = TempDir::new().expect("temp directory must exist");
-    let mut pipeline = Pipeline::new(
+    let mut pipeline = DeckBuilder::new(
         FixedMedia {
             audio: AudioFixture::Success(SuccessAudio::new(directory.path(), "demo.wav", false)),
             illustration: IllustrationFixture::Success(SuccessIllustration::new(
@@ -422,7 +420,7 @@ fn pipeline_records_failures_for_empty_example_text() {
     let entries = vec![entry("слово", "", "en")];
     assert_eq!(
         pipeline.process(&entries).0,
-        vec![Failure::new(
+        vec![SkippedCard::new(
             "слово",
             "Cannot generate audio for empty text"
         )],
@@ -430,11 +428,11 @@ fn pipeline_records_failures_for_empty_example_text() {
     );
 }
 
-/// Pipeline records audio generation failures.
+/// DeckBuilder records audio generation failures.
 #[test]
 fn pipeline_records_audio_generation_failures() {
     let directory = TempDir::new().expect("temp directory must exist");
-    let mut pipeline = Pipeline::new(
+    let mut pipeline = DeckBuilder::new(
         FixedMedia {
             audio: AudioFixture::Failure(FailingAudio::new(
                 directory.path(),
@@ -452,16 +450,19 @@ fn pipeline_records_audio_generation_failures() {
     let entries = vec![entry("слово", "фраза", "en")];
     assert_eq!(
         pipeline.process(&entries).0,
-        vec![Failure::new("слово", "503 UNAVAILABLE: сервер недоступен")],
+        vec![SkippedCard::new(
+            "слово",
+            "503 UNAVAILABLE: сервер недоступен"
+        )],
         "pipeline no longer records audio generation failures"
     );
 }
 
-/// Pipeline records illustration generation failures.
+/// DeckBuilder records illustration generation failures.
 #[test]
 fn pipeline_records_illustration_generation_failures() {
     let directory = TempDir::new().expect("temp directory must exist");
-    let mut pipeline = Pipeline::new(
+    let mut pipeline = DeckBuilder::new(
         FixedMedia {
             audio: AudioFixture::Success(SuccessAudio::new(directory.path(), "demo.wav", false)),
             illustration: IllustrationFixture::Failure(FailingIllustration::new(
@@ -475,16 +476,19 @@ fn pipeline_records_illustration_generation_failures() {
     let entries = vec![entry("слово", "фраза", "en")];
     assert_eq!(
         pipeline.process(&entries).0,
-        vec![Failure::new("слово", "503 UNAVAILABLE: сервер недоступен")],
+        vec![SkippedCard::new(
+            "слово",
+            "503 UNAVAILABLE: сервер недоступен"
+        )],
         "pipeline no longer records illustration generation failures"
     );
 }
 
-/// Pipeline continues after one audio failure and keeps the later success.
+/// DeckBuilder continues after one audio failure and keeps the later success.
 #[test]
 fn pipeline_continues_after_one_audio_failure_and_keeps_the_later_success() {
     let directory = TempDir::new().expect("temp directory must exist");
-    let mut pipeline = Pipeline::new(
+    let mut pipeline = DeckBuilder::new(
         SwitchingMedia {
             audio: BTreeMap::from([
                 (
@@ -518,7 +522,10 @@ fn pipeline_continues_after_one_audio_failure_and_keeps_the_later_success() {
     assert_eq!(
         pipeline.process(&entries),
         (
-            vec![Failure::new("провал", "503 UNAVAILABLE: сервер недоступен")],
+            vec![SkippedCard::new(
+                "провал",
+                "503 UNAVAILABLE: сервер недоступен"
+            )],
             vec![(
                 entry("успех", "вторая фраза", "en"),
                 directory.path().join("second.jpg")
@@ -528,11 +535,11 @@ fn pipeline_continues_after_one_audio_failure_and_keeps_the_later_success() {
     );
 }
 
-/// Pipeline continues after one illustration failure and keeps the later success.
+/// DeckBuilder continues after one illustration failure and keeps the later success.
 #[test]
 fn pipeline_continues_after_one_illustration_failure_and_keeps_the_later_success() {
     let directory = TempDir::new().expect("temp directory must exist");
-    let mut pipeline = Pipeline::new(
+    let mut pipeline = DeckBuilder::new(
         SwitchingMedia {
             audio: BTreeMap::from([
                 (
@@ -572,7 +579,10 @@ fn pipeline_continues_after_one_illustration_failure_and_keeps_the_later_success
     assert_eq!(
         pipeline.process(&entries),
         (
-            vec![Failure::new("провал", "503 UNAVAILABLE: сервер недоступен")],
+            vec![SkippedCard::new(
+                "провал",
+                "503 UNAVAILABLE: сервер недоступен"
+            )],
             vec![(
                 entry("успех", "вторая фраза", "en"),
                 directory.path().join("second.jpg")
@@ -582,11 +592,11 @@ fn pipeline_continues_after_one_illustration_failure_and_keeps_the_later_success
     );
 }
 
-/// Pipeline attaches both media files and keeps the frozen card payload.
+/// DeckBuilder attaches both media files and keeps the frozen card payload.
 #[test]
 fn pipeline_attaches_both_media_files_and_keeps_the_frozen_card_payload() {
     let directory = TempDir::new().expect("temp directory must exist");
-    let mut pipeline = Pipeline::new(
+    let mut pipeline = DeckBuilder::new(
         FixedMedia {
             audio: AudioFixture::Success(SuccessAudio::new(directory.path(), "demo.wav", true)),
             illustration: IllustrationFixture::Success(SuccessIllustration::new(
@@ -609,7 +619,7 @@ fn pipeline_attaches_both_media_files_and_keeps_the_frozen_card_payload() {
         ),
         (
             (
-                Vec::<Failure>::new(),
+                Vec::<SkippedCard>::new(),
                 vec![(
                     entry("слово", "фраза", "en"),
                     directory.path().join("demo.jpg")

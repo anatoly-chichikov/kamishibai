@@ -4,8 +4,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use kamishibai::domain::entry::NormalizedEntry;
-use kamishibai::infrastructure::input::{Vocabulary, VocabularyMapping};
+use kamishibai::vocabulary::VocabularyEntry;
+use kamishibai::vocabulary::{VocabularyDocument, VocabularyMapping};
 use tempfile::TempDir;
 
 /// Write one JSON document to a temporary file.
@@ -17,9 +17,9 @@ fn write(body: &str) -> Result<(TempDir, PathBuf)> {
 }
 
 /// Return the shared vocabulary reader for one JSON string.
-fn reader(body: &str) -> Result<(TempDir, Vocabulary<VocabularyMapping>)> {
+fn reader(body: &str) -> Result<(TempDir, VocabularyDocument<VocabularyMapping>)> {
     let (directory, path) = write(body)?;
-    Ok((directory, Vocabulary::new(path, VocabularyMapping)))
+    Ok((directory, VocabularyDocument::new(path, VocabularyMapping)))
 }
 
 /// Valid entries keep the exact normalized output shape.
@@ -30,7 +30,7 @@ fn valid_entries_map_into_the_full_normalized_shape() -> Result<()> {
     )?;
     assert_eq!(
         vocabulary.entries(None)?,
-        vec![NormalizedEntry {
+        vec![VocabularyEntry {
             word: String::from("кошка"),
             pronunciation: String::from("kæt"),
             translation: String::from("cat"),
@@ -71,7 +71,7 @@ fn null_optionals_become_empty_strings() -> Result<()> {
     )?;
     assert_eq!(
         vocabulary.entries(None)?,
-        vec![NormalizedEntry {
+        vec![VocabularyEntry {
             word: String::from("test"),
             pronunciation: String::new(),
             translation: String::new(),

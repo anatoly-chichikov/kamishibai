@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use anyhow::Result;
-use kamishibai::infrastructure::gemini::{GeminiClient, Transport, TransportResponse};
+use kamishibai::gemini::{GeminiClient, Transport, TransportResponse};
 use serde_json::{Value, json};
 
 /// Fake transport that records requests and replays fixed responses.

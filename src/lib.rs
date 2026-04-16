@@ -2,7 +2,11 @@
 
 #![forbid(unsafe_code)]
 
-pub mod application;
-pub mod domain;
-pub mod infrastructure;
-pub mod presentation;
+pub mod anki;
+pub mod cli;
+pub mod gemini;
+pub mod generation;
+pub mod languages;
+pub mod report;
+pub mod runtime;
+pub mod vocabulary;

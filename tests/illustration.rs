@@ -6,8 +6,8 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use image::{DynamicImage, GrayImage, Luma};
-use kamishibai::infrastructure::cache::Cache;
-use kamishibai::infrastructure::scene::{Illustration, Progress, Renderer, Translator};
+use kamishibai::generation::artifact_cache::Cache;
+use kamishibai::generation::manga::{Illustration, Progress, Renderer, Translator};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 

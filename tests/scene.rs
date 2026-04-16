@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use anyhow::{Result, bail};
 use image::{DynamicImage, GrayImage, ImageFormat, Luma};
-use kamishibai::infrastructure::scene::{
+use kamishibai::generation::manga::{
     BorderDetector, ImageSource, ImageText, MangaRenderer, Progress, Renderer, SceneText,
     TextDetector, TextDetectors,
 };

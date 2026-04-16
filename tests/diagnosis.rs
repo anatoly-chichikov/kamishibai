@@ -4,10 +4,10 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use kamishibai::presentation::diagnosis::{
+use kamishibai::runtime::diagnosis::{
     DiagnosisSelector, Display, PlainDiagnosis, RichDiagnosis, SelectedDiagnosis,
 };
-use kamishibai::presentation::progress::Console;
+use kamishibai::runtime::progress::Console;
 use serde_json::Value;
 
 /// Shared line recorder for diagnosis tests.

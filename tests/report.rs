@@ -5,11 +5,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use image::{Rgb, RgbImage};
-use kamishibai::domain::entry::NormalizedEntry;
-use kamishibai::domain::profile::{Fonts, Labels};
-use kamishibai::infrastructure::report::{
-    FontFamily, FontPath, Report, ReportLayout, Thumbnail, VocabularyLayout,
-};
+use kamishibai::languages::{ReportFonts, ReportLabels};
+use kamishibai::report::{FontFamily, FontPath, Report, ReportLayout, Thumbnail, VocabularyLayout};
+use kamishibai::vocabulary::VocabularyEntry;
 use lopdf::Document;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -21,14 +19,14 @@ struct StaticLayout {
 
 impl ReportLayout for StaticLayout {
     /// Return the configured rows for each entry.
-    fn row(&self, _entry: &NormalizedEntry) -> Vec<(String, f32)> {
+    fn row(&self, _entry: &VocabularyEntry) -> Vec<(String, f32)> {
         self.rows.clone()
     }
 }
 
 /// Create one normalized entry for report tests.
-fn entry(word: &str, source: &str, target: &str) -> NormalizedEntry {
-    NormalizedEntry {
+fn entry(word: &str, source: &str, target: &str) -> VocabularyEntry {
+    VocabularyEntry {
         word: String::from(word),
         pronunciation: String::new(),
         translation: String::from("значение"),
@@ -94,7 +92,7 @@ fn references(name: &str) -> PathBuf {
 }
 
 /// Return the frozen normalized reference entries.
-fn entries() -> Vec<NormalizedEntry> {
+fn entries() -> Vec<VocabularyEntry> {
     serde_json::from_str(
         fs::read_to_string(references("normalized/mixed-target-deck.json"))
             .expect("reference entries must exist")
@@ -114,8 +112,8 @@ fn report() -> Value {
 }
 
 /// Return one JSON-ready row manifest for one entry.
-fn manifest_rows(entry: &NormalizedEntry) -> Vec<Value> {
-    VocabularyLayout::new(Labels::default())
+fn manifest_rows(entry: &VocabularyEntry) -> Vec<Value> {
+    VocabularyLayout::new(ReportLabels::default())
         .row(entry)
         .into_iter()
         .map(|(text, size)| json!([text, size as i64]))
@@ -125,7 +123,7 @@ fn manifest_rows(entry: &NormalizedEntry) -> Vec<Value> {
 /// Vocabulary layout keeps the frozen full-entry row structure.
 #[test]
 fn vocabulary_layout_keeps_the_frozen_full_entry_row_structure() {
-    let item = NormalizedEntry {
+    let item = VocabularyEntry {
         word: String::from("café"),
         pronunciation: String::from("ˈkafe"),
         translation: String::from("кафе"),
@@ -140,7 +138,7 @@ fn vocabulary_layout_keeps_the_frozen_full_entry_row_structure() {
         transcription: String::new(),
     };
     assert_eq!(
-        VocabularyLayout::new(Labels::default()).row(&item),
+        VocabularyLayout::new(ReportLabels::default()).row(&item),
         vec![
             (String::from("café /ˈkafe/ — кафе"), 11.0),
             (String::from("The café serves crêpes"), 9.0),
@@ -158,7 +156,7 @@ fn vocabulary_layout_keeps_the_frozen_full_entry_row_structure() {
 fn vocabulary_layout_keeps_the_frozen_sparse_entry_row_structure() {
     let item = entry("café", "en", "ru");
     assert_eq!(
-        VocabularyLayout::new(Labels::default()).row(&item),
+        VocabularyLayout::new(ReportLabels::default()).row(&item),
         vec![
             (String::from("café — значение"), 11.0),
             (String::from("Translation: пример"), 9.0),
@@ -286,7 +284,7 @@ fn reports_switch_font_families_between_non_chinese_and_chinese_entries() -> Res
         StaticLayout {
             rows: vec![(String::from("Mixed script"), 10.0)],
         },
-        Fonts::default(),
+        ReportFonts::default(),
     );
     report.append(&entry("plain", "en", "en"), None);
     report.append(&entry("朋友", "el", "zh"), None);
@@ -335,7 +333,7 @@ fn reports_with_many_entries_still_span_multiple_pages() -> Result<()> {
     );
     for index in 0..30 {
         report.append(
-            &NormalizedEntry {
+            &VocabularyEntry {
                 word: format!("wörd{index}"),
                 pronunciation: String::new(),
                 translation: String::from("значение"),
@@ -392,7 +390,10 @@ fn reports_keep_the_frozen_layout_rows_labels_fonts_and_page_count_snapshot() ->
     let path = directory.path().join("reference.pdf");
     let reference = report();
     let rows = entries();
-    let mut report = Report::new(VocabularyLayout::new(Labels::default()), Fonts::default());
+    let mut report = Report::new(
+        VocabularyLayout::new(ReportLabels::default()),
+        ReportFonts::default(),
+    );
     let first = image(directory.path(), 256);
     let second = image(directory.path(), 256);
     report.append(&rows[0], Some(first.clone()));
@@ -402,12 +403,12 @@ fn reports_keep_the_frozen_layout_rows_labels_fonts_and_page_count_snapshot() ->
         json!({
             "entries": rows.iter().zip([first, second]).map(|(entry, _image)| {
                 json!({
-                    "font": Fonts::default().selected(entry).name(),
+                    "font": ReportFonts::default().selected(entry).name(),
                     "labels": {
-                        "context": Labels::default().selected(entry).context,
-                        "hint": Labels::default().selected(entry).hint,
-                        "importance": Labels::default().selected(entry).importance,
-                        "sentence": Labels::default().selected(entry).sentence,
+                        "context": ReportLabels::default().selected(entry).context,
+                        "hint": ReportLabels::default().selected(entry).hint,
+                        "importance": ReportLabels::default().selected(entry).importance,
+                        "sentence": ReportLabels::default().selected(entry).sentence,
                     },
                     "rows": manifest_rows(entry),
                     "source_lang": entry.source_lang,

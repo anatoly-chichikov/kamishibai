@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use kamishibai::infrastructure::paths::{
+use kamishibai::runtime::locations::{
     Context, LocationArgs, Locations, Platform, cache_home, cache_root, data_home,
 };
 use tempfile::TempDir;

@@ -6,8 +6,8 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use hound::WavReader;
-use kamishibai::infrastructure::audio::{Audio, Speaker};
-use kamishibai::infrastructure::cache::Cache;
+use kamishibai::generation::artifact_cache::Cache;
+use kamishibai::generation::speech::{Audio, Speaker};
 use tempfile::TempDir;
 
 /// Counting speaker for audio generation tests.
