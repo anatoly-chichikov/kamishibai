@@ -1,8 +1,8 @@
 //! Embedded asset accessors for the Rust rewrite baseline.
 
-const AUDIO_PROMPT: &str = include_str!("../assets/audio_prompt.txt");
-const SCENE_PROMPT: &str = include_str!("../assets/scene_prompt.txt");
-const MANGA_TEMPLATE: &str = include_str!("../assets/manga_template.json");
+const AUDIO_PROMPT: &str = include_str!("../../assets/audio_prompt.txt");
+const SCENE_PROMPT: &str = include_str!("../../assets/scene_prompt.txt");
+const MANGA_TEMPLATE: &str = include_str!("../../assets/manga_template.json");
 
 /// Return the embedded shared audio prompt template.
 pub fn audio_prompt() -> &'static str {

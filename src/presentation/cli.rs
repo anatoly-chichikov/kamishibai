@@ -10,15 +10,17 @@ use clap::Parser;
 use time::OffsetDateTime;
 use time::format_description::parse;
 
-use crate::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
-use crate::diagnosis::{DiagnosisSelector, Display};
-use crate::gemini::GeminiClient;
-use crate::input::{Vocabulary, VocabularyMapping};
-use crate::media::{Media, Pipeline};
-use crate::paths::{LocationArgs, Locations, SystemContext};
-use crate::profile::{Fonts, Labels, naming};
-use crate::progress::{AppProgress, ProgressSelector};
-use crate::report::{Report, Thumbnail, VocabularyLayout};
+use crate::application::media::Pipeline;
+use crate::domain::profile::naming;
+use crate::infrastructure::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
+use crate::infrastructure::gemini::GeminiClient;
+use crate::infrastructure::input::{Vocabulary, VocabularyMapping};
+use crate::infrastructure::media::Media;
+use crate::infrastructure::paths::{LocationArgs, Locations, SystemContext};
+use crate::infrastructure::report::{Report, Thumbnail, VocabularyLayout};
+use crate::presentation::diagnosis::{DiagnosisSelector, Display};
+use crate::presentation::progress::{AppProgress, ProgressSelector};
+use crate::profile::{Fonts, Labels};
 
 /// Parsed CLI arguments for the application contract.
 #[derive(Clone, Debug, Eq, Parser, PartialEq)]

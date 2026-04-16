@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use hound::{SampleFormat, WavSpec, WavWriter};
 
-use crate::cache::FileCache;
+use crate::application::media::AudioService;
+use crate::infrastructure::cache::FileCache;
 
 /// Generate raw PCM speech bytes for one prompt.
 pub trait Speaker {
@@ -87,4 +88,20 @@ fn write(path: &Path, data: &[u8]) -> Result<()> {
     }
     writer.finalize()?;
     Ok(())
+}
+
+impl<C, S> AudioService for Audio<C, S>
+where
+    C: FileCache,
+    S: Speaker,
+{
+    /// Generate one cached audio filename and cache label.
+    fn generate(&self, text: &str) -> Result<(String, bool)> {
+        Audio::<C, S>::generate(self, text)
+    }
+
+    /// Return one absolute cached audio path.
+    fn filepath(&self, filename: &str) -> Result<PathBuf> {
+        Audio::<C, S>::filepath(self, filename)
+    }
 }

@@ -4,25 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// One normalized vocabulary entry from the input document.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct NormalizedEntry {
-    pub word: String,
-    pub pronunciation: String,
-    pub translation: String,
-    pub example: String,
-    pub source_lang: String,
-    pub target_lang: String,
-    pub sentence: String,
-    pub highlight: String,
-    pub hint: String,
-    pub context: String,
-    pub importance: String,
-    pub transcription: String,
-}
+use crate::domain::entry::NormalizedEntry;
 
 /// Map raw JSON rows into normalized entries.
 pub trait FieldMapping {

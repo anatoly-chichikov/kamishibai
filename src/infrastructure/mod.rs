@@ -1,0 +1,11 @@
+pub(crate) mod anki;
+pub(crate) mod assets;
+pub(crate) mod audio;
+pub(crate) mod cache;
+pub(crate) mod gemini;
+pub(crate) mod input;
+pub(crate) mod media;
+pub(crate) mod ocr;
+pub(crate) mod paths;
+pub(crate) mod report;
+pub(crate) mod scene;

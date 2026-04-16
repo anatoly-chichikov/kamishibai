@@ -1,5 +1,3 @@
-//! Anki note formatting and APKG writing.
-
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::{Read, Write};
@@ -9,21 +7,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Result, bail};
 use rusqlite::{Connection, params};
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-use crate::input::NormalizedEntry;
+use crate::application::media::Deck;
+use crate::domain::entry::NormalizedEntry;
 
-const BASE91: [char; 91] = [
-    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
-    't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L',
-    'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4',
-    '5', '6', '7', '8', '9', '!', '#', '$', '%', '&', '(', ')', '*', '+', ',', '-', '.', '/', ':',
-    ';', '<', '=', '>', '?', '@', '[', ']', '^', '_', '`', '{', '|', '}', '~',
-];
-const MODEL_NAME: &str = "Kamishibai Vocabulary Model";
+use super::{Model, Note, NoteFormat};
+
 const SCHEMA: &str = "
 CREATE TABLE col (
     id              integer primary key,
@@ -97,6 +89,7 @@ CREATE INDEX ix_cards_sched on cards (did, queue, due);
 CREATE INDEX ix_revlog_cid on revlog (cid);
 CREATE INDEX ix_notes_csum on notes (csum);
 ";
+
 const COLLECTION: &str = r#"
 INSERT INTO col VALUES(
     null,
@@ -205,269 +198,6 @@ INSERT INTO col VALUES(
 )
 "#;
 
-/// Assemble one note from one normalized entry.
-pub trait NoteFormat {
-    /// Return one formatted note for the entry and relative media tags.
-    fn note(&self, entry: &NormalizedEntry, audio: &str, image: &str) -> Note;
-    /// Return the model used for note serialization.
-    fn model(&self) -> &Model;
-}
-
-/// Wrap one phonetic value in slash notation.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Transcription {
-    value: String,
-}
-
-impl Transcription {
-    /// Create one transcription formatter.
-    pub fn new(value: impl Into<String>) -> Self {
-        Self {
-            value: value.into(),
-        }
-    }
-
-    /// Return the slash-wrapped transcription or an empty string.
-    pub fn formatted(&self) -> String {
-        let stripped = self.value.trim_matches('/');
-        if stripped.is_empty() {
-            return String::new();
-        }
-        format!("/{stripped}/")
-    }
-}
-
-/// Replace newlines with HTML line breaks.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct HtmlLineBreaks {
-    value: String,
-}
-
-impl HtmlLineBreaks {
-    /// Create one HTML line-break formatter.
-    pub fn new(value: impl Into<String>) -> Self {
-        Self {
-            value: value.into(),
-        }
-    }
-
-    /// Return the value with newlines converted to br tags.
-    pub fn formatted(&self) -> String {
-        if self.value.is_empty() {
-            return String::new();
-        }
-        self.value.replace('\n', "<br>")
-    }
-}
-
-/// Derive a deterministic 31-bit identifier from one name.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StableId {
-    name: String,
-}
-
-impl StableId {
-    /// Create one stable identifier source.
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
-    }
-
-    /// Return the deterministic 31-bit integer identifier.
-    pub fn value(&self) -> i64 {
-        let digest = Sha256::digest(self.name.as_bytes());
-        let mut hex = String::new();
-        for item in digest.iter().take(4) {
-            hex.push_str(format!("{item:02x}").as_str());
-        }
-        i64::from(u32::from_str_radix(hex.as_str(), 16).expect("hex digest must parse"))
-            % (1_i64 << 31)
-    }
-}
-
-/// One Anki card template.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Template {
-    pub afmt: String,
-    pub bafmt: String,
-    pub bfont: String,
-    pub bqfmt: String,
-    pub bsize: i64,
-    pub did: Option<i64>,
-    pub name: String,
-    pub ord: i64,
-    pub qfmt: String,
-}
-
-/// One card model contract.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Model {
-    pub fields: Vec<String>,
-    pub id: i64,
-    pub name: String,
-    pub template: Template,
-}
-
-impl Model {
-    fn json(&self, timestamp: i64) -> Value {
-        json!({
-            "css": "",
-            "did": Value::Null,
-            "flds": self.fields.iter().enumerate().map(|(index, name)| {
-                json!({
-                    "font": "Liberation Sans",
-                    "media": [],
-                    "name": name,
-                    "ord": index,
-                    "rtl": false,
-                    "size": 20,
-                    "sticky": false,
-                })
-            }).collect::<Vec<_>>(),
-            "id": self.id.to_string(),
-            "latexPost": "\\end{document}",
-            "latexPre": "\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n",
-            "latexsvg": false,
-            "mod": timestamp,
-            "name": self.name,
-            "req": [[0, "all", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]],
-            "sortf": 0,
-            "tags": [],
-            "tmpls": [json!({
-                "afmt": self.template.afmt,
-                "bafmt": self.template.bafmt,
-                "bfont": self.template.bfont,
-                "bqfmt": self.template.bqfmt,
-                "bsize": self.template.bsize,
-                "did": self.template.did,
-                "name": self.template.name,
-                "ord": self.template.ord,
-                "qfmt": self.template.qfmt,
-            })],
-            "type": 0,
-            "usn": -1,
-            "vers": [],
-        })
-    }
-}
-
-/// Vocabulary model builder with the frozen 11-field contract.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CardModel {
-    identifier: i64,
-    name: String,
-}
-
-impl CardModel {
-    /// Create one frozen vocabulary card model builder.
-    pub fn new() -> Self {
-        Self {
-            identifier: StableId::new(MODEL_NAME).value(),
-            name: String::from(MODEL_NAME),
-        }
-    }
-
-    /// Return the frozen vocabulary model contract.
-    pub fn model(&self) -> Model {
-        Model {
-            fields: vec![
-                String::from("SourceSentence"),
-                String::from("Term"),
-                String::from("Pronunciation"),
-                String::from("Meaning"),
-                String::from("TargetSentence"),
-                String::from("Importance"),
-                String::from("Audio"),
-                String::from("Illustration"),
-                String::from("Hint"),
-                String::from("Context"),
-                String::from("PronunciationAll"),
-            ],
-            id: self.identifier,
-            name: self.name.clone(),
-            template: Template {
-                afmt: String::from(
-                    "{{FrontSide}}<hr id=\"answer\"><div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;\">{{Audio}}<div style=\"font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;\">{{TargetSentence}}</div>{{#PronunciationAll}}<div style=\"font-size: 13px; color: #aaa; margin-top: 4px;\">{{PronunciationAll}}</div>{{/PronunciationAll}}<div style=\"font-size: 17px; margin-top: 15px;\"><strong style=\"color: #ddd;\">{{Term}}</strong> <span style=\"color: #aaa;\">{{Pronunciation}}</span></div><div style=\"font-size: 15px; color: #bbb; margin-top: 3px;\">{{Meaning}}</div><div style=\"font-size: 13px; color: #999; margin-top: 8px;\">{{Importance}}/10</div>{{#Context}}<div style=\"font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; text-align: left;\">{{Context}}</div>{{/Context}}</div>",
-                ),
-                bafmt: String::new(),
-                bfont: String::new(),
-                bqfmt: String::new(),
-                bsize: 0,
-                did: None,
-                name: String::from("Card 1"),
-                ord: 0,
-                qfmt: String::from(
-                    "<div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;\">{{Illustration}}<div style=\"font-size: 20px; margin-top: 15px;\">{{SourceSentence}}</div>{{#Hint}}<div style=\"font-size: 14px; color: #888; margin-top: 8px; font-style: italic;\">{{Hint}}</div>{{/Hint}}</div>",
-                ),
-            },
-        }
-    }
-}
-
-impl Default for CardModel {
-    /// Return the frozen vocabulary card model builder.
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// One formatted Anki note payload.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Note {
-    pub fields: Vec<String>,
-    pub guid: String,
-    pub sort_field: String,
-}
-
-/// Assemble vocabulary notes from normalized entries.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VocabularyNote {
-    model: Model,
-}
-
-impl VocabularyNote {
-    /// Create one vocabulary note formatter.
-    pub fn new(model: Model) -> Self {
-        Self { model }
-    }
-}
-
-impl NoteFormat for VocabularyNote {
-    /// Return one formatted note for the entry and relative media tags.
-    fn note(&self, entry: &NormalizedEntry, audio: &str, image: &str) -> Note {
-        let source = if entry.highlight.is_empty() {
-            entry.sentence.clone()
-        } else {
-            entry.sentence.replace(
-                entry.highlight.as_str(),
-                format!("<strong><em>{}</em></strong>", entry.highlight).as_str(),
-            )
-        };
-        let fields = vec![
-            source,
-            entry.word.to_lowercase(),
-            Transcription::new(entry.pronunciation.clone()).formatted(),
-            entry.translation.clone(),
-            HtmlLineBreaks::new(entry.example.clone()).formatted(),
-            entry.importance.clone(),
-            String::from(audio),
-            String::from(image),
-            entry.hint.clone(),
-            HtmlLineBreaks::new(entry.context.clone()).formatted(),
-            Transcription::new(entry.transcription.clone()).formatted(),
-        ];
-        Note {
-            guid: guid(fields.as_slice()),
-            sort_field: fields[0].clone(),
-            fields,
-        }
-    }
-
-    /// Return the model used for note serialization.
-    fn model(&self) -> &Model {
-        &self.model
-    }
-}
-
 /// Assemble notes and media into one Anki deck package.
 #[derive(Clone, Debug)]
 pub struct VocabularyDeck<F> {
@@ -551,7 +281,7 @@ where
         let mut decks = parsed(conn, "decks")?;
         decks.insert(self.id.to_string(), self.deck());
         stored(conn, "decks", Value::Object(decks))?;
-        let model = self.format.model();
+        let model: &Model = self.format.model();
         let mut models = parsed(conn, "models")?;
         models.insert(model.id.to_string(), model.json(timestamp));
         stored(conn, "models", Value::Object(models))?;
@@ -636,6 +366,21 @@ where
     }
 }
 
+impl<F> Deck for VocabularyDeck<F>
+where
+    F: NoteFormat,
+{
+    /// Attach one media file path.
+    fn attach(&mut self, path: &Path) {
+        VocabularyDeck::<F>::attach(self, path.to_path_buf());
+    }
+
+    /// Add one note to the deck.
+    fn add(&mut self, entry: &NormalizedEntry, audio: &str, image: &str) {
+        VocabularyDeck::<F>::add(self, entry, audio, image);
+    }
+}
+
 fn stamp() -> Result<f64> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64())
 }
@@ -678,22 +423,6 @@ fn copy(path: &Path, writer: &mut ZipWriter<fs::File>) -> Result<()> {
     reader.read_to_end(&mut buffer)?;
     writer.write_all(buffer.as_slice())?;
     Ok(())
-}
-
-fn guid(fields: &[String]) -> String {
-    let value = fields.join("__");
-    let digest = Sha256::digest(value.as_bytes());
-    let mut number = 0u64;
-    for item in digest.iter().take(8) {
-        number <<= 8;
-        number += u64::from(*item);
-    }
-    let mut value = Vec::new();
-    while number > 0 {
-        value.push(BASE91[(number % BASE91.len() as u64) as usize]);
-        number /= BASE91.len() as u64;
-    }
-    value.iter().rev().collect()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
