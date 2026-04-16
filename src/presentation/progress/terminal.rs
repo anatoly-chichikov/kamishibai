@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use regex::Regex;
 
-use super::contracts::{Console, Output, Status};
+use super::contracts::{Console, Status};
 use super::uses_stdout;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -21,9 +21,9 @@ pub(super) const INTERVAL: Duration = Duration::from_millis(200);
 #[derive(Default)]
 pub struct StdoutOutput;
 
-impl Output for StdoutOutput {
+impl Console for StdoutOutput {
     /// Print one output line.
-    fn print(&mut self, text: &str) {
+    fn print(&mut self, text: &str, _highlight: bool) {
         println!("{text}");
     }
 }
@@ -211,9 +211,9 @@ fn links(text: &str) -> String {
         .into_owned()
 }
 
-impl Output for io::Stdout {
+impl Console for io::Stdout {
     /// Print one output line.
-    fn print(&mut self, text: &str) {
+    fn print(&mut self, text: &str, _highlight: bool) {
         println!("{text}");
     }
 }

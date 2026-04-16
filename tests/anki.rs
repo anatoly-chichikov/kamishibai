@@ -5,10 +5,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use kamishibai::anki::{
+use kamishibai::domain::entry::NormalizedEntry;
+use kamishibai::infrastructure::anki::{
     CardModel, HtmlLineBreaks, NoteFormat, StableId, Transcription, VocabularyDeck, VocabularyNote,
 };
-use kamishibai::input::NormalizedEntry;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use tempfile::TempDir;

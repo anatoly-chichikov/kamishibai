@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::{Result, bail};
 use image::DynamicImage;
 use serde_json::Value;
@@ -5,19 +7,22 @@ use serde_json::Value;
 use super::{BorderDetector, ImageSource, Progress, Renderer, SceneText};
 
 /// Render one scene through Gemini and reject invalid manga images.
-#[derive(Clone, Debug)]
-pub struct MangaRenderer<C, D> {
-    client: C,
+#[derive(Clone)]
+pub struct MangaRenderer<D> {
+    client: Rc<dyn ImageSource>,
     retries: usize,
     text: D,
     border: BorderDetector,
 }
 
-impl<C, D> MangaRenderer<C, D> {
+impl<D> MangaRenderer<D> {
     /// Create one validating manga renderer.
-    pub fn new(client: C, retries: usize, text: D, border: BorderDetector) -> Self {
+    pub fn new<C>(client: C, retries: usize, text: D, border: BorderDetector) -> Self
+    where
+        C: ImageSource + 'static,
+    {
         Self {
-            client,
+            client: Rc::new(client),
             retries,
             text,
             border,
@@ -25,9 +30,23 @@ impl<C, D> MangaRenderer<C, D> {
     }
 }
 
-impl<C, D> Renderer for MangaRenderer<C, D>
+impl<D> std::fmt::Debug for MangaRenderer<D>
 where
-    C: ImageSource,
+    D: std::fmt::Debug,
+{
+    /// Render one stable debug view for test diagnostics.
+    fn fmt(&self, item: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        item.debug_struct("MangaRenderer")
+            .field("client", &"ImageSource")
+            .field("retries", &self.retries)
+            .field("text", &self.text)
+            .field("border", &self.border)
+            .finish()
+    }
+}
+
+impl<D> Renderer for MangaRenderer<D>
+where
     D: SceneText,
 {
     /// Return one rendered image for the scene and word.

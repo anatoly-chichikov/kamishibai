@@ -23,8 +23,8 @@ impl LanguageEntry for NormalizedEntry {
 /// Audio generation settings for one language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AudioProfile {
-    language: String,
-    cache: String,
+    pub language: String,
+    pub cache: String,
 }
 
 impl AudioProfile {
@@ -35,23 +35,13 @@ impl AudioProfile {
             cache: cache.into(),
         }
     }
-
-    /// Return the prompt language.
-    pub fn language(&self) -> &str {
-        &self.language
-    }
-
-    /// Return the audio cache directory name.
-    pub fn cache(&self) -> &str {
-        &self.cache
-    }
 }
 
 /// Image generation settings for one language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImageProfile {
-    ocr: String,
-    cache: String,
+    pub ocr: String,
+    pub cache: String,
 }
 
 impl ImageProfile {
@@ -62,24 +52,14 @@ impl ImageProfile {
             cache: cache.into(),
         }
     }
-
-    /// Return the OCR language string.
-    pub fn ocr(&self) -> &str {
-        &self.ocr
-    }
-
-    /// Return the illustration cache directory name.
-    pub fn cache(&self) -> &str {
-        &self.cache
-    }
 }
 
 /// Deck naming settings for one language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeckNaming {
-    name: String,
-    prefix: String,
-    default: String,
+    pub name: String,
+    pub prefix: String,
+    pub default: String,
 }
 
 impl DeckNaming {
@@ -95,27 +75,12 @@ impl DeckNaming {
             default: default.into(),
         }
     }
-
-    /// Return the deck name.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Return the filesystem-safe deck prefix.
-    pub fn prefix(&self) -> &str {
-        &self.prefix
-    }
-
-    /// Return the default input filename.
-    pub fn default(&self) -> &str {
-        &self.default
-    }
 }
 
 /// Report font settings for one language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FontProfile {
-    report: String,
+    pub report: String,
 }
 
 impl FontProfile {
@@ -125,20 +90,15 @@ impl FontProfile {
             report: report.into(),
         }
     }
-
-    /// Return the report font family name.
-    pub fn report(&self) -> &str {
-        &self.report
-    }
 }
 
 /// User-facing labels for reports and related UI.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiLabels {
-    sentence: String,
-    context: String,
-    hint: String,
-    importance: String,
+    pub sentence: String,
+    pub context: String,
+    pub hint: String,
+    pub importance: String,
 }
 
 impl UiLabels {
@@ -156,37 +116,17 @@ impl UiLabels {
             importance: importance.into(),
         }
     }
-
-    /// Return the sentence label.
-    pub fn sentence(&self) -> &str {
-        &self.sentence
-    }
-
-    /// Return the context label.
-    pub fn context(&self) -> &str {
-        &self.context
-    }
-
-    /// Return the hint label.
-    pub fn hint(&self) -> &str {
-        &self.hint
-    }
-
-    /// Return the importance label.
-    pub fn importance(&self) -> &str {
-        &self.importance
-    }
 }
 
 /// One language profile composed from runtime and UI settings.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LanguageProfile {
-    code: String,
-    audio: AudioProfile,
-    imagery: ImageProfile,
-    naming: DeckNaming,
-    font: FontProfile,
-    labels: UiLabels,
+    pub code: String,
+    pub audio: AudioProfile,
+    pub imagery: ImageProfile,
+    pub naming: DeckNaming,
+    pub font: FontProfile,
+    pub labels: UiLabels,
 }
 
 impl LanguageProfile {
@@ -207,35 +147,5 @@ impl LanguageProfile {
             font,
             labels,
         }
-    }
-
-    /// Return the language code.
-    pub fn code(&self) -> &str {
-        &self.code
-    }
-
-    /// Return the audio profile.
-    pub fn audio(&self) -> &AudioProfile {
-        &self.audio
-    }
-
-    /// Return the image profile.
-    pub fn imagery(&self) -> &ImageProfile {
-        &self.imagery
-    }
-
-    /// Return the naming profile.
-    pub fn naming(&self) -> &DeckNaming {
-        &self.naming
-    }
-
-    /// Return the font profile.
-    pub fn font(&self) -> &FontProfile {
-        &self.font
-    }
-
-    /// Return the UI labels.
-    pub fn labels(&self) -> &UiLabels {
-        &self.labels
     }
 }

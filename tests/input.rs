@@ -4,7 +4,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use kamishibai::input::{NormalizedEntry, Vocabulary, VocabularyMapping};
+use kamishibai::domain::entry::NormalizedEntry;
+use kamishibai::infrastructure::input::{Vocabulary, VocabularyMapping};
 use tempfile::TempDir;
 
 /// Write one JSON document to a temporary file.

@@ -4,15 +4,14 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use kamishibai::input::NormalizedEntry;
-use kamishibai::media::{
-    AudioService, AudioSource, Deck, Failure, IllustrationService, IllustrationSource, Media,
-    Pipeline, PipelineProgress, Profiles, SceneSource,
+use kamishibai::application::media::{
+    AudioService, Deck, Failure, IllustrationService, MediaSource, Pipeline, PipelineProgress,
+    SceneSource,
 };
-use kamishibai::profile::{
-    AudioProfile, DeckNaming, FontProfile, ImageProfile, LanguageProfile, UiLabels,
-};
-use kamishibai::scene::{ImageSource, Progress as SceneProgress};
+use kamishibai::domain::entry::NormalizedEntry;
+use kamishibai::infrastructure::audio::Speaker;
+use kamishibai::infrastructure::media::Media;
+use kamishibai::infrastructure::scene::{ImageSource, Progress as SceneProgress};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -78,7 +77,7 @@ impl SceneSource for FakeClient {
     }
 }
 
-impl kamishibai::audio::Speaker for FakeClient {
+impl Speaker for FakeClient {
     /// Return one PCM audio payload for the prompt and source text.
     fn speech(&self, _prompt: &str, _text: &str) -> Result<Vec<u8>> {
         Ok(vec![0, 0, 1, 0])
@@ -89,45 +88,6 @@ impl ImageSource for FakeClient {
     /// Return one encoded image payload for the scene and word.
     fn image(&self, _scene: &Value, _word: &str) -> Result<Vec<u8>> {
         Ok(include_bytes!("../tests/fixtures/reference/inputs/single-target-en.json").to_vec())
-    }
-}
-
-/// Fake profile registry for media registry tests.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct FakeProfiles {
-    fallback: String,
-    item: LanguageProfile,
-}
-
-impl FakeProfiles {
-    /// Create one fake profile registry.
-    fn new(code: &str, fallback: &str) -> Self {
-        Self {
-            fallback: String::from(fallback),
-            item: LanguageProfile::new(
-                code,
-                AudioProfile::new("Irish", "audio-ga"),
-                ImageProfile::new("eng+gle", "manga-ga"),
-                DeckNaming::new("Irish Vocabulary", "ga", "kamishibai.json"),
-                FontProfile::new("DejaVu Sans"),
-                UiLabels::new("Translation", "Context", "Hint", "Importance"),
-            ),
-        }
-    }
-}
-
-impl Profiles for FakeProfiles {
-    /// Return one language profile for the target code.
-    fn item(&self, code: &str) -> Result<LanguageProfile> {
-        if code == self.item.code() {
-            return Ok(self.item.clone());
-        }
-        Err(anyhow!("Unsupported target language '{code}'"))
-    }
-
-    /// Return the fallback OCR selection.
-    fn fallback(&self) -> &str {
-        self.fallback.as_str()
     }
 }
 
@@ -298,36 +258,50 @@ enum IllustrationFixture {
     Success(SuccessIllustration),
 }
 
-/// Audio provider that switches by entry word.
+/// Fixed media provider for pipeline tests.
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct SwitchingAudio {
-    items: BTreeMap<String, AudioFixture>,
+struct FixedMedia {
+    audio: AudioFixture,
+    illustration: IllustrationFixture,
 }
 
-impl AudioSource for SwitchingAudio {
+impl MediaSource for FixedMedia {
     type Audio = AudioFixture;
+    type Illustration = IllustrationFixture;
 
     /// Return the audio service for one entry.
-    fn audio(&self, entry: &NormalizedEntry) -> Result<Self::Audio> {
-        self.items
+    fn audio(&mut self, _entry: &NormalizedEntry) -> Result<Self::Audio> {
+        Ok(self.audio.clone())
+    }
+
+    /// Return the illustration service for one entry.
+    fn illustration(&mut self, _entry: &NormalizedEntry) -> Result<Self::Illustration> {
+        Ok(self.illustration.clone())
+    }
+}
+
+/// Switching media provider that selects fixtures by entry word.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SwitchingMedia {
+    audio: BTreeMap<String, AudioFixture>,
+    illustration: BTreeMap<String, IllustrationFixture>,
+}
+
+impl MediaSource for SwitchingMedia {
+    type Audio = AudioFixture;
+    type Illustration = IllustrationFixture;
+
+    /// Return the audio service for one entry.
+    fn audio(&mut self, entry: &NormalizedEntry) -> Result<Self::Audio> {
+        self.audio
             .get(entry.word.as_str())
             .cloned()
             .ok_or_else(|| anyhow!("Missing audio fixture for '{}'", entry.word))
     }
-}
-
-/// Illustration provider that switches by entry word.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct SwitchingIllustration {
-    items: BTreeMap<String, IllustrationFixture>,
-}
-
-impl IllustrationSource for SwitchingIllustration {
-    type Illustration = IllustrationFixture;
 
     /// Return the illustration service for one entry.
-    fn illustration(&self, entry: &NormalizedEntry) -> Result<Self::Illustration> {
-        self.items
+    fn illustration(&mut self, entry: &NormalizedEntry) -> Result<Self::Illustration> {
+        self.illustration
             .get(entry.word.as_str())
             .cloned()
             .ok_or_else(|| anyhow!("Missing illustration fixture for '{}'", entry.word))
@@ -393,38 +367,38 @@ impl PipelineProgress for RecorderProgress {
     }
 }
 
-/// Media uses injected profile cache names for both service types.
+/// Media uses the supported profile cache names for both service types.
 #[test]
-fn media_uses_injected_profile_cache_names_for_both_service_types() -> Result<()> {
+fn media_uses_the_supported_profile_cache_names_for_both_service_types() -> Result<()> {
     let directory = TempDir::new()?;
-    let media = Media::configured(FakeClient, directory.path(), FakeProfiles::new("ga", "osd"));
-    let audio = media.audio(&entry("focal", "frása", "ga"))?;
-    let illustration = media.illustration(&entry("focal", "frása", "ga"))?;
+    let mut media = Media::new(FakeClient, directory.path());
+    let audio = media.audio(&entry("focal", "frása", "en"))?;
+    let illustration = media.illustration(&entry("focal", "frása", "en"))?;
     assert_eq!(
         (
             audio
                 .filepath("tone.wav")?
                 .to_string_lossy()
-                .ends_with("audio-ga/tone.wav"),
+                .ends_with("audio-en/tone.wav"),
             illustration
                 .filepath("panel.jpg")?
                 .to_string_lossy()
-                .ends_with("manga-ga/panel.jpg"),
+                .ends_with("manga-en/panel.jpg"),
         ),
         (true, true),
-        "media no longer uses the injected profile cache names for both service types"
+        "media no longer uses the supported profile cache names for both service types"
     );
     Ok(())
 }
 
-/// Media keeps the injected fallback OCR selection in illustration wiring.
+/// Media keeps the registry fallback OCR selection in illustration wiring.
 #[test]
-fn media_keeps_the_injected_fallback_ocr_selection() -> Result<()> {
+fn media_keeps_the_registry_fallback_ocr_selection() -> Result<()> {
     let directory = TempDir::new()?;
-    let media = Media::configured(FakeClient, directory.path(), FakeProfiles::new("ga", "osd"));
+    let mut media = Media::new(FakeClient, directory.path());
     assert!(
-        format!("{:?}", media.illustration(&entry("focal", "frása", "ga"))?).contains("\"osd\""),
-        "media no longer keeps the injected fallback ocr selection in illustration wiring"
+        format!("{:?}", media.illustration(&entry("focal", "frása", "en"))?).contains("\"eng\""),
+        "media no longer keeps the registry fallback ocr selection in illustration wiring"
     );
     Ok(())
 }
@@ -434,8 +408,14 @@ fn media_keeps_the_injected_fallback_ocr_selection() -> Result<()> {
 fn pipeline_records_failures_for_empty_example_text() {
     let directory = TempDir::new().expect("temp directory must exist");
     let mut pipeline = Pipeline::new(
-        SuccessAudio::new(directory.path(), "demo.wav", false),
-        SuccessIllustration::new(directory.path(), "demo.jpg", false),
+        FixedMedia {
+            audio: AudioFixture::Success(SuccessAudio::new(directory.path(), "demo.wav", false)),
+            illustration: IllustrationFixture::Success(SuccessIllustration::new(
+                directory.path(),
+                "demo.jpg",
+                false,
+            )),
+        },
         RecorderDeck::default(),
         RecorderProgress::default(),
     );
@@ -455,8 +435,17 @@ fn pipeline_records_failures_for_empty_example_text() {
 fn pipeline_records_audio_generation_failures() {
     let directory = TempDir::new().expect("temp directory must exist");
     let mut pipeline = Pipeline::new(
-        FailingAudio::new(directory.path(), "503 UNAVAILABLE: сервер недоступен"),
-        SuccessIllustration::new(directory.path(), "demo.jpg", false),
+        FixedMedia {
+            audio: AudioFixture::Failure(FailingAudio::new(
+                directory.path(),
+                "503 UNAVAILABLE: сервер недоступен",
+            )),
+            illustration: IllustrationFixture::Success(SuccessIllustration::new(
+                directory.path(),
+                "demo.jpg",
+                false,
+            )),
+        },
         RecorderDeck::default(),
         RecorderProgress::default(),
     );
@@ -473,8 +462,13 @@ fn pipeline_records_audio_generation_failures() {
 fn pipeline_records_illustration_generation_failures() {
     let directory = TempDir::new().expect("temp directory must exist");
     let mut pipeline = Pipeline::new(
-        SuccessAudio::new(directory.path(), "demo.wav", false),
-        FailingIllustration::new(directory.path(), "503 UNAVAILABLE: сервер недоступен"),
+        FixedMedia {
+            audio: AudioFixture::Success(SuccessAudio::new(directory.path(), "demo.wav", false)),
+            illustration: IllustrationFixture::Failure(FailingIllustration::new(
+                directory.path(),
+                "503 UNAVAILABLE: сервер недоступен",
+            )),
+        },
         RecorderDeck::default(),
         RecorderProgress::default(),
     );
@@ -491,8 +485,8 @@ fn pipeline_records_illustration_generation_failures() {
 fn pipeline_continues_after_one_audio_failure_and_keeps_the_later_success() {
     let directory = TempDir::new().expect("temp directory must exist");
     let mut pipeline = Pipeline::new(
-        SwitchingAudio {
-            items: BTreeMap::from([
+        SwitchingMedia {
+            audio: BTreeMap::from([
                 (
                     String::from("провал"),
                     AudioFixture::Failure(FailingAudio::new(
@@ -505,8 +499,15 @@ fn pipeline_continues_after_one_audio_failure_and_keeps_the_later_success() {
                     AudioFixture::Success(SuccessAudio::new(directory.path(), "second.wav", false)),
                 ),
             ]),
+            illustration: BTreeMap::from([(
+                String::from("успех"),
+                IllustrationFixture::Success(SuccessIllustration::new(
+                    directory.path(),
+                    "second.jpg",
+                    false,
+                )),
+            )]),
         },
-        SuccessIllustration::new(directory.path(), "second.jpg", false),
         RecorderDeck::default(),
         RecorderProgress::default(),
     );
@@ -532,9 +533,18 @@ fn pipeline_continues_after_one_audio_failure_and_keeps_the_later_success() {
 fn pipeline_continues_after_one_illustration_failure_and_keeps_the_later_success() {
     let directory = TempDir::new().expect("temp directory must exist");
     let mut pipeline = Pipeline::new(
-        SuccessAudio::new(directory.path(), "second.wav", false),
-        SwitchingIllustration {
-            items: BTreeMap::from([
+        SwitchingMedia {
+            audio: BTreeMap::from([
+                (
+                    String::from("провал"),
+                    AudioFixture::Success(SuccessAudio::new(directory.path(), "first.wav", false)),
+                ),
+                (
+                    String::from("успех"),
+                    AudioFixture::Success(SuccessAudio::new(directory.path(), "second.wav", false)),
+                ),
+            ]),
+            illustration: BTreeMap::from([
                 (
                     String::from("провал"),
                     IllustrationFixture::Failure(FailingIllustration::new(
@@ -577,8 +587,14 @@ fn pipeline_continues_after_one_illustration_failure_and_keeps_the_later_success
 fn pipeline_attaches_both_media_files_and_keeps_the_frozen_card_payload() {
     let directory = TempDir::new().expect("temp directory must exist");
     let mut pipeline = Pipeline::new(
-        SuccessAudio::new(directory.path(), "demo.wav", true),
-        SuccessIllustration::new(directory.path(), "demo.jpg", false),
+        FixedMedia {
+            audio: AudioFixture::Success(SuccessAudio::new(directory.path(), "demo.wav", true)),
+            illustration: IllustrationFixture::Success(SuccessIllustration::new(
+                directory.path(),
+                "demo.jpg",
+                false,
+            )),
+        },
         RecorderDeck::default(),
         RecorderProgress::default(),
     );

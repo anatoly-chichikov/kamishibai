@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 use hound::{SampleFormat, WavSpec, WavWriter};
 
 use crate::application::media::AudioService;
-use crate::infrastructure::cache::FileCache;
+use crate::infrastructure::cache::Cache;
 
 /// Generate raw PCM speech bytes for one prompt.
 pub trait Speaker {
@@ -17,19 +17,18 @@ pub trait Speaker {
 
 /// Cached audio generator with WAV persistence.
 #[derive(Clone, Debug)]
-pub struct Audio<C, S> {
-    cache: C,
+pub struct Audio<S> {
+    cache: Cache,
     prompt: String,
     speaker: S,
 }
 
-impl<C, S> Audio<C, S>
+impl<S> Audio<S>
 where
-    C: FileCache,
     S: Speaker,
 {
     /// Create one cached audio generator.
-    pub fn new(cache: C, prompt: impl Into<String>, speaker: S) -> Self {
+    pub fn new(cache: Cache, prompt: impl Into<String>, speaker: S) -> Self {
         Self {
             cache,
             prompt: prompt.into(),
@@ -90,18 +89,17 @@ fn write(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-impl<C, S> AudioService for Audio<C, S>
+impl<S> AudioService for Audio<S>
 where
-    C: FileCache,
     S: Speaker,
 {
     /// Generate one cached audio filename and cache label.
     fn generate(&self, text: &str) -> Result<(String, bool)> {
-        Audio::<C, S>::generate(self, text)
+        Audio::<S>::generate(self, text)
     }
 
     /// Return one absolute cached audio path.
     fn filepath(&self, filename: &str) -> Result<PathBuf> {
-        Audio::<C, S>::filepath(self, filename)
+        Audio::<S>::filepath(self, filename)
     }
 }

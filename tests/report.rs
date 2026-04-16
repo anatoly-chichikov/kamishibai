@@ -5,9 +5,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use image::{Rgb, RgbImage};
-use kamishibai::input::NormalizedEntry;
-use kamishibai::profile::{Fonts, Labels};
-use kamishibai::report::{FontFamily, FontPath, Report, ReportLayout, Thumbnail, VocabularyLayout};
+use kamishibai::domain::entry::NormalizedEntry;
+use kamishibai::domain::profile::{Fonts, Labels};
+use kamishibai::infrastructure::report::{
+    FontFamily, FontPath, Report, ReportLayout, Thumbnail, VocabularyLayout,
+};
 use lopdf::Document;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -402,10 +404,10 @@ fn reports_keep_the_frozen_layout_rows_labels_fonts_and_page_count_snapshot() ->
                 json!({
                     "font": Fonts::default().selected(entry).name(),
                     "labels": {
-                        "context": Labels::default().selected(entry).context(),
-                        "hint": Labels::default().selected(entry).hint(),
-                        "importance": Labels::default().selected(entry).importance(),
-                        "sentence": Labels::default().selected(entry).sentence(),
+                        "context": Labels::default().selected(entry).context,
+                        "hint": Labels::default().selected(entry).hint,
+                        "importance": Labels::default().selected(entry).importance,
+                        "sentence": Labels::default().selected(entry).sentence,
                     },
                     "rows": manifest_rows(entry),
                     "source_lang": entry.source_lang,

@@ -4,12 +4,12 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use kamishibai::media::{Failure, PipelineProgress};
-use kamishibai::progress::{
-    AlignedStatus, AppProgress, Console, Live, Output, PlainProgress, ProgressSelector,
-    RichProgress, SelectedProgress, Spinner, Status,
+use kamishibai::application::media::{Failure, PipelineProgress};
+use kamishibai::infrastructure::scene::Progress as SceneProgress;
+use kamishibai::presentation::progress::{
+    AlignedStatus, AppProgress, Console, Live, PlainProgress, ProgressSelector, RichProgress,
+    SelectedProgress, Spinner, Status,
 };
-use kamishibai::scene::Progress as SceneProgress;
 /// Shared line recorder for progress tests.
 #[derive(Clone, Debug, Default)]
 struct Lines {
@@ -42,9 +42,9 @@ struct FakeOutput {
     lines: Lines,
 }
 
-impl Output for FakeOutput {
+impl Console for FakeOutput {
     /// Print one output line.
-    fn print(&mut self, text: &str) {
+    fn print(&mut self, text: &str, _highlight: bool) {
         self.lines.items.borrow_mut().push(String::from(text));
     }
 }

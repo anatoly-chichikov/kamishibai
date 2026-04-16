@@ -5,6 +5,5 @@ mod ports;
 
 pub use pipeline::Pipeline;
 pub use ports::{
-    AudioService, AudioSource, Deck, Failure, IllustrationService, IllustrationSource,
-    PipelineProgress, Profiles, SceneSource,
+    AudioService, Deck, Failure, IllustrationService, MediaSource, PipelineProgress, SceneSource,
 };

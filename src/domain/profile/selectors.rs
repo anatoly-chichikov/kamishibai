@@ -41,7 +41,7 @@ pub fn naming(custom: Option<&str>, entries: &[NormalizedEntry]) -> DeckNaming {
                 .expect("single target set must contain one code"),
         )
         .expect("supported target language must resolve")
-        .naming()
+        .naming
         .clone();
     }
     DeckNaming::new(DEFAULT_DECK, DEFAULT_PREFIX, DEFAULT_FILE)
@@ -89,11 +89,7 @@ impl Fonts {
         let names = [entry.source(), entry.target()]
             .into_iter()
             .flatten()
-            .filter_map(|code| {
-                profile(code)
-                    .ok()
-                    .map(|item| String::from(item.font().report()))
-            })
+            .filter_map(|code| profile(code).ok().map(|item| item.font.report))
             .collect::<Vec<_>>();
         if let Some(item) = names
             .iter()
@@ -133,7 +129,7 @@ impl Labels {
             return self.default.clone();
         };
         match profile(code) {
-            Ok(item) => item.labels().clone(),
+            Ok(item) => item.labels,
             Err(_) => self.default.clone(),
         }
     }

@@ -2,12 +2,6 @@ use std::path::Path;
 
 use crate::application::media::{Failure, PipelineProgress};
 
-/// Print one plain output line.
-pub trait Output {
-    /// Print one output line.
-    fn print(&mut self, text: &str);
-}
-
 /// Print one terminal line with an optional highlight hint.
 pub trait Console {
     /// Print one terminal line.
@@ -78,26 +72,5 @@ where
     /// Stop the status indicator.
     fn stop(&mut self) {
         self.live.stop();
-    }
-}
-
-impl<L, S> AlignedStatus<L, S>
-where
-    L: Live,
-    S: Spinner,
-{
-    /// Update the visible status text.
-    pub fn update(&mut self, text: &str) {
-        Status::update(self, text);
-    }
-
-    /// Start the status indicator.
-    pub fn start(&mut self) {
-        Status::start(self);
-    }
-
-    /// Stop the status indicator.
-    pub fn stop(&mut self) {
-        Status::stop(self);
     }
 }

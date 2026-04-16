@@ -1,1 +1,1 @@
-pub(crate) mod media;
+pub mod media;

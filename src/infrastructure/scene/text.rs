@@ -8,7 +8,7 @@ use image::{DynamicImage, GrayImage};
 use ocr_rs::OcrResult_;
 use serde_json::Value;
 
-use crate::ocr;
+use crate::infrastructure::ocr;
 
 use super::contracts::{ImageText, SceneText};
 use super::redirect::{discarded, hush, locked};

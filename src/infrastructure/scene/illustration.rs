@@ -8,26 +8,25 @@ use image::codecs::jpeg::JpegEncoder;
 use serde_json::Value;
 
 use crate::application::media::IllustrationService;
-use crate::infrastructure::cache::FileCache;
+use crate::infrastructure::cache::Cache;
 
 use super::{Progress, Renderer, Translator};
 
 /// Cached illustration generator with scene JSON persistence.
 #[derive(Clone, Debug)]
-pub struct Illustration<C, T, R> {
-    cache: C,
+pub struct Illustration<T, R> {
+    cache: Cache,
     translator: T,
     renderer: R,
 }
 
-impl<C, T, R> Illustration<C, T, R>
+impl<T, R> Illustration<T, R>
 where
-    C: FileCache,
     T: Translator,
     R: Renderer,
 {
     /// Create one cached illustration generator.
-    pub fn new(cache: C, translator: T, renderer: R) -> Self {
+    pub fn new(cache: Cache, translator: T, renderer: R) -> Self {
         Self {
             cache,
             translator,
@@ -123,9 +122,8 @@ fn write_image(path: &Path, image: &DynamicImage) -> Result<()> {
     Ok(())
 }
 
-impl<C, T, R> IllustrationService for Illustration<C, T, R>
+impl<T, R> IllustrationService for Illustration<T, R>
 where
-    C: FileCache,
     T: Translator,
     R: Renderer,
 {
@@ -137,11 +135,11 @@ where
         target: &str,
         progress: &mut dyn Progress,
     ) -> Result<(String, bool)> {
-        Illustration::<C, T, R>::generate(self, sentence, word, target, progress)
+        Illustration::<T, R>::generate(self, sentence, word, target, progress)
     }
 
     /// Return one absolute cached illustration path.
     fn filepath(&self, filename: &str) -> Result<PathBuf> {
-        Illustration::<C, T, R>::filepath(self, filename)
+        Illustration::<T, R>::filepath(self, filename)
     }
 }

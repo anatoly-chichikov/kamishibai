@@ -4,27 +4,22 @@ use anyhow::Result;
 
 use crate::domain::entry::NormalizedEntry;
 
-use super::{
-    AudioService, AudioSource, Deck, Failure, IllustrationService, IllustrationSource,
-    PipelineProgress,
-};
+use super::{AudioService, Deck, Failure, IllustrationService, MediaSource, PipelineProgress};
 
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
 
-/// Orchestrate audio, illustration, deck, and progress for one batch.
-pub struct Pipeline<A, I, D, P> {
-    audio: A,
-    illustration: I,
+/// Orchestrate media, deck, and progress for one batch.
+pub struct Pipeline<M, D, P> {
+    media: M,
     deck: D,
     progress: P,
 }
 
-impl<A, I, D, P> Pipeline<A, I, D, P> {
+impl<M, D, P> Pipeline<M, D, P> {
     /// Create one media pipeline.
-    pub fn new(audio: A, illustration: I, deck: D, progress: P) -> Self {
+    pub fn new(media: M, deck: D, progress: P) -> Self {
         Self {
-            audio,
-            illustration,
+            media,
             deck,
             progress,
         }
@@ -46,10 +41,9 @@ impl<A, I, D, P> Pipeline<A, I, D, P> {
     }
 }
 
-impl<A, I, D, P> Pipeline<A, I, D, P>
+impl<M, D, P> Pipeline<M, D, P>
 where
-    A: AudioSource,
-    I: IllustrationSource,
+    M: MediaSource,
     D: Deck,
     P: PipelineProgress,
 {
@@ -63,7 +57,7 @@ where
         for (index, entry) in entries.iter().enumerate() {
             self.progress
                 .card(index + 1, entries.len(), entry.word.as_str());
-            let audio = match self.audio.audio(entry) {
+            let audio = match self.media.audio(entry) {
                 Ok(item) => item,
                 Err(error) => {
                     let reason = error.to_string();
@@ -81,7 +75,7 @@ where
                     continue;
                 }
             };
-            let illustration = match self.illustration.illustration(entry) {
+            let illustration = match self.media.illustration(entry) {
                 Ok(item) => item,
                 Err(error) => {
                     let reason = error.to_string();
@@ -112,7 +106,7 @@ where
     }
 
     /// Generate audio and return the filename plus absolute path.
-    fn audio(&mut self, entry: &NormalizedEntry, audio: &A::Audio) -> Result<(String, PathBuf)> {
+    fn audio(&mut self, entry: &NormalizedEntry, audio: &M::Audio) -> Result<(String, PathBuf)> {
         self.progress.step("Generating audio");
         let (filename, cached) = audio.generate(entry.example.as_str())?;
         let path = audio.filepath(filename.as_str())?;
@@ -128,7 +122,7 @@ where
     fn image(
         &mut self,
         entry: &NormalizedEntry,
-        illustration: &I::Illustration,
+        illustration: &M::Illustration,
     ) -> Result<(String, PathBuf)> {
         let (filename, _cached) = illustration.generate(
             entry.example.as_str(),

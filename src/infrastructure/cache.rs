@@ -1,25 +1,20 @@
 //! Persistent filesystem cache helpers for media artifacts.
 
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use tempfile::Builder;
 
-/// Read and write cached media files.
-pub trait FileCache {
-    /// Return the root cache directory.
-    fn root(&self) -> PathBuf;
-    /// Return the named cache directory.
-    fn path(&self) -> PathBuf;
-    /// Return whether one cached filename already exists.
-    fn exists(&self, filename: &str) -> bool;
-    /// Return the absolute path for one cached filename.
-    fn filepath(&self, filename: &str) -> Result<PathBuf>;
-    /// Return one staged temporary file path.
-    fn stage(&self, suffix: &str) -> Result<PathBuf>;
-    /// Atomically replace the final filename with the staged file.
-    fn commit(&self, staged: &Path, filename: &str) -> Result<()>;
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CommitPlan {
+    Failing {
+        count: Rc<RefCell<usize>>,
+        index: usize,
+    },
+    Normal,
 }
 
 /// Persistent cache rooted in one directory and named subdirectory.
@@ -27,6 +22,7 @@ pub trait FileCache {
 pub struct Cache {
     root: PathBuf,
     path: PathBuf,
+    plan: CommitPlan,
 }
 
 impl Cache {
@@ -36,34 +32,46 @@ impl Cache {
         Self {
             path: root.join(name.into()),
             root,
+            plan: CommitPlan::Normal,
         }
     }
-}
 
-impl FileCache for Cache {
+    /// Create one cache handle that fails one selected commit call.
+    pub fn failing(name: impl Into<String>, root: impl Into<PathBuf>, index: usize) -> Self {
+        let root = root.into();
+        Self {
+            path: root.join(name.into()),
+            root,
+            plan: CommitPlan::Failing {
+                count: Rc::new(RefCell::new(0)),
+                index,
+            },
+        }
+    }
+
     /// Return the root cache directory.
-    fn root(&self) -> PathBuf {
+    pub fn root(&self) -> PathBuf {
         self.root.clone()
     }
 
     /// Return the named cache directory.
-    fn path(&self) -> PathBuf {
+    pub fn path(&self) -> PathBuf {
         self.path.clone()
     }
 
     /// Return whether one cached filename already exists.
-    fn exists(&self, filename: &str) -> bool {
+    pub fn exists(&self, filename: &str) -> bool {
         self.path.join(filename).exists()
     }
 
     /// Return the absolute path for one cached filename.
-    fn filepath(&self, filename: &str) -> Result<PathBuf> {
+    pub fn filepath(&self, filename: &str) -> Result<PathBuf> {
         fs::create_dir_all(&self.path)?;
         Ok(self.path.join(filename))
     }
 
     /// Return one staged temporary file path.
-    fn stage(&self, suffix: &str) -> Result<PathBuf> {
+    pub fn stage(&self, suffix: &str) -> Result<PathBuf> {
         fs::create_dir_all(&self.path)?;
         let file = Builder::new().suffix(suffix).tempfile_in(&self.path)?;
         let (_handle, path) = file.keep()?;
@@ -71,8 +79,15 @@ impl FileCache for Cache {
     }
 
     /// Atomically replace the final filename with the staged file.
-    fn commit(&self, staged: &Path, filename: &str) -> Result<()> {
+    pub fn commit(&self, staged: &Path, filename: &str) -> Result<()> {
         fs::create_dir_all(&self.path)?;
+        if let CommitPlan::Failing { count, index } = &self.plan {
+            let current = *count.borrow();
+            *count.borrow_mut() += 1;
+            if current == *index {
+                return Err(anyhow!("commit failed"));
+            }
+        }
         fs::rename(staged, self.path.join(filename))?;
         Ok(())
     }

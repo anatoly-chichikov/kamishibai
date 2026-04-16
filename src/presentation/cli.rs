@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::io::IsTerminal;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use time::format_description::parse;
 
 use crate::application::media::Pipeline;
-use crate::domain::profile::naming;
+use crate::domain::profile::{Fonts, Labels, naming};
 use crate::infrastructure::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
 use crate::infrastructure::gemini::GeminiClient;
 use crate::infrastructure::input::{Vocabulary, VocabularyMapping};
@@ -20,7 +20,6 @@ use crate::infrastructure::paths::{LocationArgs, Locations, SystemContext};
 use crate::infrastructure::report::{Report, Thumbnail, VocabularyLayout};
 use crate::presentation::diagnosis::{DiagnosisSelector, Display};
 use crate::presentation::progress::{AppProgress, ProgressSelector};
-use crate::profile::{Fonts, Labels};
 
 /// Parsed CLI arguments for the application contract.
 #[derive(Clone, Debug, Eq, Parser, PartialEq)]
@@ -62,22 +61,6 @@ impl CliError {
             path,
         }
     }
-
-    /// Return the human-facing failure message.
-    pub fn message(&self) -> &str {
-        match self {
-            Self::Failure { message, .. } => message.as_str(),
-            Self::Interrupted => "Interrupted",
-        }
-    }
-
-    /// Return the optional filesystem path context.
-    pub fn path(&self) -> Option<&Path> {
-        match self {
-            Self::Failure { path, .. } => path.as_deref(),
-            Self::Interrupted => None,
-        }
-    }
 }
 
 /// Parse CLI arguments into the public argument shape.
@@ -100,8 +83,8 @@ where
     match main() {
         Ok(()) => 0,
         Err(CliError::Interrupted) => 130,
-        Err(error) => {
-            diagnosis.show(error.message(), error.path());
+        Err(CliError::Failure { message, path }) => {
+            diagnosis.show(message.as_str(), path.as_deref());
             1
         }
     }
@@ -136,18 +119,18 @@ where
     );
     let model = CardModel::new().model();
     let container = VocabularyDeck::new(
-        StableId::new(decknaming.name()).value(),
-        decknaming.name(),
+        StableId::new(decknaming.name.as_str()).value(),
+        decknaming.name.as_str(),
         VocabularyNote::new(model),
         Vec::<PathBuf>::new(),
     );
-    let progress = ProgressSelector::new(if crate::progress::uses_stdout() {
+    let progress = ProgressSelector::new(if crate::presentation::progress::uses_stdout() {
         std::io::stdout().is_terminal()
     } else {
         std::io::stderr().is_terminal()
     })
     .selected();
-    let mut pipeline = Pipeline::new(media.clone(), media, container, progress);
+    let mut pipeline = Pipeline::new(media, container, progress);
     let (failed, processed) = pipeline.process(entries.as_slice());
     let output = resolved
         .output()
@@ -155,7 +138,7 @@ where
     fs::create_dir_all(&output)
         .map_err(|error| CliError::handled(error.to_string(), Some(output.clone())))?;
     let stamp = stamp().map_err(|error| CliError::handled(error.to_string(), None))?;
-    let apkg = output.join(format!("{}_{}.apkg", decknaming.prefix(), stamp));
+    let apkg = output.join(format!("{}_{}.apkg", decknaming.prefix, stamp));
     pipeline
         .deck()
         .save(&apkg)
@@ -164,7 +147,7 @@ where
     for (entry, imagepath) in processed.clone() {
         report.append(&entry, Some(imagepath));
     }
-    let pdf = output.join(format!("{}_{}.pdf", decknaming.prefix(), stamp));
+    let pdf = output.join(format!("{}_{}.pdf", decknaming.prefix, stamp));
     report
         .save(&pdf, &Thumbnail::new(150))
         .map_err(|error| CliError::handled(error.to_string(), Some(pdf.clone())))?;

@@ -1,6 +1,6 @@
 //! Tests for embedded Rust assets.
 
-use kamishibai::assets;
+use kamishibai::infrastructure::assets;
 
 /// Embedded audio prompt stays aligned with the Python baseline asset.
 #[test]

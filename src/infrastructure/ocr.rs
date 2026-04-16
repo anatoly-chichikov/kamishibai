@@ -8,7 +8,7 @@ use anyhow::{Result, anyhow};
 use ocr_rs::{OcrEngine, OcrEngineConfig};
 use reqwest::blocking::Client;
 
-use crate::infrastructure::cache::{Cache, FileCache};
+use crate::infrastructure::cache::Cache;
 
 const CACHE: &str = "ocr-models";
 const URL: &str = "https://raw.githubusercontent.com/zibo-chen/rust-paddle-ocr/next/models";

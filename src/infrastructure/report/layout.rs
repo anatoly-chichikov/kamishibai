@@ -88,17 +88,23 @@ where
             lines.push((entry.example.clone(), 9.0));
         }
         if !entry.sentence.is_empty() {
-            lines.push((format!("{}: {}", labels.sentence(), entry.sentence), 9.0));
+            lines.push((
+                format!("{}: {}", labels.sentence.as_str(), entry.sentence),
+                9.0,
+            ));
         }
         if !entry.context.is_empty() {
-            lines.push((format!("{}: {}", labels.context(), entry.context), 8.0));
+            lines.push((
+                format!("{}: {}", labels.context.as_str(), entry.context),
+                8.0,
+            ));
         }
         if !entry.hint.is_empty() {
-            lines.push((format!("{}: {}", labels.hint(), entry.hint), 8.0));
+            lines.push((format!("{}: {}", labels.hint.as_str(), entry.hint), 8.0));
         }
         if !entry.importance.is_empty() {
             lines.push((
-                format!("{}: {}/10", labels.importance(), entry.importance),
+                format!("{}: {}/10", labels.importance.as_str(), entry.importance),
                 8.0,
             ));
         }

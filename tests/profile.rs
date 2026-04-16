@@ -1,8 +1,8 @@
 //! Tests for language profiles, naming, labels, and fonts.
 
 use anyhow::Result;
-use kamishibai::input::NormalizedEntry;
-use kamishibai::profile::{Fonts, Labels, LanguageEntry, profile, profiles};
+use kamishibai::domain::entry::NormalizedEntry;
+use kamishibai::domain::profile::{Fonts, Labels, LanguageEntry, profile, profiles};
 
 /// Build one normalized entry for profile selection tests.
 fn entry(source: &str, target: &str) -> NormalizedEntry {
@@ -28,12 +28,17 @@ fn english_profile_keeps_the_frozen_runtime_values() -> Result<()> {
     let item = profile("en")?;
     assert_eq!(
         (
-            item.audio().language(),
-            item.imagery().ocr(),
-            item.naming().name(),
-            item.font().report()
+            item.audio.language,
+            item.imagery.ocr,
+            item.naming.name,
+            item.font.report
         ),
-        ("English", "eng", "English Vocabulary", "DejaVu Sans"),
+        (
+            String::from("English"),
+            String::from("eng"),
+            String::from("English Vocabulary"),
+            String::from("DejaVu Sans"),
+        ),
         "english profile drifted away from the frozen runtime values"
     );
     Ok(())
@@ -72,10 +77,14 @@ fn registry_keeps_the_fallback_ocr_token() {
 /// Custom deck overrides replace the name and derive a prefix.
 #[test]
 fn custom_deck_overrides_replace_the_name_and_derive_the_prefix() {
-    let item = kamishibai::profile::naming(Some("Core Pack"), &[entry("ru", "en")]);
+    let item = kamishibai::domain::profile::naming(Some("Core Pack"), &[entry("ru", "en")]);
     assert_eq!(
-        (item.name(), item.prefix(), item.default()),
-        ("Core Pack", "core-pack", "kamishibai.json"),
+        (item.name, item.prefix, item.default),
+        (
+            String::from("Core Pack"),
+            String::from("core-pack"),
+            String::from("kamishibai.json"),
+        ),
         "custom deck overrides no longer derive the frozen naming tuple"
     );
 }
@@ -83,10 +92,9 @@ fn custom_deck_overrides_replace_the_name_and_derive_the_prefix() {
 /// Mixed targets keep the generic deck fallback.
 #[test]
 fn mixed_targets_keep_the_generic_deck_fallback() {
-    let item = kamishibai::profile::naming(None, &[entry("ru", "el"), entry("ru", "zh")]);
+    let item = kamishibai::domain::profile::naming(None, &[entry("ru", "el"), entry("ru", "zh")]);
     assert_eq!(
-        item.name(),
-        "Kamishibai Deck",
+        item.name, "Kamishibai Deck",
         "mixed targets no longer fall back to the generic deck name"
     );
 }
@@ -109,7 +117,7 @@ fn font_selection_keeps_the_chinese_override_on_source_or_target() {
 #[test]
 fn label_selection_only_depends_on_the_source_language() {
     assert_eq!(
-        Labels::default().selected(&entry("ru", "zh")).sentence(),
+        Labels::default().selected(&entry("ru", "zh")).sentence,
         "Перевод",
         "label selection no longer depends only on the source language"
     );
@@ -128,7 +136,7 @@ fn missing_source_languages_keep_the_default_labels() {
         }
     }
     assert_eq!(
-        Labels::default().selected(&Empty).sentence(),
+        Labels::default().selected(&Empty).sentence,
         "Translation",
         "missing source languages no longer keep the default labels"
     );

@@ -3,22 +3,12 @@
 use std::io::{self, Write};
 use std::path::Path;
 
+use crate::presentation::progress::Console;
+
 /// Display one user-facing error.
 pub trait Display {
     /// Show one error message and an optional file path.
     fn show(&mut self, message: &str, path: Option<&Path>);
-}
-
-/// Print one plain diagnosis line.
-pub trait Output {
-    /// Print one output line.
-    fn print(&mut self, text: &str);
-}
-
-/// Print one terminal diagnosis renderable.
-pub trait Console {
-    /// Print one terminal renderable.
-    fn print(&mut self, text: &str);
 }
 
 /// Print plain diagnosis output for non-interactive stderr.
@@ -36,14 +26,15 @@ impl<O> PlainDiagnosis<O> {
 
 impl<O> Display for PlainDiagnosis<O>
 where
-    O: Output,
+    O: Console,
 {
     /// Show one error message and an optional file path.
     fn show(&mut self, message: &str, path: Option<&Path>) {
-        self.output.print(format!("Error: {message}").as_str());
+        self.output
+            .print(format!("Error: {message}").as_str(), false);
         if let Some(item) = path {
             self.output
-                .print(format!("  File: {}", item.display()).as_str());
+                .print(format!("  File: {}", item.display()).as_str(), false);
         }
     }
 }
@@ -82,8 +73,10 @@ where
                 )
             ));
         }
-        self.console
-            .print(panel("Error", plain.as_slice(), rich.as_slice()).as_str());
+        self.console.print(
+            panel("Error", plain.as_slice(), rich.as_slice()).as_str(),
+            true,
+        );
     }
 }
 
@@ -127,9 +120,9 @@ impl Display for SelectedDiagnosis {
 #[derive(Default)]
 pub struct StderrOutput;
 
-impl Output for StderrOutput {
+impl Console for StderrOutput {
     /// Print one output line.
-    fn print(&mut self, text: &str) {
+    fn print(&mut self, text: &str, _highlight: bool) {
         let _ = writeln!(io::stderr(), "{text}");
     }
 }
@@ -138,7 +131,7 @@ pub struct TerminalConsole;
 
 impl Console for TerminalConsole {
     /// Print one terminal renderable.
-    fn print(&mut self, text: &str) {
+    fn print(&mut self, text: &str, _highlight: bool) {
         eprintln!("{text}");
     }
 }

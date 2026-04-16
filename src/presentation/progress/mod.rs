@@ -6,7 +6,7 @@ mod rich;
 mod selector;
 mod terminal;
 
-pub use contracts::{AlignedStatus, AppProgress, Console, Live, Output, Spinner, Status};
+pub use contracts::{AlignedStatus, AppProgress, Console, Live, Spinner, Status};
 pub use plain::PlainProgress;
 pub use rich::RichProgress;
 pub use selector::{ProgressSelector, SelectedProgress};

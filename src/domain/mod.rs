@@ -1,2 +1,2 @@
-pub(crate) mod entry;
-pub(crate) mod profile;
+pub mod entry;
+pub mod profile;

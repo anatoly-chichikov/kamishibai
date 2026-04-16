@@ -3,19 +3,19 @@
 use std::path::Path;
 
 use anyhow::Result;
-use kamishibai::input::NormalizedEntry;
-use kamishibai::media::{Media, Profiles, SceneSource};
-use kamishibai::profile::{
-    AudioProfile, DeckNaming, FontProfile, ImageProfile, LanguageProfile, UiLabels,
-};
-use kamishibai::scene::ImageSource;
+use kamishibai::application::media::SceneSource;
+use kamishibai::domain::entry::NormalizedEntry;
+use kamishibai::infrastructure::assets;
+use kamishibai::infrastructure::audio::Speaker;
+use kamishibai::infrastructure::media::Media;
+use kamishibai::infrastructure::scene::ImageSource;
 use serde_json::Value;
 
 /// Fake runtime client for media wiring tests.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct FakeClient;
 
-impl kamishibai::audio::Speaker for FakeClient {
+impl Speaker for FakeClient {
     /// Return one PCM audio payload for the prompt and source text.
     fn speech(&self, _prompt: &str, _text: &str) -> Result<Vec<u8>> {
         Ok(vec![0, 0, 1, 0])
@@ -45,45 +45,6 @@ impl ImageSource for FakeClient {
     }
 }
 
-/// Fake profile registry for runtime tests.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct FakeProfiles {
-    fallback: String,
-    item: LanguageProfile,
-}
-
-impl FakeProfiles {
-    /// Create one fake profile registry.
-    fn new() -> Self {
-        Self {
-            fallback: String::from("osd"),
-            item: LanguageProfile::new(
-                "ga",
-                AudioProfile::new("Irish", "audio-ga"),
-                ImageProfile::new("eng+gle", "manga-ga"),
-                DeckNaming::new("Irish Vocabulary", "ga", "kamishibai.json"),
-                FontProfile::new("DejaVu Sans"),
-                UiLabels::new("Translation", "Context", "Hint", "Importance"),
-            ),
-        }
-    }
-}
-
-impl Profiles for FakeProfiles {
-    /// Return one language profile for the target code.
-    fn item(&self, code: &str) -> Result<LanguageProfile> {
-        if code == self.item.code() {
-            return Ok(self.item.clone());
-        }
-        Err(anyhow::anyhow!("Unsupported target language '{code}'"))
-    }
-
-    /// Return the fallback OCR selection.
-    fn fallback(&self) -> &str {
-        self.fallback.as_str()
-    }
-}
-
 /// Return one normalized entry for runtime tests.
 fn entry(target: &str) -> NormalizedEntry {
     NormalizedEntry {
@@ -106,7 +67,7 @@ fn entry(target: &str) -> NormalizedEntry {
 #[test]
 fn audio_prompt_rendering_keeps_the_shared_template_semantics() {
     assert_eq!(
-        kamishibai::assets::render_audio_prompt("Language_x1"),
+        assets::render_audio_prompt("Language_x1"),
         "Say in natural Language_x1: {text}",
         "audio prompt rendering no longer keeps the shared template semantics"
     );
@@ -115,7 +76,7 @@ fn audio_prompt_rendering_keeps_the_shared_template_semantics() {
 /// Scene prompt rendering keeps the target language and JSON braces.
 #[test]
 fn scene_prompt_rendering_keeps_the_target_language_and_json_braces() {
-    let prompt = kamishibai::assets::render_scene_prompt("Language_x1");
+    let prompt = assets::render_scene_prompt("Language_x1");
     assert_eq!(
         (
             prompt.contains("educational Language_x1 flashcards"),
@@ -126,36 +87,36 @@ fn scene_prompt_rendering_keeps_the_target_language_and_json_braces() {
     );
 }
 
-/// Media supports injected profiles for both cache roots.
+/// Media resolves the supported profile cache roots for both service types.
 #[test]
-fn media_supports_injected_profiles_for_both_cache_roots() -> Result<()> {
+fn media_resolves_the_supported_profile_cache_roots_for_both_service_types() -> Result<()> {
     let directory = tempfile::TempDir::new()?;
-    let media = Media::configured(FakeClient, directory.path(), FakeProfiles::new());
-    let audio = media.audio(&entry("ga"))?;
-    let illustration = media.illustration(&entry("ga"))?;
+    let mut media = Media::new(FakeClient, directory.path());
+    let audio = media.audio(&entry("en"))?;
+    let illustration = media.illustration(&entry("en"))?;
     assert_eq!(
         (
             audio
                 .filepath("tone.wav")?
-                .ends_with(Path::new("audio-ga").join("tone.wav")),
+                .ends_with(Path::new("audio-en").join("tone.wav")),
             illustration
                 .filepath("panel.jpg")?
-                .ends_with(Path::new("manga-ga").join("panel.jpg")),
+                .ends_with(Path::new("manga-en").join("panel.jpg")),
         ),
         (true, true),
-        "media no longer supports injected profiles for both cache roots"
+        "media no longer resolves the supported profile cache roots for both service types"
     );
     Ok(())
 }
 
-/// Media keeps the injected fallback OCR policy in illustration wiring.
+/// Media keeps the registry fallback OCR policy in illustration wiring.
 #[test]
-fn media_keeps_the_injected_fallback_ocr_policy_in_illustration_wiring() -> Result<()> {
+fn media_keeps_the_registry_fallback_ocr_policy_in_illustration_wiring() -> Result<()> {
     let directory = tempfile::TempDir::new()?;
-    let media = Media::configured(FakeClient, directory.path(), FakeProfiles::new());
+    let mut media = Media::new(FakeClient, directory.path());
     assert!(
-        format!("{:?}", media.illustration(&entry("ga"))?).contains("\"osd\""),
-        "media no longer keeps the injected fallback ocr policy in illustration wiring"
+        format!("{:?}", media.illustration(&entry("en"))?).contains("\"eng\""),
+        "media no longer keeps the registry fallback ocr policy in illustration wiring"
     );
     Ok(())
 }

@@ -4,9 +4,10 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use kamishibai::diagnosis::{
-    Console, DiagnosisSelector, Display, Output, PlainDiagnosis, RichDiagnosis, SelectedDiagnosis,
+use kamishibai::presentation::diagnosis::{
+    DiagnosisSelector, Display, PlainDiagnosis, RichDiagnosis, SelectedDiagnosis,
 };
+use kamishibai::presentation::progress::Console;
 use serde_json::Value;
 
 /// Shared line recorder for diagnosis tests.
@@ -28,9 +29,9 @@ struct FakeOutput {
     lines: Lines,
 }
 
-impl Output for FakeOutput {
+impl Console for FakeOutput {
     /// Print one output line.
-    fn print(&mut self, text: &str) {
+    fn print(&mut self, text: &str, _highlight: bool) {
         self.lines.items.borrow_mut().push(String::from(text));
     }
 }
@@ -43,7 +44,7 @@ struct FakeConsole {
 
 impl Console for FakeConsole {
     /// Print one terminal renderable.
-    fn print(&mut self, text: &str) {
+    fn print(&mut self, text: &str, _highlight: bool) {
         self.lines.items.borrow_mut().push(String::from(text));
     }
 }

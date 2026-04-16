@@ -1,3 +1,3 @@
-pub(crate) mod cli;
-pub(crate) mod diagnosis;
-pub(crate) mod progress;
+pub mod cli;
+pub mod diagnosis;
+pub mod progress;
