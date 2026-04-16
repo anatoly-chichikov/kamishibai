@@ -1,11 +1,13 @@
-//! Tests for normalized input parsing.
+//! Tests for strict input parsing.
 
 use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use kamishibai::vocabulary::VocabularyEntry;
-use kamishibai::vocabulary::{VocabularyDocument, VocabularyMapping};
+use kamishibai::vocabulary::{
+    Importance, LanguageCode, NonEmptyText, VocabularyDocument, VocabularyEntry, VocabularySource,
+    VocabularyTarget,
+};
 use tempfile::TempDir;
 
 /// Write one JSON document to a temporary file.
@@ -16,76 +18,119 @@ fn write(body: &str) -> Result<(TempDir, PathBuf)> {
     Ok((directory, path))
 }
 
-/// Return the shared vocabulary reader for one JSON string.
-fn reader(body: &str) -> Result<(TempDir, VocabularyDocument<VocabularyMapping>)> {
-    let (directory, path) = write(body)?;
-    Ok((directory, VocabularyDocument::new(path, VocabularyMapping)))
+/// Return one temporary path for one JSON string.
+fn file(body: &str) -> Result<(TempDir, PathBuf)> {
+    write(body)
 }
 
-/// Valid entries keep the exact normalized output shape.
+/// Return one validated text fixture.
+fn text(value: &str) -> NonEmptyText {
+    NonEmptyText::new(value).expect("test text must be valid")
+}
+
+/// Return one validated language fixture.
+fn code(value: &str) -> LanguageCode {
+    LanguageCode::new(value).expect("test language must be valid")
+}
+
+/// Return one validated importance fixture.
+fn score(value: u8) -> Importance {
+    Importance::new(value).expect("test importance must be valid")
+}
+
+/// Valid entries keep the exact strict output shape.
 #[test]
-fn valid_entries_map_into_the_full_normalized_shape() -> Result<()> {
-    let (_directory, vocabulary) = reader(
+fn valid_entries_map_into_the_full_strict_shape() -> Result<()> {
+    let (_directory, path) = file(
         r#"{"entries":[{"term":"кошка","meaning":"cat","pronunciation":"kæt","transcription":"kat","importance":7,"source":{"sentence":"Кошка спит на окне","lang":"ru","highlight":"Кошка","hint":"домашнее животное","context":"нейтральный стиль"},"target":{"sentence":"The cat is sleeping on the windowsill","lang":"en"}}]}"#,
     )?;
     assert_eq!(
-        vocabulary.entries(None)?,
-        vec![VocabularyEntry {
-            word: String::from("кошка"),
-            pronunciation: String::from("kæt"),
-            translation: String::from("cat"),
-            example: String::from("The cat is sleeping on the windowsill"),
-            source_lang: String::from("ru"),
-            target_lang: String::from("en"),
-            sentence: String::from("Кошка спит на окне"),
-            highlight: String::from("Кошка"),
-            hint: String::from("домашнее животное"),
-            context: String::from("нейтральный стиль"),
-            importance: String::from("7"),
-            transcription: String::from("kat")
-        }],
-        "valid entry did not map into the expected normalized shape"
+        VocabularyDocument::load(&path)?,
+        VocabularyDocument {
+            entries: vec![VocabularyEntry {
+                term: text("кошка"),
+                meaning: text("cat"),
+                pronunciation: text("kæt"),
+                transcription: text("kat"),
+                importance: score(7),
+                source: VocabularySource {
+                    sentence: text("Кошка спит на окне"),
+                    lang: code("ru"),
+                    highlight: text("Кошка"),
+                    hint: text("домашнее животное"),
+                    context: text("нейтральный стиль"),
+                },
+                target: VocabularyTarget {
+                    sentence: text("The cat is sleeping on the windowsill"),
+                    lang: code("en"),
+                },
+            }],
+        },
+        "valid entry did not map into the expected strict shape"
     );
     Ok(())
 }
 
-/// Mixed valid and invalid rows keep only the valid entries.
+/// Missing required fields fail the whole document.
 #[test]
-fn mixed_rows_keep_only_valid_entries() -> Result<()> {
-    let (_directory, vocabulary) = reader(
-        r#"{"entries":[{"term":"broken","source":{"sentence":"Есть источник","lang":"ru"},"target":{"lang":"en"}},{"term":"valid","source":{"sentence":"Валидное","lang":"ru"},"target":{"sentence":"Valid","lang":"en"}},{"source":{"sentence":"Без term","lang":"ru"},"target":{"sentence":"No term","lang":"en"}}]}"#,
+fn missing_required_fields_fail_the_whole_document() -> Result<()> {
+    let (_directory, path) = file(
+        r#"{"entries":[{"term":"кошка","pronunciation":"kæt","transcription":"kat","importance":7,"source":{"sentence":"Кошка спит на окне","lang":"ru","highlight":"Кошка","hint":"домашнее животное","context":"нейтральный стиль"},"target":{"sentence":"The cat is sleeping on the windowsill","lang":"en"}}]}"#,
     )?;
-    assert_eq!(
-        vocabulary.entries(None)?.len(),
-        1,
-        "invalid rows were not filtered out of the normalized result"
+    assert!(
+        VocabularyDocument::load(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("missing field `meaning`"),
+        "missing required fields no longer fail the whole document"
     );
     Ok(())
 }
 
-/// Null optionals coalesce into empty strings.
+/// Empty strings fail the whole document.
 #[test]
-fn null_optionals_become_empty_strings() -> Result<()> {
-    let (_directory, vocabulary) = reader(
-        r#"{"entries":[{"term":"test","pronunciation":null,"importance":null,"source":{"sentence":"Предложение","lang":"ru","context":null},"target":{"sentence":"Sentence","lang":"en"}}]}"#,
+fn empty_strings_fail_the_whole_document() -> Result<()> {
+    let (_directory, path) = file(
+        r#"{"entries":[{"term":"кошка","meaning":"cat","pronunciation":" ","transcription":"kat","importance":7,"source":{"sentence":"Кошка спит на окне","lang":"ru","highlight":"Кошка","hint":"домашнее животное","context":"нейтральный стиль"},"target":{"sentence":"The cat is sleeping on the windowsill","lang":"en"}}]}"#,
     )?;
-    assert_eq!(
-        vocabulary.entries(None)?,
-        vec![VocabularyEntry {
-            word: String::from("test"),
-            pronunciation: String::new(),
-            translation: String::new(),
-            example: String::from("Sentence"),
-            source_lang: String::from("ru"),
-            target_lang: String::from("en"),
-            sentence: String::from("Предложение"),
-            highlight: String::new(),
-            hint: String::new(),
-            context: String::new(),
-            importance: String::new(),
-            transcription: String::new()
-        }],
-        "null optionals did not coalesce into empty strings"
+    assert!(
+        VocabularyDocument::load(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("expected a non-empty string"),
+        "empty strings no longer fail the whole document"
+    );
+    Ok(())
+}
+
+/// Unknown fields fail the whole document.
+#[test]
+fn unknown_fields_fail_the_whole_document() -> Result<()> {
+    let (_directory, path) = file(
+        r#"{"entries":[{"term":"кошка","meaning":"cat","pronunciation":"kæt","transcription":"kat","importance":7,"source":{"sentence":"Кошка спит на окне","lang":"ru","highlight":"Кошка","hint":"домашнее животное","context":"нейтральный стиль","tone":"soft"},"target":{"sentence":"The cat is sleeping on the windowsill","lang":"en"}}]}"#,
+    )?;
+    assert!(
+        VocabularyDocument::load(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown field `tone`"),
+        "unknown fields no longer fail the whole document"
+    );
+    Ok(())
+}
+
+/// Invalid importance values fail the whole document.
+#[test]
+fn invalid_importance_values_fail_the_whole_document() -> Result<()> {
+    let (_directory, path) = file(
+        r#"{"entries":[{"term":"кошка","meaning":"cat","pronunciation":"kæt","transcription":"kat","importance":11,"source":{"sentence":"Кошка спит на окне","lang":"ru","highlight":"Кошка","hint":"домашнее животное","context":"нейтральный стиль"},"target":{"sentence":"The cat is sleeping on the windowsill","lang":"en"}}]}"#,
+    )?;
+    assert!(
+        VocabularyDocument::load(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("expected an integer from 1 to 10"),
+        "invalid importance values no longer fail the whole document"
     );
     Ok(())
 }
@@ -93,46 +138,41 @@ fn null_optionals_become_empty_strings() -> Result<()> {
 /// Non-object roots fail with the frozen error wording.
 #[test]
 fn non_object_roots_raise_the_frozen_error_message() -> Result<()> {
-    let (_directory, vocabulary) = reader(r#"[{"term":"broken"}]"#)?;
+    let (_directory, path) = file(r#"[{"term":"broken"}]"#)?;
     assert_eq!(
-        vocabulary.document().unwrap_err().to_string(),
+        VocabularyDocument::load(&path).unwrap_err().to_string(),
         format!(
-            "Expected a JSON object in '{}' but found list",
-            vocabulary.path().display()
+            "Expected a JSON object in '{}' but found array",
+            path.display()
         ),
         "non-object roots did not raise the frozen validation message"
     );
     Ok(())
 }
 
-/// Missing entries arrays fail with the frozen error wording.
+/// Missing entries arrays fail with the strict error wording.
 #[test]
-fn missing_entries_arrays_raise_the_frozen_error_message() -> Result<()> {
-    let (_directory, vocabulary) = reader(r#"{"items":[]}"#)?;
+fn missing_entries_arrays_raise_the_strict_error_message() -> Result<()> {
+    let (_directory, path) = file(r#"{}"#)?;
     assert_eq!(
-        vocabulary.document().unwrap_err().to_string(),
+        VocabularyDocument::load(&path).unwrap_err().to_string(),
         format!(
-            "Expected an 'entries' array in '{}'",
-            vocabulary.path().display()
+            "Invalid document in '{}': missing field `entries`",
+            path.display()
         ),
-        "missing entries arrays did not raise the frozen validation message"
+        "missing entries arrays did not raise the strict validation message"
     );
     Ok(())
 }
 
-/// Empty valid results fail with the frozen error wording.
+/// Empty entry lists fail with the strict error wording.
 #[test]
-fn empty_valid_results_raise_the_frozen_error_message() -> Result<()> {
-    let (_directory, vocabulary) = reader(
-        r#"{"entries":[{"term":"broken","source":{"sentence":"Есть источник","lang":"ru"},"target":{"lang":"en"}}]}"#,
-    )?;
+fn empty_entry_lists_raise_the_strict_error_message() -> Result<()> {
+    let (_directory, path) = file(r#"{"entries":[]}"#)?;
     assert_eq!(
-        vocabulary.entries(None).unwrap_err().to_string(),
-        format!(
-            "No valid entries found in '{}'; each entry requires 'term', 'source.sentence', 'source.lang', 'target.sentence', and 'target.lang'",
-            vocabulary.path().display()
-        ),
-        "empty normalized results did not raise the frozen validation message"
+        VocabularyDocument::load(&path).unwrap_err().to_string(),
+        format!("Expected at least one entry in '{}'", path.display()),
+        "empty entry lists did not raise the strict validation message"
     );
     Ok(())
 }

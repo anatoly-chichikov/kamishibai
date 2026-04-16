@@ -9,7 +9,9 @@ use kamishibai::generation::{
     BuildProgress, Deck, DeckBuilder, GeneratorCatalog, GeneratorSource, IllustrationGenerator,
     SceneSource, SkippedCard, Speaker, SpeechGenerator,
 };
-use kamishibai::vocabulary::VocabularyEntry;
+use kamishibai::vocabulary::{
+    Importance, LanguageCode, NonEmptyText, VocabularyEntry, VocabularySource, VocabularyTarget,
+};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -89,22 +91,41 @@ impl ImageSource for FakeClient {
     }
 }
 
-/// Return one normalized entry for media tests.
+/// Return one strict entry for media tests.
 fn entry(word: &str, example: &str, target: &str) -> VocabularyEntry {
     VocabularyEntry {
-        word: String::from(word),
-        pronunciation: String::new(),
-        translation: String::from("значение"),
-        example: String::from(example),
-        source_lang: String::from("ru"),
-        target_lang: String::from(target),
-        sentence: String::from("пример"),
-        highlight: String::new(),
-        hint: String::new(),
-        context: String::new(),
-        importance: String::new(),
-        transcription: String::new(),
+        term: text(word),
+        meaning: text("значение"),
+        pronunciation: text("proɪz"),
+        transcription: text(word),
+        importance: score(5),
+        source: VocabularySource {
+            sentence: text("пример"),
+            lang: code("ru"),
+            highlight: text("пример"),
+            hint: text("подсказка"),
+            context: text("контекст"),
+        },
+        target: VocabularyTarget {
+            sentence: text(example),
+            lang: code(target),
+        },
     }
+}
+
+/// Return one validated text fixture.
+fn text(value: &str) -> NonEmptyText {
+    NonEmptyText::new(value).expect("test text must be valid")
+}
+
+/// Return one validated language fixture.
+fn code(value: &str) -> LanguageCode {
+    LanguageCode::new(value).expect("test language must be valid")
+}
+
+/// Return one validated importance fixture.
+fn score(value: u8) -> Importance {
+    Importance::new(value).expect("test importance must be valid")
 }
 
 /// Successful audio service fixture.
@@ -292,17 +313,17 @@ impl GeneratorSource for SwitchingMedia {
     /// Return the audio service for one entry.
     fn audio(&mut self, entry: &VocabularyEntry) -> Result<Self::Audio> {
         self.audio
-            .get(entry.word.as_str())
+            .get(entry.term.as_str())
             .cloned()
-            .ok_or_else(|| anyhow!("Missing audio fixture for '{}'", entry.word))
+            .ok_or_else(|| anyhow!("Missing audio fixture for '{}'", entry.term))
     }
 
     /// Return the illustration service for one entry.
     fn illustration(&mut self, entry: &VocabularyEntry) -> Result<Self::Illustration> {
         self.illustration
-            .get(entry.word.as_str())
+            .get(entry.term.as_str())
             .cloned()
-            .ok_or_else(|| anyhow!("Missing illustration fixture for '{}'", entry.word))
+            .ok_or_else(|| anyhow!("Missing illustration fixture for '{}'", entry.term))
     }
 }
 
@@ -321,8 +342,11 @@ impl Deck for RecorderDeck {
 
     /// Add one note to the deck.
     fn add(&mut self, entry: &VocabularyEntry, audio: &str, image: &str) {
-        self.added
-            .push((entry.word.clone(), String::from(audio), String::from(image)));
+        self.added.push((
+            String::from(entry.term.as_str()),
+            String::from(audio),
+            String::from(image),
+        ));
     }
 }
 
@@ -399,33 +423,6 @@ fn media_keeps_the_registry_fallback_ocr_selection() -> Result<()> {
         "media no longer keeps the registry fallback ocr selection in illustration wiring"
     );
     Ok(())
-}
-
-/// DeckBuilder records failures for empty example text.
-#[test]
-fn pipeline_records_failures_for_empty_example_text() {
-    let directory = TempDir::new().expect("temp directory must exist");
-    let mut pipeline = DeckBuilder::new(
-        FixedMedia {
-            audio: AudioFixture::Success(SuccessAudio::new(directory.path(), "demo.wav", false)),
-            illustration: IllustrationFixture::Success(SuccessIllustration::new(
-                directory.path(),
-                "demo.jpg",
-                false,
-            )),
-        },
-        RecorderDeck::default(),
-        RecorderProgress::default(),
-    );
-    let entries = vec![entry("слово", "", "en")];
-    assert_eq!(
-        pipeline.process(&entries).0,
-        vec![SkippedCard::new(
-            "слово",
-            "Cannot generate audio for empty text"
-        )],
-        "pipeline no longer records failures for empty example text"
-    );
 }
 
 /// DeckBuilder records audio generation failures.

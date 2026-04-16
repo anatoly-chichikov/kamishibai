@@ -2,24 +2,45 @@
 
 use anyhow::Result;
 use kamishibai::languages::{LanguageEntry, ReportFonts, ReportLabels, catalog, language};
-use kamishibai::vocabulary::VocabularyEntry;
+use kamishibai::vocabulary::{
+    Importance, LanguageCode, NonEmptyText, VocabularyEntry, VocabularySource, VocabularyTarget,
+};
 
-/// Build one normalized entry for profile selection tests.
+/// Build one strict entry for profile selection tests.
 fn entry(source: &str, target: &str) -> VocabularyEntry {
     VocabularyEntry {
-        word: String::from("word"),
-        pronunciation: String::new(),
-        translation: String::new(),
-        example: String::new(),
-        source_lang: String::from(source),
-        target_lang: String::from(target),
-        sentence: String::new(),
-        highlight: String::new(),
-        hint: String::new(),
-        context: String::new(),
-        importance: String::new(),
-        transcription: String::new(),
+        term: text("word"),
+        meaning: text("значение"),
+        pronunciation: text("wɜːd"),
+        transcription: text("word"),
+        importance: score(5),
+        source: VocabularySource {
+            sentence: text("пример"),
+            lang: code(source),
+            highlight: text("пример"),
+            hint: text("подсказка"),
+            context: text("контекст"),
+        },
+        target: VocabularyTarget {
+            sentence: text("example"),
+            lang: code(target),
+        },
     }
+}
+
+/// Return one validated text fixture.
+fn text(value: &str) -> NonEmptyText {
+    NonEmptyText::new(value).expect("test text must be valid")
+}
+
+/// Return one validated language fixture.
+fn code(value: &str) -> LanguageCode {
+    LanguageCode::new(value).expect("test language must be valid")
+}
+
+/// Return one validated importance fixture.
+fn score(value: u8) -> Importance {
+    Importance::new(value).expect("test importance must be valid")
 }
 
 /// Supported profiles keep the frozen runtime values.

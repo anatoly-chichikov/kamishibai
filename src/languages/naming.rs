@@ -28,7 +28,7 @@ pub fn naming(custom: Option<&str>, entries: &[VocabularyEntry]) -> DeckNaming {
     }
     let codes = entries
         .iter()
-        .map(|entry| entry.target_lang.clone())
+        .map(|entry| String::from(entry.target.lang.as_str()))
         .collect::<BTreeSet<_>>();
     if codes.len() == 1 {
         return language(

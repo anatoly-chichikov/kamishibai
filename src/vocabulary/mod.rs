@@ -1,7 +1,9 @@
-//! Vocabulary document parsing and normalized entry types.
+//! Vocabulary document parsing and canonical entry types.
 
 mod document;
 mod entry;
 
-pub use document::{FieldMapping, VocabularyDocument, VocabularyMapping};
-pub use entry::VocabularyEntry;
+pub use entry::{
+    Importance, LanguageCode, NonEmptyText, VocabularyDocument, VocabularyEntry, VocabularySource,
+    VocabularyTarget,
+};

@@ -1,6 +1,6 @@
 use crate::vocabulary::VocabularyEntry;
 
-/// Expose language codes from normalized entries.
+/// Expose language codes from canonical entries.
 pub trait LanguageEntry {
     /// Return the optional source language code.
     fn source(&self) -> Option<&str>;
@@ -11,12 +11,12 @@ pub trait LanguageEntry {
 impl LanguageEntry for VocabularyEntry {
     /// Return the optional source language code.
     fn source(&self) -> Option<&str> {
-        Some(self.source_lang.as_str())
+        Some(self.source.lang.as_str())
     }
 
     /// Return the optional target language code.
     fn target(&self) -> Option<&str> {
-        Some(self.target_lang.as_str())
+        Some(self.target.lang.as_str())
     }
 }
 

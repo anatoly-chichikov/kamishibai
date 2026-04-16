@@ -90,7 +90,7 @@ where
 {
     /// Return the cached audio service for one entry target.
     pub fn audio(&mut self, entry: &VocabularyEntry) -> Result<CachedAudio<C>> {
-        let code = entry.target_lang.clone();
+        let code = String::from(entry.target.lang.as_str());
         let item = self.catalog.item(code.as_str())?;
         let client = self.client.clone();
         let cache = self.cache.clone();
@@ -119,7 +119,7 @@ where
 {
     /// Return the cached illustration service for one entry target.
     pub fn illustration(&mut self, entry: &VocabularyEntry) -> Result<CachedIllustration<C>> {
-        let code = entry.target_lang.clone();
+        let code = String::from(entry.target.lang.as_str());
         let item = self.catalog.item(code.as_str())?;
         let client = self.client.clone();
         let cache = self.cache.clone();

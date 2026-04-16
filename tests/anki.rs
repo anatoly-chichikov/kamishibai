@@ -8,7 +8,7 @@ use anyhow::Result;
 use kamishibai::anki::{
     CardModel, HtmlLineBreaks, NoteFormat, StableId, Transcription, VocabularyDeck, VocabularyNote,
 };
-use kamishibai::vocabulary::VocabularyEntry;
+use kamishibai::vocabulary::{VocabularyDocument, VocabularyEntry};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -24,12 +24,16 @@ fn reference(name: &str) -> PathBuf {
 }
 
 fn entries() -> Vec<VocabularyEntry> {
-    serde_json::from_str(
-        fs::read_to_string(reference("normalized/mixed-target-deck.json"))
-            .expect("reference entries must exist")
-            .as_str(),
+    VocabularyDocument::load(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("reference")
+            .join("inputs")
+            .join("mixed-target-deck.json"),
     )
     .expect("reference entries must parse")
+    .entries
 }
 
 fn apkg() -> Value {

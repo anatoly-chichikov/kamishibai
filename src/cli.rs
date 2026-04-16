@@ -18,7 +18,7 @@ use crate::report::{Report, Thumbnail, VocabularyLayout};
 use crate::runtime::diagnosis::{DiagnosisSelector, Display};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::runtime::progress::{AppProgress, ProgressSelector};
-use crate::vocabulary::{VocabularyDocument, VocabularyMapping};
+use crate::vocabulary::VocabularyDocument;
 
 /// Parsed CLI arguments for the application contract.
 #[derive(Clone, Debug, Eq, Parser, PartialEq)]
@@ -100,16 +100,11 @@ where
     let input = resolved
         .input()
         .map_err(|error| CliError::handled(error.to_string(), None))?;
-    let source = VocabularyDocument::new(input.clone(), VocabularyMapping);
-    let manifest = source
-        .document()
-        .map_err(|error| CliError::handled(error.to_string(), Some(input.clone())))?;
-    let entries = source
-        .entries(Some(&manifest))
+    let document = VocabularyDocument::load(&input)
         .map_err(|error| CliError::handled(error.to_string(), Some(input.clone())))?;
     let client =
         GeminiClient::from_env().map_err(|error| CliError::handled(error.to_string(), None))?;
-    let decknaming = naming(args.deck.as_deref(), entries.as_slice());
+    let decknaming = naming(args.deck.as_deref(), document.entries.as_slice());
     let generators = GeneratorCatalog::new(
         client,
         resolved
@@ -130,7 +125,7 @@ where
     })
     .selected();
     let mut builder = DeckBuilder::new(generators, container, progress);
-    let (failed, processed) = builder.process(entries.as_slice());
+    let (failed, processed) = builder.process(document.entries.as_slice());
     let output = resolved
         .output()
         .map_err(|error| CliError::handled(error.to_string(), None))?;
@@ -157,8 +152,8 @@ where
     builder.progress_mut().result("Report", &pdf);
     builder.progress_mut().result("Output", &output);
     builder.progress_mut().finish(
-        entries.len() - failed.len(),
-        entries.len(),
+        document.entries.len() - failed.len(),
+        document.entries.len(),
         failed.as_slice(),
     );
     Ok(())

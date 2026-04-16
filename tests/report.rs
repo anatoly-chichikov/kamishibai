@@ -7,7 +7,10 @@ use anyhow::Result;
 use image::{Rgb, RgbImage};
 use kamishibai::languages::{ReportFonts, ReportLabels};
 use kamishibai::report::{FontFamily, FontPath, Report, ReportLayout, Thumbnail, VocabularyLayout};
-use kamishibai::vocabulary::VocabularyEntry;
+use kamishibai::vocabulary::{
+    Importance, LanguageCode, NonEmptyText, VocabularyDocument, VocabularyEntry, VocabularySource,
+    VocabularyTarget,
+};
 use lopdf::Document;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -24,22 +27,41 @@ impl ReportLayout for StaticLayout {
     }
 }
 
-/// Create one normalized entry for report tests.
+/// Create one strict entry for report tests.
 fn entry(word: &str, source: &str, target: &str) -> VocabularyEntry {
     VocabularyEntry {
-        word: String::from(word),
-        pronunciation: String::new(),
-        translation: String::from("значение"),
-        example: String::new(),
-        source_lang: String::from(source),
-        target_lang: String::from(target),
-        sentence: String::from("пример"),
-        highlight: String::new(),
-        hint: String::new(),
-        context: String::new(),
-        importance: String::new(),
-        transcription: String::new(),
+        term: text(word),
+        meaning: text("значение"),
+        pronunciation: text("ˈprimer"),
+        transcription: text(word),
+        importance: score(5),
+        source: VocabularySource {
+            sentence: text("пример"),
+            lang: code(source),
+            highlight: text("пример"),
+            hint: text("подсказка"),
+            context: text("контекст"),
+        },
+        target: VocabularyTarget {
+            sentence: text("translation example"),
+            lang: code(target),
+        },
     }
+}
+
+/// Return one validated text fixture.
+fn text(value: &str) -> NonEmptyText {
+    NonEmptyText::new(value).expect("test text must be valid")
+}
+
+/// Return one validated language fixture.
+fn code(value: &str) -> LanguageCode {
+    LanguageCode::new(value).expect("test language must be valid")
+}
+
+/// Return one validated importance fixture.
+fn score(value: u8) -> Importance {
+    Importance::new(value).expect("test importance must be valid")
 }
 
 /// Create one square PNG fixture for report tests.
@@ -91,14 +113,18 @@ fn references(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Return the frozen normalized reference entries.
+/// Return the frozen reference entries.
 fn entries() -> Vec<VocabularyEntry> {
-    serde_json::from_str(
-        fs::read_to_string(references("normalized/mixed-target-deck.json"))
-            .expect("reference entries must exist")
-            .as_str(),
+    VocabularyDocument::load(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("reference")
+            .join("inputs")
+            .join("mixed-target-deck.json"),
     )
     .expect("reference entries must parse")
+    .entries
 }
 
 /// Return the frozen report manifest.
@@ -124,18 +150,22 @@ fn manifest_rows(entry: &VocabularyEntry) -> Vec<Value> {
 #[test]
 fn vocabulary_layout_keeps_the_frozen_full_entry_row_structure() {
     let item = VocabularyEntry {
-        word: String::from("café"),
-        pronunciation: String::from("ˈkafe"),
-        translation: String::from("кафе"),
-        example: String::from("The café serves crêpes"),
-        source_lang: String::from("en"),
-        target_lang: String::from("ru"),
-        sentence: String::from("В кафе подают крепы"),
-        highlight: String::new(),
-        hint: String::from("coast"),
-        context: String::from("calm evening"),
-        importance: String::from("7"),
-        transcription: String::new(),
+        term: text("café"),
+        meaning: text("кафе"),
+        pronunciation: text("ˈkafe"),
+        transcription: text("cafe"),
+        importance: score(7),
+        source: VocabularySource {
+            sentence: text("В кафе подают крепы"),
+            lang: code("en"),
+            highlight: text("кафе"),
+            hint: text("coast"),
+            context: text("calm evening"),
+        },
+        target: VocabularyTarget {
+            sentence: text("The café serves crêpes"),
+            lang: code("ru"),
+        },
     };
     assert_eq!(
         VocabularyLayout::new(ReportLabels::default()).row(&item),
@@ -151,17 +181,21 @@ fn vocabulary_layout_keeps_the_frozen_full_entry_row_structure() {
     );
 }
 
-/// Vocabulary layout keeps the frozen sparse-entry row structure.
+/// Vocabulary layout keeps the strict row structure for placeholder entries.
 #[test]
-fn vocabulary_layout_keeps_the_frozen_sparse_entry_row_structure() {
+fn vocabulary_layout_keeps_the_strict_placeholder_row_structure() {
     let item = entry("café", "en", "ru");
     assert_eq!(
         VocabularyLayout::new(ReportLabels::default()).row(&item),
         vec![
-            (String::from("café — значение"), 11.0),
+            (String::from("café /ˈprimer/ — значение"), 11.0),
+            (String::from("translation example"), 9.0),
             (String::from("Translation: пример"), 9.0),
+            (String::from("Context: контекст"), 8.0),
+            (String::from("Hint: подсказка"), 8.0),
+            (String::from("Importance: 5/10"), 8.0),
         ],
-        "vocabulary layout no longer keeps the frozen sparse entry row structure"
+        "vocabulary layout no longer keeps the strict placeholder row structure"
     );
 }
 
@@ -334,18 +368,22 @@ fn reports_with_many_entries_still_span_multiple_pages() -> Result<()> {
     for index in 0..30 {
         report.append(
             &VocabularyEntry {
-                word: format!("wörd{index}"),
-                pronunciation: String::new(),
-                translation: String::from("значение"),
-                example: String::new(),
-                source_lang: String::from("en"),
-                target_lang: String::from("ru"),
-                sentence: format!("Ünïcödé {index}"),
-                highlight: String::new(),
-                hint: String::new(),
-                context: String::new(),
-                importance: String::new(),
-                transcription: String::new(),
+                term: text(format!("wörd{index}").as_str()),
+                meaning: text("значение"),
+                pronunciation: text("vɜːd"),
+                transcription: text("word"),
+                importance: score(5),
+                source: VocabularySource {
+                    sentence: text(format!("Ünïcödé {index}").as_str()),
+                    lang: code("en"),
+                    highlight: text(format!("Ünïcödé {index}").as_str()),
+                    hint: text("подсказка"),
+                    context: text("контекст"),
+                },
+                target: VocabularyTarget {
+                    sentence: text("Translation sample"),
+                    lang: code("ru"),
+                },
             },
             Some(image(directory.path(), 128)),
         );
@@ -411,9 +449,9 @@ fn reports_keep_the_frozen_layout_rows_labels_fonts_and_page_count_snapshot() ->
                         "sentence": ReportLabels::default().selected(entry).sentence,
                     },
                     "rows": manifest_rows(entry),
-                    "source_lang": entry.source_lang,
-                    "target_lang": entry.target_lang,
-                    "word": entry.word,
+                    "source_lang": entry.source.lang.as_str(),
+                    "target_lang": entry.target.lang.as_str(),
+                    "word": entry.term.as_str(),
                 })
             }).collect::<Vec<_>>(),
             "pdf": {

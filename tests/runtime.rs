@@ -6,7 +6,9 @@ use anyhow::Result;
 use kamishibai::generation::manga::ImageSource;
 use kamishibai::generation::prompts as assets;
 use kamishibai::generation::{GeneratorCatalog, SceneSource, Speaker};
-use kamishibai::vocabulary::VocabularyEntry;
+use kamishibai::vocabulary::{
+    Importance, LanguageCode, NonEmptyText, VocabularyEntry, VocabularySource, VocabularyTarget,
+};
 use serde_json::Value;
 
 /// Fake runtime client for media wiring tests.
@@ -43,22 +45,41 @@ impl ImageSource for FakeClient {
     }
 }
 
-/// Return one normalized entry for runtime tests.
+/// Return one strict entry for runtime tests.
 fn entry(target: &str) -> VocabularyEntry {
     VocabularyEntry {
-        word: String::from("focal"),
-        pronunciation: String::new(),
-        translation: String::from("значение"),
-        example: String::from("frása"),
-        source_lang: String::from("ru"),
-        target_lang: String::from(target),
-        sentence: String::from("пример"),
-        highlight: String::new(),
-        hint: String::new(),
-        context: String::new(),
-        importance: String::new(),
-        transcription: String::new(),
+        term: text("focal"),
+        meaning: text("значение"),
+        pronunciation: text("foʊkəl"),
+        transcription: text("focal"),
+        importance: score(6),
+        source: VocabularySource {
+            sentence: text("пример"),
+            lang: code("ru"),
+            highlight: text("пример"),
+            hint: text("подсказка"),
+            context: text("контекст"),
+        },
+        target: VocabularyTarget {
+            sentence: text("frása"),
+            lang: code(target),
+        },
     }
+}
+
+/// Return one validated text fixture.
+fn text(value: &str) -> NonEmptyText {
+    NonEmptyText::new(value).expect("test text must be valid")
+}
+
+/// Return one validated language fixture.
+fn code(value: &str) -> LanguageCode {
+    LanguageCode::new(value).expect("test language must be valid")
+}
+
+/// Return one validated importance fixture.
+fn score(value: u8) -> Importance {
+    Importance::new(value).expect("test importance must be valid")
 }
 
 /// Audio prompt rendering keeps the shared template semantics.

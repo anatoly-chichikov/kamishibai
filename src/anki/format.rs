@@ -10,7 +10,7 @@ const BASE91: [char; 91] = [
     ';', '<', '=', '>', '?', '@', '[', ']', '^', '_', '`', '{', '|', '}', '~',
 ];
 
-/// Assemble one note from one normalized entry.
+/// Assemble one note from one canonical entry.
 pub trait NoteFormat {
     /// Return one formatted note for the entry and relative media tags.
     fn note(&self, entry: &VocabularyEntry, audio: &str, image: &str) -> Note;
@@ -73,7 +73,7 @@ pub struct Note {
     pub sort_field: String,
 }
 
-/// Assemble vocabulary notes from normalized entries.
+/// Assemble vocabulary notes from canonical entries.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VocabularyNote {
     model: Model,
@@ -89,26 +89,26 @@ impl VocabularyNote {
 impl NoteFormat for VocabularyNote {
     /// Return one formatted note for the entry and relative media tags.
     fn note(&self, entry: &VocabularyEntry, audio: &str, image: &str) -> Note {
-        let source = if entry.highlight.is_empty() {
-            entry.sentence.clone()
-        } else {
-            entry.sentence.replace(
-                entry.highlight.as_str(),
-                format!("<strong><em>{}</em></strong>", entry.highlight).as_str(),
+        let source = entry.source.sentence.as_str().replace(
+            entry.source.highlight.as_str(),
+            format!(
+                "<strong><em>{}</em></strong>",
+                entry.source.highlight.as_str()
             )
-        };
+            .as_str(),
+        );
         let fields = vec![
             source,
-            entry.word.to_lowercase(),
-            Transcription::new(entry.pronunciation.clone()).formatted(),
-            entry.translation.clone(),
-            HtmlLineBreaks::new(entry.example.clone()).formatted(),
-            entry.importance.clone(),
+            entry.term.as_str().to_lowercase(),
+            Transcription::new(entry.pronunciation.as_str()).formatted(),
+            String::from(entry.meaning.as_str()),
+            HtmlLineBreaks::new(entry.target.sentence.as_str()).formatted(),
+            entry.importance.to_string(),
             String::from(audio),
             String::from(image),
-            entry.hint.clone(),
-            HtmlLineBreaks::new(entry.context.clone()).formatted(),
-            Transcription::new(entry.transcription.clone()).formatted(),
+            String::from(entry.source.hint.as_str()),
+            HtmlLineBreaks::new(entry.source.context.as_str()).formatted(),
+            Transcription::new(entry.transcription.as_str()).formatted(),
         ];
         Note {
             guid: guid(fields.as_slice()),

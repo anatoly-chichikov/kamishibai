@@ -58,13 +58,13 @@ where
         let mut processed = Vec::new();
         for (index, entry) in entries.iter().enumerate() {
             self.progress
-                .card(index + 1, entries.len(), entry.word.as_str());
+                .card(index + 1, entries.len(), entry.term.as_str());
             let audio = match self.source.audio(entry) {
                 Ok(item) => item,
                 Err(error) => {
                     let reason = error.to_string();
-                    self.progress.skip(entry.word.as_str(), reason.as_str());
-                    failed.push(SkippedCard::new(entry.word.clone(), reason));
+                    self.progress.skip(entry.term.as_str(), reason.as_str());
+                    failed.push(SkippedCard::new(entry.term.as_str(), reason));
                     continue;
                 }
             };
@@ -72,8 +72,8 @@ where
                 Ok(item) => item,
                 Err(error) => {
                     let reason = error.to_string();
-                    self.progress.skip(entry.word.as_str(), reason.as_str());
-                    failed.push(SkippedCard::new(entry.word.clone(), reason));
+                    self.progress.skip(entry.term.as_str(), reason.as_str());
+                    failed.push(SkippedCard::new(entry.term.as_str(), reason));
                     continue;
                 }
             };
@@ -81,8 +81,8 @@ where
                 Ok(item) => item,
                 Err(error) => {
                     let reason = error.to_string();
-                    self.progress.skip(entry.word.as_str(), reason.as_str());
-                    failed.push(SkippedCard::new(entry.word.clone(), reason));
+                    self.progress.skip(entry.term.as_str(), reason.as_str());
+                    failed.push(SkippedCard::new(entry.term.as_str(), reason));
                     continue;
                 }
             };
@@ -90,8 +90,8 @@ where
                 Ok(item) => item,
                 Err(error) => {
                     let reason = error.to_string();
-                    self.progress.skip(entry.word.as_str(), reason.as_str());
-                    failed.push(SkippedCard::new(entry.word.clone(), reason));
+                    self.progress.skip(entry.term.as_str(), reason.as_str());
+                    failed.push(SkippedCard::new(entry.term.as_str(), reason));
                     continue;
                 }
             };
@@ -110,7 +110,7 @@ where
     /// Generate audio and return the filename plus absolute path.
     fn audio(&mut self, entry: &VocabularyEntry, audio: &M::Audio) -> Result<(String, PathBuf)> {
         self.progress.step("Generating audio");
-        let (filename, cached) = audio.generate(entry.example.as_str())?;
+        let (filename, cached) = audio.generate(entry.target.sentence.as_str())?;
         let path = audio.filepath(filename.as_str())?;
         self.progress.done(
             "Generating audio",
@@ -127,9 +127,9 @@ where
         illustration: &M::Illustration,
     ) -> Result<(String, PathBuf)> {
         let (filename, _cached) = illustration.generate(
-            entry.example.as_str(),
-            entry.word.as_str(),
-            entry.target_lang.as_str(),
+            entry.target.sentence.as_str(),
+            entry.term.as_str(),
+            entry.target.lang.as_str(),
             &mut self.progress,
         )?;
         Ok((filename.clone(), illustration.filepath(filename.as_str())?))
