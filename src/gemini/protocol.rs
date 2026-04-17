@@ -306,11 +306,6 @@ pub(super) fn api_error(body: &str) -> anyhow::Error {
     }
 }
 
-/// Return whether the current error should trigger TTS model fallback.
-pub(super) fn exhausted(error: &anyhow::Error) -> bool {
-    error.to_string().contains("RESOURCE_EXHAUSTED")
-}
-
 fn number(value: i64) -> Value {
     Value::Number(value.into())
 }
