@@ -104,11 +104,7 @@ where
         if let Some(path) = self.context.var("KAMISHIBAI_OUTPUT") {
             return resolve(&self.context, Path::new(path.as_str()));
         }
-        Ok(self
-            .input()?
-            .parent()
-            .expect("input path must have a parent")
-            .join("output"))
+        Ok(normalize(self.context.cwd()?.join("kamishibai-out")))
     }
 
     /// Return the cache directory.

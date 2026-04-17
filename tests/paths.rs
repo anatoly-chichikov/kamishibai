@@ -137,26 +137,14 @@ fn explicit_output_paths_take_precedence_over_the_default_location() -> Result<(
     Ok(())
 }
 
-/// Default output paths stay beside the input file.
+/// Default output paths use the current directory kamishibai-out name.
 #[test]
-fn default_output_paths_stay_beside_the_input_file() -> Result<()> {
+fn default_output_paths_use_the_current_directory_kamishibai_out_name() -> Result<()> {
     let (_directory, context) = context(Platform::Other)?;
-    let input = context.cwd.join("nested").join("kamishibai.json");
     assert_eq!(
-        Locations::new(
-            LocationArgs {
-                path: Some(PathBuf::from("nested/kamishibai.json")),
-                output: None,
-                cache: None
-            },
-            context
-        )
-        .output()?,
-        input
-            .parent()
-            .expect("input path must have a parent")
-            .join("output"),
-        "default output paths no longer stay beside the input file"
+        Locations::new(LocationArgs::default(), context.clone()).output()?,
+        context.cwd.join("kamishibai-out"),
+        "default output paths no longer use the current directory kamishibai out name"
     );
     Ok(())
 }
