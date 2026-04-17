@@ -164,25 +164,17 @@ fn image_generation_surfaces_blocked_response_diagnostics() {
     );
 }
 
-/// TTS generation falls back only on RESOURCE_EXHAUSTED.
+/// TTS generation targets the 3.1 flash preview with a pooled voice.
 #[test]
-fn tts_generation_falls_back_only_on_resource_exhausted() -> Result<()> {
-    let transport = FakeTransport::new(vec![
-        Ok(TransportResponse {
-            status: 429,
-            body: String::from(
-                "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"quota\"}}",
-            ),
-        }),
-        Ok(body(
-            json!({"candidates":[{"content":{"parts":[{"inlineData":{"data":"AQID"}}]}}]}),
-        )?),
-    ]);
+fn tts_generation_targets_the_3_1_flash_preview_with_a_pooled_voice() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(
+        json!({"candidates":[{"content":{"parts":[{"inlineData":{"data":"AQID"}}]}}]}),
+    )?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
     let bytes = client.speech("Say in natural English: {text}", "demo")?;
     let items = requests.borrow();
-    let body = serde_json::from_str::<Value>(&items[1].1)?;
+    let body = serde_json::from_str::<Value>(&items[0].1)?;
     let voice =
         body["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"]
             .as_str()
@@ -190,19 +182,19 @@ fn tts_generation_falls_back_only_on_resource_exhausted() -> Result<()> {
     assert_eq!(
         (
             bytes,
+            items.len(),
             items[0].0.as_str(),
-            items[1].0.as_str(),
             GeminiClient::new("key", FakeTransport::new(Vec::new()))
                 .voices()
                 .contains(&voice)
         ),
         (
             vec![1, 2, 3],
+            1,
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent",
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent",
             true
         ),
-        "tts generation no longer falls back after RESOURCE_EXHAUSTED while keeping the fixed voice pool"
+        "tts generation no longer hits the 3.1 flash preview exactly once with a pooled voice"
     );
     Ok(())
 }

@@ -10,17 +10,13 @@ use crate::generation::{manga_template, render_scene_prompt};
 
 use super::codec::decode;
 use super::protocol::{
-    GenerationConfig, Request, Response, api_error, diagnosis, enforce, exhausted, unfence,
-    validate,
+    GenerationConfig, Request, Response, api_error, diagnosis, enforce, unfence, validate,
 };
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 const SCENE_MODEL: &str = "gemini-3-flash-preview";
 const IMAGE_MODEL: &str = "gemini-3.1-flash-image-preview";
-const TTS_MODELS: [&str; 2] = [
-    "gemini-3.1-flash-tts-preview",
-    "gemini-2.5-flash-preview-tts",
-];
+const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
 const VOICES: [&str; 30] = [
     "Achernar",
     "Achird",
@@ -190,39 +186,30 @@ where
         bail!("No image data found in response for '{}'", word);
     }
 
-    /// Generate one PCM audio payload with RESOURCE_EXHAUSTED fallback.
+    /// Generate one PCM audio payload from the configured TTS model.
     pub fn speech(&self, prompt: &str, text: &str) -> Result<Vec<u8>> {
-        let voice = voice();
-        for model in TTS_MODELS {
-            match self.request(
-                model,
-                &Request::text(
-                    String::from(prompt),
-                    Some(GenerationConfig::audio(voice)),
-                    None,
-                ),
-            ) {
-                Ok(response) => {
-                    if response.candidates.is_empty() {
-                        bail!("No candidates in audio response for '{}'", text);
-                    }
-                    let Some(content) = response.candidates[0].content.as_ref() else {
-                        bail!("No content in audio response for '{}'", text);
-                    };
-                    let Some(data) = content
-                        .parts
-                        .iter()
-                        .find_map(|part| part.inline_data.as_ref())
-                    else {
-                        bail!("No content in audio response for '{}'", text);
-                    };
-                    return decode(&data.data);
-                }
-                Err(error) if exhausted(&error) => continue,
-                Err(error) => return Err(error),
-            }
+        let response = self.request(
+            TTS_MODEL,
+            &Request::text(
+                String::from(prompt),
+                Some(GenerationConfig::audio(voice())),
+                None,
+            ),
+        )?;
+        if response.candidates.is_empty() {
+            bail!("No candidates in audio response for '{}'", text);
         }
-        bail!("Failed to generate audio on all models for '{}'", text);
+        let Some(content) = response.candidates[0].content.as_ref() else {
+            bail!("No content in audio response for '{}'", text);
+        };
+        let Some(data) = content
+            .parts
+            .iter()
+            .find_map(|part| part.inline_data.as_ref())
+        else {
+            bail!("No content in audio response for '{}'", text);
+        };
+        decode(&data.data)
     }
 
     fn request(&self, model: &str, request: &Request) -> Result<Response> {
