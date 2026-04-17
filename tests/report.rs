@@ -221,23 +221,16 @@ fn font_family_resolution_finds_both_regular_and_bold_font_variants() -> Result<
     Ok(())
 }
 
-/// Thumbnail compression keeps the frozen filename prefix and file output.
+/// Thumbnail scaling clamps the longest side to the configured pixel budget.
 #[test]
-fn thumbnail_compression_keeps_the_frozen_filename_prefix_and_file_output() -> Result<()> {
+fn thumbnail_scaling_clamps_the_longest_side_to_the_configured_pixel_budget() -> Result<()> {
     let directory = TempDir::new()?;
-    let source = image(directory.path(), 256);
-    let thumb = Thumbnail::new(150).compressed(&source, directory.path())?;
+    let source = image(directory.path(), 600);
+    let scaled = Thumbnail::new(150).scaled(&source)?;
     assert_eq!(
-        (
-            thumb
-                .file_name()
-                .expect("thumbnail name must exist")
-                .to_string_lossy()
-                .starts_with("thumb_"),
-            thumb.is_file(),
-        ),
-        (true, true),
-        "thumbnail compression no longer keeps the frozen filename prefix and file output"
+        (scaled.width(), scaled.height()),
+        (150, 150),
+        "thumbnail scaling no longer clamps the longest side to the configured pixel budget"
     );
     Ok(())
 }

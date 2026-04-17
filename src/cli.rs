@@ -26,14 +26,14 @@ use crate::vocabulary::VocabularyDocument;
     name = "kamishibai",
     about = "Convert schema-driven vocabulary JSON to an illustrated Anki deck",
     long_about = None,
-    after_help = "Examples:\n  kamishibai\n  kamishibai my-words.json\n  kamishibai --deck \"Core Pack\" my-words.json\n  kamishibai --output ./output --cache ~/.cache/kamishibai my-words.json"
+    after_help = "Examples:\n  kamishibai\n  kamishibai my-words.json\n  kamishibai --deck \"Core Pack\" my-words.json\n  kamishibai --out ./kamishibai-out --cache ~/.cache/kamishibai my-words.json"
 )]
 pub struct Arguments {
     /// Optional deck name override.
     #[arg(long)]
     pub deck: Option<String>,
     /// Directory for generated output files.
-    #[arg(long)]
+    #[arg(long = "out")]
     pub output: Option<PathBuf>,
     /// Directory for reusable media cache.
     #[arg(long)]

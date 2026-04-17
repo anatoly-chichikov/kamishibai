@@ -10,7 +10,7 @@ use printpdf::{Color, ParsedFont, Rgb};
 use crate::languages::FontFamily as ProfileFontFamily;
 
 /// Resolve one system font family to one filesystem path.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct FontPath {
     bold: bool,
     family: String,
@@ -35,20 +35,7 @@ impl FontPath {
 
     /// Return the resolved filesystem path for the font.
     pub fn resolved(&self) -> Result<PathBuf> {
-        let font = SystemSource::new()
-            .select_best_match(&[QueryName::Title(self.family.clone())], &self.properties())
-            .map_err(|_| anyhow!("Font '{}' was not resolved by font-kit", self.label()))?
-            .load()
-            .map_err(|_| {
-                anyhow!(
-                    "Font '{}' could not be loaded from the system source",
-                    self.label()
-                )
-            })?;
-        let bytes = font
-            .copy_font_data()
-            .ok_or_else(|| anyhow!("Font '{}' could not expose raw font data", self.label()))?;
-        self.materialized(bytes.as_slice())
+        self.materialized(self.matched()?.as_slice())
     }
 
     /// Return the matching system-font properties for the resolver.
@@ -58,6 +45,78 @@ impl FontPath {
             value.weight(Weight::BOLD);
         }
         value
+    }
+
+    /// Return the raw bytes for the first matching font query.
+    fn matched(&self) -> Result<Vec<u8>> {
+        for query in self.queries() {
+            if let Ok(bytes) = self.bytes(query) {
+                return Ok(bytes);
+            }
+        }
+        Err(anyhow!(
+            "Font '{}' was not resolved by font-kit or platform fallbacks",
+            self.label()
+        ))
+    }
+
+    /// Return the font-kit family queries for the resolver.
+    fn queries(&self) -> Vec<QueryName> {
+        let mut value = vec![QueryName::Title(self.family.clone())];
+        for item in self.aliases() {
+            if *item != self.family.as_str() {
+                value.push(QueryName::Title(String::from(*item)));
+            }
+        }
+        value.push(QueryName::SansSerif);
+        value
+    }
+
+    /// Return the platform fallback aliases for the requested family.
+    fn aliases(&self) -> &'static [&'static str] {
+        match self.family.as_str() {
+            "DejaVu Sans" => &[
+                "Arial Unicode MS",
+                "Arial",
+                "Helvetica Neue",
+                "Helvetica",
+                "Liberation Sans",
+                "Nimbus Sans",
+                "Segoe UI",
+                "Tahoma",
+                "Geneva",
+            ],
+            "Hiragino Sans GB" => &[
+                "PingFang SC",
+                "STHeiti",
+                "Heiti SC",
+                "Noto Sans CJK SC",
+                "Source Han Sans SC",
+                "Microsoft YaHei",
+                "SimHei",
+                "Arial Unicode MS",
+            ],
+            _ => &[],
+        }
+    }
+
+    /// Return the raw bytes for one font-kit family query.
+    fn bytes(&self, query: QueryName) -> Result<Vec<u8>> {
+        let font = SystemSource::new()
+            .select_best_match(&[query], &self.properties())
+            .map_err(|_| anyhow!("Font '{}' was not resolved by font-kit", self.label()))?
+            .load()
+            .map_err(|_| {
+                anyhow!(
+                    "Font '{}' could not be loaded from the system source",
+                    self.label()
+                )
+            })?;
+        Ok(font
+            .copy_font_data()
+            .ok_or_else(|| anyhow!("Font '{}' could not expose raw font data", self.label()))?
+            .as_slice()
+            .to_vec())
     }
 
     /// Persist the resolved font bytes to one reusable cache path.
@@ -91,7 +150,7 @@ impl FontPath {
 }
 
 /// Resolve regular and bold variants of one system font family.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct FontFamily {
     regular: FontPath,
     bold: FontPath,

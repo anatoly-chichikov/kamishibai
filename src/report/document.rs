@@ -4,16 +4,15 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use anyhow::Result;
-use image::ImageReader;
 use image::{DynamicImage, GenericImageView};
 use printpdf::{
     Line, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt,
     RawImage, RawImageData, RawImageFormat, TextItem, XObjectTransform,
 };
-use tempfile::TempDir;
 
 use crate::vocabulary::VocabularyEntry;
 
+use super::FontFamily;
 use super::font::{leading, parsed, rgb, target, wrap};
 use super::{FontSelector, ReportLayout, Thumbnail};
 
@@ -36,12 +35,7 @@ pub struct Report<L, F> {
 struct PageState<'a> {
     doc: &'a mut PdfDocument,
     ops: &'a mut Vec<Op>,
-    fonts: &'a mut BTreeMap<(PathBuf, PathBuf), Pair>,
-}
-
-struct ImageState<'a> {
-    directory: &'a Path,
-    thumbnail: &'a Thumbnail,
+    fonts: &'a mut BTreeMap<FontFamily, Pair>,
 }
 
 impl<L, F> Report<L, F> {
@@ -73,7 +67,6 @@ where
         let mut doc = PdfDocument::new("Kamishibai Report");
         let mut fonts = BTreeMap::new();
         let mut pages = vec![Vec::new()];
-        let thumbs = TempDir::new()?;
         let mut y = 10.0f32;
         for (entry, image) in &self.rows {
             if y > LIMIT {
@@ -85,11 +78,7 @@ where
                 ops: pages.last_mut().expect("report must keep one active page"),
                 fonts: &mut fonts,
             };
-            let images = ImageState {
-                directory: thumbs.path(),
-                thumbnail,
-            };
-            self.row(&mut page, entry, image.as_deref(), &images, &mut y)?;
+            self.row(&mut page, entry, image.as_deref(), thumbnail, &mut y)?;
         }
         let pdf = doc
             .with_pages(
@@ -109,18 +98,13 @@ where
         page: &mut PageState<'_>,
         entry: &VocabularyEntry,
         image: Option<&Path>,
-        images: &ImageState<'_>,
+        thumbnail: &Thumbnail,
         y: &mut f32,
     ) -> Result<()> {
         let top = *y;
         let pair = self.fonts(page, entry)?;
         if let Some(path) = image.filter(|path| path.is_file()) {
-            let thumb = images.thumbnail.compressed(path, images.directory)?;
-            let image = raw(ImageReader::open(&thumb)?
-                .with_guessed_format()?
-                .decode()?
-                .to_rgb8()
-                .into());
+            let image = raw(thumbnail.scaled(path)?);
             let scale_x = target(IMAGE, image.width as f32);
             let scale_y = target(IMAGE, image.height as f32);
             let id = page.doc.add_image(&image);
@@ -209,12 +193,11 @@ where
     /// Return cached or newly registered fonts for one entry.
     fn fonts(&self, page: &mut PageState<'_>, entry: &VocabularyEntry) -> Result<Pair> {
         let family = self.font.selected(entry);
-        let regular = family.regular()?;
-        let bold = family.bold()?;
-        let key = (regular.clone(), bold.clone());
-        if let Some(pair) = page.fonts.get(&key) {
+        if let Some(pair) = page.fonts.get(&family) {
             return Ok(pair.clone());
         }
+        let regular = family.regular()?;
+        let bold = family.bold()?;
         let regular_font = parsed(&regular)?;
         let bold_font = parsed(&bold)?;
         let pair = Pair {
@@ -223,7 +206,7 @@ where
             regular_font: Rc::new(regular_font),
             bold_font: Rc::new(bold_font),
         };
-        page.fonts.insert(key, pair.clone());
+        page.fonts.insert(family, pair.clone());
         Ok(pair)
     }
 }

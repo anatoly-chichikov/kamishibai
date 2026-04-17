@@ -48,15 +48,15 @@ fn cli_arguments_keep_the_public_flags_and_optional_path_contract() -> Result<()
         arguments([
             "--deck",
             "Core Pack",
-            "--output",
-            "./output",
+            "--out",
+            "./kamishibai-out",
             "--cache",
             "./cache",
             "input.json",
         ])?,
         Arguments {
             deck: Some(String::from("Core Pack")),
-            output: Some(PathBuf::from("./output")),
+            output: Some(PathBuf::from("./kamishibai-out")),
             cache: Some(PathBuf::from("./cache")),
             path: Some(PathBuf::from("input.json")),
         },

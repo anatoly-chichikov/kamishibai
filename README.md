@@ -20,6 +20,8 @@ The main flow assumes a directory that contains `kamishibai.json`:
 cargo run --
 ```
 
+By default, generated files land in `./kamishibai-out` under the directory where you launch the program.
+
 Pass an explicit file when needed:
 
 ```bash
@@ -35,7 +37,7 @@ cargo run -- --deck "Core Pack" path/to/my-words.json
 Override output and cache locations:
 
 ```bash
-cargo run -- --output ./output --cache ~/.cache/kamishibai path/to/my-words.json
+cargo run -- --out ./kamishibai-out --cache ~/.cache/kamishibai path/to/my-words.json
 ```
 
 Environment variables are also supported:
