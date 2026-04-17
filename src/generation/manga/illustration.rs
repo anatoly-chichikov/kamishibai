@@ -43,7 +43,6 @@ where
     pub fn generate(
         &self,
         sentence: &str,
-        word: &str,
         target: &str,
         progress: &mut dyn Progress,
     ) -> Result<(String, bool)> {
@@ -58,7 +57,7 @@ where
         }
         let scene = self.scene(sentence, target, &scenefile, progress)?;
         progress.step("Rendering manga");
-        let image = self.renderer.render(&scene, word, progress)?;
+        let image = self.renderer.render(&scene, progress)?;
         self.commit(&filename, &image)?;
         progress.done("Rendering manga", "rendered", Some(imagepath.as_path()));
         Ok((filename, false))
@@ -131,11 +130,10 @@ where
     fn generate(
         &self,
         sentence: &str,
-        word: &str,
         target: &str,
         progress: &mut dyn Progress,
     ) -> Result<(String, bool)> {
-        Illustration::<T, R>::generate(self, sentence, word, target, progress)
+        Illustration::<T, R>::generate(self, sentence, target, progress)
     }
 
     /// Return one absolute cached illustration path.

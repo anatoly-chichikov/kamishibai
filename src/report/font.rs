@@ -7,8 +7,6 @@ use font_kit::properties::{Properties, Weight};
 use font_kit::source::SystemSource;
 use printpdf::{Color, ParsedFont, Rgb};
 
-use crate::languages::FontFamily as ProfileFontFamily;
-
 /// Resolve one system font family to one filesystem path.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct FontPath {
@@ -166,6 +164,11 @@ impl FontFamily {
         }
     }
 
+    /// Return the configured family name.
+    pub fn name(&self) -> &str {
+        self.regular.family.as_str()
+    }
+
     /// Return the regular font path.
     pub fn regular(&self) -> Result<PathBuf> {
         self.regular.resolved()
@@ -265,11 +268,4 @@ pub(super) fn target(mm: f32, pixels: f32) -> f32 {
     }
     let points = mm * 72.0 / 25.4;
     points * 300.0 / (pixels * 72.0)
-}
-
-impl From<ProfileFontFamily> for FontFamily {
-    /// Create one report font family from one profile font family name.
-    fn from(value: ProfileFontFamily) -> Self {
-        FontFamily::new(value.name())
-    }
 }

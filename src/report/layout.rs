@@ -1,7 +1,9 @@
-use crate::languages::{ReportFonts, ReportLabels, UiLabels};
+use crate::languages::{ReportLabels, UiLabels, language};
 use crate::vocabulary::VocabularyEntry;
 
 use super::FontFamily;
+
+const DEFAULT_FONT: &str = "DejaVu Sans";
 
 /// Select one label set for one report entry.
 pub trait LabelSource {
@@ -23,6 +25,41 @@ impl LabelSource for UiLabels {
     }
 }
 
+/// Select report fonts from the language profiles.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReportFonts {
+    default: String,
+}
+
+impl Default for ReportFonts {
+    /// Return the default font selector.
+    fn default() -> Self {
+        Self {
+            default: String::from(DEFAULT_FONT),
+        }
+    }
+}
+
+impl ReportFonts {
+    /// Return the selected font family for one entry.
+    pub fn selected(&self, entry: &VocabularyEntry) -> FontFamily {
+        let names = [entry.source.lang.as_str(), entry.target.lang.as_str()]
+            .into_iter()
+            .filter_map(|code| language(code).ok().map(|item| item.report_font))
+            .collect::<Vec<_>>();
+        if let Some(item) = names
+            .iter()
+            .find(|name| name.as_str() != self.default.as_str())
+        {
+            return FontFamily::new(item.clone());
+        }
+        if let Some(item) = names.first() {
+            return FontFamily::new(item.clone());
+        }
+        FontFamily::new(self.default.clone())
+    }
+}
+
 /// Select one font family for one report entry.
 pub trait FontSelector {
     /// Return the font family for the entry.
@@ -32,7 +69,7 @@ pub trait FontSelector {
 impl FontSelector for ReportFonts {
     /// Return the font family for the entry.
     fn selected(&self, entry: &VocabularyEntry) -> FontFamily {
-        FontFamily::new(ReportFonts::selected(self, entry).name())
+        ReportFonts::selected(self, entry)
     }
 }
 

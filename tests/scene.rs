@@ -79,7 +79,7 @@ impl QueueSource {
 
 impl ImageSource for QueueSource {
     /// Return one scripted PNG payload.
-    fn image(&self, _scene: &Value, _word: &str) -> Result<Vec<u8>> {
+    fn image(&self, _scene: &Value) -> Result<Vec<u8>> {
         let Some(image) = self.values.borrow_mut().pop_front() else {
             bail!("image source ran out of scripted images");
         };
@@ -250,7 +250,7 @@ fn renderer_retries_when_ocr_text_is_detected_before_a_valid_frame_appears() -> 
     assert_eq!(
         (
             renderer
-                .render(&scene(2, "ru"), "слово", &mut progress)?
+                .render(&scene(2, "ru"), &mut progress)?
                 .color()
                 .has_color(),
             progress.retries,
@@ -279,11 +279,11 @@ fn renderer_rejects_a_frame_after_the_last_missing_border_attempt() {
     );
     assert_eq!(
         renderer
-            .render(&scene(1, "en"), "λόγος", &mut Recorder::default())
+            .render(&scene(1, "en"), &mut Recorder::default())
             .unwrap_err()
             .to_string(),
         String::from(
-            "Rejected after 1 attempts for 'λόγος': White border missing on: top, bottom, left, right",
+            "Rejected after 1 attempts: White border missing on: top, bottom, left, right"
         ),
         "renderer no longer rejects a frame after the last missing border attempt"
     );
@@ -300,10 +300,10 @@ fn renderer_rejects_a_multi_panel_frame_when_no_gutter_appears() {
     );
     assert_eq!(
         renderer
-            .render(&scene(2, "en"), "λόγος", &mut Recorder::default())
+            .render(&scene(2, "en"), &mut Recorder::default())
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts for 'λόγος': No white gutter found"),
+        String::from("Rejected after 1 attempts: No white gutter found"),
         "renderer no longer rejects a multi panel frame when no gutter appears"
     );
 }

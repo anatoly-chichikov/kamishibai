@@ -7,8 +7,7 @@ use std::rc::Rc;
 use kamishibai::generation::manga::Progress as SceneProgress;
 use kamishibai::generation::{BuildProgress, SkippedCard};
 use kamishibai::runtime::progress::{
-    AlignedStatus, AppProgress, Console, Live, PlainProgress, ProgressSelector, RichProgress,
-    SelectedProgress, Spinner, Status,
+    AppProgress, Console, PlainProgress, ProgressSelector, RichProgress, SelectedProgress, Status,
 };
 /// Shared line recorder for progress tests.
 #[derive(Clone, Debug, Default)]
@@ -61,46 +60,6 @@ impl Console for FakeConsole {
     fn print(&mut self, text: &str, highlight: bool) {
         self.lines.items.borrow_mut().push(String::from(text));
         self.highlights.items.borrow_mut().push(highlight);
-    }
-}
-
-/// Fake live region for aligned status tests.
-#[derive(Clone, Debug)]
-struct FakeLive {
-    lines: Lines,
-}
-
-impl Live for FakeLive {
-    /// Start the live region.
-    fn start(&mut self) {
-        self.lines
-            .items
-            .borrow_mut()
-            .push(String::from("live:start"));
-    }
-
-    /// Stop the live region.
-    fn stop(&mut self) {
-        self.lines
-            .items
-            .borrow_mut()
-            .push(String::from("live:stop"));
-    }
-}
-
-/// Fake spinner for aligned status tests.
-#[derive(Clone, Debug)]
-struct FakeSpinner {
-    lines: Lines,
-}
-
-impl Spinner for FakeSpinner {
-    /// Update the spinner text.
-    fn update(&mut self, text: &str) {
-        self.lines
-            .items
-            .borrow_mut()
-            .push(format!("spinner:{text}"));
     }
 }
 
@@ -164,32 +123,6 @@ fn rich() -> Vec<String> {
         .as_str(),
     )
     .expect("rich progress manifest must parse")
-}
-
-/// Aligned status delegates update, start, and stop to the wrapped objects.
-#[test]
-fn aligned_status_delegates_update_start_and_stop_to_the_wrapped_objects() {
-    let lines = Lines::default();
-    let mut status = AlignedStatus::new(
-        FakeLive {
-            lines: lines.clone(),
-        },
-        FakeSpinner {
-            lines: lines.clone(),
-        },
-    );
-    status.update("tásk...");
-    status.start();
-    status.stop();
-    assert_eq!(
-        lines.values(),
-        vec![
-            String::from("spinner:tásk..."),
-            String::from("live:start"),
-            String::from("live:stop"),
-        ],
-        "aligned status no longer delegates update start and stop to the wrapped objects"
-    );
 }
 
 /// Plain progress keeps the frozen line formatting contract.

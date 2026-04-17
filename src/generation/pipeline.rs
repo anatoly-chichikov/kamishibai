@@ -128,7 +128,6 @@ where
     ) -> Result<(String, PathBuf)> {
         let (filename, _cached) = illustration.generate(
             entry.target.sentence.as_str(),
-            entry.term.as_str(),
             entry.target.lang.as_str(),
             &mut self.progress,
         )?;

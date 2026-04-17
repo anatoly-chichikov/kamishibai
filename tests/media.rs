@@ -42,13 +42,12 @@ impl IllustrationGenerator for IllustrationFixture {
     fn generate(
         &self,
         sentence: &str,
-        word: &str,
         target: &str,
         progress: &mut dyn SceneProgress,
     ) -> Result<(String, bool)> {
         match self {
-            Self::Success(item) => item.generate(sentence, word, target, progress),
-            Self::Failure(item) => item.generate(sentence, word, target, progress),
+            Self::Success(item) => item.generate(sentence, target, progress),
+            Self::Failure(item) => item.generate(sentence, target, progress),
         }
     }
 
@@ -85,8 +84,8 @@ impl Speaker for FakeClient {
 }
 
 impl ImageSource for FakeClient {
-    /// Return one encoded image payload for the scene and word.
-    fn image(&self, _scene: &Value, _word: &str) -> Result<Vec<u8>> {
+    /// Return one encoded image payload for the scene.
+    fn image(&self, _scene: &Value) -> Result<Vec<u8>> {
         Ok(include_bytes!("../tests/fixtures/reference/inputs/single-target-en.json").to_vec())
     }
 }
@@ -222,7 +221,6 @@ impl IllustrationGenerator for SuccessIllustration {
     fn generate(
         &self,
         _sentence: &str,
-        _word: &str,
         _target: &str,
         _progress: &mut dyn SceneProgress,
     ) -> Result<(String, bool)> {
@@ -257,7 +255,6 @@ impl IllustrationGenerator for FailingIllustration {
     fn generate(
         &self,
         _sentence: &str,
-        _word: &str,
         _target: &str,
         _progress: &mut dyn SceneProgress,
     ) -> Result<(String, bool)> {

@@ -22,13 +22,8 @@ pub trait Translator {
 
 /// Render one scene JSON document into an image.
 pub trait Renderer {
-    /// Return one rendered image for the scene and word.
-    fn render(
-        &self,
-        scene: &Value,
-        word: &str,
-        progress: &mut dyn Progress,
-    ) -> Result<DynamicImage>;
+    /// Return one rendered image for the scene.
+    fn render(&self, scene: &Value, progress: &mut dyn Progress) -> Result<DynamicImage>;
 }
 
 /// Detect OCR text from one grayscale image.
@@ -45,6 +40,6 @@ pub trait SceneText {
 
 /// Render one scene JSON payload into raw image bytes.
 pub trait ImageSource {
-    /// Return one encoded image payload for the scene and word.
-    fn image(&self, scene: &Value, word: &str) -> Result<Vec<u8>>;
+    /// Return one encoded image payload for the scene.
+    fn image(&self, scene: &Value) -> Result<Vec<u8>>;
 }

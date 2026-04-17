@@ -159,7 +159,7 @@ where
     }
 
     /// Render one scene JSON payload into raw image bytes.
-    pub fn image(&self, scene: &Value, word: &str) -> Result<Vec<u8>> {
+    pub fn image(&self, scene: &Value) -> Result<Vec<u8>> {
         let response = self.request(
             IMAGE_MODEL,
             &Request::text(
@@ -169,21 +169,17 @@ where
             ),
         )?;
         if response.candidates.is_empty() {
-            bail!(
-                "No candidates in image response for '{}': {}",
-                word,
-                diagnosis(&response)
-            );
+            bail!("No candidates in image response: {}", diagnosis(&response));
         }
         let Some(content) = response.candidates[0].content.as_ref() else {
-            bail!("No content in image response for '{}'", word);
+            bail!("No content in image response");
         };
         for part in &content.parts {
             if let Some(data) = part.inline_data.as_ref() {
                 return decode(&data.data);
             }
         }
-        bail!("No image data found in response for '{}'", word);
+        bail!("No image data found in response");
     }
 
     /// Generate one PCM audio payload from the configured TTS model.

@@ -171,6 +171,13 @@ impl ImageText for TextDetector {
     }
 }
 
+impl SceneText for TextDetector {
+    /// Return the detected OCR text for one scene and image pair.
+    fn detected(&self, _scene: &Value, image: &GrayImage) -> Result<String> {
+        ImageText::detected(self, image)
+    }
+}
+
 /// Route scene OCR by the scene target language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextDetectors<D> {

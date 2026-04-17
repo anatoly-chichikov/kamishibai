@@ -5,8 +5,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use image::{Rgb, RgbImage};
-use kamishibai::languages::{ReportFonts, ReportLabels};
-use kamishibai::report::{FontFamily, FontPath, Report, ReportLayout, Thumbnail, VocabularyLayout};
+use kamishibai::languages::ReportLabels;
+use kamishibai::report::{
+    FontFamily, FontPath, Report, ReportFonts, ReportLayout, Thumbnail, VocabularyLayout,
+};
 use kamishibai::vocabulary::{
     Importance, LanguageCode, NonEmptyText, VocabularyDocument, VocabularyEntry, VocabularySource,
     VocabularyTarget,
