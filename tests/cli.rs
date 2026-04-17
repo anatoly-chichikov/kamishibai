@@ -48,7 +48,7 @@ fn cli_arguments_keep_the_public_flags_and_optional_path_contract() -> Result<()
         arguments([
             "--deck",
             "Core Pack",
-            "--out-dir",
+            "--out",
             "./kamishibai-out",
             "--cache",
             "./cache",
