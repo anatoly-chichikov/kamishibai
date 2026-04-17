@@ -198,8 +198,8 @@ fn tts_generation_falls_back_only_on_resource_exhausted() -> Result<()> {
         ),
         (
             vec![1, 2, 3],
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent",
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent",
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-tts:generateContent",
             true
         ),
         "tts generation no longer falls back after RESOURCE_EXHAUSTED while keeping the fixed voice pool"

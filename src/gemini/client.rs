@@ -17,7 +17,11 @@ use super::protocol::{
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 const SCENE_MODEL: &str = "gemini-3-flash-preview";
 const IMAGE_MODEL: &str = "gemini-3.1-flash-image-preview";
-const TTS_MODELS: [&str; 2] = ["gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"];
+const TTS_MODELS: [&str; 3] = [
+    "gemini-3.1-flash-tts-preview",
+    "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
+];
 const VOICES: [&str; 30] = [
     "Achernar",
     "Achird",
