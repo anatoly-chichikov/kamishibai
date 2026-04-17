@@ -10,7 +10,7 @@ use printpdf::{Color, ParsedFont, Rgb};
 use crate::languages::FontFamily as ProfileFontFamily;
 
 /// Resolve one system font family to one filesystem path.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct FontPath {
     bold: bool,
     family: String,
@@ -91,7 +91,7 @@ impl FontPath {
 }
 
 /// Resolve regular and bold variants of one system font family.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct FontFamily {
     regular: FontPath,
     bold: FontPath,

@@ -8,6 +8,7 @@ use anyhow::{Result, bail};
 use rusqlite::{Connection, params};
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
+use zip::CompressionMethod;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
@@ -278,68 +279,70 @@ where
     }
 
     fn write(&self, conn: &mut Connection, timestamp: i64, ids: &mut Identifiers) -> Result<()> {
-        let mut decks = parsed(conn, "decks")?;
+        let tx = conn.transaction()?;
+        let mut decks = parsed(&tx, "decks")?;
         decks.insert(self.id.to_string(), self.deck());
-        stored(conn, "decks", Value::Object(decks))?;
+        stored(&tx, "decks", Value::Object(decks))?;
         let model: &Model = self.format.model();
-        let mut models = parsed(conn, "models")?;
+        let mut models = parsed(&tx, "models")?;
         models.insert(model.id.to_string(), model.json(timestamp));
-        stored(conn, "models", Value::Object(models))?;
+        stored(&tx, "models", Value::Object(models))?;
+        let mut notes = tx.prepare("INSERT INTO notes VALUES(?,?,?,?,?,?,?,?,?,?,?)")?;
+        let mut cards =
+            tx.prepare("INSERT INTO cards VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")?;
         for note in &self.notes {
             let note_id = ids.next();
-            conn.execute(
-                "INSERT INTO notes VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                params![
-                    note_id,
-                    note.guid,
-                    model.id,
-                    timestamp,
-                    -1,
-                    "",
-                    note.fields.join("\x1f"),
-                    note.sort_field,
-                    0,
-                    0,
-                    "",
-                ],
-            )?;
-            conn.execute(
-                "INSERT INTO cards VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                params![
-                    ids.next(),
-                    note_id,
-                    self.id,
-                    0,
-                    timestamp,
-                    -1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    "",
-                ],
-            )?;
+            notes.execute(params![
+                note_id,
+                note.guid,
+                model.id,
+                timestamp,
+                -1,
+                "",
+                note.fields.join("\x1f"),
+                note.sort_field,
+                0,
+                0,
+                "",
+            ])?;
+            cards.execute(params![
+                ids.next(),
+                note_id,
+                self.id,
+                0,
+                timestamp,
+                -1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "",
+            ])?;
         }
+        drop(notes);
+        drop(cards);
+        tx.commit()?;
         Ok(())
     }
 
     fn zip(&self, database: &Path, output: &Path) -> Result<()> {
         let file = fs::File::create(output)?;
         let mut writer = ZipWriter::new(file);
-        let options = SimpleFileOptions::default();
-        writer.start_file("collection.anki2", options)?;
+        let deflated = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("collection.anki2", deflated)?;
         copy(database, &mut writer)?;
-        writer.start_file("media", options)?;
+        writer.start_file("media", deflated)?;
         writer.write_all(media(self.media.as_slice())?.as_bytes())?;
         for (index, path) in self.media.iter().enumerate() {
-            writer.start_file(index.to_string(), options)?;
+            writer.start_file(index.to_string(), stored)?;
             copy(path, &mut writer)?;
         }
         writer.finish()?;
