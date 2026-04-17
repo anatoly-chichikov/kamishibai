@@ -23,9 +23,9 @@ impl<T> ImageSource for GeminiClient<T>
 where
     T: Transport,
 {
-    /// Return one encoded image payload for the scene and word.
-    fn image(&self, scene: &Value, word: &str) -> Result<Vec<u8>> {
-        GeminiClient::<T>::image(self, scene, word)
+    /// Return one encoded image payload for the scene.
+    fn image(&self, scene: &Value) -> Result<Vec<u8>> {
+        GeminiClient::<T>::image(self, scene)
     }
 }
 

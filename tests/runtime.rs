@@ -39,8 +39,8 @@ impl SceneSource for FakeClient {
 }
 
 impl ImageSource for FakeClient {
-    /// Return one encoded image payload for the scene and word.
-    fn image(&self, _scene: &Value, _word: &str) -> Result<Vec<u8>> {
+    /// Return one encoded image payload for the scene.
+    fn image(&self, _scene: &Value) -> Result<Vec<u8>> {
         Ok(include_bytes!("../assets/manga_template.json").to_vec())
     }
 }

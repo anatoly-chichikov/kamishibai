@@ -32,50 +32,42 @@ cargo run --
 Every entry must contain:
 
 - `term`
-- `source.sentence`
-- `source.lang`
-- `target.sentence`
-- `target.lang`
-
-Optional fields:
-
 - `meaning`
 - `pronunciation`
 - `transcription`
 - `importance`
+- `source.sentence`
+- `source.lang`
 - `source.highlight`
 - `source.hint`
 - `source.context`
+- `target.sentence`
+- `target.lang`
 
-Normalized entries always carry both `source_lang` and `target_lang`.
+The input contract is strict. There are no optional entry fields.
 
 ## Architecture
 
 The runtime is split into a few focused modules:
 
-- `src/input.rs`: validates the JSON document and normalizes entries
-- `src/profile.rs`: immutable language profiles, naming, labels, and report fonts
-- `src/paths.rs`: resolves input, output, and cache locations from args and env
-- `src/gemini.rs`: talks to Gemini through the frozen direct REST contract
-- `src/ocr.rs`: routes legacy OCR tokens to cached PaddleOCR bundles and downloads model files
-- `src/audio.rs`: writes cached WAV audio
-- `src/scene.rs`: translates scenes, runs OCR checks, and validates manga output
-- `src/media.rs`: wires per-language services and orchestrates the batch pipeline
-- `src/anki.rs`: defines the language-neutral Anki note model and APKG writer
-- `src/report.rs`: builds the PDF report with profile-driven labels and fonts
-- `src/progress.rs`: renders plain and rich progress output
-- `src/diagnosis.rs`: renders plain and rich startup diagnostics
+- `src/vocabulary`: validates the strict JSON document and exposes canonical entry types
+- `src/languages`: keeps language profiles, naming, labels, and report font preferences
+- `src/runtime`: resolves paths and renders progress and diagnosis output
+- `src/gemini`: talks to Gemini through the frozen direct REST contract
+- `src/generation`: writes cached WAV audio, composes scenes, routes OCR, validates manga output, and orchestrates the fixed Gemini production pipeline
+- `src/anki`: defines the language-neutral Anki note model and APKG writer
+- `src/report`: builds the PDF report with layout, thumbnails, and font resolution
 - `src/cli.rs`: orchestrates the end-to-end command-line flow
 
 ## Language Profiles
 
-Language-specific behavior belongs only in `profile.rs` declarations. A profile defines:
+Language-specific behavior belongs only in `src/languages` profile declarations. A profile defines:
 
-- prompt display name
+- Gemini prompt display name
 - OCR configuration
 - cache directory naming
 - default deck naming
 - report font family
 - user-facing report labels
 
-If a new language is needed, add a new profile instead of editing runtime orchestration logic.
+If a new language is needed, add a new profile instead of editing the fixed runtime orchestration logic.

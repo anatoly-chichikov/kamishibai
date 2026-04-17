@@ -1,7 +1,8 @@
 //! Tests for language profiles, naming, labels, and fonts.
 
 use anyhow::Result;
-use kamishibai::languages::{LanguageEntry, ReportFonts, ReportLabels, catalog, language};
+use kamishibai::languages::{LanguageEntry, ReportLabels, catalog, language};
+use kamishibai::report::ReportFonts;
 use kamishibai::vocabulary::{
     Importance, LanguageCode, NonEmptyText, VocabularyEntry, VocabularySource, VocabularyTarget,
 };
@@ -48,12 +49,7 @@ fn score(value: u8) -> Importance {
 fn english_profile_keeps_the_frozen_runtime_values() -> Result<()> {
     let item = language("en")?;
     assert_eq!(
-        (
-            item.audio.language,
-            item.imagery.ocr,
-            item.naming.name,
-            item.font.report
-        ),
+        (item.prompt, item.ocr, item.naming.name, item.report_font),
         (
             String::from("English"),
             String::from("eng"),

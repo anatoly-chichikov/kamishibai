@@ -100,22 +100,15 @@ Example:
 The shipping runtime lives in Rust modules under `src/`:
 
 - `src/cli.rs`
-- `src/input.rs`
-- `src/profile.rs`
-- `src/paths.rs`
-- `src/assets.rs`
-- `src/gemini.rs`
-- `src/cache.rs`
-- `src/ocr.rs`
-- `src/audio.rs`
-- `src/scene.rs`
-- `src/media.rs`
-- `src/anki.rs`
-- `src/report.rs`
-- `src/progress.rs`
-- `src/diagnosis.rs`
+- `src/vocabulary`
+- `src/languages`
+- `src/runtime`
+- `src/gemini`
+- `src/generation`
+- `src/anki`
+- `src/report`
 
-Language-specific behavior belongs only in [`src/profile.rs`](src/profile.rs). Add new languages there instead of branching runtime orchestration.
+The runtime is a fixed production pipeline on top of Gemini. Language-specific behavior belongs only in the profile declarations under `src/languages`. Add new languages there instead of branching runtime orchestration.
 
 ## External Requirements
 

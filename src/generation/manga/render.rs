@@ -49,13 +49,8 @@ impl<D> Renderer for MangaRenderer<D>
 where
     D: SceneText,
 {
-    /// Return one rendered image for the scene and word.
-    fn render(
-        &self,
-        scene: &Value,
-        word: &str,
-        progress: &mut dyn Progress,
-    ) -> Result<DynamicImage> {
+    /// Return one rendered image for the scene.
+    fn render(&self, scene: &Value, progress: &mut dyn Progress) -> Result<DynamicImage> {
         let panels = scene
             .get("manga_panel")
             .and_then(|root| root.get("panels"))
@@ -63,8 +58,7 @@ where
             .map_or(0, Vec::len);
         let mut reason = String::new();
         for attempt in 0..self.retries {
-            let gray =
-                image::load_from_memory(self.client.image(scene, word)?.as_slice())?.into_luma8();
+            let gray = image::load_from_memory(self.client.image(scene)?.as_slice())?.into_luma8();
             let found = self.text.detected(scene, &gray)?;
             if !found.is_empty() {
                 reason = format!("OCR detected text: '{found}'");
@@ -84,11 +78,6 @@ where
             }
             return Ok(DynamicImage::ImageLuma8(gray));
         }
-        bail!(
-            "Rejected after {} attempts for '{}': {}",
-            self.retries,
-            word,
-            reason
-        );
+        bail!("Rejected after {} attempts: {}", self.retries, reason);
     }
 }

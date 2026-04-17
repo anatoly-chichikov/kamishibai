@@ -42,12 +42,7 @@ struct FixedRenderer;
 
 impl Renderer for FixedRenderer {
     /// Return one fixed grayscale image.
-    fn render(
-        &self,
-        _scene: &Value,
-        _word: &str,
-        _progress: &mut dyn Progress,
-    ) -> Result<DynamicImage> {
+    fn render(&self, _scene: &Value, _progress: &mut dyn Progress) -> Result<DynamicImage> {
         Ok(DynamicImage::ImageLuma8(GrayImage::from_pixel(
             64,
             64,
@@ -92,12 +87,8 @@ fn illustration_generation_writes_both_the_scene_json_and_the_jpeg_file() -> Res
         FixedRenderer,
     );
     let mut progress = Recorder::default();
-    let (filename, cached) = illustration.generate(
-        "The cat is sleeping on the windowsill",
-        "кошка",
-        "en",
-        &mut progress,
-    )?;
+    let (filename, cached) =
+        illustration.generate("The cat is sleeping on the windowsill", "en", &mut progress)?;
     let digest = "0f7acb8b6e5b";
     let scene_path = illustration.filepath(&format!("{digest}.json"))?;
     let image_path = illustration.filepath(&format!("{digest}.jpg"))?;
@@ -125,12 +116,8 @@ fn cached_scene_files_skip_translator_calls_and_report_cached_progress() -> Resu
         serde_json::to_string_pretty(&scene())?,
     )?;
     let mut progress = Recorder::default();
-    let _result = illustration.generate(
-        "The cat is sleeping on the windowsill",
-        "кошка",
-        "en",
-        &mut progress,
-    )?;
+    let _result =
+        illustration.generate("The cat is sleeping on the windowsill", "en", &mut progress)?;
     assert_eq!(
         (
             *translator.calls.borrow(),
@@ -160,12 +147,8 @@ fn legacy_cached_images_omit_the_missing_scene_path() -> Result<()> {
     let image = illustration.filepath(&format!("{digest}.jpg"))?;
     DynamicImage::ImageLuma8(GrayImage::from_pixel(64, 64, Luma([128]))).save(&image)?;
     let mut progress = Recorder::default();
-    let _result = illustration.generate(
-        "The cat is sleeping on the windowsill",
-        "кошка",
-        "en",
-        &mut progress,
-    )?;
+    let _result =
+        illustration.generate("The cat is sleeping on the windowsill", "en", &mut progress)?;
     assert_eq!(
         progress
             .events
@@ -188,7 +171,6 @@ fn failed_scene_commits_remove_the_staged_scene_file() -> Result<()> {
     let _error = illustration
         .generate(
             "The cat is sleeping on the windowsill",
-            "кошка",
             "en",
             &mut Recorder::default(),
         )
@@ -210,7 +192,6 @@ fn failed_image_commits_remove_the_staged_image_file() -> Result<()> {
     let _error = illustration
         .generate(
             "The cat is sleeping on the windowsill",
-            "кошка",
             "en",
             &mut Recorder::default(),
         )

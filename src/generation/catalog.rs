@@ -5,8 +5,7 @@ use anyhow::Result;
 
 use crate::generation::artifact_cache::Cache;
 use crate::generation::manga::{
-    BorderDetector, Illustration, ImageSource, MangaRenderer, TextDetector, TextDetectors,
-    Translator,
+    BorderDetector, Illustration, ImageSource, MangaRenderer, TextDetector, Translator,
 };
 use crate::generation::render_audio_prompt;
 use crate::generation::speech::{Audio, Speaker};
@@ -15,8 +14,7 @@ use crate::languages::{LanguageCatalog, catalog};
 use crate::vocabulary::VocabularyEntry;
 
 type CachedAudio<C> = Audio<C>;
-type CachedIllustration<C> =
-    Illustration<SceneComposer<C>, MangaRenderer<TextDetectors<TextDetector>>>;
+type CachedIllustration<C> = Illustration<SceneComposer<C>, MangaRenderer<TextDetector>>;
 
 /// Wrap one scene client with one fixed prompt language.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -46,11 +44,9 @@ where
 }
 
 #[derive(Clone, Debug)]
-struct State<C> {
-    audio: BTreeMap<String, CachedAudio<C>>,
-    detector: BTreeMap<String, TextDetector>,
-    illustration: BTreeMap<String, CachedIllustration<C>>,
-    translator: BTreeMap<String, SceneComposer<C>>,
+struct LanguageRuntime<C> {
+    audio: CachedAudio<C>,
+    illustration: CachedIllustration<C>,
 }
 
 /// Build lazy per-language audio and illustration services.
@@ -59,7 +55,7 @@ pub struct GeneratorCatalog<C> {
     cache: PathBuf,
     client: C,
     catalog: LanguageCatalog,
-    state: State<C>,
+    runtimes: BTreeMap<String, LanguageRuntime<C>>,
 }
 
 impl<C> GeneratorCatalog<C> {
@@ -74,103 +70,57 @@ impl<C> GeneratorCatalog<C> {
             cache: cache.into(),
             client,
             catalog,
-            state: State {
-                audio: BTreeMap::new(),
-                detector: BTreeMap::new(),
-                illustration: BTreeMap::new(),
-                translator: BTreeMap::new(),
-            },
+            runtimes: BTreeMap::new(),
         }
     }
 }
 
 impl<C> GeneratorCatalog<C>
 where
-    C: Clone + Speaker,
+    C: Clone + ImageSource + SceneSource + Speaker + 'static,
 {
+    /// Return the cached runtime for one entry target.
+    fn runtime(&mut self, entry: &VocabularyEntry) -> Result<&LanguageRuntime<C>> {
+        let code = String::from(entry.target.lang.as_str());
+        if !self.runtimes.contains_key(code.as_str()) {
+            let item = self.catalog.item(code.as_str())?;
+            let client = self.client.clone();
+            let cache = self.cache.clone();
+            self.runtimes.insert(
+                code.clone(),
+                LanguageRuntime {
+                    audio: Audio::new(
+                        Cache::new(item.audio_cache.as_str(), cache.clone()),
+                        render_audio_prompt(item.prompt.as_str()),
+                        client.clone(),
+                    ),
+                    illustration: Illustration::new(
+                        Cache::new(item.image_cache.as_str(), cache.clone()),
+                        SceneComposer::new(client.clone(), item.prompt.as_str()),
+                        MangaRenderer::new(
+                            client,
+                            3,
+                            TextDetector::cached(60, item.ocr.as_str(), cache),
+                            BorderDetector::new(6, 240, 10),
+                        ),
+                    ),
+                },
+            );
+        }
+        Ok(self
+            .runtimes
+            .get(code.as_str())
+            .expect("generator catalog must keep the requested runtime"))
+    }
+
     /// Return the cached audio service for one entry target.
     pub fn audio(&mut self, entry: &VocabularyEntry) -> Result<CachedAudio<C>> {
-        let code = String::from(entry.target.lang.as_str());
-        let item = self.catalog.item(code.as_str())?;
-        let client = self.client.clone();
-        let cache = self.cache.clone();
-        if !self.state.audio.contains_key(code.as_str()) {
-            self.state.audio.insert(
-                code.clone(),
-                Audio::new(
-                    Cache::new(item.audio.cache.as_str(), cache),
-                    render_audio_prompt(item.audio.language.as_str()),
-                    client,
-                ),
-            );
-        }
-        Ok(self
-            .state
-            .audio
-            .get(code.as_str())
-            .cloned()
-            .expect("generator catalog must keep the requested audio service"))
+        Ok(self.runtime(entry)?.audio.clone())
     }
-}
 
-impl<C> GeneratorCatalog<C>
-where
-    C: Clone + ImageSource + SceneSource + 'static,
-{
     /// Return the cached illustration service for one entry target.
     pub fn illustration(&mut self, entry: &VocabularyEntry) -> Result<CachedIllustration<C>> {
-        let code = String::from(entry.target.lang.as_str());
-        let item = self.catalog.item(code.as_str())?;
-        let client = self.client.clone();
-        let cache = self.cache.clone();
-        let fallback = String::from(self.catalog.fallback_ocr());
-        if !self.state.translator.contains_key(code.as_str()) {
-            self.state.translator.insert(
-                code.clone(),
-                SceneComposer::new(client.clone(), item.audio.language.as_str()),
-            );
-        }
-        if !self.state.detector.contains_key(code.as_str()) {
-            self.state.detector.insert(
-                code.clone(),
-                TextDetector::cached(60, item.imagery.ocr.as_str(), cache.clone()),
-            );
-        }
-        if !self.state.illustration.contains_key(code.as_str()) {
-            let detector = self
-                .state
-                .detector
-                .get(code.as_str())
-                .cloned()
-                .expect("generator catalog must keep the requested detector");
-            let translator = self
-                .state
-                .translator
-                .get(code.as_str())
-                .cloned()
-                .expect("generator catalog must keep the requested translator");
-            let mut detectors = BTreeMap::new();
-            detectors.insert(code.clone(), detector);
-            self.state.illustration.insert(
-                code.clone(),
-                Illustration::new(
-                    Cache::new(item.imagery.cache.as_str(), cache.clone()),
-                    translator,
-                    MangaRenderer::new(
-                        client,
-                        3,
-                        TextDetectors::new(detectors, TextDetector::cached(60, fallback, cache)),
-                        BorderDetector::new(6, 240, 10),
-                    ),
-                ),
-            );
-        }
-        Ok(self
-            .state
-            .illustration
-            .get(code.as_str())
-            .cloned()
-            .expect("generator catalog must keep the requested illustration service"))
+        Ok(self.runtime(entry)?.illustration.clone())
     }
 }
 

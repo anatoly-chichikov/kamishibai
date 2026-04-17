@@ -26,7 +26,6 @@ pub trait IllustrationGenerator {
     fn generate(
         &self,
         sentence: &str,
-        word: &str,
         target: &str,
         progress: &mut dyn SceneProgress,
     ) -> Result<(String, bool)>;

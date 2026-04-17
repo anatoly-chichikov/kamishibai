@@ -20,40 +20,6 @@ impl LanguageEntry for VocabularyEntry {
     }
 }
 
-/// Audio generation settings for one language.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AudioProfile {
-    pub language: String,
-    pub cache: String,
-}
-
-impl AudioProfile {
-    /// Create one audio profile.
-    pub fn new(language: impl Into<String>, cache: impl Into<String>) -> Self {
-        Self {
-            language: language.into(),
-            cache: cache.into(),
-        }
-    }
-}
-
-/// Image generation settings for one language.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ImageProfile {
-    pub ocr: String,
-    pub cache: String,
-}
-
-impl ImageProfile {
-    /// Create one image profile.
-    pub fn new(ocr: impl Into<String>, cache: impl Into<String>) -> Self {
-        Self {
-            ocr: ocr.into(),
-            cache: cache.into(),
-        }
-    }
-}
-
 /// Deck naming settings for one language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeckNaming {
@@ -73,21 +39,6 @@ impl DeckNaming {
             name: name.into(),
             prefix: prefix.into(),
             default: default.into(),
-        }
-    }
-}
-
-/// Report font settings for one language.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FontProfile {
-    pub report: String,
-}
-
-impl FontProfile {
-    /// Create one font profile.
-    pub fn new(report: impl Into<String>) -> Self {
-        Self {
-            report: report.into(),
         }
     }
 }
@@ -122,30 +73,11 @@ impl UiLabels {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LanguageProfile {
     pub code: String,
-    pub audio: AudioProfile,
-    pub imagery: ImageProfile,
+    pub prompt: String,
+    pub audio_cache: String,
+    pub ocr: String,
+    pub image_cache: String,
     pub naming: DeckNaming,
-    pub font: FontProfile,
+    pub report_font: String,
     pub labels: UiLabels,
-}
-
-impl LanguageProfile {
-    /// Create one language profile.
-    pub fn new(
-        code: impl Into<String>,
-        audio: AudioProfile,
-        imagery: ImageProfile,
-        naming: DeckNaming,
-        font: FontProfile,
-        labels: UiLabels,
-    ) -> Self {
-        Self {
-            code: code.into(),
-            audio,
-            imagery,
-            naming,
-            font,
-            labels,
-        }
-    }
 }

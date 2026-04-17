@@ -1,9 +1,6 @@
 use anyhow::{Result, bail};
 
-use super::{
-    AudioProfile, DEFAULT_FONT, DeckNaming, FALLBACK_OCR, FontProfile, ImageProfile,
-    LanguageProfile, UiLabels,
-};
+use super::{DEFAULT_FONT, DeckNaming, FALLBACK_OCR, LanguageProfile, UiLabels};
 
 /// Registry for supported language profiles.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -13,54 +10,66 @@ impl LanguageCatalog {
     /// Return the supported profile for one language code.
     pub fn item(&self, code: &str) -> Result<LanguageProfile> {
         match code {
-            "de" => Ok(LanguageProfile::new(
-                "de",
-                AudioProfile::new("German", "audio-de"),
-                ImageProfile::new("eng+deu", "manga-de"),
-                DeckNaming::new("German Vocabulary", "de", super::DEFAULT_FILE),
-                FontProfile::new(DEFAULT_FONT),
-                UiLabels::new("Übersetzung", "Kontext", "Hinweis", "Wichtigkeit"),
-            )),
-            "el" => Ok(LanguageProfile::new(
-                "el",
-                AudioProfile::new("Greek", "audio-el"),
-                ImageProfile::new("eng+ell", "manga-el"),
-                DeckNaming::new("Greek Vocabulary", "el", super::DEFAULT_FILE),
-                FontProfile::new(DEFAULT_FONT),
-                UiLabels::new("Μετάφραση", "Πλαίσιο", "Υπόδειξη", "Σπουδαιότητα"),
-            )),
-            "en" => Ok(LanguageProfile::new(
-                "en",
-                AudioProfile::new("English", "audio-en"),
-                ImageProfile::new("eng", "manga-en"),
-                DeckNaming::new("English Vocabulary", "en", super::DEFAULT_FILE),
-                FontProfile::new(DEFAULT_FONT),
-                UiLabels::new("Translation", "Context", "Hint", "Importance"),
-            )),
-            "es" => Ok(LanguageProfile::new(
-                "es",
-                AudioProfile::new("Spanish", "audio-es"),
-                ImageProfile::new("eng+spa", "manga-es"),
-                DeckNaming::new("Spanish Vocabulary", "es", super::DEFAULT_FILE),
-                FontProfile::new(DEFAULT_FONT),
-                UiLabels::new("Traducción", "Contexto", "Pista", "Importancia"),
-            )),
-            "ru" => Ok(LanguageProfile::new(
-                "ru",
-                AudioProfile::new("Russian", "audio-ru"),
-                ImageProfile::new("eng+rus", "manga-ru"),
-                DeckNaming::new("Russian Vocabulary", "ru", super::DEFAULT_FILE),
-                FontProfile::new(DEFAULT_FONT),
-                UiLabels::new("Перевод", "Контекст", "Подсказка", "Важность"),
-            )),
-            "zh" => Ok(LanguageProfile::new(
-                "zh",
-                AudioProfile::new("Mandarin Chinese", "audio-zh"),
-                ImageProfile::new("eng+chi_sim", "manga-zh"),
-                DeckNaming::new("Chinese Vocabulary", "zh", super::DEFAULT_FILE),
-                FontProfile::new("Hiragino Sans GB"),
-                UiLabels::new("翻译", "语境", "提示", "重要性"),
-            )),
+            "de" => Ok(LanguageProfile {
+                code: String::from("de"),
+                prompt: String::from("German"),
+                audio_cache: String::from("audio-de"),
+                ocr: String::from("eng+deu"),
+                image_cache: String::from("manga-de"),
+                naming: DeckNaming::new("German Vocabulary", "de", super::DEFAULT_FILE),
+                report_font: String::from(DEFAULT_FONT),
+                labels: UiLabels::new("Übersetzung", "Kontext", "Hinweis", "Wichtigkeit"),
+            }),
+            "el" => Ok(LanguageProfile {
+                code: String::from("el"),
+                prompt: String::from("Greek"),
+                audio_cache: String::from("audio-el"),
+                ocr: String::from("eng+ell"),
+                image_cache: String::from("manga-el"),
+                naming: DeckNaming::new("Greek Vocabulary", "el", super::DEFAULT_FILE),
+                report_font: String::from(DEFAULT_FONT),
+                labels: UiLabels::new("Μετάφραση", "Πλαίσιο", "Υπόδειξη", "Σπουδαιότητα"),
+            }),
+            "en" => Ok(LanguageProfile {
+                code: String::from("en"),
+                prompt: String::from("English"),
+                audio_cache: String::from("audio-en"),
+                ocr: String::from("eng"),
+                image_cache: String::from("manga-en"),
+                naming: DeckNaming::new("English Vocabulary", "en", super::DEFAULT_FILE),
+                report_font: String::from(DEFAULT_FONT),
+                labels: UiLabels::new("Translation", "Context", "Hint", "Importance"),
+            }),
+            "es" => Ok(LanguageProfile {
+                code: String::from("es"),
+                prompt: String::from("Spanish"),
+                audio_cache: String::from("audio-es"),
+                ocr: String::from("eng+spa"),
+                image_cache: String::from("manga-es"),
+                naming: DeckNaming::new("Spanish Vocabulary", "es", super::DEFAULT_FILE),
+                report_font: String::from(DEFAULT_FONT),
+                labels: UiLabels::new("Traducción", "Contexto", "Pista", "Importancia"),
+            }),
+            "ru" => Ok(LanguageProfile {
+                code: String::from("ru"),
+                prompt: String::from("Russian"),
+                audio_cache: String::from("audio-ru"),
+                ocr: String::from("eng+rus"),
+                image_cache: String::from("manga-ru"),
+                naming: DeckNaming::new("Russian Vocabulary", "ru", super::DEFAULT_FILE),
+                report_font: String::from(DEFAULT_FONT),
+                labels: UiLabels::new("Перевод", "Контекст", "Подсказка", "Важность"),
+            }),
+            "zh" => Ok(LanguageProfile {
+                code: String::from("zh"),
+                prompt: String::from("Mandarin Chinese"),
+                audio_cache: String::from("audio-zh"),
+                ocr: String::from("eng+chi_sim"),
+                image_cache: String::from("manga-zh"),
+                naming: DeckNaming::new("Chinese Vocabulary", "zh", super::DEFAULT_FILE),
+                report_font: String::from("Hiragino Sans GB"),
+                labels: UiLabels::new("翻译", "语境", "提示", "重要性"),
+            }),
             _ => bail!("Unsupported language '{code}'"),
         }
     }

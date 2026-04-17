@@ -127,10 +127,8 @@ fn image_generation_keeps_the_image_modality_and_square_aspect_ratio() -> Result
     )?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let _bytes = client.image(
-        &json!({"manga_panel":{"panels":[{"scene":{"description":"A cat"}}]}}),
-        "cat",
-    )?;
+    let _bytes =
+        client.image(&json!({"manga_panel":{"panels":[{"scene":{"description":"A cat"}}]}}))?;
     let request = serde_json::from_str::<Value>(&requests.borrow()[0].1)?;
     assert_eq!(
         (
@@ -153,13 +151,10 @@ fn image_generation_surfaces_blocked_response_diagnostics() {
     let client = GeminiClient::new("key", transport);
     assert_eq!(
         client
-            .image(
-                &json!({"manga_panel":{"panels":[{"scene":{"description":"A cat"}}]}}),
-                "cat"
-            )
+            .image(&json!({"manga_panel":{"panels":[{"scene":{"description":"A cat"}}]}}))
             .unwrap_err()
             .to_string(),
-        "No candidates in image response for 'cat': SAFETY, blocked, flagged=[HARM_CATEGORY_HARASSMENT=MEDIUM]",
+        "No candidates in image response: SAFETY, blocked, flagged=[HARM_CATEGORY_HARASSMENT=MEDIUM]",
         "image generation no longer surfaces the frozen blocked-response diagnostics"
     );
 }
