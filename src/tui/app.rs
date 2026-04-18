@@ -13,6 +13,7 @@ pub struct App {
     input: AppInput,
     review: Review,
     cards: CardsView,
+    done: DoneArtifacts,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -20,6 +21,13 @@ pub struct CardsView {
     pub drafts: Vec<CardDraft>,
     pub selected: usize,
     pub expanded: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DoneArtifacts {
+    pub deck: String,
+    pub report: String,
+    pub output: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -49,6 +57,7 @@ impl App {
             },
             review: Review::default(),
             cards: CardsView::default(),
+            done: DoneArtifacts::default(),
         }
     }
 
@@ -121,6 +130,7 @@ impl App {
             input: self.input,
             review: self.review,
             cards: self.cards,
+            done: self.done,
         }
     }
 
@@ -152,6 +162,7 @@ impl App {
             },
             review: Review::default(),
             cards: CardsView::default(),
+            done: DoneArtifacts::default(),
         }
     }
 
@@ -243,6 +254,26 @@ impl App {
     pub fn card_toggle_expanded(mut self) -> Self {
         self.cards.expanded = !self.cards.expanded;
         self
+    }
+
+    /// Return the app with Done artifacts installed for the final screen.
+    pub fn done_published(
+        mut self,
+        deck: impl Into<String>,
+        report: impl Into<String>,
+        output: impl Into<String>,
+    ) -> Self {
+        self.done = DoneArtifacts {
+            deck: deck.into(),
+            report: report.into(),
+            output: output.into(),
+        };
+        self
+    }
+
+    /// Return the Done-screen artifact list.
+    pub fn done_artifacts(&self) -> &DoneArtifacts {
+        &self.done
     }
 
     /// Return the app with every failed artifact slot reset to fresh so the
