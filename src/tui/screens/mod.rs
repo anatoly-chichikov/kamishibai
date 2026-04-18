@@ -3,4 +3,5 @@
 
 pub mod modals;
 pub mod what_i_understood;
+pub mod your_cards;
 pub mod your_words;

@@ -1,4 +1,4 @@
-use crate::session::{LanguagePair, WordCandidate};
+use crate::session::{Artifact, CardArtifacts, CardDraft, LanguagePair, WordCandidate};
 
 use super::screen::{ModalKind, Screen};
 
@@ -10,6 +10,14 @@ pub struct App {
     pair: LanguagePair,
     input: AppInput,
     review: Review,
+    cards: CardsView,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CardsView {
+    pub drafts: Vec<CardDraft>,
+    pub selected: usize,
+    pub expanded: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -38,6 +46,7 @@ impl App {
                 ..AppInput::default()
             },
             review: Review::default(),
+            cards: CardsView::default(),
         }
     }
 
@@ -109,6 +118,7 @@ impl App {
             pair,
             input: self.input,
             review: self.review,
+            cards: self.cards,
         }
     }
 
@@ -139,6 +149,7 @@ impl App {
                 ..AppInput::default()
             },
             review: Review::default(),
+            cards: CardsView::default(),
         }
     }
 
@@ -178,6 +189,92 @@ impl App {
             self.review.selected -= 1;
         }
         self
+    }
+
+    /// Return the current card drafts for the Your Cards screen.
+    pub fn cards(&self) -> &[CardDraft] {
+        self.cards.drafts.as_slice()
+    }
+
+    /// Return the currently focused card index.
+    pub fn card_selected(&self) -> usize {
+        self.cards.selected
+    }
+
+    /// Return whether the focused card is expanded.
+    pub fn card_expanded(&self) -> bool {
+        self.cards.expanded
+    }
+
+    /// Return the app with a new card session installed.
+    pub fn cards_started(mut self, drafts: Vec<CardDraft>) -> Self {
+        self.cards = CardsView {
+            drafts,
+            selected: 0,
+            expanded: false,
+        };
+        self
+    }
+
+    /// Return the app with card cursor moved down (saturates).
+    pub fn card_selected_next(mut self) -> Self {
+        if !self.cards.drafts.is_empty() {
+            let last = self.cards.drafts.len() - 1;
+            if self.cards.selected < last {
+                self.cards.selected += 1;
+                self.cards.expanded = false;
+            }
+        }
+        self
+    }
+
+    /// Return the app with card cursor moved up (saturates).
+    pub fn card_selected_previous(mut self) -> Self {
+        if self.cards.selected > 0 {
+            self.cards.selected -= 1;
+            self.cards.expanded = false;
+        }
+        self
+    }
+
+    /// Return the app with the focused card toggled between expanded and collapsed.
+    pub fn card_toggle_expanded(mut self) -> Self {
+        self.cards.expanded = !self.cards.expanded;
+        self
+    }
+
+    /// Return the app with a different artifact bundle installed for the focused card.
+    pub fn card_patched_artifacts(mut self, artifacts: CardArtifacts) -> Self {
+        if let Some(draft) = self.cards.drafts.get(self.cards.selected).cloned() {
+            self.cards.drafts[self.cards.selected] = draft.with_artifacts(artifacts);
+        }
+        self
+    }
+
+    /// Return the count of ready cards for the status line.
+    pub fn cards_ready(&self) -> usize {
+        self.cards
+            .drafts
+            .iter()
+            .filter(|draft| draft.artifacts().all_ready())
+            .count()
+    }
+
+    /// Return the count of failed cards for the status line.
+    pub fn cards_failed(&self) -> usize {
+        self.cards
+            .drafts
+            .iter()
+            .filter(|draft| draft.artifacts().has_failed())
+            .count()
+    }
+
+    /// Return the artifact-specific display hint for the focused card.
+    pub fn card_artifact_hint(&self, kind: Artifact) -> &'static str {
+        let Some(draft) = self.cards.drafts.get(self.cards.selected) else {
+            return "queued";
+        };
+        artifact_hint(draft.artifacts(), kind)
     }
 
     /// Return the app with the selected candidate removed.
@@ -234,6 +331,24 @@ impl App {
         self.input.blob.clear();
         self
     }
+}
+
+fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {
+    let slot = match kind {
+        Artifact::Scene => artifacts.scene(),
+        Artifact::Picture => artifacts.picture(),
+        Artifact::Sound => artifacts.sound(),
+    };
+    if slot.ready() {
+        return "ready";
+    }
+    if slot.failed_terminally() {
+        return "failed";
+    }
+    if slot.tally().done() > 0 {
+        return "retrying";
+    }
+    "queued"
 }
 
 fn cycle_support(current: &str) -> String {
