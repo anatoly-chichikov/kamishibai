@@ -1,11 +1,10 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::app::App;
-use super::screen::{ModalKind, Screen};
+use super::screen::Screen;
 use super::screens;
 
 /// Render the current app state into a ratatui frame.
@@ -17,7 +16,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         other => placeholder(frame, area, app, other),
     }
     if let Some(kind) = app.modal() {
-        draw_modal(frame, area, kind);
+        screens::modals::draw(frame, area, kind, app);
     }
 }
 
@@ -51,29 +50,4 @@ fn placeholder(frame: &mut Frame, area: Rect, app: &App, screen: Screen) {
         Screen::YourWords => "[Enter] continue",
     };
     frame.render_widget(Paragraph::new(Line::from(footer)), areas[2]);
-}
-
-fn draw_modal(frame: &mut Frame, area: Rect, kind: ModalKind) {
-    let title = match kind {
-        ModalKind::ChangeSomething => "Change something",
-        ModalKind::ChangeThisCard => "Change this card",
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(title)
-        .style(Style::default().bg(Color::Black));
-    let inset = centered(area, 60, 12);
-    frame.render_widget(Clear, inset);
-    frame.render_widget(block, inset);
-}
-
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect {
-        x,
-        y,
-        width: width.min(area.width),
-        height: height.min(area.height),
-    }
 }
