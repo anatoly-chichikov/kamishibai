@@ -1,0 +1,16 @@
+---
+source: tests/snapshot.rs
+expression: render(&app)
+---
+kamishibai · EN → RU                                                            
+┌What I understood─────────────────────────────────────────────────────────────┐
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+[Enter] make cards · [R] change something
