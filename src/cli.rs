@@ -19,7 +19,10 @@ use ratatui::backend::CrosstermBackend;
 
 use crate::config::{Preferences, default_store};
 use crate::runtime::locations::SystemContext;
-use crate::session::{LanguagePair, ScriptDetection, TargetDetection, catalog_for_detection};
+use crate::session::{
+    CandidateKind, LanguagePair, ScriptDetection, TargetDetection, WordCandidate,
+    catalog_for_detection,
+};
 use crate::tui::{App, Screen, Side, draw, to_app, transit};
 
 /// Execute the TUI and translate failures into a process exit code.
@@ -74,7 +77,8 @@ fn apply_side(app: App, side: Side) -> Result<App> {
     match side {
         Side::RunUnderstanding => {
             let guess = ScriptDetection.detect(app.blob(), &catalog_for_detection())?;
-            Ok(app.confirmed_target(guess.code()))
+            let candidates = first_pass(app.blob());
+            Ok(app.confirmed_target(guess.code()).understood(candidates))
         }
         Side::PersistMyLanguage(code) => {
             if let Ok(store) = default_store(&SystemContext) {
@@ -85,6 +89,17 @@ fn apply_side(app: App, side: Side) -> Result<App> {
         Side::ExitApp | Side::None => Ok(app),
         _ => Ok(app),
     }
+}
+
+/// Deterministic placeholder for the cheap understanding pass until CTX-177
+/// wires a real Gemini implementation. Splits the raw blob on newlines and
+/// commas, trims empty entries, and wraps each row as a generic word candidate.
+fn first_pass(blob: &str) -> Vec<WordCandidate> {
+    blob.split(['\n', ','])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| WordCandidate::new(entry, CandidateKind::Word, String::new(), String::new()))
+        .collect()
 }
 
 fn load_preferences() -> Result<Preferences> {

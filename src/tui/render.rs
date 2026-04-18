@@ -13,6 +13,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     match app.screen() {
         Screen::YourWords => screens::your_words::draw(frame, area, app),
+        Screen::WhatIUnderstood => screens::what_i_understood::draw(frame, area, app),
         other => placeholder(frame, area, app, other),
     }
     if let Some(kind) = app.modal() {

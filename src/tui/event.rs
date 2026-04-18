@@ -31,6 +31,10 @@ pub enum AppEvent {
     KeyChar(char),
     /// Text editor pressed backspace.
     KeyBackspace,
+    /// Arrow up or k — previous row.
+    NavPrev,
+    /// Arrow down or j — next row.
+    NavNext,
     /// Session engine emitted understanding pass result.
     UnderstandingReady,
     /// Session engine emitted bulk correction result.
