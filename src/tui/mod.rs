@@ -8,10 +8,14 @@
 
 mod app;
 mod event;
+mod input;
+mod render;
 mod screen;
 mod transition;
 
 pub use app::App;
 pub use event::{AppEvent, EditingOwner};
+pub use input::to_app;
+pub use render::draw;
 pub use screen::{ModalKind, Screen};
 pub use transition::{Side, transit};
