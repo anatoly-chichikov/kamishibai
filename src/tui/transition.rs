@@ -42,11 +42,29 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (next, Side::PersistMyLanguage(code))
         }
         (Screen::WhatIUnderstood, None, AppEvent::Submit) => {
-            (app.with_screen(Screen::YourCards), Side::StartGeneration)
+            if app.candidates().is_empty() {
+                (app, Side::None)
+            } else {
+                (app.with_screen(Screen::YourCards), Side::StartGeneration)
+            }
         }
         (Screen::WhatIUnderstood, None, AppEvent::RequestChange) => {
             (app.with_modal(ModalKind::ChangeSomething), Side::None)
         }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('d'))
+        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('D')) => {
+            (app.dropped_selected(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
+        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K')) => {
+            (app.selected_previous(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('j'))
+        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('J')) => {
+            (app.selected_next(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev) => (app.selected_previous(), Side::None),
+        (Screen::WhatIUnderstood, None, AppEvent::NavNext) => (app.selected_next(), Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::OverrideTarget(code)) => {
             (app.override_target(code), Side::None)
         }

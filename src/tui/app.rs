@@ -1,4 +1,4 @@
-use crate::session::LanguagePair;
+use crate::session::{LanguagePair, WordCandidate};
 
 use super::screen::{ModalKind, Screen};
 
@@ -9,6 +9,7 @@ pub struct App {
     modal: Option<ModalKind>,
     pair: LanguagePair,
     input: AppInput,
+    review: Review,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -17,6 +18,12 @@ pub struct AppInput {
     pub modal: String,
     pub failed: usize,
     pub target_pending: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Review {
+    pub candidates: Vec<WordCandidate>,
+    pub selected: usize,
 }
 
 impl App {
@@ -30,6 +37,7 @@ impl App {
                 target_pending: true,
                 ..AppInput::default()
             },
+            review: Review::default(),
         }
     }
 
@@ -100,6 +108,7 @@ impl App {
             modal: self.modal,
             pair,
             input: self.input,
+            review: self.review,
         }
     }
 
@@ -129,7 +138,63 @@ impl App {
                 target_pending: true,
                 ..AppInput::default()
             },
+            review: Review::default(),
         }
+    }
+
+    /// Return the confirmed candidates to be reviewed.
+    pub fn candidates(&self) -> &[WordCandidate] {
+        self.review.candidates.as_slice()
+    }
+
+    /// Return the currently highlighted candidate index.
+    pub fn selected(&self) -> usize {
+        self.review.selected
+    }
+
+    /// Return the app with a new set of understood candidates installed.
+    pub fn understood(mut self, candidates: Vec<WordCandidate>) -> Self {
+        self.review = Review {
+            candidates,
+            selected: 0,
+        };
+        self
+    }
+
+    /// Return the app with the cursor moved one row down (saturates at last).
+    pub fn selected_next(mut self) -> Self {
+        if !self.review.candidates.is_empty() {
+            let last = self.review.candidates.len() - 1;
+            if self.review.selected < last {
+                self.review.selected += 1;
+            }
+        }
+        self
+    }
+
+    /// Return the app with the cursor moved one row up (saturates at zero).
+    pub fn selected_previous(mut self) -> Self {
+        if self.review.selected > 0 {
+            self.review.selected -= 1;
+        }
+        self
+    }
+
+    /// Return the app with the selected candidate removed.
+    pub fn dropped_selected(mut self) -> Self {
+        if self.review.candidates.is_empty() {
+            return self;
+        }
+        let index = self.review.selected.min(self.review.candidates.len() - 1);
+        self.review.candidates.remove(index);
+        if self.review.selected >= self.review.candidates.len()
+            && !self.review.candidates.is_empty()
+        {
+            self.review.selected = self.review.candidates.len() - 1;
+        } else if self.review.candidates.is_empty() {
+            self.review.selected = 0;
+        }
+        self
     }
 
     /// Return the app with a different number of failed cards recorded.
