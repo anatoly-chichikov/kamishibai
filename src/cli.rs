@@ -84,6 +84,7 @@ fn apply_side(app: App, side: Side) -> Result<App> {
             let drafts = drafts_from(&app);
             Ok(app.cards_started(drafts))
         }
+        Side::RegenerateFailed => Ok(app.cards_reset_failures()),
         Side::PersistMyLanguage(code) => {
             if let Ok(store) = default_store(&SystemContext) {
                 let _ = store.write(&Preferences::new(code));
