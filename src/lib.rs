@@ -4,9 +4,11 @@
 
 pub mod anki;
 pub mod cli;
+pub mod config;
 pub mod gemini;
 pub mod generation;
 pub mod languages;
 pub mod report;
 pub mod runtime;
+pub mod session;
 pub mod vocabulary;
