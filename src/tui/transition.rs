@@ -93,6 +93,9 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::RequestChange) => {
             (app.with_modal(ModalKind::ChangeThisCard), Side::None)
         }
+        (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_selected_previous(), Side::None),
+        (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
+        (Screen::YourCards, None, AppEvent::Submit) => (app.card_toggle_expanded(), Side::None),
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::SendCorrection(text)) => {
             (app.close_modal(), Side::RunCardCorrection(text))
         }

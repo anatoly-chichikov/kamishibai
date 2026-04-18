@@ -20,8 +20,8 @@ use ratatui::backend::CrosstermBackend;
 use crate::config::{Preferences, default_store};
 use crate::runtime::locations::SystemContext;
 use crate::session::{
-    CandidateKind, LanguagePair, ScriptDetection, TargetDetection, WordCandidate,
-    catalog_for_detection,
+    CandidateKind, CardDraft, CardPayload, LanguagePair, ScriptDetection, TargetDetection,
+    WordCandidate, catalog_for_detection,
 };
 use crate::tui::{App, Screen, Side, draw, to_app, transit};
 
@@ -80,6 +80,10 @@ fn apply_side(app: App, side: Side) -> Result<App> {
             let candidates = first_pass(app.blob());
             Ok(app.confirmed_target(guess.code()).understood(candidates))
         }
+        Side::StartGeneration => {
+            let drafts = drafts_from(&app);
+            Ok(app.cards_started(drafts))
+        }
         Side::PersistMyLanguage(code) => {
             if let Ok(store) = default_store(&SystemContext) {
                 let _ = store.write(&Preferences::new(code));
@@ -89,6 +93,24 @@ fn apply_side(app: App, side: Side) -> Result<App> {
         Side::ExitApp | Side::None => Ok(app),
         _ => Ok(app),
     }
+}
+
+fn drafts_from(app: &App) -> Vec<CardDraft> {
+    app.candidates()
+        .iter()
+        .map(|candidate| {
+            CardDraft::new(
+                candidate.term(),
+                app.pair().clone(),
+                CardPayload::new(
+                    candidate.term(),
+                    candidate.preview(),
+                    candidate.note(),
+                    candidate.term(),
+                ),
+            )
+        })
+        .collect()
 }
 
 /// Deterministic placeholder for the cheap understanding pass until CTX-177
