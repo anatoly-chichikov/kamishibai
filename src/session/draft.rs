@@ -128,6 +128,15 @@ impl Default for CardArtifacts {
 }
 
 impl CardArtifacts {
+    /// Compose one artifacts bundle from three explicit slots.
+    pub fn from_parts(scene: ArtifactSlot, picture: ArtifactSlot, sound: ArtifactSlot) -> Self {
+        Self {
+            scene,
+            picture,
+            sound,
+        }
+    }
+
     /// Return the slot for `Artifact::Scene`.
     pub fn scene(&self) -> &ArtifactSlot {
         &self.scene
