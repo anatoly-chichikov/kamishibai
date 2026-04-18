@@ -68,6 +68,12 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, None, AppEvent::OverrideTarget(code)) => {
             (app.override_target(code), Side::None)
         }
+        (Screen::WhatIUnderstood, None, AppEvent::ToggleMyLanguage)
+        | (Screen::Done, None, AppEvent::ToggleMyLanguage) => {
+            let next = app.toggle_support();
+            let code = next.pair().support().to_string();
+            (next, Side::PersistMyLanguage(code))
+        }
         (
             Screen::WhatIUnderstood,
             Some(ModalKind::ChangeSomething),
@@ -140,6 +146,10 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('R'))
         | (Screen::YourCards, AppEvent::KeyChar('r'))
         | (Screen::YourCards, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
+        (Screen::WhatIUnderstood, AppEvent::KeyChar('l'))
+        | (Screen::WhatIUnderstood, AppEvent::KeyChar('L'))
+        | (Screen::Done, AppEvent::KeyChar('l'))
+        | (Screen::Done, AppEvent::KeyChar('L')) => AppEvent::ToggleMyLanguage,
         (Screen::Done, AppEvent::KeyChar('n')) | (Screen::Done, AppEvent::KeyChar('N')) => {
             AppEvent::NewBatch
         }
