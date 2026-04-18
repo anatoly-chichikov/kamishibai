@@ -18,11 +18,24 @@ pub enum Side {
 /// Pure transition function: given the current app and one event, produce the
 /// next app plus an optional side effect. No IO, no Gemini calls.
 pub fn transit(app: App, event: AppEvent) -> (App, Side) {
+    let event = promote(&app, event);
     match (app.screen(), app.modal(), event) {
-        (Screen::YourWords, None, AppEvent::Submit) => (
-            app.with_screen(Screen::WhatIUnderstood),
-            Side::RunUnderstanding,
-        ),
+        (Screen::YourWords, None, AppEvent::Submit) => {
+            if app
+                .blob()
+                .chars()
+                .any(|character| !character.is_whitespace())
+            {
+                (
+                    app.with_screen(Screen::WhatIUnderstood),
+                    Side::RunUnderstanding,
+                )
+            } else {
+                (app, Side::None)
+            }
+        }
+        (Screen::YourWords, None, AppEvent::KeyChar(symbol)) => (app.typed(symbol), Side::None),
+        (Screen::YourWords, None, AppEvent::KeyBackspace) => (app.rubbed(), Side::None),
         (Screen::YourWords, None, AppEvent::ToggleMyLanguage) => {
             let next = app.toggle_support();
             let code = next.pair().support().to_string();
@@ -45,6 +58,12 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::Cancel) => {
             (app.close_modal(), Side::None)
         }
+        (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::KeyChar(symbol)) => {
+            (app.typed(symbol), Side::None)
+        }
+        (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::KeyBackspace) => {
+            (app.rubbed(), Side::None)
+        }
         (Screen::YourCards, None, AppEvent::RequestChange) => {
             (app.with_modal(ModalKind::ChangeThisCard), Side::None)
         }
@@ -53,6 +72,12 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::Cancel) => {
             (app.close_modal(), Side::None)
+        }
+        (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::KeyChar(symbol)) => {
+            (app.typed(symbol), Side::None)
+        }
+        (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::KeyBackspace) => {
+            (app.rubbed(), Side::None)
         }
         (Screen::YourCards, None, AppEvent::BatchReady) => {
             (app.with_screen(Screen::Done), Side::None)
@@ -64,5 +89,24 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::Done, None, AppEvent::Quit) => (app, Side::ExitApp),
         (_, _, AppEvent::Redraw) => (app, Side::None),
         (_, _, _) => (app, Side::None),
+    }
+}
+
+fn promote(app: &App, event: AppEvent) -> AppEvent {
+    if app.modal().is_some() {
+        return event;
+    }
+    match (app.screen(), &event) {
+        (Screen::WhatIUnderstood, AppEvent::KeyChar('r'))
+        | (Screen::WhatIUnderstood, AppEvent::KeyChar('R'))
+        | (Screen::YourCards, AppEvent::KeyChar('r'))
+        | (Screen::YourCards, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
+        (Screen::Done, AppEvent::KeyChar('n')) | (Screen::Done, AppEvent::KeyChar('N')) => {
+            AppEvent::NewBatch
+        }
+        (Screen::Done, AppEvent::KeyChar('q')) | (Screen::Done, AppEvent::KeyChar('Q')) => {
+            AppEvent::Quit
+        }
+        _ => event,
     }
 }

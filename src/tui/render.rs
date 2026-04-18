@@ -1,69 +1,75 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::app::App;
 use super::screen::{ModalKind, Screen};
+use super::screens;
 
 /// Render the current app state into a ratatui frame.
-///
-/// This is a placeholder skeleton. Final pixel-perfect layouts are produced by
-/// each `CTX-17x`/`CTX-18x` screen task, which anchors on the PDF reference.
 pub fn draw(frame: &mut Frame, app: &App) {
-    let areas = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(frame.area());
-    let header = Paragraph::new(format!("kamishibai · {}", app.pair().label()));
-    frame.render_widget(header, areas[0]);
-    body(frame, areas[1], app);
-    footer(frame, areas[2], app);
+    let area = frame.area();
+    match app.screen() {
+        Screen::YourWords => screens::your_words::draw(frame, area, app),
+        other => placeholder(frame, area, app, other),
+    }
     if let Some(kind) = app.modal() {
-        modal(frame, frame.area(), kind);
+        draw_modal(frame, area, kind);
     }
 }
 
-fn body(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    let title = match app.screen() {
+fn placeholder(frame: &mut Frame, area: Rect, app: &App, screen: Screen) {
+    let title = match screen {
         Screen::YourWords => "Your words",
         Screen::WhatIUnderstood => "What I understood",
         Screen::YourCards => "Your cards",
         Screen::Done => "Done",
     };
+    let header = Paragraph::new(format!(
+        "kamishibai · {} → {}",
+        app.pair().target().to_uppercase(),
+        app.pair().support().to_uppercase(),
+    ));
+    let areas = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Min(1),
+            ratatui::layout::Constraint::Length(1),
+        ])
+        .split(area);
+    frame.render_widget(header, areas[0]);
     let block = Block::default().borders(Borders::ALL).title(title);
-    frame.render_widget(block, area);
-}
-
-fn footer(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    let hint = match app.screen() {
-        Screen::YourWords => "[Enter] continue · [L] my language",
+    frame.render_widget(block, areas[1]);
+    let footer = match screen {
         Screen::WhatIUnderstood => "[Enter] make cards · [R] change something",
         Screen::YourCards => "[R] change this card · [Enter] expand",
         Screen::Done => "[N] new batch · [Q] quit",
+        Screen::YourWords => "[Enter] continue",
     };
-    frame.render_widget(Paragraph::new(Line::from(hint)), area);
+    frame.render_widget(Paragraph::new(Line::from(footer)), areas[2]);
 }
 
-fn modal(frame: &mut Frame, area: ratatui::layout::Rect, kind: ModalKind) {
+fn draw_modal(frame: &mut Frame, area: Rect, kind: ModalKind) {
     let title = match kind {
         ModalKind::ChangeSomething => "Change something",
         ModalKind::ChangeThisCard => "Change this card",
     };
-    let block = Block::default().borders(Borders::ALL).title(title);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .style(Style::default().bg(Color::Black));
     let inset = centered(area, 60, 12);
     frame.render_widget(Clear, inset);
     frame.render_widget(block, inset);
 }
 
-fn centered(area: ratatui::layout::Rect, width: u16, height: u16) -> ratatui::layout::Rect {
+fn centered(area: Rect, width: u16, height: u16) -> Rect {
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
-    ratatui::layout::Rect {
+    Rect {
         x,
         y,
         width: width.min(area.width),
