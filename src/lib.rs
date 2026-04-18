@@ -11,4 +11,5 @@ pub mod languages;
 pub mod report;
 pub mod runtime;
 pub mod session;
+pub mod tui;
 pub mod vocabulary;
