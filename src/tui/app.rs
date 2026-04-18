@@ -1,4 +1,6 @@
-use crate::session::{Artifact, CardArtifacts, CardDraft, LanguagePair, WordCandidate};
+use crate::session::{
+    Artifact, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, WordCandidate,
+};
 
 use super::screen::{ModalKind, Screen};
 
@@ -240,6 +242,36 @@ impl App {
     /// Return the app with the focused card toggled between expanded and collapsed.
     pub fn card_toggle_expanded(mut self) -> Self {
         self.cards.expanded = !self.cards.expanded;
+        self
+    }
+
+    /// Return the app with every failed artifact slot reset to fresh so the
+    /// session engine can re-enqueue it.
+    pub fn cards_reset_failures(mut self) -> Self {
+        for draft in self.cards.drafts.iter_mut() {
+            if !draft.artifacts().has_failed() {
+                continue;
+            }
+            let artifacts = draft.artifacts();
+            let scene = if artifacts.scene().failed_terminally() {
+                ArtifactSlot::fresh(Artifact::Scene)
+            } else {
+                artifacts.scene().clone()
+            };
+            let picture = if artifacts.picture().failed_terminally() {
+                ArtifactSlot::fresh(Artifact::Picture)
+            } else {
+                artifacts.picture().clone()
+            };
+            let sound = if artifacts.sound().failed_terminally() {
+                ArtifactSlot::fresh(Artifact::Sound)
+            } else {
+                artifacts.sound().clone()
+            };
+            *draft = draft
+                .clone()
+                .with_artifacts(CardArtifacts::from_parts(scene, picture, sound));
+        }
         self
     }
 
