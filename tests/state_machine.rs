@@ -9,7 +9,7 @@ use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, transit};
 
 #[test]
 fn skeleton_flow_reaches_done_through_every_fullscreen_screen() {
-    let start = App::new(LanguagePair::new("en", "ru"));
+    let start = App::new(LanguagePair::new("en", "ru")).seeded_blob("a");
     let (after_words, understanding) = transit(start, AppEvent::Submit);
     let (after_understood, generation) = transit(after_words.clone(), AppEvent::Submit);
     let (after_cards, _) = transit(after_understood.clone(), AppEvent::BatchReady);
@@ -34,7 +34,7 @@ fn skeleton_flow_reaches_done_through_every_fullscreen_screen() {
 
 #[test]
 fn language_pair_travels_untouched_through_the_full_flow() {
-    let start = App::new(LanguagePair::new("en", "ru"));
+    let start = App::new(LanguagePair::new("en", "ru")).seeded_blob("x");
     let (a, _) = transit(start, AppEvent::Submit);
     let (b, _) = transit(a, AppEvent::Submit);
     let (c, _) = transit(b, AppEvent::BatchDone { failed: 0 });

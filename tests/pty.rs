@@ -35,6 +35,7 @@ fn pty_flow_advances_from_your_words_to_what_i_understood() {
     session
         .expect("[screen] Your words")
         .expect("skeleton must render Your words on launch");
+    session.send("a").expect("must seed blob character");
     session.send("\r").expect("must send Enter");
     session
         .expect("[screen] What I understood")

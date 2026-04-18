@@ -15,3 +15,8 @@ pub use draft::{Artifact, ArtifactSlot, AttemptTally, CardArtifacts, CardDraft, 
 pub use pair::LanguagePair;
 pub use pass::{BulkCorrection, CardCorrection, Understanding, Understood};
 pub use state::SessionState;
+
+/// Convenience re-export so CLI callers do not need a separate `languages` import.
+pub fn catalog_for_detection() -> crate::languages::LanguageCatalog {
+    crate::languages::catalog()
+}
