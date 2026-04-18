@@ -73,6 +73,14 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             Some(ModalKind::ChangeSomething),
             AppEvent::SendCorrection(text),
         ) => (app.close_modal(), Side::RunBulkCorrection(text)),
+        (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::Submit) => {
+            let text = app.modal_buffer().to_string();
+            if text.chars().any(|c| !c.is_whitespace()) {
+                (app.close_modal(), Side::RunBulkCorrection(text))
+            } else {
+                (app, Side::None)
+            }
+        }
         (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::Cancel) => {
             (app.close_modal(), Side::None)
         }
@@ -87,6 +95,14 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::SendCorrection(text)) => {
             (app.close_modal(), Side::RunCardCorrection(text))
+        }
+        (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::Submit) => {
+            let text = app.modal_buffer().to_string();
+            if text.chars().any(|c| !c.is_whitespace()) {
+                (app.close_modal(), Side::RunCardCorrection(text))
+            } else {
+                (app, Side::None)
+            }
         }
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::Cancel) => {
             (app.close_modal(), Side::None)
