@@ -1,128 +1,88 @@
 //! Renderer for the `Your words` screen.
 //!
-//! Anchors on `docs/tui-states/current-pdf/01-your-words.png`. A compact
-//! language pair badge is added on top of the PDF as the missing language
-//! layer (see CTX-183 / CTX-184).
+//! Mirrors state 01 of the design mockup
+//! (`kamishibai/project/states.js` · "Your words").
 
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
+use ratatui::widgets::Paragraph;
 
 use crate::tui::app::App;
+use crate::tui::palette;
 
 const PLACEHOLDER: &str = "paste one per line, or comma-separated, or a messy blob:";
 const HEADLINE: &str = "Your words";
 const TAGLINE: &str = "paste anything — I figure out the rest";
-const HINT_LEFT: &str = "минимум трения. Только слова.";
-const HINT_RIGHT: &str = "[⌘V] paste · [Enter] continue";
+const HINT_KEYS: &str = "[⌘V] paste · [Enter] continue";
 
 /// Draw the `Your words` screen into the given area for the current `App`.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
-    let areas = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
-        .split(area);
-    frame.render_widget(language_badge(app), areas[0]);
-    let outer = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .title_top(Line::from(Span::styled(
-            format!(" {HEADLINE} "),
-            Style::default().add_modifier(Modifier::BOLD),
-        )))
-        .title_top(
-            Line::from(Span::styled(
-                format!(" {TAGLINE} "),
-                Style::default().fg(Color::DarkGray),
-            ))
-            .alignment(Alignment::Right),
-        );
-    let inner = outer.inner(areas[1]);
-    frame.render_widget(outer, areas[1]);
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(3),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .split(inner);
-    frame.render_widget(input_panel(app), sections[0]);
-    frame.render_widget(divider(sections[1].width), sections[1]);
-    frame.render_widget(footer_line(sections[2].width), sections[2]);
-}
-
-fn language_badge(app: &App) -> Paragraph<'_> {
-    let target = if app.target_pending() {
-        String::from("detecting…")
-    } else {
-        app.pair().target().to_uppercase()
-    };
-    let support = app.pair().support().to_uppercase();
-    let text = format!("kamishibai · {target} → {support}");
-    Paragraph::new(Line::from(Span::styled(
-        text,
-        Style::default().fg(Color::DarkGray),
-    )))
+    let frame_rects = super::common::frame(area);
+    frame.render_widget(
+        super::common::language_badge(app).style(palette::base()),
+        frame_rects.badge,
+    );
+    frame.render_widget(
+        super::common::header(HEADLINE, TAGLINE, frame_rects.header.width),
+        frame_rects.header,
+    );
+    frame.render_widget(input_panel(app), frame_rects.body);
+    frame.render_widget(
+        super::common::dashed_divider(frame_rects.footer_rule.width),
+        frame_rects.footer_rule,
+    );
+    frame.render_widget(
+        super::common::footer(HINT_KEYS, frame_rects.footer.width),
+        frame_rects.footer,
+    );
 }
 
 fn input_panel(app: &App) -> Paragraph<'_> {
     let mut lines: Vec<Line<'_>> = Vec::new();
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("  {PLACEHOLDER}"),
-        Style::default().fg(Color::Gray),
-    )));
+    lines.push(Line::from(Span::styled(PLACEHOLDER, palette::dim())));
     lines.push(Line::from(""));
     let typed = app.blob();
     if typed.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "   █",
-            Style::default().fg(Color::White),
-        )));
+        lines.push(Line::from(vec![
+            Span::styled("▍", Style::default().bg(palette::BG).fg(palette::FG)),
+            Span::styled(
+                " ",
+                Style::default()
+                    .bg(palette::FG)
+                    .fg(palette::FG)
+                    .add_modifier(Modifier::SLOW_BLINK),
+            ),
+        ]));
     } else {
+        let total = typed.split('\n').count();
         for (row, raw) in typed.split('\n').enumerate() {
-            let mut spans = vec![Span::raw("   ")];
+            let mut spans: Vec<Span<'_>> = Vec::new();
+            if row == 0 {
+                spans.push(Span::styled(
+                    "▍",
+                    Style::default().bg(palette::BG).fg(palette::FG),
+                ));
+            } else {
+                spans.push(Span::raw(" "));
+            }
             spans.push(Span::styled(
                 String::from(raw),
-                Style::default().fg(Color::White),
+                Style::default().bg(palette::BG).fg(palette::FG),
             ));
-            if row + 1 == typed.split('\n').count() {
-                spans.push(Span::styled("█", Style::default().fg(Color::White)));
+            if row + 1 == total {
+                spans.push(Span::styled(
+                    " ",
+                    Style::default()
+                        .bg(palette::FG)
+                        .fg(palette::FG)
+                        .add_modifier(Modifier::SLOW_BLINK),
+                ));
             }
             lines.push(Line::from(spans));
         }
     }
-    Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .style(Style::default().bg(Color::Black).fg(Color::White))
-}
-
-fn divider(width: u16) -> Paragraph<'static> {
-    let dashes = "-".repeat(width as usize);
-    Paragraph::new(Line::from(Span::styled(
-        dashes,
-        Style::default().fg(Color::DarkGray),
-    )))
-}
-
-fn footer_line(width: u16) -> Paragraph<'static> {
-    let left = HINT_LEFT;
-    let right = HINT_RIGHT;
-    let total = left.chars().count() + right.chars().count();
-    let gap = (width as usize).saturating_sub(total);
-    let padding = " ".repeat(gap);
-    let line = Line::from(vec![
-        Span::styled(left, Style::default().fg(Color::Gray)),
-        Span::raw(padding),
-        Span::styled(
-            right,
-            Style::default()
-                .fg(Color::Gray)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
-    Paragraph::new(line)
+    Paragraph::new(lines).style(palette::base())
 }

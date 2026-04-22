@@ -7,6 +7,7 @@ use super::screens;
 /// Render the current app state into a ratatui frame.
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
+    screens::common::paint_background(frame, area);
     match app.screen() {
         Screen::YourWords => screens::your_words::draw(frame, area, app),
         Screen::WhatIUnderstood => screens::what_i_understood::draw(frame, area, app),

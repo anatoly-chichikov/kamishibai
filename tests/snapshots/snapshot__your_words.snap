@@ -2,15 +2,15 @@
 source: tests/snapshot.rs
 expression: render(&app)
 ---
-kamishibai · detecting… → RU                                                    
-╭ Your words ────────────────────────── paste anything — I figure out the rest ╮
-│                                                                              │
-│  paste one per line, or comma-separated, or a messy blob:                    │
-│                                                                              │
-│   █                                                                          │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│------------------------------------------------------------------------------│
-│минимум трения. Только слова.                    [⌘V] paste · [Enter] continue│
-╰──────────────────────────────────────────────────────────────────────────────╯
+                                                                                
+    kamishibai · detecting… → RU                                                
+                                                                                
+    Your words                        paste anything — I figure out the rest    
+                                                                                
+    paste one per line, or comma-separated, or a messy blob:                    
+                                                                                
+    ▍                                                                           
+                                                                                
+                                                                                
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
+                                               [⌘V] paste · [Enter] continue

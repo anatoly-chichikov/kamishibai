@@ -52,21 +52,32 @@ fn your_cards_surfaces_failure_banner_when_any_card_fails_terminally() {
     let app = seeded();
     let rendered = flat(&app);
     assert!(
-        rendered.contains("1 couldn't finish")
-            && rendered.contains("[F] regenerate failed")
+        rendered.contains("1 card couldn't finish after 3 tries")
+            && rendered.contains("[r] regenerate failed")
             && rendered.contains("✗ picture"),
-        "Your cards must render the failure banner and the [F] key hint when any card failed"
+        "Your cards must render the failure banner and the [r] key hint when any card failed"
     );
 }
 
 #[test]
-fn f_key_emits_regenerate_failed_side_effect() {
+fn lowercase_r_emits_regenerate_failed_when_any_card_failed_terminally() {
     let app = seeded();
-    let (_, side) = transit(app, AppEvent::KeyChar('F'));
+    let (_, side) = transit(app, AppEvent::KeyChar('r'));
     assert_eq!(
         side,
         Side::RegenerateFailed,
-        "F on Your cards must emit the RegenerateFailed side-effect"
+        "lowercase r on Your cards must emit the RegenerateFailed side-effect when a card failed"
+    );
+}
+
+#[test]
+fn uppercase_r_opens_change_this_card_even_with_failures_present() {
+    let app = seeded();
+    let (after, _) = transit(app, AppEvent::KeyChar('R'));
+    assert_eq!(
+        after.modal(),
+        Some(kamishibai::tui::ModalKind::ChangeThisCard),
+        "uppercase R must still open Change this card even when a failure banner is visible"
     );
 }
 

@@ -2,15 +2,15 @@
 source: tests/snapshot.rs
 expression: render(&app)
 ---
-kamishibai · EN → RU                                                            
-╭ Your cards ──────────────────────────────────────── group 1 of 1 · 0/0 ready ╮
-│  cards ─                                                                     │
-│  preparing cards…                                                            │
-│                                                                              │
-│                                                                              │
-│  status ─                                                                    │
-│  0/0 ready                                                                   │
-│  artifacts: scene=queued · picture=queued · sound=queued                     │
-│------------------------------------------------------------------------------│
-│единственный рабочий экран. Артефактов всегда три: scene · picture · sound. Ви│
-╰──────────────────────────────────────────────────────────────────────────────╯
+                                                                                
+    kamishibai · detecting… → RU                                                
+                                                                                
+    Your cards                                      group 1 of 1 · 0/0 ready    
+    cards ──────────────────────────────────────────────────────────────────    
+                                                                                
+                                                                                
+    preparing cards…                                                            
+                                                                                
+                                                                                
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
+        [↑↓] nav · [Enter] expand · [R] change this card · [d] drop artifact

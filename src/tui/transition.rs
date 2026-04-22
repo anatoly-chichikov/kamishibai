@@ -104,6 +104,9 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::Submit) => (app.card_toggle_expanded(), Side::None),
         (Screen::YourCards, None, AppEvent::KeyChar('F'))
         | (Screen::YourCards, None, AppEvent::KeyChar('f')) => (app, Side::RegenerateFailed),
+        (Screen::YourCards, None, AppEvent::KeyChar('r')) if app.cards_failed() > 0 => {
+            (app, Side::RegenerateFailed)
+        }
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::SendCorrection(text)) => {
             (app.close_modal(), Side::RunCardCorrection(text))
         }
@@ -143,9 +146,15 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
     }
     match (app.screen(), &event) {
         (Screen::WhatIUnderstood, AppEvent::KeyChar('r'))
-        | (Screen::WhatIUnderstood, AppEvent::KeyChar('R'))
-        | (Screen::YourCards, AppEvent::KeyChar('r'))
-        | (Screen::YourCards, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
+        | (Screen::WhatIUnderstood, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
+        (Screen::YourCards, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
+        (Screen::YourCards, AppEvent::KeyChar('r')) => {
+            if app.cards_failed() > 0 {
+                event
+            } else {
+                AppEvent::RequestChange
+            }
+        }
         (Screen::WhatIUnderstood, AppEvent::KeyChar('l'))
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('L'))
         | (Screen::Done, AppEvent::KeyChar('l'))

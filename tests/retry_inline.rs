@@ -73,7 +73,7 @@ fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() {
         .cards_started(drafts);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("● picture (retrying 1/3)"),
+        rendered.contains("↻ picture 1/3"),
         "Your cards must surface the retry attempt inline without leaving the screen"
     );
 }
