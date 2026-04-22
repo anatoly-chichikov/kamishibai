@@ -6,7 +6,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 fn flat(app: &App) -> String {
-    let backend = TestBackend::new(100, 12);
+    let backend = TestBackend::new(100, 20);
     let mut terminal = Terminal::new(backend).expect("backend");
     terminal.draw(|frame| draw(frame, app)).expect("draw");
     let buffer = terminal.backend().buffer();
@@ -43,10 +43,10 @@ fn done_screen_lists_three_artifacts_and_keyboard_hints() {
             && rendered.contains("en_2026-04-17_183029.pdf")
             && rendered.contains("✓ Output:")
             && rendered.contains("kamishibai-out/")
-            && rendered.contains("просто ссылки. Никакого summary.")
+            && !rendered.contains("просто ссылки")
             && rendered.contains("[n] new batch · [q] quit")
             && rendered.contains("kamishibai · EN → RU"),
-        "Done must render the three artifacts, the Russian hint, the keyboard line, and the language pair"
+        "Done must render the three artifacts and the keyboard line, without any design-tool commentary"
     );
 }
 

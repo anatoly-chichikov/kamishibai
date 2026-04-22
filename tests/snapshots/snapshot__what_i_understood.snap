@@ -2,15 +2,15 @@
 source: tests/snapshot.rs
 expression: render(&app)
 ---
-kamishibai · detecting… → RU                                                    
-╭ What I understood ───────────────────── a quick look before making the cards ╮
-│  understanding your words…                                                   │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│  looks right?   [Enter] make cards                                           │
-│  not quite?     [R] change something                                         │
-│------------------------------------------------------------------------------│
-│один экран, один вопрос: «я правильно понял?». Всё про одно слово — в одну стр│
-╰──────────────────────────────────────────────────────────────────────────────╯
+                                                                                
+    kamishibai · detecting… → RU                                                
+                                                                                
+    What I understood                   a quick look before making the cards    
+                                                                                
+    understanding your words…                                                   
+                                                                                
+    looks right?  [Enter] make cards                                            
+    not quite?    [R] change something                                          
+                                                                                
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
+             [↑↓] nav · [d] drop · [R] change something · [Enter] make cards

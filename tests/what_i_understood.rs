@@ -18,7 +18,7 @@ fn press(code: KeyCode) -> KeyEvent {
 }
 
 fn flat(app: &App) -> String {
-    let backend = TestBackend::new(100, 16);
+    let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).expect("backend");
     terminal.draw(|frame| draw(frame, app)).expect("draw");
     let buffer = terminal.backend().buffer();

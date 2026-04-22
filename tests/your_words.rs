@@ -56,10 +56,10 @@ fn your_words_renders_placeholder_tagline_and_language_pair() {
             && flat.contains("paste anything — I figure out the rest")
             && flat.contains("paste one per line, or comma-separated, or a messy blob:")
             && flat.contains("[⌘V] paste · [Enter] continue")
-            && flat.contains("минимум трения. Только слова.")
+            && !flat.contains("минимум трения")
             && flat.contains("kamishibai ·")
             && flat.contains("→ RU"),
-        "Your words screen must render the PDF labels and a language pair badge on top"
+        "Your words screen must render the PDF labels and a language pair badge on top, without any design-tool commentary"
     );
 }
 

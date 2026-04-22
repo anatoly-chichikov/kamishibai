@@ -27,7 +27,7 @@ impl CardCorrection for FakeCardCorrection {
 }
 
 fn flat(app: &App) -> String {
-    let backend = TestBackend::new(120, 28);
+    let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).expect("backend");
     terminal.draw(|frame| draw(frame, app)).expect("draw");
     let buffer = terminal.backend().buffer();
@@ -73,8 +73,9 @@ fn request_change_on_your_cards_opens_per_card_modal() {
     assert!(
         opened.modal() == Some(ModalKind::ChangeThisCard)
             && rendered.contains("How should I change this card?")
-            && rendered.contains("applies to this card only"),
-        "R on Your cards must open the per-card modal with the right prompt"
+            && rendered.contains("tell me what to change")
+            && rendered.contains("card #1 · whilst"),
+        "R on Your cards must open the per-card modal with the right prompt and card preview"
     );
 }
 

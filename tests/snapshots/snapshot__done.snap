@@ -2,15 +2,15 @@
 source: tests/snapshot.rs
 expression: render(&app)
 ---
-kamishibai · EN → RU                                                            
-╭ Done ──────────────────────────────────────────────────── here's what I made ╮
-│                                                                              │
-│    ✓ Anki deck:   —                                                          │
-│    ✓ Report:      —                                                          │
-│    ✓ Output:      —                                                          │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│------------------------------------------------------------------------------│
-│просто ссылки. Никакого summary.                      [n] new batch · [q] quit│
-╰──────────────────────────────────────────────────────────────────────────────╯
+                                                                                
+    kamishibai · detecting… → RU                                                
+                                                                                
+    Done                                                  here's what I made    
+                                                                                
+                                                                                
+    ✓ Anki deck:   —                                                            
+                                                                                
+    ✓ Report:      —                                                            
+                                                                                
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
+                                                    [n] new batch · [q] quit

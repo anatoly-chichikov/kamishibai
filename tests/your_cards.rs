@@ -9,7 +9,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 fn flat(app: &App) -> String {
-    let backend = TestBackend::new(120, 28);
+    let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).expect("backend");
     terminal.draw(|frame| draw(frame, app)).expect("draw");
     let buffer = terminal.backend().buffer();
@@ -98,7 +98,7 @@ fn retry_state_shows_retrying_count_inline_inside_the_card_row() {
     let app = seeded(vec![draft("in the end", retrying_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("● picture (retrying 1/3)"),
+        rendered.contains("↻ picture 1/3"),
         "retrying state must be rendered inline without leaving the Your cards screen"
     );
 }
@@ -108,8 +108,8 @@ fn failure_banner_appears_when_any_card_exhausts_its_retries() {
     let app = seeded(vec![draft("wreck", failed_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("1 couldn't finish")
-            && rendered.contains("[F] regenerate failed")
+        rendered.contains("1 card couldn't finish after 3 tries")
+            && rendered.contains("[r] regenerate failed")
             && rendered.contains("✗ picture"),
         "Your cards must surface the failure banner and the recovery key when a card fails terminally"
     );
@@ -141,10 +141,12 @@ fn expanded_card_shows_front_back_and_change_this_card_hint() {
     let expanded = transit(start, AppEvent::Submit).0;
     let rendered = flat(&expanded);
     assert!(
-        rendered.contains("— front")
-            && rendered.contains("— back")
-            && rendered.contains("[R] change this card")
-            && rendered.contains("[d] drop picture / scene / sound"),
-        "the expanded row must reveal front/back sections and the per-card editor hint"
+        rendered.contains("── front")
+            && rendered.contains("── back")
+            && rendered.contains("── files")
+            && rendered.contains("[R]")
+            && rendered.contains("change this card")
+            && rendered.contains("drop picture / scene / sound"),
+        "the expanded row must reveal front/back sections, files list, and the per-card editor hint"
     );
 }

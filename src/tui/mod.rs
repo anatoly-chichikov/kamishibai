@@ -9,6 +9,7 @@
 mod app;
 mod event;
 mod input;
+pub(crate) mod palette;
 mod render;
 mod screen;
 mod screens;
