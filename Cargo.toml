@@ -37,3 +37,4 @@ expectrl = "=0.8.0"
 insta = "=1.47.2"
 lopdf = { version = "=0.39.0", default-features = false }
 predicates = "=3.1.4"
+ron = "=0.12.1"
