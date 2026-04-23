@@ -1,0 +1,1051 @@
+// kamishibai · TUI UI element contract
+//
+// Serialized instance of `tests/ui_contract.rs::schema::Contract`.
+// The schema is the source of truth for what fields/variants exist; this
+// file is the data. Run `cargo test --test ui_contract` to validate it.
+//
+// Hierarchy:
+//   Contract → App → { Chrome, Screen[], Modal[] }
+//   Screen   → Region[]      (one of Chrome/Header/Body/Status/Footer/Banner/Modal)
+//   Region   → Element[]
+//   Element  → { id, kind, text, source, purpose, importance, usefulness, health, issues[] }
+//   Issue    → enum: BrokenWiring | HiddenBinding | FakeData | DuplicateOf
+//                  | DriftFromDesign | SpecPromiseUnfulfilled
+//                  | CopyInconsistency | MisleadingLabel
+//
+// Read top-down for inventory; jump by Issue variant to read structurally.
+
+Contract(
+    meta: Meta(
+        framework: "ratatui + crossterm",
+        terminal_size_assumed: TerminalSize(cols: 80, rows: 12),
+        sources_checked: [
+            "src/tui/transition.rs",
+            "src/tui/input.rs",
+            "src/tui/screens/common.rs",
+            "src/tui/screens/your_words.rs",
+            "src/tui/screens/what_i_understood.rs",
+            "src/tui/screens/your_cards.rs",
+            "src/tui/screens/done.rs",
+            "src/tui/screens/modals.rs",
+            "docs/tui-states/state-map.md",
+            "docs/tui-states/live",
+            "docs/tui-states/current-pdf",
+        ],
+    ),
+
+    app: App(
+
+        // ────────────────────────────────────────────────────────────────
+        // Chrome — drawn on every fullscreen screen
+        // ────────────────────────────────────────────────────────────────
+        chrome: Chrome(elements: [
+            Element(
+                id: ElementId("language_badge"),
+                kind: Badge,
+                text: Template([
+                    Static("kamishibai · "),
+                    Bind(DataPath("App::pair().target() | \"detecting…\"")),
+                    Static(" → "),
+                    Bind(DataPath("App::pair().support()")),
+                ]),
+                source: SourceRef(file: "src/tui/screens/common.rs", line: 72),
+                purpose: "tells the user which language pair the batch is locked to",
+                importance: 5,
+                usefulness: 4,
+                health: Working,
+                issues: [],
+            ),
+            Element(
+                id: ElementId("header_title"),
+                kind: HeaderTitle,
+                text: Template([
+                    Bind(DataPath("Screen::headline (one of: Your words | What I understood | Your cards | Done)")),
+                ]),
+                source: SourceRef(file: "src/tui/screens/common.rs", line: 84),
+                purpose: "anchors the user in the current wizard step",
+                importance: 5,
+                usefulness: 5,
+                health: Working,
+                issues: [],
+            ),
+            Element(
+                id: ElementId("header_tagline"),
+                kind: HeaderTagline,
+                text: Template([
+                    Bind(DataPath("Screen::tagline (flavor copy on 3 screens, real progress on YourCards)")),
+                ]),
+                source: SourceRef(file: "src/tui/screens/common.rs", line: 84),
+                purpose: "right-aligned secondary descriptor — flavor or progress depending on screen",
+                importance: 2,
+                usefulness: 2,
+                health: Partial(MisleadingCopy),
+                issues: [
+                    DuplicateOf(
+                        other: ElementId("yc.status_ready"),
+                        reason: SameCopy,
+                    ),
+                ],
+            ),
+            Element(
+                id: ElementId("dashed_divider"),
+                kind: DashedDivider,
+                text: Literal("─ ─ ─ ─ ─ ─ ─ …"),
+                source: SourceRef(file: "src/tui/screens/common.rs", line: 105),
+                purpose: "visual seam between body and footer hint bar",
+                importance: 2,
+                usefulness: 3,
+                health: Decorative,
+                issues: [],
+            ),
+        ]),
+
+        // ────────────────────────────────────────────────────────────────
+        // Screens
+        // ────────────────────────────────────────────────────────────────
+        screens: [
+
+            // ── 01 · YourWords ──────────────────────────────────────────
+            Screen(
+                id: YourWords,
+                purpose: "ingest a raw vocab blob and detect the target language",
+                states: [Default, Pending],
+                regions: [
+                    Region(kind: Body, elements: [
+                        Element(
+                            id: ElementId("yw.placeholder"),
+                            kind: Hint,
+                            text: Literal("paste one per line, or comma-separated, or a messy blob:"),
+                            source: SourceRef(file: "src/tui/screens/your_words.rs", line: 15),
+                            purpose: "tells the user what input format is accepted",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yw.text_blob"),
+                            kind: TextArea,
+                            text: Template([Bind(DataPath("App::blob()"))]),
+                            source: SourceRef(file: "src/tui/screens/your_words.rs", line: 42),
+                            purpose: "the actual input the user is typing or pasting",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                    ]),
+                    Region(kind: Footer, elements: [
+                        Element(
+                            id: ElementId("yw.footer_paste"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[⌘V] paste"),
+                            source: SourceRef(file: "src/tui/screens/your_words.rs", line: 18),
+                            purpose: "reminds the user that paste is the expected entry path",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Partial(ApproximationOfDesign),
+                            issues: [
+                                MisleadingLabel(
+                                    label: "[⌘V] paste",
+                                    actual_source: DataPath("crossterm KeyChar stream — no explicit ⌘V binding; relies on terminal pumping characters one by one"),
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yw.footer_continue"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[Enter] continue"),
+                            source: SourceRef(file: "src/tui/screens/your_words.rs", line: 18),
+                            purpose: "confirms the blob and runs the LLM understanding pass",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yw.toggle_my_language"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[L] toggle my language  (NOT RENDERED)"),
+                            source: SourceRef(file: "src/tui/screens/your_words.rs", line: 18),
+                            purpose: "let the user flip support language before running detection",
+                            importance: 3,
+                            usefulness: 3,
+                            health: Broken,
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/tui/transition.rs", line: 39)),
+                                    missing_input: NoKeyMapInPromote(
+                                        key: "L",
+                                        screen: YourWords,
+                                    ),
+                                ),
+                                SpecPromiseUnfulfilled(
+                                    spec_ref: SourceRef(file: "docs/tui-states/state-map.md", line: 80),
+                                    what: "keyboard contract row promises [L] toggle my language on YourWords",
+                                ),
+                            ],
+                        ),
+                    ]),
+                ],
+            ),
+
+            // ── 02 · WhatIUnderstood ───────────────────────────────────
+            Screen(
+                id: WhatIUnderstood,
+                purpose: "show the LLM's first-pass interpretation of the blob",
+                states: [Default, Pending, Empty(AllDropped)],
+                regions: [
+                    Region(kind: Body, elements: [
+                        Element(
+                            id: ElementId("wu.empty_state"),
+                            kind: Hint,
+                            text: Literal("understanding your words… | nothing left to review — add more words or go back"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 17),
+                            purpose: "covers pre-LLM and after-everything-dropped states",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("wu.top_rule"),
+                            kind: Rule(Solid),
+                            text: Literal("───────…"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 59),
+                            purpose: "top frame of the candidates table",
+                            importance: 2,
+                            usefulness: 3,
+                            health: Decorative,
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("wu.bottom_rule"),
+                                    reason: NearIdenticalCopy,
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("wu.candidates_table"),
+                            kind: ListRow,
+                            text: Template([
+                                Static("N. "),
+                                Bind(DataPath("WordCandidate::term()")),
+                                Static("   "),
+                                Bind(DataPath("WordCandidate::kind().label()")),
+                                Static("   "),
+                                Bind(DataPath("WordCandidate::preview()")),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 64),
+                            purpose: "shows the LLM-resolved candidates the user can confirm or drop",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("wu.bottom_rule"),
+                            kind: Rule(Solid),
+                            text: Literal("───────…"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 85),
+                            purpose: "bottom frame of the candidates table",
+                            importance: 2,
+                            usefulness: 3,
+                            health: Decorative,
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("wu.top_rule"),
+                                    reason: NearIdenticalCopy,
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("wu.prompt_make_cards"),
+                            kind: Prompt,
+                            text: Literal("looks right?  [Enter] make cards"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 96),
+                            purpose: "tells the user how to commit to the current list",
+                            importance: 3,
+                            usefulness: 3,
+                            health: Partial(MissingHint),
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("wu.footer_make_cards"),
+                                    reason: SameKeyHint,
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("wu.prompt_change_something"),
+                            kind: Prompt,
+                            text: Literal("not quite?    [R] change something"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 102),
+                            purpose: "explains how to ask the LLM to redo the pass",
+                            importance: 3,
+                            usefulness: 3,
+                            health: Partial(MissingHint),
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("wu.footer_change_something"),
+                                    reason: SameKeyHint,
+                                ),
+                            ],
+                        ),
+                    ]),
+                    Region(kind: Footer, elements: [
+                        Element(
+                            id: ElementId("wu.footer_nav"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[↑↓] nav"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 16),
+                            purpose: "tells the user the candidate list is keyboard-navigable",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("wu.footer_drop"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[d] drop"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 16),
+                            purpose: "remove the focused candidate before generation",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("wu.footer_change_something"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[R] change something"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 16),
+                            purpose: "open ChangeSomething modal to renegotiate the bulk pass",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("wu.footer_make_cards"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[Enter] make cards"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 16),
+                            purpose: "lock the list and start artifact generation",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("wu.flip_my_language"),
+                            kind: HiddenKeyBinding,
+                            text: Literal("[L] flip my language  (handler wired, no footer hint)"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 16),
+                            purpose: "swap the support language without leaving the screen",
+                            importance: 3,
+                            usefulness: 3,
+                            health: Partial(MissingHint),
+                            issues: [
+                                HiddenBinding(
+                                    key: "L",
+                                    handler_at: SourceRef(file: "src/tui/transition.rs", line: 71),
+                                    screen: WhatIUnderstood,
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("wu.override_target"),
+                            kind: HiddenKeyBinding,
+                            text: Literal("[T] override target  (NOT WIRED, NOT RENDERED)"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 16),
+                            purpose: "let the user override the LLM-detected target language",
+                            importance: 3,
+                            usefulness: 3,
+                            health: Broken,
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/tui/transition.rs", line: 68)),
+                                    missing_input: NoUiPathForEvent(
+                                        event: "OverrideTarget(String)",
+                                    ),
+                                ),
+                                SpecPromiseUnfulfilled(
+                                    spec_ref: SourceRef(file: "docs/tui-states/state-map.md", line: 81),
+                                    what: "keyboard contract row promises [T] override target on WhatIUnderstood",
+                                ),
+                            ],
+                        ),
+                    ]),
+                ],
+            ),
+
+            // ── 04 · YourCards (default + retrying + failed) ────────────
+            Screen(
+                id: YourCards,
+                purpose: "show artifact-by-artifact progress for every card and let the user repair / drop",
+                states: [Default, Retrying, Failed],
+                regions: [
+                    Region(kind: Body, elements: [
+                        Element(
+                            id: ElementId("yc.section_cards"),
+                            kind: SectionHeader,
+                            text: Literal("cards ──────"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 45),
+                            purpose: "labels the card list region",
+                            importance: 2,
+                            usefulness: 2,
+                            health: Decorative,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.card_row"),
+                            kind: ListRow,
+                            text: Template([
+                                Bind(DataPath("CardDraft.row_marker (▸▾◐○✗)")),
+                                Static("  N. "),
+                                Bind(DataPath("CardDraft::term()")),
+                                Static("   "),
+                                Bind(DataPath("ArtifactSlot::scene")),
+                                Static(" · "),
+                                Bind(DataPath("ArtifactSlot::picture")),
+                                Static(" · "),
+                                Bind(DataPath("ArtifactSlot::sound")),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 108),
+                            purpose: "live status of each card across the three artifact slots",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.row_inline_note"),
+                            kind: ListRow,
+                            text: Template([
+                                Bind(DataPath("retry_note(slot.kind) | failure_note(slot.kind) — canned per artifact")),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 179),
+                            purpose: "names the reason a slot is retrying or failed",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Partial(MisleadingCopy),
+                            issues: [
+                                MisleadingLabel(
+                                    label: "· text found in image / · rate limit, waiting… / · scene JSON kept coming back broken",
+                                    actual_source: DataPath("hardcoded per Artifact kind — not derived from real error"),
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.expanded_front"),
+                            kind: DetailBlock,
+                            text: Template([
+                                Static("── front ──\n"),
+                                Bind(DataPath("CardDraft::payload().front()")),
+                                Static("\n"),
+                                Bind(DataPath("CardDraft::payload().hint()")),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 248),
+                            purpose: "shows the Anki front the user is about to ship",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Partial(ApproximationOfDesign),
+                            issues: [
+                                DriftFromDesign(
+                                    design_ref: "docs/tui-states/current-pdf/04-your-cards.png",
+                                    what_differs: MissingVisualEmphasis(
+                                        what: "target span highlight (e.g. «в то время как») present in PDF, plain in live",
+                                    ),
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.expanded_back"),
+                            kind: DetailBlock,
+                            text: Template([
+                                Static("── back ──\n"),
+                                Bind(DataPath("CardDraft::payload().back()")),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 265),
+                            purpose: "shows the Anki back the user is about to ship",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Partial(ApproximationOfDesign),
+                            issues: [
+                                DriftFromDesign(
+                                    design_ref: "docs/tui-states/current-pdf/04-your-cards.png",
+                                    what_differs: LayoutCollapsed(
+                                        expected: "back sentence on one line; `whilst /waɪlst/   пока, в то время как · formal` on its own row below",
+                                        actual: "back sentence has `· whilst /waɪlst/ · formal` smashed onto the same line; meaning row missing",
+                                    ),
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.expanded_files"),
+                            kind: DetailBlock,
+                            text: Literal("── files ──\n▣ picture  a345532c.jpg  · 268 KB\n▣ scene    a345532c.json · 1.9 KB\n♪ sound    f4206ebe.wav  · 11.2 KB"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 274),
+                            purpose: "tell the user which files belong to this card",
+                            importance: 2,
+                            usefulness: 1,
+                            health: Fake,
+                            issues: [
+                                FakeData(
+                                    literal: "a345532c.jpg / a345532c.json / f4206ebe.wav (+ 268 KB / 1.9 KB / 11.2 KB)",
+                                    should_derive_from: Some(DataPath("CardArtifacts::{picture,scene,sound} paths and sizes")),
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.expanded_change_rule"),
+                            kind: SectionHeader,
+                            text: Literal("── change this card ──"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 278),
+                            purpose: "labels the per-card action row inside the expanded view",
+                            importance: 1,
+                            usefulness: 1,
+                            health: Decorative,
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("yc.expanded_change_keys"),
+                                    reason: SubsetOfOther,
+                                ),
+                                DuplicateOf(
+                                    other: ElementId("yc.footer_change_card"),
+                                    reason: SameKeyHint,
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.expanded_change_keys"),
+                            kind: KeyHint(BodyInline),
+                            text: Literal("[R] change this card    [d] drop picture / scene / sound"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 280),
+                            purpose: "actions specific to the focused card while expanded",
+                            importance: 3,
+                            usefulness: 2,
+                            health: Partial(MissingHint),
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("yc.footer_change_card"),
+                                    reason: SameKeyHint,
+                                ),
+                                BrokenWiring(
+                                    handler_at: None,
+                                    missing_input: NoTransitionArm(
+                                        event: "KeyChar('d')",
+                                        screen: YourCards,
+                                    ),
+                                ),
+                            ],
+                        ),
+                    ]),
+                    Region(kind: Status, elements: [
+                        Element(
+                            id: ElementId("yc.section_status"),
+                            kind: SectionHeader,
+                            text: Literal("status ──────"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 50),
+                            purpose: "labels the bottom status line",
+                            importance: 2,
+                            usefulness: 2,
+                            health: Decorative,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.status_ready"),
+                            kind: StatusLine,
+                            text: Template([
+                                Bind(DataPath("App::cards_ready()")),
+                                Static("/"),
+                                Bind(DataPath("App::cards().len()")),
+                                Static(" ready"),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 372),
+                            purpose: "progress against the batch",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Partial(MisleadingCopy),
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("header_tagline"),
+                                    reason: SameCopy,
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.status_failed"),
+                            kind: StatusLine,
+                            text: Template([
+                                Bind(DataPath("App::cards_failed()")),
+                                Static(" couldn't finish"),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 374),
+                            purpose: "warn that some cards are terminal",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.status_retrying_or_cache_hits"),
+                            kind: StatusLine,
+                            text: Template([
+                                Bind(DataPath("'retrying {N}' if N>0 else 'cache hits {ready}'")),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 376),
+                            purpose: "tell the user the queue is alive (retries) or that cache helped",
+                            importance: 3,
+                            usefulness: 2,
+                            health: Partial(MisleadingCopy),
+                            issues: [
+                                MisleadingLabel(
+                                    label: "cache hits {ready}",
+                                    actual_source: DataPath("App::cards_ready() — count of fully-ready cards, NOT cache hits"),
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.status_elapsed"),
+                            kind: StatusLine,
+                            text: Literal("elapsed 00:41"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 381),
+                            purpose: "elapsed wall time of the batch",
+                            importance: 3,
+                            usefulness: 1,
+                            health: Fake,
+                            issues: [
+                                FakeData(
+                                    literal: "elapsed 00:41",
+                                    should_derive_from: Some(DataPath("Instant on batch start → format mm:ss")),
+                                ),
+                            ],
+                        ),
+                    ]),
+                    Region(kind: Banner, elements: [
+                        Element(
+                            id: ElementId("yc.banner_frame"),
+                            kind: BannerFrame,
+                            text: Literal("╔═══…═╗ … ╚═══…═╝"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 307),
+                            purpose: "block-shaped attention grabber for terminal failure",
+                            importance: 5,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.banner_title"),
+                            kind: BannerTitle,
+                            text: Template([
+                                Bind(DataPath("App::cards_failed()")),
+                                Static(" card couldn't finish after 3 tries."),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 352),
+                            purpose: "name the failure mode",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Partial(MisleadingCopy),
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("header_tagline"),
+                                    reason: NearIdenticalCopy,
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.banner_subtitle"),
+                            kind: BannerSubtitle,
+                            text: Literal("the rest is fine — cached, will be free to retry."),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 353),
+                            purpose: "calm-down copy: explain that retry is cheap",
+                            importance: 3,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.banner_keys"),
+                            kind: KeyHint(Banner),
+                            text: Literal("[r] regenerate failed    [Enter] keep going anyway"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 325),
+                            purpose: "primary recovery actions for failed cards",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("yc.footer_regenerate_failed"),
+                                    reason: SameKeyHint,
+                                ),
+                                DuplicateOf(
+                                    other: ElementId("yc.footer_keep_going"),
+                                    reason: SameKeyHint,
+                                ),
+                            ],
+                        ),
+                    ]),
+                    Region(kind: Footer, elements: [
+                        Element(
+                            id: ElementId("yc.footer_nav"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[↑↓] nav"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 18),
+                            purpose: "navigate the card list",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.footer_expand"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[Enter] expand"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 18),
+                            purpose: "toggle the focused card's detail panel",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Partial(MisleadingCopy),
+                            issues: [
+                                MisleadingLabel(
+                                    label: "expand",
+                                    actual_source: DataPath("App::card_toggle_expanded — actually toggles, not just expands"),
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.footer_change_card"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[R] change this card"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 18),
+                            purpose: "open ChangeThisCard modal for the focused card",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.footer_drop_artifact"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[d] drop artifact"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 18),
+                            purpose: "drop a stuck artifact so the queue moves on",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Broken,
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: None,
+                                    missing_input: NoTransitionArm(
+                                        event: "KeyChar('d')",
+                                        screen: YourCards,
+                                    ),
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.footer_regenerate_failed"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[r] regenerate failed  (only when failures > 0)"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 19),
+                            purpose: "second placement of the regen action",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.footer_keep_going"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[Enter] keep going  (only when failures > 0)"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 19),
+                            purpose: "accept the failures and move to Done",
+                            importance: 5,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [
+                                CopyInconsistency(
+                                    with: [ElementId("yc.banner_keys")],
+                                    variants: [
+                                        "[Enter] keep going",
+                                        "[Enter] keep going anyway",
+                                    ],
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("yc.hidden_F_regenerate_failed"),
+                            kind: HiddenKeyBinding,
+                            text: Literal("[F] regenerate failed  (handler wired, never advertised)"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 18),
+                            purpose: "kick off a re-run of failed artifacts (alternate to [r])",
+                            importance: 3,
+                            usefulness: 3,
+                            health: Partial(MissingHint),
+                            issues: [
+                                HiddenBinding(
+                                    key: "F",
+                                    handler_at: SourceRef(file: "src/tui/transition.rs", line: 105),
+                                    screen: YourCards,
+                                ),
+                            ],
+                        ),
+                    ]),
+                ],
+            ),
+
+            // ── 08 · Done ──────────────────────────────────────────────
+            Screen(
+                id: Done,
+                purpose: "summarize produced artifacts and offer next batch / quit",
+                states: [Default],
+                regions: [
+                    Region(kind: Body, elements: [
+                        Element(
+                            id: ElementId("done.deck_row"),
+                            kind: ListRow,
+                            text: Template([
+                                Static("✓ Anki deck:  "),
+                                Bind(DataPath("DoneArtifacts::deck")),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/done.rs", line: 67),
+                            purpose: "names the produced Anki deck — the thing the user came for",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("done.report_row"),
+                            kind: ListRow,
+                            text: Template([
+                                Static("✓ Report:  "),
+                                Bind(DataPath("DoneArtifacts::report")),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/done.rs", line: 69),
+                            purpose: "names the produced PDF report",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("done.output_row"),
+                            kind: ListRow,
+                            text: Template([
+                                Static("✓ Output:  "),
+                                Bind(DataPath("DoneArtifacts::output")),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/done.rs", line: 71),
+                            purpose: "shows the output directory",
+                            importance: 1,
+                            usefulness: 1,
+                            health: Decorative,
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("done.deck_row"),
+                                    reason: SubsetOfOther,
+                                ),
+                                DuplicateOf(
+                                    other: ElementId("done.report_row"),
+                                    reason: SubsetOfOther,
+                                ),
+                            ],
+                        ),
+                    ]),
+                    Region(kind: Footer, elements: [
+                        Element(
+                            id: ElementId("done.footer_new_batch"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[n] new batch"),
+                            source: SourceRef(file: "src/tui/screens/done.rs", line: 15),
+                            purpose: "start the wizard over without restarting the binary",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("done.footer_quit"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[q] quit"),
+                            source: SourceRef(file: "src/tui/screens/done.rs", line: 15),
+                            purpose: "graceful exit from the only screen with no other natural exit",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("done.hidden_toggle_my"),
+                            kind: HiddenKeyBinding,
+                            text: Literal("[L] toggle my language  (handler wired, no footer hint)"),
+                            source: SourceRef(file: "src/tui/screens/done.rs", line: 15),
+                            purpose: "let the user flip the support language before starting next batch",
+                            importance: 2,
+                            usefulness: 2,
+                            health: Partial(MissingHint),
+                            issues: [
+                                HiddenBinding(
+                                    key: "L",
+                                    handler_at: SourceRef(file: "src/tui/transition.rs", line: 160),
+                                    screen: Done,
+                                ),
+                            ],
+                        ),
+                    ]),
+                ],
+            ),
+        ],
+
+        // ────────────────────────────────────────────────────────────────
+        // Modals
+        // ────────────────────────────────────────────────────────────────
+        modals: [
+
+            // ── 03 · ChangeSomething (over WhatIUnderstood) ─────────────
+            Modal(
+                id: ChangeSomething,
+                over: WhatIUnderstood,
+                purpose: "let the user describe a bulk correction for the candidates list",
+                regions: [
+                    Region(kind: Modal, elements: [
+                        Element(
+                            id: ElementId("cs.frame"),
+                            kind: ModalFrame,
+                            text: Literal("╔═ How should I change these? ═╗ … ╚════╝"),
+                            source: SourceRef(file: "src/tui/screens/modals.rs", line: 34),
+                            purpose: "isolates the correction prompt from the underlying list",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("cs.label"),
+                            kind: ModalLabel,
+                            text: Template([
+                                Static("tell me in your own words — applies to all "),
+                                Bind(DataPath("App::candidates().len()")),
+                                Static(":"),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/modals.rs", line: 42),
+                            purpose: "explains scope (this rewrites all candidates, not one)",
+                            importance: 4,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("cs.textarea"),
+                            kind: TextArea,
+                            text: Template([Bind(DataPath("App::modal_buffer()"))]),
+                            source: SourceRef(file: "src/tui/screens/modals.rs", line: 154),
+                            purpose: "free-form correction for the bulk pass",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("cs.footer"),
+                            kind: ModalFooter,
+                            text: Literal("[Esc] cancel    [Enter] send"),
+                            source: SourceRef(file: "src/tui/screens/modals.rs", line: 193),
+                            purpose: "modal commit / dismiss contract",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                    ]),
+                ],
+            ),
+
+            // ── 05 · ChangeThisCard (over YourCards) ─────────────────────
+            Modal(
+                id: ChangeThisCard,
+                over: YourCards,
+                purpose: "let the user describe a per-card correction for the focused card",
+                regions: [
+                    Region(kind: Modal, elements: [
+                        Element(
+                            id: ElementId("ctc.frame"),
+                            kind: ModalFrame,
+                            text: Literal("╔═ How should I change this card? ═╗ … ╚════╝"),
+                            source: SourceRef(file: "src/tui/screens/modals.rs", line: 33),
+                            purpose: "isolates per-card correction",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("ctc.preview"),
+                            kind: ModalCardPreview,
+                            text: Template([
+                                Static("card #"),
+                                Bind(DataPath("App::card_selected() + 1")),
+                                Static(" · "),
+                                Bind(DataPath("CardDraft::term()")),
+                                Static("\n──\n"),
+                                Bind(DataPath("CardDraft::payload().front()")),
+                                Static("\n──"),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/modals.rs", line: 129),
+                            purpose: "remind the user which card they are editing",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("ctc.label"),
+                            kind: ModalLabel,
+                            text: Literal("tell me what to change:"),
+                            source: SourceRef(file: "src/tui/screens/modals.rs", line: 51),
+                            purpose: "scope hint (this rewrite is per-card, not bulk)",
+                            importance: 4,
+                            usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("ctc.textarea"),
+                            kind: TextArea,
+                            text: Template([Bind(DataPath("App::modal_buffer()"))]),
+                            source: SourceRef(file: "src/tui/screens/modals.rs", line: 154),
+                            purpose: "free-form correction for one card",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("cs.textarea"),
+                                    reason: SameCopy,
+                                ),
+                            ],
+                        ),
+                        Element(
+                            id: ElementId("ctc.footer"),
+                            kind: ModalFooter,
+                            text: Literal("[Esc] cancel    [Enter] send"),
+                            source: SourceRef(file: "src/tui/screens/modals.rs", line: 193),
+                            purpose: "modal commit / dismiss contract",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [
+                                DuplicateOf(
+                                    other: ElementId("cs.footer"),
+                                    reason: SameKeyHint,
+                                ),
+                            ],
+                        ),
+                    ]),
+                ],
+            ),
+        ],
+    ),
+)
