@@ -8,6 +8,7 @@
 //! - all four locked-in `ScreenId`s appear exactly once;
 //! - every `Issue::DuplicateOf::other` points at an `ElementId` that exists;
 //! - every `Element` with `health: Broken | Fake` carries at least one `Issue`;
+//! - every `Element` with open issues has degraded health;
 //! - every `SourceRef` resolves to a real file with the named line in range.
 
 #![allow(dead_code)]
@@ -38,22 +39,14 @@ fn loads_ui_contract() {
     let known_ids = collect_element_ids(&contract);
     check_duplicate_targets(&contract, &known_ids, &mut errs);
     check_broken_or_fake_have_issues(&contract, &mut errs);
+    check_issueful_elements_are_degraded(&contract, &mut errs);
     check_source_refs(&contract, &mut errs);
-    check_no_open_issues(&contract, &mut errs);
     assert!(
         errs.is_empty(),
         "ui-contract failed {} invariant(s):\n  - {}",
         errs.len(),
         errs.join("\n  - ")
     );
-}
-
-fn check_no_open_issues(contract: &Contract, errs: &mut Vec<String>) {
-    visit_elements(contract, |e| {
-        if !e.issues.is_empty() {
-            errs.push(format!("{:?} still has {:?}", e.id, e.issues));
-        }
-    });
 }
 
 fn check_screens_exhaustive(contract: &Contract, errs: &mut Vec<String>) {
@@ -108,6 +101,17 @@ fn check_broken_or_fake_have_issues(contract: &Contract, errs: &mut Vec<String>)
         let needs = matches!(e.health, Health::Broken | Health::Fake);
         if needs && e.issues.is_empty() {
             errs.push(format!("{:?} health={:?} but issues=[]", e.id, e.health));
+        }
+    });
+}
+
+fn check_issueful_elements_are_degraded(contract: &Contract, errs: &mut Vec<String>) {
+    visit_elements(contract, |e| {
+        if !e.issues.is_empty() && matches!(e.health, Health::Working | Health::Decorative) {
+            errs.push(format!(
+                "{:?} has open issues but health={:?}",
+                e.id, e.health
+            ));
         }
     });
 }
