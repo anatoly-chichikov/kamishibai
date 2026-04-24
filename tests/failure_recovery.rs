@@ -101,10 +101,10 @@ fn regenerate_failed_resets_only_the_failed_slots_and_keeps_ready_slots() {
 #[test]
 fn recovery_keeps_the_user_on_your_cards() {
     let app = seeded();
-    let (after, _) = transit(app, AppEvent::KeyChar('F'));
+    let (after, _) = transit(app, AppEvent::KeyChar('r'));
     assert_eq!(
         after.screen(),
         Screen::YourCards,
-        "failure recovery must stay inline on Your cards"
+        "regenerating failed cards must stay inline on Your cards"
     );
 }

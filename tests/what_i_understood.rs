@@ -99,6 +99,8 @@ fn what_i_understood_renders_four_candidates_with_prompts_and_language_pair() {
             && rendered.contains("looks right?")
             && rendered.contains("[Enter] make cards")
             && rendered.contains("[R] change something")
+            && rendered.contains("[L] my lang")
+            && rendered.contains("[T] target")
             && rendered.contains("kamishibai ·")
             && rendered.contains("EN → RU"),
         "What I understood must render headline, tagline, every candidate, both prompts, and language pair"
@@ -164,5 +166,18 @@ fn override_target_language_sticks_and_flips_target_pending_off() {
         (next.pair().target().to_string(), next.target_pending()),
         (String::from("es"), false),
         "OverrideTarget must change the target code and flip the pending flag off"
+    );
+}
+
+#[test]
+fn uppercase_t_on_what_i_understood_cycles_target_language() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_target("en");
+    let next = transit(app, to_app(press(KeyCode::Char('T'))).expect("map")).0;
+    assert_eq!(
+        (next.pair().target().to_string(), next.target_pending()),
+        (String::from("es"), false),
+        "uppercase T on What I understood must cycle the target override"
     );
 }

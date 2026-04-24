@@ -77,10 +77,10 @@ from `config/preferences.json` at batch start and defaults to `en`.
 
 | State             | Keys                                                                                     |
 | ----------------- | ---------------------------------------------------------------------------------------- |
-| `YourWords`       | `⌘V/Ctrl+V` paste · `Enter` continue · `L` toggle my language                             |
+| `YourWords`       | type/paste words · `Enter` continue · `L` toggle my language                              |
 | `WhatIUnderstood` | `↑↓` nav · `d` drop row · `R` change something · `Enter` make cards · `L` flip my · `T` override target |
 | `ChangeSomething` | text area input · `Enter` send · `Esc` cancel                                            |
-| `YourCards`       | `↑↓` nav · `Enter` expand/collapse · `R` change this card · `d` drop artifact · `F` regenerate failed |
+| `YourCards`       | `↑↓` nav · `Enter` expand/collapse · `R` change this card · `d` drop artifact · `r` regenerate failed |
 | `ChangeThisCard`  | text area input · `Enter` send · `Esc` cancel                                            |
 | `Done`            | `N` new batch · `Q` quit · file paths stay visible                                       |
 

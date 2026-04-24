@@ -14,8 +14,8 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CandidateKind, CardArtifacts, CardDraft, CardPayload, LanguagePair,
-    WordCandidate,
+    Artifact, ArtifactFile, ArtifactSlot, CandidateKind, CardArtifacts, CardDraft, CardPayload,
+    LanguagePair, WordCandidate,
 };
 use kamishibai::tui::{App, ModalKind, Screen, draw};
 use ratatui::Terminal;
@@ -77,6 +77,26 @@ fn ready_artifacts() -> CardArtifacts {
     )
 }
 
+fn cached_artifacts() -> CardArtifacts {
+    CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Scene).succeeded_with(ArtifactFile::new(
+            "a345532c.json",
+            "1.9 KB",
+            true,
+        )),
+        ArtifactSlot::fresh(Artifact::Picture).succeeded_with(ArtifactFile::new(
+            "a345532c.jpg",
+            "268 KB",
+            true,
+        )),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded_with(ArtifactFile::new(
+            "f4206ebe.wav",
+            "11.2 KB",
+            true,
+        )),
+    )
+}
+
 fn retrying_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
@@ -127,6 +147,18 @@ fn card_with_hint(
     artifacts: CardArtifacts,
 ) -> CardDraft {
     CardDraft::new(term, pair(), CardPayload::new(front, back, hint, term))
+        .with_artifacts(artifacts)
+}
+
+fn card_with_highlight(
+    term: &str,
+    front: &str,
+    back: &str,
+    hint: &str,
+    highlight: &str,
+    artifacts: CardArtifacts,
+) -> CardDraft {
+    CardDraft::new(term, pair(), CardPayload::new(front, back, hint, highlight))
         .with_artifacts(artifacts)
 }
 
@@ -185,12 +217,13 @@ fn build_states() -> Vec<(String, App)> {
         .with_screen(Screen::YourCards)
         .confirmed_target("en")
         .cards_started(vec![
-            card_with_hint(
+            card_with_highlight(
                 "whilst",
-                "Пока она говорила, я думал о своём.",
-                "While she was speaking, I was thinking of my own stuff. · whilst /waɪlst/ · formal",
+                "Пока она говорила, я в то время как думал о своём.",
+                "While she was speaking, I was thinking of my own stuff.\nwhilst /waɪlst/   пока, в то время как · formal",
                 "Как «while», но старомодное — в книгах и BBC.",
-                ready_artifacts(),
+                "в то время как",
+                cached_artifacts(),
             ),
             card(
                 "at the end",
@@ -201,7 +234,8 @@ fn build_states() -> Vec<(String, App)> {
             card("in the end", "", "", making_picture_artifacts()),
             card("wreck", "", "", CardArtifacts::default()),
         ])
-        .card_toggle_expanded();
+        .card_toggle_expanded()
+        .with_elapsed(Duration::from_secs(41));
 
     let change_this_card = App::new(pair())
         .with_screen(Screen::YourCards)
@@ -242,7 +276,8 @@ fn build_states() -> Vec<(String, App)> {
             card("at the end", "", "", second_retrying_artifacts()),
             card("in the end", "", "", retrying_artifacts()),
             card("wreck", "", "", making_picture_artifacts()),
-        ]);
+        ])
+        .with_elapsed(Duration::from_secs(65));
 
     let failed = App::new(pair())
         .with_screen(Screen::YourCards)
@@ -252,7 +287,8 @@ fn build_states() -> Vec<(String, App)> {
             card("at the end", "", "", ready_artifacts()),
             card("in the end", "", "", failed_picture_artifacts()),
             card("wreck", "", "", ready_artifacts()),
-        ]);
+        ])
+        .with_elapsed(Duration::from_secs(108));
 
     let done = App::new(pair())
         .with_screen(Screen::Done)

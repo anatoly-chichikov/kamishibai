@@ -101,7 +101,7 @@ fn toggle_my_language_on_what_i_understood_persists_the_new_code() {
 }
 
 #[test]
-fn toggle_my_language_on_done_persists_the_new_code() {
+fn letter_l_on_done_is_not_a_hidden_language_shortcut() {
     let app = base()
         .with_screen(Screen::Done)
         .confirmed_target("en")
@@ -109,11 +109,8 @@ fn toggle_my_language_on_done_persists_the_new_code() {
     let (after, side) = transit(app, AppEvent::KeyChar('l'));
     assert_eq!(
         (after.pair().support().to_string(), side),
-        (
-            String::from("es"),
-            Side::PersistMyLanguage(String::from("es"))
-        ),
-        "L on Done must rotate `my language` and request persistence"
+        (String::from("ru"), Side::None),
+        "letter L on Done must not be a hidden language shortcut"
     );
 }
 

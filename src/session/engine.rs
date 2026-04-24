@@ -104,7 +104,7 @@ impl SessionEngine {
             let artifacts = draft.artifacts();
             for kind in [Artifact::Scene, Artifact::Picture, Artifact::Sound] {
                 let current = slot(artifacts, kind);
-                if !current.ready() && !current.failed_terminally() {
+                if !current.complete() {
                     return Some((index, kind));
                 }
             }
@@ -123,10 +123,7 @@ impl SessionEngine {
             let artifacts = draft.artifacts();
             [Artifact::Scene, Artifact::Picture, Artifact::Sound]
                 .iter()
-                .all(|kind| {
-                    let item = slot(artifacts, *kind);
-                    item.ready() || item.failed_terminally()
-                })
+                .all(|kind| slot(artifacts, *kind).complete())
         })
     }
 

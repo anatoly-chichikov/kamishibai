@@ -13,4 +13,4 @@ expression: render(&app)
                                                                                 
                                                                                 
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
-        [↑↓] nav · [Enter] expand · [R] change this card · [d] drop artifact
+    [↑↓] nav · [Enter] expand/collapse · [R] change this card · [d] drop art

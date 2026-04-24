@@ -15,8 +15,9 @@ use crate::tui::palette;
 
 const HEADLINE: &str = "Your cards";
 const HINT_KEYS_DEFAULT: &str =
-    "[↑↓] nav · [Enter] expand · [R] change this card · [d] drop artifact";
-const HINT_KEYS_FAILED: &str = "[r] regenerate failed · [Enter] keep going · [R] change this card";
+    "[↑↓] nav · [Enter] expand/collapse · [R] change this card · [d] drop artifact";
+const HINT_KEYS_FAILED: &str =
+    "[r] regenerate failed · [Enter] keep going anyway · [R] change this card";
 
 /// Draw the `Your cards` screen for the current `App`.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
@@ -70,7 +71,7 @@ fn tagline(app: &App) -> String {
     let failed = app.cards_failed();
     if failed > 0 {
         let plural = if failed == 1 { "" } else { "s" };
-        format!("{failed} card{plural} couldn't finish after 3 tries")
+        format!("{failed} card{plural} gave up after 3 tries")
     } else {
         format!(
             "group 1 of 1 · {}/{} ready",
@@ -163,6 +164,9 @@ fn artifact_span(name: &'static str, slot: &ArtifactSlot) -> Vec<Span<'static>> 
     if slot.ready() {
         return vec![Span::styled(format!("✓ {name}"), palette::ok())];
     }
+    if slot.discarded() {
+        return vec![Span::styled(format!("⊘ {name}"), palette::dim())];
+    }
     if slot.failed_terminally() {
         return vec![Span::styled(format!("✗ {name}"), palette::failure())];
     }
@@ -182,7 +186,7 @@ fn retry_note(draft: &CardDraft) -> Option<&'static str> {
         draft.artifacts().picture(),
         draft.artifacts().sound(),
     ] {
-        if slot.ready() || slot.failed_terminally() {
+        if slot.ready() || slot.discarded() || slot.failed_terminally() {
             continue;
         }
         let attempts = slot.tally().done();
@@ -190,9 +194,9 @@ fn retry_note(draft: &CardDraft) -> Option<&'static str> {
             continue;
         }
         return Some(match slot.kind() {
-            Artifact::Scene => "· retry in progress",
-            Artifact::Picture => "· text found in image",
-            Artifact::Sound => "· rate limit, waiting…",
+            Artifact::Scene => "· retrying scene",
+            Artifact::Picture => "· retrying picture",
+            Artifact::Sound => "· retrying sound",
         });
     }
     None
@@ -208,9 +212,9 @@ fn failure_note(draft: &CardDraft) -> Option<&'static str> {
             continue;
         }
         return Some(match slot.kind() {
-            Artifact::Scene => "· scene JSON kept coming back broken",
-            Artifact::Picture => "· text kept appearing in image",
-            Artifact::Sound => "· audio gave up after three rate-limits",
+            Artifact::Scene => "· scene couldn't finish",
+            Artifact::Picture => "· picture couldn't finish",
+            Artifact::Sound => "· sound couldn't finish",
         });
     }
     None
@@ -218,7 +222,7 @@ fn failure_note(draft: &CardDraft) -> Option<&'static str> {
 
 fn working(artifacts: &CardArtifacts) -> bool {
     for slot in [artifacts.scene(), artifacts.picture(), artifacts.sound()] {
-        if slot.ready() || slot.failed_terminally() {
+        if slot.ready() || slot.discarded() || slot.failed_terminally() {
             continue;
         }
         if slot.tally().done() > 0 {
@@ -247,10 +251,7 @@ fn expanded_rows<'a>(draft: &'a CardDraft, width: u16) -> Vec<Line<'a>> {
         Line::from(""),
         rule("front"),
         Line::from(""),
-        Line::from(vec![
-            Span::raw(EXPAND_INDENT),
-            Span::styled(String::from(draft.payload().front()), palette::base()),
-        ]),
+        sentence_row(draft.payload().front(), draft.payload().highlight()),
     ];
     if !hint.is_empty() {
         rows.push(Line::from(vec![
@@ -264,16 +265,11 @@ fn expanded_rows<'a>(draft: &'a CardDraft, width: u16) -> Vec<Line<'a>> {
     rows.push(Line::from(""));
     rows.push(rule("back"));
     rows.push(Line::from(""));
-    rows.push(Line::from(vec![
-        Span::raw(EXPAND_INDENT),
-        Span::styled(String::from(draft.payload().back()), palette::base()),
-    ]));
+    rows.extend(text_rows(draft.payload().back()));
     rows.push(Line::from(""));
     rows.push(rule("files"));
     rows.push(Line::from(""));
-    rows.push(file_row("▣", "picture", "a345532c.jpg", "268 KB"));
-    rows.push(file_row("▣", "scene  ", "a345532c.json", "1.9 KB"));
-    rows.push(file_row("♪", "sound  ", "f4206ebe.wav", "11.2 KB"));
+    rows.extend(file_rows(draft.artifacts()));
     rows.push(Line::from(""));
     rows.push(rule("change this card"));
     rows.push(Line::from(""));
@@ -291,17 +287,100 @@ fn expanded_rows<'a>(draft: &'a CardDraft, width: u16) -> Vec<Line<'a>> {
     rows
 }
 
-fn file_row(glyph: &str, name: &str, file: &str, size: &str) -> Line<'static> {
+fn sentence_row(text: &str, highlight: &str) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(EXPAND_INDENT));
+    if !highlight.is_empty()
+        && let Some(start) = text.find(highlight)
+    {
+        let (before, rest) = text.split_at(start);
+        let (matched, after) = rest.split_at(highlight.len());
+        if !before.is_empty() {
+            spans.push(Span::styled(String::from(before), palette::base()));
+        }
+        spans.push(Span::styled(
+            String::from(matched),
+            palette::base().add_modifier(Modifier::REVERSED),
+        ));
+        if !after.is_empty() {
+            spans.push(Span::styled(String::from(after), palette::base()));
+        }
+    } else {
+        spans.push(Span::styled(String::from(text), palette::base()));
+    }
+    Line::from(spans)
+}
+
+fn text_rows(text: &str) -> Vec<Line<'static>> {
+    if text.is_empty() {
+        return vec![Line::from(vec![
+            Span::raw(EXPAND_INDENT),
+            Span::styled("—", palette::dim()),
+        ])];
+    }
+    text.split('\n')
+        .map(|line| {
+            Line::from(vec![
+                Span::raw(EXPAND_INDENT),
+                Span::styled(String::from(line), palette::base()),
+            ])
+        })
+        .collect()
+}
+
+fn file_rows(artifacts: &CardArtifacts) -> Vec<Line<'static>> {
+    vec![
+        file_row("▣", "picture", artifacts.picture()),
+        file_row("▣", "scene  ", artifacts.scene()),
+        file_row("♪", "sound  ", artifacts.sound()),
+    ]
+}
+
+fn file_row(glyph: &str, name: &str, slot: &ArtifactSlot) -> Line<'static> {
+    if let Some(file) = slot.file() {
+        return Line::from(vec![
+            Span::raw(EXPAND_INDENT),
+            Span::styled(String::from(glyph), palette::dim()),
+            Span::raw(" "),
+            Span::styled(String::from(name), palette::base()),
+            Span::raw("   "),
+            Span::styled(String::from(file.name()), palette::link()),
+            Span::raw("   "),
+            Span::styled(format!("· {}", file.size()), palette::dim()),
+        ]);
+    }
+    file_status_row(glyph, name, artifact_state(slot))
+}
+
+fn file_status_row(glyph: &str, name: &str, status: String) -> Line<'static> {
     Line::from(vec![
         Span::raw(EXPAND_INDENT),
         Span::styled(String::from(glyph), palette::dim()),
         Span::raw(" "),
         Span::styled(String::from(name), palette::base()),
         Span::raw("   "),
-        Span::styled(String::from(file), palette::link()),
-        Span::raw("   "),
-        Span::styled(format!("· {size}"), palette::dim()),
+        Span::styled(status, palette::dim()),
     ])
+}
+
+fn artifact_state(slot: &ArtifactSlot) -> String {
+    if slot.ready() {
+        return String::from("ready");
+    }
+    if slot.discarded() {
+        return String::from("discarded");
+    }
+    if slot.failed_terminally() {
+        return format!("failed after {} tries", slot.tally().ceiling());
+    }
+    if slot.tally().done() > 0 {
+        return format!(
+            "retrying {}/{}",
+            slot.tally().done(),
+            slot.tally().ceiling()
+        );
+    }
+    String::from("queued")
 }
 
 fn failure_banner(width: u16) -> Vec<Line<'static>> {
@@ -375,10 +454,35 @@ fn status_panel(app: &App) -> Paragraph<'_> {
     }
     if retrying > 0 {
         parts.push(format!("retrying {retrying}"));
-    } else if failed == 0 {
-        parts.push(format!("cache hits {ready}"));
     }
-    parts.push(String::from("elapsed 00:41"));
+    let cache_hits = cache_hits(app);
+    if retrying == 0 && failed == 0 && cache_hits > 0 {
+        parts.push(format!("cache hits {cache_hits}"));
+    }
+    parts.push(format!("elapsed {}", elapsed(app)));
     Paragraph::new(Line::from(Span::styled(parts.join(" · "), palette::base())))
         .style(palette::base())
+}
+
+fn cache_hits(app: &App) -> usize {
+    app.cards()
+        .iter()
+        .map(|draft| {
+            [
+                draft.artifacts().scene(),
+                draft.artifacts().picture(),
+                draft.artifacts().sound(),
+            ]
+            .iter()
+            .filter(|slot| slot.file().is_some_and(|file| file.cached()))
+            .count()
+        })
+        .sum()
+}
+
+fn elapsed(app: &App) -> String {
+    let seconds = app.elapsed().as_secs();
+    let minutes = seconds / 60;
+    let remainder = seconds % 60;
+    format!("{minutes:02}:{remainder:02}")
 }

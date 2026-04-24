@@ -55,11 +55,25 @@ fn your_words_renders_placeholder_tagline_and_language_pair() {
         flat.contains("Your words")
             && flat.contains("paste anything — I figure out the rest")
             && flat.contains("paste one per line, or comma-separated, or a messy blob:")
-            && flat.contains("[⌘V] paste · [Enter] continue")
+            && flat.contains("[paste/type] words · [L] my language · [Enter] continue")
             && !flat.contains("минимум трения")
             && flat.contains("kamishibai ·")
             && flat.contains("→ RU"),
         "Your words screen must render the PDF labels and a language pair badge on top, without any design-tool commentary"
+    );
+}
+
+#[test]
+fn uppercase_l_on_empty_your_words_toggles_my_language() {
+    let app = App::new(LanguagePair::new("en", "ru"));
+    let (next, side) = transit(app, to_app(press(KeyCode::Char('L'))).expect("map"));
+    assert_eq!(
+        (next.pair().support().to_string(), side),
+        (
+            String::from("es"),
+            Side::PersistMyLanguage(String::from("es"))
+        ),
+        "uppercase L on an empty Your words screen must rotate `my language`"
     );
 }
 

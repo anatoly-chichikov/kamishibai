@@ -19,6 +19,40 @@ impl Artifact {
     }
 }
 
+/// File metadata attached to one completed artifact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArtifactFile {
+    name: String,
+    size: String,
+    cached: bool,
+}
+
+impl ArtifactFile {
+    /// Create one artifact file descriptor.
+    pub fn new(name: impl Into<String>, size: impl Into<String>, cached: bool) -> Self {
+        Self {
+            name: name.into(),
+            size: size.into(),
+            cached,
+        }
+    }
+
+    /// Return the display filename.
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    /// Return the human-readable file size.
+    pub fn size(&self) -> &str {
+        self.size.as_str()
+    }
+
+    /// Return whether this artifact came from cache.
+    pub fn cached(&self) -> bool {
+        self.cached
+    }
+}
+
 /// Number of attempts already spent versus the absolute cap.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AttemptTally {
@@ -62,7 +96,9 @@ impl AttemptTally {
 pub struct ArtifactSlot {
     kind: Artifact,
     ready: bool,
+    discarded: bool,
     tally: AttemptTally,
+    file: Option<ArtifactFile>,
 }
 
 impl ArtifactSlot {
@@ -71,7 +107,9 @@ impl ArtifactSlot {
         Self {
             kind,
             ready: false,
+            discarded: false,
             tally: AttemptTally::new(3),
+            file: None,
         }
     }
 
@@ -85,14 +123,38 @@ impl ArtifactSlot {
         self.ready
     }
 
+    /// Return whether this artifact was explicitly discarded by the user.
+    pub fn discarded(&self) -> bool {
+        self.discarded
+    }
+
+    /// Return whether this slot no longer needs queue work.
+    pub fn complete(&self) -> bool {
+        self.ready || self.discarded || self.failed_terminally()
+    }
+
     /// Return the attempt tally.
     pub fn tally(&self) -> AttemptTally {
         self.tally
     }
 
+    /// Return completed artifact file metadata, if available.
+    pub fn file(&self) -> Option<&ArtifactFile> {
+        self.file.as_ref()
+    }
+
     /// Return the slot as ready.
     pub fn succeeded(mut self) -> Self {
         self.ready = true;
+        self.discarded = false;
+        self
+    }
+
+    /// Return the slot as ready with file metadata.
+    pub fn succeeded_with(mut self, file: ArtifactFile) -> Self {
+        self.ready = true;
+        self.discarded = false;
+        self.file = Some(file);
         self
     }
 
@@ -102,9 +164,17 @@ impl ArtifactSlot {
         self
     }
 
+    /// Return the slot as explicitly discarded by the user.
+    pub fn discard(mut self) -> Self {
+        self.ready = false;
+        self.discarded = true;
+        self.file = None;
+        self
+    }
+
     /// Return whether retry budget has been exhausted without success.
     pub fn failed_terminally(&self) -> bool {
-        !self.ready && self.tally.exhausted()
+        !self.ready && !self.discarded && self.tally.exhausted()
     }
 }
 

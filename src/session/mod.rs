@@ -12,7 +12,9 @@ mod state;
 pub use bridge::{to_document, to_entry};
 pub use candidate::{CandidateKind, RawInputBatch, WordCandidate};
 pub use detection::{ScriptDetection, TargetDetection, TargetGuess};
-pub use draft::{Artifact, ArtifactSlot, AttemptTally, CardArtifacts, CardDraft, CardPayload};
+pub use draft::{
+    Artifact, ArtifactFile, ArtifactSlot, AttemptTally, CardArtifacts, CardDraft, CardPayload,
+};
 pub use engine::{ArtifactProducer, EngineEvent, SessionEngine};
 pub use pair::LanguagePair;
 pub use pass::{BulkCorrection, CardCorrection, Understanding, Understood};

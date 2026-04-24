@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::session::{
     Artifact, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, WordCandidate,
 };
@@ -21,6 +23,7 @@ pub struct CardsView {
     pub drafts: Vec<CardDraft>,
     pub selected: usize,
     pub expanded: bool,
+    pub elapsed: Duration,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -225,6 +228,7 @@ impl App {
             drafts,
             selected: 0,
             expanded: false,
+            elapsed: Duration::ZERO,
         };
         self
     }
@@ -253,6 +257,17 @@ impl App {
     /// Return the app with the focused card toggled between expanded and collapsed.
     pub fn card_toggle_expanded(mut self) -> Self {
         self.cards.expanded = !self.cards.expanded;
+        self
+    }
+
+    /// Return the elapsed generation time shown on the Your Cards status line.
+    pub fn elapsed(&self) -> Duration {
+        self.cards.elapsed
+    }
+
+    /// Return the app with an updated generation elapsed time.
+    pub fn with_elapsed(mut self, elapsed: Duration) -> Self {
+        self.cards.elapsed = elapsed;
         self
     }
 
@@ -309,6 +324,16 @@ impl App {
     /// Return the app with a different artifact bundle installed for the focused card.
     pub fn card_patched_artifacts(mut self, artifacts: CardArtifacts) -> Self {
         if let Some(draft) = self.cards.drafts.get(self.cards.selected).cloned() {
+            self.cards.drafts[self.cards.selected] = draft.with_artifacts(artifacts);
+        }
+        self
+    }
+
+    /// Return the app with the first unfinished artifact of the focused card discarded.
+    pub fn card_dropped_artifact(mut self) -> Self {
+        if let Some(draft) = self.cards.drafts.get(self.cards.selected).cloned()
+            && let Some(artifacts) = drop_artifact(draft.artifacts())
+        {
             self.cards.drafts[self.cards.selected] = draft.with_artifacts(artifacts);
         }
         self
@@ -396,6 +421,44 @@ impl App {
     }
 }
 
+fn drop_artifact(artifacts: &CardArtifacts) -> Option<CardArtifacts> {
+    for kind in [Artifact::Scene, Artifact::Picture, Artifact::Sound] {
+        let slot = match kind {
+            Artifact::Scene => artifacts.scene(),
+            Artifact::Picture => artifacts.picture(),
+            Artifact::Sound => artifacts.sound(),
+        };
+        if slot.complete() {
+            continue;
+        }
+        return Some(replace_slot(artifacts, kind, slot.clone().discard()));
+    }
+    None
+}
+
+fn replace_slot(
+    artifacts: &CardArtifacts,
+    kind: Artifact,
+    replacement: ArtifactSlot,
+) -> CardArtifacts {
+    let scene = if kind == Artifact::Scene {
+        replacement.clone()
+    } else {
+        artifacts.scene().clone()
+    };
+    let picture = if kind == Artifact::Picture {
+        replacement.clone()
+    } else {
+        artifacts.picture().clone()
+    };
+    let sound = if kind == Artifact::Sound {
+        replacement
+    } else {
+        artifacts.sound().clone()
+    };
+    CardArtifacts::from_parts(scene, picture, sound)
+}
+
 fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {
     let slot = match kind {
         Artifact::Scene => artifacts.scene(),
@@ -404,6 +467,9 @@ fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {
     };
     if slot.ready() {
         return "ready";
+    }
+    if slot.discarded() {
+        return "discarded";
     }
     if slot.failed_terminally() {
         return "failed";

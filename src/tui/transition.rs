@@ -68,8 +68,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, None, AppEvent::OverrideTarget(code)) => {
             (app.override_target(code), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::ToggleMyLanguage)
-        | (Screen::Done, None, AppEvent::ToggleMyLanguage) => {
+        (Screen::WhatIUnderstood, None, AppEvent::ToggleMyLanguage) => {
             let next = app.toggle_support();
             let code = next.pair().support().to_string();
             (next, Side::PersistMyLanguage(code))
@@ -102,8 +101,10 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_selected_previous(), Side::None),
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
         (Screen::YourCards, None, AppEvent::Submit) => (app.card_toggle_expanded(), Side::None),
-        (Screen::YourCards, None, AppEvent::KeyChar('F'))
-        | (Screen::YourCards, None, AppEvent::KeyChar('f')) => (app, Side::RegenerateFailed),
+        (Screen::YourCards, None, AppEvent::KeyChar('d'))
+        | (Screen::YourCards, None, AppEvent::KeyChar('D')) => {
+            (app.card_dropped_artifact(), Side::None)
+        }
         (Screen::YourCards, None, AppEvent::KeyChar('r')) if app.cards_failed() > 0 => {
             (app, Side::RegenerateFailed)
         }
@@ -145,8 +146,15 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         return event;
     }
     match (app.screen(), &event) {
+        (Screen::YourWords, AppEvent::KeyChar('L')) if app.blob().is_empty() => {
+            AppEvent::ToggleMyLanguage
+        }
         (Screen::WhatIUnderstood, AppEvent::KeyChar('r'))
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
+        (Screen::WhatIUnderstood, AppEvent::KeyChar('t'))
+        | (Screen::WhatIUnderstood, AppEvent::KeyChar('T')) => {
+            AppEvent::OverrideTarget(next_target(app.pair().target(), app.pair().support()))
+        }
         (Screen::YourCards, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
         (Screen::YourCards, AppEvent::KeyChar('r')) => {
             if app.cards_failed() > 0 {
@@ -156,9 +164,7 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
             }
         }
         (Screen::WhatIUnderstood, AppEvent::KeyChar('l'))
-        | (Screen::WhatIUnderstood, AppEvent::KeyChar('L'))
-        | (Screen::Done, AppEvent::KeyChar('l'))
-        | (Screen::Done, AppEvent::KeyChar('L')) => AppEvent::ToggleMyLanguage,
+        | (Screen::WhatIUnderstood, AppEvent::KeyChar('L')) => AppEvent::ToggleMyLanguage,
         (Screen::Done, AppEvent::KeyChar('n')) | (Screen::Done, AppEvent::KeyChar('N')) => {
             AppEvent::NewBatch
         }
@@ -167,4 +173,22 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         }
         _ => event,
     }
+}
+
+fn next_target(current: &str, support: &str) -> String {
+    let order = ["en", "ru", "es", "de", "el", "zh"];
+    let mut position = 0;
+    for (index, code) in order.iter().enumerate() {
+        if *code == current {
+            position = index;
+            break;
+        }
+    }
+    for offset in 1..=order.len() {
+        let candidate = order[(position + offset) % order.len()];
+        if candidate != support {
+            return String::from(candidate);
+        }
+    }
+    String::from(current)
 }
