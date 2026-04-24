@@ -20,6 +20,8 @@ Contract(
         framework: "ratatui + crossterm",
         terminal_size_assumed: TerminalSize(cols: 80, rows: 12),
         sources_checked: [
+            "src/cli.rs",
+            "src/session/engine.rs",
             "src/tui/transition.rs",
             "src/tui/input.rs",
             "src/tui/screens/common.rs",
@@ -161,8 +163,13 @@ Contract(
                             purpose: "let the user flip support language before running detection",
                             importance: 3,
                             usefulness: 3,
-                            health: Working,
-                            issues: [],
+                            health: Partial(MisleadingCopy),
+                            issues: [
+                                MisleadingLabel(
+                                    label: "[L] my language",
+                                    actual_source: DataPath("src/tui/transition.rs::promote only maps uppercase L when App::blob().is_empty(); otherwise L is inserted into the blob"),
+                                ),
+                            ],
                         ),
                     ]),
                 ],
@@ -212,8 +219,17 @@ Contract(
                             purpose: "shows the LLM-resolved candidates the user can confirm or drop",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Fake,
+                            issues: [
+                                FakeData(
+                                    literal: "CandidateKind::Word with empty preview and note from first_pass",
+                                    should_derive_from: Some(DataPath("Gemini understanding pass candidate kind, preview, and note")),
+                                ),
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 78)),
+                                    missing_input: NoUiPathForEvent(event: "RunUnderstanding side-effect bridge calls a real understanding port"),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("wu.bottom_rule"),
@@ -234,8 +250,13 @@ Contract(
                             purpose: "tells the user how to commit to the current list",
                             importance: 3,
                             usefulness: 3,
-                            health: Working,
-                            issues: [],
+                            health: Partial(MisleadingCopy),
+                            issues: [
+                                SpecPromiseUnfulfilled(
+                                    spec_ref: SourceRef(file: "docs/tui-states/state-map.md", line: 95),
+                                    what: "Enter make cards should start artifact production, but StartGeneration only installs queued drafts",
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("wu.prompt_change_something"),
@@ -291,8 +312,13 @@ Contract(
                             purpose: "lock the list and start artifact generation",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Partial(CoversSomeStates),
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 83)),
+                                    missing_input: NoUiPathForEvent(event: "StartGeneration starts SessionEngine with a real ArtifactProducer"),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("wu.flip_my_language"),
@@ -313,8 +339,13 @@ Contract(
                             purpose: "let the user override the LLM-detected target language",
                             importance: 3,
                             usefulness: 3,
-                            health: Working,
-                            issues: [],
+                            health: Partial(ApproximationOfDesign),
+                            issues: [
+                                MisleadingLabel(
+                                    label: "[T] target",
+                                    actual_source: DataPath("src/tui/transition.rs::next_target cycles a fixed hardcoded list instead of opening a target picker or accepting a typed code"),
+                                ),
+                            ],
                         ),
                     ]),
                 ],
@@ -356,8 +387,17 @@ Contract(
                             purpose: "live status of each card across the three artifact slots",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Partial(CoversSomeStates),
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 83)),
+                                    missing_input: NoUiPathForEvent(event: "StartGeneration creates draft rows but does not start SessionEngine::advance or consume EngineEvent updates"),
+                                ),
+                                SpecPromiseUnfulfilled(
+                                    spec_ref: SourceRef(file: "docs/tui-states/state-map.md", line: 114),
+                                    what: "App shell is supposed to read session-engine events and dispatch them, but cargo run has only a key-event loop",
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("yc.row_inline_note"),
@@ -464,8 +504,13 @@ Contract(
                             purpose: "progress against the batch",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Partial(CoversSomeStates),
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 83)),
+                                    missing_input: NoUiPathForEvent(event: "ArtifactReady updates App::cards_ready during cargo run"),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("yc.status_failed"),
@@ -478,8 +523,13 @@ Contract(
                             purpose: "warn that some cards are terminal",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Partial(CoversSomeStates),
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 83)),
+                                    missing_input: NoUiPathForEvent(event: "RetryExhausted updates App::cards_failed during cargo run"),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("yc.status_retrying_or_cache_hits"),
@@ -491,8 +541,13 @@ Contract(
                             purpose: "tell the user the queue is alive (retries) or that cache helped",
                             importance: 3,
                             usefulness: 2,
-                            health: Working,
-                            issues: [],
+                            health: Partial(CoversSomeStates),
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 83)),
+                                    missing_input: NoUiPathForEvent(event: "RetryStarted and cache-hit paths update retry/cache status during cargo run"),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("yc.status_elapsed"),
@@ -505,8 +560,13 @@ Contract(
                             purpose: "elapsed wall time of the batch",
                             importance: 3,
                             usefulness: 3,
-                            health: Working,
-                            issues: [],
+                            health: Partial(CoversSomeStates),
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 56)),
+                                    missing_input: NoUiPathForEvent(event: "Timer tick updates App::with_elapsed while the generator runs"),
+                                ),
+                            ],
                         ),
                     ]),
                     Region(kind: Banner, elements: [
@@ -554,8 +614,13 @@ Contract(
                             purpose: "primary recovery actions for failed cards",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Partial(CoversSomeStates),
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/tui/transition.rs", line: 103)),
+                                    missing_input: NoTransitionArm(event: "Submit with cards_failed() > 0 keeps going to Done", screen: YourCards),
+                                ),
+                            ],
                         ),
                     ]),
                     Region(kind: Footer, elements: [
@@ -600,8 +665,13 @@ Contract(
                             purpose: "drop a stuck artifact so the queue moves on",
                             importance: 4,
                             usefulness: 4,
-                            health: Working,
-                            issues: [],
+                            health: Partial(CoversSomeStates),
+                            issues: [
+                                MisleadingLabel(
+                                    label: "[d] drop artifact",
+                                    actual_source: DataPath("src/tui/app.rs::card_dropped_artifact mutates local App state only; no running generator queue consumes the discard"),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("yc.footer_regenerate_failed"),
@@ -611,8 +681,13 @@ Contract(
                             purpose: "second placement of the regen action",
                             importance: 4,
                             usefulness: 4,
-                            health: Working,
-                            issues: [],
+                            health: Partial(CoversSomeStates),
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 87)),
+                                    missing_input: NoUiPathForEvent(event: "RegenerateFailed re-enqueues failed artifacts into SessionEngine and producer"),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("yc.footer_keep_going"),
@@ -622,8 +697,13 @@ Contract(
                             purpose: "accept the failures and move to Done",
                             importance: 5,
                             usefulness: 4,
-                            health: Working,
-                            issues: [],
+                            health: Broken,
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/tui/transition.rs", line: 103)),
+                                    missing_input: NoTransitionArm(event: "Submit with cards_failed() > 0 keeps going to Done", screen: YourCards),
+                                ),
+                            ],
                         ),
                     ]),
                 ],
@@ -647,8 +727,17 @@ Contract(
                             purpose: "names the produced Anki deck — the thing the user came for",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Fake,
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/tui/transition.rs", line: 131)),
+                                    missing_input: NoUiPathForEvent(event: "BatchReady or BatchDone publishes DoneArtifacts::deck before switching to Done"),
+                                ),
+                                FakeData(
+                                    literal: "—",
+                                    should_derive_from: Some(DataPath("generated APKG path")),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("done.report_row"),
@@ -661,8 +750,17 @@ Contract(
                             purpose: "names the produced PDF report",
                             importance: 4,
                             usefulness: 4,
-                            health: Working,
-                            issues: [],
+                            health: Fake,
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/tui/transition.rs", line: 131)),
+                                    missing_input: NoUiPathForEvent(event: "BatchReady or BatchDone publishes DoneArtifacts::report before switching to Done"),
+                                ),
+                                FakeData(
+                                    literal: "—",
+                                    should_derive_from: Some(DataPath("generated PDF report path")),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("done.output_row"),
@@ -675,8 +773,17 @@ Contract(
                             purpose: "shows the output directory",
                             importance: 1,
                             usefulness: 1,
-                            health: Decorative,
-                            issues: [],
+                            health: Fake,
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/tui/transition.rs", line: 131)),
+                                    missing_input: NoUiPathForEvent(event: "BatchReady or BatchDone publishes DoneArtifacts::output before switching to Done"),
+                                ),
+                                FakeData(
+                                    literal: "—",
+                                    should_derive_from: Some(DataPath("generated output directory path")),
+                                ),
+                            ],
                         ),
                     ]),
                     Region(kind: Footer, elements: [
@@ -764,8 +871,13 @@ Contract(
                             purpose: "modal commit / dismiss contract",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Broken,
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 95)),
+                                    missing_input: NoUiPathForEvent(event: "RunBulkCorrection(String) is handled by the CLI side-effect bridge"),
+                                ),
+                            ],
                         ),
                     ]),
                 ],
@@ -838,8 +950,13 @@ Contract(
                             purpose: "modal commit / dismiss contract",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Broken,
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 95)),
+                                    missing_input: NoUiPathForEvent(event: "RunCardCorrection(String) is handled by the CLI side-effect bridge"),
+                                ),
+                            ],
                         ),
                     ]),
                 ],
