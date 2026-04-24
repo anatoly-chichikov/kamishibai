@@ -22,6 +22,7 @@ Contract(
         sources_checked: [
             "src/cli.rs",
             "src/session/engine.rs",
+            "src/tui/event.rs",
             "src/tui/transition.rs",
             "src/tui/input.rs",
             "src/tui/screens/common.rs",
@@ -112,48 +113,76 @@ Contract(
                         Element(
                             id: ElementId("yw.placeholder"),
                             kind: Hint,
-                            text: Literal("paste one per line, or comma-separated, or a messy blob:"),
+                            text: Literal("type or paste one word/phrase per line:"),
                             source: SourceRef(file: "src/tui/screens/your_words.rs", line: 15),
                             purpose: "tells the user what input format is accepted",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Partial(MisleadingCopy),
+                            issues: [
+                                MisleadingLabel(
+                                    label: "comma-separated",
+                                    actual_source: DataPath("The desired first-flow contract is newline-delimited input only; commas are literal text, not separators"),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("yw.text_blob"),
                             kind: TextArea,
                             text: Template([Bind(DataPath("App::blob()"))]),
                             source: SourceRef(file: "src/tui/screens/your_words.rs", line: 42),
-                            purpose: "the actual input the user is typing or pasting",
+                            purpose: "the multiline input the user is typing or pasting; plain Enter must append a newline",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Broken,
+                            issues: [
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/tui/input.rs", line: 11)),
+                                    missing_input: NoUiPathForEvent(event: "Plain Enter in YourWords appends '\\n' to App::blob() instead of submitting"),
+                                ),
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/tui/transition.rs", line: 23)),
+                                    missing_input: NoTransitionArm(event: "YourWords newline input is represented separately from submit", screen: YourWords),
+                                ),
+                            ],
                         ),
                     ]),
                     Region(kind: Footer, elements: [
                         Element(
                             id: ElementId("yw.footer_paste"),
                             kind: KeyHint(Footer),
-                            text: Literal("[paste/type] words"),
+                            text: Literal("[type/paste] one per line"),
                             source: SourceRef(file: "src/tui/screens/your_words.rs", line: 18),
                             purpose: "reminds the user that paste is the expected entry path",
                             importance: 4,
                             usefulness: 4,
-                            health: Working,
-                            issues: [],
+                            health: Partial(MisleadingCopy),
+                            issues: [
+                                MisleadingLabel(
+                                    label: "[paste/type] words",
+                                    actual_source: DataPath("The first-flow contract should say one item per line and should not imply comma splitting"),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("yw.footer_continue"),
                             kind: KeyHint(Footer),
-                            text: Literal("[Enter] continue"),
+                            text: Literal("[Shift+Enter] continue"),
                             source: SourceRef(file: "src/tui/screens/your_words.rs", line: 18),
-                            purpose: "confirms the blob and runs the LLM understanding pass",
+                            purpose: "confirms the multiline blob and runs the LLM understanding pass without stealing plain Enter from text entry",
                             importance: 5,
                             usefulness: 5,
-                            health: Working,
-                            issues: [],
+                            health: Broken,
+                            issues: [
+                                MisleadingLabel(
+                                    label: "[Enter] continue",
+                                    actual_source: DataPath("Plain Enter is expected to insert a newline on YourWords; submit must be a distinct chord such as Shift+Enter"),
+                                ),
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/tui/input.rs", line: 11)),
+                                    missing_input: NoUiPathForEvent(event: "Shift+Enter maps to submit/continue while plain Enter remains text input"),
+                                ),
+                            ],
                         ),
                         Element(
                             id: ElementId("yw.toggle_my_language"),
@@ -228,6 +257,10 @@ Contract(
                                 BrokenWiring(
                                     handler_at: Some(SourceRef(file: "src/cli.rs", line: 78)),
                                     missing_input: NoUiPathForEvent(event: "RunUnderstanding side-effect bridge calls a real understanding port"),
+                                ),
+                                BrokenWiring(
+                                    handler_at: Some(SourceRef(file: "src/cli.rs", line: 121)),
+                                    missing_input: NoUiPathForEvent(event: "Understanding pass treats newlines as item boundaries and leaves commas inside text"),
                                 ),
                             ],
                         ),

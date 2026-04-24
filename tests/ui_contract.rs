@@ -10,6 +10,7 @@
 //! - every `Element` with `health: Broken | Fake` carries at least one `Issue`;
 //! - every `Element` with open issues has degraded health;
 //! - every `SourceRef` resolves to a real file with the named line in range.
+//! - the `YourWords` input contract stays line-delimited and does not bind plain `Enter`.
 
 #![allow(dead_code)]
 
@@ -41,6 +42,7 @@ fn loads_ui_contract() {
     check_broken_or_fake_have_issues(&contract, &mut errs);
     check_issueful_elements_are_degraded(&contract, &mut errs);
     check_source_refs(&contract, &mut errs);
+    check_your_words_input_contract(&contract, &mut errs);
     assert!(
         errs.is_empty(),
         "ui-contract failed {} invariant(s):\n  - {}",
@@ -143,6 +145,72 @@ fn check_source_refs(contract: &Contract, errs: &mut Vec<String>) {
                 r.file, r.line, lines
             ));
         }
+    }
+}
+
+fn check_your_words_input_contract(contract: &Contract, errs: &mut Vec<String>) {
+    let Some(placeholder) = element_by_id(contract, "yw.placeholder") else {
+        errs.push(String::from("yw.placeholder is missing"));
+        return;
+    };
+    if text_contains(placeholder, "comma") {
+        errs.push(String::from("yw.placeholder still advertises comma input"));
+    }
+    let Some(paste) = element_by_id(contract, "yw.footer_paste") else {
+        errs.push(String::from("yw.footer_paste is missing"));
+        return;
+    };
+    if !text_contains(paste, "one per line") {
+        errs.push(String::from(
+            "yw.footer_paste does not lock line-delimited input",
+        ));
+    }
+    let Some(continue_hint) = element_by_id(contract, "yw.footer_continue") else {
+        errs.push(String::from("yw.footer_continue is missing"));
+        return;
+    };
+    if !text_contains(continue_hint, "Shift+Enter") {
+        errs.push(String::from("yw.footer_continue does not use Shift+Enter"));
+    }
+    if text_contains(continue_hint, "[Enter] continue") {
+        errs.push(String::from("yw.footer_continue still binds plain Enter"));
+    }
+}
+
+fn element_by_id<'a>(contract: &'a Contract, id: &str) -> Option<&'a Element> {
+    for e in &contract.app.chrome.elements {
+        if e.id.0 == id {
+            return Some(e);
+        }
+    }
+    for s in &contract.app.screens {
+        for r in &s.regions {
+            for e in &r.elements {
+                if e.id.0 == id {
+                    return Some(e);
+                }
+            }
+        }
+    }
+    for m in &contract.app.modals {
+        for r in &m.regions {
+            for e in &r.elements {
+                if e.id.0 == id {
+                    return Some(e);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn text_contains(element: &Element, needle: &str) -> bool {
+    match &element.text {
+        TextSpec::Literal(text) => text.contains(needle),
+        TextSpec::Template(parts) => parts.iter().any(|part| match part {
+            TextFragment::Static(text) => text.contains(needle),
+            TextFragment::Bind(path) => path.0.contains(needle),
+        }),
     }
 }
 
