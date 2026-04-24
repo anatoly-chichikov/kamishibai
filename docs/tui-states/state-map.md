@@ -42,7 +42,7 @@ from `config/preferences.json` at batch start and defaults to `en`.
 ## Transitions
 
 ```
-              [Enter]
+              [Shift+Enter]
     YourWords ─────────► resolving target ─► WhatIUnderstood
         ▲                                          │
         │                                          │
@@ -77,7 +77,7 @@ from `config/preferences.json` at batch start and defaults to `en`.
 
 | State             | Keys                                                                                     |
 | ----------------- | ---------------------------------------------------------------------------------------- |
-| `YourWords`       | type/paste words · `Enter` continue · `L` toggle my language                              |
+| `YourWords`       | type/paste one item per line · `Enter` newline · `Shift+Enter` continue · `L` toggle my language |
 | `WhatIUnderstood` | `↑↓` nav · `d` drop row · `R` change something · `Enter` make cards · `L` flip my · `T` override target |
 | `ChangeSomething` | text area input · `Enter` send · `Esc` cancel                                            |
 | `YourCards`       | `↑↓` nav · `Enter` expand/collapse · `R` change this card · `d` drop artifact · `r` regenerate failed |
@@ -94,6 +94,10 @@ Events are divided between the app shell and individual screens:
   navigation, row expansion.
 - **Session engine owns**: LLM response events (`UnderstandingReady`, `BulkCorrectionReady`,
   `CardCorrectionReady`, `ArtifactReady`, `ArtifactFailed`, `RetryStarted`, `RetryFailedTerminally`).
+
+`YourWords` input is line-delimited. Plain `Enter` appends a new line to the raw
+blob. Commas are literal text, not separators. The continue command must be a
+distinct chord from text entry; the primary contract label is `Shift+Enter`.
 
 ## Recovery semantics (MVP)
 
