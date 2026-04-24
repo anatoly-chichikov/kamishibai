@@ -79,13 +79,8 @@ Contract(
                 purpose: "right-aligned secondary descriptor — flavor or progress depending on screen",
                 importance: 2,
                 usefulness: 2,
-                health: Partial(MisleadingCopy),
-                issues: [
-                    DuplicateOf(
-                        other: ElementId("yc.status_ready"),
-                        reason: SameCopy,
-                    ),
-                ],
+                health: Working,
+                issues: [],
             ),
             Element(
                 id: ElementId("dashed_divider"),
@@ -139,18 +134,13 @@ Contract(
                         Element(
                             id: ElementId("yw.footer_paste"),
                             kind: KeyHint(Footer),
-                            text: Literal("[⌘V] paste"),
+                            text: Literal("[paste/type] words"),
                             source: SourceRef(file: "src/tui/screens/your_words.rs", line: 18),
                             purpose: "reminds the user that paste is the expected entry path",
                             importance: 4,
                             usefulness: 4,
-                            health: Partial(ApproximationOfDesign),
-                            issues: [
-                                MisleadingLabel(
-                                    label: "[⌘V] paste",
-                                    actual_source: DataPath("crossterm KeyChar stream — no explicit ⌘V binding; relies on terminal pumping characters one by one"),
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yw.footer_continue"),
@@ -166,25 +156,13 @@ Contract(
                         Element(
                             id: ElementId("yw.toggle_my_language"),
                             kind: KeyHint(Footer),
-                            text: Literal("[L] toggle my language  (NOT RENDERED)"),
+                            text: Literal("[L] my language"),
                             source: SourceRef(file: "src/tui/screens/your_words.rs", line: 18),
                             purpose: "let the user flip support language before running detection",
                             importance: 3,
                             usefulness: 3,
-                            health: Broken,
-                            issues: [
-                                BrokenWiring(
-                                    handler_at: Some(SourceRef(file: "src/tui/transition.rs", line: 39)),
-                                    missing_input: NoKeyMapInPromote(
-                                        key: "L",
-                                        screen: YourWords,
-                                    ),
-                                ),
-                                SpecPromiseUnfulfilled(
-                                    spec_ref: SourceRef(file: "docs/tui-states/state-map.md", line: 80),
-                                    what: "keyboard contract row promises [L] toggle my language on YourWords",
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                     ]),
                 ],
@@ -217,12 +195,7 @@ Contract(
                             importance: 2,
                             usefulness: 3,
                             health: Decorative,
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("wu.bottom_rule"),
-                                    reason: NearIdenticalCopy,
-                                ),
-                            ],
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("wu.candidates_table"),
@@ -251,12 +224,7 @@ Contract(
                             importance: 2,
                             usefulness: 3,
                             health: Decorative,
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("wu.top_rule"),
-                                    reason: NearIdenticalCopy,
-                                ),
-                            ],
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("wu.prompt_make_cards"),
@@ -266,13 +234,8 @@ Contract(
                             purpose: "tells the user how to commit to the current list",
                             importance: 3,
                             usefulness: 3,
-                            health: Partial(MissingHint),
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("wu.footer_make_cards"),
-                                    reason: SameKeyHint,
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("wu.prompt_change_something"),
@@ -282,13 +245,8 @@ Contract(
                             purpose: "explains how to ask the LLM to redo the pass",
                             importance: 3,
                             usefulness: 3,
-                            health: Partial(MissingHint),
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("wu.footer_change_something"),
-                                    reason: SameKeyHint,
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                     ]),
                     Region(kind: Footer, elements: [
@@ -338,42 +296,25 @@ Contract(
                         ),
                         Element(
                             id: ElementId("wu.flip_my_language"),
-                            kind: HiddenKeyBinding,
-                            text: Literal("[L] flip my language  (handler wired, no footer hint)"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[L] my lang"),
                             source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 16),
                             purpose: "swap the support language without leaving the screen",
                             importance: 3,
                             usefulness: 3,
-                            health: Partial(MissingHint),
-                            issues: [
-                                HiddenBinding(
-                                    key: "L",
-                                    handler_at: SourceRef(file: "src/tui/transition.rs", line: 71),
-                                    screen: WhatIUnderstood,
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("wu.override_target"),
-                            kind: HiddenKeyBinding,
-                            text: Literal("[T] override target  (NOT WIRED, NOT RENDERED)"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[T] target"),
                             source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 16),
                             purpose: "let the user override the LLM-detected target language",
                             importance: 3,
                             usefulness: 3,
-                            health: Broken,
-                            issues: [
-                                BrokenWiring(
-                                    handler_at: Some(SourceRef(file: "src/tui/transition.rs", line: 68)),
-                                    missing_input: NoUiPathForEvent(
-                                        event: "OverrideTarget(String)",
-                                    ),
-                                ),
-                                SpecPromiseUnfulfilled(
-                                    spec_ref: SourceRef(file: "docs/tui-states/state-map.md", line: 81),
-                                    what: "keyboard contract row promises [T] override target on WhatIUnderstood",
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                     ]),
                 ],
@@ -428,13 +369,8 @@ Contract(
                             purpose: "names the reason a slot is retrying or failed",
                             importance: 4,
                             usefulness: 4,
-                            health: Partial(MisleadingCopy),
-                            issues: [
-                                MisleadingLabel(
-                                    label: "· text found in image / · rate limit, waiting… / · scene JSON kept coming back broken",
-                                    actual_source: DataPath("hardcoded per Artifact kind — not derived from real error"),
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yc.expanded_front"),
@@ -449,15 +385,8 @@ Contract(
                             purpose: "shows the Anki front the user is about to ship",
                             importance: 5,
                             usefulness: 5,
-                            health: Partial(ApproximationOfDesign),
-                            issues: [
-                                DriftFromDesign(
-                                    design_ref: "docs/tui-states/current-pdf/04-your-cards.png",
-                                    what_differs: MissingVisualEmphasis(
-                                        what: "target span highlight (e.g. «в то время как») present in PDF, plain in live",
-                                    ),
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yc.expanded_back"),
@@ -470,32 +399,22 @@ Contract(
                             purpose: "shows the Anki back the user is about to ship",
                             importance: 5,
                             usefulness: 5,
-                            health: Partial(ApproximationOfDesign),
-                            issues: [
-                                DriftFromDesign(
-                                    design_ref: "docs/tui-states/current-pdf/04-your-cards.png",
-                                    what_differs: LayoutCollapsed(
-                                        expected: "back sentence on one line; `whilst /waɪlst/   пока, в то время как · formal` on its own row below",
-                                        actual: "back sentence has `· whilst /waɪlst/ · formal` smashed onto the same line; meaning row missing",
-                                    ),
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yc.expanded_files"),
                             kind: DetailBlock,
-                            text: Literal("── files ──\n▣ picture  a345532c.jpg  · 268 KB\n▣ scene    a345532c.json · 1.9 KB\n♪ sound    f4206ebe.wav  · 11.2 KB"),
+                            text: Template([
+                                Static("── files ──\n"),
+                                Bind(DataPath("CardArtifacts::{picture,scene,sound} file metadata or state")),
+                            ]),
                             source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 274),
                             purpose: "tell the user which files belong to this card",
                             importance: 2,
-                            usefulness: 1,
-                            health: Fake,
-                            issues: [
-                                FakeData(
-                                    literal: "a345532c.jpg / a345532c.json / f4206ebe.wav (+ 268 KB / 1.9 KB / 11.2 KB)",
-                                    should_derive_from: Some(DataPath("CardArtifacts::{picture,scene,sound} paths and sizes")),
-                                ),
-                            ],
+                            usefulness: 3,
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yc.expanded_change_rule"),
@@ -506,16 +425,7 @@ Contract(
                             importance: 1,
                             usefulness: 1,
                             health: Decorative,
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("yc.expanded_change_keys"),
-                                    reason: SubsetOfOther,
-                                ),
-                                DuplicateOf(
-                                    other: ElementId("yc.footer_change_card"),
-                                    reason: SameKeyHint,
-                                ),
-                            ],
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yc.expanded_change_keys"),
@@ -525,20 +435,8 @@ Contract(
                             purpose: "actions specific to the focused card while expanded",
                             importance: 3,
                             usefulness: 2,
-                            health: Partial(MissingHint),
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("yc.footer_change_card"),
-                                    reason: SameKeyHint,
-                                ),
-                                BrokenWiring(
-                                    handler_at: None,
-                                    missing_input: NoTransitionArm(
-                                        event: "KeyChar('d')",
-                                        screen: YourCards,
-                                    ),
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                     ]),
                     Region(kind: Status, elements: [
@@ -566,13 +464,8 @@ Contract(
                             purpose: "progress against the batch",
                             importance: 5,
                             usefulness: 5,
-                            health: Partial(MisleadingCopy),
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("header_tagline"),
-                                    reason: SameCopy,
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yc.status_failed"),
@@ -598,29 +491,22 @@ Contract(
                             purpose: "tell the user the queue is alive (retries) or that cache helped",
                             importance: 3,
                             usefulness: 2,
-                            health: Partial(MisleadingCopy),
-                            issues: [
-                                MisleadingLabel(
-                                    label: "cache hits {ready}",
-                                    actual_source: DataPath("App::cards_ready() — count of fully-ready cards, NOT cache hits"),
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yc.status_elapsed"),
                             kind: StatusLine,
-                            text: Literal("elapsed 00:41"),
+                            text: Template([
+                                Static("elapsed "),
+                                Bind(DataPath("App::elapsed() formatted as mm:ss")),
+                            ]),
                             source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 381),
                             purpose: "elapsed wall time of the batch",
                             importance: 3,
-                            usefulness: 1,
-                            health: Fake,
-                            issues: [
-                                FakeData(
-                                    literal: "elapsed 00:41",
-                                    should_derive_from: Some(DataPath("Instant on batch start → format mm:ss")),
-                                ),
-                            ],
+                            usefulness: 3,
+                            health: Working,
+                            issues: [],
                         ),
                     ]),
                     Region(kind: Banner, elements: [
@@ -646,13 +532,8 @@ Contract(
                             purpose: "name the failure mode",
                             importance: 5,
                             usefulness: 5,
-                            health: Partial(MisleadingCopy),
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("header_tagline"),
-                                    reason: NearIdenticalCopy,
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yc.banner_subtitle"),
@@ -674,16 +555,7 @@ Contract(
                             importance: 5,
                             usefulness: 5,
                             health: Working,
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("yc.footer_regenerate_failed"),
-                                    reason: SameKeyHint,
-                                ),
-                                DuplicateOf(
-                                    other: ElementId("yc.footer_keep_going"),
-                                    reason: SameKeyHint,
-                                ),
-                            ],
+                            issues: [],
                         ),
                     ]),
                     Region(kind: Footer, elements: [
@@ -701,18 +573,13 @@ Contract(
                         Element(
                             id: ElementId("yc.footer_expand"),
                             kind: KeyHint(Footer),
-                            text: Literal("[Enter] expand"),
+                            text: Literal("[Enter] expand/collapse"),
                             source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 18),
                             purpose: "toggle the focused card's detail panel",
                             importance: 4,
                             usefulness: 4,
-                            health: Partial(MisleadingCopy),
-                            issues: [
-                                MisleadingLabel(
-                                    label: "expand",
-                                    actual_source: DataPath("App::card_toggle_expanded — actually toggles, not just expands"),
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yc.footer_change_card"),
@@ -733,16 +600,8 @@ Contract(
                             purpose: "drop a stuck artifact so the queue moves on",
                             importance: 4,
                             usefulness: 4,
-                            health: Broken,
-                            issues: [
-                                BrokenWiring(
-                                    handler_at: None,
-                                    missing_input: NoTransitionArm(
-                                        event: "KeyChar('d')",
-                                        screen: YourCards,
-                                    ),
-                                ),
-                            ],
+                            health: Working,
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("yc.footer_regenerate_failed"),
@@ -758,38 +617,13 @@ Contract(
                         Element(
                             id: ElementId("yc.footer_keep_going"),
                             kind: KeyHint(Footer),
-                            text: Literal("[Enter] keep going  (only when failures > 0)"),
+                            text: Literal("[Enter] keep going anyway  (only when failures > 0)"),
                             source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 19),
                             purpose: "accept the failures and move to Done",
                             importance: 5,
                             usefulness: 4,
                             health: Working,
-                            issues: [
-                                CopyInconsistency(
-                                    with: [ElementId("yc.banner_keys")],
-                                    variants: [
-                                        "[Enter] keep going",
-                                        "[Enter] keep going anyway",
-                                    ],
-                                ),
-                            ],
-                        ),
-                        Element(
-                            id: ElementId("yc.hidden_F_regenerate_failed"),
-                            kind: HiddenKeyBinding,
-                            text: Literal("[F] regenerate failed  (handler wired, never advertised)"),
-                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 18),
-                            purpose: "kick off a re-run of failed artifacts (alternate to [r])",
-                            importance: 3,
-                            usefulness: 3,
-                            health: Partial(MissingHint),
-                            issues: [
-                                HiddenBinding(
-                                    key: "F",
-                                    handler_at: SourceRef(file: "src/tui/transition.rs", line: 105),
-                                    screen: YourCards,
-                                ),
-                            ],
+                            issues: [],
                         ),
                     ]),
                 ],
@@ -842,16 +676,7 @@ Contract(
                             importance: 1,
                             usefulness: 1,
                             health: Decorative,
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("done.deck_row"),
-                                    reason: SubsetOfOther,
-                                ),
-                                DuplicateOf(
-                                    other: ElementId("done.report_row"),
-                                    reason: SubsetOfOther,
-                                ),
-                            ],
+                            issues: [],
                         ),
                     ]),
                     Region(kind: Footer, elements: [
@@ -876,23 +701,6 @@ Contract(
                             usefulness: 5,
                             health: Working,
                             issues: [],
-                        ),
-                        Element(
-                            id: ElementId("done.hidden_toggle_my"),
-                            kind: HiddenKeyBinding,
-                            text: Literal("[L] toggle my language  (handler wired, no footer hint)"),
-                            source: SourceRef(file: "src/tui/screens/done.rs", line: 15),
-                            purpose: "let the user flip the support language before starting next batch",
-                            importance: 2,
-                            usefulness: 2,
-                            health: Partial(MissingHint),
-                            issues: [
-                                HiddenBinding(
-                                    key: "L",
-                                    handler_at: SourceRef(file: "src/tui/transition.rs", line: 160),
-                                    screen: Done,
-                                ),
-                            ],
                         ),
                     ]),
                 ],
@@ -1020,12 +828,7 @@ Contract(
                             importance: 5,
                             usefulness: 5,
                             health: Working,
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("cs.textarea"),
-                                    reason: SameCopy,
-                                ),
-                            ],
+                            issues: [],
                         ),
                         Element(
                             id: ElementId("ctc.footer"),
@@ -1036,12 +839,7 @@ Contract(
                             importance: 5,
                             usefulness: 5,
                             health: Working,
-                            issues: [
-                                DuplicateOf(
-                                    other: ElementId("cs.footer"),
-                                    reason: SameKeyHint,
-                                ),
-                            ],
+                            issues: [],
                         ),
                     ]),
                 ],

@@ -15,7 +15,7 @@ use crate::tui::palette;
 const PLACEHOLDER: &str = "paste one per line, or comma-separated, or a messy blob:";
 const HEADLINE: &str = "Your words";
 const TAGLINE: &str = "paste anything — I figure out the rest";
-const HINT_KEYS: &str = "[⌘V] paste · [Enter] continue";
+const HINT_KEYS: &str = "[paste/type] words · [L] my language · [Enter] continue";
 
 /// Draw the `Your words` screen into the given area for the current `App`.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {

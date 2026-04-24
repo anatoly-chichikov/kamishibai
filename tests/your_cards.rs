@@ -150,3 +150,13 @@ fn expanded_card_shows_front_back_and_change_this_card_hint() {
         "the expanded row must reveal front/back sections, files list, and the per-card editor hint"
     );
 }
+
+#[test]
+fn lowercase_d_discards_the_first_unfinished_artifact_on_the_focused_card() {
+    let start = seeded(vec![draft("in the end", retrying_artifacts())]);
+    let next = transit(start, AppEvent::KeyChar('d')).0;
+    assert!(
+        next.cards()[0].artifacts().picture().discarded(),
+        "lowercase d on Your cards must discard the first unfinished focused artifact"
+    );
+}

@@ -39,12 +39,21 @@ fn loads_ui_contract() {
     check_duplicate_targets(&contract, &known_ids, &mut errs);
     check_broken_or_fake_have_issues(&contract, &mut errs);
     check_source_refs(&contract, &mut errs);
+    check_no_open_issues(&contract, &mut errs);
     assert!(
         errs.is_empty(),
         "ui-contract failed {} invariant(s):\n  - {}",
         errs.len(),
         errs.join("\n  - ")
     );
+}
+
+fn check_no_open_issues(contract: &Contract, errs: &mut Vec<String>) {
+    visit_elements(contract, |e| {
+        if !e.issues.is_empty() {
+            errs.push(format!("{:?} still has {:?}", e.id, e.issues));
+        }
+    });
 }
 
 fn check_screens_exhaustive(contract: &Contract, errs: &mut Vec<String>) {

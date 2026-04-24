@@ -13,7 +13,8 @@ use crate::tui::palette;
 
 const HEADLINE: &str = "What I understood";
 const TAGLINE: &str = "a quick look before making the cards";
-const HINT_KEYS: &str = "[↑↓] nav · [d] drop · [R] change something · [Enter] make cards";
+const HINT_KEYS: &str =
+    "[↑↓] nav · [d] drop · [R] change · [L] my lang · [T] target · [Enter] make";
 const PENDING: &str = "understanding your words…";
 const EMPTY_AFTER_DROP: &str = "nothing left to review — add more words or go back";
 

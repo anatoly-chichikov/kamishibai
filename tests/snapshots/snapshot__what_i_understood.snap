@@ -13,4 +13,4 @@ expression: render(&app)
     not quite?    [R] change something                                          
                                                                                 
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
-             [↑↓] nav · [d] drop · [R] change something · [Enter] make cards
+    [↑↓] nav · [d] drop · [R] change · [L] my lang · [T] target · [Enter] ma
