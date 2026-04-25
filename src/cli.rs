@@ -23,14 +23,19 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::config::{Preferences, default_store};
+use crate::gemini::{GeminiClient, HttpTransport};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    Artifact, ArtifactFile, ArtifactProducer, BulkCorrection, CandidateKind, CardCorrection,
-    CardDraft, CardPayload, EngineEvent, LanguagePair, RawInputBatch, ScriptDetection,
-    SessionEngine, TargetDetection, Understanding, Understood, WordCandidate,
-    catalog_for_detection,
+    Artifact, ArtifactFile, ArtifactProducer, BulkCorrection, CardCorrection, CardDraft,
+    CardPayload, EngineEvent, LanguagePair, RawInputBatch, SessionEngine, Understanding,
 };
 use crate::tui::{App, AppEvent, Side, draw, to_app, transit};
+
+#[cfg(test)]
+use crate::session::{
+    CandidateKind, ScriptDetection, TargetDetection, Understood, WordCandidate,
+    catalog_for_detection,
+};
 
 /// Execute the TUI and translate failures into a process exit code.
 pub fn run() -> u8 {
@@ -96,23 +101,34 @@ where
     }
 }
 
-struct Shell {
+trait TextPasses: Understanding + BulkCorrection + CardCorrection {}
+
+impl<T> TextPasses for T where T: Understanding + BulkCorrection + CardCorrection {}
+
+struct Shell<P> {
     app: App,
     engine: Option<SessionEngine>,
     producer: LocalArtifactProducer,
     started: Option<Instant>,
+    passes: P,
 }
 
-impl Shell {
+impl Shell<GeminiClient<HttpTransport>> {
     fn new(app: App) -> Result<Self> {
         Ok(Self {
             app,
             engine: None,
             producer: LocalArtifactProducer::new(default_output()?),
             started: None,
+            passes: GeminiClient::from_env()?,
         })
     }
+}
 
+impl<P> Shell<P>
+where
+    P: TextPasses,
+{
     fn app(&self) -> &App {
         &self.app
     }
@@ -167,7 +183,7 @@ impl Shell {
     fn apply(&mut self, side: Side) -> Result<()> {
         match side {
             Side::RunUnderstanding => {
-                let understood = LocalUnderstanding.understand(
+                let understood = self.passes.understand(
                     &RawInputBatch::new(self.app.blob()),
                     self.app.pair().support(),
                 )?;
@@ -189,16 +205,14 @@ impl Shell {
                 self.started = Some(Instant::now());
             }
             Side::RunBulkCorrection(comment) => {
-                let updated = LocalCorrection.correct_bulk(
-                    self.app.candidates(),
-                    &comment,
-                    self.app.pair(),
-                )?;
+                let updated =
+                    self.passes
+                        .correct_bulk(self.app.candidates(), &comment, self.app.pair())?;
                 self.app = self.app.clone().understood(updated);
             }
             Side::RunCardCorrection(comment) => {
                 if let Some(draft) = self.app.cards().get(self.app.card_selected()) {
-                    let updated = LocalCorrection.correct_card(draft, &comment, self.app.pair())?;
+                    let updated = self.passes.correct_card(draft, &comment, self.app.pair())?;
                     self.app = self.app.clone().card_replaced(updated);
                     self.engine = Some(SessionEngine::start(self.app.cards().to_vec()));
                     self.started = Some(Instant::now());
@@ -224,6 +238,7 @@ impl Shell {
 fn drafts_from(app: &App) -> Vec<CardDraft> {
     app.candidates()
         .iter()
+        .filter(|candidate| candidate.included())
         .map(|candidate| {
             CardDraft::new(
                 candidate.term(),
@@ -240,9 +255,11 @@ fn drafts_from(app: &App) -> Vec<CardDraft> {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct LocalUnderstanding;
+#[cfg(test)]
+struct LocalPasses;
 
-impl Understanding for LocalUnderstanding {
+#[cfg(test)]
+impl Understanding for LocalPasses {
     fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
         let guess = ScriptDetection.detect(raw.text(), &catalog_for_detection())?;
         let candidates = raw
@@ -263,10 +280,8 @@ impl Understanding for LocalUnderstanding {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct LocalCorrection;
-
-impl BulkCorrection for LocalCorrection {
+#[cfg(test)]
+impl BulkCorrection for LocalPasses {
     fn correct_bulk(
         &self,
         candidates: &[WordCandidate],
@@ -291,7 +306,8 @@ impl BulkCorrection for LocalCorrection {
     }
 }
 
-impl CardCorrection for LocalCorrection {
+#[cfg(test)]
+impl CardCorrection for LocalPasses {
     fn correct_card(
         &self,
         draft: &CardDraft,
@@ -364,6 +380,7 @@ fn default_output() -> Result<PathBuf> {
     Locations::new(LocationArgs::default(), SystemContext).output()
 }
 
+#[cfg(test)]
 fn kind_for(entry: &str) -> CandidateKind {
     if entry.split_whitespace().count() > 1 {
         return CandidateKind::Phrase;
@@ -449,12 +466,13 @@ mod tests {
     use super::*;
     use crate::tui::Screen;
 
-    fn shell(app: App, output: PathBuf) -> Shell {
+    fn shell(app: App, output: PathBuf) -> Shell<LocalPasses> {
         Shell {
             app,
             engine: None,
             producer: LocalArtifactProducer::new(output),
             started: None,
+            passes: LocalPasses,
         }
     }
 
@@ -497,7 +515,18 @@ mod tests {
     #[test]
     fn shell_generation_publishes_done_artifacts() {
         let output = tempdir().expect("temp output must exist");
-        let mut shell = shell(review(), output.path().to_path_buf());
+        let mut shell = shell(
+            review().understood(vec![
+                candidate("whilst"),
+                WordCandidate::new(
+                    "окно",
+                    CandidateKind::Skipped,
+                    "not generated",
+                    "ru · outside EN batch",
+                ),
+            ]),
+            output.path().to_path_buf(),
+        );
         shell
             .handle(AppEvent::KeyEnter)
             .expect("enter must start generation");
@@ -510,6 +539,36 @@ mod tests {
                 && shell.app.done_artifacts().report.ends_with(".pdf")
                 && !shell.app.done_artifacts().output.is_empty(),
             "generation must publish deck, report, and output path before Done"
+        );
+    }
+
+    #[test]
+    fn shell_generation_skips_rejected_candidates() {
+        let output = tempdir().expect("temp output must exist");
+        let mut shell = shell(
+            review().understood(vec![
+                candidate("whilst"),
+                WordCandidate::new(
+                    "окно",
+                    CandidateKind::Skipped,
+                    "not generated",
+                    "ru · outside EN batch",
+                ),
+            ]),
+            output.path().to_path_buf(),
+        );
+        shell
+            .handle(AppEvent::Submit)
+            .expect("submit must start generation");
+        assert_eq!(
+            shell
+                .app
+                .cards()
+                .iter()
+                .map(|draft| draft.term())
+                .collect::<Vec<_>>(),
+            vec!["whilst"],
+            "generation must not create drafts for skipped candidates"
         );
     }
 

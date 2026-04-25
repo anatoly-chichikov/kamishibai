@@ -169,7 +169,7 @@ fn build_states() -> Vec<(String, App)> {
     let candidates = vec![
         WordCandidate::new(
             "whilst",
-            CandidateKind::Other(String::from("formal conjunction")),
+            CandidateKind::Word,
             "«пока, в то время как» · BrE",
             "",
         ),
@@ -185,12 +185,7 @@ fn build_states() -> Vec<(String, App)> {
             "«в итоге» — о результате",
             "",
         ),
-        WordCandidate::new(
-            "wreck",
-            CandidateKind::Other(String::from("noun / verb")),
-            "обломки · разрушать",
-            "",
-        ),
+        WordCandidate::new("wreck", CandidateKind::Word, "обломки · разрушать", ""),
     ];
 
     let review = App::new(pair())

@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use kamishibai::gemini::{GeminiClient, Transport, TransportResponse};
+use kamishibai::session::{CandidateKind, CardDraft, CardPayload, LanguagePair, RawInputBatch};
 use serde_json::{Value, json};
 
 /// Fake transport that records requests and replays fixed responses.
@@ -40,6 +41,166 @@ fn body(value: Value) -> Result<TransportResponse> {
         status: 200,
         body: serde_json::to_string(&value)?,
     })
+}
+
+/// Return the first text prompt recorded by fake transport.
+fn recorded_prompt(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Result<String> {
+    let body = requests.borrow()[0].1.clone();
+    let value = serde_json::from_str::<Value>(body.as_str())?;
+    Ok(String::from(
+        value["contents"][0]["parts"][0]["text"]
+            .as_str()
+            .expect("request text must exist"),
+    ))
+}
+
+/// Return the current language labels exactly as the registry exposes them.
+fn registry_language_labels() -> Result<String> {
+    let catalog = kamishibai::languages::catalog();
+    let mut labels = Vec::new();
+    for code in catalog.codes() {
+        let item = catalog.item(code)?;
+        labels.push(format!("{} ({})", item.code, item.prompt));
+    }
+    Ok(labels.join(", "))
+}
+
+/// Understanding uses Flash and returns form comments plus skipped off-language rows.
+#[test]
+fn understanding_uses_flash_and_returns_form_comments() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"language\":\"en\",\"kind\":\"word\",\"preview\":\"разрушил / потерпел крушение\",\"note\":\"verb; past tense or past participle of wreck; generate this surface form\",\"include\":true},{\"term\":\"окно\",\"language\":\"ru\",\"kind\":\"skip\",\"preview\":\"not generated\",\"note\":\"outside the EN batch\",\"include\":false}]}"
+                }]
+            }
+        }]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let understood = client.understand(&RawInputBatch::new("wrecked\nокно"), "ru")?;
+    let prompt = recorded_prompt(&requests)?;
+    assert_eq!(
+        (
+            requests.borrow()[0].0.as_str(),
+            prompt.contains(registry_language_labels()?.as_str()),
+            prompt.contains("Use ISO 639-1 codes: en, ru, es, de, el, zh"),
+            understood.guess().code(),
+            understood.candidates()[0].term(),
+            understood.candidates()[0].kind().label(),
+            understood.candidates()[0].note(),
+            understood.candidates()[1].kind().label(),
+            understood.candidates()[1].included(),
+        ),
+        (
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
+            true,
+            false,
+            "en",
+            "wrecked",
+            "word",
+            "en · verb; past tense or past participle of wreck; generate this surface form",
+            "skip",
+            false,
+        ),
+        "understanding must use Flash, surface form comments, and skip off-language rows"
+    );
+    Ok(())
+}
+
+/// Understanding rejects grammar labels instead of accepting category drift.
+#[test]
+fn understanding_rejects_grammar_candidate_kind() {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"language\":\"en\",\"kind\":\"verb\",\"preview\":\"разрушил\",\"note\":\"past tense of wreck\",\"include\":true}]}"
+                }]
+            }
+        }]
+    }))
+    .expect("response body must serialize"))]);
+    let client = GeminiClient::new("key", transport);
+    assert!(
+        client
+            .understand(&RawInputBatch::new("wrecked"), "ru")
+            .is_err(),
+        "understanding must not accept grammar labels as candidate kinds"
+    );
+}
+
+/// Bulk correction uses Flash and can change the candidate form comment.
+#[test]
+fn bulk_correction_uses_flash_and_updates_form_comments() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wound\",\"language\":\"en\",\"kind\":\"word\",\"preview\":\"рана\",\"note\":\"noun, not past tense of wind\",\"include\":true}]}"
+                }]
+            }
+        }]
+    }))?)]);
+    let client = GeminiClient::new("key", transport);
+    let updated = client.correct_bulk(
+        &[kamishibai::session::WordCandidate::new(
+            "wound",
+            CandidateKind::Word,
+            "намотал",
+            "ambiguous form",
+        )],
+        "treat it as a noun",
+        &LanguagePair::new("en", "ru"),
+    )?;
+    assert_eq!(
+        (
+            updated[0].kind().label(),
+            updated[0].preview(),
+            updated[0].note()
+        ),
+        ("word", "рана", "en · noun, not past tense of wind"),
+        "bulk correction must use Flash output for the refined form comment"
+    );
+    Ok(())
+}
+
+/// Per-card correction uses Flash to recompose the draft fields.
+#[test]
+fn card_correction_uses_flash_to_recompose_card_fields() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"front\":\"I wound the clock.\",\"back\":\"Я завел часы.\",\"hint\":\"wound = past of wind\",\"highlight\":\"wound\"}"
+                }]
+            }
+        }]
+    }))?)]);
+    let client = GeminiClient::new("key", transport);
+    let draft = CardDraft::new(
+        "wound",
+        LanguagePair::new("en", "ru"),
+        CardPayload::new("front", "back", "hint", "wound"),
+    );
+    let updated = client.correct_card(&draft, "make it verb", &LanguagePair::new("en", "ru"))?;
+    assert_eq!(
+        (
+            updated.payload().front(),
+            updated.payload().back(),
+            updated.payload().hint(),
+            updated.payload().highlight(),
+        ),
+        (
+            "I wound the clock.",
+            "Я завел часы.",
+            "wound = past of wind",
+            "wound",
+        ),
+        "card correction must recompose draft fields from Flash JSON"
+    );
+    Ok(())
 }
 
 /// Missing API keys keep the frozen startup error wording.

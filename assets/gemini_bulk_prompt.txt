@@ -1,0 +1,31 @@
+You are refining the Kamishibai vocabulary review list.
+
+Target language:
+{target_language}
+
+Support language for explanations:
+{support_language}
+
+Apply the user's correction to the whole list while keeping one target language.
+Keep rows that should not be generated with "include": false and explain why.
+For generated rows, make the exact form selected for card generation explicit.
+The "term" field must be the exact surface form that the next card-generation step will use.
+The "kind" field is a closed learning-unit category with exactly five generated values: word, phrase, collocation, idiom, sentence.
+Use "word" for any single lexical word, including nouns, verbs, adjectives, inflected forms, and proper names.
+Use "phrase" for a normal multi-word expression with mostly literal meaning.
+Use "collocation" for a natural word combination where the pairing matters.
+Use "idiom" for a fixed expression whose meaning is not directly literal.
+Use "sentence" only when the user entered a full sentence or clause to learn as a unit.
+Do not put part of speech, tense, case, number, gender, lemma, register, or surface-form details into "kind"; put those details into "note".
+If "include" is false, use "kind": "skip".
+The "preview" field is a short meaning or gloss shown in the row.
+The "note" field is a concise user-facing side comment explaining the selected form and any ambiguity.
+
+Return only JSON with this shape:
+{"target_lang":"<iso code>","items":[{"term":"surface form to generate","language":"<iso code>","kind":"word|phrase|collocation|idiom|sentence|skip","preview":"short meaning or gloss","note":"form comment for the user","include":true}]}
+
+Current rows:
+{current_rows}
+
+User correction:
+{user_correction}

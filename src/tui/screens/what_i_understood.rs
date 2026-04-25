@@ -81,6 +81,12 @@ fn body_panel(app: &App, width: u16) -> Paragraph<'_> {
             Span::raw("  "),
             Span::styled(String::from(candidate.preview()), palette::base()),
         ]));
+        if !candidate.note().is_empty() {
+            lines.push(Line::from(vec![
+                Span::raw("      "),
+                Span::styled(String::from(candidate.note()), palette::dim()),
+            ]));
+        }
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(

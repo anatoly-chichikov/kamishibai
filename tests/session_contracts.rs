@@ -18,13 +18,13 @@ impl Understanding for FakeUnderstanding {
             vec![
                 WordCandidate::new(
                     "whilst",
-                    CandidateKind::Other(String::from("formal conjunction")),
+                    CandidateKind::Word,
                     "«пока, в то время как» · BrE",
                     "formal, bookish usage",
                 ),
                 WordCandidate::new(
                     "wreck",
-                    CandidateKind::Other(String::from("noun / verb")),
+                    CandidateKind::Word,
                     "обломки · разрушать",
                     "context suggests verb sense",
                 ),
@@ -46,7 +46,7 @@ impl BulkCorrection for FakeBulk {
         if let Some(last) = patched.last_mut() {
             *last = WordCandidate::new(
                 last.term(),
-                CandidateKind::Other(String::from("verb")),
+                CandidateKind::Word,
                 "разбить (машину)",
                 "user clarified verb sense",
             );
@@ -172,7 +172,7 @@ fn bridge_from_single_draft_fills_both_languages() {
     let pair = LanguagePair::new("en", "ru");
     let candidate = WordCandidate::new(
         "wreck",
-        CandidateKind::Other(String::from("verb")),
+        CandidateKind::Word,
         "разбить (машину)",
         "verb sense",
     );
