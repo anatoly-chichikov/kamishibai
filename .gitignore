@@ -1,5 +1,6 @@
 cache/
 .DS_Store
+.claude/
 .idea/
 output/
 test_output/

@@ -45,7 +45,11 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::WhatIUnderstood, None, AppEvent::Submit)
         | (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) => {
-            if app.candidates().is_empty() {
+            if !app
+                .candidates()
+                .iter()
+                .any(|candidate| candidate.included())
+            {
                 (app, Side::None)
             } else {
                 (app.with_screen(Screen::YourCards), Side::StartGeneration)

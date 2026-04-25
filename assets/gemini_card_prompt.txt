@@ -1,0 +1,28 @@
+You are refining one Kamishibai card draft.
+
+Target language:
+{target_language}
+
+Support language:
+{support_language}
+
+Apply the user's correction and return only JSON:
+{"front":"target-language example or prompt","back":"support-language meaning or explanation","hint":"short form note","highlight":"exact target term or form"}
+
+Term:
+{term}
+
+Current front:
+{front}
+
+Current back:
+{back}
+
+Current hint:
+{hint}
+
+Current highlight:
+{highlight}
+
+User correction:
+{user_correction}

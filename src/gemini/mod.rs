@@ -2,6 +2,7 @@
 
 mod client;
 mod codec;
+mod prompts;
 mod protocol;
 
 pub use client::{GeminiClient, HttpTransport, Transport, TransportResponse};
@@ -10,6 +11,10 @@ use anyhow::Result;
 
 use crate::generation::SceneSource;
 use crate::generation::Speaker;
+use crate::session::{
+    BulkCorrection, CardCorrection, CardDraft, LanguagePair, RawInputBatch, Understanding,
+    Understood, WordCandidate,
+};
 
 impl<T> SceneSource for GeminiClient<T>
 where
@@ -28,5 +33,45 @@ where
     /// Return one PCM audio payload for the prompt and source text.
     fn speech(&self, prompt: &str, text: &str) -> Result<Vec<u8>> {
         GeminiClient::<T>::speech(self, prompt, text)
+    }
+}
+
+impl<T> Understanding for GeminiClient<T>
+where
+    T: Transport,
+{
+    /// Return one reviewed candidate list from the raw user blob.
+    fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
+        GeminiClient::<T>::understand(self, raw, my)
+    }
+}
+
+impl<T> BulkCorrection for GeminiClient<T>
+where
+    T: Transport,
+{
+    /// Return the candidate list after one bulk user correction.
+    fn correct_bulk(
+        &self,
+        candidates: &[WordCandidate],
+        comment: &str,
+        pair: &LanguagePair,
+    ) -> Result<Vec<WordCandidate>> {
+        GeminiClient::<T>::correct_bulk(self, candidates, comment, pair)
+    }
+}
+
+impl<T> CardCorrection for GeminiClient<T>
+where
+    T: Transport,
+{
+    /// Return one card draft after a per-card user correction.
+    fn correct_card(
+        &self,
+        draft: &CardDraft,
+        comment: &str,
+        pair: &LanguagePair,
+    ) -> Result<CardDraft> {
+        GeminiClient::<T>::correct_card(self, draft, comment, pair)
     }
 }

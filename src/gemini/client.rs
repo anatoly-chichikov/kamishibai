@@ -4,11 +4,18 @@ use anyhow::{Result, bail};
 use rand::RngExt;
 use reqwest::blocking::Client;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::generation::{manga_template, render_scene_prompt};
+use crate::languages::catalog;
+use crate::session::{
+    CandidateKind, CardDraft, CardPayload, LanguagePair, RawInputBatch, TargetGuess, Understood,
+    WordCandidate,
+};
 
 use super::codec::decode;
+use super::prompts::{render_bulk_prompt, render_card_prompt, render_intake_prompt};
 use super::protocol::{
     GenerationConfig, Request, Response, api_error, diagnosis, enforce, unfence, validate,
 };
@@ -134,15 +141,7 @@ where
     /// Translate one sentence into the enforced manga scene JSON shape.
     pub fn scene(&self, language: &str, sentence: &str, target: &str) -> Result<Value> {
         let prompt = render_scene_prompt(language).replace("{sentence}", sentence);
-        let response = self.request(SCENE_MODEL, &Request::text(prompt, None, None))?;
-        let raw = response
-            .candidates
-            .iter()
-            .flat_map(|candidate| candidate.content.as_ref().into_iter())
-            .flat_map(|content| content.parts.iter())
-            .filter_map(|part| part.text.as_ref())
-            .cloned()
-            .collect::<String>();
+        let raw = self.text(prompt)?;
         let cleaned = unfence(raw.trim());
         let panels = serde_json::from_str::<Value>(cleaned)?;
         let Some(items) = panels.as_array() else {
@@ -156,6 +155,56 @@ where
         enforce(&mut scene);
         validate(&scene)?;
         Ok(scene)
+    }
+
+    /// Resolve raw user input into reviewed candidates using the Flash text model.
+    pub fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
+        let catalog = catalog();
+        let prompt = render_intake_prompt(raw.text(), my, &catalog)?;
+        let decoded: IntakeResponse = serde_json::from_str(unfence(self.text(prompt)?.trim()))?;
+        Ok(Understood::new(
+            TargetGuess::new(decoded.target_lang, true),
+            decoded
+                .items
+                .into_iter()
+                .map(IntakeItem::candidate)
+                .collect::<Result<Vec<_>>>()?,
+        ))
+    }
+
+    /// Re-run the reviewed candidate list after a user bulk refinement.
+    pub fn correct_bulk(
+        &self,
+        candidates: &[WordCandidate],
+        comment: &str,
+        pair: &LanguagePair,
+    ) -> Result<Vec<WordCandidate>> {
+        let catalog = catalog();
+        let prompt = render_bulk_prompt(candidates, comment, pair, &catalog)?;
+        let decoded: IntakeResponse = serde_json::from_str(unfence(self.text(prompt)?.trim()))?;
+        decoded
+            .items
+            .into_iter()
+            .map(IntakeItem::candidate)
+            .collect()
+    }
+
+    /// Recompose one card draft after a per-card refinement.
+    pub fn correct_card(
+        &self,
+        draft: &CardDraft,
+        comment: &str,
+        pair: &LanguagePair,
+    ) -> Result<CardDraft> {
+        let catalog = catalog();
+        let prompt = render_card_prompt(draft, comment, pair, &catalog)?;
+        let decoded: CardResponse = serde_json::from_str(unfence(self.text(prompt)?.trim()))?;
+        Ok(draft.clone().recomposed(CardPayload::new(
+            decoded.front,
+            decoded.back,
+            decoded.hint,
+            decoded.highlight,
+        )))
     }
 
     /// Render one scene JSON payload into raw image bytes.
@@ -219,10 +268,92 @@ where
         }
         Ok(serde_json::from_str(&response.body)?)
     }
+
+    fn text(&self, prompt: String) -> Result<String> {
+        let response = self.request(SCENE_MODEL, &Request::text(prompt, None, None))?;
+        let raw = response
+            .candidates
+            .iter()
+            .flat_map(|candidate| candidate.content.as_ref().into_iter())
+            .flat_map(|content| content.parts.iter())
+            .filter_map(|part| part.text.as_ref())
+            .cloned()
+            .collect::<String>();
+        if raw.trim().is_empty() {
+            bail!("No text content in Gemini response");
+        }
+        Ok(raw)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct IntakeResponse {
+    target_lang: String,
+    items: Vec<IntakeItem>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct IntakeItem {
+    term: String,
+    language: String,
+    kind: String,
+    preview: String,
+    note: String,
+    include: bool,
+}
+
+impl IntakeItem {
+    fn candidate(self) -> Result<WordCandidate> {
+        let kind = if self.include {
+            kind(self.kind.as_str())?
+        } else {
+            CandidateKind::Skipped
+        };
+        let note = if self.language.trim().is_empty() {
+            self.note
+        } else if self.note.trim().is_empty() {
+            self.language
+        } else {
+            format!("{} · {}", self.language, self.note)
+        };
+        Ok(WordCandidate::new(
+            nonempty(self.term.as_str(), "candidate"),
+            kind,
+            self.preview,
+            note,
+        ))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CardResponse {
+    front: String,
+    back: String,
+    hint: String,
+    highlight: String,
 }
 
 fn voice() -> &'static str {
     let mut rng = rand::rng();
     let index = rng.random_range(0..VOICES.len());
     VOICES[index]
+}
+
+fn kind(value: &str) -> Result<CandidateKind> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "word" => Ok(CandidateKind::Word),
+        "phrase" => Ok(CandidateKind::Phrase),
+        "idiom" => Ok(CandidateKind::Idiom),
+        "collocation" => Ok(CandidateKind::Collocation),
+        "sentence" => Ok(CandidateKind::Sentence),
+        "skip" => Ok(CandidateKind::Skipped),
+        other => bail!("Unsupported candidate kind '{other}'"),
+    }
+}
+
+fn nonempty(value: &str, fallback: &str) -> String {
+    if value.trim().is_empty() {
+        return String::from(fallback);
+    }
+    String::from(value)
 }

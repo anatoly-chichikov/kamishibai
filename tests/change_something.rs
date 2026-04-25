@@ -20,9 +20,9 @@ impl BulkCorrection for FakeBulk {
             .map(|candidate| {
                 Ok(WordCandidate::new(
                     candidate.term(),
-                    CandidateKind::Other(String::from("verb")),
+                    CandidateKind::Word,
                     "updated by bulk pass",
-                    candidate.note(),
+                    "verb sense selected",
                 ))
             })
             .collect()
@@ -129,7 +129,7 @@ fn bulk_pass_result_flows_back_into_what_i_understood() {
     let reviewed = app.understood(updated);
     let rendered = flat(&reviewed);
     assert!(
-        rendered.contains("updated by bulk pass") && rendered.contains("verb"),
+        rendered.contains("updated by bulk pass") && rendered.contains("verb sense selected"),
         "after returning from Change something the review screen must show the patched previews"
     );
 }

@@ -39,6 +39,25 @@ the same visual language.
 `target language` is resolved before `WhatIUnderstood`. `my language` is read
 from `config/preferences.json` at batch start and defaults to `en`.
 
+## Candidate kind contract
+
+`WordCandidate::kind()` is a closed learning-unit category, not a free-form
+grammar label.
+
+Generated values are exactly five: `word`, `phrase`, `collocation`, `idiom`,
+`sentence`. `skip` is a service status for rows excluded from generation, not a
+learning category.
+
+`word` covers any single lexical word, including nouns, verbs, adjectives,
+inflected forms, and proper names. `phrase` covers normal mostly literal
+multi-word expressions. `collocation` covers natural pairings where the word
+combination matters. `idiom` covers fixed non-literal expressions. `sentence`
+is only for a full sentence or clause learned as a unit.
+
+Form details such as part of speech, lemma, tense, case, number, gender,
+register, and ambiguity belong in `WordCandidate::note()`. Unknown `kind`
+values from Gemini fail fast instead of being accepted.
+
 ## Transitions
 
 ```
@@ -98,6 +117,11 @@ Events are divided between the app shell and individual screens:
 `YourWords` input is line-delimited. Plain `Enter` appends a new line to the raw
 blob. Commas are literal text, not separators. The continue command must be a
 distinct chord from text entry; the contract label is `Shift+Enter`.
+
+The first pass is a Gemini Flash understanding request. It chooses one global
+target language for the batch, returns candidate rows with part-of-speech/form
+comments, and keeps off-language rows visible as `skip` rows. `skip` rows are
+not forwarded to card generation.
 
 ## Recovery semantics (MVP)
 

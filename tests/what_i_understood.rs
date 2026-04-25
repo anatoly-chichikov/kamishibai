@@ -41,9 +41,9 @@ impl Understanding for FakeUnderstanding {
             vec![
                 WordCandidate::new(
                     "whilst",
-                    CandidateKind::Other(String::from("formal conjunction")),
+                    CandidateKind::Word,
                     "«пока, в то время как» · BrE",
-                    String::new(),
+                    "conjunction; generate the formal BrE surface form",
                 ),
                 WordCandidate::new(
                     "at the end",
@@ -59,7 +59,7 @@ impl Understanding for FakeUnderstanding {
                 ),
                 WordCandidate::new(
                     "wreck",
-                    CandidateKind::Other(String::from("noun / verb")),
+                    CandidateKind::Word,
                     "обломки · разрушать",
                     String::new(),
                 ),
@@ -93,6 +93,7 @@ fn what_i_understood_renders_four_candidates_with_prompts_and_language_pair() {
         rendered.contains("What I understood")
             && rendered.contains("a quick look before making the cards")
             && rendered.contains("whilst")
+            && rendered.contains("formal BrE surface form")
             && rendered.contains("at the end")
             && rendered.contains("in the end")
             && rendered.contains("wreck")
@@ -151,6 +152,25 @@ fn empty_candidate_list_keeps_user_on_what_i_understood() {
         (next.screen(), side),
         (Screen::WhatIUnderstood, Side::None),
         "submitting with no candidates must keep the user on What I understood"
+    );
+}
+
+#[test]
+fn skipped_candidate_list_keeps_user_on_what_i_understood() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_target("en")
+        .understood(vec![WordCandidate::new(
+            "окно",
+            CandidateKind::Skipped,
+            "not generated",
+            "ru · outside the EN batch",
+        )]);
+    let (next, side) = transit(app, kamishibai::tui::AppEvent::Submit);
+    assert_eq!(
+        (next.screen(), side),
+        (Screen::WhatIUnderstood, Side::None),
+        "only skipped candidates must not advance into card generation"
     );
 }
 

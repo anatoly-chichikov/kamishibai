@@ -30,7 +30,8 @@ pub enum CandidateKind {
     Phrase,
     Idiom,
     Collocation,
-    Other(String),
+    Sentence,
+    Skipped,
 }
 
 impl CandidateKind {
@@ -41,12 +42,13 @@ impl CandidateKind {
             CandidateKind::Phrase => "phrase",
             CandidateKind::Idiom => "idiom",
             CandidateKind::Collocation => "collocation",
-            CandidateKind::Other(value) => value.as_str(),
+            CandidateKind::Sentence => "sentence",
+            CandidateKind::Skipped => "skip",
         }
     }
 }
 
-/// One candidate row produced by the cheap understanding pass.
+/// One candidate row produced by the first understanding pass.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WordCandidate {
     term: String,
@@ -89,5 +91,10 @@ impl WordCandidate {
     /// Return any free-form note attached to the candidate.
     pub fn note(&self) -> &str {
         self.note.as_str()
+    }
+
+    /// Return whether this row should be forwarded to card generation.
+    pub fn included(&self) -> bool {
+        !matches!(self.kind, CandidateKind::Skipped)
     }
 }
