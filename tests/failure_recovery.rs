@@ -108,3 +108,14 @@ fn recovery_keeps_the_user_on_your_cards() {
         "regenerating failed cards must stay inline on Your cards"
     );
 }
+
+#[test]
+fn enter_on_failure_banner_keeps_going_to_done() {
+    let app = seeded();
+    let (after, side) = transit(app, AppEvent::KeyEnter);
+    assert_eq!(
+        (after.screen(), side),
+        (Screen::Done, Side::PublishDone),
+        "Enter on the failure banner must accept failed cards and continue to Done"
+    );
+}

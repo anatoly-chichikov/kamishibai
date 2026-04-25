@@ -18,6 +18,10 @@ fn press(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
+fn modified(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent::new(code, modifiers)
+}
+
 fn flatten(app: &App) -> String {
     let backend = TestBackend::new(80, 12);
     let mut terminal = Terminal::new(backend).expect("test backend must boot");
@@ -54,8 +58,10 @@ fn your_words_renders_placeholder_tagline_and_language_pair() {
     assert!(
         flat.contains("Your words")
             && flat.contains("paste anything — I figure out the rest")
-            && flat.contains("paste one per line, or comma-separated, or a messy blob:")
-            && flat.contains("[paste/type] words · [L] my language · [Enter] continue")
+            && flat.contains("type or paste one word/phrase per line:")
+            && flat.contains("one per line")
+            && flat.contains("Ctrl+L")
+            && flat.contains("Shift+Enter")
             && !flat.contains("минимум трения")
             && flat.contains("kamishibai ·")
             && flat.contains("→ RU"),
@@ -64,41 +70,44 @@ fn your_words_renders_placeholder_tagline_and_language_pair() {
 }
 
 #[test]
-fn uppercase_l_on_empty_your_words_toggles_my_language() {
+fn ctrl_l_on_your_words_toggles_my_language() {
     let app = App::new(LanguagePair::new("en", "ru"));
-    let (next, side) = transit(app, to_app(press(KeyCode::Char('L'))).expect("map"));
+    let (next, side) = transit(
+        app,
+        to_app(modified(KeyCode::Char('l'), KeyModifiers::CONTROL)).expect("map"),
+    );
     assert_eq!(
         (next.pair().support().to_string(), side),
         (
             String::from("es"),
             Side::PersistMyLanguage(String::from("es"))
         ),
-        "uppercase L on an empty Your words screen must rotate `my language`"
+        "Ctrl+L on Your words must rotate `my language`"
     );
 }
 
 #[test]
-fn enter_on_empty_blob_stays_on_your_words() {
+fn enter_on_empty_blob_inserts_newline_and_stays_on_your_words() {
     let app = App::new(LanguagePair::new("en", "ru"));
     let event = to_app(press(KeyCode::Enter)).expect("Enter must map");
     let (next, side) = transit(app, event);
     assert_eq!(
-        (next.screen(), side),
-        (Screen::YourWords, Side::None),
-        "submitting an empty blob must keep the user on Your words without side effects"
+        (next.screen(), next.blob().to_string(), side),
+        (Screen::YourWords, String::from("\n"), Side::None),
+        "plain Enter on an empty blob must insert a newline without side effects"
     );
 }
 
 #[test]
-fn typing_and_pressing_enter_advances_to_what_i_understood_and_locks_target_language() {
+fn typing_and_pressing_shift_enter_advances_to_what_i_understood_and_locks_target_language() {
     let app = App::new(LanguagePair::new("en", "ru"));
     let mut state = app;
-    for symbol in "окно\n".chars() {
+    for symbol in "окно".chars() {
         let event = to_app(press(KeyCode::Char(symbol))).expect("char must map");
         let (next, _) = transit(state, event);
         state = next;
     }
-    let submit = to_app(press(KeyCode::Enter)).expect("Enter must map");
+    let submit = to_app(modified(KeyCode::Enter, KeyModifiers::SHIFT)).expect("Enter must map");
     let (after_submit, side) = transit(state, submit);
     let resolved = apply_side(after_submit, side.clone());
     assert_eq!(
@@ -114,7 +123,7 @@ fn typing_and_pressing_enter_advances_to_what_i_understood_and_locks_target_lang
             false,
             String::from("ru"),
         ),
-        "Enter on non-empty blob must move to What I understood, request understanding, and confirm the detected target language"
+        "Shift+Enter on non-empty blob must move to What I understood, request understanding, and confirm the detected target language"
     );
 }
 

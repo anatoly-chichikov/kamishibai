@@ -31,8 +31,8 @@ the same visual language.
 
 | Screen            | What is shown                                                                                  |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
-| `YourWords`       | Detected target (pending), persisted `my` language. `[L]` opens an inline `my` language pick. |
-| `WhatIUnderstood` | Confirmed target, current `my`. `[L]` can flip `my`, `[T]` can override target if unsure.     |
+| `YourWords`       | Detected target (pending), persisted `my` language. `[Ctrl+L]` flips `my` language.          |
+| `WhatIUnderstood` | Confirmed target, current `my`. `[L]` can flip `my`, `[T]` cycles target if unsure.           |
 | `YourCards`       | Frozen pair for the batch — read-only.                                                         |
 | `Done`            | Pair remains visible next to the batch summary.                                                |
 
@@ -77,8 +77,8 @@ from `config/preferences.json` at batch start and defaults to `en`.
 
 | State             | Keys                                                                                     |
 | ----------------- | ---------------------------------------------------------------------------------------- |
-| `YourWords`       | type/paste one item per line · `Enter` newline · `Shift+Enter` continue · `L` toggle my language |
-| `WhatIUnderstood` | `↑↓` nav · `d` drop row · `R` change something · `Enter` make cards · `L` flip my · `T` override target |
+| `YourWords`       | type/paste one item per line · `Enter` newline · `Shift+Enter` continue · `Ctrl+L` toggle my language |
+| `WhatIUnderstood` | `↑↓` nav · `d` drop row · `R` change something · `Enter` make cards · `L` flip my · `T` cycle target |
 | `ChangeSomething` | text area input · `Enter` send · `Esc` cancel                                            |
 | `YourCards`       | `↑↓` nav · `Enter` expand/collapse · `R` change this card · `d` drop artifact · `r` regenerate failed |
 | `ChangeThisCard`  | text area input · `Enter` send · `Esc` cancel                                            |
@@ -97,7 +97,7 @@ Events are divided between the app shell and individual screens:
 
 `YourWords` input is line-delimited. Plain `Enter` appends a new line to the raw
 blob. Commas are literal text, not separators. The continue command must be a
-distinct chord from text entry; the primary contract label is `Shift+Enter`.
+distinct chord from text entry; the contract label is `Shift+Enter`.
 
 ## Recovery semantics (MVP)
 

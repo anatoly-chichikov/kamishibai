@@ -3,7 +3,8 @@
 
 use anyhow::{Result, anyhow};
 use kamishibai::session::{
-    Artifact, ArtifactProducer, CardDraft, CardPayload, EngineEvent, LanguagePair, SessionEngine,
+    Artifact, ArtifactFile, ArtifactProducer, CardDraft, CardPayload, EngineEvent, LanguagePair,
+    SessionEngine,
 };
 use kamishibai::tui::{App, Screen, draw};
 use ratatui::Terminal;
@@ -14,12 +15,16 @@ struct FailPictureOnce {
 }
 
 impl ArtifactProducer for FailPictureOnce {
-    fn produce(&mut self, _draft: &CardDraft, artifact: Artifact) -> Result<()> {
+    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
         if artifact == Artifact::Picture && !self.spent {
             self.spent = true;
             return Err(anyhow!("transient"));
         }
-        Ok(())
+        Ok(ArtifactFile::new(
+            format!("{}-{}.txt", draft.term(), artifact.label()),
+            "1 B",
+            false,
+        ))
     }
 }
 

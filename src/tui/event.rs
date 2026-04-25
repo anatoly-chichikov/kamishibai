@@ -13,6 +13,8 @@ pub enum EditingOwner {
 pub enum AppEvent {
     /// User asked to move forward from the current screen (Enter on body).
     Submit,
+    /// User pressed the physical Enter key.
+    KeyEnter,
     /// User asked to back out of a modal or go back a screen.
     Cancel,
     /// User pressed R — requests bulk or per-card correction depending on context.

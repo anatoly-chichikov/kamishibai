@@ -6,7 +6,8 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use kamishibai::session::{
-    Artifact, ArtifactProducer, CardDraft, CardPayload, EngineEvent, LanguagePair, SessionEngine,
+    Artifact, ArtifactFile, ArtifactProducer, CardDraft, CardPayload, EngineEvent, LanguagePair,
+    SessionEngine,
 };
 
 fn draft(term: &str) -> CardDraft {
@@ -20,8 +21,8 @@ fn draft(term: &str) -> CardDraft {
 struct AlwaysReady;
 
 impl ArtifactProducer for AlwaysReady {
-    fn produce(&mut self, _draft: &CardDraft, _artifact: Artifact) -> Result<()> {
-        Ok(())
+    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
+        Ok(file(draft, artifact))
     }
 }
 
@@ -38,28 +39,36 @@ impl FailFirstTwoScenes {
 }
 
 impl ArtifactProducer for FailFirstTwoScenes {
-    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<()> {
+    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
         if artifact != Artifact::Scene {
-            return Ok(());
+            return Ok(file(draft, artifact));
         }
         let count = self.calls.entry(String::from(draft.term())).or_insert(0);
         *count += 1;
         if *count <= 2 {
             return Err(anyhow!("scene producer transient error"));
         }
-        Ok(())
+        Ok(file(draft, artifact))
     }
 }
 
 struct FailSceneAlways;
 
 impl ArtifactProducer for FailSceneAlways {
-    fn produce(&mut self, _draft: &CardDraft, artifact: Artifact) -> Result<()> {
+    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
         if artifact == Artifact::Scene {
             return Err(anyhow!("scene blocked"));
         }
-        Ok(())
+        Ok(file(draft, artifact))
     }
+}
+
+fn file(draft: &CardDraft, artifact: Artifact) -> ArtifactFile {
+    ArtifactFile::new(
+        format!("{}-{}.txt", draft.term(), artifact.label()),
+        "1 B",
+        false,
+    )
 }
 
 #[test]

@@ -233,6 +233,17 @@ impl App {
         self
     }
 
+    /// Return the app with card drafts replaced while preserving UI cursor state.
+    pub fn cards_replaced(mut self, drafts: Vec<CardDraft>) -> Self {
+        let selected = self.cards.selected.min(drafts.len().saturating_sub(1));
+        self.cards.drafts = drafts;
+        self.cards.selected = selected;
+        if self.cards.drafts.is_empty() {
+            self.cards.expanded = false;
+        }
+        self
+    }
+
     /// Return the app with card cursor moved down (saturates).
     pub fn card_selected_next(mut self) -> Self {
         if !self.cards.drafts.is_empty() {
@@ -325,6 +336,14 @@ impl App {
     pub fn card_patched_artifacts(mut self, artifacts: CardArtifacts) -> Self {
         if let Some(draft) = self.cards.drafts.get(self.cards.selected).cloned() {
             self.cards.drafts[self.cards.selected] = draft.with_artifacts(artifacts);
+        }
+        self
+    }
+
+    /// Return the app with a replacement draft installed for the focused card.
+    pub fn card_replaced(mut self, draft: CardDraft) -> Self {
+        if self.cards.selected < self.cards.drafts.len() {
+            self.cards.drafts[self.cards.selected] = draft;
         }
         self
     }
