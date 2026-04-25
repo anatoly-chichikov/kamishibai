@@ -100,7 +100,7 @@ fn what_i_understood_renders_four_candidates_with_prompts_and_language_pair() {
             && rendered.contains("[Enter] make cards")
             && rendered.contains("[R] change something")
             && rendered.contains("[L] my lang")
-            && rendered.contains("[T] target")
+            && rendered.contains("[T] cycle target")
             && rendered.contains("kamishibai ·")
             && rendered.contains("EN → RU"),
         "What I understood must render headline, tagline, every candidate, both prompts, and language pair"

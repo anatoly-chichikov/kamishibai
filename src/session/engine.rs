@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 
-use super::draft::{Artifact, ArtifactSlot, CardArtifacts, CardDraft};
+use super::draft::{Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft};
 
 /// One step emitted by the engine for the outer shell to consume.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -33,7 +33,7 @@ pub enum EngineEvent {
 pub trait ArtifactProducer {
     /// Attempt to produce one artifact for one draft. Success must mark the
     /// slot as ready; failure lets the engine bump the retry tally.
-    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<()>;
+    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile>;
 }
 
 /// Session engine state: the ordered batch of drafts plus a cursor.
@@ -60,10 +60,12 @@ impl SessionEngine {
             let slot_before = slot(draft.artifacts(), artifact).clone();
             let attempt = slot_before.tally().done().saturating_add(1);
             match producer.produce(&draft, artifact) {
-                Ok(()) => {
-                    self.drafts[index] = self.drafts[index]
-                        .clone()
-                        .with_artifacts(mark_ready(draft.artifacts().clone(), artifact));
+                Ok(file) => {
+                    self.drafts[index] = self.drafts[index].clone().with_artifacts(mark_ready(
+                        draft.artifacts().clone(),
+                        artifact,
+                        file,
+                    ));
                     Some(EngineEvent::ArtifactReady {
                         card: index,
                         artifact,
@@ -143,8 +145,8 @@ fn slot(artifacts: &CardArtifacts, kind: Artifact) -> &ArtifactSlot {
     }
 }
 
-fn mark_ready(artifacts: CardArtifacts, kind: Artifact) -> CardArtifacts {
-    reshape(artifacts, kind, |slot| slot.succeeded())
+fn mark_ready(artifacts: CardArtifacts, kind: Artifact, file: ArtifactFile) -> CardArtifacts {
+    reshape(artifacts, kind, |slot| slot.succeeded_with(file.clone()))
 }
 
 fn mark_attempted(artifacts: CardArtifacts, kind: Artifact) -> CardArtifacts {

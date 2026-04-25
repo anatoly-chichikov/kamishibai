@@ -12,6 +12,7 @@ pub enum Side {
     StartGeneration,
     RegenerateFailed,
     PersistMyLanguage(String),
+    PublishDone,
     ExitApp,
 }
 
@@ -34,6 +35,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 (app, Side::None)
             }
         }
+        (Screen::YourWords, None, AppEvent::KeyEnter) => (app.typed('\n'), Side::None),
         (Screen::YourWords, None, AppEvent::KeyChar(symbol)) => (app.typed(symbol), Side::None),
         (Screen::YourWords, None, AppEvent::KeyBackspace) => (app.rubbed(), Side::None),
         (Screen::YourWords, None, AppEvent::ToggleMyLanguage) => {
@@ -41,7 +43,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             let code = next.pair().support().to_string();
             (next, Side::PersistMyLanguage(code))
         }
-        (Screen::WhatIUnderstood, None, AppEvent::Submit) => {
+        (Screen::WhatIUnderstood, None, AppEvent::Submit)
+        | (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) => {
             if app.candidates().is_empty() {
                 (app, Side::None)
             } else {
@@ -78,7 +81,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             Some(ModalKind::ChangeSomething),
             AppEvent::SendCorrection(text),
         ) => (app.close_modal(), Side::RunBulkCorrection(text)),
-        (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::Submit) => {
+        (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::Submit)
+        | (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::KeyEnter) => {
             let text = app.modal_buffer().to_string();
             if text.chars().any(|c| !c.is_whitespace()) {
                 (app.close_modal(), Side::RunBulkCorrection(text))
@@ -100,7 +104,14 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_selected_previous(), Side::None),
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
-        (Screen::YourCards, None, AppEvent::Submit) => (app.card_toggle_expanded(), Side::None),
+        (Screen::YourCards, None, AppEvent::Submit)
+        | (Screen::YourCards, None, AppEvent::KeyEnter)
+            if app.cards_failed() > 0 =>
+        {
+            (app.with_screen(Screen::Done), Side::PublishDone)
+        }
+        (Screen::YourCards, None, AppEvent::Submit)
+        | (Screen::YourCards, None, AppEvent::KeyEnter) => (app.card_toggle_expanded(), Side::None),
         (Screen::YourCards, None, AppEvent::KeyChar('d'))
         | (Screen::YourCards, None, AppEvent::KeyChar('D')) => {
             (app.card_dropped_artifact(), Side::None)
@@ -111,7 +122,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::SendCorrection(text)) => {
             (app.close_modal(), Side::RunCardCorrection(text))
         }
-        (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::Submit) => {
+        (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::Submit)
+        | (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::KeyEnter) => {
             let text = app.modal_buffer().to_string();
             if text.chars().any(|c| !c.is_whitespace()) {
                 (app.close_modal(), Side::RunCardCorrection(text))
@@ -129,10 +141,10 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (app.rubbed(), Side::None)
         }
         (Screen::YourCards, None, AppEvent::BatchReady) => {
-            (app.with_screen(Screen::Done), Side::None)
+            (app.with_screen(Screen::Done), Side::PublishDone)
         }
         (Screen::YourCards, None, AppEvent::BatchDone { failed: _ }) => {
-            (app.with_screen(Screen::Done), Side::None)
+            (app.with_screen(Screen::Done), Side::PublishDone)
         }
         (Screen::Done, None, AppEvent::NewBatch) => (app.fresh_batch(), Side::None),
         (Screen::Done, None, AppEvent::Quit) => (app, Side::ExitApp),
@@ -146,9 +158,6 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         return event;
     }
     match (app.screen(), &event) {
-        (Screen::YourWords, AppEvent::KeyChar('L')) if app.blob().is_empty() => {
-            AppEvent::ToggleMyLanguage
-        }
         (Screen::WhatIUnderstood, AppEvent::KeyChar('r'))
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
         (Screen::WhatIUnderstood, AppEvent::KeyChar('t'))

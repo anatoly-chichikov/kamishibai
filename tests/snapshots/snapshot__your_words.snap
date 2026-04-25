@@ -1,5 +1,6 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 31
 expression: render(&app)
 ---
                                                                                 
@@ -7,10 +8,10 @@ expression: render(&app)
                                                                                 
     Your words                        paste anything — I figure out the rest    
                                                                                 
-    paste one per line, or comma-separated, or a messy blob:                    
+    type or paste one word/phrase per line:                                     
                                                                                 
     ▍                                                                           
                                                                                 
                                                                                 
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
-                     [paste/type] words · [L] my language · [Enter] continue
+    [type/paste] one per line · [Ctrl+L] my language · [Shift+Enter] continu
