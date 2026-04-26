@@ -3,15 +3,15 @@ source: tests/snapshot.rs
 assertion_line: 37
 expression: render(&app)
 ---
+    kamishibai · ... → RU                       шаг 1 из 2 · проверка смысла    
+    Я правильно понял эти слова?  поправь до того, как я сгенерирую карточки    
+    ────────────────────────────────────────────────────────────────────────    
+    понимаю твои слова...                                                       
                                                                                 
-    kamishibai · detecting… → RU                                                
                                                                                 
-    What I understood                   a quick look before making the cards    
                                                                                 
-    understanding your words…                                                   
                                                                                 
-    looks right?  [Enter] make cards                                            
-    not quite?    [R] change something                                          
                                                                                 
-─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
-    [↑↓] nav · [d] drop · [R] change · [L] my lang · [T] cycle target · [Ent
+                                                                                
+    [↑↓] навигация · [d] удалить · [R] поправить · [L] мой язык                 
+                       [T] сменить target · [Enter] сгенерировать 0 карточек

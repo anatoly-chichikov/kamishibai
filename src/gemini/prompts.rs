@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::languages::LanguageCatalog;
-use crate::session::{CardDraft, LanguagePair, WordCandidate};
+use crate::session::{CardDraft, LanguagePair, MetaTone, WordCandidate};
 
 const INTAKE_PROMPT: &str = include_str!("../../assets/gemini_intake_prompt.txt");
 const BULK_PROMPT: &str = include_str!("../../assets/gemini_bulk_prompt.txt");
@@ -33,11 +33,23 @@ pub(super) fn render_bulk_prompt(
     let rows = candidates
         .iter()
         .map(|candidate| {
+            let meta = candidate
+                .meta()
+                .segments()
+                .iter()
+                .map(|segment| {
+                    serde_json::json!({
+                        "text": segment.text(),
+                        "tone": meta_tone(segment.tone()),
+                    })
+                })
+                .collect::<Vec<_>>();
             serde_json::json!({
                 "term": candidate.term(),
                 "kind": candidate.kind().label(),
                 "preview": candidate.preview(),
                 "note": candidate.note(),
+                "meta": meta,
                 "include": candidate.included(),
             })
         })
@@ -79,6 +91,13 @@ pub(super) fn render_card_prompt(
             ("{user_correction}", String::from(comment)),
         ],
     )
+}
+
+fn meta_tone(tone: MetaTone) -> &'static str {
+    match tone {
+        MetaTone::Dim => "dim",
+        MetaTone::Bright => "bright",
+    }
 }
 
 fn language_choices(catalog: &LanguageCatalog) -> Result<String> {

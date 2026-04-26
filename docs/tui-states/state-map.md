@@ -22,6 +22,10 @@ All future work references this map instead of re-deriving transitions.
 
 Retry, failure banner and recovery are inline within `YourCards` — not separate screens.
 
+Text-only Gemini passes use one universal blocking overlay on top of the current
+screen: first understanding, bulk correction, and per-card correction. The
+overlay owns keyboard input until the background request finishes.
+
 There is **no** standalone fullscreen language wizard. Language pair is rendered
 as a compact header widget on every fullscreen screen. The widget is a missing
 requirement relative to the PDF and must be added on top of every screenshot in
@@ -54,9 +58,16 @@ multi-word expressions. `collocation` covers natural pairings where the word
 combination matters. `idiom` covers fixed non-literal expressions. `sentence`
 is only for a full sentence or clause learned as a unit.
 
-Form details such as part of speech, lemma, tense, case, number, gender,
-register, and ambiguity belong in `WordCandidate::note()`. Unknown `kind`
-values from Gemini fail fast instead of being accepted.
+Screen-facing form details such as part of speech, inflection, selected sense,
+register, typo correction, and ambiguity highlighting belong in
+`WordCandidate::meta()`. `WordCandidate::note()` remains an internal generation
+hint for the next card pass. Unknown `kind` values from Gemini fail fast instead
+of being accepted.
+
+`WhatIUnderstood` never renders the technical `kind` labels. Each row shows the
+target surface form, the support-language translation, and localized metadata
+segments joined with ` · `. Each metadata segment carries its own dim or bright
+tone so only actual model decisions are highlighted.
 
 ## Transitions
 

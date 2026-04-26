@@ -19,6 +19,12 @@ pub enum Side {
 /// Pure transition function: given the current app and one event, produce the
 /// next app plus an optional side effect. No IO, no Gemini calls.
 pub fn transit(app: App, event: AppEvent) -> (App, Side) {
+    if app.error().is_some() && event != AppEvent::Redraw {
+        return (app.error_cleared(), Side::None);
+    }
+    if app.busy().is_some() && event != AppEvent::Redraw {
+        return (app, Side::None);
+    }
     let event = promote(&app, event);
     match (app.screen(), app.modal(), event) {
         (Screen::YourWords, None, AppEvent::Submit) => {

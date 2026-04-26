@@ -81,7 +81,7 @@ fn shift_enter_on_your_words_advances_to_what_i_understood_with_language_pair_vi
     assert_eq!(
         (
             next.screen(),
-            render_contains(&next, "What I understood"),
+            render_contains(&next, "Я правильно понял эти слова?"),
             render_contains(&next, "EN → RU"),
         ),
         (Screen::WhatIUnderstood, true, true),

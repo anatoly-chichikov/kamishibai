@@ -11,11 +11,65 @@ use super::screen::{ModalKind, Screen};
 pub struct App {
     screen: Screen,
     modal: Option<ModalKind>,
+    busy: Option<BusyView>,
+    error: Option<String>,
     pair: LanguagePair,
     input: AppInput,
     review: Review,
     cards: CardsView,
     done: DoneArtifacts,
+}
+
+/// The blocking text pass currently covering the interface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BusyKind {
+    Understanding,
+    BulkCorrection,
+    CardCorrection,
+}
+
+impl BusyKind {
+    /// Return the short text shown in the universal loader.
+    pub fn label(&self) -> &'static str {
+        match self {
+            BusyKind::Understanding => "understanding your words",
+            BusyKind::BulkCorrection => "applying your changes",
+            BusyKind::CardCorrection => "updating this card",
+        }
+    }
+}
+
+/// The universal loader overlay state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BusyView {
+    kind: BusyKind,
+    elapsed: Duration,
+}
+
+impl BusyView {
+    /// Create one loader state for a blocking text pass.
+    pub fn new(kind: BusyKind) -> Self {
+        Self {
+            kind,
+            elapsed: Duration::ZERO,
+        }
+    }
+
+    /// Return the currently running blocking pass.
+    pub fn kind(&self) -> BusyKind {
+        self.kind
+    }
+
+    /// Return how long the current blocking pass has been running.
+    pub fn elapsed(&self) -> Duration {
+        self.elapsed
+    }
+
+    /// Return the loader with a refreshed elapsed duration.
+    pub fn with_elapsed(mut self, elapsed: Duration) -> Self {
+        self.elapsed = elapsed;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -53,6 +107,8 @@ impl App {
         Self {
             screen: Screen::YourWords,
             modal: None,
+            busy: None,
+            error: None,
             pair,
             input: AppInput {
                 target_pending: true,
@@ -72,6 +128,16 @@ impl App {
     /// Return the currently open modal, if any.
     pub fn modal(&self) -> Option<ModalKind> {
         self.modal
+    }
+
+    /// Return the universal blocking loader, if a text pass is running.
+    pub fn busy(&self) -> Option<&BusyView> {
+        self.busy.as_ref()
+    }
+
+    /// Return the last recoverable request error, if one is being shown.
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
     }
 
     /// Return the session language pair.
@@ -121,6 +187,38 @@ impl App {
         self
     }
 
+    /// Return the app with the universal blocking loader shown.
+    pub fn busy_started(mut self, kind: BusyKind) -> Self {
+        self.busy = Some(BusyView::new(kind));
+        self
+    }
+
+    /// Return the app with the universal blocking loader elapsed time updated.
+    pub fn busy_elapsed(mut self, elapsed: Duration) -> Self {
+        if let Some(busy) = self.busy.take() {
+            self.busy = Some(busy.with_elapsed(elapsed));
+        }
+        self
+    }
+
+    /// Return the app with the universal blocking loader hidden.
+    pub fn busy_finished(mut self) -> Self {
+        self.busy = None;
+        self
+    }
+
+    /// Return the app with a recoverable request error shown.
+    pub fn error_shown(mut self, message: impl Into<String>) -> Self {
+        self.error = Some(message.into());
+        self
+    }
+
+    /// Return the app with the recoverable request error dismissed.
+    pub fn error_cleared(mut self) -> Self {
+        self.error = None;
+        self
+    }
+
     /// Return the app with `my` language flipped through the catalog.
     pub fn toggle_support(self) -> Self {
         let current = self.pair.support().to_string();
@@ -129,6 +227,8 @@ impl App {
         Self {
             screen: self.screen,
             modal: self.modal,
+            busy: self.busy,
+            error: self.error,
             pair,
             input: self.input,
             review: self.review,
@@ -158,6 +258,8 @@ impl App {
         Self {
             screen: Screen::YourWords,
             modal: None,
+            busy: None,
+            error: None,
             pair: self.pair,
             input: AppInput {
                 target_pending: true,

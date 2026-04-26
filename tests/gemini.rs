@@ -5,7 +5,9 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use kamishibai::gemini::{GeminiClient, Transport, TransportResponse};
-use kamishibai::session::{CandidateKind, CardDraft, CardPayload, LanguagePair, RawInputBatch};
+use kamishibai::session::{
+    CandidateKind, CardDraft, CardPayload, LanguagePair, MetaTone, RawInputBatch,
+};
 use serde_json::{Value, json};
 
 /// Fake transport that records requests and replays fixed responses.
@@ -72,7 +74,7 @@ fn understanding_uses_flash_and_returns_form_comments() -> Result<()> {
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"language\":\"en\",\"kind\":\"word\",\"preview\":\"разрушил / потерпел крушение\",\"note\":\"verb; past tense or past participle of wreck; generate this surface form\",\"include\":true},{\"term\":\"окно\",\"language\":\"ru\",\"kind\":\"skip\",\"preview\":\"not generated\",\"note\":\"outside the EN batch\",\"include\":false}]}"
+                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"language\":\"en\",\"kind\":\"word\",\"preview\":\"разрушил / потерпел крушение\",\"note\":\"прошедшая форма для генерации\",\"meta\":[{\"text\":\"прошедшее время от слова \\\"wreck\\\"\",\"tone\":\"bright\"},{\"text\":\"о разрушении или крушении\",\"tone\":\"bright\"}],\"include\":true},{\"term\":\"окно\",\"language\":\"ru\",\"kind\":\"skip\",\"preview\":\"not generated\",\"note\":\"outside the EN batch\",\"meta\":[{\"text\":\"пропущено\",\"tone\":\"dim\"},{\"text\":\"другой язык исходного списка\",\"tone\":\"dim\"}],\"include\":false}]}"
                 }]
             }
         }]
@@ -81,6 +83,12 @@ fn understanding_uses_flash_and_returns_form_comments() -> Result<()> {
     let client = GeminiClient::new("key", transport);
     let understood = client.understand(&RawInputBatch::new("wrecked\nокно"), "ru")?;
     let prompt = recorded_prompt(&requests)?;
+    let meta = understood.candidates()[0]
+        .meta()
+        .segments()
+        .iter()
+        .map(|segment| (segment.text(), segment.tone()))
+        .collect::<Vec<_>>();
     assert_eq!(
         (
             requests.borrow()[0].0.as_str(),
@@ -90,6 +98,7 @@ fn understanding_uses_flash_and_returns_form_comments() -> Result<()> {
             understood.candidates()[0].term(),
             understood.candidates()[0].kind().label(),
             understood.candidates()[0].note(),
+            meta,
             understood.candidates()[1].kind().label(),
             understood.candidates()[1].included(),
         ),
@@ -100,7 +109,11 @@ fn understanding_uses_flash_and_returns_form_comments() -> Result<()> {
             "en",
             "wrecked",
             "word",
-            "en · verb; past tense or past participle of wreck; generate this surface form",
+            "en · прошедшая форма для генерации",
+            vec![
+                ("прошедшее время от слова \"wreck\"", MetaTone::Bright),
+                ("о разрушении или крушении", MetaTone::Bright)
+            ],
             "skip",
             false,
         ),
@@ -116,7 +129,7 @@ fn understanding_rejects_grammar_candidate_kind() {
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"language\":\"en\",\"kind\":\"verb\",\"preview\":\"разрушил\",\"note\":\"past tense of wreck\",\"include\":true}]}"
+                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"language\":\"en\",\"kind\":\"verb\",\"preview\":\"разрушил\",\"note\":\"past tense of wreck\",\"meta\":[{\"text\":\"verb\",\"tone\":\"dim\"}],\"include\":true}]}"
                 }]
             }
         }]
@@ -138,7 +151,7 @@ fn bulk_correction_uses_flash_and_updates_form_comments() -> Result<()> {
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wound\",\"language\":\"en\",\"kind\":\"word\",\"preview\":\"рана\",\"note\":\"noun, not past tense of wind\",\"include\":true}]}"
+                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wound\",\"language\":\"en\",\"kind\":\"word\",\"preview\":\"рана\",\"note\":\"существительное для генерации\",\"meta\":[{\"text\":\"существительное\",\"tone\":\"bright\"},{\"text\":\"повреждение ткани тела\",\"tone\":\"bright\"}],\"include\":true}]}"
                 }]
             }
         }]
@@ -158,9 +171,17 @@ fn bulk_correction_uses_flash_and_updates_form_comments() -> Result<()> {
         (
             updated[0].kind().label(),
             updated[0].preview(),
-            updated[0].note()
+            updated[0].note(),
+            updated[0].meta().segments()[0].text(),
+            updated[0].meta().segments()[0].tone()
         ),
-        ("word", "рана", "en · noun, not past tense of wind"),
+        (
+            "word",
+            "рана",
+            "en · существительное для генерации",
+            "существительное",
+            MetaTone::Bright
+        ),
         "bulk correction must use Flash output for the refined form comment"
     );
     Ok(())
