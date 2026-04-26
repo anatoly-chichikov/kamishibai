@@ -7,7 +7,6 @@ Supported target languages:
 Choose exactly one dominant target language for the whole batch.
 For every non-empty input line, decide whether it belongs to that target language.
 If an item is not in the target language, keep it in the response with "include": false and explain why it will not be generated.
-For included items, make the exact generated form explicit: part of speech, lemma when useful, inflection, tense, case, number, gender, register, and ambiguity.
 The "term" field must be the exact surface form that the next card-generation step will use.
 The "kind" field is a closed learning-unit category with exactly five generated values: word, phrase, collocation, idiom, sentence.
 Use "word" for any single lexical word, including nouns, verbs, adjectives, inflected forms, and proper names.
@@ -15,14 +14,23 @@ Use "phrase" for a normal multi-word expression with mostly literal meaning.
 Use "collocation" for a natural word combination where the pairing matters.
 Use "idiom" for a fixed expression whose meaning is not directly literal.
 Use "sentence" only when the user entered a full sentence or clause to learn as a unit.
-Do not put part of speech, tense, case, number, gender, lemma, register, or surface-form details into "kind"; put those details into "note".
+Do not put part of speech, tense, case, number, gender, lemma, register, or surface-form details into "kind"; put those details into "meta" and a concise generation hint into "note".
 If "include" is false, use "kind": "skip".
-The "preview" field is a short meaning or gloss shown in the row.
-The "note" field is a concise user-facing side comment explaining the selected form and any ambiguity.
-Write preview and note in the user's support language: {support_language}.
+The "preview" field is the translation shown in the row: one word or a short phrase in the user's support language.
+The "note" field is a concise internal hint for card generation in the user's support language.
+The "meta" field is the exact sense-check signature shown in the row, already localized into the user's support language.
+For every included item, "meta" must contain labels in this order: part of speech or form, sense shade, optional style.
+Use full words, no abbreviations, no dictionary definitions, no example sentences, and no negative wording in "meta".
+The sense shade is mandatory unless the item is a typo correction.
+If the surface form is an inflected form, replace the part-of-speech label with a form label like comparative degree from word "cold" or past tense from word "debut", localized into the support language but keeping the quoted target-language word unchanged.
+If a typo was corrected, use only two labels: part of speech, then corrected typo: was "<original>", localized into the support language but keeping the original target-language spelling unchanged.
+Set meta label "tone" to "bright" when the label shows a model decision: ambiguous part of speech, polysemous sense branch, selected style among alternatives, any form construction, or typo correction.
+Set "tone" to "dim" when the label states a fact that did not require choosing among alternatives.
+Style labels are included only when style is not neutral, and must include the localized equivalent of "style: <style>".
+Write preview, note, and meta text in the user's support language: {support_language}.
 
 Return only JSON with this shape:
-{"target_lang":"<iso code>","items":[{"term":"surface form to generate","language":"<iso code>","kind":"word|phrase|collocation|idiom|sentence|skip","preview":"short meaning or gloss","note":"form comment for the user","include":true}]}
+{"target_lang":"<iso code>","items":[{"term":"surface form to generate","language":"<iso code>","kind":"word|phrase|collocation|idiom|sentence|skip","preview":"one-word or short translation","note":"generation hint","meta":[{"text":"localized label","tone":"dim|bright"}],"include":true}]}
 
 Raw input:
 {raw_input}

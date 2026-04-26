@@ -10,8 +10,8 @@ use serde_json::Value;
 use crate::generation::{manga_template, render_scene_prompt};
 use crate::languages::catalog;
 use crate::session::{
-    CandidateKind, CardDraft, CardPayload, LanguagePair, RawInputBatch, TargetGuess, Understood,
-    WordCandidate,
+    CandidateKind, CandidateMeta, CardDraft, CardPayload, LanguagePair, MetaSegment, RawInputBatch,
+    TargetGuess, Understood, WordCandidate,
 };
 
 use super::codec::decode;
@@ -299,6 +299,8 @@ struct IntakeItem {
     kind: String,
     preview: String,
     note: String,
+    #[serde(default)]
+    meta: Vec<IntakeMetaSegment>,
     include: bool,
 }
 
@@ -316,13 +318,21 @@ impl IntakeItem {
         } else {
             format!("{} · {}", self.language, self.note)
         };
-        Ok(WordCandidate::new(
+        let meta = meta(self.meta, &kind, note.as_str())?;
+        Ok(WordCandidate::with_meta(
             nonempty(self.term.as_str(), "candidate"),
             kind,
             self.preview,
             note,
+            meta,
         ))
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct IntakeMetaSegment {
+    text: String,
+    tone: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -349,6 +359,27 @@ fn kind(value: &str) -> Result<CandidateKind> {
         "skip" => Ok(CandidateKind::Skipped),
         other => bail!("Unsupported candidate kind '{other}'"),
     }
+}
+
+fn meta(
+    segments: Vec<IntakeMetaSegment>,
+    kind: &CandidateKind,
+    fallback_note: &str,
+) -> Result<CandidateMeta> {
+    if segments.is_empty() {
+        return Ok(CandidateMeta::legacy(kind, fallback_note));
+    }
+    let parsed = segments
+        .into_iter()
+        .map(
+            |segment| match segment.tone.trim().to_ascii_lowercase().as_str() {
+                "dim" => Ok(MetaSegment::dim(segment.text)),
+                "bright" => Ok(MetaSegment::bright(segment.text)),
+                other => bail!("Unsupported metadata tone '{other}'"),
+            },
+        )
+        .collect::<Result<Vec<_>>>()?;
+    Ok(CandidateMeta::from_segments(parsed))
 }
 
 fn nonempty(value: &str, fallback: &str) -> String {

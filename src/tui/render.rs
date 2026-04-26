@@ -17,4 +17,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if let Some(kind) = app.modal() {
         screens::modals::draw(frame, area, kind, app);
     }
+    if let Some(busy) = app.busy() {
+        screens::busy::draw(frame, area, busy);
+    }
+    if let Some(error) = app.error() {
+        screens::error::draw(frame, area, app, error);
+    }
 }

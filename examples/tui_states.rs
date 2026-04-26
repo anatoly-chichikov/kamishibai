@@ -14,8 +14,8 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use kamishibai::session::{
-    Artifact, ArtifactFile, ArtifactSlot, CandidateKind, CardArtifacts, CardDraft, CardPayload,
-    LanguagePair, WordCandidate,
+    Artifact, ArtifactFile, ArtifactSlot, CandidateKind, CandidateMeta, CardArtifacts, CardDraft,
+    CardPayload, LanguagePair, MetaSegment, WordCandidate,
 };
 use kamishibai::tui::{App, ModalKind, Screen, draw};
 use ratatui::Terminal;
@@ -163,29 +163,54 @@ fn card_with_highlight(
 }
 
 fn build_states() -> Vec<(String, App)> {
-    let words_seed = "whilst\nat the end\nin the end\nwreck";
+    let words_seed = "sincerely\nat the end\nexpel\ndebuted";
     let base_words = App::new(pair()).seeded_blob(words_seed);
 
     let candidates = vec![
-        WordCandidate::new(
-            "whilst",
+        WordCandidate::with_meta(
+            "sincerely",
             CandidateKind::Word,
-            "«пока, в то время как» · BrE",
+            "искренне",
             "",
+            CandidateMeta::new(
+                MetaSegment::dim("наречие"),
+                MetaSegment::dim("с искренними чувствами"),
+                Some(MetaSegment::bright("стиль: формальный")),
+            ),
         ),
-        WordCandidate::new(
+        WordCandidate::with_meta(
             "at the end",
             CandidateKind::Phrase,
-            "«в конце» — о времени/месте",
+            "в конце",
             "",
+            CandidateMeta::new(
+                MetaSegment::dim("фраза"),
+                MetaSegment::dim("о времени или месте"),
+                None,
+            ),
         ),
-        WordCandidate::new(
-            "in the end",
-            CandidateKind::Idiom,
-            "«в итоге» — о результате",
+        WordCandidate::with_meta(
+            "expel",
+            CandidateKind::Word,
+            "исключать",
             "",
+            CandidateMeta::new(
+                MetaSegment::dim("глагол"),
+                MetaSegment::bright("из учебного заведения или организации"),
+                None,
+            ),
         ),
-        WordCandidate::new("wreck", CandidateKind::Word, "обломки · разрушать", ""),
+        WordCandidate::with_meta(
+            "debuted",
+            CandidateKind::Word,
+            "дебютировал",
+            "",
+            CandidateMeta::new(
+                MetaSegment::bright("прошедшее время от слова \"debut\""),
+                MetaSegment::bright("о первом публичном появлении"),
+                None,
+            ),
+        ),
     ];
 
     let review = App::new(pair())
@@ -213,11 +238,11 @@ fn build_states() -> Vec<(String, App)> {
         .confirmed_target("en")
         .cards_started(vec![
             card_with_highlight(
-                "whilst",
-                "Пока она говорила, я в то время как думал о своём.",
-                "While she was speaking, I was thinking of my own stuff.\nwhilst /waɪlst/   пока, в то время как · formal",
-                "Как «while», но старомодное — в книгах и BBC.",
-                "в то время как",
+                "sincerely",
+                "She sincerely thanked everyone for their help.",
+                "Она искренне поблагодарила всех за помощь.\nsincerely /sɪnˈsɪrli/   искренне · formal",
+                "О чувствах, выраженных честно и серьёзно.",
+                "sincerely",
                 cached_artifacts(),
             ),
             card(
@@ -226,8 +251,8 @@ fn build_states() -> Vec<(String, App)> {
                 "",
                 ready_artifacts(),
             ),
-            card("in the end", "", "", making_picture_artifacts()),
-            card("wreck", "", "", CardArtifacts::default()),
+            card("expel", "", "", making_picture_artifacts()),
+            card("debuted", "", "", CardArtifacts::default()),
         ])
         .card_toggle_expanded()
         .with_elapsed(Duration::from_secs(41));
@@ -236,15 +261,15 @@ fn build_states() -> Vec<(String, App)> {
         .with_screen(Screen::YourCards)
         .confirmed_target("en")
         .cards_started(vec![
-            card("whilst", "", "", ready_artifacts()),
+            card("sincerely", "", "", ready_artifacts()),
             card(
                 "at the end",
                 "The meeting starts at the end of March.",
                 "",
                 ready_artifacts(),
             ),
-            card("in the end", "", "", making_picture_artifacts()),
-            card("wreck", "", "", CardArtifacts::default()),
+            card("expel", "", "", making_picture_artifacts()),
+            card("debuted", "", "", CardArtifacts::default()),
         ])
         .card_selected_next()
         .with_modal(ModalKind::ChangeThisCard)
@@ -267,10 +292,10 @@ fn build_states() -> Vec<(String, App)> {
         .with_screen(Screen::YourCards)
         .confirmed_target("en")
         .cards_started(vec![
-            card("whilst", "", "", ready_artifacts()),
+            card("sincerely", "", "", ready_artifacts()),
             card("at the end", "", "", second_retrying_artifacts()),
-            card("in the end", "", "", retrying_artifacts()),
-            card("wreck", "", "", making_picture_artifacts()),
+            card("expel", "", "", retrying_artifacts()),
+            card("debuted", "", "", making_picture_artifacts()),
         ])
         .with_elapsed(Duration::from_secs(65));
 
@@ -278,10 +303,10 @@ fn build_states() -> Vec<(String, App)> {
         .with_screen(Screen::YourCards)
         .confirmed_target("en")
         .cards_started(vec![
-            card("whilst", "", "", ready_artifacts()),
+            card("sincerely", "", "", ready_artifacts()),
             card("at the end", "", "", ready_artifacts()),
-            card("in the end", "", "", failed_picture_artifacts()),
-            card("wreck", "", "", ready_artifacts()),
+            card("expel", "", "", failed_picture_artifacts()),
+            card("debuted", "", "", ready_artifacts()),
         ])
         .with_elapsed(Duration::from_secs(108));
 

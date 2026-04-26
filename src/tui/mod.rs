@@ -15,7 +15,7 @@ mod screen;
 mod screens;
 mod transition;
 
-pub use app::App;
+pub use app::{App, BusyKind, BusyView};
 pub use event::{AppEvent, EditingOwner};
 pub use input::to_app;
 pub use render::draw;

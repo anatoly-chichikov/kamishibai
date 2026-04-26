@@ -7,9 +7,11 @@
 use std::fs;
 use std::io::stdout;
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use crossterm::event::{
     Event, KeyCode, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags, poll, read,
@@ -29,12 +31,12 @@ use crate::session::{
     Artifact, ArtifactFile, ArtifactProducer, BulkCorrection, CardCorrection, CardDraft,
     CardPayload, EngineEvent, LanguagePair, RawInputBatch, SessionEngine, Understanding,
 };
-use crate::tui::{App, AppEvent, Side, draw, to_app, transit};
+use crate::tui::{App, AppEvent, BusyKind, Screen, Side, draw, to_app, transit};
 
 #[cfg(test)]
 use crate::session::{
-    CandidateKind, ScriptDetection, TargetDetection, Understood, WordCandidate,
-    catalog_for_detection,
+    CandidateKind, CandidateMeta, MetaSegment, ScriptDetection, TargetDetection, Understood,
+    WordCandidate, catalog_for_detection,
 };
 
 /// Execute the TUI and translate failures into a process exit code.
@@ -98,16 +100,33 @@ where
         if side == Side::ExitApp {
             return Ok(());
         }
+        shell.tick()?;
     }
 }
 
-trait TextPasses: Understanding + BulkCorrection + CardCorrection {}
+trait TextPasses: Understanding + BulkCorrection + CardCorrection + Clone + Send + 'static {}
 
-impl<T> TextPasses for T where T: Understanding + BulkCorrection + CardCorrection {}
+impl<T> TextPasses for T where
+    T: Understanding + BulkCorrection + CardCorrection + Clone + Send + 'static
+{
+}
+
+enum TextOutcome {
+    Understanding(Result<crate::session::Understood>),
+    BulkCorrection(Result<Vec<crate::session::WordCandidate>>),
+    CardCorrection(Result<Box<CardDraft>>),
+}
+
+struct PendingTextJob {
+    receiver: Receiver<TextOutcome>,
+    handle: JoinHandle<()>,
+    started: Instant,
+}
 
 struct Shell<P> {
     app: App,
     engine: Option<SessionEngine>,
+    text: Option<PendingTextJob>,
     producer: LocalArtifactProducer,
     started: Option<Instant>,
     passes: P,
@@ -118,6 +137,7 @@ impl Shell<GeminiClient<HttpTransport>> {
         Ok(Self {
             app,
             engine: None,
+            text: None,
             producer: LocalArtifactProducer::new(default_output()?),
             started: None,
             passes: GeminiClient::from_env()?,
@@ -134,6 +154,9 @@ where
     }
 
     fn handle(&mut self, event: AppEvent) -> Result<Side> {
+        if self.text.is_some() {
+            return Ok(Side::None);
+        }
         let sync_engine = matches!(event, AppEvent::KeyChar('d') | AppEvent::KeyChar('D'));
         let (next, side) = transit(self.app.clone(), event);
         self.app = next;
@@ -147,6 +170,10 @@ where
     fn tick(&mut self) -> Result<()> {
         if let Some(started) = self.started {
             self.app = self.app.clone().with_elapsed(started.elapsed());
+        }
+        self.poll_text()?;
+        if self.text.is_some() {
+            return Ok(());
         }
         let Some(event) = self.advance() else {
             return Ok(());
@@ -180,18 +207,81 @@ where
         Some(event)
     }
 
+    fn poll_text(&mut self) -> Result<()> {
+        let Some(job) = self.text.as_ref() else {
+            return Ok(());
+        };
+        self.app = self.app.clone().busy_elapsed(job.started.elapsed());
+        match job.receiver.try_recv() {
+            Ok(outcome) => {
+                let job = self.text.take().expect("invariant: text job must exist");
+                self.app = self.app.clone().busy_finished();
+                if let Err(error) = join_text(job.handle) {
+                    self.app = self.app.clone().error_shown(error.to_string());
+                    return Ok(());
+                }
+                self.finish_text(outcome);
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                let job = self.text.take().expect("invariant: text job must exist");
+                let message = join_text(job.handle)
+                    .map(|()| String::from("background text pass disconnected"))
+                    .unwrap_or_else(|error| error.to_string());
+                self.app = self.app.clone().busy_finished().error_shown(message);
+            }
+        }
+        Ok(())
+    }
+
+    fn finish_text(&mut self, outcome: TextOutcome) {
+        match outcome {
+            TextOutcome::Understanding(result) => match result {
+                Ok(understood) => {
+                    self.app = self
+                        .app
+                        .clone()
+                        .confirmed_target(understood.guess().code())
+                        .understood(understood.candidates().to_vec());
+                }
+                Err(error) => {
+                    self.app = self
+                        .app
+                        .clone()
+                        .with_screen(Screen::YourWords)
+                        .error_shown(error.to_string());
+                }
+            },
+            TextOutcome::BulkCorrection(result) => match result {
+                Ok(updated) => {
+                    self.app = self.app.clone().understood(updated);
+                }
+                Err(error) => {
+                    self.app = self.app.clone().error_shown(error.to_string());
+                }
+            },
+            TextOutcome::CardCorrection(result) => match result {
+                Ok(updated) => {
+                    self.app = self.app.clone().card_replaced(*updated);
+                    self.engine = Some(SessionEngine::start(self.app.cards().to_vec()));
+                    self.started = Some(Instant::now());
+                }
+                Err(error) => {
+                    self.app = self.app.clone().error_shown(error.to_string());
+                }
+            },
+        }
+    }
+
     fn apply(&mut self, side: Side) -> Result<()> {
         match side {
             Side::RunUnderstanding => {
-                let understood = self.passes.understand(
-                    &RawInputBatch::new(self.app.blob()),
-                    self.app.pair().support(),
-                )?;
-                self.app = self
-                    .app
-                    .clone()
-                    .confirmed_target(understood.guess().code())
-                    .understood(understood.candidates().to_vec());
+                let raw = RawInputBatch::new(self.app.blob());
+                let support = self.app.pair().support().to_string();
+                let passes = self.passes.clone();
+                self.start_text(BusyKind::Understanding, move || {
+                    TextOutcome::Understanding(passes.understand(&raw, support.as_str()))
+                })?;
             }
             Side::StartGeneration => {
                 let drafts = drafts_from(&self.app);
@@ -205,17 +295,29 @@ where
                 self.started = Some(Instant::now());
             }
             Side::RunBulkCorrection(comment) => {
-                let updated =
-                    self.passes
-                        .correct_bulk(self.app.candidates(), &comment, self.app.pair())?;
-                self.app = self.app.clone().understood(updated);
+                let candidates = self.app.candidates().to_vec();
+                let pair = self.app.pair().clone();
+                let passes = self.passes.clone();
+                self.start_text(BusyKind::BulkCorrection, move || {
+                    TextOutcome::BulkCorrection(passes.correct_bulk(
+                        candidates.as_slice(),
+                        comment.as_str(),
+                        &pair,
+                    ))
+                })?;
             }
             Side::RunCardCorrection(comment) => {
                 if let Some(draft) = self.app.cards().get(self.app.card_selected()) {
-                    let updated = self.passes.correct_card(draft, &comment, self.app.pair())?;
-                    self.app = self.app.clone().card_replaced(updated);
-                    self.engine = Some(SessionEngine::start(self.app.cards().to_vec()));
-                    self.started = Some(Instant::now());
+                    let draft = draft.clone();
+                    let pair = self.app.pair().clone();
+                    let passes = self.passes.clone();
+                    self.start_text(BusyKind::CardCorrection, move || {
+                        TextOutcome::CardCorrection(
+                            passes
+                                .correct_card(&draft, comment.as_str(), &pair)
+                                .map(Box::new),
+                        )
+                    })?;
                 }
             }
             Side::PublishDone => {
@@ -233,6 +335,33 @@ where
         }
         Ok(())
     }
+
+    fn start_text<F>(&mut self, kind: BusyKind, run: F) -> Result<()>
+    where
+        F: FnOnce() -> TextOutcome + Send + 'static,
+    {
+        if self.text.is_some() {
+            bail!("background text pass already running");
+        }
+        let (sender, receiver) = channel();
+        let handle = thread::spawn(move || {
+            let _ = sender.send(run());
+        });
+        self.text = Some(PendingTextJob {
+            receiver,
+            handle,
+            started: Instant::now(),
+        });
+        self.app = self.app.clone().busy_started(kind);
+        Ok(())
+    }
+}
+
+fn join_text(handle: JoinHandle<()>) -> Result<()> {
+    if handle.join().is_err() {
+        bail!("background text pass panicked");
+    }
+    Ok(())
 }
 
 fn drafts_from(app: &App) -> Vec<CardDraft> {
@@ -268,11 +397,12 @@ impl Understanding for LocalPasses {
             .map(str::trim)
             .filter(|entry| !entry.is_empty())
             .map(|entry| {
-                WordCandidate::new(
+                WordCandidate::with_meta(
                     entry,
                     kind_for(entry),
                     format!("{entry} · review for {my}"),
                     String::from("one item per line"),
+                    meta_for(entry),
                 )
             })
             .collect();
@@ -291,7 +421,7 @@ impl BulkCorrection for LocalPasses {
         Ok(candidates
             .iter()
             .map(|candidate| {
-                WordCandidate::new(
+                WordCandidate::with_meta(
                     candidate.term(),
                     candidate.kind().clone(),
                     format!(
@@ -300,6 +430,11 @@ impl BulkCorrection for LocalPasses {
                         comment
                     ),
                     nonempty(candidate.note(), comment),
+                    CandidateMeta::new(
+                        MetaSegment::dim("single lexical item"),
+                        MetaSegment::bright(comment),
+                        None,
+                    ),
                 )
             })
             .collect())
@@ -388,6 +523,22 @@ fn kind_for(entry: &str) -> CandidateKind {
     CandidateKind::Word
 }
 
+#[cfg(test)]
+fn meta_for(entry: &str) -> CandidateMeta {
+    if entry.split_whitespace().count() > 1 {
+        return CandidateMeta::new(
+            MetaSegment::dim("multi-word expression"),
+            MetaSegment::dim("line-delimited input"),
+            None,
+        );
+    }
+    CandidateMeta::new(
+        MetaSegment::dim("single lexical item"),
+        MetaSegment::dim("line-delimited input"),
+        None,
+    )
+}
+
 fn nonempty(value: &str, fallback: &str) -> String {
     if value.trim().is_empty() {
         return String::from(fallback);
@@ -470,9 +621,21 @@ mod tests {
         Shell {
             app,
             engine: None,
+            text: None,
             producer: LocalArtifactProducer::new(output),
             started: None,
             passes: LocalPasses,
+        }
+    }
+
+    fn failing_shell(app: App, output: PathBuf) -> Shell<FailingPasses> {
+        Shell {
+            app,
+            engine: None,
+            text: None,
+            producer: LocalArtifactProducer::new(output),
+            started: None,
+            passes: FailingPasses,
         }
     }
 
@@ -491,6 +654,51 @@ mod tests {
             .understood(vec![candidate("whilst")])
     }
 
+    fn settle_text<P>(shell: &mut Shell<P>)
+    where
+        P: TextPasses,
+    {
+        for _ in 0..50 {
+            shell.tick().expect("text pass tick must succeed");
+            if shell.app.busy().is_none() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("text pass did not settle before the deadline");
+    }
+
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    struct FailingPasses;
+
+    impl Understanding for FailingPasses {
+        fn understand(&self, _raw: &RawInputBatch, _my: &str) -> Result<Understood> {
+            Err(anyhow::anyhow!("INTERNAL: boom"))
+        }
+    }
+
+    impl BulkCorrection for FailingPasses {
+        fn correct_bulk(
+            &self,
+            _candidates: &[WordCandidate],
+            _comment: &str,
+            _pair: &LanguagePair,
+        ) -> Result<Vec<WordCandidate>> {
+            Err(anyhow::anyhow!("INTERNAL: boom"))
+        }
+    }
+
+    impl CardCorrection for FailingPasses {
+        fn correct_card(
+            &self,
+            _draft: &CardDraft,
+            _comment: &str,
+            _pair: &LanguagePair,
+        ) -> Result<CardDraft> {
+            Err(anyhow::anyhow!("INTERNAL: boom"))
+        }
+    }
+
     #[test]
     fn first_pass_keeps_commas_inside_lines() {
         let output = tempdir().expect("temp output must exist");
@@ -501,6 +709,7 @@ mod tests {
         shell
             .handle(AppEvent::Submit)
             .expect("submit must run understanding");
+        settle_text(&mut shell);
         assert_eq!(
             (
                 shell.app.screen(),
@@ -509,6 +718,52 @@ mod tests {
             ),
             (Screen::WhatIUnderstood, 2, "whilst, in the end"),
             "first pass must split only by lines and keep commas literal"
+        );
+    }
+
+    #[test]
+    fn text_pass_failure_stays_in_the_tui_as_recoverable_error() {
+        let output = tempdir().expect("temp output must exist");
+        let mut shell = failing_shell(
+            App::new(pair()).seeded_blob("wreck"),
+            output.path().to_path_buf(),
+        );
+        shell
+            .handle(AppEvent::Submit)
+            .expect("submit must start understanding");
+        settle_text(&mut shell);
+        let before = (
+            shell.app.screen(),
+            shell.app.blob().to_string(),
+            shell.app.busy().is_none(),
+            shell.app.error().map(String::from),
+        );
+        let side = shell
+            .handle(AppEvent::KeyChar('x'))
+            .expect("dismiss key must not crash");
+        assert_eq!(
+            (
+                before,
+                shell.app.screen(),
+                shell.app.blob().to_string(),
+                shell.app.busy().is_none(),
+                shell.app.error().map(String::from),
+                side,
+            ),
+            (
+                (
+                    Screen::YourWords,
+                    String::from("wreck"),
+                    true,
+                    Some(String::from("INTERNAL: boom")),
+                ),
+                Screen::YourWords,
+                String::from("wreck"),
+                true,
+                None,
+                Side::None,
+            ),
+            "Gemini text errors must keep the TUI alive, preserve the input, and dismiss cleanly"
         );
     }
 

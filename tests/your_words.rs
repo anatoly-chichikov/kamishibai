@@ -5,11 +5,13 @@
 //! is mocked with `ScriptDetection`, which is the deterministic fallback the
 //! production code uses when the LLM is unavailable.
 
+use std::time::Duration;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::languages::catalog;
 use kamishibai::session::{LanguagePair, ScriptDetection, TargetDetection};
-use kamishibai::tui::{App, Screen, Side, draw, to_app, transit};
+use kamishibai::tui::{App, BusyKind, Screen, Side, draw, to_app, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use tempfile::tempdir;
@@ -66,6 +68,49 @@ fn your_words_renders_placeholder_tagline_and_language_pair() {
             && flat.contains("kamishibai ·")
             && flat.contains("→ RU"),
         "Your words screen must render the PDF labels and a language pair badge on top, without any design-tool commentary"
+    );
+}
+
+#[test]
+fn busy_loader_covers_the_current_screen_with_request_status() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .busy_started(BusyKind::Understanding)
+        .busy_elapsed(Duration::from_millis(320));
+    let flat = flatten(&app);
+    assert!(
+        flat.contains("Working")
+            && flat.contains("understanding your words")
+            && flat.contains("the request is still running"),
+        "busy loader must cover the current screen with a visible request status"
+    );
+}
+
+#[test]
+fn busy_loader_owns_keyboard_input_until_request_finishes() {
+    let app = App::new(LanguagePair::new("en", "ru")).busy_started(BusyKind::Understanding);
+    let event = to_app(press(KeyCode::Char('x'))).expect("char must map");
+    let (next, side) = transit(app, event);
+    assert_eq!(
+        (
+            next.blob().to_string(),
+            next.busy().map(|busy| busy.kind()),
+            side,
+        ),
+        (String::new(), Some(BusyKind::Understanding), Side::None),
+        "busy loader must suppress ordinary keyboard input until the request finishes"
+    );
+}
+
+#[test]
+fn recoverable_error_overlay_keeps_the_message_visible() {
+    let app = App::new(LanguagePair::new("en", "ru")).error_shown("INTERNAL: boom");
+    let flat = flatten(&app);
+    assert!(
+        flat.contains("Не получилось")
+            && flat.contains("запрос к Gemini завершился ошибкой")
+            && flat.contains("INTERNAL: boom")
+            && flat.contains("нажми любую клавишу"),
+        "recoverable Gemini errors must render as an in-app overlay"
     );
 }
 

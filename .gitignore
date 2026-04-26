@@ -3,6 +3,7 @@ cache/
 .claude/
 .idea/
 output/
+kamishibai-out/
 test_output/
 /tmp/
 target/
