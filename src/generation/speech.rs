@@ -3,8 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
-use hound::{SampleFormat, WavSpec, WavWriter};
+use anyhow::{Context, Result, bail};
 
 use crate::generation::SpeechGenerator;
 use crate::generation::artifact_cache::Cache;
@@ -71,21 +70,29 @@ where
 }
 
 fn write(path: &Path, data: &[u8]) -> Result<()> {
-    let mut samples = data.chunks_exact(2);
-    let spec = WavSpec {
-        channels: 1,
-        sample_rate: 24_000,
-        bits_per_sample: 16,
-        sample_format: SampleFormat::Int,
-    };
-    let mut writer = WavWriter::create(path, spec)?;
-    for item in &mut samples {
-        writer.write_sample(i16::from_le_bytes([item[0], item[1]]))?;
-    }
-    if !samples.remainder().is_empty() {
+    if !data.len().is_multiple_of(2) {
         bail!("Audio payload is not 16-bit aligned");
     }
-    writer.finalize()?;
+    let data_size = u32::try_from(data.len()).context("Audio payload too large for WAV")?;
+    let riff_size = data_size
+        .checked_add(36)
+        .context("Audio payload too large for WAV")?;
+    let mut wav = Vec::with_capacity(44 + data.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&riff_size.to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&24_000u32.to_le_bytes());
+    wav.extend_from_slice(&48_000u32.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_size.to_le_bytes());
+    wav.extend_from_slice(data);
+    fs::write(path, &wav)?;
     Ok(())
 }
 

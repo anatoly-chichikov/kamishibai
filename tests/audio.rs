@@ -5,7 +5,6 @@ use std::fs;
 use std::rc::Rc;
 
 use anyhow::Result;
-use hound::WavReader;
 use kamishibai::generation::artifact_cache::Cache;
 use kamishibai::generation::speech::{Audio, Speaker};
 use tempfile::TempDir;
@@ -46,15 +45,18 @@ fn audio_generation_writes_the_expected_wav_file_and_cache_filename() -> Result<
         speaker.clone(),
     );
     let (filename, cached) = audio.generate("The cat is sleeping on the windowsill")?;
-    let reader = WavReader::open(audio.filepath(&filename)?)?;
+    let bytes = fs::read(audio.filepath(&filename)?)?;
+    let channels = u16::from_le_bytes([bytes[22], bytes[23]]);
+    let sample_rate = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
+    let bits_per_sample = u16::from_le_bytes([bytes[34], bytes[35]]);
     assert_eq!(
         (
             filename,
             cached,
             *speaker.calls.borrow(),
-            reader.spec().channels,
-            reader.spec().sample_rate,
-            reader.spec().bits_per_sample
+            channels,
+            sample_rate,
+            bits_per_sample
         ),
         (String::from("1cccf86c1a16.wav"), false, 1, 1, 24_000, 16),
         "audio generation no longer writes the expected WAV file and cache filename"
