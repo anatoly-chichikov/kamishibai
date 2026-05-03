@@ -10,16 +10,16 @@ mod pass;
 mod state;
 
 pub use bridge::{to_document, to_entry};
-pub use candidate::{
-    CandidateKind, CandidateMeta, MetaSegment, MetaTone, RawInputBatch, WordCandidate,
-};
+pub use candidate::{RawInputBatch, WordCandidate};
 pub use detection::{ScriptDetection, TargetDetection, TargetGuess};
 pub use draft::{
-    Artifact, ArtifactFile, ArtifactSlot, AttemptTally, CardArtifacts, CardDraft, CardPayload,
+    Artifact, ArtifactFile, ArtifactSlot, AttemptTally, CardArtifacts, CardBody, CardDraft,
 };
-pub use engine::{ArtifactProducer, EngineEvent, SessionEngine};
+pub use engine::{EngineEvent, SessionEngine};
 pub use pair::LanguagePair;
-pub use pass::{BulkCorrection, CardCorrection, Understanding, Understood};
+pub use pass::{
+    BulkCorrection, CardBodyGeneration, CardCorrection, CardRevision, Understanding, Understood,
+};
 pub use state::SessionState;
 
 /// Convenience re-export so CLI callers do not need a separate `languages` import.

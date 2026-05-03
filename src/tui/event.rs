@@ -53,6 +53,14 @@ pub enum AppEvent {
     RetryExhausted,
     /// Resize or redraw — no state change, included for completeness.
     Redraw,
+    /// Welcome stage 0: arrow-cycle to the previous language chip.
+    WelcomePrevLanguage,
+    /// Welcome stage 0: arrow-cycle to the next language chip.
+    WelcomeNextLanguage,
+    /// Welcome: a clipboard paste landed on the API key input.
+    WelcomePasteKey(String),
+    /// Welcome: user pressed `?` to be taken to the key URL.
+    WelcomeOpenKeyHelp,
 }
 
 impl AppEvent {

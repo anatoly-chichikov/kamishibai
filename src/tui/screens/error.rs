@@ -1,83 +1,55 @@
 //! Recoverable request error overlay.
 //!
-//! It keeps the TUI alive when a background text request fails.
+//! Shown when a background text pass returns an error. Mirrors the modal
+//! style — solid border, dim message, single key hint to dismiss.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::tui::app::App;
 use crate::tui::palette;
 
-const WIDTH: u16 = 62;
-const HEIGHT: u16 = 8;
+const WIDTH: u16 = 60;
+const HEIGHT: u16 = 5;
 
 /// Draw one recoverable request error over the current screen.
-pub fn draw(frame: &mut Frame, area: Rect, app: &App, message: &str) {
+pub fn draw(frame: &mut Frame, area: Rect, _app: &App, message: &str) {
     let inset = centered(area, WIDTH, HEIGHT);
+    super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
-    frame.render_widget(panel(app, message, inset.width), inset);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(palette::FG).bg(palette::BG))
+        .style(palette::base());
+    let inner = block.inner(inset);
+    frame.render_widget(block, inset);
+    frame.render_widget(panel(message), inner);
+    let title = Span::styled(" can't reach gemini ", palette::base());
+    let title_rect = Rect {
+        x: inset.x + 2,
+        y: inset.y,
+        width: title.content.chars().count() as u16,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(title)).style(palette::base()),
+        title_rect,
+    );
 }
 
-fn panel(app: &App, message: &str, width: u16) -> Paragraph<'static> {
-    let copy = copy(app);
-    let inner = width as usize;
-    let top = double_edge_line(copy.title, width);
-    let bottom = format!("╚{}╝", "═".repeat(inner.saturating_sub(2)));
-    let blank = format!("║{}║", " ".repeat(inner.saturating_sub(2)));
+fn panel(message: &str) -> Paragraph<'_> {
     Paragraph::new(vec![
-        Line::from(Span::styled(top, palette::base())),
-        Line::from(Span::styled(blank.clone(), palette::base())),
-        centered_text(
-            copy.summary,
-            width,
+        Line::from(""),
+        Line::from(Span::styled(
+            String::from(message),
             palette::base().add_modifier(Modifier::BOLD),
-        ),
-        centered_text(message, width, palette::dim()),
-        centered_text(copy.dismiss, width, palette::key()),
-        Line::from(Span::styled(blank, palette::base())),
-        Line::from(Span::styled(bottom, palette::base())),
+        )),
+        Line::from(Span::styled("press any key to dismiss", palette::dim())),
     ])
     .style(palette::base())
-}
-
-fn centered_text(text: &str, width: u16, style: ratatui::style::Style) -> Line<'static> {
-    let inner = (width as usize).saturating_sub(2);
-    let clipped = text.chars().take(inner).collect::<String>();
-    let text_width = clipped.chars().count();
-    let left = inner.saturating_sub(text_width) / 2;
-    let right = inner.saturating_sub(text_width).saturating_sub(left);
-    Line::from(vec![
-        Span::styled("║", palette::base()),
-        Span::styled(" ".repeat(left), palette::base()),
-        Span::styled(clipped, style),
-        Span::styled(" ".repeat(right), palette::base()),
-        Span::styled("║", palette::base()),
-    ])
-}
-
-fn copy(app: &App) -> ErrorCopy {
-    match app.pair().support() {
-        "ru" => ErrorCopy {
-            title: "Не получилось",
-            summary: "запрос к Gemini завершился ошибкой",
-            dismiss: "нажми любую клавишу, чтобы продолжить",
-        },
-        _ => ErrorCopy {
-            title: "Request failed",
-            summary: "Gemini returned an error",
-            dismiss: "press any key to continue",
-        },
-    }
-}
-
-fn double_edge_line(title: &str, width: u16) -> String {
-    let inner = (width as usize).saturating_sub(2);
-    let adorned = format!("═ {title} ");
-    let fill = inner.saturating_sub(adorned.chars().count());
-    format!("╔{adorned}{}╗", "═".repeat(fill))
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
@@ -89,10 +61,4 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
         width: actual_width,
         height: actual_height,
     }
-}
-
-struct ErrorCopy {
-    title: &'static str,
-    summary: &'static str,
-    dismiss: &'static str,
 }

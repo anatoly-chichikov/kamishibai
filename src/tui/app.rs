@@ -4,7 +4,7 @@ use crate::session::{
     Artifact, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, WordCandidate,
 };
 
-use super::screen::{ModalKind, Screen};
+use super::screen::{KeySource, ModalKind, Screen, WelcomeStage};
 
 /// The immutable shell state carried between transitions.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,6 +18,27 @@ pub struct App {
     review: Review,
     cards: CardsView,
     done: DoneArtifacts,
+    welcome: WelcomeView,
+    body_scroll: u16,
+    quit_pending: bool,
+}
+
+/// First-run welcome state: stage, pasted key, source of that key.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WelcomeView {
+    pub stage: WelcomeStage,
+    pub key: String,
+    pub source: KeySource,
+}
+
+impl Default for WelcomeView {
+    fn default() -> Self {
+        Self {
+            stage: WelcomeStage::PickLanguage,
+            key: String::new(),
+            source: KeySource::Empty,
+        }
+    }
 }
 
 /// The blocking text pass currently covering the interface.
@@ -78,6 +99,7 @@ pub struct CardsView {
     pub selected: usize,
     pub expanded: bool,
     pub elapsed: Duration,
+    pub running: Option<(usize, Artifact)>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -117,7 +139,77 @@ impl App {
             review: Review::default(),
             cards: CardsView::default(),
             done: DoneArtifacts::default(),
+            welcome: WelcomeView::default(),
+            body_scroll: 0,
+            quit_pending: false,
         }
+    }
+
+    /// Return whether a first Ctrl+C has been received and the user is one
+    /// keystroke away from quitting.
+    pub fn quit_pending(&self) -> bool {
+        self.quit_pending
+    }
+
+    /// Return the app with the quit-pending flag updated.
+    pub fn with_quit_pending(mut self, pending: bool) -> Self {
+        self.quit_pending = pending;
+        self
+    }
+
+    /// Return the app rerouted onto the first-run Welcome screen.
+    pub fn opening_welcome(mut self, source: KeySource, key: impl Into<String>) -> Self {
+        self.screen = Screen::Welcome;
+        self.welcome = WelcomeView {
+            stage: WelcomeStage::PickLanguage,
+            key: key.into(),
+            source,
+        };
+        self
+    }
+
+    /// Return the welcome view (read-only).
+    pub fn welcome(&self) -> &WelcomeView {
+        &self.welcome
+    }
+
+    /// Return the app advanced from picking language to entering a key.
+    pub fn welcome_advance(mut self) -> Self {
+        self.welcome.stage = WelcomeStage::EnterKey;
+        self
+    }
+
+    /// Return the app stepped back from entering the key to picking the language.
+    pub fn welcome_step_back(mut self) -> Self {
+        self.welcome.stage = WelcomeStage::PickLanguage;
+        self
+    }
+
+    /// Return the app with a different language picked on the welcome screen.
+    pub fn welcome_pick_language(mut self, code: impl Into<String>) -> Self {
+        let pair = LanguagePair::new(self.pair.target().to_string(), code.into());
+        self.pair = pair;
+        self
+    }
+
+    /// Return the app with a freshly pasted API key on the welcome screen.
+    pub fn welcome_paste_key(mut self, key: impl Into<String>) -> Self {
+        let key: String = key.into();
+        let trimmed = key.trim().to_string();
+        self.welcome.key = trimmed.clone();
+        self.welcome.source = if trimmed.is_empty() {
+            KeySource::Empty
+        } else {
+            KeySource::Pasted
+        };
+        self
+    }
+
+    /// Return the app with the API key cleared so the user can paste a new one.
+    pub fn welcome_clear_key(mut self) -> Self {
+        self.welcome.key = String::new();
+        self.welcome.source = KeySource::Empty;
+        self
     }
 
     /// Return the current fullscreen state.
@@ -170,7 +262,41 @@ impl App {
         self.screen = next;
         self.modal = None;
         self.input.modal.clear();
+        self.body_scroll = 0;
         self
+    }
+
+    /// Return the current body scroll offset in lines.
+    pub fn body_scroll(&self) -> u16 {
+        self.body_scroll
+    }
+
+    /// Return the app with the body scroll bumped by `delta` lines, clamped at zero.
+    pub fn body_scrolled(mut self, delta: i32) -> Self {
+        let next = i32::from(self.body_scroll).saturating_add(delta).max(0);
+        let max = i32::from(self.body_scroll_ceiling());
+        let clamped = next.min(max);
+        self.body_scroll = u16::try_from(clamped).unwrap_or(u16::MAX);
+        self
+    }
+
+    /// Return the app with the body scroll reset to the top.
+    pub fn body_scroll_reset(mut self) -> Self {
+        self.body_scroll = 0;
+        self
+    }
+
+    fn body_scroll_ceiling(&self) -> u16 {
+        match self.screen {
+            Screen::YourCards | Screen::Done => {
+                let cards = u16::try_from(self.cards.drafts.len()).unwrap_or(u16::MAX);
+                cards.saturating_mul(7).saturating_add(8)
+            }
+            Screen::WhatIUnderstood => {
+                u16::try_from(self.review.candidates.len()).unwrap_or(u16::MAX)
+            }
+            Screen::YourWords | Screen::Welcome => 0,
+        }
     }
 
     /// Return the app with a modal opened.
@@ -220,21 +346,11 @@ impl App {
     }
 
     /// Return the app with `my` language flipped through the catalog.
-    pub fn toggle_support(self) -> Self {
+    pub fn toggle_support(mut self) -> Self {
         let current = self.pair.support().to_string();
         let next = cycle_support(current.as_str());
-        let pair = LanguagePair::new(self.pair.target().to_string(), next);
-        Self {
-            screen: self.screen,
-            modal: self.modal,
-            busy: self.busy,
-            error: self.error,
-            pair,
-            input: self.input,
-            review: self.review,
-            cards: self.cards,
-            done: self.done,
-        }
+        self.pair = LanguagePair::new(self.pair.target().to_string(), next);
+        self
     }
 
     /// Return the app with a new target language code (user override).
@@ -268,6 +384,9 @@ impl App {
             review: Review::default(),
             cards: CardsView::default(),
             done: DoneArtifacts::default(),
+            welcome: WelcomeView::default(),
+            body_scroll: 0,
+            quit_pending: false,
         }
     }
 
@@ -331,8 +450,21 @@ impl App {
             selected: 0,
             expanded: false,
             elapsed: Duration::ZERO,
+            running: None,
         };
         self
+    }
+
+    /// Return the app with the currently-running artifact recorded so the UI can
+    /// render an inline spinner instead of "queued".
+    pub fn cards_running(mut self, target: Option<(usize, Artifact)>) -> Self {
+        self.cards.running = target;
+        self
+    }
+
+    /// Return which (card, artifact) pair is being worked on right now, if any.
+    pub fn cards_running_target(&self) -> Option<(usize, Artifact)> {
+        self.cards.running
     }
 
     /// Return the app with card drafts replaced while preserving UI cursor state.
@@ -412,6 +544,11 @@ impl App {
                 continue;
             }
             let artifacts = draft.artifacts();
+            let body = if artifacts.body().failed_terminally() {
+                ArtifactSlot::fresh(Artifact::Body)
+            } else {
+                artifacts.body().clone()
+            };
             let scene = if artifacts.scene().failed_terminally() {
                 ArtifactSlot::fresh(Artifact::Scene)
             } else {
@@ -429,7 +566,7 @@ impl App {
             };
             *draft = draft
                 .clone()
-                .with_artifacts(CardArtifacts::from_parts(scene, picture, sound));
+                .with_artifacts(CardArtifacts::from_parts(body, scene, picture, sound));
         }
         self
     }
@@ -545,6 +682,7 @@ impl App {
 fn drop_artifact(artifacts: &CardArtifacts) -> Option<CardArtifacts> {
     for kind in [Artifact::Scene, Artifact::Picture, Artifact::Sound] {
         let slot = match kind {
+            Artifact::Body => artifacts.body(),
             Artifact::Scene => artifacts.scene(),
             Artifact::Picture => artifacts.picture(),
             Artifact::Sound => artifacts.sound(),
@@ -562,6 +700,11 @@ fn replace_slot(
     kind: Artifact,
     replacement: ArtifactSlot,
 ) -> CardArtifacts {
+    let body = if kind == Artifact::Body {
+        replacement.clone()
+    } else {
+        artifacts.body().clone()
+    };
     let scene = if kind == Artifact::Scene {
         replacement.clone()
     } else {
@@ -577,11 +720,12 @@ fn replace_slot(
     } else {
         artifacts.sound().clone()
     };
-    CardArtifacts::from_parts(scene, picture, sound)
+    CardArtifacts::from_parts(body, scene, picture, sound)
 }
 
 fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {
     let slot = match kind {
+        Artifact::Body => artifacts.body(),
         Artifact::Scene => artifacts.scene(),
         Artifact::Picture => artifacts.picture(),
         Artifact::Sound => artifacts.sound(),

@@ -55,19 +55,11 @@ fn apply_side(app: App, side: Side) -> App {
 
 #[test]
 fn your_words_renders_placeholder_tagline_and_language_pair() {
-    let app = App::new(LanguagePair::new("en", "ru"));
+    let app = App::new(LanguagePair::new("en", "ru")).confirmed_target("en");
     let flat = flatten(&app);
     assert!(
-        flat.contains("Your words")
-            && flat.contains("paste anything — I figure out the rest")
-            && flat.contains("type or paste one word/phrase per line:")
-            && flat.contains("one per line")
-            && flat.contains("Ctrl+L")
-            && flat.contains("Shift+Enter")
-            && !flat.contains("минимум трения")
-            && flat.contains("kamishibai ·")
-            && flat.contains("→ RU"),
-        "Your words screen must render the PDF labels and a language pair badge on top, without any design-tool commentary"
+        flat.contains("your words") && flat.contains("step 1/3") && flat.contains("→ EN"),
+        "your words screen must render the PDF labels and a language chip on the right: {flat}"
     );
 }
 
@@ -78,7 +70,7 @@ fn busy_loader_covers_the_current_screen_with_request_status() {
         .busy_elapsed(Duration::from_millis(320));
     let flat = flatten(&app);
     assert!(
-        flat.contains("Working")
+        flat.contains("working")
             && flat.contains("understanding your words")
             && flat.contains("the request is still running"),
         "busy loader must cover the current screen with a visible request status"
@@ -106,10 +98,9 @@ fn recoverable_error_overlay_keeps_the_message_visible() {
     let app = App::new(LanguagePair::new("en", "ru")).error_shown("INTERNAL: boom");
     let flat = flatten(&app);
     assert!(
-        flat.contains("Не получилось")
-            && flat.contains("запрос к Gemini завершился ошибкой")
+        flat.contains("can't reach gemini")
             && flat.contains("INTERNAL: boom")
-            && flat.contains("нажми любую клавишу"),
+            && flat.contains("press any key to dismiss"),
         "recoverable Gemini errors must render as an in-app overlay"
     );
 }

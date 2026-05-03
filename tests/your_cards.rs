@@ -2,14 +2,14 @@
 //! and its two inline variants (retry, failure).
 
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardPayload, LanguagePair,
+    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, Screen, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 fn flat(app: &App) -> String {
-    let backend = TestBackend::new(120, 40);
+    let backend = TestBackend::new(120, 50);
     let mut terminal = Terminal::new(backend).expect("backend");
     terminal.draw(|frame| draw(frame, app)).expect("draw");
     let buffer = terminal.backend().buffer();
@@ -25,6 +25,7 @@ fn flat(app: &App) -> String {
 
 fn ready_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
@@ -34,6 +35,7 @@ fn ready_artifacts() -> CardArtifacts {
 fn retrying_artifacts() -> CardArtifacts {
     let picture = ArtifactSlot::fresh(Artifact::Picture).attempted();
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         picture,
         ArtifactSlot::fresh(Artifact::Sound),
@@ -46,18 +48,34 @@ fn failed_artifacts() -> CardArtifacts {
         picture = picture.attempted();
     }
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         picture,
         ArtifactSlot::fresh(Artifact::Sound),
     )
 }
 
+fn body_for(term: &str) -> CardBody {
+    CardBody::new(
+        format!("/{term}/"),
+        format!("/{term} sentence/"),
+        format!("meaning of {term}"),
+        5,
+        format!("source sentence with {term}"),
+        term,
+        format!("vivid hint for {term}"),
+        format!("usage notes for {term}"),
+        format!("Example with {term}."),
+    )
+}
+
 fn draft(term: &str, artifacts: CardArtifacts) -> CardDraft {
     CardDraft::new(
         term,
+        format!("understanding for {term}"),
         LanguagePair::new("en", "ru"),
-        CardPayload::new("front", "back", "hint", term),
     )
+    .with_body(body_for(term), None)
     .with_artifacts(artifacts)
 }
 
@@ -78,8 +96,7 @@ fn your_cards_lists_each_card_with_artifact_check_marks_and_status_summary() {
     ]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("Your cards")
-            && rendered.contains("group 1 of 1")
+        rendered.contains("building your cards")
             && rendered.contains("2/4 ready")
             && rendered.contains("whilst")
             && rendered.contains("at the end")
@@ -87,9 +104,8 @@ fn your_cards_lists_each_card_with_artifact_check_marks_and_status_summary() {
             && rendered.contains("wreck")
             && rendered.contains("✓ scene")
             && rendered.contains("✓ picture")
-            && rendered.contains("○ picture")
-            && rendered.contains("kamishibai · EN → RU"),
-        "Your cards must render every draft, its artifact check marks, and the `ready/total` status"
+            && rendered.contains("RU → EN"),
+        "your cards must render every draft, its step lines, and the `ready/total` status"
     );
 }
 
@@ -98,8 +114,8 @@ fn retry_state_shows_retrying_count_inline_inside_the_card_row() {
     let app = seeded(vec![draft("in the end", retrying_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("↻ picture 1/3"),
-        "retrying state must be rendered inline without leaving the Your cards screen"
+        rendered.contains("retry 2/3") || rendered.contains("retry 1/3"),
+        "retrying state must be rendered inline without leaving the your cards screen: {rendered}"
     );
 }
 
@@ -108,10 +124,8 @@ fn failure_banner_appears_when_any_card_exhausts_its_retries() {
     let app = seeded(vec![draft("wreck", failed_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("1 card couldn't finish after 3 tries")
-            && rendered.contains("[r] regenerate failed")
-            && rendered.contains("✗ picture"),
-        "Your cards must surface the failure banner and the recovery key when a card fails terminally"
+        rendered.contains("gave up") && rendered.contains("✗") && rendered.contains("picture"),
+        "your cards must mark the card as `gave up` and show the ✗ on the failed step: {rendered}"
     );
 }
 
@@ -136,18 +150,18 @@ fn arrows_and_enter_navigate_and_toggle_expansion_of_the_focused_card() {
 }
 
 #[test]
-fn expanded_card_shows_front_back_and_change_this_card_hint() {
+fn expanded_card_shows_body_preview_only_no_duplicate_artifact_pane() {
     let start = seeded(vec![draft("whilst", ready_artifacts())]);
     let expanded = transit(start, AppEvent::Submit).0;
     let rendered = flat(&expanded);
+    let artifact_lines = rendered.matches("scene").count();
     assert!(
-        rendered.contains("── front")
-            && rendered.contains("── back")
-            && rendered.contains("── files")
-            && rendered.contains("[R]")
-            && rendered.contains("change this card")
-            && rendered.contains("drop picture / scene / sound"),
-        "the expanded row must reveal front/back sections, files list, and the per-card editor hint"
+        rendered.contains("target")
+            && rendered.contains("source")
+            && rendered.contains("hint")
+            && rendered.contains("meaning")
+            && artifact_lines <= 1,
+        "expanded row must reveal the body preview without duplicating the step list: {rendered}"
     );
 }
 

@@ -1,60 +1,61 @@
-//! Grayscale ink palette for the Kamishibai TUI.
+//! Static monochrome palette for the Kamishibai TUI.
 //!
-//! Values are lifted directly from the design mockup
-//! (`Kamishibai TUI A.html` · `:root` block). The TUI renders monochrome
-//! manga-ink only — no red, no yellow, no accent hues. Every screen must
-//! go through this module to stay in lock-step with the reference.
+//! Values mirror the locked design tokens in
+//! `kamishibai-simple/project/styles.css` (`:root`). The TUI is pure
+//! manga-ink — no accent hue is allowed. Every screen reads colors through
+//! this module so the rendered terminal stays in lock-step with the design.
 
 use ratatui::style::{Color, Modifier, Style};
 
-/// Terminal background. Matches `--term-bg: #0a0a0a`.
-pub const BG: Color = Color::Rgb(0x0a, 0x0a, 0x0a);
-/// Primary ink color for ordinary text. Matches `--term-fg: #f0ede4`.
-pub const FG: Color = Color::Rgb(0xf0, 0xed, 0xe4);
-/// Positive / ready state. Matches `.c-ok: #cfccc2`.
-pub const OK: Color = Color::Rgb(0xcf, 0xcc, 0xc2);
-/// In-progress state. Matches `.c-wn: #9a968b`.
-pub const WN: Color = Color::Rgb(0x9a, 0x96, 0x8b);
-/// Dim muted text (dividers, captions). Matches `--term-dim: #6e6a60`.
-pub const DIM: Color = Color::Rgb(0x6e, 0x6a, 0x60);
-/// Key-hint color. Matches `.c-key: #bdbab0`.
-pub const KEY: Color = Color::Rgb(0xbd, 0xba, 0xb0);
+/// Terminal background. Matches `--bg: #0e0e10`.
+pub const BG: Color = Color::Rgb(0x0e, 0x0e, 0x10);
+/// Primary ink color for ordinary text. Matches `--fg: #e6e3da`.
+pub const FG: Color = Color::Rgb(0xe6, 0xe3, 0xda);
+/// Muted ink for secondary copy and dividers. Matches `--dim: #8b8a83`.
+pub const DIM: Color = Color::Rgb(0x8b, 0x8a, 0x83);
+/// Deeper muted ink for placeholder rows and pending steps. Matches `--dim2: #5a5953`.
+pub const DIM2: Color = Color::Rgb(0x5a, 0x59, 0x53);
+/// Border color for rules, dashed dividers, and outlined chips. Matches `--rule: #2a2a2d`.
+pub const RULE: Color = Color::Rgb(0x2a, 0x2a, 0x2d);
+/// Row highlight background — selected lines use this. Matches `--hl: #1c1c1f`.
+pub const HL: Color = Color::Rgb(0x1c, 0x1c, 0x1f);
 
 /// Return the base paragraph style (paper ink on terminal-dark background).
 pub fn base() -> Style {
     Style::default().bg(BG).fg(FG)
 }
 
-/// Return the style for a muted / dim span.
+/// Return the style for a muted / dim span (`--dim`).
 pub fn dim() -> Style {
     Style::default().bg(BG).fg(DIM)
 }
 
-/// Return the style for a done / positive span.
-pub fn ok() -> Style {
-    Style::default().bg(BG).fg(OK)
+/// Return the style for the deepest muted span (`--dim2`).
+pub fn dim2() -> Style {
+    Style::default().bg(BG).fg(DIM2)
 }
 
-/// Return the style for an in-progress span.
-pub fn wn() -> Style {
-    Style::default().bg(BG).fg(WN)
+/// Return the style for a row highlighted as selected (background `--hl`, ink `--fg`).
+pub fn highlight() -> Style {
+    Style::default().bg(HL).fg(FG)
 }
 
-/// Return the style for a keyboard hint span.
-pub fn key() -> Style {
-    Style::default().bg(BG).fg(KEY)
+/// Return the style for a dim span over a highlighted row.
+pub fn highlight_dim() -> Style {
+    Style::default().bg(HL).fg(DIM)
 }
 
-/// Return the style for a failed / wavy-underlined span (wavy approximated
-/// as plain underline — no terminal widget supports SGR 4:3 directly).
-pub fn failure() -> Style {
-    Style::default()
-        .bg(BG)
-        .fg(FG)
-        .add_modifier(Modifier::UNDERLINED)
+/// Return the inverse style: black ink on cream block (used by titles).
+pub fn invert() -> Style {
+    Style::default().bg(FG).fg(BG)
 }
 
-/// Return the style for a link-like span (`c-tl` — underlined white).
+/// Return the style used to draw `--rule` lines.
+pub fn rule() -> Style {
+    Style::default().bg(BG).fg(RULE)
+}
+
+/// Return the underlined link style — pure mono, no color shift.
 pub fn link() -> Style {
     Style::default()
         .bg(BG)

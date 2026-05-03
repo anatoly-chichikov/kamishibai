@@ -4,36 +4,42 @@
 //! path `YourWords -> WhatIUnderstood -> YourCards -> Done`. No UI rendering,
 //! no network, no Gemini.
 
-use kamishibai::session::{CandidateKind, LanguagePair, WordCandidate};
+use kamishibai::session::{LanguagePair, WordCandidate};
 use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, transit};
 
 fn fake_candidates() -> Vec<WordCandidate> {
-    vec![WordCandidate::new("a", CandidateKind::Word, "sample", "")]
+    vec![WordCandidate::new(
+        "a",
+        "letter A; included by default",
+        true,
+    )]
 }
 
 #[test]
-fn skeleton_flow_reaches_done_through_every_fullscreen_screen() {
+fn skeleton_flow_publishes_done_inline_on_your_cards() {
     let start = App::new(LanguagePair::new("en", "ru")).seeded_blob("a");
     let (after_words, understanding) = transit(start, AppEvent::Submit);
     let reviewing = after_words.clone().understood(fake_candidates());
     let (after_understood, generation) = transit(reviewing, AppEvent::Submit);
-    let (after_cards, _) = transit(after_understood.clone(), AppEvent::BatchReady);
+    let (after_batch, publish) = transit(after_understood.clone(), AppEvent::BatchReady);
     assert_eq!(
         (
             after_words.screen(),
             understanding,
             after_understood.screen(),
             generation,
-            after_cards.screen(),
+            after_batch.screen(),
+            publish,
         ),
         (
             Screen::WhatIUnderstood,
             Side::RunUnderstanding,
             Screen::YourCards,
             Side::StartGeneration,
-            Screen::Done,
+            Screen::YourCards,
+            Side::PublishDone,
         ),
-        "skeleton flow must traverse YourWords -> WhatIUnderstood -> YourCards -> Done"
+        "skeleton flow must publish Done inline on YourCards instead of leaving the screen"
     );
 }
 
@@ -46,7 +52,7 @@ fn language_pair_travels_untouched_through_the_full_flow() {
     let (c, _) = transit(b, AppEvent::BatchDone { failed: 0 });
     assert_eq!(
         c.pair().label(),
-        "EN → RU",
+        "RU → EN",
         "the language pair must survive every transition without mutation"
     );
 }
@@ -97,7 +103,7 @@ fn new_batch_from_done_resets_to_your_words_without_losing_language() {
     let (next, _) = transit(start, AppEvent::NewBatch);
     assert_eq!(
         (next.screen(), next.failed(), next.pair().label()),
-        (Screen::YourWords, 0, String::from("EN → RU")),
+        (Screen::YourWords, 0, String::from("RU → EN")),
         "new batch must restart at YourWords, clear failures, and keep the language pair"
     );
 }

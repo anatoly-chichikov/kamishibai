@@ -4,14 +4,14 @@ assertion_line: 31
 expression: render(&app)
 ---
                                                                                 
-    kamishibai · detecting… → RU                                                
+     your words   each line becomes one anki card                     RU → …    
                                                                                 
-    Your words                        paste anything — I figure out the rest    
+    01                                                                          
+    02                                                                          
+    03  type or paste, one item per line                                        
+    04                                                                          
                                                                                 
-    type or paste one word/phrase per line:                                     
-                                                                                
-    ▍                                                                           
                                                                                 
                                                                                 
-─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
-    [type/paste] one per line · [Ctrl+L] my language · [Shift+Enter] continu
+                                                                                
+    step 1/3 · no words yet             [Cmd+V] paste a list · [Ctrl+C] quit

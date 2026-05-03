@@ -46,6 +46,7 @@ fn main() -> Result<()> {
 
 fn render(app: &App) -> io::Result<()> {
     let title = match app.screen() {
+        Screen::Welcome => "Welcome",
         Screen::YourWords => "Your words",
         Screen::WhatIUnderstood => "What I understood",
         Screen::YourCards => "Your cards",

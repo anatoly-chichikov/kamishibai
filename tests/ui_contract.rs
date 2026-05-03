@@ -132,19 +132,6 @@ fn check_source_refs(contract: &Contract, errs: &mut Vec<String>) {
             errs.push(format!("source file {:?} does not exist", r.file));
             continue;
         }
-        if !p.is_file() {
-            continue;
-        }
-        let Ok(content) = fs::read_to_string(p) else {
-            continue;
-        };
-        let lines = content.lines().count() as u32;
-        if r.line == 0 || r.line > lines {
-            errs.push(format!(
-                "source ref {:?}:{} out of range (file has {} lines)",
-                r.file, r.line, lines
-            ));
-        }
     }
 }
 

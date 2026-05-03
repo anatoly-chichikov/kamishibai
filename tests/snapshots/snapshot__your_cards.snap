@@ -1,16 +1,17 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 43
 expression: render(&app)
 ---
                                                                                 
-    kamishibai · detecting… → RU                                                
-                                                                                
-    Your cards                                      group 1 of 1 · 0/0 ready    
-    cards ──────────────────────────────────────────────────────────────────    
+     building your cards   drawing each card one by one               RU → …    
                                                                                 
                                                                                 
     preparing cards…                                                            
                                                                                 
                                                                                 
-─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
-    [↑↓] nav · [Enter] expand/collapse · [R] change this card · [d] drop art
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    step 3/3 · 0/0 ready · 00:00                    working… · [Ctrl+C] quit

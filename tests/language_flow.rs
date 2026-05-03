@@ -53,7 +53,7 @@ fn flow_resolves_pair_and_confirms_candidates_without_network_calls() {
     .pass(raw, pair.target());
     assert_eq!(
         (guess, pair.label(), candidates.len(),),
-        (TargetGuess::new("en", false), String::from("EN → RU"), 4,),
+        (TargetGuess::new("en", false), String::from("RU → EN"), 4,),
         "flow must detect target, honor persisted support language, and forward confirmed candidates"
     );
 }
@@ -74,7 +74,7 @@ fn flow_uses_english_support_on_first_run() {
     let pair = LanguagePair::new("ru", persisted.as_str());
     assert_eq!(
         pair.label(),
-        "RU → EN",
+        "EN → RU",
         "first-run my language must surface as English in the session pair"
     );
 }

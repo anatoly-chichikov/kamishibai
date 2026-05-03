@@ -1,7 +1,7 @@
 //! Recovery flow for failed cards (`07-your-cards-couldnt-finish.png`).
 
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardPayload, LanguagePair,
+    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
@@ -28,18 +28,34 @@ fn failed_picture() -> CardArtifacts {
         picture = picture.attempted();
     }
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         picture,
         ArtifactSlot::fresh(Artifact::Sound),
     )
 }
 
+fn body_for(term: &str) -> CardBody {
+    CardBody::new(
+        format!("/{term}/"),
+        format!("/{term} sentence/"),
+        format!("meaning of {term}"),
+        5,
+        format!("source for {term}"),
+        term,
+        format!("hint for {term}"),
+        format!("context for {term}"),
+        format!("Example with {term}."),
+    )
+}
+
 fn seeded() -> App {
     let draft = CardDraft::new(
         "wreck",
+        "verb sense — destroyed vehicle",
         LanguagePair::new("en", "ru"),
-        CardPayload::new("front", "back", "hint", "wreck"),
     )
+    .with_body(body_for("wreck"), None)
     .with_artifacts(failed_picture());
     App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::YourCards)
@@ -52,10 +68,8 @@ fn your_cards_surfaces_failure_banner_when_any_card_fails_terminally() {
     let app = seeded();
     let rendered = flat(&app);
     assert!(
-        rendered.contains("1 card couldn't finish after 3 tries")
-            && rendered.contains("[r] regenerate failed")
-            && rendered.contains("✗ picture"),
-        "Your cards must render the failure banner and the [r] key hint when any card failed"
+        rendered.contains("gave up") && rendered.contains("✗") && rendered.contains("picture"),
+        "your cards must show `gave up` summary and ✗ on the failed step: {rendered}"
     );
 }
 
@@ -110,12 +124,12 @@ fn recovery_keeps_the_user_on_your_cards() {
 }
 
 #[test]
-fn enter_on_failure_banner_keeps_going_to_done() {
+fn enter_on_failure_banner_toggles_expansion_without_leaving_your_cards() {
     let app = seeded();
     let (after, side) = transit(app, AppEvent::KeyEnter);
     assert_eq!(
         (after.screen(), side),
-        (Screen::Done, Side::PublishDone),
-        "Enter on the failure banner must accept failed cards and continue to Done"
+        (Screen::YourCards, Side::None),
+        "Enter on the failure banner must just toggle expansion and stay on YourCards"
     );
 }

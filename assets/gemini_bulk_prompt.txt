@@ -1,4 +1,4 @@
-You are refining the Kamishibai vocabulary review list.
+You are refining the Kamishibai understanding list after a user comment.
 
 Target language:
 {target_language}
@@ -6,31 +6,41 @@ Target language:
 Support language for explanations:
 {support_language}
 
-Apply the user's correction to the whole list while keeping one target language.
-Keep rows that should not be generated with "include": false and explain why.
-The "term" field must be the exact surface form that the next card-generation step will use.
-The "kind" field is a closed learning-unit category with exactly five generated values: word, phrase, collocation, idiom, sentence.
-Use "word" for any single lexical word, including nouns, verbs, adjectives, inflected forms, and proper names.
-Use "phrase" for a normal multi-word expression with mostly literal meaning.
-Use "collocation" for a natural word combination where the pairing matters.
-Use "idiom" for a fixed expression whose meaning is not directly literal.
-Use "sentence" only when the user entered a full sentence or clause to learn as a unit.
-Do not put part of speech, tense, case, number, gender, lemma, register, or surface-form details into "kind"; put those details into "meta" and a concise generation hint into "note".
-If "include" is false, use "kind": "skip".
-The "preview" field is the translation shown in the row: one word or a short phrase in the support language.
-The "note" field is a concise internal hint for card generation in the support language.
-The "meta" field is the exact sense-check signature shown in the row, already localized into the support language.
-For every included item, "meta" must contain labels in this order: part of speech or form, sense shade, optional style.
-Use full words, no abbreviations, no dictionary definitions, no example sentences, and no negative wording in "meta".
-The sense shade is mandatory unless the item is a typo correction.
-If the surface form is an inflected form, replace the part-of-speech label with a form label like comparative degree from word "cold" or past tense from word "debut", localized into the support language but keeping the quoted target-language word unchanged.
-If a typo was corrected, use only two labels: part of speech, then corrected typo: was "<original>", localized into the support language but keeping the original target-language spelling unchanged.
-Set meta label "tone" to "bright" when the label shows a model decision: ambiguous part of speech, polysemous sense branch, selected style among alternatives, any form construction, or typo correction.
-Set "tone" to "dim" when the label states a fact that did not require choosing among alternatives.
-Style labels are included only when style is not neutral, and must include the localized equivalent of "style: <style>".
+Apply the user's correction to the whole list while keeping the target language fixed. Keep rows that should not be turned into cards with `"ok": false` and explain why in their `understanding`.
 
-Return only JSON with this shape:
-{"target_lang":"<iso code>","items":[{"term":"surface form to generate","language":"<iso code>","kind":"word|phrase|collocation|idiom|sentence|skip","preview":"one-word or short translation","note":"generation hint","meta":[{"text":"localized label","tone":"dim|bright"}],"include":true}]}
+Each item has three fields:
+
+1. "term" — the surface form the next step will use. Correct typos silently if needed. Preserve morphological form unless the user's correction explicitly asks otherwise.
+
+2. "understanding" — one short, scannable line in {support_language}, structured as `<part of speech abbreviation> · <gloss>[ · <decision marker if any>]`.
+
+   The entire line — POS, gloss, decision marker — must be written in {support_language}. Never mix English POS labels into a non-English line. Pick the right abbreviation set for {support_language}:
+   - Russian (`ru`): `сущ.`, `гл.`, `прил.`, `нареч.`, `мест.`, `союз`, `предл.`, `част.`, `межд.`, `числ.`; phrases `фраза`; idioms `идиома`; collocations `колл.`; full sentences `предл.`.
+   - English (`en`): `noun`, `verb`, `adj.`, `adv.`, `pron.`, `conj.`, `prep.`, `part.`, `interj.`, `num.`; phrases `phrase`; idioms `idiom`; collocations `collocation`; full sentences `sentence`.
+   - Spanish (`es`): `sust.`, `verbo`, `adj.`, `adv.`, `pron.`, `conj.`, `prep.`, `part.`, `interj.`, `num.`; phrases `frase`; idioms `idiom.`; collocations `coloc.`; full sentences `oración`.
+   - German (`de`): `Subst.`, `Verb`, `Adj.`, `Adv.`, `Pron.`, `Konj.`, `Präp.`, `Part.`, `Interj.`, `Num.`; phrases `Phrase`; idioms `Idiom`; collocations `Kollok.`; full sentences `Satz`.
+   - Greek (`el`): `ουσ.`, `ρ.`, `επίθ.`, `επίρρ.`, `αντων.`, `σύνδ.`, `πρόθ.`, `μόρ.`, `επιφ.`, `αριθμ.`; phrases `φράση`; idioms `ιδιωτ.`; collocations `συνεμφ.`; full sentences `πρόταση`.
+   - Chinese (`zh`): `名`, `动`, `形`, `副`, `代`, `连`, `介`, `助`, `叹`, `数`; phrases `短语`; idioms `成语`; collocations `搭配`; full sentences `句子`.
+   - For other support languages, use that language's standard short POS labels — never fall back to English.
+
+   The gloss is one word or a couple of comma-separated translations in {support_language}, never a full sentence.
+
+   Add a third segment after ` · ` only when a real decision applies — chosen polysemous sense (with what was rejected), non-default morphology, typo correction, non-neutral register or style, idiom/collocation note, or the reason for exclusion when `ok` is false.
+
+   Hard prohibitions:
+   - Never use empty filler words like "обычное", "обычный", "повседневное", "стандартное", "обыкновенное", "regular", "common", "ordinary", "everyday", "standard", "basic", "simple". Drop them.
+   - Do not describe the obvious semantic field a user already knows (e.g., "одомашненное животное", "цвет", "день недели").
+   - Do not write a full prose sentence. Stick to the `<pos> · <gloss>[ · <marker>]` shape with ` · ` separators.
+
+   Examples for an EN→RU pair: `сущ. · кошка`, `прил. · красный`, `союз · пока, в то время как · формальный британский`, `гл. · дебютировать · прошедшее время`, `гл. · исключить · из учебного заведения, не «выпустить газ»`, `пропуск · слово на русском, не на target-языке`.
+
+   Do not introduce labels, tags, or structured fields beyond the dot-separated segments.
+
+3. "ok" — boolean. `true` if the item belongs to the target language and can be turned into a card; `false` otherwise. When `false`, `understanding` must state the reason briefly.
+
+Return only JSON with this shape, no prose, no code fences:
+
+{"target_lang":"<iso code>","items":[{"term":"<surface form>","understanding":"<one or two sentences in the support language>","ok":true}]}
 
 Current rows:
 {current_rows}

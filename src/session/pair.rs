@@ -37,12 +37,15 @@ impl LanguagePair {
         catalog.item(self.support.as_str())
     }
 
-    /// Return a compact "target → support" label for header placement.
+    /// Return a compact "support → target" label (native first, learning second).
+    ///
+    /// Order matches the on-screen chip — the user reads it as "from my
+    /// language into the language being learned".
     pub fn label(&self) -> String {
         format!(
             "{} → {}",
-            self.target.to_uppercase(),
-            self.support.to_uppercase()
+            self.support.to_uppercase(),
+            self.target.to_uppercase()
         )
     }
 }

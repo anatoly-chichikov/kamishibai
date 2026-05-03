@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImageView};
 use printpdf::{
     Line, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt,
@@ -36,6 +36,13 @@ struct PageState<'a> {
     doc: &'a mut PdfDocument,
     ops: &'a mut Vec<Op>,
     fonts: &'a mut BTreeMap<FontFamily, Pair>,
+    subsetted: &'a BTreeMap<FontFamily, SubsetFonts>,
+}
+
+#[derive(Clone, Debug)]
+struct SubsetFonts {
+    regular: Rc<ParsedFont>,
+    bold: Rc<ParsedFont>,
 }
 
 impl<L, F> Report<L, F> {
@@ -64,6 +71,7 @@ where
         if let Some(parent) = output.as_ref().parent() {
             fs::create_dir_all(parent)?;
         }
+        let subsetted = self.prepared_fonts()?;
         let mut doc = PdfDocument::new("Kamishibai Report");
         let mut fonts = BTreeMap::new();
         let mut pages = vec![Vec::new()];
@@ -77,6 +85,7 @@ where
                 doc: &mut doc,
                 ops: pages.last_mut().expect("report must keep one active page"),
                 fonts: &mut fonts,
+                subsetted: &subsetted,
             };
             self.row(&mut page, entry, image.as_deref(), thumbnail, &mut y)?;
         }
@@ -90,6 +99,45 @@ where
             .save(&PdfSaveOptions::default(), &mut Vec::new());
         fs::write(output, pdf)?;
         Ok(())
+    }
+
+    /// Pre-subset every font family to the actual characters its rows use.
+    /// Without this, printpdf 0.9.1 embeds the full font (subsetting in that
+    /// version is hard-disabled by an `if false &&` guard in serialize.rs:1162),
+    /// which on macOS picks Arial Unicode MS (~23 MB per weight) and inflates
+    /// PDFs to tens of megabytes.
+    fn prepared_fonts(&self) -> Result<BTreeMap<FontFamily, SubsetFonts>> {
+        let mut chars_per_family: BTreeMap<FontFamily, HashSet<char>> = BTreeMap::new();
+        for (entry, _) in &self.rows {
+            let family = self.font.selected(entry);
+            let entry_chars = self
+                .layout
+                .row(entry)
+                .into_iter()
+                .flat_map(|(line, _)| line.chars().collect::<Vec<_>>())
+                .collect::<Vec<_>>();
+            chars_per_family
+                .entry(family)
+                .or_default()
+                .extend(entry_chars);
+        }
+        let mut prepared = BTreeMap::new();
+        for (family, chars) in chars_per_family {
+            let regular_path = family.regular()?;
+            let bold_path = family.bold()?;
+            let regular = parsed(&regular_path)?;
+            let bold = parsed(&bold_path)?;
+            let regular_subset = subset_or_full(&regular, &chars);
+            let bold_subset = subset_or_full(&bold, &chars);
+            prepared.insert(
+                family,
+                SubsetFonts {
+                    regular: Rc::new(regular_subset),
+                    bold: Rc::new(bold_subset),
+                },
+            );
+        }
+        Ok(prepared)
     }
 
     /// Render one entry onto the active page.
@@ -196,15 +244,15 @@ where
         if let Some(pair) = page.fonts.get(&family) {
             return Ok(pair.clone());
         }
-        let regular = family.regular()?;
-        let bold = family.bold()?;
-        let regular_font = parsed(&regular)?;
-        let bold_font = parsed(&bold)?;
+        let prepared = page
+            .subsetted
+            .get(&family)
+            .ok_or_else(|| anyhow!("subsetted fonts missing for family {}", family.name()))?;
         let pair = Pair {
-            regular: page.doc.add_font(&regular_font),
-            bold: page.doc.add_font(&bold_font),
-            regular_font: Rc::new(regular_font),
-            bold_font: Rc::new(bold_font),
+            regular: page.doc.add_font(&prepared.regular),
+            bold: page.doc.add_font(&prepared.bold),
+            regular_font: prepared.regular.clone(),
+            bold_font: prepared.bold.clone(),
         };
         page.fonts.insert(family, pair.clone());
         Ok(pair)
@@ -229,4 +277,21 @@ fn raw(image: DynamicImage) -> RawImage {
         data_format: RawImageFormat::RGB8,
         tag: Vec::new(),
     }
+}
+
+/// Subset one font down to the supplied character set; falls back to the full
+/// font when allsorts cannot subset it (rare but happens for some CFF fonts).
+fn subset_or_full(font: &ParsedFont, chars: &HashSet<char>) -> ParsedFont {
+    let mut glyph_ids: BTreeMap<u16, char> = BTreeMap::new();
+    glyph_ids.insert(0, '\0');
+    for ch in chars {
+        if let Some(gid) = font.lookup_glyph_index(*ch as u32) {
+            glyph_ids.insert(gid, *ch);
+        }
+    }
+    let Ok(subset) = printpdf::subset_font(font, &glyph_ids) else {
+        return font.clone();
+    };
+    let mut warnings = Vec::new();
+    ParsedFont::from_bytes(&subset.bytes, 0, &mut warnings).unwrap_or_else(|| font.clone())
 }

@@ -1,13 +1,15 @@
 use anyhow::Result;
+use serde_json::json;
 
 use crate::languages::LanguageCatalog;
-use crate::session::{CardDraft, LanguagePair, MetaTone, WordCandidate};
+use crate::session::{CardBody, CardDraft, LanguagePair, WordCandidate};
 
 const INTAKE_PROMPT: &str = include_str!("../../assets/gemini_intake_prompt.txt");
 const BULK_PROMPT: &str = include_str!("../../assets/gemini_bulk_prompt.txt");
+const CARD_BODY_PROMPT: &str = include_str!("../../assets/gemini_card_body_prompt.txt");
 const CARD_PROMPT: &str = include_str!("../../assets/gemini_card_prompt.txt");
 
-/// Render the first-pass vocabulary review prompt.
+/// Render the human-in-the-loop intake prompt.
 pub(super) fn render_intake_prompt(
     raw: &str,
     my: &str,
@@ -23,7 +25,7 @@ pub(super) fn render_intake_prompt(
     )
 }
 
-/// Render the bulk vocabulary refinement prompt.
+/// Render the bulk understanding refinement prompt fired from `Change something`.
 pub(super) fn render_bulk_prompt(
     candidates: &[WordCandidate],
     comment: &str,
@@ -33,24 +35,10 @@ pub(super) fn render_bulk_prompt(
     let rows = candidates
         .iter()
         .map(|candidate| {
-            let meta = candidate
-                .meta()
-                .segments()
-                .iter()
-                .map(|segment| {
-                    serde_json::json!({
-                        "text": segment.text(),
-                        "tone": meta_tone(segment.tone()),
-                    })
-                })
-                .collect::<Vec<_>>();
-            serde_json::json!({
+            json!({
                 "term": candidate.term(),
-                "kind": candidate.kind().label(),
-                "preview": candidate.preview(),
-                "note": candidate.note(),
-                "meta": meta,
-                "include": candidate.included(),
+                "understanding": candidate.understanding(),
+                "ok": candidate.ok(),
             })
         })
         .collect::<Vec<_>>();
@@ -68,36 +56,64 @@ pub(super) fn render_bulk_prompt(
     )
 }
 
-/// Render the per-card refinement prompt.
+/// Render the Pro card-body generation prompt.
+pub(super) fn render_card_body_prompt(
+    term: &str,
+    understanding: &str,
+    pair: &LanguagePair,
+    catalog: &LanguageCatalog,
+) -> Result<String> {
+    render(
+        CARD_BODY_PROMPT,
+        &[
+            ("{target_language}", language_label(catalog, pair.target())?),
+            (
+                "{source_language}",
+                language_label(catalog, pair.support())?,
+            ),
+            ("{term}", String::from(term)),
+            ("{understanding}", String::from(understanding)),
+        ],
+    )
+}
+
+/// Render the per-card refinement prompt fired from `Change this card`.
 pub(super) fn render_card_prompt(
     draft: &CardDraft,
     comment: &str,
     pair: &LanguagePair,
     catalog: &LanguageCatalog,
 ) -> Result<String> {
+    let body = draft.body().cloned().unwrap_or_else(empty_body);
+    let body_json = serde_json::to_string_pretty(&json!({
+        "pronunciation": body.pronunciation(),
+        "transcription": body.transcription(),
+        "meaning": body.meaning(),
+        "importance": body.importance(),
+        "source_sentence": body.source_sentence(),
+        "source_highlight": body.source_highlight(),
+        "source_hint": body.source_hint(),
+        "source_context": body.source_context(),
+        "target_sentence": body.target_sentence(),
+    }))?;
     render(
         CARD_PROMPT,
         &[
             ("{target_language}", language_label(catalog, pair.target())?),
             (
-                "{support_language}",
+                "{source_language}",
                 language_label(catalog, pair.support())?,
             ),
             ("{term}", String::from(draft.term())),
-            ("{front}", String::from(draft.payload().front())),
-            ("{back}", String::from(draft.payload().back())),
-            ("{hint}", String::from(draft.payload().hint())),
-            ("{highlight}", String::from(draft.payload().highlight())),
+            ("{understanding}", String::from(draft.understanding())),
+            ("{current_body}", body_json),
             ("{user_correction}", String::from(comment)),
         ],
     )
 }
 
-fn meta_tone(tone: MetaTone) -> &'static str {
-    match tone {
-        MetaTone::Dim => "dim",
-        MetaTone::Bright => "bright",
-    }
+fn empty_body() -> CardBody {
+    CardBody::new("", "", "", 5, "", "", "", "", "")
 }
 
 fn language_choices(catalog: &LanguageCatalog) -> Result<String> {

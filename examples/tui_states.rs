@@ -14,10 +14,10 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use kamishibai::session::{
-    Artifact, ArtifactFile, ArtifactSlot, CandidateKind, CandidateMeta, CardArtifacts, CardDraft,
-    CardPayload, LanguagePair, MetaSegment, WordCandidate,
+    Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
+    WordCandidate,
 };
-use kamishibai::tui::{App, ModalKind, Screen, draw};
+use kamishibai::tui::{App, BusyKind, KeySource, ModalKind, Screen, draw};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
@@ -71,6 +71,7 @@ fn pair() -> LanguagePair {
 
 fn ready_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
@@ -78,19 +79,24 @@ fn ready_artifacts() -> CardArtifacts {
 }
 
 fn cached_artifacts() -> CardArtifacts {
+    let tmp = std::env::temp_dir();
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded_with(ArtifactFile::new(
             "a345532c.json",
+            tmp.join("a345532c.json"),
             "1.9 KB",
             true,
         )),
         ArtifactSlot::fresh(Artifact::Picture).succeeded_with(ArtifactFile::new(
             "a345532c.jpg",
+            tmp.join("a345532c.jpg"),
             "268 KB",
             true,
         )),
         ArtifactSlot::fresh(Artifact::Sound).succeeded_with(ArtifactFile::new(
             "f4206ebe.wav",
+            tmp.join("f4206ebe.wav"),
             "11.2 KB",
             true,
         )),
@@ -99,6 +105,7 @@ fn cached_artifacts() -> CardArtifacts {
 
 fn retrying_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture)
             .attempted()
@@ -109,6 +116,7 @@ fn retrying_artifacts() -> CardArtifacts {
 
 fn second_retrying_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).attempted().attempted(),
@@ -117,6 +125,7 @@ fn second_retrying_artifacts() -> CardArtifacts {
 
 fn making_picture_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).attempted(),
         ArtifactSlot::fresh(Artifact::Sound),
@@ -129,14 +138,37 @@ fn failed_picture_artifacts() -> CardArtifacts {
         picture = picture.attempted();
     }
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         picture,
         ArtifactSlot::fresh(Artifact::Sound),
     )
 }
 
+fn body_for(term: &str, target: &str, source: &str, hint: &str, highlight: &str) -> CardBody {
+    CardBody::new(
+        format!("/{term}/"),
+        format!("/{target}/"),
+        format!("translation of {term}"),
+        7,
+        source.to_string(),
+        if highlight.is_empty() {
+            term
+        } else {
+            highlight
+        }
+        .to_string(),
+        hint.to_string(),
+        format!("usage notes for {term}"),
+        target.to_string(),
+    )
+}
+
 fn card(term: &str, front: &str, back: &str, artifacts: CardArtifacts) -> CardDraft {
-    card_with_hint(term, front, back, "", artifacts)
+    let body = body_for(term, front, back, "", "");
+    CardDraft::new(term, format!("understanding for {term}"), pair())
+        .with_body(body, None)
+        .with_artifacts(artifacts)
 }
 
 fn card_with_hint(
@@ -146,7 +178,9 @@ fn card_with_hint(
     hint: &str,
     artifacts: CardArtifacts,
 ) -> CardDraft {
-    CardDraft::new(term, pair(), CardPayload::new(front, back, hint, term))
+    let body = body_for(term, front, back, hint, "");
+    CardDraft::new(term, format!("understanding for {term}"), pair())
+        .with_body(body, None)
         .with_artifacts(artifacts)
 }
 
@@ -158,7 +192,9 @@ fn card_with_highlight(
     highlight: &str,
     artifacts: CardArtifacts,
 ) -> CardDraft {
-    CardDraft::new(term, pair(), CardPayload::new(front, back, hint, highlight))
+    let body = body_for(term, front, back, hint, highlight);
+    CardDraft::new(term, format!("understanding for {term}"), pair())
+        .with_body(body, None)
         .with_artifacts(artifacts)
 }
 
@@ -167,49 +203,21 @@ fn build_states() -> Vec<(String, App)> {
     let base_words = App::new(pair()).seeded_blob(words_seed);
 
     let candidates = vec![
-        WordCandidate::with_meta(
+        WordCandidate::new(
             "sincerely",
-            CandidateKind::Word,
-            "искренне",
-            "",
-            CandidateMeta::new(
-                MetaSegment::dim("наречие"),
-                MetaSegment::dim("с искренними чувствами"),
-                Some(MetaSegment::bright("стиль: формальный")),
-            ),
+            "наречие; искренне; формальный стиль, часто в письмах",
+            true,
         ),
-        WordCandidate::with_meta(
-            "at the end",
-            CandidateKind::Phrase,
-            "в конце",
-            "",
-            CandidateMeta::new(
-                MetaSegment::dim("фраза"),
-                MetaSegment::dim("о времени или месте"),
-                None,
-            ),
-        ),
-        WordCandidate::with_meta(
+        WordCandidate::new("at the end", "фраза о времени или месте; в конце", true),
+        WordCandidate::new(
             "expel",
-            CandidateKind::Word,
-            "исключать",
-            "",
-            CandidateMeta::new(
-                MetaSegment::dim("глагол"),
-                MetaSegment::bright("из учебного заведения или организации"),
-                None,
-            ),
+            "глагол; смысл — исключить из учебного заведения или организации",
+            true,
         ),
-        WordCandidate::with_meta(
+        WordCandidate::new(
             "debuted",
-            CandidateKind::Word,
-            "дебютировал",
-            "",
-            CandidateMeta::new(
-                MetaSegment::bright("прошедшее время от слова \"debut\""),
-                MetaSegment::bright("о первом публичном появлении"),
-                None,
-            ),
+            "прошедшее время от слова «debut»; о первом публичном появлении",
+            true,
         ),
     ];
 
@@ -240,7 +248,7 @@ fn build_states() -> Vec<(String, App)> {
             card_with_highlight(
                 "sincerely",
                 "She sincerely thanked everyone for their help.",
-                "Она искренне поблагодарила всех за помощь.\nsincerely /sɪnˈsɪrli/   искренне · formal",
+                "Она искренне поблагодарила всех за помощь.",
                 "О чувствах, выраженных честно и серьёзно.",
                 "sincerely",
                 cached_artifacts(),
@@ -262,10 +270,11 @@ fn build_states() -> Vec<(String, App)> {
         .confirmed_target("en")
         .cards_started(vec![
             card("sincerely", "", "", ready_artifacts()),
-            card(
+            card_with_hint(
                 "at the end",
                 "The meeting starts at the end of March.",
                 "",
+                "О временной точке завершения процесса.",
                 ready_artifacts(),
             ),
             card("expel", "", "", making_picture_artifacts()),
@@ -319,8 +328,21 @@ fn build_states() -> Vec<(String, App)> {
             "kamishibai-out/",
         );
 
+    let welcome = App::new(pair())
+        .opening_welcome(KeySource::Empty, String::new())
+        .welcome_advance();
+
+    let busy_understanding = App::new(pair())
+        .seeded_blob(words_seed)
+        .busy_started(BusyKind::Understanding)
+        .busy_elapsed(Duration::from_millis(540));
     vec![
+        (String::from("00 · Welcome"), welcome),
         (String::from("01 · Your words"), base_words),
+        (
+            String::from("01b · Busy · understanding"),
+            busy_understanding,
+        ),
         (String::from("02 · What I understood"), review),
         (
             String::from("02b · Change something · modal"),
