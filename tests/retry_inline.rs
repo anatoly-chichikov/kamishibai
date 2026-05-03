@@ -3,30 +3,11 @@
 
 use anyhow::{Result, anyhow};
 use kamishibai::session::{
-    Artifact, ArtifactFile, ArtifactProducer, CardDraft, CardPayload, EngineEvent, LanguagePair,
-    SessionEngine,
+    Artifact, ArtifactFile, CardBody, CardDraft, EngineEvent, LanguagePair, SessionEngine,
 };
 use kamishibai::tui::{App, Screen, draw};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-
-struct FailPictureOnce {
-    spent: bool,
-}
-
-impl ArtifactProducer for FailPictureOnce {
-    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
-        if artifact == Artifact::Picture && !self.spent {
-            self.spent = true;
-            return Err(anyhow!("transient"));
-        }
-        Ok(ArtifactFile::new(
-            format!("{}-{}.txt", draft.term(), artifact.label()),
-            "1 B",
-            false,
-        ))
-    }
-}
 
 fn flat(app: &App) -> String {
     let backend = TestBackend::new(120, 24);
@@ -46,29 +27,49 @@ fn flat(app: &App) -> String {
 fn draft(term: &str) -> CardDraft {
     CardDraft::new(
         term,
+        format!("understanding for {term}"),
         LanguagePair::new("en", "ru"),
-        CardPayload::new("front", "back", "hint", term),
     )
 }
 
+fn body_for(term: &str) -> CardBody {
+    CardBody::new(
+        format!("/{term}/"),
+        format!("/{term} sentence/"),
+        format!("meaning of {term}"),
+        5,
+        format!("source for {term}"),
+        term,
+        format!("hint for {term}"),
+        format!("context for {term}"),
+        format!("Example with {term}."),
+    )
+}
+
+fn file_for(term: &str, kind: Artifact) -> ArtifactFile {
+    let name = format!("{term}-{}.txt", kind.label());
+    let path = std::env::temp_dir().join(&name);
+    ArtifactFile::new(name, path, "1 B", false)
+}
+
 #[test]
-fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() {
+fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() -> Result<()> {
     let mut engine = SessionEngine::start(vec![draft("in the end")]);
-    let mut producer = FailPictureOnce { spent: false };
-    let mut retried = false;
-    for _ in 0..10 {
-        match engine.advance(&mut producer) {
-            Some(EngineEvent::RetryStarted { .. }) => {
-                retried = true;
-                break;
-            }
-            Some(EngineEvent::BatchReady) => break,
-            Some(_) => continue,
-            None => break,
-        }
-    }
+    engine.applied_body(0, Ok((body_for("in the end"), None)));
+    engine.applied_media(
+        0,
+        Artifact::Scene,
+        Ok(file_for("in the end", Artifact::Scene)),
+    );
+    let event = engine.applied_media(0, Artifact::Picture, Err(anyhow!("transient")));
     assert!(
-        retried,
+        matches!(
+            event,
+            EngineEvent::RetryStarted {
+                artifact: Artifact::Picture,
+                ..
+            }
+        ),
         "engine must raise RetryStarted for the failing picture"
     );
     let drafts = engine.drafts().to_vec();
@@ -78,9 +79,10 @@ fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() {
         .cards_started(drafts);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("↻ picture 1/3"),
-        "Your cards must surface the retry attempt inline without leaving the screen"
+        rendered.contains("retry"),
+        "your cards must surface the retry attempt inline without leaving the screen: {rendered}"
     );
+    Ok(())
 }
 
 #[test]

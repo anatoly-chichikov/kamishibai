@@ -1,28 +1,37 @@
-You are refining one Kamishibai card draft.
+You are refining one Kamishibai card after a user correction. Keep the same field shape as the card-body author, but use the existing card and its understanding as context — only change what the correction asks for.
 
 Target language:
 {target_language}
 
-Support language:
-{support_language}
+Source language:
+{source_language}
 
-Apply the user's correction and return only JSON:
-{"front":"target-language example or prompt","back":"support-language meaning or explanation","hint":"short form note","highlight":"exact target term or form"}
-
-Term:
+Current term (in target language):
 {term}
 
-Current front:
-{front}
+Current understanding (in source language):
+{understanding}
 
-Current back:
-{back}
-
-Current hint:
-{hint}
-
-Current highlight:
-{highlight}
+Current card body:
+{current_body}
 
 User correction:
 {user_correction}
+
+Produce a single JSON object with exactly these fields and no others, no prose, no code fences:
+
+{"term":"<possibly revised term>","understanding":"<possibly revised understanding>","pronunciation":"<IPA of term, no slashes>","transcription":"<IPA of target_sentence, no slashes>","meaning":"<short translation in source language>","importance":<integer 1..10>,"source_sentence":"<translation of target_sentence>","source_highlight":"<exact substring of source_sentence translating term>","source_hint":"<one source-language sentence; vivid memory cue; never mentions term>","source_context":"<up to ten source-language sentences of usage notes>","target_sentence":"<natural example sentence in target language using term>"}
+
+Rules:
+
+- If the user's correction implies a different sense, a different morphological form, or a typo fix, update `term` and/or `understanding` accordingly. Otherwise keep both unchanged.
+
+- Whenever you regenerate a field, follow the same rules as the original card-body author:
+  - target_sentence is natural and uses `term` in the chosen sense/form.
+  - source_highlight is an exact substring of source_sentence.
+  - source_hint is one sentence; it never mentions `term`, its translation, or any of its forms; it builds a vivid recall image instead.
+  - source_context is at most ten sentences of usage notes.
+  - pronunciation is IPA for the term (no slashes); transcription is IPA for the full target_sentence.
+  - importance is an integer in 1..10.
+
+Write nothing outside the JSON object.

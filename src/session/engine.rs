@@ -1,13 +1,14 @@
-//! Session engine: drives the queue `scene -> picture -> sound` for every
-//! card draft, one artifact at a time, with a three-attempt retry budget.
+//! Session engine: tracks per-card artifact state.
 //!
-//! The real Gemini-backed producer lives in `src/generation/*`. Tests pass
-//! in an `ArtifactProducer` fake so the engine can be exercised without
-//! touching the network.
+//! The engine is purely state. It exposes `next_target` to advertise the next
+//! pending artifact, and `applied_*` methods that the shell calls once a
+//! background worker has produced (or failed to produce) an artifact. The
+//! shell drives all actual Gemini and disk work in background threads so the
+//! TUI never blocks on network I/O.
 
 use anyhow::Result;
 
-use super::draft::{Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft};
+use super::draft::{Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardBody, CardDraft};
 
 /// One step emitted by the engine for the outer shell to consume.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -28,15 +29,7 @@ pub enum EngineEvent {
     BatchDone { failed_cards: usize },
 }
 
-/// Contract for artifact generation. Implemented by the real Gemini pipeline
-/// and by inline fakes in tests.
-pub trait ArtifactProducer {
-    /// Attempt to produce one artifact for one draft. Success must mark the
-    /// slot as ready; failure lets the engine bump the retry tally.
-    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile>;
-}
-
-/// Session engine state: the ordered batch of drafts plus a cursor.
+/// Session engine state: the ordered batch of drafts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionEngine {
     drafts: Vec<CardDraft>,
@@ -53,58 +46,16 @@ impl SessionEngine {
         self.drafts.as_slice()
     }
 
-    /// Advance one step. Returns `None` when the queue has fully drained.
-    pub fn advance<P: ArtifactProducer>(&mut self, producer: &mut P) -> Option<EngineEvent> {
-        if let Some((index, artifact)) = self.next_target() {
-            let draft = self.drafts[index].clone();
-            let slot_before = slot(draft.artifacts(), artifact).clone();
-            let attempt = slot_before.tally().done().saturating_add(1);
-            match producer.produce(&draft, artifact) {
-                Ok(file) => {
-                    self.drafts[index] = self.drafts[index].clone().with_artifacts(mark_ready(
-                        draft.artifacts().clone(),
-                        artifact,
-                        file,
-                    ));
-                    Some(EngineEvent::ArtifactReady {
-                        card: index,
-                        artifact,
-                    })
-                }
-                Err(_) => {
-                    self.drafts[index] = self.drafts[index]
-                        .clone()
-                        .with_artifacts(mark_attempted(draft.artifacts().clone(), artifact));
-                    let latest = slot(self.drafts[index].artifacts(), artifact).clone();
-                    if latest.failed_terminally() {
-                        Some(EngineEvent::RetryExhausted {
-                            card: index,
-                            artifact,
-                        })
-                    } else {
-                        Some(EngineEvent::RetryStarted {
-                            card: index,
-                            artifact,
-                            attempt,
-                        })
-                    }
-                }
-            }
-        } else if self.all_ready() {
-            Some(EngineEvent::BatchReady)
-        } else if self.fully_drained() {
-            Some(EngineEvent::BatchDone {
-                failed_cards: self.failed_cards(),
-            })
-        } else {
-            None
-        }
-    }
-
-    fn next_target(&self) -> Option<(usize, Artifact)> {
+    /// Return the next pending artifact to work on, if any.
+    pub fn next_target(&self) -> Option<(usize, Artifact)> {
         for (index, draft) in self.drafts.iter().enumerate() {
             let artifacts = draft.artifacts();
-            for kind in [Artifact::Scene, Artifact::Picture, Artifact::Sound] {
+            for kind in [
+                Artifact::Body,
+                Artifact::Sound,
+                Artifact::Scene,
+                Artifact::Picture,
+            ] {
                 let current = slot(artifacts, kind);
                 if !current.complete() {
                     return Some((index, kind));
@@ -112,6 +63,111 @@ impl SessionEngine {
             }
         }
         None
+    }
+
+    /// Apply the outcome of a body-generation pass for one card.
+    pub fn applied_body(
+        &mut self,
+        card: usize,
+        result: Result<(CardBody, Option<ArtifactFile>)>,
+    ) -> EngineEvent {
+        let attempt_before = slot(self.drafts[card].artifacts(), Artifact::Body)
+            .tally()
+            .done()
+            .saturating_add(1);
+        match result {
+            Ok((body, file)) => {
+                self.drafts[card] = self.drafts[card].clone().with_body(body, file);
+                EngineEvent::ArtifactReady {
+                    card,
+                    artifact: Artifact::Body,
+                }
+            }
+            Err(_) => {
+                let bumped = mark_attempted(self.drafts[card].artifacts().clone(), Artifact::Body);
+                let cascaded = if slot(&bumped, Artifact::Body).failed_terminally() {
+                    discard_dependents_of_body(bumped)
+                } else {
+                    bumped
+                };
+                self.drafts[card] = self.drafts[card].clone().with_artifacts(cascaded);
+                let latest = slot(self.drafts[card].artifacts(), Artifact::Body);
+                if latest.failed_terminally() {
+                    EngineEvent::RetryExhausted {
+                        card,
+                        artifact: Artifact::Body,
+                    }
+                } else {
+                    EngineEvent::RetryStarted {
+                        card,
+                        artifact: Artifact::Body,
+                        attempt: attempt_before,
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply the outcome of a media-artifact pass (scene/picture/sound) for one card.
+    pub fn applied_media(
+        &mut self,
+        card: usize,
+        artifact: Artifact,
+        result: Result<ArtifactFile>,
+    ) -> EngineEvent {
+        debug_assert!(
+            !matches!(artifact, Artifact::Body),
+            "applied_media must not be called with Artifact::Body"
+        );
+        let attempt_before = slot(self.drafts[card].artifacts(), artifact)
+            .tally()
+            .done()
+            .saturating_add(1);
+        match result {
+            Ok(file) => {
+                self.drafts[card] = self.drafts[card].clone().with_artifacts(mark_ready(
+                    self.drafts[card].artifacts().clone(),
+                    artifact,
+                    file,
+                ));
+                EngineEvent::ArtifactReady { card, artifact }
+            }
+            Err(_) => {
+                let bumped = mark_attempted(self.drafts[card].artifacts().clone(), artifact);
+                let cascaded = if slot(&bumped, artifact).failed_terminally()
+                    && matches!(artifact, Artifact::Scene)
+                {
+                    discard_picture(bumped)
+                } else {
+                    bumped
+                };
+                self.drafts[card] = self.drafts[card].clone().with_artifacts(cascaded);
+                let latest = slot(self.drafts[card].artifacts(), artifact);
+                if latest.failed_terminally() {
+                    EngineEvent::RetryExhausted { card, artifact }
+                } else {
+                    EngineEvent::RetryStarted {
+                        card,
+                        artifact,
+                        attempt: attempt_before,
+                    }
+                }
+            }
+        }
+    }
+
+    /// Return BatchReady or BatchDone if all per-card work is complete; otherwise None.
+    pub fn batch_state(&self) -> Option<EngineEvent> {
+        if !self.fully_drained() {
+            return None;
+        }
+        if self.all_ready() {
+            Some(EngineEvent::BatchReady)
+        } else {
+            Some(EngineEvent::BatchDone {
+                failed_cards: self.failed_cards(),
+            })
+        }
     }
 
     fn all_ready(&self) -> bool {
@@ -123,9 +179,14 @@ impl SessionEngine {
     fn fully_drained(&self) -> bool {
         self.drafts.iter().all(|draft| {
             let artifacts = draft.artifacts();
-            [Artifact::Scene, Artifact::Picture, Artifact::Sound]
-                .iter()
-                .all(|kind| slot(artifacts, *kind).complete())
+            [
+                Artifact::Body,
+                Artifact::Sound,
+                Artifact::Scene,
+                Artifact::Picture,
+            ]
+            .iter()
+            .all(|kind| slot(artifacts, *kind).complete())
         })
     }
 
@@ -139,6 +200,7 @@ impl SessionEngine {
 
 fn slot(artifacts: &CardArtifacts, kind: Artifact) -> &ArtifactSlot {
     match kind {
+        Artifact::Body => artifacts.body(),
         Artifact::Scene => artifacts.scene(),
         Artifact::Picture => artifacts.picture(),
         Artifact::Sound => artifacts.sound(),
@@ -153,10 +215,31 @@ fn mark_attempted(artifacts: CardArtifacts, kind: Artifact) -> CardArtifacts {
     reshape(artifacts, kind, |slot| slot.attempted())
 }
 
+fn discard_dependents_of_body(artifacts: CardArtifacts) -> CardArtifacts {
+    reshape(
+        reshape(
+            reshape(artifacts, Artifact::Scene, |slot| slot.discard()),
+            Artifact::Picture,
+            |slot| slot.discard(),
+        ),
+        Artifact::Sound,
+        |slot| slot.discard(),
+    )
+}
+
+fn discard_picture(artifacts: CardArtifacts) -> CardArtifacts {
+    reshape(artifacts, Artifact::Picture, |slot| slot.discard())
+}
+
 fn reshape<F>(artifacts: CardArtifacts, kind: Artifact, mutate: F) -> CardArtifacts
 where
     F: Fn(ArtifactSlot) -> ArtifactSlot,
 {
+    let body = if kind == Artifact::Body {
+        mutate(artifacts.body().clone())
+    } else {
+        artifacts.body().clone()
+    };
     let scene = if kind == Artifact::Scene {
         mutate(artifacts.scene().clone())
     } else {
@@ -172,5 +255,5 @@ where
     } else {
         artifacts.sound().clone()
     };
-    CardArtifacts::from_parts(scene, picture, sound)
+    CardArtifacts::from_parts(body, scene, picture, sound)
 }

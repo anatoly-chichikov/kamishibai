@@ -1,159 +1,183 @@
-//! Session engine integration: scene → picture → sound queue with retries.
+//! Session engine integration: body → scene → picture → sound queue with retries.
 //!
-//! All artifact production is mocked. No Gemini, no disk, no network.
+//! No Gemini, no disk, no network. Tests drive the engine directly via
+//! `next_target` + `applied_*` instead of the old producer trait.
 
 use std::collections::HashMap;
 
-use anyhow::{Result, anyhow};
+use anyhow::anyhow;
 use kamishibai::session::{
-    Artifact, ArtifactFile, ArtifactProducer, CardDraft, CardPayload, EngineEvent, LanguagePair,
-    SessionEngine,
+    Artifact, ArtifactFile, CardBody, CardDraft, EngineEvent, LanguagePair, SessionEngine,
 };
 
 fn draft(term: &str) -> CardDraft {
     CardDraft::new(
         term,
+        format!("understanding for {term}"),
         LanguagePair::new("en", "ru"),
-        CardPayload::new("front", "back", "hint", term),
     )
 }
 
-struct AlwaysReady;
-
-impl ArtifactProducer for AlwaysReady {
-    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
-        Ok(file(draft, artifact))
-    }
-}
-
-struct FailFirstTwoScenes {
-    calls: HashMap<String, u8>,
-}
-
-impl FailFirstTwoScenes {
-    fn new() -> Self {
-        Self {
-            calls: HashMap::new(),
-        }
-    }
-}
-
-impl ArtifactProducer for FailFirstTwoScenes {
-    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
-        if artifact != Artifact::Scene {
-            return Ok(file(draft, artifact));
-        }
-        let count = self.calls.entry(String::from(draft.term())).or_insert(0);
-        *count += 1;
-        if *count <= 2 {
-            return Err(anyhow!("scene producer transient error"));
-        }
-        Ok(file(draft, artifact))
-    }
-}
-
-struct FailSceneAlways;
-
-impl ArtifactProducer for FailSceneAlways {
-    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
-        if artifact == Artifact::Scene {
-            return Err(anyhow!("scene blocked"));
-        }
-        Ok(file(draft, artifact))
-    }
-}
-
-fn file(draft: &CardDraft, artifact: Artifact) -> ArtifactFile {
-    ArtifactFile::new(
-        format!("{}-{}.txt", draft.term(), artifact.label()),
-        "1 B",
-        false,
+fn body_for(term: &str) -> CardBody {
+    CardBody::new(
+        format!("/{term}/"),
+        format!("/{term} sentence/"),
+        format!("meaning of {term}"),
+        5,
+        format!("source for {term}"),
+        term,
+        format!("hint for {term}"),
+        format!("context for {term}"),
+        format!("Example with {term}."),
     )
+}
+
+fn file_for(draft: &CardDraft, artifact: Artifact) -> ArtifactFile {
+    let name = format!("{}-{}.txt", draft.term(), artifact.label());
+    let path = std::env::temp_dir().join(&name);
+    ArtifactFile::new(name, path, "1 B", false)
+}
+
+fn run(
+    engine: &mut SessionEngine,
+    mut step: impl FnMut(usize, Artifact) -> StepOutcome,
+) -> Vec<EngineEvent> {
+    let mut events = Vec::new();
+    for _ in 0..32 {
+        if let Some((card, kind)) = engine.next_target() {
+            let outcome = step(card, kind);
+            let event = match (kind, outcome) {
+                (Artifact::Body, StepOutcome::BodyOk(body)) => {
+                    engine.applied_body(card, Ok((body, None)))
+                }
+                (Artifact::Body, StepOutcome::Fail) => {
+                    engine.applied_body(card, Err(anyhow!("transient")))
+                }
+                (kind, StepOutcome::MediaOk(file)) => engine.applied_media(card, kind, Ok(file)),
+                (kind, StepOutcome::Fail) => {
+                    engine.applied_media(card, kind, Err(anyhow!("transient")))
+                }
+                _ => unreachable!(),
+            };
+            events.push(event);
+            continue;
+        }
+        if let Some(event) = engine.batch_state() {
+            events.push(event);
+            return events;
+        }
+        return events;
+    }
+    events
+}
+
+enum StepOutcome {
+    BodyOk(CardBody),
+    MediaOk(ArtifactFile),
+    Fail,
 }
 
 #[test]
 fn happy_path_produces_each_artifact_in_order_and_reports_batch_ready() {
     let mut engine = SessionEngine::start(vec![draft("whilst"), draft("wreck")]);
-    let mut producer = AlwaysReady;
-    let mut events: Vec<EngineEvent> = Vec::new();
-    for _ in 0..10 {
-        match engine.advance(&mut producer) {
-            Some(EngineEvent::BatchReady) => {
-                events.push(EngineEvent::BatchReady);
-                break;
-            }
-            Some(event) => events.push(event),
-            None => break,
-        }
-    }
+    let drafts: Vec<CardDraft> = engine.drafts().to_vec();
+    let events = run(&mut engine, |card, artifact| match artifact {
+        Artifact::Body => StepOutcome::BodyOk(body_for(drafts[card].term())),
+        kind => StepOutcome::MediaOk(file_for(&drafts[card], kind)),
+    });
     let kinds: Vec<Artifact> = events
         .iter()
-        .take(6)
         .filter_map(|event| match event {
             EngineEvent::ArtifactReady { artifact, .. } => Some(*artifact),
             _ => None,
         })
         .collect();
     assert_eq!(
-        (events.last(), kinds.len(), kinds[0], kinds[1], kinds[2]),
+        (
+            events.last(),
+            kinds.len(),
+            kinds[0],
+            kinds[1],
+            kinds[2],
+            kinds[3]
+        ),
         (
             Some(&EngineEvent::BatchReady),
-            6,
+            8,
+            Artifact::Body,
+            Artifact::Sound,
             Artifact::Scene,
             Artifact::Picture,
-            Artifact::Sound,
         ),
-        "engine must produce scene → picture → sound per card and end with BatchReady"
+        "engine must produce body → sound → scene → picture per card and end with BatchReady"
     );
 }
 
 #[test]
 fn transient_scene_failures_retry_up_to_three_times_before_moving_on() {
     let mut engine = SessionEngine::start(vec![draft("whilst")]);
-    let mut producer = FailFirstTwoScenes::new();
-    let mut events: Vec<EngineEvent> = Vec::new();
-    for _ in 0..20 {
-        match engine.advance(&mut producer) {
-            Some(EngineEvent::BatchReady) => {
-                events.push(EngineEvent::BatchReady);
-                break;
+    let drafts: Vec<CardDraft> = engine.drafts().to_vec();
+    let mut scene_calls: HashMap<String, u8> = HashMap::new();
+    let events = run(&mut engine, |card, artifact| match artifact {
+        Artifact::Body => StepOutcome::BodyOk(body_for(drafts[card].term())),
+        Artifact::Scene => {
+            let count = scene_calls
+                .entry(String::from(drafts[card].term()))
+                .or_insert(0);
+            *count += 1;
+            if *count <= 2 {
+                StepOutcome::Fail
+            } else {
+                StepOutcome::MediaOk(file_for(&drafts[card], Artifact::Scene))
             }
-            Some(event) => events.push(event),
-            None => break,
         }
-    }
+        kind => StepOutcome::MediaOk(file_for(&drafts[card], kind)),
+    });
     let retries = events
         .iter()
-        .filter(|event| matches!(event, EngineEvent::RetryStarted { .. }))
+        .filter(|event| {
+            matches!(
+                event,
+                EngineEvent::RetryStarted {
+                    artifact: Artifact::Scene,
+                    ..
+                }
+            )
+        })
         .count();
     assert_eq!(
         (retries, events.last()),
         (2, Some(&EngineEvent::BatchReady)),
-        "two transient failures must raise two RetryStarted events before the scene finally succeeds"
+        "two transient scene failures must raise two RetryStarted events before scene finally succeeds"
     );
 }
 
 #[test]
-fn terminal_failure_after_three_attempts_closes_batch_with_failure_summary() {
+fn terminal_scene_failure_discards_picture_and_completes_remaining() {
     let mut engine = SessionEngine::start(vec![draft("whilst")]);
-    let mut producer = FailSceneAlways;
-    let mut events: Vec<EngineEvent> = Vec::new();
-    for _ in 0..20 {
-        match engine.advance(&mut producer) {
-            Some(EngineEvent::BatchReady) => break,
-            Some(event) => events.push(event.clone()),
-            None => break,
-        }
-        if let Some(EngineEvent::BatchDone { .. }) = events.last() {
-            break;
-        }
-    }
-    let exhausted = events
-        .iter()
-        .any(|event| matches!(event, EngineEvent::RetryExhausted { .. }));
+    let drafts: Vec<CardDraft> = engine.drafts().to_vec();
+    let events = run(&mut engine, |card, artifact| match artifact {
+        Artifact::Body => StepOutcome::BodyOk(body_for(drafts[card].term())),
+        Artifact::Scene => StepOutcome::Fail,
+        kind => StepOutcome::MediaOk(file_for(&drafts[card], kind)),
+    });
+    let exhausted = events.iter().any(|event| {
+        matches!(
+            event,
+            EngineEvent::RetryExhausted {
+                artifact: Artifact::Scene,
+                ..
+            }
+        )
+    });
+    let picture_discarded = engine.drafts()[0].artifacts().picture().discarded();
     assert_eq!(
-        (exhausted, events.last()),
-        (true, Some(&EngineEvent::BatchDone { failed_cards: 1 })),
-        "three failed attempts must raise RetryExhausted and then BatchDone with the failed card counted"
+        (exhausted, picture_discarded, events.last()),
+        (
+            true,
+            true,
+            Some(&EngineEvent::BatchDone { failed_cards: 1 })
+        ),
+        "terminal scene failure must discard picture and emit BatchDone with the failed card counted"
     );
 }

@@ -32,21 +32,17 @@ fn published() -> App {
 }
 
 #[test]
-fn done_screen_lists_three_artifacts_and_keyboard_hints() {
+fn done_screen_lists_short_artifact_labels_and_keyboard_hints() {
     let rendered = flat(&published());
     assert!(
-        rendered.contains("Done")
-            && rendered.contains("here's what I made")
-            && rendered.contains("✓ Anki deck:")
-            && rendered.contains("en_2026-04-17_183029.apkg")
-            && rendered.contains("✓ Report:")
-            && rendered.contains("en_2026-04-17_183029.pdf")
-            && rendered.contains("✓ Output:")
-            && rendered.contains("kamishibai-out/")
-            && !rendered.contains("просто ссылки")
-            && rendered.contains("[n] new batch · [q] quit")
-            && rendered.contains("kamishibai · EN → RU"),
-        "Done must render the three artifacts and the keyboard line, without any design-tool commentary"
+        rendered.contains("your cards")
+            && rendered.contains("all done")
+            && rendered.contains("APKG")
+            && rendered.contains("PDF")
+            && rendered.contains("[n]")
+            && rendered.contains("new batch")
+            && rendered.contains("RU → EN"),
+        "Done must render compact APKG/PDF link labels and keyboard hints with the language chip"
     );
 }
 
@@ -56,7 +52,7 @@ fn new_batch_from_done_returns_to_your_words_with_language_kept() {
     let (next, _) = transit(app, AppEvent::NewBatch);
     assert_eq!(
         (next.screen(), next.pair().label()),
-        (Screen::YourWords, String::from("EN → RU")),
+        (Screen::YourWords, String::from("RU → EN")),
         "N on Done must return to Your words while keeping the language pair"
     );
 }

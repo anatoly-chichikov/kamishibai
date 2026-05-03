@@ -1,7 +1,7 @@
 //! Integration flow for `What I understood -> Change something -> updated What I understood`.
 
 use anyhow::Result;
-use kamishibai::session::{BulkCorrection, CandidateKind, LanguagePair, WordCandidate};
+use kamishibai::session::{BulkCorrection, LanguagePair, WordCandidate};
 use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -20,9 +20,8 @@ impl BulkCorrection for FakeBulk {
             .map(|candidate| {
                 Ok(WordCandidate::new(
                     candidate.term(),
-                    CandidateKind::Word,
-                    "updated by bulk pass",
-                    "verb sense selected",
+                    "updated by bulk pass — verb sense selected",
+                    candidate.ok(),
                 ))
             })
             .collect()
@@ -49,8 +48,8 @@ fn seeded() -> App {
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_target("en")
         .understood(vec![
-            WordCandidate::new("whilst", CandidateKind::Word, "«пока»", ""),
-            WordCandidate::new("wreck", CandidateKind::Word, "обломки", ""),
+            WordCandidate::new("whilst", "neutral conjunction; while", true),
+            WordCandidate::new("wreck", "noun: remains of a destroyed ship", true),
         ])
 }
 
@@ -69,8 +68,8 @@ fn modal_renders_prompt_dashes_textarea_and_send_cancel_footer() {
         .typed('b');
     let rendered = flat(&app);
     assert!(
-        rendered.contains("How should I change these?")
-            && rendered.contains("applies to all 2")
+        rendered.contains("change")
+            && rendered.contains("tell me what to change")
             && rendered.contains("#2 - verb")
             && rendered.contains("[Esc] cancel")
             && rendered.contains("[Enter] send"),
@@ -129,7 +128,7 @@ fn bulk_pass_result_flows_back_into_what_i_understood() {
     let reviewed = app.understood(updated);
     let rendered = flat(&reviewed);
     assert!(
-        rendered.contains("updated by bulk pass") && rendered.contains("verb sense selected"),
-        "after returning from Change something the review screen must show the patched previews"
+        rendered.contains("updated by bulk pass"),
+        "after returning from Change something the review screen must show the patched understanding"
     );
 }

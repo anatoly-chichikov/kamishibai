@@ -1,104 +1,103 @@
-//! Renderer for the sense-check screen.
+//! Renderer for the `what i understood` screen.
 //!
-//! This is step one of two between raw input and expensive card generation.
+//! Mirrors `kamishibai-simple/project/steps-1.jsx` (StepUnderstood). One row
+//! per word: number, term, em-dash, and the human-language understanding the
+//! model produced. Excluded items (kind=Skipped) get a strikethrough term and
+//! the explanation as the gloss so the user can see what was rejected and why.
+
+use std::borrow::Cow;
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::session::{MetaSegment, MetaTone, WordCandidate};
+use super::ScreenView;
+use crate::session::WordCandidate;
 use crate::tui::app::App;
 use crate::tui::palette;
 
-const GUTTER: u16 = 4;
-const TARGET_PENDING: &str = "...";
+const HEADLINE: &str = "what i understood";
+const HINT: &str = "quick check before i build the cards";
 
-/// Draw the sense-check screen for the current `App`.
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .split(area);
-    let width = area.width.saturating_sub(GUTTER * 2);
-    frame.render_widget(top_bar(app, width), inset(rows[0]));
-    frame.render_widget(question_bar(app, width), inset(rows[1]));
-    frame.render_widget(rule(width), inset(rows[2]));
-    frame.render_widget(body(app), inset(rows[3]));
-    frame.render_widget(footer_primary(app), inset(rows[4]));
-    frame.render_widget(footer_secondary(app, width), inset(rows[5]));
+/// `ScreenView` handle for the sense-check screen.
+pub struct WhatIUnderstood;
+
+impl ScreenView for WhatIUnderstood {
+    fn title(&self, _: &App) -> Cow<'static, str> {
+        Cow::Borrowed(HEADLINE)
+    }
+
+    fn hint(&self, _: &App) -> Cow<'static, str> {
+        Cow::Borrowed(HINT)
+    }
+
+    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
+        footer(app, width)
+    }
+
+    fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
+        frame.render_widget(body(app, area.width).scroll((app.body_scroll(), 0)), area);
+    }
 }
 
-fn top_bar(app: &App, width: u16) -> Paragraph<'static> {
-    let copy = copy(app);
-    split_line(direction(app), copy.step, width, false)
-}
-
-fn question_bar(app: &App, width: u16) -> Paragraph<'static> {
-    let copy = copy(app);
-    split_line(copy.question, copy.subtitle, width, true)
-}
-
-fn split_line(
-    left: impl Into<String>,
-    right: impl Into<String>,
-    width: u16,
-    bold: bool,
-) -> Paragraph<'static> {
-    let left = left.into();
-    let right = right.into();
-    let gap = (width as usize).saturating_sub(left.chars().count() + right.chars().count());
-    let left_style = if bold {
-        palette::base().add_modifier(Modifier::BOLD)
-    } else {
-        palette::base()
-    };
-    Paragraph::new(Line::from(vec![
-        Span::styled(left, left_style),
-        Span::styled(" ".repeat(gap), palette::base()),
-        Span::styled(right, palette::base()),
-    ]))
-    .style(palette::base())
-}
-
-fn rule(width: u16) -> Paragraph<'static> {
-    Paragraph::new(Line::from(Span::styled(
-        "─".repeat(width as usize),
-        palette::dim(),
-    )))
-    .style(palette::base())
-}
-
-fn body(app: &App) -> Paragraph<'_> {
+fn body(app: &App, width: u16) -> Paragraph<'_> {
     if app.candidates().is_empty() {
-        let copy = copy(app);
-        let message = if app.target_pending() {
-            copy.pending
+        let typed: Vec<&str> = app
+            .blob()
+            .split('\n')
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        if !typed.is_empty() {
+            let term_width = typed
+                .iter()
+                .map(|line| line.chars().count())
+                .max()
+                .unwrap_or(12)
+                .max(12);
+            let lines = typed
+                .iter()
+                .enumerate()
+                .map(|(index, line)| pending_line(index, line, term_width, width))
+                .collect::<Vec<_>>();
+            return Paragraph::new(lines).style(palette::base());
+        }
+        let copy = if app.target_pending() {
+            "understanding your words…"
         } else {
-            copy.empty
+            "nothing left to review"
         };
-        return Paragraph::new(Line::from(Span::styled(message, palette::dim())))
+        return Paragraph::new(Line::from(Span::styled(copy, palette::dim())))
             .style(palette::base());
     }
     let term_width = padded_width(app.candidates(), |candidate| candidate.term(), 12);
-    let preview_width = padded_width(app.candidates(), |candidate| candidate.preview(), 14);
     let lines = app
         .candidates()
         .iter()
         .enumerate()
         .map(|(index, candidate)| {
-            candidate_line(index, candidate, app.selected(), term_width, preview_width)
+            candidate_line(index, candidate, app.selected(), term_width, width)
         })
         .collect::<Vec<_>>();
     Paragraph::new(lines).style(palette::base())
+}
+
+fn pending_line<'a>(index: usize, raw: &'a str, term_width: usize, width: u16) -> Line<'a> {
+    let term = super::common::pad_right(raw, term_width);
+    let used = 4 + term_width;
+    let pad = (width as usize).saturating_sub(used);
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    spans.push(Span::styled(
+        format!("{:0>2}  ", index + 1),
+        palette::dim2(),
+    ));
+    spans.push(Span::styled(term, palette::dim()));
+    if pad > 0 {
+        spans.push(Span::styled(" ".repeat(pad), palette::base()));
+    }
+    Line::from(spans)
 }
 
 fn candidate_line<'a>(
@@ -106,81 +105,53 @@ fn candidate_line<'a>(
     candidate: &'a WordCandidate,
     selected: usize,
     term_width: usize,
-    preview_width: usize,
+    width: u16,
 ) -> Line<'a> {
-    let mut spans = vec![
-        Span::styled(
-            format!("{:>2}.", index + 1),
-            row_number_style(index == selected),
-        ),
-        Span::raw(" "),
-        Span::styled(pad(candidate.term(), term_width), palette::base()),
-        Span::raw("  "),
-        Span::styled(pad(candidate.preview(), preview_width), palette::base()),
-        Span::raw("  "),
-    ];
-    spans.extend(meta_spans(candidate.meta().segments()));
-    Line::from(spans)
-}
-
-fn meta_spans(segments: &[MetaSegment]) -> Vec<Span<'_>> {
-    let mut spans = Vec::new();
-    for (index, segment) in segments.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::styled(" · ", palette::dim()));
-        }
-        spans.push(Span::styled(segment.text(), meta_style(segment.tone())));
-    }
-    spans
-}
-
-fn meta_style(tone: MetaTone) -> Style {
-    match tone {
-        MetaTone::Dim => palette::dim(),
-        MetaTone::Bright => palette::base().add_modifier(Modifier::BOLD),
-    }
-}
-
-fn row_number_style(selected: bool) -> Style {
-    if selected {
-        return palette::base();
-    }
-    palette::dim()
-}
-
-fn footer_primary(app: &App) -> Paragraph<'static> {
-    Paragraph::new(Line::from(Span::styled(
-        copy(app).footer_primary,
-        palette::key(),
-    )))
-    .style(palette::base())
-}
-
-fn footer_secondary(app: &App, width: u16) -> Paragraph<'static> {
-    let text = (copy(app).footer_secondary)(
-        app.candidates()
-            .iter()
-            .filter(|candidate| candidate.included())
-            .count(),
-    );
-    let pad = (width as usize).saturating_sub(text.chars().count());
-    Paragraph::new(Line::from(vec![
-        Span::styled(" ".repeat(pad), palette::base()),
-        Span::styled(text, palette::key()),
-    ]))
-    .style(palette::base())
-}
-
-fn direction(app: &App) -> String {
-    let target = if app.target_pending() {
-        String::from(TARGET_PENDING)
+    let is_selected = index == selected;
+    let row_style = if is_selected {
+        palette::highlight()
     } else {
-        app.pair().target().to_uppercase()
+        palette::base()
     };
-    format!(
-        "kamishibai · {target} → {}",
-        app.pair().support().to_uppercase()
-    )
+    let num_style = if is_selected {
+        palette::highlight().add_modifier(Modifier::BOLD)
+    } else {
+        palette::dim2()
+    };
+    let term_style = if !candidate.ok() {
+        palette::dim().add_modifier(Modifier::CROSSED_OUT)
+    } else if is_selected {
+        palette::highlight().add_modifier(Modifier::BOLD)
+    } else {
+        palette::base()
+    };
+    let dash_style = if !candidate.ok() {
+        palette::dim2()
+    } else if is_selected {
+        palette::highlight_dim()
+    } else {
+        palette::dim2()
+    };
+    let gloss_style = if !candidate.ok() {
+        palette::dim()
+    } else if is_selected {
+        palette::highlight_dim().add_modifier(Modifier::BOLD)
+    } else {
+        palette::dim()
+    };
+    let gloss = candidate.understanding().to_string();
+    let term = super::common::pad_right(candidate.term(), term_width);
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    spans.push(Span::styled(format!("{:0>2}  ", index + 1), num_style));
+    spans.push(Span::styled(term, term_style));
+    spans.push(Span::styled("  —  ", dash_style));
+    spans.push(Span::styled(gloss.clone(), gloss_style));
+    let used = 4 + term_width + 5 + gloss.chars().count();
+    let pad = (width as usize).saturating_sub(used);
+    if pad > 0 {
+        spans.push(Span::styled(" ".repeat(pad), row_style));
+    }
+    Line::from(spans)
 }
 
 fn padded_width<F>(candidates: &[WordCandidate], value: F, minimum: usize) -> usize
@@ -196,136 +167,33 @@ where
         .max(minimum)
 }
 
-fn pad(value: &str, width: usize) -> String {
-    let mut text = String::from(value);
-    let gap = width.saturating_sub(value.chars().count());
-    text.push_str(" ".repeat(gap).as_str());
-    text
-}
-
-fn inset(area: Rect) -> Rect {
-    let clamp = GUTTER.min(area.width / 2);
-    Rect {
-        x: area.x + clamp,
-        y: area.y,
-        width: area.width.saturating_sub(clamp * 2),
-        height: area.height,
-    }
-}
-
-fn copy(app: &App) -> SenseCopy {
-    match app.pair().support() {
-        "ru" => SenseCopy {
-            step: "шаг 1 из 2 · проверка смысла",
-            question: "Я правильно понял эти слова?",
-            subtitle: "поправь до того, как я сгенерирую карточки",
-            pending: "понимаю твои слова...",
-            empty: "не осталось слов для проверки",
-            footer_primary: "[↑↓] навигация · [d] удалить · [R] поправить · [L] мой язык",
-            footer_secondary: russian_footer,
-        },
-        "de" => SenseCopy {
-            step: "Schritt 1 von 2 · Bedeutungsprüfung",
-            question: "Habe ich diese Wörter richtig verstanden?",
-            subtitle: "korrigiere sie, bevor ich Karten generiere",
-            pending: "ich verstehe deine Wörter...",
-            empty: "keine Wörter mehr zu prüfen",
-            footer_primary: "[↑↓] Navigation · [d] löschen · [R] korrigieren · [L] meine Sprache",
-            footer_secondary: german_footer,
-        },
-        "el" => SenseCopy {
-            step: "βήμα 1 από 2 · έλεγχος νοήματος",
-            question: "Κατάλαβα σωστά αυτές τις λέξεις;",
-            subtitle: "διόρθωσέ τες πριν δημιουργήσω κάρτες",
-            pending: "καταλαβαίνω τις λέξεις σου...",
-            empty: "δεν έμειναν λέξεις για έλεγχο",
-            footer_primary: "[↑↓] πλοήγηση · [d] διαγραφή · [R] διόρθωση · [L] γλώσσα μου",
-            footer_secondary: greek_footer,
-        },
-        "es" => SenseCopy {
-            step: "paso 1 de 2 · revisión del sentido",
-            question: "¿Entendí bien estas palabras?",
-            subtitle: "corrige antes de que genere las tarjetas",
-            pending: "entendiendo tus palabras...",
-            empty: "no quedan palabras por revisar",
-            footer_primary: "[↑↓] navegación · [d] eliminar · [R] corregir · [L] mi idioma",
-            footer_secondary: spanish_footer,
-        },
-        "zh" => SenseCopy {
-            step: "第 1 步，共 2 步 · 意义检查",
-            question: "我正确理解这些词了吗？",
-            subtitle: "在我生成卡片前先修改",
-            pending: "正在理解你的词...",
-            empty: "没有剩余词条需要检查",
-            footer_primary: "[↑↓] 导航 · [d] 删除 · [R] 修改 · [L] 我的语言",
-            footer_secondary: chinese_footer,
-        },
-        _ => SenseCopy {
-            step: "step 1 of 2 · sense check",
-            question: "Did I understand these words correctly?",
-            subtitle: "change them before I generate cards",
-            pending: "understanding your words...",
-            empty: "nothing left to review",
-            footer_primary: "[↑↓] navigate · [d] delete · [R] change · [L] my language",
-            footer_secondary: english_footer,
-        },
-    }
-}
-
-fn english_footer(cards: usize) -> String {
-    let noun = if cards == 1 { "card" } else { "cards" };
-    format!("[T] change target · [Enter] generate {cards} {noun}")
-}
-
-fn german_footer(cards: usize) -> String {
-    let noun = if cards == 1 { "Karte" } else { "Karten" };
-    format!("[T] target wechseln · [Enter] {cards} {noun} generieren")
-}
-
-fn greek_footer(cards: usize) -> String {
-    let noun = if cards == 1 {
-        "κάρτα"
+fn footer(app: &App, width: u16) -> Paragraph<'static> {
+    let mut left: Vec<Span<'static>> = Vec::new();
+    left.push(Span::styled("step 2/3", palette::dim2()));
+    left.push(super::common::status_sep());
+    let count = app
+        .candidates()
+        .iter()
+        .filter(|candidate| candidate.ok())
+        .count();
+    if count > 0 {
+        left.push(Span::styled(
+            count.to_string(),
+            palette::base().add_modifier(Modifier::BOLD),
+        ));
+        let noun = if count == 1 { "card" } else { "cards" };
+        left.push(Span::styled(format!(" {noun}"), palette::dim()));
     } else {
-        "κάρτες"
-    };
-    format!("[T] αλλαγή target · [Enter] δημιουργία {cards} {noun}")
-}
-
-fn russian_footer(cards: usize) -> String {
-    format!(
-        "[T] сменить target · [Enter] сгенерировать {cards} {}",
-        russian_card_word(cards)
-    )
-}
-
-fn spanish_footer(cards: usize) -> String {
-    let noun = if cards == 1 { "tarjeta" } else { "tarjetas" };
-    format!("[T] cambiar target · [Enter] generar {cards} {noun}")
-}
-
-fn chinese_footer(cards: usize) -> String {
-    format!("[T] 切换 target · [Enter] 生成 {cards} 张卡片")
-}
-
-fn russian_card_word(cards: usize) -> &'static str {
-    let last_two = cards % 100;
-    let last = cards % 10;
-    if (11..=14).contains(&last_two) {
-        return "карточек";
+        left.push(Span::styled("nothing to make", palette::dim2()));
     }
-    match last {
-        1 => "карточку",
-        2..=4 => "карточки",
-        _ => "карточек",
-    }
-}
-
-struct SenseCopy {
-    step: &'static str,
-    question: &'static str,
-    subtitle: &'static str,
-    pending: &'static str,
-    empty: &'static str,
-    footer_primary: &'static str,
-    footer_secondary: fn(usize) -> String,
+    let mut right: Vec<Span<'static>> = Vec::new();
+    right.extend(super::common::key_hint("↑↓", "nav"));
+    right.push(super::common::status_sep());
+    right.extend(super::common::key_hint("D", "drop"));
+    right.push(super::common::status_sep());
+    right.extend(super::common::key_hint("R", "change"));
+    right.push(super::common::status_sep());
+    right.extend(super::common::key_hint("Enter", "generate"));
+    super::common::append_quit(&mut right, app.quit_pending());
+    super::common::status_bar(left, right, width)
 }

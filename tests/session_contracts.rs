@@ -4,9 +4,9 @@
 
 use anyhow::Result;
 use kamishibai::session::{
-    Artifact, BulkCorrection, CandidateKind, CardArtifacts, CardDraft, CardPayload, LanguagePair,
-    RawInputBatch, ScriptDetection, SessionState, TargetDetection, TargetGuess, Understanding,
-    Understood, WordCandidate, to_document, to_entry,
+    Artifact, BulkCorrection, CardArtifacts, CardBody, CardDraft, LanguagePair, RawInputBatch,
+    ScriptDetection, SessionState, TargetDetection, TargetGuess, Understanding, Understood,
+    WordCandidate, to_document, to_entry,
 };
 
 struct FakeUnderstanding;
@@ -18,15 +18,13 @@ impl Understanding for FakeUnderstanding {
             vec![
                 WordCandidate::new(
                     "whilst",
-                    CandidateKind::Word,
-                    "«пока, в то время как» · BrE",
-                    "formal, bookish usage",
+                    "neutral conjunction; British English, slightly bookish",
+                    true,
                 ),
                 WordCandidate::new(
                     "wreck",
-                    CandidateKind::Word,
-                    "обломки · разрушать",
-                    "context suggests verb sense",
+                    "ambiguous between noun (the remains of a destroyed ship) and verb (to destroy); context suggests verb",
+                    true,
                 ),
             ],
         ))
@@ -46,29 +44,32 @@ impl BulkCorrection for FakeBulk {
         if let Some(last) = patched.last_mut() {
             *last = WordCandidate::new(
                 last.term(),
-                CandidateKind::Word,
-                "разбить (машину)",
-                "user clarified verb sense",
+                "user clarified verb sense — to crash or destroy a vehicle",
+                true,
             );
         }
         Ok(patched)
     }
 }
 
+fn body_for(candidate: &WordCandidate) -> CardBody {
+    let term = candidate.term();
+    CardBody::new(
+        format!("/{term}/"),
+        format!("/sentence with {term}/"),
+        format!("local meaning of {term}"),
+        5,
+        format!("Russian translation of a sentence with {term}"),
+        term,
+        format!("vivid recall image for {term}"),
+        format!("usage notes around {term}"),
+        format!("English example with {term}."),
+    )
+}
+
 fn draft_for(candidate: &WordCandidate, pair: &LanguagePair) -> CardDraft {
-    let payload = CardPayload::new(
-        format!(
-            "Пока она говорила, я {} думал о своём.",
-            candidate.preview()
-        ),
-        format!(
-            "While she was speaking, I was thinking of my own stuff. ({})",
-            candidate.preview()
-        ),
-        candidate.note(),
-        candidate.term(),
-    );
-    CardDraft::new(candidate.term(), pair.clone(), payload)
+    CardDraft::new(candidate.term(), candidate.understanding(), pair.clone())
+        .with_body(body_for(candidate), None)
 }
 
 #[test]
@@ -89,7 +90,7 @@ fn your_words_to_what_i_understood_flow_builds_session_with_confirmed_candidates
             session.confirmed().len(),
             session.confirmed()[0].term(),
         ),
-        (String::from("EN → RU"), 2, "whilst"),
+        (String::from("RU → EN"), 2, "whilst"),
         "flow must attach the detected pair and mocked candidates to session state"
     );
 }
@@ -105,12 +106,12 @@ fn bulk_correction_pass_replaces_candidate_metadata_without_touching_pair() {
     let after = FakeBulk
         .correct_bulk(&before, "#2 — глагол", &pair)
         .expect("bulk correction must succeed");
-    assert_eq!(
+    assert!(
         after
             .last()
             .expect("bulk result must keep the row")
-            .preview(),
-        "разбить (машину)",
+            .understanding()
+            .contains("verb sense"),
         "bulk correction pass must apply user comment to the targeted candidate"
     );
 }
@@ -170,12 +171,7 @@ fn terminal_failure_is_recognisable_after_three_failed_attempts() {
 #[test]
 fn bridge_from_single_draft_fills_both_languages() {
     let pair = LanguagePair::new("en", "ru");
-    let candidate = WordCandidate::new(
-        "wreck",
-        CandidateKind::Word,
-        "разбить (машину)",
-        "verb sense",
-    );
+    let candidate = WordCandidate::new("wreck", "verb sense — to destroy a vehicle", true);
     let draft = draft_for(&candidate, &pair);
     let entry = to_entry(&draft).expect("bridge must succeed");
     assert_eq!(

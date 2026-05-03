@@ -10,17 +10,21 @@ use serde_json::Value;
 use crate::generation::{manga_template, render_scene_prompt};
 use crate::languages::catalog;
 use crate::session::{
-    CandidateKind, CandidateMeta, CardDraft, CardPayload, LanguagePair, MetaSegment, RawInputBatch,
-    TargetGuess, Understood, WordCandidate,
+    CardBody, CardDraft, CardRevision, LanguagePair, RawInputBatch, TargetGuess, Understood,
+    WordCandidate,
 };
 
 use super::codec::decode;
-use super::prompts::{render_bulk_prompt, render_card_prompt, render_intake_prompt};
+use super::prompts::{
+    render_bulk_prompt, render_card_body_prompt, render_card_prompt, render_intake_prompt,
+};
 use super::protocol::{
     GenerationConfig, Request, Response, api_error, diagnosis, enforce, unfence, validate,
 };
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+const TEXT_MODEL: &str = "gemini-3-flash-preview";
+const BODY_MODEL: &str = "gemini-3.1-pro-preview";
 const SCENE_MODEL: &str = "gemini-3-flash-preview";
 const IMAGE_MODEL: &str = "gemini-3.1-flash-image-preview";
 const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
@@ -141,7 +145,7 @@ where
     /// Translate one sentence into the enforced manga scene JSON shape.
     pub fn scene(&self, language: &str, sentence: &str, target: &str) -> Result<Value> {
         let prompt = render_scene_prompt(language).replace("{sentence}", sentence);
-        let raw = self.text(prompt)?;
+        let raw = self.text(SCENE_MODEL, prompt)?;
         let cleaned = unfence(raw.trim());
         let panels = serde_json::from_str::<Value>(cleaned)?;
         let Some(items) = panels.as_array() else {
@@ -157,11 +161,12 @@ where
         Ok(scene)
     }
 
-    /// Resolve raw user input into reviewed candidates using the Flash text model.
+    /// Resolve raw user input into reviewed rows using the Flash text model.
     pub fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
         let catalog = catalog();
         let prompt = render_intake_prompt(raw.text(), my, &catalog)?;
-        let decoded: IntakeResponse = serde_json::from_str(unfence(self.text(prompt)?.trim()))?;
+        let decoded: IntakeResponse =
+            serde_json::from_str(unfence(self.text(TEXT_MODEL, prompt)?.trim()))?;
         Ok(Understood::new(
             TargetGuess::new(decoded.target_lang, true),
             decoded
@@ -172,7 +177,7 @@ where
         ))
     }
 
-    /// Re-run the reviewed candidate list after a user bulk refinement.
+    /// Re-run the reviewed list after a user bulk refinement.
     pub fn correct_bulk(
         &self,
         candidates: &[WordCandidate],
@@ -181,12 +186,27 @@ where
     ) -> Result<Vec<WordCandidate>> {
         let catalog = catalog();
         let prompt = render_bulk_prompt(candidates, comment, pair, &catalog)?;
-        let decoded: IntakeResponse = serde_json::from_str(unfence(self.text(prompt)?.trim()))?;
+        let decoded: IntakeResponse =
+            serde_json::from_str(unfence(self.text(TEXT_MODEL, prompt)?.trim()))?;
         decoded
             .items
             .into_iter()
             .map(IntakeItem::candidate)
             .collect()
+    }
+
+    /// Build the rich card body for one term using the Pro tier.
+    pub fn generate_card_body(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+    ) -> Result<CardBody> {
+        let catalog = catalog();
+        let prompt = render_card_body_prompt(term, understanding, pair, &catalog)?;
+        let decoded: CardBodyResponse =
+            serde_json::from_str(unfence(self.text(BODY_MODEL, prompt)?.trim()))?;
+        Ok(decoded.into_body())
     }
 
     /// Recompose one card draft after a per-card refinement.
@@ -195,16 +215,14 @@ where
         draft: &CardDraft,
         comment: &str,
         pair: &LanguagePair,
-    ) -> Result<CardDraft> {
+    ) -> Result<CardRevision> {
         let catalog = catalog();
         let prompt = render_card_prompt(draft, comment, pair, &catalog)?;
-        let decoded: CardResponse = serde_json::from_str(unfence(self.text(prompt)?.trim()))?;
-        Ok(draft.clone().recomposed(CardPayload::new(
-            decoded.front,
-            decoded.back,
-            decoded.hint,
-            decoded.highlight,
-        )))
+        let decoded: CardCorrectionResponse =
+            serde_json::from_str(unfence(self.text(BODY_MODEL, prompt)?.trim()))?;
+        let term = decoded.term.clone();
+        let understanding = decoded.understanding.clone();
+        Ok(CardRevision::new(term, understanding, decoded.into_body()))
     }
 
     /// Render one scene JSON payload into raw image bytes.
@@ -269,8 +287,8 @@ where
         Ok(serde_json::from_str(&response.body)?)
     }
 
-    fn text(&self, prompt: String) -> Result<String> {
-        let response = self.request(SCENE_MODEL, &Request::text(prompt, None, None))?;
+    fn text(&self, model: &str, prompt: String) -> Result<String> {
+        let response = self.request(model, &Request::text(prompt, None, None))?;
         let raw = response
             .candidates
             .iter()
@@ -295,91 +313,90 @@ struct IntakeResponse {
 #[derive(Clone, Debug, Deserialize)]
 struct IntakeItem {
     term: String,
-    language: String,
-    kind: String,
-    preview: String,
-    note: String,
-    #[serde(default)]
-    meta: Vec<IntakeMetaSegment>,
-    include: bool,
+    understanding: String,
+    ok: bool,
 }
 
 impl IntakeItem {
     fn candidate(self) -> Result<WordCandidate> {
-        let kind = if self.include {
-            kind(self.kind.as_str())?
+        let term = nonempty(self.term.as_str(), "candidate");
+        let understanding = if self.understanding.trim().is_empty() {
+            String::from(if self.ok {
+                "no notes"
+            } else {
+                "skipped without explanation"
+            })
         } else {
-            CandidateKind::Skipped
+            self.understanding
         };
-        let note = if self.language.trim().is_empty() {
-            self.note
-        } else if self.note.trim().is_empty() {
-            self.language
-        } else {
-            format!("{} · {}", self.language, self.note)
-        };
-        let meta = meta(self.meta, &kind, note.as_str())?;
-        Ok(WordCandidate::with_meta(
-            nonempty(self.term.as_str(), "candidate"),
-            kind,
-            self.preview,
-            note,
-            meta,
-        ))
+        Ok(WordCandidate::new(term, understanding, self.ok))
     }
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct IntakeMetaSegment {
-    text: String,
-    tone: String,
+struct CardBodyResponse {
+    pronunciation: String,
+    transcription: String,
+    meaning: String,
+    importance: u8,
+    source_sentence: String,
+    source_highlight: String,
+    source_hint: String,
+    source_context: String,
+    target_sentence: String,
+}
+
+impl CardBodyResponse {
+    fn into_body(self) -> CardBody {
+        CardBody::new(
+            self.pronunciation,
+            self.transcription,
+            self.meaning,
+            self.importance,
+            self.source_sentence,
+            self.source_highlight,
+            self.source_hint,
+            self.source_context,
+            self.target_sentence,
+        )
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct CardResponse {
-    front: String,
-    back: String,
-    hint: String,
-    highlight: String,
+struct CardCorrectionResponse {
+    term: String,
+    understanding: String,
+    pronunciation: String,
+    transcription: String,
+    meaning: String,
+    importance: u8,
+    source_sentence: String,
+    source_highlight: String,
+    source_hint: String,
+    source_context: String,
+    target_sentence: String,
+}
+
+impl CardCorrectionResponse {
+    fn into_body(self) -> CardBody {
+        CardBody::new(
+            self.pronunciation,
+            self.transcription,
+            self.meaning,
+            self.importance,
+            self.source_sentence,
+            self.source_highlight,
+            self.source_hint,
+            self.source_context,
+            self.target_sentence,
+        )
+    }
 }
 
 fn voice() -> &'static str {
     let mut rng = rand::rng();
     let index = rng.random_range(0..VOICES.len());
     VOICES[index]
-}
-
-fn kind(value: &str) -> Result<CandidateKind> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "word" => Ok(CandidateKind::Word),
-        "phrase" => Ok(CandidateKind::Phrase),
-        "idiom" => Ok(CandidateKind::Idiom),
-        "collocation" => Ok(CandidateKind::Collocation),
-        "sentence" => Ok(CandidateKind::Sentence),
-        "skip" => Ok(CandidateKind::Skipped),
-        other => bail!("Unsupported candidate kind '{other}'"),
-    }
-}
-
-fn meta(
-    segments: Vec<IntakeMetaSegment>,
-    kind: &CandidateKind,
-    fallback_note: &str,
-) -> Result<CandidateMeta> {
-    if segments.is_empty() {
-        return Ok(CandidateMeta::legacy(kind, fallback_note));
-    }
-    let parsed = segments
-        .into_iter()
-        .map(
-            |segment| match segment.tone.trim().to_ascii_lowercase().as_str() {
-                "dim" => Ok(MetaSegment::dim(segment.text)),
-                "bright" => Ok(MetaSegment::bright(segment.text)),
-                other => bail!("Unsupported metadata tone '{other}'"),
-            },
-        )
-        .collect::<Result<Vec<_>>>()?;
-    Ok(CandidateMeta::from_segments(parsed))
 }
 
 fn nonempty(value: &str, fallback: &str) -> String {

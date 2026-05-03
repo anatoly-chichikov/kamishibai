@@ -1,20 +1,23 @@
 //! TUI entrypoint for the word-first kamishibai flow.
 //!
-//! The old JSON-first CLI is gone. The binary boots straight into the locked
-//! TUI state machine. This module owns the terminal shell, preference store,
-//! first-pass understanding, and a deterministic artifact side-effect bridge.
+//! The TUI shell owns the terminal, preferences, and the background workers
+//! for both text passes (understand / bulk / per-card correction / card body)
+//! and media passes (scene / picture / audio). Every Gemini call runs in a
+//! background thread so the TUI never blocks on network I/O. Once a batch
+//! finishes, `PublishDone` saves a real APKG deck and a real PDF report.
 
 use std::fs;
 use std::io::stdout;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use crossterm::event::{
-    Event, KeyCode, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags, poll, read,
+    DisableMouseCapture, EnableMouseCapture, Event, KeyboardEnhancementFlags, MouseButton,
+    MouseEventKind, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags, poll, read,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -23,21 +26,33 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use time::OffsetDateTime;
+use time::format_description::parse as parse_time;
 
+use crate::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
 use crate::config::{Preferences, default_store};
 use crate::gemini::{GeminiClient, HttpTransport};
+use crate::generation::artifact_cache::Cache;
+use crate::generation::manga::{
+    BorderDetector, Illustration, MangaRenderer, Progress as SceneProgress, TextDetector,
+};
+use crate::generation::speech::Audio;
+use crate::generation::{SceneComposer, render_audio_prompt};
+use crate::languages::{LanguageCatalog, ReportLabels, catalog, naming};
+use crate::report::{Report, ReportFonts, Thumbnail, VocabularyLayout};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    Artifact, ArtifactFile, ArtifactProducer, BulkCorrection, CardCorrection, CardDraft,
-    CardPayload, EngineEvent, LanguagePair, RawInputBatch, SessionEngine, Understanding,
+    Artifact, ArtifactFile, BulkCorrection, CardBody, CardBodyGeneration, CardCorrection,
+    CardDraft, CardRevision, EngineEvent, LanguagePair, RawInputBatch, SessionEngine,
+    Understanding, Understood, WordCandidate, to_entry,
 };
-use crate::tui::{App, AppEvent, BusyKind, Screen, Side, draw, to_app, transit};
+use crate::tui::{App, AppEvent, BusyKind, Screen, Side, draw, link_at, to_app, transit};
+use crate::vocabulary::VocabularyEntry;
 
 #[cfg(test)]
-use crate::session::{
-    CandidateKind, CandidateMeta, MetaSegment, ScriptDetection, TargetDetection, Understood,
-    WordCandidate, catalog_for_detection,
-};
+use crate::session::{ScriptDetection, TargetDetection, catalog_for_detection};
+
+const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
 
 /// Execute the TUI and translate failures into a process exit code.
 pub fn run() -> u8 {
@@ -54,7 +69,7 @@ fn start() -> Result<()> {
     enable_raw_mode()?;
     let mut out = stdout();
     let enhanced = supports_keyboard_enhancement().unwrap_or(false);
-    execute!(out, EnterAlternateScreen)?;
+    execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
     if enhanced {
         execute!(
             out,
@@ -72,6 +87,7 @@ fn start() -> Result<()> {
     if enhanced {
         execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags).ok();
     }
+    execute!(terminal.backend_mut(), DisableMouseCapture).ok();
     disable_raw_mode().ok();
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     outcome
@@ -84,37 +100,97 @@ where
 {
     let mut shell = Shell::new(app)?;
     loop {
+        shell.refresh_quit_pending();
         terminal.draw(|frame| draw(frame, shell.app()))?;
-        if !poll(Duration::from_millis(200))? {
+        if !poll(Duration::from_millis(100))? {
             shell.tick()?;
             continue;
         }
-        let Event::Key(key) = read()? else {
-            continue;
-        };
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            return Ok(());
+        let event = read()?;
+        match event {
+            Event::Key(key) => {
+                let Some(event) = to_app(key) else { continue };
+                if matches!(event, AppEvent::Quit) {
+                    if shell.arm_quit() {
+                        return Ok(());
+                    }
+                    continue;
+                }
+                shell.disarm_quit();
+                let side = shell.handle(event)?;
+                if side == Side::ExitApp {
+                    return Ok(());
+                }
+                shell.tick()?;
+            }
+            Event::Mouse(mouse) => match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    shell.scroll(-1);
+                }
+                MouseEventKind::ScrollDown => {
+                    shell.scroll(1);
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let area = terminal.size()?;
+                    let rect = ratatui::layout::Rect {
+                        x: 0,
+                        y: 0,
+                        width: area.width,
+                        height: area.height,
+                    };
+                    if let Some(target) = link_at(shell.app(), rect, mouse.column, mouse.row) {
+                        let _ = open_path(target.as_str());
+                    }
+                }
+                _ => {}
+            },
+            _ => {
+                shell.tick()?;
+            }
         }
-        let Some(event) = to_app(key) else { continue };
-        let side = shell.handle(event)?;
-        if side == Side::ExitApp {
-            return Ok(());
-        }
-        shell.tick()?;
     }
 }
 
-trait TextPasses: Understanding + BulkCorrection + CardCorrection + Clone + Send + 'static {}
-
-impl<T> TextPasses for T where
-    T: Understanding + BulkCorrection + CardCorrection + Clone + Send + 'static
+/// All text-oriented Gemini passes the shell delegates to.
+trait TextPasses:
+    Understanding + BulkCorrection + CardBodyGeneration + CardCorrection + Clone + Send + 'static
 {
 }
 
+impl<T> TextPasses for T where
+    T: Understanding
+        + BulkCorrection
+        + CardBodyGeneration
+        + CardCorrection
+        + Clone
+        + Send
+        + 'static
+{
+}
+
+/// All media-oriented Gemini passes plus deck and report finalization.
+trait MediaPasses: Clone + Send + 'static {
+    fn produce_scene(&self, draft: &CardDraft) -> Result<ArtifactFile>;
+    fn produce_picture(&self, draft: &CardDraft) -> Result<ArtifactFile>;
+    fn produce_sound(&self, draft: &CardDraft) -> Result<ArtifactFile>;
+    /// Persist a generated card body to the local cache so the user can open
+    /// the rich JSON from the step list (clickable just like the media files).
+    fn persist_body(
+        &self,
+        term: &str,
+        pair: &LanguagePair,
+        body: &CardBody,
+    ) -> Result<ArtifactFile>;
+    fn publish(&self, drafts: &[CardDraft]) -> Result<(String, String, String)>;
+}
+
+trait Lifecycle: TextPasses + MediaPasses {}
+impl<T> Lifecycle for T where T: TextPasses + MediaPasses {}
+
 enum TextOutcome {
-    Understanding(Result<crate::session::Understood>),
-    BulkCorrection(Result<Vec<crate::session::WordCandidate>>),
-    CardCorrection(Result<Box<CardDraft>>),
+    Understanding(Result<Understood>),
+    BulkCorrection(Result<Vec<WordCandidate>>),
+    CardCorrection(Result<Box<CardRevision>>),
 }
 
 struct PendingTextJob {
@@ -123,34 +199,88 @@ struct PendingTextJob {
     started: Instant,
 }
 
+enum ArtifactOutcome {
+    Body(Result<(CardBody, Option<ArtifactFile>)>),
+    Media(Result<ArtifactFile>),
+}
+
+struct PendingArtifactJob {
+    receiver: Receiver<ArtifactOutcome>,
+    handle: JoinHandle<()>,
+    card: usize,
+    artifact: Artifact,
+    #[allow(dead_code)]
+    started: Instant,
+}
+
+const QUIT_WINDOW: Duration = Duration::from_millis(1000);
+
 struct Shell<P> {
     app: App,
     engine: Option<SessionEngine>,
     text: Option<PendingTextJob>,
-    producer: LocalArtifactProducer,
+    artifact_job: Option<PendingArtifactJob>,
     started: Option<Instant>,
+    quit_armed_at: Option<Instant>,
     passes: P,
 }
 
-impl Shell<GeminiClient<HttpTransport>> {
+impl Shell<ProductionPasses> {
     fn new(app: App) -> Result<Self> {
+        let client = GeminiClient::from_env()?;
+        let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
+        let output = default_output()?;
         Ok(Self {
             app,
             engine: None,
             text: None,
-            producer: LocalArtifactProducer::new(default_output()?),
+            artifact_job: None,
             started: None,
-            passes: GeminiClient::from_env()?,
+            quit_armed_at: None,
+            passes: ProductionPasses::new(client, cache, output),
         })
     }
 }
 
 impl<P> Shell<P>
 where
-    P: TextPasses,
+    P: Lifecycle,
 {
     fn app(&self) -> &App {
         &self.app
+    }
+
+    fn scroll(&mut self, delta: i32) {
+        self.app = self.app.clone().body_scrolled(delta);
+    }
+
+    fn arm_quit(&mut self) -> bool {
+        let now = Instant::now();
+        if let Some(armed) = self.quit_armed_at
+            && now.duration_since(armed) <= QUIT_WINDOW
+        {
+            return true;
+        }
+        self.quit_armed_at = Some(now);
+        if !self.app.quit_pending() {
+            self.app = self.app.clone().with_quit_pending(true);
+        }
+        false
+    }
+
+    fn disarm_quit(&mut self) {
+        self.quit_armed_at = None;
+        if self.app.quit_pending() {
+            self.app = self.app.clone().with_quit_pending(false);
+        }
+    }
+
+    fn refresh_quit_pending(&mut self) {
+        if let Some(armed) = self.quit_armed_at
+            && armed.elapsed() > QUIT_WINDOW
+        {
+            self.disarm_quit();
+        }
     }
 
     fn handle(&mut self, event: AppEvent) -> Result<Side> {
@@ -175,36 +305,130 @@ where
         if self.text.is_some() {
             return Ok(());
         }
-        let Some(event) = self.advance() else {
+        self.poll_artifact()?;
+        if self.artifact_job.is_some() {
+            return Ok(());
+        }
+        self.advance_engine()
+    }
+
+    fn advance_engine(&mut self) -> Result<()> {
+        let Some(engine) = self.engine.as_ref() else {
             return Ok(());
         };
-        match event {
-            EngineEvent::BatchReady => {
-                let side = self.handle(AppEvent::BatchReady)?;
-                if side == Side::ExitApp {
-                    return Ok(());
+        if let Some((card, kind)) = engine.next_target() {
+            self.spawn_artifact(card, kind)?;
+            return Ok(());
+        }
+        if let Some(event) = engine.batch_state() {
+            match event {
+                EngineEvent::BatchReady => {
+                    let side = self.handle(AppEvent::BatchReady)?;
+                    if side == Side::ExitApp {
+                        return Ok(());
+                    }
                 }
-            }
-            EngineEvent::BatchDone { failed_cards } => {
-                let side = self.handle(AppEvent::BatchDone {
-                    failed: failed_cards,
-                })?;
-                if side == Side::ExitApp {
-                    return Ok(());
+                EngineEvent::BatchDone { failed_cards } => {
+                    let side = self.handle(AppEvent::BatchDone {
+                        failed: failed_cards,
+                    })?;
+                    if side == Side::ExitApp {
+                        return Ok(());
+                    }
                 }
+                _ => {}
             }
-            EngineEvent::ArtifactReady { .. }
-            | EngineEvent::RetryStarted { .. }
-            | EngineEvent::RetryExhausted { .. } => {}
         }
         Ok(())
     }
 
-    fn advance(&mut self) -> Option<EngineEvent> {
-        let engine = self.engine.as_mut()?;
-        let event = engine.advance(&mut self.producer)?;
-        self.app = self.app.clone().cards_replaced(engine.drafts().to_vec());
-        Some(event)
+    fn spawn_artifact(&mut self, card: usize, artifact: Artifact) -> Result<()> {
+        if self.artifact_job.is_some() {
+            return Ok(());
+        }
+        let Some(engine) = self.engine.as_ref() else {
+            return Ok(());
+        };
+        let draft = engine.drafts()[card].clone();
+        let pair = draft.pair().clone();
+        let term = draft.term().to_string();
+        let understanding = draft.understanding().to_string();
+        let passes = self.passes.clone();
+        let (sender, receiver) = channel();
+        let handle = thread::spawn(move || {
+            let outcome = match artifact {
+                Artifact::Body => ArtifactOutcome::Body(
+                    passes
+                        .generate_card_body(&term, &understanding, &pair)
+                        .map(|body| {
+                            let file = passes.persist_body(&term, &pair, &body).ok();
+                            (body, file)
+                        }),
+                ),
+                Artifact::Scene => ArtifactOutcome::Media(passes.produce_scene(&draft)),
+                Artifact::Picture => ArtifactOutcome::Media(passes.produce_picture(&draft)),
+                Artifact::Sound => ArtifactOutcome::Media(passes.produce_sound(&draft)),
+            };
+            let _ = sender.send(outcome);
+        });
+        self.artifact_job = Some(PendingArtifactJob {
+            receiver,
+            handle,
+            card,
+            artifact,
+            started: Instant::now(),
+        });
+        self.app = self.app.clone().cards_running(Some((card, artifact)));
+        Ok(())
+    }
+
+    fn poll_artifact(&mut self) -> Result<()> {
+        let Some(job) = self.artifact_job.as_ref() else {
+            return Ok(());
+        };
+        match job.receiver.try_recv() {
+            Ok(outcome) => {
+                let job = self
+                    .artifact_job
+                    .take()
+                    .expect("invariant: artifact job must exist");
+                let _ = join_thread(job.handle);
+                self.apply_artifact_outcome(job.card, job.artifact, outcome);
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                let job = self
+                    .artifact_job
+                    .take()
+                    .expect("invariant: artifact job must exist");
+                let _ = join_thread(job.handle);
+                let synthetic = anyhow!("background artifact task disconnected");
+                let outcome = match job.artifact {
+                    Artifact::Body => ArtifactOutcome::Body(Err(synthetic)),
+                    _ => ArtifactOutcome::Media(Err(synthetic)),
+                };
+                self.apply_artifact_outcome(job.card, job.artifact, outcome);
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_artifact_outcome(
+        &mut self,
+        card: usize,
+        artifact: Artifact,
+        outcome: ArtifactOutcome,
+    ) {
+        let Some(engine) = self.engine.as_mut() else {
+            self.app = self.app.clone().cards_running(None);
+            return;
+        };
+        let _event = match outcome {
+            ArtifactOutcome::Body(result) => engine.applied_body(card, result),
+            ArtifactOutcome::Media(result) => engine.applied_media(card, artifact, result),
+        };
+        let drafts = engine.drafts().to_vec();
+        self.app = self.app.clone().cards_replaced(drafts).cards_running(None);
     }
 
     fn poll_text(&mut self) -> Result<()> {
@@ -216,7 +440,7 @@ where
             Ok(outcome) => {
                 let job = self.text.take().expect("invariant: text job must exist");
                 self.app = self.app.clone().busy_finished();
-                if let Err(error) = join_text(job.handle) {
+                if let Err(error) = join_thread(job.handle) {
                     self.app = self.app.clone().error_shown(error.to_string());
                     return Ok(());
                 }
@@ -225,7 +449,7 @@ where
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
                 let job = self.text.take().expect("invariant: text job must exist");
-                let message = join_text(job.handle)
+                let message = join_thread(job.handle)
                     .map(|()| String::from("background text pass disconnected"))
                     .unwrap_or_else(|error| error.to_string());
                 self.app = self.app.clone().busy_finished().error_shown(message);
@@ -261,8 +485,14 @@ where
                 }
             },
             TextOutcome::CardCorrection(result) => match result {
-                Ok(updated) => {
-                    self.app = self.app.clone().card_replaced(*updated);
+                Ok(revision) => {
+                    let (term, understanding, body) = revision.into_parts();
+                    let Some(current) = self.app.cards().get(self.app.card_selected()).cloned()
+                    else {
+                        return;
+                    };
+                    let updated = current.recomposed(term, understanding, body);
+                    self.app = self.app.clone().card_replaced(updated);
                     self.engine = Some(SessionEngine::start(self.app.cards().to_vec()));
                     self.started = Some(Instant::now());
                 }
@@ -321,7 +551,8 @@ where
                 }
             }
             Side::PublishDone => {
-                let (deck, report, output) = self.producer.publish(self.app.cards())?;
+                let drafts = self.app.cards().to_vec();
+                let (deck, report, output) = self.passes.publish(&drafts)?;
                 self.app = self.app.clone().done_published(deck, report, output);
                 self.engine = None;
                 self.started = None;
@@ -331,6 +562,8 @@ where
                     let _ = store.write(&Preferences::new(code));
                 }
             }
+            Side::PersistApiKey(_) => {}
+            Side::OpenKeyHelp => {}
             Side::ExitApp | Side::None => {}
         }
         Ok(())
@@ -357,9 +590,9 @@ where
     }
 }
 
-fn join_text(handle: JoinHandle<()>) -> Result<()> {
+fn join_thread(handle: JoinHandle<()>) -> Result<()> {
     if handle.join().is_err() {
-        bail!("background text pass panicked");
+        bail!("background task panicked");
     }
     Ok(())
 }
@@ -367,240 +600,307 @@ fn join_text(handle: JoinHandle<()>) -> Result<()> {
 fn drafts_from(app: &App) -> Vec<CardDraft> {
     app.candidates()
         .iter()
-        .filter(|candidate| candidate.included())
+        .filter(|candidate| candidate.ok())
         .map(|candidate| {
             CardDraft::new(
                 candidate.term(),
+                candidate.understanding(),
                 app.pair().clone(),
-                CardPayload::new(
-                    candidate.term(),
-                    nonempty(candidate.preview(), candidate.term()),
-                    nonempty(candidate.note(), "line-delimited input"),
-                    candidate.term(),
-                ),
             )
         })
         .collect()
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[cfg(test)]
-struct LocalPasses;
+/// Production media + lifecycle passes backed by Gemini and the on-disk cache.
+#[derive(Clone)]
+pub struct ProductionPasses {
+    client: GeminiClient<HttpTransport>,
+    cache: PathBuf,
+    output: PathBuf,
+    catalog: LanguageCatalog,
+}
 
-#[cfg(test)]
-impl Understanding for LocalPasses {
-    fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
-        let guess = ScriptDetection.detect(raw.text(), &catalog_for_detection())?;
-        let candidates = raw
-            .text()
-            .lines()
-            .map(str::trim)
-            .filter(|entry| !entry.is_empty())
-            .map(|entry| {
-                WordCandidate::with_meta(
-                    entry,
-                    kind_for(entry),
-                    format!("{entry} · review for {my}"),
-                    String::from("one item per line"),
-                    meta_for(entry),
-                )
-            })
-            .collect();
-        Ok(Understood::new(guess, candidates))
+impl ProductionPasses {
+    /// Build production passes from a live Gemini client and on-disk locations.
+    pub fn new(client: GeminiClient<HttpTransport>, cache: PathBuf, output: PathBuf) -> Self {
+        Self {
+            client,
+            cache,
+            output,
+            catalog: catalog(),
+        }
+    }
+
+    fn audio_for(&self, target_lang: &str) -> Result<Audio<GeminiClient<HttpTransport>>> {
+        let item = self.catalog.item(target_lang)?;
+        Ok(Audio::new(
+            Cache::new(item.audio_cache.as_str(), self.cache.clone()),
+            render_audio_prompt(item.prompt.as_str()),
+            self.client.clone(),
+        ))
+    }
+
+    fn illustration_for(
+        &self,
+        target_lang: &str,
+    ) -> Result<Illustration<SceneComposer<GeminiClient<HttpTransport>>, MangaRenderer<TextDetector>>>
+    {
+        let item = self.catalog.item(target_lang)?;
+        let client = self.client.clone();
+        Ok(Illustration::new(
+            Cache::new(item.image_cache.as_str(), self.cache.clone()),
+            SceneComposer::new(client.clone(), item.prompt.as_str()),
+            MangaRenderer::new(
+                client,
+                3,
+                TextDetector::cached(60, item.ocr.as_str(), self.cache.clone()),
+                BorderDetector::new(6, 240, 10),
+            ),
+        ))
     }
 }
 
-#[cfg(test)]
-impl BulkCorrection for LocalPasses {
+impl Understanding for ProductionPasses {
+    fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
+        self.client.understand(raw, my)
+    }
+}
+
+impl BulkCorrection for ProductionPasses {
     fn correct_bulk(
         &self,
         candidates: &[WordCandidate],
         comment: &str,
-        _pair: &LanguagePair,
+        pair: &LanguagePair,
     ) -> Result<Vec<WordCandidate>> {
-        Ok(candidates
-            .iter()
-            .map(|candidate| {
-                WordCandidate::with_meta(
-                    candidate.term(),
-                    candidate.kind().clone(),
-                    format!(
-                        "{} · {}",
-                        nonempty(candidate.preview(), candidate.term()),
-                        comment
-                    ),
-                    nonempty(candidate.note(), comment),
-                    CandidateMeta::new(
-                        MetaSegment::dim("single lexical item"),
-                        MetaSegment::bright(comment),
-                        None,
-                    ),
-                )
-            })
-            .collect())
+        self.client.correct_bulk(candidates, comment, pair)
     }
 }
 
-#[cfg(test)]
-impl CardCorrection for LocalPasses {
+impl CardBodyGeneration for ProductionPasses {
+    fn generate_card_body(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+    ) -> Result<CardBody> {
+        self.client.generate_card_body(term, understanding, pair)
+    }
+}
+
+impl CardCorrection for ProductionPasses {
     fn correct_card(
         &self,
         draft: &CardDraft,
         comment: &str,
-        _pair: &LanguagePair,
-    ) -> Result<CardDraft> {
-        Ok(draft.clone().recomposed(CardPayload::new(
-            draft.payload().front(),
-            format!("{}\nchange: {comment}", draft.payload().back()),
-            nonempty(draft.payload().hint(), comment),
-            draft.payload().highlight(),
-        )))
+        pair: &LanguagePair,
+    ) -> Result<CardRevision> {
+        self.client.correct_card(draft, comment, pair)
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct LocalArtifactProducer {
-    output: PathBuf,
-    stamp: String,
-}
+impl MediaPasses for ProductionPasses {
+    fn produce_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+        let body = draft
+            .body()
+            .ok_or_else(|| anyhow!("body must be ready before scene"))?;
+        let illustration = self.illustration_for(draft.pair().target())?;
+        let mut progress = NoopProgress;
+        let (filename, cached) = illustration.scene_only(
+            body.target_sentence(),
+            draft.pair().target(),
+            &mut progress,
+        )?;
+        let path = illustration.filepath(filename.as_str())?;
+        let size = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        Ok(ArtifactFile::new(filename, path, format_size(size), cached))
+    }
 
-impl LocalArtifactProducer {
-    fn new(output: PathBuf) -> Self {
-        Self {
-            output,
-            stamp: stamp(),
+    fn produce_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+        let body = draft
+            .body()
+            .ok_or_else(|| anyhow!("body must be ready before picture"))?;
+        let illustration = self.illustration_for(draft.pair().target())?;
+        let mut progress = NoopProgress;
+        let (filename, cached) = illustration.picture_only(
+            body.target_sentence(),
+            draft.pair().target(),
+            &mut progress,
+        )?;
+        let path = illustration.filepath(filename.as_str())?;
+        let size = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        Ok(ArtifactFile::new(filename, path, format_size(size), cached))
+    }
+
+    fn produce_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+        let body = draft
+            .body()
+            .ok_or_else(|| anyhow!("body must be ready before sound"))?;
+        let audio = self.audio_for(draft.pair().target())?;
+        let (filename, cached) = audio.generate(body.target_sentence())?;
+        let path = audio.filepath(filename.as_str())?;
+        let size = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        Ok(ArtifactFile::new(filename, path, format_size(size), cached))
+    }
+
+    fn persist_body(
+        &self,
+        term: &str,
+        pair: &LanguagePair,
+        body: &CardBody,
+    ) -> Result<ArtifactFile> {
+        let item = self.catalog.item(pair.target())?;
+        let cache = Cache::new(format!("body-{}", item.code), self.cache.clone());
+        let digest_full = format!("{:x}", md5::compute(format!("{}\0{}", pair.target(), term)));
+        let filename = format!("{}.json", &digest_full[..12]);
+        let path = cache.filepath(filename.as_str())?;
+        let cached = cache.exists(filename.as_str());
+        if !cached {
+            let payload = serde_json::json!({
+                "term": term,
+                "target_lang": pair.target(),
+                "source_lang": pair.support(),
+                "pronunciation": body.pronunciation(),
+                "transcription": body.transcription(),
+                "meaning": body.meaning(),
+                "importance": body.importance(),
+                "source_sentence": body.source_sentence(),
+                "source_highlight": body.source_highlight(),
+                "source_hint": body.source_hint(),
+                "source_context": body.source_context(),
+                "target_sentence": body.target_sentence(),
+            });
+            let staged = cache.stage(".json")?;
+            let result = fs::write(&staged, serde_json::to_string_pretty(&payload)?)
+                .map_err(anyhow::Error::from)
+                .and_then(|()| cache.commit(&staged, filename.as_str()));
+            if result.is_err() {
+                let _ = fs::remove_file(&staged);
+            }
+            result?;
         }
+        let size = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        Ok(ArtifactFile::new(filename, path, format_size(size), cached))
     }
 
     fn publish(&self, drafts: &[CardDraft]) -> Result<(String, String, String)> {
         fs::create_dir_all(&self.output)?;
-        let deck = self.output.join(format!("kamishibai-{}.apkg", self.stamp));
-        let report = self.output.join(format!("kamishibai-{}.pdf", self.stamp));
-        fs::write(&deck, deck_text(drafts))?;
-        fs::write(&report, report_text(drafts))?;
+        let entries: Vec<VocabularyEntry> = drafts
+            .iter()
+            .filter(|draft| draft.artifacts().all_ready())
+            .map(to_entry)
+            .collect::<Result<Vec<_>>>()?;
+        if entries.is_empty() {
+            bail!("no completed cards to publish");
+        }
+        let decknaming = naming(None, entries.as_slice());
+        let model = CardModel::new().model();
+        let mut container = VocabularyDeck::new(
+            StableId::new(decknaming.name.as_str()).value(),
+            decknaming.name.as_str(),
+            VocabularyNote::new(model),
+            Vec::<PathBuf>::new(),
+        );
+        let mut report = Report::new(
+            VocabularyLayout::new(ReportLabels::default()),
+            ReportFonts::default(),
+        );
+        for draft in drafts.iter().filter(|draft| draft.artifacts().all_ready()) {
+            let entry = to_entry(draft)?;
+            let audio_file = draft
+                .artifacts()
+                .sound()
+                .file()
+                .ok_or_else(|| anyhow!("sound artifact missing for {}", draft.term()))?;
+            let picture_file = draft
+                .artifacts()
+                .picture()
+                .file()
+                .ok_or_else(|| anyhow!("picture artifact missing for {}", draft.term()))?;
+            let audio_path = self
+                .audio_for(draft.pair().target())?
+                .filepath(audio_file.name())?;
+            let picture_path = self
+                .illustration_for(draft.pair().target())?
+                .filepath(picture_file.name())?;
+            container.attach(audio_path);
+            container.attach(picture_path.clone());
+            container.add(
+                &entry,
+                format!("[sound:{}]", audio_file.name()).as_str(),
+                format!("<img src='{}' style='{IMAGE_STYLE}'>", picture_file.name()).as_str(),
+            );
+            report.append(&entry, Some(picture_path));
+        }
+        let stamp = release_stamp()?;
+        let apkg = self
+            .output
+            .join(format!("{}_{}.apkg", decknaming.prefix, stamp));
+        container.save(&apkg)?;
+        let pdf = self
+            .output
+            .join(format!("{}_{}.pdf", decknaming.prefix, stamp));
+        report.save(&pdf, &Thumbnail::new(150))?;
         Ok((
-            file_name(&deck),
-            file_name(&report),
+            apkg.to_string_lossy().into_owned(),
+            pdf.to_string_lossy().into_owned(),
             self.output.to_string_lossy().into_owned(),
         ))
     }
 }
 
-impl ArtifactProducer for LocalArtifactProducer {
-    fn produce(&mut self, draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
-        fs::create_dir_all(&self.output)?;
-        let filename = format!(
-            "{}-{}-{}.{}",
-            self.stamp,
-            slug(draft.term()),
-            artifact.label(),
-            extension(artifact)
-        );
-        let path = self.output.join(&filename);
-        fs::write(
-            &path,
-            format!(
-                "kamishibai {} artifact for {}\n{}\n",
-                artifact.label(),
-                draft.term(),
-                draft.payload().front()
-            ),
-        )?;
-        let size = fs::metadata(&path)?.len();
-        Ok(ArtifactFile::new(filename, format!("{size} B"), false))
+struct NoopProgress;
+
+impl SceneProgress for NoopProgress {
+    fn step(&mut self, _name: &str) {}
+    fn done(&mut self, _name: &str, _label: &str, _path: Option<&Path>) {}
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     }
+}
+
+fn release_stamp() -> Result<String> {
+    Ok(OffsetDateTime::now_utc()
+        .format(parse_time("[year]-[month]-[day]_[hour][minute][second]")?.as_slice())?)
 }
 
 fn default_output() -> Result<PathBuf> {
     Locations::new(LocationArgs::default(), SystemContext).output()
 }
 
-#[cfg(test)]
-fn kind_for(entry: &str) -> CandidateKind {
-    if entry.split_whitespace().count() > 1 {
-        return CandidateKind::Phrase;
+/// Open one filesystem path with the host system's default handler. macOS
+/// uses `open`, Linux uses `xdg-open`, Windows uses `cmd /c start`.
+fn open_path(path: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(path).spawn()?;
     }
-    CandidateKind::Word
-}
-
-#[cfg(test)]
-fn meta_for(entry: &str) -> CandidateMeta {
-    if entry.split_whitespace().count() > 1 {
-        return CandidateMeta::new(
-            MetaSegment::dim("multi-word expression"),
-            MetaSegment::dim("line-delimited input"),
-            None,
-        );
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open").arg(path).spawn()?;
     }
-    CandidateMeta::new(
-        MetaSegment::dim("single lexical item"),
-        MetaSegment::dim("line-delimited input"),
-        None,
-    )
-}
-
-fn nonempty(value: &str, fallback: &str) -> String {
-    if value.trim().is_empty() {
-        return String::from(fallback);
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/c", "start", "", path])
+            .spawn()?;
     }
-    String::from(value)
-}
-
-fn extension(artifact: Artifact) -> &'static str {
-    match artifact {
-        Artifact::Scene => "scene.txt",
-        Artifact::Picture => "picture.txt",
-        Artifact::Sound => "sound.txt",
-    }
-}
-
-fn slug(value: &str) -> String {
-    let mut out = String::new();
-    for character in value.chars() {
-        if character.is_ascii_alphanumeric() {
-            out.push(character.to_ascii_lowercase());
-        } else if !out.ends_with('-') {
-            out.push('-');
-        }
-    }
-    let trimmed = out.trim_matches('-');
-    if trimmed.is_empty() {
-        return String::from("card");
-    }
-    String::from(trimmed)
-}
-
-fn stamp() -> String {
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(duration) => duration.as_secs().to_string(),
-        Err(_) => String::from("0"),
-    }
-}
-
-fn file_name(path: &std::path::Path) -> String {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string_lossy().into_owned())
-}
-
-fn deck_text(drafts: &[CardDraft]) -> String {
-    let mut text = String::from("kamishibai deck\n");
-    for draft in drafts {
-        text.push_str(draft.term());
-        text.push('\n');
-    }
-    text
-}
-
-fn report_text(drafts: &[CardDraft]) -> String {
-    let mut text = String::from("kamishibai report\n");
-    for draft in drafts {
-        text.push_str(draft.payload().front());
-        text.push('\n');
-        text.push_str(draft.payload().back());
-        text.push('\n');
-    }
-    text
+    Ok(())
 }
 
 fn load_preferences() -> Result<Preferences> {
@@ -610,31 +910,170 @@ fn load_preferences() -> Result<Preferences> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use tempfile::tempdir;
 
     use super::*;
     use crate::tui::Screen;
 
-    fn shell(app: App, output: PathBuf) -> Shell<LocalPasses> {
+    /// Test-only passes: produces deterministic fakes without touching the network.
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub(super) struct LocalPasses;
+
+    impl LocalPasses {
+        fn local_body(term: &str, understanding: &str) -> CardBody {
+            CardBody::new(
+                format!("/{term}/"),
+                format!("/{term} sentence/"),
+                format!("local meaning of {term}"),
+                5,
+                format!("local source for {term} ({understanding})"),
+                term,
+                format!("vivid cue for {term}"),
+                format!("usage notes for {term}"),
+                format!("Example with {term}."),
+            )
+        }
+    }
+
+    impl Understanding for LocalPasses {
+        fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
+            let guess = ScriptDetection.detect(raw.text(), &catalog_for_detection())?;
+            let candidates = raw
+                .text()
+                .lines()
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(|entry| {
+                    WordCandidate::new(
+                        entry,
+                        format!("local-fake understanding for {entry} (support {my})"),
+                        true,
+                    )
+                })
+                .collect();
+            Ok(Understood::new(guess, candidates))
+        }
+    }
+
+    impl BulkCorrection for LocalPasses {
+        fn correct_bulk(
+            &self,
+            candidates: &[WordCandidate],
+            comment: &str,
+            _pair: &LanguagePair,
+        ) -> Result<Vec<WordCandidate>> {
+            Ok(candidates
+                .iter()
+                .map(|candidate| {
+                    WordCandidate::new(
+                        candidate.term(),
+                        format!("{} · {}", candidate.understanding(), comment),
+                        candidate.ok(),
+                    )
+                })
+                .collect())
+        }
+    }
+
+    impl CardBodyGeneration for LocalPasses {
+        fn generate_card_body(
+            &self,
+            term: &str,
+            understanding: &str,
+            _pair: &LanguagePair,
+        ) -> Result<CardBody> {
+            Ok(Self::local_body(term, understanding))
+        }
+    }
+
+    impl CardCorrection for LocalPasses {
+        fn correct_card(
+            &self,
+            draft: &CardDraft,
+            comment: &str,
+            _pair: &LanguagePair,
+        ) -> Result<CardRevision> {
+            let understanding = format!("{} · change: {comment}", draft.understanding());
+            let body = Self::local_body(draft.term(), understanding.as_str());
+            Ok(CardRevision::new(draft.term(), understanding, body))
+        }
+    }
+
+    impl MediaPasses for LocalPasses {
+        fn produce_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+            local_artifact(draft, Artifact::Scene)
+        }
+
+        fn produce_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+            local_artifact(draft, Artifact::Picture)
+        }
+
+        fn produce_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+            local_artifact(draft, Artifact::Sound)
+        }
+
+        fn persist_body(
+            &self,
+            term: &str,
+            _pair: &LanguagePair,
+            _body: &CardBody,
+        ) -> Result<ArtifactFile> {
+            let name = format!("{}-body.local.json", slug(term));
+            let path = std::env::temp_dir().join(&name);
+            Ok(ArtifactFile::new(name, path, "1 B", false))
+        }
+
+        fn publish(&self, drafts: &[CardDraft]) -> Result<(String, String, String)> {
+            Ok((
+                format!("local-{}-cards.apkg", drafts.len()),
+                format!("local-{}-cards.pdf", drafts.len()),
+                String::from("/tmp/local-out"),
+            ))
+        }
+    }
+
+    fn local_artifact(draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
+        let name = format!("{}-{}.local", slug(draft.term()), artifact.label());
+        let path = std::env::temp_dir().join(&name);
+        Ok(ArtifactFile::new(name, path, "1 B", false))
+    }
+
+    fn slug(value: &str) -> String {
+        let mut out = String::new();
+        for character in value.chars() {
+            if character.is_ascii_alphanumeric() {
+                out.push(character.to_ascii_lowercase());
+            } else if !out.ends_with('-') {
+                out.push('-');
+            }
+        }
+        let trimmed = out.trim_matches('-');
+        if trimmed.is_empty() {
+            return String::from("card");
+        }
+        String::from(trimmed)
+    }
+
+    fn shell(app: App) -> Shell<LocalPasses> {
         Shell {
             app,
             engine: None,
             text: None,
-            producer: LocalArtifactProducer::new(output),
+            artifact_job: None,
             started: None,
+            quit_armed_at: None,
             passes: LocalPasses,
         }
     }
 
-    fn failing_shell(app: App, output: PathBuf) -> Shell<FailingPasses> {
+    fn failing_shell(app: App) -> Shell<FailingPasses> {
         Shell {
             app,
             engine: None,
             text: None,
-            producer: LocalArtifactProducer::new(output),
+            artifact_job: None,
             started: None,
+            quit_armed_at: None,
             passes: FailingPasses,
         }
     }
@@ -644,7 +1083,11 @@ mod tests {
     }
 
     fn candidate(term: &str) -> WordCandidate {
-        WordCandidate::new(term, CandidateKind::Word, format!("{term} preview"), "note")
+        WordCandidate::new(term, format!("local-fake understanding for {term}"), true)
+    }
+
+    fn skipped(term: &str) -> WordCandidate {
+        WordCandidate::new(term, "not in target language", false)
     }
 
     fn review() -> App {
@@ -656,9 +1099,9 @@ mod tests {
 
     fn settle_text<P>(shell: &mut Shell<P>)
     where
-        P: TextPasses,
+        P: Lifecycle,
     {
-        for _ in 0..50 {
+        for _ in 0..200 {
             shell.tick().expect("text pass tick must succeed");
             if shell.app.busy().is_none() {
                 return;
@@ -666,6 +1109,19 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         panic!("text pass did not settle before the deadline");
+    }
+
+    fn settle_engine<P>(shell: &mut Shell<P>, max_ticks: usize)
+    where
+        P: Lifecycle,
+    {
+        for _ in 0..max_ticks {
+            shell.tick().expect("engine tick must succeed");
+            if shell.engine.is_none() && shell.artifact_job.is_none() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -688,24 +1144,55 @@ mod tests {
         }
     }
 
+    impl CardBodyGeneration for FailingPasses {
+        fn generate_card_body(
+            &self,
+            _term: &str,
+            _understanding: &str,
+            _pair: &LanguagePair,
+        ) -> Result<CardBody> {
+            Err(anyhow::anyhow!("INTERNAL: boom"))
+        }
+    }
+
     impl CardCorrection for FailingPasses {
         fn correct_card(
             &self,
             _draft: &CardDraft,
             _comment: &str,
             _pair: &LanguagePair,
-        ) -> Result<CardDraft> {
+        ) -> Result<CardRevision> {
+            Err(anyhow::anyhow!("INTERNAL: boom"))
+        }
+    }
+
+    impl MediaPasses for FailingPasses {
+        fn produce_scene(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
+            Err(anyhow::anyhow!("INTERNAL: boom"))
+        }
+        fn produce_picture(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
+            Err(anyhow::anyhow!("INTERNAL: boom"))
+        }
+        fn produce_sound(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
+            Err(anyhow::anyhow!("INTERNAL: boom"))
+        }
+        fn persist_body(
+            &self,
+            _term: &str,
+            _pair: &LanguagePair,
+            _body: &CardBody,
+        ) -> Result<ArtifactFile> {
+            Err(anyhow::anyhow!("INTERNAL: boom"))
+        }
+        fn publish(&self, _drafts: &[CardDraft]) -> Result<(String, String, String)> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }
     }
 
     #[test]
     fn first_pass_keeps_commas_inside_lines() {
-        let output = tempdir().expect("temp output must exist");
-        let mut shell = shell(
-            App::new(pair()).seeded_blob("whilst, in the end\nwreck"),
-            output.path().to_path_buf(),
-        );
+        let _output = tempdir().expect("temp output must exist");
+        let mut shell = shell(App::new(pair()).seeded_blob("whilst, in the end\nwreck"));
         shell
             .handle(AppEvent::Submit)
             .expect("submit must run understanding");
@@ -723,11 +1210,8 @@ mod tests {
 
     #[test]
     fn text_pass_failure_stays_in_the_tui_as_recoverable_error() {
-        let output = tempdir().expect("temp output must exist");
-        let mut shell = failing_shell(
-            App::new(pair()).seeded_blob("wreck"),
-            output.path().to_path_buf(),
-        );
+        let _output = tempdir().expect("temp output must exist");
+        let mut shell = failing_shell(App::new(pair()).seeded_blob("wreck"));
         shell
             .handle(AppEvent::Submit)
             .expect("submit must start understanding");
@@ -769,49 +1253,25 @@ mod tests {
 
     #[test]
     fn shell_generation_publishes_done_artifacts() {
-        let output = tempdir().expect("temp output must exist");
-        let mut shell = shell(
-            review().understood(vec![
-                candidate("whilst"),
-                WordCandidate::new(
-                    "окно",
-                    CandidateKind::Skipped,
-                    "not generated",
-                    "ru · outside EN batch",
-                ),
-            ]),
-            output.path().to_path_buf(),
-        );
+        let _output = tempdir().expect("temp output must exist");
+        let mut shell = shell(review().understood(vec![candidate("whilst"), skipped("окно")]));
         shell
             .handle(AppEvent::KeyEnter)
             .expect("enter must start generation");
-        for _ in 0..4 {
-            shell.tick().expect("generation tick must succeed");
-        }
+        settle_engine(&mut shell, 200);
         assert!(
-            shell.app.screen() == Screen::Done
+            shell.app.screen() == Screen::YourCards
                 && shell.app.done_artifacts().deck.ends_with(".apkg")
                 && shell.app.done_artifacts().report.ends_with(".pdf")
                 && !shell.app.done_artifacts().output.is_empty(),
-            "generation must publish deck, report, and output path before Done"
+            "generation must publish deck, report, and output path while staying on YourCards"
         );
     }
 
     #[test]
     fn shell_generation_skips_rejected_candidates() {
-        let output = tempdir().expect("temp output must exist");
-        let mut shell = shell(
-            review().understood(vec![
-                candidate("whilst"),
-                WordCandidate::new(
-                    "окно",
-                    CandidateKind::Skipped,
-                    "not generated",
-                    "ru · outside EN batch",
-                ),
-            ]),
-            output.path().to_path_buf(),
-        );
+        let _output = tempdir().expect("temp output must exist");
+        let mut shell = shell(review().understood(vec![candidate("whilst"), skipped("окно")]));
         shell
             .handle(AppEvent::Submit)
             .expect("submit must start generation");
@@ -823,17 +1283,30 @@ mod tests {
                 .map(|draft| draft.term())
                 .collect::<Vec<_>>(),
             vec!["whilst"],
-            "generation must not create drafts for skipped candidates"
+            "generation must not create drafts for rejected candidates"
         );
     }
 
     #[test]
     fn shell_drop_artifact_restarts_the_engine_from_current_cards() {
-        let output = tempdir().expect("temp output must exist");
-        let mut shell = shell(review(), output.path().to_path_buf());
+        let _output = tempdir().expect("temp output must exist");
+        let mut shell = shell(review());
         shell
             .handle(AppEvent::Submit)
             .expect("submit must start generation");
+        for _ in 0..30 {
+            shell.tick().expect("tick");
+            let body_ready = shell
+                .app
+                .cards()
+                .first()
+                .map(|draft| draft.artifacts().body().ready())
+                .unwrap_or(false);
+            if body_ready {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
         shell
             .handle(AppEvent::KeyChar('d'))
             .expect("drop must sync generation queue");

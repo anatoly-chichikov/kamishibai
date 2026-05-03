@@ -71,18 +71,20 @@ impl FontPath {
     }
 
     /// Return the platform fallback aliases for the requested family.
+    /// Lightweight families come first so the embedded subset stays small;
+    /// massive Unicode catch-alls (Arial Unicode MS) are kept as last resort.
     fn aliases(&self) -> &'static [&'static str] {
         match self.family.as_str() {
             "DejaVu Sans" => &[
-                "Arial Unicode MS",
-                "Arial",
                 "Helvetica Neue",
                 "Helvetica",
+                "Arial",
                 "Liberation Sans",
                 "Nimbus Sans",
                 "Segoe UI",
                 "Tahoma",
                 "Geneva",
+                "Arial Unicode MS",
             ],
             "Hiragino Sans GB" => &[
                 "PingFang SC",

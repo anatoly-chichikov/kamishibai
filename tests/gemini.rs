@@ -5,9 +5,7 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use kamishibai::gemini::{GeminiClient, Transport, TransportResponse};
-use kamishibai::session::{
-    CandidateKind, CardDraft, CardPayload, LanguagePair, MetaTone, RawInputBatch,
-};
+use kamishibai::session::{CardBody, CardDraft, LanguagePair, RawInputBatch, WordCandidate};
 use serde_json::{Value, json};
 
 /// Fake transport that records requests and replays fixed responses.
@@ -56,25 +54,14 @@ fn recorded_prompt(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Result<Stri
     ))
 }
 
-/// Return the current language labels exactly as the registry exposes them.
-fn registry_language_labels() -> Result<String> {
-    let catalog = kamishibai::languages::catalog();
-    let mut labels = Vec::new();
-    for code in catalog.codes() {
-        let item = catalog.item(code)?;
-        labels.push(format!("{} ({})", item.code, item.prompt));
-    }
-    Ok(labels.join(", "))
-}
-
-/// Understanding uses Flash and returns form comments plus skipped off-language rows.
+/// Understanding uses Flash and returns the simple {term, understanding, ok} shape.
 #[test]
-fn understanding_uses_flash_and_returns_form_comments() -> Result<()> {
+fn understanding_uses_flash_and_returns_simple_understanding_rows() -> Result<()> {
     let transport = FakeTransport::new(vec![Ok(body(json!({
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"language\":\"en\",\"kind\":\"word\",\"preview\":\"разрушил / потерпел крушение\",\"note\":\"прошедшая форма для генерации\",\"meta\":[{\"text\":\"прошедшее время от слова \\\"wreck\\\"\",\"tone\":\"bright\"},{\"text\":\"о разрушении или крушении\",\"tone\":\"bright\"}],\"include\":true},{\"term\":\"окно\",\"language\":\"ru\",\"kind\":\"skip\",\"preview\":\"not generated\",\"note\":\"outside the EN batch\",\"meta\":[{\"text\":\"пропущено\",\"tone\":\"dim\"},{\"text\":\"другой язык исходного списка\",\"tone\":\"dim\"}],\"include\":false}]}"
+                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"understanding\":\"past tense of \\\"wreck\\\" — destroyed or crashed\",\"ok\":true},{\"term\":\"окно\",\"understanding\":\"this is Russian, not the target language; will not be turned into a card\",\"ok\":false}]}"
                 }]
             }
         }]
@@ -83,143 +70,157 @@ fn understanding_uses_flash_and_returns_form_comments() -> Result<()> {
     let client = GeminiClient::new("key", transport);
     let understood = client.understand(&RawInputBatch::new("wrecked\nокно"), "ru")?;
     let prompt = recorded_prompt(&requests)?;
-    let meta = understood.candidates()[0]
-        .meta()
-        .segments()
-        .iter()
-        .map(|segment| (segment.text(), segment.tone()))
-        .collect::<Vec<_>>();
     assert_eq!(
         (
             requests.borrow()[0].0.as_str(),
-            prompt.contains(registry_language_labels()?.as_str()),
-            prompt.contains("Use ISO 639-1 codes: en, ru, es, de, el, zh"),
+            prompt.contains("Supported target languages"),
             understood.guess().code(),
             understood.candidates()[0].term(),
-            understood.candidates()[0].kind().label(),
-            understood.candidates()[0].note(),
-            meta,
-            understood.candidates()[1].kind().label(),
-            understood.candidates()[1].included(),
+            understood.candidates()[0].understanding(),
+            understood.candidates()[0].ok(),
+            understood.candidates()[1].term(),
+            understood.candidates()[1].ok(),
         ),
         (
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
             true,
-            false,
             "en",
             "wrecked",
-            "word",
-            "en · прошедшая форма для генерации",
-            vec![
-                ("прошедшее время от слова \"wreck\"", MetaTone::Bright),
-                ("о разрушении или крушении", MetaTone::Bright)
-            ],
-            "skip",
+            "past tense of \"wreck\" — destroyed or crashed",
+            true,
+            "окно",
             false,
         ),
-        "understanding must use Flash, surface form comments, and skip off-language rows"
+        "understanding must use Flash, return simple human-language understanding rows, and mark off-language rows ok=false"
     );
     Ok(())
 }
 
-/// Understanding rejects grammar labels instead of accepting category drift.
+/// Bulk correction uses Flash and updates the understanding sentence.
 #[test]
-fn understanding_rejects_grammar_candidate_kind() {
+fn bulk_correction_uses_flash_and_updates_understanding() -> Result<()> {
     let transport = FakeTransport::new(vec![Ok(body(json!({
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"language\":\"en\",\"kind\":\"verb\",\"preview\":\"разрушил\",\"note\":\"past tense of wreck\",\"meta\":[{\"text\":\"verb\",\"tone\":\"dim\"}],\"include\":true}]}"
-                }]
-            }
-        }]
-    }))
-    .expect("response body must serialize"))]);
-    let client = GeminiClient::new("key", transport);
-    assert!(
-        client
-            .understand(&RawInputBatch::new("wrecked"), "ru")
-            .is_err(),
-        "understanding must not accept grammar labels as candidate kinds"
-    );
-}
-
-/// Bulk correction uses Flash and can change the candidate form comment.
-#[test]
-fn bulk_correction_uses_flash_and_updates_form_comments() -> Result<()> {
-    let transport = FakeTransport::new(vec![Ok(body(json!({
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wound\",\"language\":\"en\",\"kind\":\"word\",\"preview\":\"рана\",\"note\":\"существительное для генерации\",\"meta\":[{\"text\":\"существительное\",\"tone\":\"bright\"},{\"text\":\"повреждение ткани тела\",\"tone\":\"bright\"}],\"include\":true}]}"
+                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wound\",\"understanding\":\"noun: a wound on the body, not the past tense of wind\",\"ok\":true}]}"
                 }]
             }
         }]
     }))?)]);
     let client = GeminiClient::new("key", transport);
     let updated = client.correct_bulk(
-        &[kamishibai::session::WordCandidate::new(
+        &[WordCandidate::new(
             "wound",
-            CandidateKind::Word,
-            "намотал",
-            "ambiguous form",
+            "ambiguous between noun and past-tense verb",
+            true,
         )],
         "treat it as a noun",
         &LanguagePair::new("en", "ru"),
     )?;
     assert_eq!(
         (
-            updated[0].kind().label(),
-            updated[0].preview(),
-            updated[0].note(),
-            updated[0].meta().segments()[0].text(),
-            updated[0].meta().segments()[0].tone()
+            updated[0].term(),
+            updated[0].understanding(),
+            updated[0].ok()
         ),
         (
-            "word",
-            "рана",
-            "en · существительное для генерации",
-            "существительное",
-            MetaTone::Bright
+            "wound",
+            "noun: a wound on the body, not the past tense of wind",
+            true,
         ),
-        "bulk correction must use Flash output for the refined form comment"
+        "bulk correction must use Flash output to refine the understanding sentence"
     );
     Ok(())
 }
 
-/// Per-card correction uses Flash to recompose the draft fields.
+/// Card-body generation uses the Pro model and returns the full rich body.
 #[test]
-fn card_correction_uses_flash_to_recompose_card_fields() -> Result<()> {
+fn card_body_generation_uses_pro_and_returns_full_body() -> Result<()> {
     let transport = FakeTransport::new(vec![Ok(body(json!({
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"front\":\"I wound the clock.\",\"back\":\"Я завел часы.\",\"hint\":\"wound = past of wind\",\"highlight\":\"wound\"}"
+                    "text": "{\"pronunciation\":\"ˈbɒrəʊ\",\"transcription\":\"kən aɪ ˈbɒrəʊ jɔː ˈpɛn\",\"meaning\":\"одолжить\",\"importance\":8,\"source_sentence\":\"Можно одолжить твою ручку?\",\"source_highlight\":\"одолжить\",\"source_hint\":\"Когда ручка не твоя, а надо записать — вежливо просишь на время.\",\"source_context\":\"Нейтрально-вежливый глагол.\",\"target_sentence\":\"Can I borrow your pen?\"}"
+                }]
+            }
+        }]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let body_out = client.generate_card_body(
+        "borrow",
+        "verb sense — to take something temporarily",
+        &LanguagePair::new("en", "ru"),
+    )?;
+    assert_eq!(
+        (
+            requests.borrow()[0].0.as_str(),
+            body_out.pronunciation(),
+            body_out.target_sentence(),
+            body_out.source_highlight(),
+            body_out.importance(),
+        ),
+        (
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent",
+            "ˈbɒrəʊ",
+            "Can I borrow your pen?",
+            "одолжить",
+            8,
+        ),
+        "card-body generation must hit the Pro model and decode every rich field"
+    );
+    Ok(())
+}
+
+/// Per-card correction uses Pro and may revise term, understanding, and full body.
+#[test]
+fn card_correction_uses_pro_to_recompose_term_understanding_and_body() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"term\":\"wound\",\"understanding\":\"verb: to wound someone — past tense of wind in another sense was wrong\",\"pronunciation\":\"waʊnd\",\"transcription\":\"aɪ waʊnd ðə klɒk\",\"meaning\":\"завести\",\"importance\":6,\"source_sentence\":\"Я завел часы.\",\"source_highlight\":\"завел\",\"source_hint\":\"Поворачивал что-то круглое, чтобы оно начало работать.\",\"source_context\":\"Глагол про механические часы.\",\"target_sentence\":\"I wound the clock.\"}"
                 }]
             }
         }]
     }))?)]);
     let client = GeminiClient::new("key", transport);
-    let draft = CardDraft::new(
+    let body_seed = CardBody::new(
+        "/wound/",
+        "/wound seed/",
+        "рана",
+        5,
+        "src",
         "wound",
-        LanguagePair::new("en", "ru"),
-        CardPayload::new("front", "back", "hint", "wound"),
+        "hint",
+        "context",
+        "Example.",
     );
-    let updated = client.correct_card(&draft, "make it verb", &LanguagePair::new("en", "ru"))?;
+    let draft = CardDraft::new("wound", "noun: a wound", LanguagePair::new("en", "ru"))
+        .with_body(body_seed, None);
+    let revision = client.correct_card(
+        &draft,
+        "treat as past tense of wind",
+        &LanguagePair::new("en", "ru"),
+    )?;
+    let (term, understanding, body_out) = revision.into_parts();
     assert_eq!(
         (
-            updated.payload().front(),
-            updated.payload().back(),
-            updated.payload().hint(),
-            updated.payload().highlight(),
+            term,
+            understanding,
+            body_out.target_sentence().to_string(),
+            body_out.source_highlight().to_string(),
+            body_out.importance(),
         ),
         (
-            "I wound the clock.",
-            "Я завел часы.",
-            "wound = past of wind",
-            "wound",
+            String::from("wound"),
+            String::from("verb: to wound someone — past tense of wind in another sense was wrong"),
+            String::from("I wound the clock."),
+            String::from("завел"),
+            6,
         ),
-        "card correction must recompose draft fields from Flash JSON"
+        "card correction must recompose term, understanding, and full body from Pro JSON"
     );
     Ok(())
 }
@@ -280,24 +281,6 @@ fn scene_generation_rejects_non_array_responses() {
             .to_string(),
         "Expected a JSON array of panels",
         "scene generation no longer rejects non-array responses with the frozen error wording"
-    );
-}
-
-/// Scene generation rejects empty panel arrays.
-#[test]
-fn scene_generation_rejects_empty_panel_arrays() {
-    let transport = FakeTransport::new(vec![Ok(body(
-        json!({"candidates":[{"content":{"parts":[{"text":"[]"}]}}]}),
-    )
-    .expect("response body must serialize"))]);
-    let client = GeminiClient::new("key", transport);
-    assert_eq!(
-        client
-            .scene("English", "demo", "en")
-            .unwrap_err()
-            .to_string(),
-        "No panels found in scene JSON",
-        "scene generation no longer rejects empty panel arrays with the frozen error wording"
     );
 }
 

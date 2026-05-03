@@ -4,7 +4,7 @@
 
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardPayload, LanguagePair, WordCandidate,
+    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair, WordCandidate,
 };
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
@@ -28,9 +28,24 @@ fn flat(app: &App) -> String {
 
 fn ready() -> CardArtifacts {
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    )
+}
+
+fn body_for(term: &str) -> CardBody {
+    CardBody::new(
+        format!("/{term}/"),
+        format!("/{term} sentence/"),
+        format!("meaning of {term}"),
+        5,
+        format!("source for {term}"),
+        term,
+        format!("hint for {term}"),
+        format!("context for {term}"),
+        format!("Example with {term}."),
     )
 }
 
@@ -40,26 +55,22 @@ fn base() -> App {
 
 #[test]
 fn language_badge_is_consistent_across_every_fullscreen_screen() {
-    let your_words = base();
+    let your_words = base().confirmed_target("en");
     let what_i_understood = base()
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_target("en")
         .understood(vec![WordCandidate::new(
             "whilst",
-            kamishibai::session::CandidateKind::Word,
-            "preview",
-            "",
+            "neutral conjunction",
+            true,
         )]);
     let your_cards = base()
         .with_screen(Screen::YourCards)
         .confirmed_target("en")
         .cards_started(vec![
-            CardDraft::new(
-                "whilst",
-                LanguagePair::new("en", "ru"),
-                CardPayload::new("f", "b", "h", "whilst"),
-            )
-            .with_artifacts(ready()),
+            CardDraft::new("whilst", "understanding", LanguagePair::new("en", "ru"))
+                .with_body(body_for("whilst"), None)
+                .with_artifacts(ready()),
         ]);
     let done = base()
         .with_screen(Screen::Done)
@@ -68,8 +79,8 @@ fn language_badge_is_consistent_across_every_fullscreen_screen() {
     for app in [your_words, what_i_understood, your_cards, done] {
         let rendered = flat(&app);
         assert!(
-            rendered.contains("kamishibai ·") && rendered.contains("→ RU"),
-            "every fullscreen screen must render the compact language pair badge"
+            rendered.contains("→ EN"),
+            "every fullscreen screen must render the compact language chip"
         );
     }
 }
@@ -79,8 +90,8 @@ fn your_words_shows_detecting_marker_before_target_is_confirmed() {
     let app = base();
     let rendered = flat(&app);
     assert!(
-        rendered.contains("detecting…"),
-        "while target is pending the badge must show a `detecting…` marker"
+        rendered.contains("…"),
+        "while target is pending the language chip must show a `…` placeholder"
     );
 }
 

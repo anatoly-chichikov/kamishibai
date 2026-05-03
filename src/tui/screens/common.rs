@@ -1,60 +1,109 @@
-//! Shared widgets for the Kamishibai TUI screens.
+//! Shared chrome for the Kamishibai TUI screens.
 //!
-//! These primitives (language badge, header, dividers, footer) keep every
-//! fullscreen screen anchored on the same design grid. Colors come from the
-//! grayscale ink palette; text content comes from the design mockup.
+//! These primitives keep every fullscreen screen anchored on the same design
+//! grid as the HTML mockup (`kamishibai-simple/project/styles.css`). All
+//! tokens come from the static palette — no accent hue is allowed.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use super::ScreenView;
 use crate::tui::app::App;
 use crate::tui::palette;
 
 /// Horizontal breathing room applied to every screen's content column.
 pub const GUTTER: u16 = 4;
-/// Breathing room above the language badge so it doesn't touch the top edge.
+/// Breathing room above the title row so it doesn't touch the top edge.
 pub const TOP_MARGIN: u16 = 1;
-/// Breathing room between the language badge and the title row.
-pub const BADGE_GAP: u16 = 1;
-/// Breathing room above the dashed footer separator so the body doesn't hug it.
-pub const FOOTER_GAP: u16 = 1;
+/// Breathing room between the header and the body content.
+pub const HEADER_GAP: u16 = 1;
 
-/// Describes the rows of a fullscreen screen: outer gutters, badge, header,
-/// body, and footer.
+/// Describes the rows of a fullscreen screen: top margin, header, rule lines,
+/// body, dashed status separator, status bar.
 pub struct ScreenFrame {
-    pub badge: Rect,
     pub header: Rect,
+    /// Vestigial slot from when the header had a solid rule under it. The
+    /// rule is gone (font-dependent rendering put the line at the bottom of
+    /// the cell on some terminals); the slot stays as a 0-height rect so
+    /// callers don't have to care.
+    #[allow(dead_code)]
+    pub header_rule: Rect,
     pub body: Rect,
-    pub footer_rule: Rect,
-    pub footer: Rect,
+    pub status_rule: Rect,
+    pub status: Rect,
 }
 
-/// Split the available area into the common screen frame: top-margin,
-/// badge, gap, header, body (with horizontal gutter), spacer, footer.
-pub fn frame(area: Rect) -> ScreenFrame {
+/// Split the available area into the common screen frame.
+///
+/// Order top-down: top margin, header, breathing row, body, dashed rule above
+/// status, status bar pinned to the last row. The solid rule under the header
+/// is gone — terminal-font rendering of `─` and SGR 9 strikethrough varies
+/// from cell-center to baseline depending on the user's font, so we rely on
+/// the inverted title block plus a clean blank gutter for the visual break.
+/// `header_rule` stays as a zero-height field for callers that still want
+/// to address the slot symbolically.
+pub fn frame_rects(area: Rect) -> ScreenFrame {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(TOP_MARGIN),
             Constraint::Length(1),
-            Constraint::Length(BADGE_GAP),
-            Constraint::Length(1),
+            Constraint::Length(HEADER_GAP),
             Constraint::Min(1),
-            Constraint::Length(FOOTER_GAP),
             Constraint::Length(1),
             Constraint::Length(1),
         ])
         .split(area);
-    let body = inset_horizontal(rows[4], GUTTER);
     ScreenFrame {
-        badge: inset_horizontal(rows[1], GUTTER),
-        header: inset_horizontal(rows[3], GUTTER),
-        body,
-        footer_rule: rows[6],
-        footer: inset_horizontal(rows[7], GUTTER),
+        header: inset_horizontal(rows[1], GUTTER),
+        header_rule: Rect {
+            x: rows[2].x,
+            y: rows[2].y,
+            width: rows[2].width,
+            height: 0,
+        },
+        body: inset_horizontal(rows[3], GUTTER),
+        status_rule: rows[4],
+        status: inset_horizontal(rows[5], GUTTER),
     }
+}
+
+/// Render the chrome rule above the status bar. The header rule slot has
+/// zero height now, so nothing is drawn at the top of the body.
+pub fn paint_rules(frame: &mut Frame, rects: &ScreenFrame) {
+    frame.render_widget(dashed_rule(rects.status_rule.width), rects.status_rule);
+}
+
+/// Render a solid full-width rule line in `--rule` color. Currently unused
+/// — kept around in case a future screen wants a lightweight horizontal
+/// rule and is willing to live with font-dependent vertical placement.
+#[allow(dead_code)]
+pub fn solid_rule(width: u16) -> Paragraph<'static> {
+    Paragraph::new(Line::from(Span::styled(
+        " ".repeat(width as usize),
+        palette::rule().add_modifier(Modifier::CROSSED_OUT),
+    )))
+    .style(palette::base())
+}
+
+/// Render a dashed full-width rule line in `--rule` color.
+///
+/// Same vertical-centering trick as `solid_rule`: every other cell is a plain
+/// space, the marked cells carry the strikethrough.
+pub fn dashed_rule(width: u16) -> Paragraph<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(width as usize);
+    let dash_style = palette::rule().add_modifier(Modifier::CROSSED_OUT);
+    for column in 0..width as usize {
+        if column % 2 == 0 {
+            spans.push(Span::styled(String::from(" "), dash_style));
+        } else {
+            spans.push(Span::styled(String::from(" "), palette::base()));
+        }
+    }
+    Paragraph::new(Line::from(spans)).style(palette::base())
 }
 
 /// Return the rectangle shrunk by `gutter` columns on each side.
@@ -68,77 +117,158 @@ pub fn inset_horizontal(area: Rect, gutter: u16) -> Rect {
     }
 }
 
-/// Width-hint display length of the compact badge (the top-left "kamishibai · X → Y" line).
-pub fn language_badge(app: &App) -> Paragraph<'_> {
-    let target = if app.target_pending() {
-        String::from("detecting…")
+/// Render the header row: inverted-block title, dim contextual tagline pinned
+/// immediately to the right of the title, and the language chip pinned to the
+/// right edge of the row.
+///
+/// The chip is provided as styled spans so the renderer can mark only the
+/// learning language with the bright inverted block — the user's own
+/// language stays dim, mirroring the "active label" treatment of the title.
+///
+/// Layout: `[ TITLE ]  hint                                 support → target`.
+/// Two plain spaces separate the inverted title block from the dim hint —
+/// enough breathing room after the bright background, no extra punctuation.
+/// The flexible gap sits between the hint and the chip so the chip stays
+/// anchored to the right edge.
+pub fn header(
+    title: &str,
+    hint: &str,
+    lang_chip: Option<Vec<Span<'static>>>,
+    width: u16,
+) -> Paragraph<'static> {
+    let title = String::from(title);
+    let hint = String::from(hint);
+    let title_block = format!(" {title} ");
+    let title_visible = title_block.chars().count();
+    let hint_visible = hint.chars().count();
+    let hint_lead = if hint.is_empty() { 0 } else { 2 };
+    let chip = lang_chip.unwrap_or_default();
+    let chip_visible: usize = chip.iter().map(|span| span.content.chars().count()).sum();
+    let chip_lead = if chip.is_empty() { 0 } else { 2 };
+    let used = title_visible + hint_lead + hint_visible + chip_visible + chip_lead;
+    let gap = (width as usize).saturating_sub(used);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::styled(
+        title_block,
+        palette::invert().add_modifier(Modifier::BOLD),
+    ));
+    if !hint.is_empty() {
+        spans.push(Span::styled("  ", palette::base()));
+        spans.push(Span::styled(hint, palette::dim()));
+    }
+    spans.push(Span::styled(" ".repeat(gap), palette::base()));
+    if !chip.is_empty() {
+        spans.push(Span::styled("  ", palette::base()));
+        spans.extend(chip);
+    }
+    Paragraph::new(Line::from(spans)).style(palette::base())
+}
+
+/// Build the language chip — bold bright `support → target`.
+///
+/// Reading order is `support → target` so the user reads "from my language
+/// into the language i'm learning". The whole chip — both languages and the
+/// arrow between them — is rendered in bold bright `palette::base()`,
+/// matching the title block on the opposite side of the header.
+pub fn language_chip(app: &App) -> Vec<Span<'static>> {
+    let support = app.pair().support().to_uppercase();
+    let target_text = if app.target_pending() {
+        String::from("…")
     } else {
         app.pair().target().to_uppercase()
     };
-    let support = app.pair().support().to_uppercase();
-    let text = format!("kamishibai · {target} → {support}");
-    Paragraph::new(Line::from(Span::styled(text, palette::dim())))
+    let style = palette::base().add_modifier(Modifier::BOLD);
+    vec![
+        Span::styled(support, style),
+        Span::styled(" → ", style),
+        Span::styled(target_text, style),
+    ]
 }
 
-/// Return the header line with a bold title on the left and a dim tagline on the right.
-pub fn header(title: &str, tagline: &str, width: u16) -> Paragraph<'static> {
-    let title = String::from(title);
-    let tagline = String::from(tagline);
-    let left_chars = title.chars().count();
-    let right_chars = tagline.chars().count();
-    let gap = (width as usize).saturating_sub(left_chars + right_chars);
-    Paragraph::new(Line::from(vec![
+/// Render the bottom status bar — left segment, right segment, separated by a flexible gap.
+pub fn status_bar(
+    left: Vec<Span<'static>>,
+    right: Vec<Span<'static>>,
+    width: u16,
+) -> Paragraph<'static> {
+    let left_visible: usize = left.iter().map(|span| span.content.chars().count()).sum();
+    let right_visible: usize = right.iter().map(|span| span.content.chars().count()).sum();
+    let gap = (width as usize).saturating_sub(left_visible + right_visible);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.extend(left);
+    spans.push(Span::styled(" ".repeat(gap), palette::base()));
+    spans.extend(right);
+    Paragraph::new(Line::from(spans)).style(palette::base())
+}
+
+/// Compose a `[KEY] label` pair suitable for a status bar key hint.
+pub fn key_hint(key: &str, label: &str) -> Vec<Span<'static>> {
+    vec![
         Span::styled(
-            title,
-            Style::default()
-                .bg(palette::BG)
-                .fg(palette::FG)
-                .add_modifier(Modifier::BOLD),
+            format!("[{key}]"),
+            palette::base().add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" ".repeat(gap), palette::base()),
-        Span::styled(tagline, palette::dim()),
-    ]))
-    .style(palette::base())
+        Span::styled(format!(" {label}"), palette::dim()),
+    ]
 }
 
-/// Return a full-width dashed divider (dim) — the thin rule between body and footer.
-pub fn dashed_divider(width: u16) -> Paragraph<'static> {
-    let cells = width as usize;
-    let mut pattern = String::with_capacity(cells);
-    for column in 0..cells {
-        pattern.push(if column % 2 == 0 { '─' } else { ' ' });
-    }
-    Paragraph::new(Line::from(Span::styled(pattern, palette::dim()))).style(palette::base())
+/// Compose the dim · separator between status bar segments.
+pub fn status_sep() -> Span<'static> {
+    Span::styled(" · ", palette::dim2())
 }
 
-/// Return a labelled section divider — `label ──────────────────...` — dim.
-pub fn section_divider(label: &str, width: u16) -> Paragraph<'static> {
-    let prefix = format!("{label} ");
-    let prefix_len = prefix.chars().count();
-    let remaining = (width as usize).saturating_sub(prefix_len);
-    Paragraph::new(Line::from(vec![Span::styled(
-        format!("{prefix}{}", "─".repeat(remaining)),
-        palette::dim(),
-    )]))
-    .style(palette::base())
-}
-
-/// Return the bottom hints bar — right-aligned keyboard hints only.
+/// Append the global Ctrl+C quit hint to a status-bar segment.
 ///
-/// The design mockup's left-hand "why" blurb is design commentary, not product
-/// UI, so it is not rendered here.
-pub fn footer(keys: &str, width: u16) -> Paragraph<'static> {
-    let text = String::from(keys);
-    let pad = (width as usize).saturating_sub(text.chars().count());
-    Paragraph::new(Line::from(vec![
-        Span::styled(" ".repeat(pad), palette::base()),
-        Span::styled(text, palette::key()),
-    ]))
-    .style(palette::base())
+/// The hint is always present so the user never has to remember the chord;
+/// the label switches from `quit` to a bold `again` once the first Ctrl+C
+/// has been received and the next press will actually exit the process.
+pub fn append_quit(segment: &mut Vec<Span<'static>>, pending: bool) {
+    if !segment.is_empty() {
+        segment.push(status_sep());
+    }
+    segment.push(Span::styled(
+        "[Ctrl+C]",
+        palette::base().add_modifier(Modifier::BOLD),
+    ));
+    if pending {
+        segment.push(Span::styled(
+            " again",
+            palette::base().add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        segment.push(Span::styled(" quit", palette::dim()));
+    }
+}
+
+/// One and only entry point for drawing a fullscreen screen.
+///
+/// Paints the background, computes the standard chrome layout, draws the
+/// header and dashed status rule, hands the inner body rectangle to
+/// `view.body`, and finishes by drawing the screen's footer pinned to the
+/// bottom row. Screens cannot bypass this function — `render::draw` only
+/// dispatches through it, and the dispatcher hands `view.body` the body Rect
+/// only, so a screen has no handle on the chrome regions.
+pub fn render_screen(frame: &mut Frame, area: Rect, app: &App, view: &dyn ScreenView) {
+    paint_background(frame, area);
+    let rects = frame_rects(area);
+    let title = view.title(app);
+    let hint = view.hint(app);
+    frame.render_widget(
+        header(
+            title.as_ref(),
+            hint.as_ref(),
+            view.lang_chip(app),
+            rects.header.width,
+        ),
+        rects.header,
+    );
+    paint_rules(frame, &rects);
+    view.body(frame, rects.body, app);
+    frame.render_widget(view.footer(app, rects.status.width), rects.status);
 }
 
 /// Clear a rectangle with the terminal-dark background so no stray paper bleeds through.
-pub fn paint_background(frame: &mut ratatui::Frame, area: Rect) {
+pub fn paint_background(frame: &mut Frame, area: Rect) {
     let filler = " ".repeat(area.width as usize);
     for row in 0..area.height {
         let strip = Rect {
@@ -152,4 +282,12 @@ pub fn paint_background(frame: &mut ratatui::Frame, area: Rect) {
             strip,
         );
     }
+}
+
+/// Pad a string to the requested character width.
+pub fn pad_right(value: &str, width: usize) -> String {
+    let mut text = String::from(value);
+    let gap = width.saturating_sub(value.chars().count());
+    text.push_str(" ".repeat(gap).as_str());
+    text
 }

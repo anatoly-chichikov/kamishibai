@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 
 use crate::vocabulary::{
     Importance, LanguageCode, NonEmptyText, VocabularyDocument, VocabularyEntry, VocabularySource,
@@ -7,28 +7,28 @@ use crate::vocabulary::{
 
 use super::draft::CardDraft;
 
-/// Bridge one card draft into the strict internal vocabulary entry used by the
-/// existing `src/generation/*` pipeline.
-///
-/// This keeps the expensive pieces (`catalog.rs`, `manga/render.rs`, `speech.rs`)
-/// working without modification while the user-facing flow migrates off the
-/// JSON-first entry point.
+/// Bridge one card draft into the strict internal vocabulary entry consumed by
+/// the existing `src/generation/*` pipeline. Fails if the body has not been
+/// generated yet — every field on `VocabularyEntry` is non-empty by contract.
 pub fn to_entry(draft: &CardDraft) -> Result<VocabularyEntry> {
+    let Some(body) = draft.body() else {
+        bail!("invariant: card body must be generated before bridging to VocabularyEntry");
+    };
     Ok(VocabularyEntry {
         term: NonEmptyText::new(draft.term())?,
-        meaning: NonEmptyText::new(draft.payload().back())?,
-        pronunciation: NonEmptyText::new(draft.payload().front())?,
-        transcription: NonEmptyText::new(draft.payload().highlight())?,
-        importance: Importance::new(5)?,
+        meaning: NonEmptyText::new(body.meaning())?,
+        pronunciation: NonEmptyText::new(body.pronunciation())?,
+        transcription: NonEmptyText::new(body.transcription())?,
+        importance: Importance::new(body.importance())?,
         source: VocabularySource {
-            sentence: NonEmptyText::new(draft.payload().back())?,
+            sentence: NonEmptyText::new(body.source_sentence())?,
             lang: LanguageCode::new(draft.pair().support())?,
-            highlight: NonEmptyText::new(draft.payload().highlight())?,
-            hint: NonEmptyText::new(draft.payload().hint())?,
-            context: NonEmptyText::new(draft.payload().hint())?,
+            highlight: NonEmptyText::new(body.source_highlight())?,
+            hint: NonEmptyText::new(body.source_hint())?,
+            context: NonEmptyText::new(body.source_context())?,
         },
         target: VocabularyTarget {
-            sentence: NonEmptyText::new(draft.payload().front())?,
+            sentence: NonEmptyText::new(body.target_sentence())?,
             lang: LanguageCode::new(draft.pair().target())?,
         },
     })

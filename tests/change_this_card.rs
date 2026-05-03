@@ -2,7 +2,8 @@
 
 use anyhow::Result;
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardCorrection, CardDraft, CardPayload, LanguagePair,
+    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardCorrection, CardDraft, CardRevision,
+    LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, draw, transit};
 use ratatui::Terminal;
@@ -16,18 +17,25 @@ impl CardCorrection for FakeCardCorrection {
         draft: &CardDraft,
         _comment: &str,
         _pair: &LanguagePair,
-    ) -> Result<CardDraft> {
-        Ok(draft.clone().recomposed(CardPayload::new(
+    ) -> Result<CardRevision> {
+        let understanding = format!("{} · revised: verb sense", draft.understanding());
+        let body = CardBody::new(
+            "/updated/",
+            "/updated front sentence/",
+            "updated meaning",
+            7,
+            "updated source sentence",
+            "updated",
+            "updated hint without naming the term",
+            "updated context",
             "updated front",
-            "updated back",
-            draft.payload().hint(),
-            draft.payload().highlight(),
-        )))
+        );
+        Ok(CardRevision::new(draft.term(), understanding, body))
     }
 }
 
 fn flat(app: &App) -> String {
-    let backend = TestBackend::new(120, 40);
+    let backend = TestBackend::new(120, 50);
     let mut terminal = Terminal::new(backend).expect("backend");
     terminal.draw(|frame| draw(frame, app)).expect("draw");
     let buffer = terminal.backend().buffer();
@@ -41,21 +49,37 @@ fn flat(app: &App) -> String {
     rendered
 }
 
-fn ready() -> CardArtifacts {
+fn ready_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
     )
 }
 
+fn body_for(term: &str) -> CardBody {
+    CardBody::new(
+        format!("/{term}/"),
+        format!("/{term} sentence/"),
+        format!("meaning of {term}"),
+        5,
+        format!("source meaning of {term}"),
+        term,
+        format!("hint for {term} without naming it"),
+        format!("usage notes for {term}"),
+        format!("Example with {term}."),
+    )
+}
+
 fn draft(term: &str) -> CardDraft {
     CardDraft::new(
         term,
+        format!("understanding for {term}"),
         LanguagePair::new("en", "ru"),
-        CardPayload::new("front", "back", "hint", term),
     )
-    .with_artifacts(ready())
+    .with_body(body_for(term), None)
+    .with_artifacts(ready_artifacts())
 }
 
 fn seeded() -> App {
@@ -72,9 +96,9 @@ fn request_change_on_your_cards_opens_per_card_modal() {
     let rendered = flat(&opened);
     assert!(
         opened.modal() == Some(ModalKind::ChangeThisCard)
-            && rendered.contains("How should I change this card?")
+            && rendered.contains("change · this card")
             && rendered.contains("tell me what to change")
-            && rendered.contains("card #1 · whilst"),
+            && rendered.contains("whilst"),
         "R on Your cards must open the per-card modal with the right prompt and card preview"
     );
 }
@@ -99,21 +123,22 @@ fn submit_on_per_card_modal_emits_card_correction_and_closes_overlay() {
 fn correction_result_reaches_focused_card_without_touching_neighbors() {
     let app = seeded();
     let focused = app.cards()[app.card_selected()].clone();
-    let updated = FakeCardCorrection
+    let revision = FakeCardCorrection
         .correct_card(&focused, "verb", app.pair())
         .expect("mock card correction");
-    let patched = app.card_patched_artifacts(ready());
-    let with_updated = patched.clone().cards_started({
-        let mut drafts = patched.cards().to_vec();
+    let (term, understanding, body) = revision.into_parts();
+    let updated = focused.recomposed(term, understanding, body);
+    let with_updated = app.clone().cards_started({
+        let mut drafts = app.cards().to_vec();
         drafts[0] = updated;
         drafts
     });
     let rendered = flat(&with_updated.card_toggle_expanded());
     assert!(
         rendered.contains("updated front")
-            && rendered.contains("updated back")
+            && rendered.contains("updated source sentence")
             && rendered.contains("wreck"),
-        "per-card correction must update only the focused draft and leave siblings intact"
+        "per-card correction must update only the focused draft and leave siblings intact: {rendered}"
     );
 }
 

@@ -1,231 +1,113 @@
-//! Shared renderer for the two correction modals (states 02b and 03b).
+//! Centered correction modal.
 //!
-//! Both share the same visual pattern — double-line header `╔═ … ═╗`,
-//! a card or list preview, a dashed textarea region, and a centered
-//! `[Esc] cancel    [Enter] send` footer.
+//! Single visual pattern — solid border, dashed input rule, and a right-aligned
+//! `[Esc] cancel  [↵] send` action row. Shared between the bulk-correction and
+//! per-card-correction flows. The terminal cursor is placed on the input line
+//! so the host terminal handles its own blink natively.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::tui::app::App;
 use crate::tui::palette;
 use crate::tui::screen::ModalKind;
 
-const MODAL_WIDTH: u16 = 72;
-const MODAL_HEIGHT: u16 = 20;
+const MODAL_WIDTH: u16 = 64;
+const MODAL_HEIGHT: u16 = 9;
+const HORIZONTAL_PADDING: u16 = 2;
+const INPUT_LINE_OFFSET: u16 = 3;
 
 /// Draw the correction modal of the requested kind.
 pub fn draw(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
     let inset = centered(area, MODAL_WIDTH, MODAL_HEIGHT);
     super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
-    frame.render_widget(modal_body(kind, app, inset.width), inset);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(palette::FG).bg(palette::BG))
+        .style(palette::base());
+    let inner = block.inner(inset);
+    frame.render_widget(block, inset);
+    let content = padded(inner);
+    frame.render_widget(panel(kind, app, content.width as usize), content);
+    let title_label = match kind {
+        ModalKind::ChangeSomething => "change",
+        ModalKind::ChangeThisCard => "change · this card",
+    };
+    let title = Span::styled(format!(" {title_label} "), palette::base());
+    let title_rect = Rect {
+        x: inset.x + 2,
+        y: inset.y,
+        width: title.content.chars().count() as u16,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(title)).style(palette::base()),
+        title_rect,
+    );
+    let buffer_width = app.modal_buffer().chars().count() as u16;
+    let cursor_x = (content.x + buffer_width).min(content.x + content.width.saturating_sub(1));
+    let cursor_y = content.y + INPUT_LINE_OFFSET;
+    frame.set_cursor_position((cursor_x, cursor_y));
 }
 
-fn modal_body<'a>(kind: ModalKind, app: &'a App, width: u16) -> Paragraph<'a> {
-    let inner = width as usize;
-    let title = match kind {
-        ModalKind::ChangeSomething => "How should I change these?",
-        ModalKind::ChangeThisCard => "How should I change this card?",
-    };
-    let top = double_edge_line(title, width);
-    let blank_inner = format!("║{}║", " ".repeat(inner.saturating_sub(2)));
-    let bottom = format!("╚{}╝", "═".repeat(inner.saturating_sub(2)));
-    let mut lines: Vec<Line<'a>> = Vec::new();
-    lines.push(Line::from(Span::styled(top, palette::base())));
-    lines.push(side_line(&blank_inner));
-    match kind {
-        ModalKind::ChangeSomething => {
-            lines.push(side_text_line(
-                "     tell me in your own words — applies to all ",
-                &format!("{}:", app.candidates().len()),
-                width,
-                palette::dim(),
-                palette::dim(),
-            ));
-        }
-        ModalKind::ChangeThisCard => {
-            lines.extend(card_preview(app, width));
-            lines.push(side_text_line(
-                "     tell me what to change:",
-                "",
-                width,
-                palette::dim(),
-                palette::base(),
-            ));
-        }
+fn padded(inner: Rect) -> Rect {
+    Rect {
+        x: inner.x + HORIZONTAL_PADDING,
+        y: inner.y,
+        width: inner.width.saturating_sub(HORIZONTAL_PADDING * 2),
+        height: inner.height,
     }
-    lines.push(side_line(&blank_inner));
-    lines.push(side_styled_line(
-        Line::from(vec![Span::styled(
-            format!("     {}", "─".repeat(inner.saturating_sub(12))),
-            palette::dim(),
-        )]),
-        width,
-    ));
-    lines.extend(textarea_lines(app, width));
-    lines.push(side_styled_line(
-        Line::from(vec![Span::styled(
-            format!("     {}", "─".repeat(inner.saturating_sub(12))),
-            palette::dim(),
-        )]),
-        width,
-    ));
-    lines.push(side_line(&blank_inner));
-    lines.push(footer_line(width));
-    lines.push(side_line(&blank_inner));
-    lines.push(Line::from(Span::styled(bottom, palette::base())));
+}
+
+fn panel<'a>(kind: ModalKind, app: &'a App, width: usize) -> Paragraph<'a> {
+    let prompt = match kind {
+        ModalKind::ChangeSomething => "tell me what to change — applies to all".to_string(),
+        ModalKind::ChangeThisCard => format!(
+            "tell me what to change · {}",
+            app.cards()
+                .get(app.card_selected())
+                .map(|draft| draft.term())
+                .unwrap_or("")
+        ),
+    };
+    let input = if app.modal_buffer().is_empty() {
+        Line::from("")
+    } else {
+        Line::from(Span::styled(
+            String::from(app.modal_buffer()),
+            palette::base(),
+        ))
+    };
+    let dashes = "─".repeat(width);
+    let actions = Line::from(vec![
+        Span::styled("[Esc]", palette::base().add_modifier(Modifier::BOLD)),
+        Span::styled(" cancel    ", palette::dim()),
+        Span::styled("[Enter]", palette::base().add_modifier(Modifier::BOLD)),
+        Span::styled(" send", palette::base()),
+    ]);
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(prompt, palette::dim())),
+        Line::from(""),
+        input,
+        Line::from(Span::styled(dashes, palette::rule())),
+        Line::from(""),
+        actions,
+    ];
     Paragraph::new(lines).style(palette::base())
 }
 
-fn double_edge_line(title: &str, width: u16) -> String {
-    let inner = width as usize - 2;
-    let adorned = format!("═ {title} ");
-    let adorned_len = adorned.chars().count();
-    let fill = inner.saturating_sub(adorned_len);
-    format!("╔{adorned}{}╗", "═".repeat(fill))
-}
-
-fn side_line(content: &str) -> Line<'static> {
-    Line::from(Span::styled(String::from(content), palette::base()))
-}
-
-fn side_styled_line(line: Line<'_>, width: u16) -> Line<'_> {
-    let used: usize = line
-        .spans
-        .iter()
-        .map(|span| span.content.chars().count())
-        .sum();
-    let pad = (width as usize).saturating_sub(2).saturating_sub(used);
-    let mut spans: Vec<Span<'_>> = Vec::new();
-    spans.push(Span::styled("║", palette::base()));
-    spans.extend(line.spans);
-    spans.push(Span::styled(" ".repeat(pad), palette::base()));
-    spans.push(Span::styled("║", palette::base()));
-    Line::from(spans)
-}
-
-fn side_text_line<'a>(
-    prefix: &str,
-    suffix: &str,
-    width: u16,
-    prefix_style: Style,
-    suffix_style: Style,
-) -> Line<'a> {
-    let visible = prefix.chars().count() + suffix.chars().count();
-    let pad = (width as usize).saturating_sub(2).saturating_sub(visible);
-    Line::from(vec![
-        Span::styled("║", palette::base()),
-        Span::styled(String::from(prefix), prefix_style),
-        Span::styled(String::from(suffix), suffix_style),
-        Span::styled(" ".repeat(pad), palette::base()),
-        Span::styled("║", palette::base()),
-    ])
-}
-
-fn card_preview<'a>(app: &'a App, width: u16) -> Vec<Line<'a>> {
-    let inner = (width as usize).saturating_sub(2);
-    let separator = format!("     {}", "─".repeat(inner.saturating_sub(10)));
-    let focused = app.cards().get(app.card_selected());
-    let title = focused
-        .map(|draft| format!("     card #{} · {}", app.card_selected() + 1, draft.term()))
-        .unwrap_or_else(|| String::from("     card preview"));
-    let example = focused
-        .map(|draft| format!("      {}", draft.payload().front()))
-        .unwrap_or_else(|| String::from("      (nothing selected)"));
-    vec![
-        side_text_line(&title, "", width, palette::dim(), palette::base()),
-        side_styled_line(
-            Line::from(vec![Span::styled(separator.clone(), palette::dim())]),
-            width,
-        ),
-        side_text_line(&example, "", width, palette::base(), palette::base()),
-        side_styled_line(
-            Line::from(vec![Span::styled(separator, palette::dim())]),
-            width,
-        ),
-        side_text_line("", "", width, palette::base(), palette::base()),
-    ]
-}
-
-fn textarea_lines<'a>(app: &'a App, width: u16) -> Vec<Line<'a>> {
-    let inner = (width as usize).saturating_sub(2);
-    let buffer = app.modal_buffer();
-    let mut rows: Vec<String> = Vec::new();
-    if buffer.is_empty() {
-        rows.push(String::from("      "));
-    } else {
-        for line in buffer.split('\n') {
-            rows.push(format!("      {line}"));
-        }
-    }
-    let mut lines: Vec<Line<'a>> = Vec::new();
-    let last = rows.len() - 1;
-    for (index, text) in rows.into_iter().enumerate() {
-        let mut visible = text.chars().count();
-        let show_cursor = index == last;
-        let cursor_width = if show_cursor { 1 } else { 0 };
-        let pad = inner.saturating_sub(visible).saturating_sub(cursor_width);
-        visible += cursor_width + pad;
-        let _ = visible;
-        let mut spans: Vec<Span<'a>> = Vec::new();
-        spans.push(Span::styled("║", palette::base()));
-        spans.push(Span::styled(text, palette::base()));
-        if show_cursor {
-            spans.push(Span::styled(
-                " ",
-                Style::default()
-                    .bg(palette::FG)
-                    .fg(palette::FG)
-                    .add_modifier(Modifier::SLOW_BLINK),
-            ));
-        }
-        spans.push(Span::styled(" ".repeat(pad), palette::base()));
-        spans.push(Span::styled("║", palette::base()));
-        lines.push(Line::from(spans));
-    }
-    lines
-}
-
-fn footer_line(width: u16) -> Line<'static> {
-    let inner = (width as usize).saturating_sub(2);
-    let text_left_key = "[Esc]";
-    let text_left_label = " cancel";
-    let gap = "    ";
-    let text_right_key = "[Enter]";
-    let text_right_label = " send";
-    let visible = text_left_key.chars().count()
-        + text_left_label.chars().count()
-        + gap.chars().count()
-        + text_right_key.chars().count()
-        + text_right_label.chars().count();
-    let pad_left = inner.saturating_sub(visible) / 2;
-    let pad_right = inner.saturating_sub(visible).saturating_sub(pad_left);
-    Line::from(vec![
-        Span::styled("║", palette::base()),
-        Span::styled(" ".repeat(pad_left), palette::base()),
-        Span::styled(String::from(text_left_key), palette::key()),
-        Span::styled(String::from(text_left_label), palette::base()),
-        Span::raw(gap),
-        Span::styled(String::from(text_right_key), palette::key()),
-        Span::styled(String::from(text_right_label), palette::base()),
-        Span::styled(" ".repeat(pad_right), palette::base()),
-        Span::styled("║", palette::base()),
-    ])
-}
-
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let clamped_width = width.min(area.width);
-    let clamped_height = height.min(area.height);
-    let x = area.x + area.width.saturating_sub(clamped_width) / 2;
-    let y = area.y + area.height.saturating_sub(clamped_height) / 2;
+    let actual_width = width.min(area.width);
+    let actual_height = height.min(area.height);
     Rect {
-        x,
-        y,
-        width: clamped_width,
-        height: clamped_height,
+        x: area.x + area.width.saturating_sub(actual_width) / 2,
+        y: area.y + area.height.saturating_sub(actual_height) / 2,
+        width: actual_width,
+        height: actual_height,
     }
 }

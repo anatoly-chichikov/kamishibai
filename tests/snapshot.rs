@@ -48,3 +48,32 @@ fn done_snapshot_locks_final_screen() {
     let app = App::new(LanguagePair::new("en", "ru")).with_screen(Screen::Done);
     insta::assert_snapshot!("done", render(&app));
 }
+
+#[test]
+fn header_hint_sits_left_of_language_chip_on_every_screen() {
+    let pair = LanguagePair::new("en", "ru");
+    let cases = [
+        (Screen::YourWords, "each line becomes one anki card"),
+        (
+            Screen::WhatIUnderstood,
+            "quick check before i build the cards",
+        ),
+        (Screen::YourCards, "drawing each card one by one"),
+        (Screen::Done, "all done"),
+    ];
+    for (screen, hint) in cases {
+        let app = App::new(pair.clone()).with_screen(screen);
+        let buffer = render(&app);
+        let header_row = buffer.lines().nth(1).expect("header row must render");
+        let hint_pos = header_row
+            .find(hint)
+            .unwrap_or_else(|| panic!("hint missing on {screen:?} header row"));
+        let chip_pos = header_row
+            .find("RU")
+            .unwrap_or_else(|| panic!("language chip missing on {screen:?} header row"));
+        assert!(
+            hint_pos < chip_pos,
+            "contextual hint must sit left of the language chip on {screen:?} (hint at {hint_pos}, chip at {chip_pos})"
+        );
+    }
+}

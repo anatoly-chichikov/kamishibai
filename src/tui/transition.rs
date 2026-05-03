@@ -1,6 +1,6 @@
 use super::app::App;
 use super::event::AppEvent;
-use super::screen::{ModalKind, Screen};
+use super::screen::{ModalKind, Screen, WelcomeStage};
 
 /// A side effect requested by a transition. The shell interprets it outside the pure function.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,6 +12,8 @@ pub enum Side {
     StartGeneration,
     RegenerateFailed,
     PersistMyLanguage(String),
+    PersistApiKey(String),
+    OpenKeyHelp,
     PublishDone,
     ExitApp,
 }
@@ -27,6 +29,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
     }
     let event = promote(&app, event);
     match (app.screen(), app.modal(), event) {
+        (Screen::Welcome, _, e) => welcome(app, e),
         (Screen::YourWords, None, AppEvent::Submit) => {
             if app
                 .blob()
@@ -51,11 +54,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::WhatIUnderstood, None, AppEvent::Submit)
         | (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) => {
-            if !app
-                .candidates()
-                .iter()
-                .any(|candidate| candidate.included())
-            {
+            if !app.candidates().iter().any(|candidate| candidate.ok()) {
                 (app, Side::None)
             } else {
                 (app.with_screen(Screen::YourCards), Side::StartGeneration)
@@ -115,12 +114,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_selected_previous(), Side::None),
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
         (Screen::YourCards, None, AppEvent::Submit)
-        | (Screen::YourCards, None, AppEvent::KeyEnter)
-            if app.cards_failed() > 0 =>
-        {
-            (app.with_screen(Screen::Done), Side::PublishDone)
-        }
-        (Screen::YourCards, None, AppEvent::Submit)
         | (Screen::YourCards, None, AppEvent::KeyEnter) => (app.card_toggle_expanded(), Side::None),
         (Screen::YourCards, None, AppEvent::KeyChar('d'))
         | (Screen::YourCards, None, AppEvent::KeyChar('D')) => {
@@ -150,16 +143,55 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::KeyBackspace) => {
             (app.rubbed(), Side::None)
         }
-        (Screen::YourCards, None, AppEvent::BatchReady) => {
-            (app.with_screen(Screen::Done), Side::PublishDone)
-        }
-        (Screen::YourCards, None, AppEvent::BatchDone { failed: _ }) => {
-            (app.with_screen(Screen::Done), Side::PublishDone)
-        }
+        (Screen::YourCards, None, AppEvent::BatchReady) => (app, Side::PublishDone),
+        (Screen::YourCards, None, AppEvent::BatchDone { failed: _ }) => (app, Side::PublishDone),
+        (Screen::YourCards, None, AppEvent::NewBatch) => (app.fresh_batch(), Side::None),
         (Screen::Done, None, AppEvent::NewBatch) => (app.fresh_batch(), Side::None),
         (Screen::Done, None, AppEvent::Quit) => (app, Side::ExitApp),
         (_, _, AppEvent::Redraw) => (app, Side::None),
         (_, _, _) => (app, Side::None),
+    }
+}
+
+fn welcome(app: App, event: AppEvent) -> (App, Side) {
+    let stage = app.welcome().stage;
+    match (stage, event) {
+        (WelcomeStage::PickLanguage, AppEvent::WelcomeNextLanguage) => {
+            let next = next_support(app.pair().support(), 1);
+            let next_app = app.welcome_pick_language(next.clone());
+            (next_app, Side::PersistMyLanguage(next))
+        }
+        (WelcomeStage::PickLanguage, AppEvent::WelcomePrevLanguage) => {
+            let next = next_support(app.pair().support(), -1);
+            let next_app = app.welcome_pick_language(next.clone());
+            (next_app, Side::PersistMyLanguage(next))
+        }
+        (WelcomeStage::PickLanguage, AppEvent::Submit)
+        | (WelcomeStage::PickLanguage, AppEvent::KeyEnter) => (app.welcome_advance(), Side::None),
+        (WelcomeStage::EnterKey, AppEvent::Cancel) => (app.welcome_step_back(), Side::None),
+        (WelcomeStage::EnterKey, AppEvent::WelcomePasteKey(text)) => {
+            let trimmed = text.trim().to_string();
+            let next = app.welcome_paste_key(trimmed.clone());
+            (next, Side::PersistApiKey(trimmed))
+        }
+        (WelcomeStage::EnterKey, AppEvent::KeyChar(symbol)) => {
+            let mut key = app.welcome().key.clone();
+            key.push(symbol);
+            (app.welcome_paste_key(key), Side::None)
+        }
+        (WelcomeStage::EnterKey, AppEvent::KeyBackspace) => {
+            (app.welcome_clear_key(), Side::PersistApiKey(String::new()))
+        }
+        (WelcomeStage::EnterKey, AppEvent::WelcomeOpenKeyHelp) => (app, Side::OpenKeyHelp),
+        (WelcomeStage::EnterKey, AppEvent::Submit)
+        | (WelcomeStage::EnterKey, AppEvent::KeyEnter) => {
+            if app.welcome().key.chars().count() >= 20 {
+                (app.with_screen(Screen::YourWords), Side::None)
+            } else {
+                (app, Side::None)
+            }
+        }
+        _ => (app, Side::None),
     }
 }
 
@@ -168,6 +200,9 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         return event;
     }
     match (app.screen(), &event) {
+        (Screen::Welcome, AppEvent::NavPrev) => AppEvent::WelcomePrevLanguage,
+        (Screen::Welcome, AppEvent::NavNext) => AppEvent::WelcomeNextLanguage,
+        (Screen::Welcome, AppEvent::KeyChar('?')) => AppEvent::WelcomeOpenKeyHelp,
         (Screen::WhatIUnderstood, AppEvent::KeyChar('r'))
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
         (Screen::WhatIUnderstood, AppEvent::KeyChar('t'))
@@ -182,16 +217,29 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
                 AppEvent::RequestChange
             }
         }
+        (Screen::YourCards, AppEvent::KeyChar('n'))
+        | (Screen::YourCards, AppEvent::KeyChar('N')) => {
+            if all_finished(app) {
+                AppEvent::NewBatch
+            } else {
+                event
+            }
+        }
         (Screen::WhatIUnderstood, AppEvent::KeyChar('l'))
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('L')) => AppEvent::ToggleMyLanguage,
         (Screen::Done, AppEvent::KeyChar('n')) | (Screen::Done, AppEvent::KeyChar('N')) => {
             AppEvent::NewBatch
         }
-        (Screen::Done, AppEvent::KeyChar('q')) | (Screen::Done, AppEvent::KeyChar('Q')) => {
-            AppEvent::Quit
-        }
         _ => event,
     }
+}
+
+fn all_finished(app: &App) -> bool {
+    !app.cards().is_empty()
+        && app
+            .cards()
+            .iter()
+            .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed())
 }
 
 fn next_target(current: &str, support: &str) -> String {
@@ -210,4 +258,17 @@ fn next_target(current: &str, support: &str) -> String {
         }
     }
     String::from(current)
+}
+
+fn next_support(current: &str, direction: i32) -> String {
+    let order = ["en", "ru", "es", "de", "el", "zh", "fr", "it", "ja"];
+    let mut position: i32 = 0;
+    for (index, code) in order.iter().enumerate() {
+        if *code == current {
+            position = index as i32;
+            break;
+        }
+    }
+    let next = (position + direction).rem_euclid(order.len() as i32) as usize;
+    String::from(order[next])
 }

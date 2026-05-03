@@ -44,7 +44,7 @@ fn language_pair_label_renders_uppercase_arrow() {
     let pair = LanguagePair::new("en", "ru");
     assert_eq!(
         pair.label(),
-        "EN → RU",
+        "RU → EN",
         "language pair label must render target → support in uppercase"
     );
 }

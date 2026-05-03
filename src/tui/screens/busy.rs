@@ -1,99 +1,75 @@
 //! Universal blocking loader overlay.
 //!
-//! It covers the current screen while a background text pass is running and
-//! gives the render loop something visible to animate until the result arrives.
+//! Shown over the current screen while a background text pass is running.
+//! Single solid-bordered card with the same circular half-step spinner the
+//! terminal progress reporter uses — keeps a single visual language for
+//! waiting state across the entire app.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::tui::app::BusyView;
 use crate::tui::palette;
 
-const WIDTH: u16 = 48;
-const HEIGHT: u16 = 7;
-const FRAMES: [&str; 4] = ["-", "\\", "|", "/"];
+const WIDTH: u16 = 50;
+const HEIGHT: u16 = 6;
+const HORIZONTAL_PADDING: u16 = 2;
+const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
 
 /// Draw the universal blocking loader over the full terminal area.
 pub fn draw(frame: &mut Frame, area: Rect, busy: &BusyView) {
-    scrim(frame, area);
     let inset = centered(area, WIDTH, HEIGHT);
+    super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
-    frame.render_widget(panel(busy, inset.width), inset);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(palette::FG).bg(palette::BG))
+        .style(palette::base());
+    let inner = block.inner(inset);
+    frame.render_widget(block, inset);
+    frame.render_widget(panel(busy), padded(inner));
+    let title = Span::styled(" working ", palette::base());
+    let title_rect = Rect {
+        x: inset.x + 2,
+        y: inset.y,
+        width: title.content.chars().count() as u16,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(title)).style(palette::base()),
+        title_rect,
+    );
 }
 
-fn scrim(frame: &mut Frame, area: Rect) {
-    for row in 0..area.height {
-        let mut pattern = String::with_capacity(area.width as usize);
-        for column in 0..area.width {
-            if (row + column) % 2 == 0 {
-                pattern.push(' ');
-            } else {
-                pattern.push('░');
-            }
-        }
-        let strip = Rect {
-            x: area.x,
-            y: area.y + row,
-            width: area.width,
-            height: 1,
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(pattern, palette::dim()))),
-            strip,
-        );
+fn padded(inner: Rect) -> Rect {
+    Rect {
+        x: inner.x + HORIZONTAL_PADDING,
+        y: inner.y,
+        width: inner.width.saturating_sub(HORIZONTAL_PADDING * 2),
+        height: inner.height,
     }
 }
 
-fn panel(busy: &BusyView, width: u16) -> Paragraph<'static> {
-    let inner = width as usize;
-    let top = double_edge_line("Working", width);
-    let bottom = format!("╚{}╝", "═".repeat(inner.saturating_sub(2)));
-    let blank = format!("║{}║", " ".repeat(inner.saturating_sub(2)));
-    let frame = spinner(busy);
-    let message = format!("{frame} {}", busy.kind().label());
-    Paragraph::new(vec![
-        Line::from(Span::styled(top, palette::base())),
-        Line::from(Span::styled(blank.clone(), palette::base())),
-        centered_text(
-            &message,
-            width,
+fn panel(busy: &BusyView) -> Paragraph<'static> {
+    let label = busy.kind().label();
+    let line = Line::from(vec![
+        Span::styled(spinner(busy), palette::base()),
+        Span::styled("  ", palette::base()),
+        Span::styled(
+            String::from(label),
             palette::base().add_modifier(Modifier::BOLD),
         ),
-        centered_text("the request is still running", width, palette::dim()),
-        Line::from(Span::styled(blank, palette::base())),
-        Line::from(Span::styled(bottom, palette::base())),
-    ])
-    .style(palette::base())
-}
-
-fn centered_text(text: &str, width: u16, style: Style) -> Line<'static> {
-    let inner = (width as usize).saturating_sub(2);
-    let clipped = text.chars().take(inner).collect::<String>();
-    let text_width = clipped.chars().count();
-    let left = inner.saturating_sub(text_width) / 2;
-    let right = inner.saturating_sub(text_width).saturating_sub(left);
-    Line::from(vec![
-        Span::styled("║", palette::base()),
-        Span::styled(" ".repeat(left), palette::base()),
-        Span::styled(clipped, style),
-        Span::styled(" ".repeat(right), palette::base()),
-        Span::styled("║", palette::base()),
-    ])
+    ]);
+    let still = Line::from(Span::styled("the request is still running", palette::dim()));
+    Paragraph::new(vec![Line::from(""), line, still, Line::from("")]).style(palette::base())
 }
 
 fn spinner(busy: &BusyView) -> &'static str {
-    let index = (busy.elapsed().as_millis() / 160) as usize % FRAMES.len();
+    let index = (busy.elapsed().as_millis() / 180) as usize % FRAMES.len();
     FRAMES[index]
-}
-
-fn double_edge_line(title: &str, width: u16) -> String {
-    let inner = (width as usize).saturating_sub(2);
-    let adorned = format!("═ {title} ");
-    let fill = inner.saturating_sub(adorned.chars().count());
-    format!("╔{adorned}{}╗", "═".repeat(fill))
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {

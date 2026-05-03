@@ -6,10 +6,7 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::session::TargetGuess;
-use kamishibai::session::{
-    CandidateKind, CandidateMeta, LanguagePair, MetaSegment, RawInputBatch, Understanding,
-    Understood, WordCandidate,
-};
+use kamishibai::session::{LanguagePair, RawInputBatch, Understanding, Understood, WordCandidate};
 use kamishibai::tui::{App, Screen, Side, draw, to_app, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -61,61 +58,30 @@ impl Understanding for FakeUnderstanding {
         Ok(Understood::new(
             TargetGuess::new("en", true),
             vec![
-                candidate(
+                WordCandidate::new(
                     "sincerely",
-                    "искренне",
-                    CandidateMeta::new(
-                        MetaSegment::dim("наречие"),
-                        MetaSegment::dim("с искренними чувствами"),
-                        Some(MetaSegment::bright("стиль: формальный")),
-                    ),
+                    "наречие; искренне; формальная закрывающая фраза в письмах",
+                    true,
                 ),
-                candidate(
+                WordCandidate::new(
                     "expel",
-                    "исключать",
-                    CandidateMeta::new(
-                        MetaSegment::dim("глагол"),
-                        MetaSegment::bright("из учебного заведения или организации"),
-                        None,
-                    ),
+                    "глагол; выбран смысл «исключить из учебного заведения или организации»",
+                    true,
                 ),
-                WordCandidate::with_meta(
-                    "at the end",
-                    CandidateKind::Phrase,
-                    "в конце",
-                    String::new(),
-                    CandidateMeta::new(
-                        MetaSegment::dim("фраза"),
-                        MetaSegment::dim("о времени или месте"),
-                        None,
-                    ),
-                ),
-                WordCandidate::with_meta(
+                WordCandidate::new("at the end", "фраза о времени или месте; в конце", true),
+                WordCandidate::new(
                     "celebratory",
-                    CandidateKind::Word,
-                    "праздничный",
-                    String::new(),
-                    CandidateMeta::typo(
-                        MetaSegment::dim("прилагательное"),
-                        "исправлена опечатка: было \"celeblatory\"",
-                    ),
+                    "прилагательное «праздничный»; исправлена опечатка: было «celeblatory»",
+                    true,
                 ),
-                candidate(
+                WordCandidate::new(
                     "debuted",
-                    "дебютировал",
-                    CandidateMeta::new(
-                        MetaSegment::bright("прошедшее время от слова \"debut\""),
-                        MetaSegment::bright("о первом публичном появлении"),
-                        None,
-                    ),
+                    "прошедшее время от слова «debut»; о первом публичном появлении",
+                    true,
                 ),
             ],
         ))
     }
-}
-
-fn candidate(term: &str, preview: &str, meta: CandidateMeta) -> WordCandidate {
-    WordCandidate::with_meta(term, CandidateKind::Word, preview, "", meta)
 }
 
 fn run_understanding(app: App) -> App {
@@ -127,7 +93,7 @@ fn run_understanding(app: App) -> App {
 }
 
 #[test]
-fn what_i_understood_renders_sense_check_rows_with_localized_prompts_and_card_count() {
+fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_count() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_target("en")
@@ -140,28 +106,23 @@ fn what_i_understood_renders_sense_check_rows_with_localized_prompts_and_card_co
         );
     let rendered = flat(&app);
     assert!(
-        rendered.contains("kamishibai · EN → RU")
-            && rendered.contains("шаг 1 из 2 · проверка смысла")
-            && rendered.contains("Я правильно понял эти слова?")
-            && rendered.contains("поправь до того, как я сгенерирую карточки")
+        rendered.contains("RU → EN")
+            && rendered.contains("step 2/3")
+            && rendered.contains("what i understood")
+            && rendered.contains("quick check before i build the cards")
             && rendered.contains("sincerely")
             && rendered.contains("искренне")
-            && rendered.contains("наречие · с искренними чувствами · стиль: формальный")
             && rendered.contains("expel")
-            && rendered.contains("глагол · из учебного заведения или организации")
             && rendered.contains("at the end")
-            && rendered.contains("фраза · о времени или месте")
-            && rendered.contains("исправлена опечатка: было \"celeblatory\"")
-            && rendered
-                .contains("прошедшее время от слова \"debut\" · о первом публичном появлении")
-            && rendered.contains("[↑↓] навигация")
-            && rendered.contains("[T] сменить target · [Enter] сгенерировать 5 карточек"),
-        "sense check must render localized header, dense one-line metadata, and exact generation count"
+            && rendered.contains("[↑↓]")
+            && rendered.contains("[Enter]")
+            && rendered.contains("generate"),
+        "sense check must render the new mono header, gloss list, and key hints: {rendered}"
     );
 }
 
 #[test]
-fn what_i_understood_styles_each_meta_segment_by_its_own_tone() {
+fn what_i_understood_styles_selected_row_distinctly_from_others() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_target("en")
@@ -173,13 +134,31 @@ fn what_i_understood_styles_each_meta_segment_by_its_own_tone() {
                 .to_vec(),
         );
     assert!(
-        modifiers(&app, "наречие")
+        modifiers(&app, "sincerely")
             .iter()
-            .all(|modifier| !modifier.contains(Modifier::BOLD))
-            && modifiers(&app, "стиль: формальный")
+            .any(|modifier| modifier.contains(Modifier::BOLD)),
+        "the selected term on the gloss list must render in bold"
+    );
+}
+
+#[test]
+fn excluded_candidate_renders_with_strikethrough_and_dim_gloss() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_target("en")
+        .understood(vec![WordCandidate::new(
+            "сообщение",
+            "this is Russian, not the target language; will not be turned into a card",
+            false,
+        )]);
+    let rendered = flat(&app);
+    let term_modifiers = modifiers(&app, "сообщение");
+    assert!(
+        rendered.contains("not the target language")
+            && term_modifiers
                 .iter()
-                .all(|modifier| modifier.contains(Modifier::BOLD)),
-        "sense check metadata must style dim and bright labels independently"
+                .any(|modifier| modifier.contains(Modifier::CROSSED_OUT)),
+        "excluded items must show their reason and render the term with a strikethrough: {rendered}"
     );
 }
 
@@ -236,16 +215,10 @@ fn skipped_candidate_list_keeps_user_on_what_i_understood() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_target("en")
-        .understood(vec![WordCandidate::with_meta(
+        .understood(vec![WordCandidate::new(
             "окно",
-            CandidateKind::Skipped,
-            "not generated",
-            "ru · outside the EN batch",
-            CandidateMeta::new(
-                MetaSegment::dim("пропущено"),
-                MetaSegment::dim("другой язык исходного списка"),
-                None,
-            ),
+            "this is Russian, not the EN target batch; will not be turned into a card",
+            false,
         )]);
     let (next, side) = transit(app, kamishibai::tui::AppEvent::Submit);
     assert_eq!(
