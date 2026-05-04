@@ -213,35 +213,10 @@ fn any_running(artifacts: &CardArtifacts) -> bool {
 }
 
 fn card_summary(draft: &CardDraft) -> String {
-    let artifacts = draft.artifacts();
-    if artifacts.has_failed() {
-        return String::from("gave up");
-    }
-    if artifacts.all_ready() {
-        return String::from("ready");
-    }
-    let done = step_done_count(artifacts);
-    if done > 0 {
-        return format!("{done}/4");
-    }
-    String::from("queued")
-}
-
-fn step_done_count(artifacts: &CardArtifacts) -> usize {
-    let mut done = 0usize;
-    if artifacts.body().ready() {
-        done += 1;
-    }
-    if artifacts.scene().ready() {
-        done += 1;
-    }
-    if artifacts.picture().ready() {
-        done += 1;
-    }
-    if artifacts.sound().ready() {
-        done += 1;
-    }
-    done
+    draft
+        .body()
+        .map(|body| body.target_sentence().to_string())
+        .unwrap_or_default()
 }
 
 fn step_line<'a>(

@@ -103,7 +103,9 @@ fn start_with_batch(path: PathBuf) -> Result<()> {
         .iter()
         .map(|entry| from_entry(entry, pair.clone()))
         .collect();
+    let target = pair.target().to_string();
     let app = App::new(pair)
+        .confirmed_target(target)
         .with_screen(Screen::YourCards)
         .cards_started(drafts.clone());
     run_tui(app, Some(drafts))
@@ -1450,6 +1452,50 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["whilst"],
             "generation must not create drafts for rejected candidates"
+        );
+    }
+
+    #[test]
+    fn json_batch_load_locks_in_the_target_language_so_the_chip_drops_the_pending_dots() {
+        let dir = tempdir().expect("temp dir must exist");
+        let path = dir.path().join("batch.json");
+        let payload = serde_json::json!({
+            "entries": [{
+                "term": "sincerely",
+                "meaning": "искренне",
+                "pronunciation": "sɪnˈsɪəli",
+                "transcription": "aɪ sɪnˈsɪəli əˈpɒlədʒaɪz",
+                "importance": 7,
+                "source": {
+                    "sentence": "Я искренне извиняюсь.",
+                    "lang": "ru",
+                    "highlight": "искренне",
+                    "hint": "От всего сердца.",
+                    "context": "Наречие."
+                },
+                "target": {
+                    "sentence": "I sincerely apologize.",
+                    "lang": "en"
+                }
+            }]
+        });
+        std::fs::write(
+            &path,
+            serde_json::to_string(&payload).expect("payload must encode"),
+        )
+        .expect("batch json must write");
+        let document = VocabularyDocument::load(&path).expect("batch must parse");
+        let pair = pair_from_document(&document).expect("pair must derive");
+        let target = pair.target().to_string();
+        let app = App::new(pair).confirmed_target(target);
+        assert_eq!(
+            (
+                app.pair().support().to_string(),
+                app.pair().target().to_string(),
+                app.target_pending(),
+            ),
+            (String::from("ru"), String::from("en"), false),
+            "loaded batch must seed the chip with file's languages and not leave it pending"
         );
     }
 
