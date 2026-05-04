@@ -32,28 +32,17 @@ fn published() -> App {
 }
 
 #[test]
-fn done_screen_lists_short_artifact_labels_and_keyboard_hints() {
+fn done_screen_lists_short_artifact_labels_and_quit_hint() {
     let rendered = flat(&published());
     assert!(
         rendered.contains("your cards")
             && rendered.contains("all done")
             && rendered.contains("APKG")
             && rendered.contains("PDF")
-            && rendered.contains("[N]")
-            && rendered.contains("new batch")
-            && rendered.contains("RU → EN"),
-        "Done must render compact APKG/PDF link labels and keyboard hints with the language chip"
-    );
-}
-
-#[test]
-fn new_batch_from_done_returns_to_your_words_with_language_kept() {
-    let app = published();
-    let (next, _) = transit(app, AppEvent::NewBatch);
-    assert_eq!(
-        (next.screen(), next.pair().label()),
-        (Screen::YourWords, String::from("RU → EN")),
-        "N on Done must return to Your words while keeping the language pair"
+            && rendered.contains("[Ctrl+C]")
+            && rendered.contains("RU → EN")
+            && !rendered.contains("new batch"),
+        "Done must show APKG/PDF labels, quit hint, and the language chip — no new-batch hook"
     );
 }
 

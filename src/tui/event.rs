@@ -21,8 +21,6 @@ pub enum AppEvent {
     RequestChange,
     /// User confirmed the comment of the currently open modal.
     SendCorrection(String),
-    /// User asked to start a new batch after Done.
-    NewBatch,
     /// User asked to quit the app from Done.
     Quit,
     /// User asked to open the `my` language picker modal (`Cmd+L`, `Ctrl+L`,

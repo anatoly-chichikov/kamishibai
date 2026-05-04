@@ -101,7 +101,7 @@ fn padded(inner: Rect) -> Rect {
 
 fn text_title(kind: ModalKind) -> &'static str {
     match kind {
-        ModalKind::ChangeSomething => "change",
+        ModalKind::ChangeSomething => "change · this row",
         ModalKind::ChangeThisCard => "change · this card",
         ModalKind::PickMyLanguage => "my language",
     }
@@ -109,7 +109,13 @@ fn text_title(kind: ModalKind) -> &'static str {
 
 fn text_panel<'a>(kind: ModalKind, app: &'a App, width: usize) -> Paragraph<'a> {
     let prompt = match kind {
-        ModalKind::ChangeSomething => "tell me what to change — applies to all".to_string(),
+        ModalKind::ChangeSomething => format!(
+            "tell me what to change · {}",
+            app.candidates()
+                .get(app.selected())
+                .map(|candidate| candidate.term())
+                .unwrap_or("")
+        ),
         ModalKind::ChangeThisCard => format!(
             "tell me what to change · {}",
             app.cards()

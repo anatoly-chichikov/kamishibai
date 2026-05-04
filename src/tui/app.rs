@@ -426,28 +426,6 @@ impl App {
         self
     }
 
-    /// Return the app reset for a fresh batch while keeping the language pair.
-    pub fn fresh_batch(self) -> Self {
-        Self {
-            screen: Screen::YourWords,
-            modal: None,
-            busy: None,
-            error: None,
-            pair: self.pair,
-            input: AppInput {
-                target_pending: true,
-                ..AppInput::default()
-            },
-            review: Review::default(),
-            cards: CardsView::default(),
-            done: DoneArtifacts::default(),
-            welcome: WelcomeView::default(),
-            body_scroll: 0,
-            quit_pending: false,
-            picker_cursor: 0,
-        }
-    }
-
     /// Return the confirmed candidates to be reviewed.
     pub fn candidates(&self) -> &[WordCandidate] {
         self.review.candidates.as_slice()
@@ -645,16 +623,6 @@ impl App {
         self
     }
 
-    /// Return the app with the first unfinished artifact of the focused card discarded.
-    pub fn card_dropped_artifact(mut self) -> Self {
-        if let Some(draft) = self.cards.drafts.get(self.cards.selected).cloned()
-            && let Some(artifacts) = drop_artifact(draft.artifacts())
-        {
-            self.cards.drafts[self.cards.selected] = draft.with_artifacts(artifacts);
-        }
-        self
-    }
-
     /// Return the count of ready cards for the status line.
     pub fn cards_ready(&self) -> usize {
         self.cards
@@ -735,50 +703,6 @@ impl App {
         self.input.blob.clear();
         self
     }
-}
-
-fn drop_artifact(artifacts: &CardArtifacts) -> Option<CardArtifacts> {
-    for kind in [Artifact::Scene, Artifact::Picture, Artifact::Sound] {
-        let slot = match kind {
-            Artifact::Body => artifacts.body(),
-            Artifact::Scene => artifacts.scene(),
-            Artifact::Picture => artifacts.picture(),
-            Artifact::Sound => artifacts.sound(),
-        };
-        if slot.complete() {
-            continue;
-        }
-        return Some(replace_slot(artifacts, kind, slot.clone().discard()));
-    }
-    None
-}
-
-fn replace_slot(
-    artifacts: &CardArtifacts,
-    kind: Artifact,
-    replacement: ArtifactSlot,
-) -> CardArtifacts {
-    let body = if kind == Artifact::Body {
-        replacement.clone()
-    } else {
-        artifacts.body().clone()
-    };
-    let scene = if kind == Artifact::Scene {
-        replacement.clone()
-    } else {
-        artifacts.scene().clone()
-    };
-    let picture = if kind == Artifact::Picture {
-        replacement.clone()
-    } else {
-        artifacts.picture().clone()
-    };
-    let sound = if kind == Artifact::Sound {
-        replacement
-    } else {
-        artifacts.sound().clone()
-    };
-    CardArtifacts::from_parts(body, scene, picture, sound)
 }
 
 fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {

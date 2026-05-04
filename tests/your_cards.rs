@@ -107,17 +107,17 @@ fn your_cards_lists_each_card_with_a_bare_term_head_and_artifact_check_marks() {
             && rendered.contains("RU → EN")
             && rendered.contains("[↑↓] nav")
             && rendered.contains("[Enter] expand")
-            && rendered.contains("[D] drop")
             && rendered.contains("[R] change")
+            && !rendered.contains("[D] drop")
             && !rendered.contains("working…")
             && !rendered.contains("queued")
             && !rendered.contains("Example with"),
-        "collapsed view must hide queued rows and the during-generation footer must spell out every active key: {rendered}"
+        "during-generation footer must drop the obsolete drop hint and spell out every remaining key: {rendered}"
     );
 }
 
 #[test]
-fn your_cards_done_footer_carries_expand_change_and_new_batch_hints() {
+fn your_cards_done_footer_carries_expand_and_change_hints_only() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("at the end", ready_artifacts()),
@@ -131,11 +131,10 @@ fn your_cards_done_footer_carries_expand_change_and_new_batch_hints() {
             && rendered.contains("[↑↓] nav")
             && rendered.contains("[Enter] expand")
             && rendered.contains("[R] change")
-            && rendered.contains("[N] new batch")
-            && !rendered.contains("[n] new batch")
+            && !rendered.contains("new batch")
             && !rendered.contains("[D] drop")
             && !rendered.contains("working…"),
-        "all-done footer must offer expand/change/new-batch in the canonical uppercase style: {rendered}"
+        "all-done footer must offer only expand/change hints — no new-batch or drop hooks: {rendered}"
     );
 }
 
@@ -212,15 +211,5 @@ fn expanded_card_shows_body_preview_only_no_duplicate_artifact_pane() {
             && rendered.contains("meaning")
             && artifact_lines <= 1,
         "expanded row must reveal the body preview without duplicating the step list: {rendered}"
-    );
-}
-
-#[test]
-fn lowercase_d_discards_the_first_unfinished_artifact_on_the_focused_card() {
-    let start = seeded(vec![draft("in the end", retrying_artifacts())]);
-    let next = transit(start, AppEvent::KeyChar('d')).0;
-    assert!(
-        next.cards()[0].artifacts().picture().discarded(),
-        "lowercase d on Your cards must discard the first unfinished focused artifact"
     );
 }

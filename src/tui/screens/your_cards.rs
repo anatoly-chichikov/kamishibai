@@ -59,7 +59,7 @@ impl ScreenView for YourCards {
     }
 
     fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, all_finished(app), width)
+        footer(app, width)
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -499,7 +499,7 @@ pub(crate) fn detail_pane_height(draft: &CardDraft) -> usize {
     h
 }
 
-fn footer(app: &App, all_finished: bool, width: u16) -> Paragraph<'static> {
+fn footer(app: &App, width: u16) -> Paragraph<'static> {
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 3/3", palette::dim2()));
     left.push(super::common::status_sep());
@@ -525,16 +525,8 @@ fn footer(app: &App, all_finished: bool, width: u16) -> Paragraph<'static> {
     right.extend(super::common::key_hint("↑↓", "nav"));
     right.push(super::common::status_sep());
     right.extend(super::common::key_hint("Enter", "expand"));
-    if !all_finished {
-        right.push(super::common::status_sep());
-        right.extend(super::common::key_hint("D", "drop"));
-    }
     right.push(super::common::status_sep());
     right.extend(super::common::key_hint("R", "change"));
-    if all_finished {
-        right.push(super::common::status_sep());
-        right.extend(super::common::key_hint("N", "new batch"));
-    }
     super::common::append_quit(&mut right, app.quit_pending());
     super::common::status_bar(left, right, width)
 }
