@@ -12,7 +12,9 @@ use crate::session::Artifact;
 
 use super::App;
 use super::screen::Screen;
+use super::screens::banner;
 use super::screens::common::{GUTTER, HEADER_GAP, TOP_MARGIN, language_chip};
+use super::screens::your_cards::detail_pane_height;
 
 const STEP_ARTIFACT_ORDER: [Artifact; 4] = [
     Artifact::Body,
@@ -20,9 +22,6 @@ const STEP_ARTIFACT_ORDER: [Artifact; 4] = [
     Artifact::Scene,
     Artifact::Picture,
 ];
-
-/// Mirror of the outputs banner labels in `your_cards::outputs_banner`.
-const BANNER_LABELS: [(&str, &str); 2] = [("↓", "APKG"), ("↓", "PDF")];
 
 /// Return `true` if the click landed on the language chip in the header row
 /// AND the active screen actually allows the user to change `my` language.
@@ -54,13 +53,13 @@ pub fn language_chip_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -
 
 /// Return the path that the click landed on, if any. Two clickable surfaces
 /// live on `Your cards`:
-/// 1. The outputs banner (.apkg, .pdf, output folder) shown when all cards
-///    finished — clickable on the short label row at the top, and on each
-///    full path row beneath it.
+/// 1. The sticky outputs banner (.apkg, .pdf, output folder) shown when all
+///    cards finished — pinned to the top of the body rect and unaffected by
+///    body scroll.
 /// 2. Per-card step rows whose artifact is `ready` — clickable on the
 ///    rendered file label so the user can jump straight to that artifact.
 pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<String> {
-    if app.screen() != Screen::YourCards {
+    if !matches!(app.screen(), Screen::YourCards | Screen::Done) {
         return None;
     }
     let body_y = TOP_MARGIN + 1 + HEADER_GAP;
@@ -72,16 +71,22 @@ pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<
     if click_x < body_x || click_x >= body_x + body_width {
         return None;
     }
-    let mut row = (click_y - body_y) as usize + app.body_scroll() as usize;
-    if all_finished(app) {
-        let banner = banner_entries(app);
-        if !banner.is_empty() {
-            if row == 0 {
-                return label_row_hit(&banner, body_x, click_x);
-            }
-            row = row.checked_sub(2)?; // skip label row + trailing blank
-        }
+    let banner_rows = if banner_visible(app) {
+        banner::HEIGHT
+    } else {
+        0
+    };
+    let row_in_body = click_y - body_y;
+    if banner_rows > 0 && row_in_body == 0 {
+        return banner_label_hit(app, body_x, click_x);
     }
+    if app.screen() != Screen::YourCards {
+        return None;
+    }
+    if row_in_body < banner_rows {
+        return None;
+    }
+    let mut row = (row_in_body - banner_rows) as usize + app.body_scroll() as usize;
     for (idx, draft) in app.cards().iter().enumerate() {
         let head_height = 1usize;
         let steps_height = STEP_ARTIFACT_ORDER.len();
@@ -114,40 +119,30 @@ pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<
     None
 }
 
-struct BannerEntry<'a> {
-    glyph: &'a str,
-    label: &'a str,
-    path: &'a str,
+fn banner_visible(app: &App) -> bool {
+    if !banner::has_entries(app) {
+        return false;
+    }
+    match app.screen() {
+        Screen::Done => true,
+        Screen::YourCards => all_finished(app),
+        _ => false,
+    }
 }
 
-fn banner_entries(app: &App) -> Vec<BannerEntry<'_>> {
-    let done = app.done_artifacts();
-    let paths = [done.deck.as_str(), done.report.as_str()];
-    BANNER_LABELS
-        .iter()
-        .zip(paths.iter())
-        .filter_map(|((glyph, label), path)| {
-            if path.is_empty() {
-                None
-            } else {
-                Some(BannerEntry { glyph, label, path })
-            }
-        })
-        .collect()
-}
-
-fn label_row_hit(entries: &[BannerEntry<'_>], body_x: u16, click_x: u16) -> Option<String> {
-    let mut pos = 2u16; // skip "│ "
-    for (idx, entry) in entries.iter().enumerate() {
+fn banner_label_hit(app: &App, body_x: u16, click_x: u16) -> Option<String> {
+    let entries = banner::entries(app);
+    let mut pos = banner::INDENT_WIDTH as u16;
+    for (idx, (label, path)) in entries.iter().enumerate() {
         if idx > 0 {
-            pos = pos.saturating_add(4); // separator
+            pos = pos.saturating_add(banner::SEPARATOR_WIDTH as u16);
         }
-        pos = pos.saturating_add(entry.glyph.chars().count() as u16 + 1); // glyph + space
+        pos = pos.saturating_add(banner::GLYPH.chars().count() as u16);
         let label_start = body_x + pos;
-        let label_len = entry.label.chars().count() as u16;
+        let label_len = label.chars().count() as u16;
         let label_end = label_start.saturating_add(label_len);
         if click_x >= label_start && click_x < label_end {
-            return Some(String::from(entry.path));
+            return Some(String::from(*path));
         }
         pos = pos.saturating_add(label_len);
     }
@@ -160,23 +155,4 @@ fn all_finished(app: &App) -> bool {
             .cards()
             .iter()
             .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed())
-}
-
-/// Approximate height of the body preview detail pane to keep step click
-/// hit-tests aligned even when a card is expanded. The shape is a verbatim
-/// mirror of `your_cards::detail_pane` / `body_preview`.
-fn detail_pane_height(draft: &crate::session::CardDraft) -> usize {
-    let mut h = 1; // initial blank
-    let Some(body) = draft.body() else {
-        return h + 1; // "body not generated yet" placeholder
-    };
-    h += 2; // target label + value
-    h += 1 + 2; // blank + source label + value
-    h += 1 + 2; // blank + hint label + value
-    h += 1 + 2; // blank + meaning label + value
-    if !body.source_context().trim().is_empty() {
-        h += 1 + 1; // blank + context label
-        h += body.source_context().lines().count();
-    }
-    h
 }

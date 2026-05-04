@@ -8,7 +8,7 @@
 use std::borrow::Cow;
 
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -42,29 +42,38 @@ impl ScreenView for Done {
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
-        frame.render_widget(body(app).scroll((app.body_scroll(), 0)), area);
+        let banner_rows = if super::banner::has_entries(app) {
+            super::banner::HEIGHT
+        } else {
+            0
+        };
+        if banner_rows == 0 {
+            frame.render_widget(card_summary(app).scroll((app.body_scroll(), 0)), area);
+            return;
+        }
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(banner_rows), Constraint::Min(0)])
+            .split(area);
+        frame.render_widget(super::banner::widget(app), split[0]);
+        frame.render_widget(card_summary(app).scroll((app.body_scroll(), 0)), split[1]);
     }
 }
 
-fn body(app: &App) -> Paragraph<'_> {
-    let done = app.done_artifacts();
+/// Total number of lines `card_summary` will produce — one per card, or one
+/// placeholder row when the batch is empty. Used by the scroll clamp in
+/// `tui::app` so the wheel cannot push content past the bottom edge.
+pub(crate) fn content_height(app: &App) -> u16 {
+    let lines = if app.cards().is_empty() {
+        1
+    } else {
+        app.cards().len()
+    };
+    u16::try_from(lines).unwrap_or(u16::MAX)
+}
+
+fn card_summary(app: &App) -> Paragraph<'_> {
     let mut lines: Vec<Line<'_>> = Vec::new();
-    let entries: Vec<(&str, &str)> = [("APKG", done.deck.as_str()), ("PDF", done.report.as_str())]
-        .into_iter()
-        .filter(|(_, path)| !path.is_empty())
-        .collect();
-    if !entries.is_empty() {
-        let mut top: Vec<Span<'_>> = vec![Span::styled("│ ", palette::base())];
-        for (idx, (label, _)) in entries.iter().enumerate() {
-            if idx > 0 {
-                top.push(Span::styled("    ", palette::base()));
-            }
-            top.push(Span::styled("↓ ", palette::dim()));
-            top.push(Span::styled(String::from(*label), palette::link()));
-        }
-        lines.push(Line::from(top));
-    }
-    lines.push(Line::from(""));
     if app.cards().is_empty() {
         lines.push(Line::from(Span::styled(
             "no cards in this batch",

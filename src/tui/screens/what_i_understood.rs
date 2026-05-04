@@ -84,6 +84,22 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
     Paragraph::new(lines).style(palette::base())
 }
 
+/// Total number of lines `body` will render for the current state of `app`.
+/// One row per confirmed candidate (or per typed-but-not-yet-understood line),
+/// zero when neither set is populated. Used by the scroll clamp in `tui::app`.
+pub(crate) fn content_height(app: &App) -> u16 {
+    if !app.candidates().is_empty() {
+        return u16::try_from(app.candidates().len()).unwrap_or(u16::MAX);
+    }
+    let typed = app
+        .blob()
+        .split('\n')
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .count();
+    u16::try_from(typed).unwrap_or(u16::MAX)
+}
+
 fn pending_line<'a>(index: usize, raw: &'a str, term_width: usize, width: u16) -> Line<'a> {
     let term = super::common::pad_right(raw, term_width);
     let used = 4 + term_width;

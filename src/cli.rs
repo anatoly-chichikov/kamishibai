@@ -7,7 +7,7 @@
 //! finishes, `PublishDone` saves a real APKG deck and a real PDF report.
 
 use std::fs;
-use std::io::stdout;
+use std::io::{Write, stdout};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
@@ -44,13 +44,13 @@ use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
     Artifact, ArtifactFile, BulkCorrection, CardBody, CardBodyGeneration, CardCorrection,
     CardDraft, CardRevision, EngineEvent, LanguagePair, RawInputBatch, SessionEngine,
-    Understanding, Understood, WordCandidate, to_entry,
+    Understanding, Understood, WordCandidate, from_entry, to_entry,
 };
 use crate::tui::{
     App, AppEvent, BusyKind, ModalKind, Screen, Side, draw, language_chip_at, link_at,
-    picker_geometry, to_app, transit,
+    picker_geometry, scroll_viewport, to_app, transit,
 };
-use crate::vocabulary::VocabularyEntry;
+use crate::vocabulary::{VocabularyDocument, VocabularyEntry};
 
 #[cfg(test)]
 use crate::session::{ScriptDetection, TargetDetection, catalog_for_detection};
@@ -58,10 +58,30 @@ use crate::session::{ScriptDetection, TargetDetection, catalog_for_detection};
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
 
 /// Execute the TUI and translate failures into a process exit code.
+///
+/// Without arguments the TUI starts on the empty `Your Words` screen and runs
+/// the full intake → understanding → generation flow. With one positional
+/// argument — a path to a strict-schema vocabulary JSON document — kamishibai
+/// validates the file, builds drafts with the body already attached, and
+/// jumps straight to `Your Cards` with the generation engine running so only
+/// the media (scene/picture/sound) and publish passes execute.
 pub fn run() -> u8 {
-    match start() {
+    let mut args = std::env::args_os().skip(1);
+    let first = args.next();
+    if args.next().is_some() {
+        eprintln!("usage: kamishibai [path-to-vocabulary.json]");
+        return 2;
+    }
+    let outcome = match first {
+        None => start(),
+        Some(path) => start_with_batch(PathBuf::from(path)),
+    };
+    match outcome {
         Ok(()) => 0,
-        Err(_) => 1,
+        Err(error) => {
+            eprintln!("kamishibai: {error}");
+            1
+        }
     }
 }
 
@@ -69,10 +89,63 @@ fn start() -> Result<()> {
     let preferences = load_preferences().unwrap_or_default();
     let pair = LanguagePair::new(String::from("en"), preferences.my_language.clone());
     let app = App::new(pair);
+    run_tui(app, None)
+}
+
+/// Run the TUI with one batch of pre-rendered drafts loaded from a JSON file.
+/// Validation runs before any terminal state mutation so a bad path or schema
+/// error never leaves the terminal in raw / alternate-screen mode.
+fn start_with_batch(path: PathBuf) -> Result<()> {
+    let document = VocabularyDocument::load(&path)?;
+    let pair = pair_from_document(&document)?;
+    let drafts: Vec<CardDraft> = document
+        .entries
+        .iter()
+        .map(|entry| from_entry(entry, pair.clone()))
+        .collect();
+    let app = App::new(pair)
+        .with_screen(Screen::YourCards)
+        .cards_started(drafts.clone());
+    run_tui(app, Some(drafts))
+}
+
+/// Confirm every entry in the document shares the same source/target language
+/// pair, then return that pair. The session engine and language profiles assume
+/// one pair per batch, so a mixed document cannot be processed.
+fn pair_from_document(document: &VocabularyDocument) -> Result<LanguagePair> {
+    let first = document
+        .entries
+        .first()
+        .ok_or_else(|| anyhow!("vocabulary document contains no entries"))?;
+    let target = first.target.lang.as_str();
+    let support = first.source.lang.as_str();
+    for (index, entry) in document.entries.iter().enumerate().skip(1) {
+        if entry.target.lang.as_str() != target {
+            bail!(
+                "entry {} has target language '{}' but the batch started with '{}'",
+                index,
+                entry.target.lang.as_str(),
+                target
+            );
+        }
+        if entry.source.lang.as_str() != support {
+            bail!(
+                "entry {} has source language '{}' but the batch started with '{}'",
+                index,
+                entry.source.lang.as_str(),
+                support
+            );
+        }
+    }
+    Ok(LanguagePair::new(target, support))
+}
+
+fn run_tui(app: App, primed: Option<Vec<CardDraft>>) -> Result<()> {
     enable_raw_mode()?;
     let mut out = stdout();
     let enhanced = supports_keyboard_enhancement().unwrap_or(false);
     execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
+    set_pointer_cursor(&mut out);
     if enhanced {
         execute!(
             out,
@@ -86,24 +159,60 @@ fn start() -> Result<()> {
     }
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
-    let outcome = loop_forever(&mut terminal, app);
+    let outcome = loop_forever(&mut terminal, app, primed);
     if enhanced {
         execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags).ok();
     }
+    reset_pointer_cursor(terminal.backend_mut());
     execute!(terminal.backend_mut(), DisableMouseCapture).ok();
     disable_raw_mode().ok();
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     outcome
 }
 
-fn loop_forever<B>(terminal: &mut Terminal<B>, app: App) -> Result<()>
+/// Ask the terminal to swap the I-beam mouse pointer for a plain arrow while
+/// the TUI owns the screen. Mouse capture suppresses the terminal's native
+/// text-selection so the I-beam is misleading. The escape is `OSC 22 ; default
+/// ST` per xterm; iTerm2, WezTerm, kitty, Ghostty, recent Alacritty and xterm
+/// honour it. Apple Terminal silently ignores it. Errors are non-fatal — the
+/// TUI keeps working with whatever cursor the host shows.
+fn set_pointer_cursor<W: Write>(out: &mut W) {
+    let _ = out.write_all(b"\x1b]22;default\x1b\\");
+    let _ = out.flush();
+}
+
+/// Restore the terminal's default mouse pointer when the TUI gives up the
+/// screen. Empty `OSC 22 ; ST` resets the pointer name on the terminals that
+/// support it.
+fn reset_pointer_cursor<W: Write>(out: &mut W) {
+    let _ = out.write_all(b"\x1b]22;\x1b\\");
+    let _ = out.flush();
+}
+
+fn loop_forever<B>(
+    terminal: &mut Terminal<B>,
+    app: App,
+    primed: Option<Vec<CardDraft>>,
+) -> Result<()>
 where
     B: ratatui::backend::Backend,
     <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
 {
-    let mut shell = Shell::new(app)?;
+    let mut shell = match primed {
+        Some(drafts) => Shell::primed(app, drafts)?,
+        None => Shell::new(app)?,
+    };
     loop {
         shell.refresh_quit_pending();
+        let area = terminal.size()?;
+        let rect = ratatui::layout::Rect {
+            x: 0,
+            y: 0,
+            width: area.width,
+            height: area.height,
+        };
+        let viewport = scroll_viewport(shell.app(), rect);
+        shell.reclamp_scroll(viewport);
         terminal.draw(|frame| draw(frame, shell.app()))?;
         if !poll(Duration::from_millis(100))? {
             shell.tick()?;
@@ -120,18 +229,32 @@ where
                     continue;
                 }
                 shell.disarm_quit();
+                let was_nav = matches!(event, AppEvent::NavPrev | AppEvent::NavNext);
                 let side = shell.handle(event)?;
                 if side == Side::ExitApp {
                     return Ok(());
                 }
+                if was_nav {
+                    shell.snap_scroll_to_selection(viewport);
+                }
                 shell.tick()?;
             }
             Event::Mouse(mouse) => match mouse.kind {
-                MouseEventKind::ScrollUp => {
-                    shell.scroll(-1);
-                }
-                MouseEventKind::ScrollDown => {
-                    shell.scroll(1);
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                    let area = terminal.size()?;
+                    let rect = ratatui::layout::Rect {
+                        x: 0,
+                        y: 0,
+                        width: area.width,
+                        height: area.height,
+                    };
+                    let viewport = scroll_viewport(shell.app(), rect);
+                    let delta = if matches!(mouse.kind, MouseEventKind::ScrollUp) {
+                        -1
+                    } else {
+                        1
+                    };
+                    shell.scroll(delta, viewport);
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
                     let area = terminal.size()?;
@@ -263,6 +386,18 @@ impl Shell<ProductionPasses> {
             passes: ProductionPasses::new(client, cache, output),
         })
     }
+
+    /// Build one shell that already has the generation engine running on a
+    /// pre-rendered batch loaded from a JSON document. Mirrors what
+    /// `Side::StartGeneration` does after the user presses Submit on
+    /// `Screen::WhatIUnderstood`, but skips the intake and understanding
+    /// passes entirely.
+    fn primed(app: App, drafts: Vec<CardDraft>) -> Result<Self> {
+        let mut shell = Self::new(app)?;
+        shell.engine = Some(SessionEngine::start(drafts));
+        shell.started = Some(Instant::now());
+        Ok(shell)
+    }
 }
 
 impl<P> Shell<P>
@@ -273,8 +408,16 @@ where
         &self.app
     }
 
-    fn scroll(&mut self, delta: i32) {
-        self.app = self.app.clone().body_scrolled(delta);
+    fn scroll(&mut self, delta: i32, viewport: u16) {
+        self.app = self.app.clone().body_scrolled(delta, viewport);
+    }
+
+    fn reclamp_scroll(&mut self, viewport: u16) {
+        self.app = self.app.clone().body_scroll_clamped(viewport);
+    }
+
+    fn snap_scroll_to_selection(&mut self, viewport: u16) {
+        self.app = self.app.clone().body_scroll_to_selection(viewport);
     }
 
     fn arm_quit(&mut self) -> bool {

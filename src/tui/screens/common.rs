@@ -284,6 +284,37 @@ pub fn paint_background(frame: &mut Frame, area: Rect) {
     }
 }
 
+/// Number of body-rect rows actually available for scrolling content on the
+/// current screen, given the full terminal area. Equals the body rect height
+/// minus the rows reserved for the sticky outputs banner (when it is shown).
+/// Used by the wheel-scroll clamp so the user can never push content past the
+/// bottom edge of the viewport.
+pub fn scroll_viewport(app: &App, terminal_area: Rect) -> u16 {
+    let body_height = frame_rects(terminal_area).body.height;
+    let banner_rows = if banner_visible(app) {
+        super::banner::HEIGHT
+    } else {
+        0
+    };
+    body_height.saturating_sub(banner_rows)
+}
+
+fn banner_visible(app: &App) -> bool {
+    if !super::banner::has_entries(app) {
+        return false;
+    }
+    match app.screen() {
+        crate::tui::screen::Screen::Done => true,
+        crate::tui::screen::Screen::YourCards => {
+            app.cards()
+                .iter()
+                .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed())
+                && !app.cards().is_empty()
+        }
+        _ => false,
+    }
+}
+
 /// Pad a string to the requested character width.
 pub fn pad_right(value: &str, width: usize) -> String {
     let mut text = String::from(value);

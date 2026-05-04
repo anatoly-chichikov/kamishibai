@@ -11,6 +11,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::tui::app::App;
 
+pub mod banner;
 pub mod busy;
 pub mod common;
 pub mod done;

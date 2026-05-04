@@ -9,7 +9,7 @@ mod pair;
 mod pass;
 mod state;
 
-pub use bridge::{to_document, to_entry};
+pub use bridge::{from_entry, to_document, to_entry};
 pub use candidate::{RawInputBatch, WordCandidate};
 pub use detection::{ScriptDetection, TargetDetection, TargetGuess};
 pub use draft::{
