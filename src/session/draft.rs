@@ -442,15 +442,22 @@ impl CardDraft {
     ///
     /// The correction may rewrite the term (typo fix), the understanding
     /// (sense or form change), and the rich body. Artifacts reset because
-    /// scene/picture/sound depend on the body.
+    /// scene/picture/sound depend on the body. When the caller has already
+    /// persisted the new body to disk, the resulting `ArtifactFile` lands on
+    /// the body slot so the meta row keeps its clickable file label.
     pub fn recomposed(
         self,
         term: impl Into<String>,
         understanding: impl Into<String>,
         body: CardBody,
+        file: Option<ArtifactFile>,
     ) -> Self {
+        let body_slot = match file {
+            Some(file) => ArtifactSlot::fresh(Artifact::Body).succeeded_with(file),
+            None => ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        };
         let artifacts = CardArtifacts::from_parts(
-            ArtifactSlot::fresh(Artifact::Body).succeeded(),
+            body_slot,
             ArtifactSlot::fresh(Artifact::Scene),
             ArtifactSlot::fresh(Artifact::Picture),
             ArtifactSlot::fresh(Artifact::Sound),

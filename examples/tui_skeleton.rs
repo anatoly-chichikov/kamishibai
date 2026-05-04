@@ -30,7 +30,6 @@ fn main() -> Result<()> {
         let event = match byte[0] {
             b'\r' | b'\n' => AppEvent::Submit,
             b'r' | b'R' => AppEvent::RequestChange,
-            b'n' | b'N' => AppEvent::NewBatch,
             0x1B => AppEvent::Cancel,
             other => AppEvent::KeyChar(other as char),
         };

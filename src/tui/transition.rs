@@ -129,10 +129,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
         (Screen::YourCards, None, AppEvent::Submit)
         | (Screen::YourCards, None, AppEvent::KeyEnter) => (app.card_toggle_expanded(), Side::None),
-        (Screen::YourCards, None, AppEvent::KeyChar('d'))
-        | (Screen::YourCards, None, AppEvent::KeyChar('D')) => {
-            (app.card_dropped_artifact(), Side::None)
-        }
         (Screen::YourCards, None, AppEvent::KeyChar('r')) if app.cards_failed() > 0 => {
             (app, Side::RegenerateFailed)
         }
@@ -159,8 +155,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::YourCards, None, AppEvent::BatchReady) => (app, Side::PublishDone),
         (Screen::YourCards, None, AppEvent::BatchDone { failed: _ }) => (app, Side::PublishDone),
-        (Screen::YourCards, None, AppEvent::NewBatch) => (app.fresh_batch(), Side::None),
-        (Screen::Done, None, AppEvent::NewBatch) => (app.fresh_batch(), Side::None),
         (Screen::Done, None, AppEvent::Quit) => (app, Side::ExitApp),
         (_, _, AppEvent::Redraw) => (app, Side::None),
         (_, _, _) => (app, Side::None),
@@ -234,17 +228,6 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
                 AppEvent::RequestChange
             }
         }
-        (Screen::YourCards, AppEvent::KeyChar('n'))
-        | (Screen::YourCards, AppEvent::KeyChar('N')) => {
-            if all_finished(app) {
-                AppEvent::NewBatch
-            } else {
-                event
-            }
-        }
-        (Screen::Done, AppEvent::KeyChar('n')) | (Screen::Done, AppEvent::KeyChar('N')) => {
-            AppEvent::NewBatch
-        }
         _ => event,
     }
 }
@@ -292,14 +275,6 @@ fn open_language_picker(app: App) -> App {
     let cursor = picker_cursor_for(app.pair().support());
     app.with_modal(ModalKind::PickMyLanguage)
         .with_picker_cursor(cursor)
-}
-
-fn all_finished(app: &App) -> bool {
-    !app.cards().is_empty()
-        && app
-            .cards()
-            .iter()
-            .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed())
 }
 
 fn next_target(current: &str, support: &str) -> String {

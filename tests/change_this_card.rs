@@ -127,7 +127,7 @@ fn correction_result_reaches_focused_card_without_touching_neighbors() {
         .correct_card(&focused, "verb", app.pair())
         .expect("mock card correction");
     let (term, understanding, body) = revision.into_parts();
-    let updated = focused.recomposed(term, understanding, body);
+    let updated = focused.recomposed(term, understanding, body, None);
     let with_updated = app.clone().cards_started({
         let mut drafts = app.cards().to_vec();
         drafts[0] = updated;

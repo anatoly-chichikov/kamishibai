@@ -96,19 +96,6 @@ fn change_this_card_modal_returns_card_correction_and_closes_modal() {
 }
 
 #[test]
-fn new_batch_from_done_resets_to_your_words_without_losing_language() {
-    let start = App::new(LanguagePair::new("en", "ru"))
-        .with_screen(Screen::Done)
-        .with_failed(2);
-    let (next, _) = transit(start, AppEvent::NewBatch);
-    assert_eq!(
-        (next.screen(), next.failed(), next.pair().label()),
-        (Screen::YourWords, 0, String::from("RU → EN")),
-        "new batch must restart at YourWords, clear failures, and keep the language pair"
-    );
-}
-
-#[test]
 fn quit_from_done_requests_app_exit() {
     let start = App::new(LanguagePair::new("en", "ru")).with_screen(Screen::Done);
     let (_, side) = transit(start, AppEvent::Quit);

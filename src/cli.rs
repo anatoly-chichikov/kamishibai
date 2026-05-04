@@ -338,7 +338,7 @@ impl<T> Lifecycle for T where T: TextPasses + MediaPasses {}
 enum TextOutcome {
     Understanding(Result<Understood>),
     BulkCorrection(Result<Vec<WordCandidate>>),
-    CardCorrection(Result<Box<CardRevision>>),
+    CardCorrection(Result<Box<(CardRevision, Option<ArtifactFile>)>>),
 }
 
 struct PendingTextJob {
@@ -455,13 +455,9 @@ where
         if self.text.is_some() {
             return Ok(Side::None);
         }
-        let sync_engine = matches!(event, AppEvent::KeyChar('d') | AppEvent::KeyChar('D'));
         let (next, side) = transit(self.app.clone(), event);
         self.app = next;
         self.apply(side.clone())?;
-        if sync_engine && self.engine.is_some() {
-            self.engine = Some(SessionEngine::start(self.app.cards().to_vec()));
-        }
         Ok(side)
     }
 
@@ -646,20 +642,29 @@ where
             },
             TextOutcome::BulkCorrection(result) => match result {
                 Ok(updated) => {
-                    self.app = self.app.clone().understood(updated);
+                    let Some(refined) = updated.into_iter().next() else {
+                        return;
+                    };
+                    let mut candidates = self.app.candidates().to_vec();
+                    let selected = self.app.selected();
+                    if selected < candidates.len() {
+                        candidates[selected] = refined;
+                        self.app = self.app.clone().understood(candidates);
+                    }
                 }
                 Err(error) => {
                     self.app = self.app.clone().error_shown(error.to_string());
                 }
             },
             TextOutcome::CardCorrection(result) => match result {
-                Ok(revision) => {
+                Ok(payload) => {
+                    let (revision, file) = *payload;
                     let (term, understanding, body) = revision.into_parts();
                     let Some(current) = self.app.cards().get(self.app.card_selected()).cloned()
                     else {
                         return;
                     };
-                    let updated = current.recomposed(term, understanding, body);
+                    let updated = current.recomposed(term, understanding, body, file);
                     self.app = self.app.clone().card_replaced(updated);
                     self.engine = Some(SessionEngine::start(self.app.cards().to_vec()));
                     self.started = Some(Instant::now());
@@ -693,12 +698,14 @@ where
                 self.started = Some(Instant::now());
             }
             Side::RunBulkCorrection(comment) => {
-                let candidates = self.app.candidates().to_vec();
+                let Some(focused) = self.app.candidates().get(self.app.selected()).cloned() else {
+                    return Ok(());
+                };
                 let pair = self.app.pair().clone();
                 let passes = self.passes.clone();
                 self.start_text(BusyKind::BulkCorrection, move || {
                     TextOutcome::BulkCorrection(passes.correct_bulk(
-                        candidates.as_slice(),
+                        std::slice::from_ref(&focused),
                         comment.as_str(),
                         &pair,
                     ))
@@ -713,7 +720,12 @@ where
                         TextOutcome::CardCorrection(
                             passes
                                 .correct_card(&draft, comment.as_str(), &pair)
-                                .map(Box::new),
+                                .map(|revision| {
+                                    let file = passes
+                                        .persist_body(revision.term(), &pair, revision.body())
+                                        .ok();
+                                    Box::new((revision, file))
+                                }),
                         )
                     })?;
                 }
@@ -1496,43 +1508,6 @@ mod tests {
             ),
             (String::from("ru"), String::from("en"), false),
             "loaded batch must seed the chip with file's languages and not leave it pending"
-        );
-    }
-
-    #[test]
-    fn shell_drop_artifact_restarts_the_engine_from_current_cards() {
-        let _output = tempdir().expect("temp output must exist");
-        let mut shell = shell(review());
-        shell
-            .handle(AppEvent::Submit)
-            .expect("submit must start generation");
-        for _ in 0..30 {
-            shell.tick().expect("tick");
-            let body_ready = shell
-                .app
-                .cards()
-                .first()
-                .map(|draft| draft.artifacts().body().ready())
-                .unwrap_or(false);
-            if body_ready {
-                break;
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
-        shell
-            .handle(AppEvent::KeyChar('d'))
-            .expect("drop must sync generation queue");
-        let discarded = shell
-            .engine
-            .as_ref()
-            .expect("engine must still exist")
-            .drafts()[0]
-            .artifacts()
-            .scene()
-            .discarded();
-        assert!(
-            discarded,
-            "drop artifact must restart the engine with the discarded slot"
         );
     }
 }

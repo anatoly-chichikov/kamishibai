@@ -14,4 +14,4 @@ expression: render(&app)
                                                                                 
                                                                                 
                                                                                 
-    step 3/3 · 0/0 ready                       [N] new batch · [Ctrl+C] quit
+    step 3/3 · 0/0 ready                                       [Ctrl+C] quit
