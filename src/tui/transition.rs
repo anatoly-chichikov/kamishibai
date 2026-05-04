@@ -1,3 +1,5 @@
+use crate::languages::catalog;
+
 use super::app::App;
 use super::event::AppEvent;
 use super::screen::{ModalKind, Screen, WelcomeStage};
@@ -47,10 +49,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourWords, None, AppEvent::KeyEnter) => (app.typed('\n'), Side::None),
         (Screen::YourWords, None, AppEvent::KeyChar(symbol)) => (app.typed(symbol), Side::None),
         (Screen::YourWords, None, AppEvent::KeyBackspace) => (app.rubbed(), Side::None),
-        (Screen::YourWords, None, AppEvent::ToggleMyLanguage) => {
-            let next = app.toggle_support();
-            let code = next.pair().support().to_string();
-            (next, Side::PersistMyLanguage(code))
+        (Screen::YourWords, None, AppEvent::OpenLanguagePicker) => {
+            (open_language_picker(app), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::Submit)
         | (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) => {
@@ -80,10 +80,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, None, AppEvent::OverrideTarget(code)) => {
             (app.override_target(code), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::ToggleMyLanguage) => {
-            let next = app.toggle_support();
-            let code = next.pair().support().to_string();
-            (next, Side::PersistMyLanguage(code))
+        (Screen::WhatIUnderstood, None, AppEvent::OpenLanguagePicker) => {
+            (open_language_picker(app), Side::None)
         }
         (
             Screen::WhatIUnderstood,
@@ -108,6 +106,22 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::KeyBackspace) => {
             (app.rubbed(), Side::None)
         }
+        (_, Some(ModalKind::PickMyLanguage), AppEvent::LanguagePickerPrev) => {
+            (app.picker_cursor_advanced(-1), Side::None)
+        }
+        (_, Some(ModalKind::PickMyLanguage), AppEvent::LanguagePickerNext) => {
+            (app.picker_cursor_advanced(1), Side::None)
+        }
+        (_, Some(ModalKind::PickMyLanguage), AppEvent::SetMyLanguage(code))
+            if can_pick_language(app.screen()) =>
+        {
+            (
+                app.close_modal().set_support(code.clone()),
+                Side::PersistMyLanguage(code),
+            )
+        }
+        (_, Some(ModalKind::PickMyLanguage), AppEvent::Cancel) => (app.close_modal(), Side::None),
+        (_, Some(ModalKind::PickMyLanguage), _) => (app, Side::None),
         (Screen::YourCards, None, AppEvent::RequestChange) => {
             (app.with_modal(ModalKind::ChangeThisCard), Side::None)
         }
@@ -158,12 +172,12 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
     match (stage, event) {
         (WelcomeStage::PickLanguage, AppEvent::WelcomeNextLanguage) => {
             let next = next_support(app.pair().support(), 1);
-            let next_app = app.welcome_pick_language(next.clone());
+            let next_app = app.set_support(next.clone());
             (next_app, Side::PersistMyLanguage(next))
         }
         (WelcomeStage::PickLanguage, AppEvent::WelcomePrevLanguage) => {
             let next = next_support(app.pair().support(), -1);
-            let next_app = app.welcome_pick_language(next.clone());
+            let next_app = app.set_support(next.clone());
             (next_app, Side::PersistMyLanguage(next))
         }
         (WelcomeStage::PickLanguage, AppEvent::Submit)
@@ -196,6 +210,9 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
 }
 
 fn promote(app: &App, event: AppEvent) -> AppEvent {
+    if let Some(ModalKind::PickMyLanguage) = app.modal() {
+        return promote_picker(app, event);
+    }
     if app.modal().is_some() {
         return event;
     }
@@ -225,13 +242,56 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
                 event
             }
         }
-        (Screen::WhatIUnderstood, AppEvent::KeyChar('l'))
-        | (Screen::WhatIUnderstood, AppEvent::KeyChar('L')) => AppEvent::ToggleMyLanguage,
         (Screen::Done, AppEvent::KeyChar('n')) | (Screen::Done, AppEvent::KeyChar('N')) => {
             AppEvent::NewBatch
         }
         _ => event,
     }
+}
+
+/// Reinterpret keys while the language picker modal is open: arrows cycle the
+/// chip selection, Enter confirms it, plain Esc still cancels through the
+/// generic modal dismissal arm.
+fn promote_picker(app: &App, event: AppEvent) -> AppEvent {
+    match event {
+        AppEvent::NavPrev => AppEvent::LanguagePickerPrev,
+        AppEvent::NavNext => AppEvent::LanguagePickerNext,
+        AppEvent::Submit | AppEvent::KeyEnter => {
+            AppEvent::SetMyLanguage(picker_selected(app).to_string())
+        }
+        other => other,
+    }
+}
+
+/// Return the language code currently highlighted in the picker modal.
+///
+/// Selection is stored on the app as the modal's persistent index. If the
+/// app has no recorded picker index yet, fall back to the active support
+/// language so the modal opens with the current pick highlighted.
+pub fn picker_selected(app: &App) -> &'static str {
+    let codes = catalog().codes();
+    let cursor = app.picker_cursor();
+    codes[cursor.min(codes.len() - 1)]
+}
+
+/// Compute the picker cursor for a given language code. Used when opening the
+/// modal so the active language is pre-selected.
+pub fn picker_cursor_for(code: &str) -> usize {
+    let codes = catalog().codes();
+    codes
+        .iter()
+        .position(|item| item.eq_ignore_ascii_case(code))
+        .unwrap_or(0)
+}
+
+fn can_pick_language(screen: Screen) -> bool {
+    matches!(screen, Screen::YourWords | Screen::WhatIUnderstood)
+}
+
+fn open_language_picker(app: App) -> App {
+    let cursor = picker_cursor_for(app.pair().support());
+    app.with_modal(ModalKind::PickMyLanguage)
+        .with_picker_cursor(cursor)
 }
 
 fn all_finished(app: &App) -> bool {
@@ -243,16 +303,16 @@ fn all_finished(app: &App) -> bool {
 }
 
 fn next_target(current: &str, support: &str) -> String {
-    let order = ["en", "ru", "es", "de", "el", "zh"];
+    let codes = catalog().codes();
     let mut position = 0;
-    for (index, code) in order.iter().enumerate() {
+    for (index, code) in codes.iter().enumerate() {
         if *code == current {
             position = index;
             break;
         }
     }
-    for offset in 1..=order.len() {
-        let candidate = order[(position + offset) % order.len()];
+    for offset in 1..=codes.len() {
+        let candidate = codes[(position + offset) % codes.len()];
         if candidate != support {
             return String::from(candidate);
         }
@@ -261,14 +321,14 @@ fn next_target(current: &str, support: &str) -> String {
 }
 
 fn next_support(current: &str, direction: i32) -> String {
-    let order = ["en", "ru", "es", "de", "el", "zh", "fr", "it", "ja"];
+    let codes = catalog().codes();
     let mut position: i32 = 0;
-    for (index, code) in order.iter().enumerate() {
+    for (index, code) in codes.iter().enumerate() {
         if *code == current {
             position = index as i32;
             break;
         }
     }
-    let next = (position + direction).rem_euclid(order.len() as i32) as usize;
-    String::from(order[next])
+    let next = (position + direction).rem_euclid(codes.len() as i32) as usize;
+    String::from(codes[next])
 }

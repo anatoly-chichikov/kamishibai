@@ -46,7 +46,10 @@ use crate::session::{
     CardDraft, CardRevision, EngineEvent, LanguagePair, RawInputBatch, SessionEngine,
     Understanding, Understood, WordCandidate, to_entry,
 };
-use crate::tui::{App, AppEvent, BusyKind, Screen, Side, draw, link_at, to_app, transit};
+use crate::tui::{
+    App, AppEvent, BusyKind, ModalKind, Screen, Side, draw, language_chip_at, link_at,
+    picker_geometry, to_app, transit,
+};
 use crate::vocabulary::VocabularyEntry;
 
 #[cfg(test)]
@@ -138,7 +141,27 @@ where
                         width: area.width,
                         height: area.height,
                     };
-                    if let Some(target) = link_at(shell.app(), rect, mouse.column, mouse.row) {
+                    if shell.app().modal() == Some(ModalKind::PickMyLanguage) {
+                        if let Some(index) = picker_geometry::chip_at(rect, mouse.column, mouse.row)
+                        {
+                            let codes = catalog().codes();
+                            if let Some(code) = codes.get(index) {
+                                let event = AppEvent::SetMyLanguage(String::from(*code));
+                                let side = shell.handle(event)?;
+                                if side == Side::ExitApp {
+                                    return Ok(());
+                                }
+                                shell.tick()?;
+                            }
+                        }
+                    } else if language_chip_at(shell.app(), rect, mouse.column, mouse.row) {
+                        let side = shell.handle(AppEvent::OpenLanguagePicker)?;
+                        if side == Side::ExitApp {
+                            return Ok(());
+                        }
+                        shell.tick()?;
+                    } else if let Some(target) = link_at(shell.app(), rect, mouse.column, mouse.row)
+                    {
                         let _ = open_path(target.as_str());
                     }
                 }

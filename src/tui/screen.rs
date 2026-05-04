@@ -14,6 +14,11 @@ pub enum Screen {
 pub enum ModalKind {
     ChangeSomething,
     ChangeThisCard,
+    /// Picker for the user's `my` language. Opened by `Cmd+L` / `Ctrl+L` or by
+    /// clicking the language chip in the header. Shows the supported codes
+    /// from `LanguageCatalog`, navigated with `←/→` and confirmed with
+    /// `Enter`. The currently active code is pre-selected.
+    PickMyLanguage,
 }
 
 /// Stage the first-run Welcome screen is currently on.

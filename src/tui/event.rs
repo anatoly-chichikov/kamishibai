@@ -25,8 +25,15 @@ pub enum AppEvent {
     NewBatch,
     /// User asked to quit the app from Done.
     Quit,
-    /// User toggled "my" language override.
-    ToggleMyLanguage,
+    /// User asked to open the `my` language picker modal (`Cmd+L`, `Ctrl+L`,
+    /// or click on the header language chip).
+    OpenLanguagePicker,
+    /// User picked a `my` language code from the picker modal.
+    SetMyLanguage(String),
+    /// User cycled the picker selection one step left.
+    LanguagePickerPrev,
+    /// User cycled the picker selection one step right.
+    LanguagePickerNext,
     /// User overrode the detected target language.
     OverrideTarget(String),
     /// Text editor appended characters.
@@ -68,6 +75,9 @@ impl AppEvent {
     pub fn targets(&self) -> Option<ModalKind> {
         match self {
             AppEvent::SendCorrection(_) => Some(ModalKind::ChangeSomething),
+            AppEvent::SetMyLanguage(_)
+            | AppEvent::LanguagePickerPrev
+            | AppEvent::LanguagePickerNext => Some(ModalKind::PickMyLanguage),
             _ => None,
         }
     }

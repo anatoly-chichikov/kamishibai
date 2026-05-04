@@ -18,7 +18,7 @@ use super::ScreenView;
 use crate::tui::app::App;
 use crate::tui::palette;
 
-const HEADLINE: &str = "your words";
+const HEADLINE: &str = "words you want to learn";
 const HINT: &str = "each line becomes one anki card";
 const PLACEHOLDER_LINES: usize = 4;
 const PLACEHOLDER_HINT: &str = "type or paste, one item per line";

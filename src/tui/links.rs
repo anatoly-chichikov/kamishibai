@@ -12,7 +12,7 @@ use crate::session::Artifact;
 
 use super::App;
 use super::screen::Screen;
-use super::screens::common::{GUTTER, HEADER_GAP, TOP_MARGIN};
+use super::screens::common::{GUTTER, HEADER_GAP, TOP_MARGIN, language_chip};
 
 const STEP_ARTIFACT_ORDER: [Artifact; 4] = [
     Artifact::Body,
@@ -23,6 +23,34 @@ const STEP_ARTIFACT_ORDER: [Artifact; 4] = [
 
 /// Mirror of the outputs banner labels in `your_cards::outputs_banner`.
 const BANNER_LABELS: [(&str, &str); 2] = [("↓", "APKG"), ("↓", "PDF")];
+
+/// Return `true` if the click landed on the language chip in the header row
+/// AND the active screen actually allows the user to change `my` language.
+///
+/// The chip lives at `(area.y + TOP_MARGIN)` row, anchored to the right edge
+/// at `(area.x + area.width - GUTTER)` minus the chip width. Welcome doesn't
+/// render a chip at all; YourCards and Done do render one but the batch pair
+/// is frozen, so clicks there are inert (the same rule the keyboard path
+/// follows in `transit`).
+pub fn language_chip_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> bool {
+    if !matches!(app.screen(), Screen::YourWords | Screen::WhatIUnderstood) {
+        return false;
+    }
+    let header_y = terminal.y + TOP_MARGIN;
+    if click_y != header_y {
+        return false;
+    }
+    let chip_width: u16 = language_chip(app)
+        .iter()
+        .map(|span| span.content.chars().count() as u16)
+        .sum();
+    if chip_width == 0 {
+        return false;
+    }
+    let right_edge = terminal.x + terminal.width.saturating_sub(GUTTER);
+    let start = right_edge.saturating_sub(chip_width);
+    click_x >= start && click_x < right_edge
+}
 
 /// Return the path that the click landed on, if any. Two clickable surfaces
 /// live on `Your cards`:
