@@ -112,7 +112,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         ));
     }
     let mut right: Vec<Span<'static>> = Vec::new();
-    right.extend(super::common::key_hint("n", "new batch"));
+    right.extend(super::common::key_hint("N", "new batch"));
     super::common::append_quit(&mut right, app.quit_pending());
     super::common::status_bar(left, right, width)
 }

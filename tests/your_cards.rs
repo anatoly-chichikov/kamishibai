@@ -105,9 +105,37 @@ fn your_cards_lists_each_card_with_a_bare_term_head_and_artifact_check_marks() {
             && rendered.contains("✓ scene")
             && rendered.contains("✓ picture")
             && rendered.contains("RU → EN")
+            && rendered.contains("[↑↓] nav")
+            && rendered.contains("[Enter] expand")
+            && rendered.contains("[D] drop")
+            && rendered.contains("[R] change")
+            && !rendered.contains("working…")
             && !rendered.contains("queued")
             && !rendered.contains("Example with"),
-        "collapsed view must hide queued step rows and never leak body sentences: {rendered}"
+        "collapsed view must hide queued rows and the during-generation footer must spell out every active key: {rendered}"
+    );
+}
+
+#[test]
+fn your_cards_done_footer_carries_expand_change_and_new_batch_hints() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+        draft("in the end", ready_artifacts()),
+        draft("wreck", ready_artifacts()),
+    ]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("your cards")
+            && rendered.contains("all done")
+            && rendered.contains("[↑↓] nav")
+            && rendered.contains("[Enter] expand")
+            && rendered.contains("[R] change")
+            && rendered.contains("[N] new batch")
+            && !rendered.contains("[n] new batch")
+            && !rendered.contains("[D] drop")
+            && !rendered.contains("working…"),
+        "all-done footer must offer expand/change/new-batch in the canonical uppercase style: {rendered}"
     );
 }
 
