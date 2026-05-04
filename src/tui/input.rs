@@ -27,10 +27,16 @@ pub fn to_app(key: KeyEvent) -> Option<AppEvent> {
         KeyCode::Down => Some(AppEvent::NavNext),
         KeyCode::Left => Some(AppEvent::NavPrev),
         KeyCode::Right => Some(AppEvent::NavNext),
+        KeyCode::Char(symbol) if key.modifiers.contains(KeyModifiers::SUPER) => {
+            match latin_for_ctrl(symbol) {
+                'l' => Some(AppEvent::OpenLanguagePicker),
+                _ => None,
+            }
+        }
         KeyCode::Char(symbol) if key.modifiers.contains(KeyModifiers::CONTROL) => {
             match latin_for_ctrl(symbol) {
                 'c' => Some(AppEvent::Quit),
-                'l' => Some(AppEvent::ToggleMyLanguage),
+                'l' => Some(AppEvent::OpenLanguagePicker),
                 _ => None,
             }
         }

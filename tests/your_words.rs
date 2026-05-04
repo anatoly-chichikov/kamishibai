@@ -58,7 +58,9 @@ fn your_words_renders_placeholder_tagline_and_language_pair() {
     let app = App::new(LanguagePair::new("en", "ru")).confirmed_target("en");
     let flat = flatten(&app);
     assert!(
-        flat.contains("your words") && flat.contains("step 1/3") && flat.contains("→ EN"),
+        flat.contains("words you want to learn")
+            && flat.contains("step 1/3")
+            && flat.contains("→ EN"),
         "your words screen must render the PDF labels and a language chip on the right: {flat}"
     );
 }
@@ -106,19 +108,30 @@ fn recoverable_error_overlay_keeps_the_message_visible() {
 }
 
 #[test]
-fn ctrl_l_on_your_words_toggles_my_language() {
+fn ctrl_l_on_your_words_opens_the_language_picker() {
     let app = App::new(LanguagePair::new("en", "ru"));
     let (next, side) = transit(
         app,
         to_app(modified(KeyCode::Char('l'), KeyModifiers::CONTROL)).expect("map"),
     );
     assert_eq!(
-        (next.pair().support().to_string(), side),
-        (
-            String::from("es"),
-            Side::PersistMyLanguage(String::from("es"))
-        ),
-        "Ctrl+L on Your words must rotate `my language`"
+        (next.modal(), side),
+        (Some(kamishibai::tui::ModalKind::PickMyLanguage), Side::None,),
+        "Ctrl+L on Your words must open the language picker modal without persisting yet"
+    );
+}
+
+#[test]
+fn cmd_l_on_your_words_opens_the_language_picker() {
+    let app = App::new(LanguagePair::new("en", "ru"));
+    let (next, side) = transit(
+        app,
+        to_app(modified(KeyCode::Char('l'), KeyModifiers::SUPER)).expect("map"),
+    );
+    assert_eq!(
+        (next.modal(), side),
+        (Some(kamishibai::tui::ModalKind::PickMyLanguage), Side::None,),
+        "Cmd+L on Your words must open the language picker modal in kitty-protocol terminals"
     );
 }
 

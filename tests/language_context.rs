@@ -96,18 +96,25 @@ fn your_words_shows_detecting_marker_before_target_is_confirmed() {
 }
 
 #[test]
-fn toggle_my_language_on_what_i_understood_persists_the_new_code() {
+fn picking_my_language_on_what_i_understood_persists_the_new_code() {
     let app = base()
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_target("en");
-    let (after, side) = transit(app, AppEvent::KeyChar('L'));
+    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
     assert_eq!(
-        (after.pair().support().to_string(), side),
+        opened.modal(),
+        Some(kamishibai::tui::ModalKind::PickMyLanguage),
+        "OpenLanguagePicker on What I understood must open the picker modal"
+    );
+    let (after, side) = transit(opened, AppEvent::SetMyLanguage(String::from("es")));
+    assert_eq!(
+        (after.modal(), after.pair().support().to_string(), side,),
         (
+            None,
             String::from("es"),
-            Side::PersistMyLanguage(String::from("es"))
+            Side::PersistMyLanguage(String::from("es")),
         ),
-        "L on What I understood must rotate `my language` and request persistence"
+        "confirming a language pick must close the modal, swap support, and request persistence"
     );
 }
 
@@ -126,7 +133,43 @@ fn letter_l_on_done_is_not_a_hidden_language_shortcut() {
 }
 
 #[test]
-fn toggling_my_language_through_transit_writes_to_the_preference_store() {
+fn picker_modal_opens_with_the_active_language_preselected_and_arrows_cycle_through_the_catalog() {
+    let app = base().confirmed_target("en");
+    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
+    let codes = kamishibai::languages::catalog().codes();
+    let initial = codes
+        .iter()
+        .position(|code| *code == "ru")
+        .expect("ru must be in the supported catalog");
+    assert_eq!(
+        opened.picker_cursor(),
+        initial,
+        "the picker must open with the cursor on the active `my` language"
+    );
+    let (after_right, _) = transit(opened, AppEvent::LanguagePickerNext);
+    let (after_left_left, _) = transit(after_right, AppEvent::LanguagePickerPrev);
+    assert_eq!(
+        after_left_left.picker_cursor(),
+        initial,
+        "Prev after Next must return the cursor to the original chip"
+    );
+}
+
+#[test]
+fn picker_does_not_open_on_your_cards_or_done_because_the_pair_is_frozen() {
+    for screen in [Screen::YourCards, Screen::Done] {
+        let app = base().with_screen(screen).confirmed_target("en");
+        let (after, side) = transit(app, AppEvent::OpenLanguagePicker);
+        assert_eq!(
+            (after.modal(), side),
+            (None, Side::None),
+            "OpenLanguagePicker on {screen:?} must not open the picker — the batch pair is frozen"
+        );
+    }
+}
+
+#[test]
+fn picking_my_language_through_transit_writes_to_the_preference_store() {
     let home = tempdir().expect("temp home");
     let store = PreferenceStore::at(home.path().join("kamishibai").join("preferences.json"));
     store
@@ -135,7 +178,8 @@ fn toggling_my_language_through_transit_writes_to_the_preference_store() {
     let app = base()
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_target("en");
-    let (after, side) = transit(app, AppEvent::KeyChar('L'));
+    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
+    let (after, side) = transit(opened, AppEvent::SetMyLanguage(String::from("es")));
     if let Side::PersistMyLanguage(code) = side {
         store
             .write(&Preferences::new(code))
@@ -145,7 +189,7 @@ fn toggling_my_language_through_transit_writes_to_the_preference_store() {
     assert_eq!(
         (after.pair().support().to_string(), restored),
         (String::from("es"), String::from("es")),
-        "rotating `my language` in-flow must update both the session pair and the persisted preference"
+        "picking a language through the modal must update both the session pair and the persisted preference"
     );
 }
 

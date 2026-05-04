@@ -21,6 +21,7 @@ pub struct App {
     welcome: WelcomeView,
     body_scroll: u16,
     quit_pending: bool,
+    picker_cursor: usize,
 }
 
 /// First-run welcome state: stage, pasted key, source of that key.
@@ -142,6 +143,7 @@ impl App {
             welcome: WelcomeView::default(),
             body_scroll: 0,
             quit_pending: false,
+            picker_cursor: 0,
         }
     }
 
@@ -182,13 +184,6 @@ impl App {
     /// Return the app stepped back from entering the key to picking the language.
     pub fn welcome_step_back(mut self) -> Self {
         self.welcome.stage = WelcomeStage::PickLanguage;
-        self
-    }
-
-    /// Return the app with a different language picked on the welcome screen.
-    pub fn welcome_pick_language(mut self, code: impl Into<String>) -> Self {
-        let pair = LanguagePair::new(self.pair.target().to_string(), code.into());
-        self.pair = pair;
         self
     }
 
@@ -313,6 +308,28 @@ impl App {
         self
     }
 
+    /// Return the index of the chip currently highlighted inside the
+    /// language picker modal. Meaningful only while `PickMyLanguage` is open.
+    pub fn picker_cursor(&self) -> usize {
+        self.picker_cursor
+    }
+
+    /// Return the app with the picker cursor set to a specific index. Used
+    /// when opening the modal so the active language is pre-selected.
+    pub fn with_picker_cursor(mut self, index: usize) -> Self {
+        self.picker_cursor = index;
+        self
+    }
+
+    /// Return the app with the picker cursor advanced by `delta`, wrapping
+    /// around the supported-language catalog.
+    pub fn picker_cursor_advanced(mut self, delta: i32) -> Self {
+        let len = crate::languages::catalog().codes().len() as i32;
+        let next = (self.picker_cursor as i32 + delta).rem_euclid(len);
+        self.picker_cursor = next as usize;
+        self
+    }
+
     /// Return the app with the universal blocking loader shown.
     pub fn busy_started(mut self, kind: BusyKind) -> Self {
         self.busy = Some(BusyView::new(kind));
@@ -345,11 +362,12 @@ impl App {
         self
     }
 
-    /// Return the app with `my` language flipped through the catalog.
-    pub fn toggle_support(mut self) -> Self {
-        let current = self.pair.support().to_string();
-        let next = cycle_support(current.as_str());
-        self.pair = LanguagePair::new(self.pair.target().to_string(), next);
+    /// Return the app with the `my` (support) language replaced by `code`.
+    /// Target stays untouched. Use this from the language picker modal and
+    /// from the Welcome screen — there is no implicit cycle anymore.
+    pub fn set_support(mut self, code: impl Into<String>) -> Self {
+        let pair = LanguagePair::new(self.pair.target().to_string(), code.into());
+        self.pair = pair;
         self
     }
 
@@ -387,6 +405,7 @@ impl App {
             welcome: WelcomeView::default(),
             body_scroll: 0,
             quit_pending: false,
+            picker_cursor: 0,
         }
     }
 
@@ -743,16 +762,4 @@ fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {
         return "retrying";
     }
     "queued"
-}
-
-fn cycle_support(current: &str) -> String {
-    let order = ["en", "ru", "es", "de", "el", "zh"];
-    let mut position = 0;
-    for (index, code) in order.iter().enumerate() {
-        if *code == current {
-            position = index;
-            break;
-        }
-    }
-    String::from(order[(position + 1) % order.len()])
 }
