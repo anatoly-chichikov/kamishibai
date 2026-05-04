@@ -266,12 +266,28 @@ impl App {
         self.body_scroll
     }
 
-    /// Return the app with the body scroll bumped by `delta` lines, clamped at zero.
-    pub fn body_scrolled(mut self, delta: i32) -> Self {
+    /// Return the app with the body scroll bumped by `delta` lines, clamped so
+    /// the bottom row of content stays at or above the bottom row of the
+    /// `viewport`. Pass the actual scrollable height the renderer hands to the
+    /// body widget — for `Your cards` / `Done` that is the body rect height
+    /// minus the sticky outputs banner. A zero `viewport` clamps to zero.
+    pub fn body_scrolled(mut self, delta: i32, viewport: u16) -> Self {
+        let max = self.body_content_height().saturating_sub(viewport);
         let next = i32::from(self.body_scroll).saturating_add(delta).max(0);
-        let max = i32::from(self.body_scroll_ceiling());
-        let clamped = next.min(max);
+        let clamped = next.min(i32::from(max));
         self.body_scroll = u16::try_from(clamped).unwrap_or(u16::MAX);
+        self
+    }
+
+    /// Return the app with the body scroll re-clamped against the current
+    /// `viewport`. Called every render tick so content that shrinks (e.g. when
+    /// the user collapses an expanded card or removes candidates) snaps the
+    /// view back so no blank tail is left below the content.
+    pub fn body_scroll_clamped(mut self, viewport: u16) -> Self {
+        let max = self.body_content_height().saturating_sub(viewport);
+        if self.body_scroll > max {
+            self.body_scroll = max;
+        }
         self
     }
 
@@ -281,15 +297,38 @@ impl App {
         self
     }
 
-    fn body_scroll_ceiling(&self) -> u16 {
+    /// Return the app with the body scroll snapped so the focused card is
+    /// fully inside the `viewport`. Used after arrow-key navigation: if the
+    /// user wheel-scrolled the selection out of view, the next ↑/↓ press
+    /// pulls scroll back so the new selection lands at the top or bottom
+    /// edge of the visible area. Inert on screens without a card cursor.
+    pub fn body_scroll_to_selection(mut self, viewport: u16) -> Self {
+        if !matches!(self.screen, Screen::YourCards) {
+            return self;
+        }
+        let Some((top, height)) = crate::tui::screens::your_cards::focused_card_range(&self) else {
+            return self;
+        };
+        let max = self.body_content_height().saturating_sub(viewport);
+        let bottom = top.saturating_add(height);
+        let mut next = self.body_scroll;
+        if top < next {
+            next = top;
+        } else if bottom > next.saturating_add(viewport) {
+            next = bottom.saturating_sub(viewport);
+        }
+        if next > max {
+            next = max;
+        }
+        self.body_scroll = next;
+        self
+    }
+
+    fn body_content_height(&self) -> u16 {
         match self.screen {
-            Screen::YourCards | Screen::Done => {
-                let cards = u16::try_from(self.cards.drafts.len()).unwrap_or(u16::MAX);
-                cards.saturating_mul(7).saturating_add(8)
-            }
-            Screen::WhatIUnderstood => {
-                u16::try_from(self.review.candidates.len()).unwrap_or(u16::MAX)
-            }
+            Screen::YourCards => crate::tui::screens::your_cards::content_height(self),
+            Screen::Done => crate::tui::screens::done::content_height(self),
+            Screen::WhatIUnderstood => crate::tui::screens::what_i_understood::content_height(self),
             Screen::YourWords | Screen::Welcome => 0,
         }
     }

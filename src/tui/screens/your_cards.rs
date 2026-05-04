@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -59,19 +59,32 @@ impl ScreenView for YourCards {
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
         let finished = all_finished(app);
+        let banner_rows = if finished && super::banner::has_entries(app) {
+            super::banner::HEIGHT
+        } else {
+            0
+        };
+        if banner_rows == 0 {
+            frame.render_widget(
+                cards_paragraph(app, area.width as usize).scroll((app.body_scroll(), 0)),
+                area,
+            );
+            return;
+        }
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(banner_rows), Constraint::Min(0)])
+            .split(area);
+        frame.render_widget(super::banner::widget(app), split[0]);
         frame.render_widget(
-            body(app, finished, area.width as usize).scroll((app.body_scroll(), 0)),
-            area,
+            cards_paragraph(app, area.width as usize).scroll((app.body_scroll(), 0)),
+            split[1],
         );
     }
 }
 
-fn body(app: &App, all_finished: bool, width: usize) -> Paragraph<'_> {
+fn cards_paragraph(app: &App, width: usize) -> Paragraph<'_> {
     let mut lines: Vec<Line<'_>> = Vec::new();
-    if all_finished {
-        lines.extend(outputs_banner(app));
-        lines.push(Line::from(""));
-    }
     if app.cards().is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("preparing cards…", palette::dim())));
@@ -95,26 +108,6 @@ fn body(app: &App, all_finished: bool, width: usize) -> Paragraph<'_> {
         ));
     }
     Paragraph::new(lines).style(palette::base())
-}
-
-fn outputs_banner(app: &App) -> Vec<Line<'_>> {
-    let done = app.done_artifacts();
-    let entries: Vec<(&str, &str)> = [("APKG", done.deck.as_str()), ("PDF", done.report.as_str())]
-        .into_iter()
-        .filter(|(_, path)| !path.is_empty())
-        .collect();
-    if entries.is_empty() {
-        return Vec::new();
-    }
-    let mut top: Vec<Span<'_>> = vec![Span::styled("│ ", palette::base())];
-    for (idx, (label, _)) in entries.iter().enumerate() {
-        if idx > 0 {
-            top.push(Span::styled("    ", palette::base()));
-        }
-        top.push(Span::styled("↓ ", palette::dim()));
-        top.push(Span::styled(String::from(*label), palette::link()));
-    }
-    vec![Line::from(top)]
 }
 
 fn card_block<'a>(
@@ -448,6 +441,70 @@ fn all_finished(app: &App) -> bool {
             .cards()
             .iter()
             .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed())
+}
+
+/// Row offset and height of the currently focused card inside the scrolling
+/// card list, in body-rect rows. Returns `None` when there are no cards yet.
+/// Mirrors the per-card layout used by `cards_paragraph` so scroll-snapping
+/// and renderer stay in lockstep.
+pub(crate) fn focused_card_range(app: &App) -> Option<(u16, u16)> {
+    if app.cards().is_empty() {
+        return None;
+    }
+    let mut offset: usize = 0;
+    for (idx, draft) in app.cards().iter().enumerate() {
+        let mut height: usize = 1 + STEP_NAMES.len();
+        if idx == app.card_selected() && app.card_expanded() {
+            height = height.saturating_add(detail_pane_height(draft));
+        }
+        if idx == app.card_selected() {
+            return Some((
+                u16::try_from(offset).unwrap_or(u16::MAX),
+                u16::try_from(height).unwrap_or(u16::MAX),
+            ));
+        }
+        offset = offset.saturating_add(height + 1);
+    }
+    None
+}
+
+/// Total number of lines `cards_paragraph` will produce for the current state
+/// of `app`. Mirrors the per-card layout: 1 head row + 4 step rows + optional
+/// detail pane (only on the focused, expanded card) + 1 trailing blank line.
+/// Used by both the scroll clamp in `tui::app` and the click hit tester in
+/// `tui::links`, so they stay in lockstep with the renderer.
+pub(crate) fn content_height(app: &App) -> u16 {
+    if app.cards().is_empty() {
+        return 0;
+    }
+    let mut total: usize = 0;
+    for (idx, draft) in app.cards().iter().enumerate() {
+        total = total.saturating_add(1 + STEP_NAMES.len());
+        if idx == app.card_selected() && app.card_expanded() {
+            total = total.saturating_add(detail_pane_height(draft));
+        }
+        total = total.saturating_add(1);
+    }
+    u16::try_from(total).unwrap_or(u16::MAX)
+}
+
+/// Number of body-rect rows the expanded body-preview pane consumes for one
+/// card. Verbatim mirror of `detail_pane` / `body_preview` so callers can keep
+/// scroll offsets and click hit-tests aligned with the rendered output.
+pub(crate) fn detail_pane_height(draft: &CardDraft) -> usize {
+    let mut h = 1;
+    let Some(body) = draft.body() else {
+        return h + 1;
+    };
+    h += 2;
+    h += 1 + 2;
+    h += 1 + 2;
+    h += 1 + 2;
+    if !body.source_context().trim().is_empty() {
+        h += 1 + 1;
+        h += body.source_context().lines().count();
+    }
+    h
 }
 
 fn footer(app: &App, all_finished: bool, width: u16) -> Paragraph<'static> {
