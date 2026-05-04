@@ -522,12 +522,18 @@ fn footer(app: &App, all_finished: bool, width: u16) -> Paragraph<'static> {
     left.push(super::common::status_sep());
     left.push(Span::styled(elapsed(app), palette::dim2()));
     let mut right: Vec<Span<'static>> = Vec::new();
-    if all_finished {
-        right.extend(super::common::key_hint("↑↓", "open"));
+    right.extend(super::common::key_hint("↑↓", "nav"));
+    right.push(super::common::status_sep());
+    right.extend(super::common::key_hint("Enter", "expand"));
+    if !all_finished {
         right.push(super::common::status_sep());
-        right.extend(super::common::key_hint("n", "new batch"));
-    } else {
-        right.push(Span::styled("working…", palette::dim2()));
+        right.extend(super::common::key_hint("D", "drop"));
+    }
+    right.push(super::common::status_sep());
+    right.extend(super::common::key_hint("R", "change"));
+    if all_finished {
+        right.push(super::common::status_sep());
+        right.extend(super::common::key_hint("N", "new batch"));
     }
     super::common::append_quit(&mut right, app.quit_pending());
     super::common::status_bar(left, right, width)

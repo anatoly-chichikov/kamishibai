@@ -39,7 +39,7 @@ fn done_screen_lists_short_artifact_labels_and_keyboard_hints() {
             && rendered.contains("all done")
             && rendered.contains("APKG")
             && rendered.contains("PDF")
-            && rendered.contains("[n]")
+            && rendered.contains("[N]")
             && rendered.contains("new batch")
             && rendered.contains("RU → EN"),
         "Done must render compact APKG/PDF link labels and keyboard hints with the language chip"
