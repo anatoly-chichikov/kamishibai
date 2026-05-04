@@ -168,20 +168,10 @@ fn card_head<'a>(
     } else {
         palette::base()
     };
-    let summary = card_summary(draft);
-    let summary_style = if focused {
-        palette::highlight_dim()
-    } else {
-        palette::dim()
-    };
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled(format!(" {glyph} "), glyph_style));
     spans.push(Span::styled(format!("{:0>2}  ", idx + 1), num_style));
-    spans.push(Span::styled(
-        super::common::pad_right(draft.term(), 18),
-        term_style,
-    ));
-    spans.push(Span::styled(summary, summary_style));
+    spans.push(Span::styled(String::from(draft.term()), term_style));
     let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
     let pad = width.saturating_sub(used);
     if pad > 0 {
@@ -210,13 +200,6 @@ fn any_running(artifacts: &CardArtifacts) -> bool {
         }
     }
     false
-}
-
-fn card_summary(draft: &CardDraft) -> String {
-    draft
-        .body()
-        .map(|body| body.target_sentence().to_string())
-        .unwrap_or_default()
 }
 
 fn step_line<'a>(
