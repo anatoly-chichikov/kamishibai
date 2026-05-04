@@ -24,7 +24,12 @@ const HEADLINE_DONE: &str = "your cards";
 const HINT_WORKING: &str = "drawing each card one by one";
 const HINT_DONE: &str = "all done";
 const HINT_DONE_FAILED: &str = "some cards didn't make it";
-const STEP_NAMES: [&str; 4] = ["meta", "audio", "scene", "picture"];
+const STEPS: [(&str, Artifact); 4] = [
+    ("meta", Artifact::Body),
+    ("audio", Artifact::Sound),
+    ("scene", Artifact::Scene),
+    ("picture", Artifact::Picture),
+];
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
 
 /// `ScreenView` handle for the `your cards` / generating screen. Title and
@@ -119,16 +124,25 @@ fn card_block<'a>(
     running: Option<Artifact>,
     spinner_frame: usize,
 ) -> Vec<Line<'a>> {
-    let mut lines: Vec<Line<'a>> = Vec::new();
-    lines.push(card_head(draft, idx, focused, expanded, width));
     let artifacts = draft.artifacts();
-    for name in STEP_NAMES {
-        lines.push(step_line(name, artifacts, running, spinner_frame));
+    let progressed = card_progressed(artifacts, running);
+    let mut lines: Vec<Line<'a>> = Vec::new();
+    lines.push(card_head(draft, idx, focused, expanded, progressed, width));
+    if progressed {
+        for &(name, kind) in &STEPS {
+            let slot = slot_for(artifacts, kind);
+            if !slot_visible(slot, kind, running) {
+                continue;
+            }
+            lines.push(step_line(name, kind, slot, running, spinner_frame));
+        }
     }
     if expanded {
         lines.extend(detail_pane(draft));
     }
-    lines.push(Line::from(""));
+    if progressed || expanded {
+        lines.push(Line::from(""));
+    }
     lines
 }
 
@@ -137,6 +151,7 @@ fn card_head<'a>(
     idx: usize,
     focused: bool,
     expanded: bool,
+    progressed: bool,
     width: usize,
 ) -> Line<'a> {
     let row_style = if focused {
@@ -148,7 +163,7 @@ fn card_head<'a>(
         "▾"
     } else if card_finished(draft) {
         "▸"
-    } else if any_running(draft.artifacts()) {
+    } else if progressed {
         "·"
     } else {
         " "
@@ -163,10 +178,11 @@ fn card_head<'a>(
     } else {
         palette::dim2()
     };
-    let term_style = if focused {
-        palette::highlight().add_modifier(Modifier::BOLD)
-    } else {
-        palette::base()
+    let term_style = match (progressed, focused) {
+        (true, true) => palette::highlight().add_modifier(Modifier::BOLD),
+        (true, false) => palette::base(),
+        (false, true) => palette::highlight_dim(),
+        (false, false) => palette::dim2(),
     };
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled(format!(" {glyph} "), glyph_style));
@@ -185,43 +201,40 @@ fn card_finished(draft: &CardDraft) -> bool {
     artifacts.all_ready() || artifacts.has_failed()
 }
 
-fn any_running(artifacts: &CardArtifacts) -> bool {
-    for slot in [
-        artifacts.body(),
-        artifacts.scene(),
-        artifacts.picture(),
-        artifacts.sound(),
-    ] {
-        if slot.ready() || slot.discarded() || slot.failed_terminally() {
-            continue;
-        }
-        if slot.tally().done() > 0 {
-            return true;
-        }
-    }
-    false
-}
-
-fn step_line<'a>(
-    name: &'a str,
-    artifacts: &'a CardArtifacts,
-    running: Option<Artifact>,
-    spinner_frame: usize,
-) -> Line<'a> {
-    let slot_kind: Artifact = match name {
-        "meta" => Artifact::Body,
-        "scene" => Artifact::Scene,
-        "audio" => Artifact::Sound,
-        "picture" => Artifact::Picture,
-        _ => Artifact::Body,
-    };
-    let slot: &ArtifactSlot = match slot_kind {
+fn slot_for(artifacts: &CardArtifacts, kind: Artifact) -> &ArtifactSlot {
+    match kind {
         Artifact::Body => artifacts.body(),
         Artifact::Scene => artifacts.scene(),
         Artifact::Picture => artifacts.picture(),
         Artifact::Sound => artifacts.sound(),
-    };
-    let active = running == Some(slot_kind);
+    }
+}
+
+fn slot_visible(slot: &ArtifactSlot, kind: Artifact, running: Option<Artifact>) -> bool {
+    slot.ready()
+        || slot.discarded()
+        || slot.failed_terminally()
+        || slot.tally().done() > 0
+        || running == Some(kind)
+}
+
+fn card_progressed(artifacts: &CardArtifacts, running: Option<Artifact>) -> bool {
+    if running.is_some() {
+        return true;
+    }
+    STEPS
+        .iter()
+        .any(|&(_, kind)| slot_visible(slot_for(artifacts, kind), kind, None))
+}
+
+fn step_line<'a>(
+    name: &'a str,
+    kind: Artifact,
+    slot: &'a ArtifactSlot,
+    running: Option<Artifact>,
+    spinner_frame: usize,
+) -> Line<'a> {
+    let active = running == Some(kind);
     let (glyph, status_style, name_style, note_spans) = step_state(slot, active, spinner_frame);
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled("    ", palette::base()));
@@ -409,41 +422,62 @@ pub(crate) fn focused_card_range(app: &App) -> Option<(u16, u16)> {
     if app.cards().is_empty() {
         return None;
     }
+    let running_target = app.cards_running_target();
     let mut offset: usize = 0;
     for (idx, draft) in app.cards().iter().enumerate() {
-        let mut height: usize = 1 + STEP_NAMES.len();
-        if idx == app.card_selected() && app.card_expanded() {
-            height = height.saturating_add(detail_pane_height(draft));
-        }
+        let running_for_card =
+            running_target.and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
+        let expanded = idx == app.card_selected() && app.card_expanded();
+        let (rows, trailing) = card_layout(draft, running_for_card, expanded);
         if idx == app.card_selected() {
             return Some((
                 u16::try_from(offset).unwrap_or(u16::MAX),
-                u16::try_from(height).unwrap_or(u16::MAX),
+                u16::try_from(rows).unwrap_or(u16::MAX),
             ));
         }
-        offset = offset.saturating_add(height + 1);
+        offset = offset.saturating_add(rows + trailing);
     }
     None
 }
 
 /// Total number of lines `cards_paragraph` will produce for the current state
-/// of `app`. Mirrors the per-card layout: 1 head row + 4 step rows + optional
-/// detail pane (only on the focused, expanded card) + 1 trailing blank line.
-/// Used by both the scroll clamp in `tui::app` and the click hit tester in
-/// `tui::links`, so they stay in lockstep with the renderer.
+/// of `app`. Mirrors the per-card layout: 1 head row + visible step rows +
+/// optional detail pane (only on the focused, expanded card) + trailing blank
+/// line for any card that emitted extra rows. Used by both the scroll clamp
+/// in `tui::app` and the click hit tester in `tui::links`, so they stay in
+/// lockstep with the renderer.
 pub(crate) fn content_height(app: &App) -> u16 {
     if app.cards().is_empty() {
         return 0;
     }
+    let running_target = app.cards_running_target();
     let mut total: usize = 0;
     for (idx, draft) in app.cards().iter().enumerate() {
-        total = total.saturating_add(1 + STEP_NAMES.len());
-        if idx == app.card_selected() && app.card_expanded() {
-            total = total.saturating_add(detail_pane_height(draft));
-        }
-        total = total.saturating_add(1);
+        let running_for_card =
+            running_target.and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
+        let expanded = idx == app.card_selected() && app.card_expanded();
+        let (rows, trailing) = card_layout(draft, running_for_card, expanded);
+        total = total.saturating_add(rows + trailing);
     }
     u16::try_from(total).unwrap_or(u16::MAX)
+}
+
+fn card_layout(draft: &CardDraft, running: Option<Artifact>, expanded: bool) -> (usize, usize) {
+    let artifacts = draft.artifacts();
+    let progressed = card_progressed(artifacts, running);
+    let mut rows: usize = 1;
+    if progressed {
+        for &(_, kind) in &STEPS {
+            if slot_visible(slot_for(artifacts, kind), kind, running) {
+                rows += 1;
+            }
+        }
+    }
+    if expanded {
+        rows = rows.saturating_add(detail_pane_height(draft));
+    }
+    let trailing = if progressed || expanded { 1 } else { 0 };
+    (rows, trailing)
 }
 
 /// Number of body-rect rows the expanded body-preview pane consumes for one

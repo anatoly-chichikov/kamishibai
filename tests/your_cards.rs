@@ -105,8 +105,29 @@ fn your_cards_lists_each_card_with_a_bare_term_head_and_artifact_check_marks() {
             && rendered.contains("✓ scene")
             && rendered.contains("✓ picture")
             && rendered.contains("RU → EN")
+            && !rendered.contains("queued")
             && !rendered.contains("Example with"),
-        "collapsed view must show only terms in the card head, never leak body sentences: {rendered}"
+        "collapsed view must hide queued step rows and never leak body sentences: {rendered}"
+    );
+}
+
+#[test]
+fn untouched_card_shows_only_a_dim_term_with_no_step_rows() {
+    let single = CardDraft::new(
+        "ancient",
+        "understanding for ancient",
+        LanguagePair::new("en", "ru"),
+    );
+    let app = seeded(vec![single]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("ancient")
+            && !rendered.contains("meta")
+            && !rendered.contains("audio")
+            && !rendered.contains("scene")
+            && !rendered.contains("picture")
+            && !rendered.contains("queued"),
+        "untouched card must collapse to its term row alone, no artifact lines: {rendered}"
     );
 }
 
