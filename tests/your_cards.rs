@@ -87,7 +87,7 @@ fn seeded(drafts: Vec<CardDraft>) -> App {
 }
 
 #[test]
-fn your_cards_lists_each_card_with_artifact_check_marks_and_example_phrase() {
+fn your_cards_lists_each_card_with_a_bare_term_head_and_artifact_check_marks() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("at the end", ready_artifacts()),
@@ -95,21 +95,18 @@ fn your_cards_lists_each_card_with_artifact_check_marks_and_example_phrase() {
         draft("wreck", CardArtifacts::default()),
     ]);
     let rendered = flat(&app);
-    let head_lines: Vec<&str> = rendered
-        .lines()
-        .filter(|line| line.contains("  01  ") || line.contains("  02  "))
-        .collect();
-    let head_blob = head_lines.join("\n");
     assert!(
         rendered.contains("building your cards")
             && rendered.contains("2/4 ready")
-            && rendered.contains("Example with whilst.")
-            && rendered.contains("Example with at the end.")
+            && rendered.contains("whilst")
+            && rendered.contains("at the end")
+            && rendered.contains("in the end")
+            && rendered.contains("wreck")
             && rendered.contains("✓ scene")
             && rendered.contains("✓ picture")
             && rendered.contains("RU → EN")
-            && !head_blob.contains("ready"),
-        "card head row must carry the example phrase, not a status word: {head_blob}"
+            && !rendered.contains("Example with"),
+        "collapsed view must show only terms in the card head, never leak body sentences: {rendered}"
     );
 }
 
