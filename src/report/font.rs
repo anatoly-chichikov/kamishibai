@@ -1,13 +1,18 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Result, anyhow, bail};
 use font_kit::family_name::FamilyName as QueryName;
+use font_kit::handle::Handle;
 use font_kit::properties::{Properties, Weight};
 use font_kit::source::SystemSource;
 use printpdf::{Color, ParsedFont, Rgb};
 
-/// Resolve one system font family to one filesystem path.
+/// Resolve one font family + weight to one filesystem path through font-kit.
+/// macOS ships Arial (Regular and Bold as separate .ttf files), Hiragino
+/// Sans GB, and Arial Unicode MS — these three together cover every script
+/// the report uses, so the binary stays fontless and the embed is whatever
+/// subsetting trims the system files to.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct FontPath {
     bold: bool,
@@ -31,9 +36,17 @@ impl FontPath {
         }
     }
 
-    /// Return the resolved filesystem path for the font.
-    pub fn resolved(&self) -> Result<PathBuf> {
-        self.materialized(self.matched()?.as_slice())
+    /// Return the resolved filesystem path and face index for the font. The
+    /// index points into the .ttc collection font-kit hands back (macOS ships
+    /// every Helvetica Neue weight inside one .ttc), so the renderer reaches
+    /// the correct subface instead of always reading face 0.
+    pub fn resolved(&self) -> Result<ResolvedFont> {
+        let resolved = self.matched()?;
+        let path = self.materialized(resolved.bytes.as_slice())?;
+        Ok(ResolvedFont {
+            path,
+            face_index: resolved.face_index,
+        })
     }
 
     /// Return the matching system-font properties for the resolver.
@@ -45,11 +58,11 @@ impl FontPath {
         value
     }
 
-    /// Return the raw bytes for the first matching font query.
-    fn matched(&self) -> Result<Vec<u8>> {
+    /// Return the raw bytes and face index for the first matching font query.
+    fn matched(&self) -> Result<MatchedFont> {
         for query in self.queries() {
-            if let Ok(bytes) = self.bytes(query) {
-                return Ok(bytes);
+            if let Ok(font) = self.bytes(query) {
+                return Ok(font);
             }
         }
         Err(anyhow!(
@@ -70,21 +83,15 @@ impl FontPath {
         value
     }
 
-    /// Return the platform fallback aliases for the requested family.
-    /// Lightweight families come first so the embedded subset stays small;
-    /// massive Unicode catch-alls (Arial Unicode MS) are kept as last resort.
+    /// Return the platform fallback aliases for the requested family. macOS
+    /// names come first, Linux/Windows names follow as a courtesy.
     fn aliases(&self) -> &'static [&'static str] {
         match self.family.as_str() {
-            "DejaVu Sans" => &[
-                "Helvetica Neue",
+            "Arial" => &[
                 "Helvetica",
-                "Arial",
+                "Helvetica Neue",
                 "Liberation Sans",
-                "Nimbus Sans",
-                "Segoe UI",
-                "Tahoma",
-                "Geneva",
-                "Arial Unicode MS",
+                "DejaVu Sans",
             ],
             "Hiragino Sans GB" => &[
                 "PingFang SC",
@@ -94,29 +101,33 @@ impl FontPath {
                 "Source Han Sans SC",
                 "Microsoft YaHei",
                 "SimHei",
-                "Arial Unicode MS",
             ],
+            "Arial Unicode MS" => &["Arial Unicode", "Lucida Sans Unicode"],
             _ => &[],
         }
     }
 
-    /// Return the raw bytes for one font-kit family query.
-    fn bytes(&self, query: QueryName) -> Result<Vec<u8>> {
-        let font = SystemSource::new()
+    /// Return the raw bytes and face index for one font-kit family query.
+    fn bytes(&self, query: QueryName) -> Result<MatchedFont> {
+        let handle = SystemSource::new()
             .select_best_match(&[query], &self.properties())
-            .map_err(|_| anyhow!("Font '{}' was not resolved by font-kit", self.label()))?
-            .load()
-            .map_err(|_| {
-                anyhow!(
-                    "Font '{}' could not be loaded from the system source",
-                    self.label()
-                )
-            })?;
-        Ok(font
+            .map_err(|_| anyhow!("Font '{}' was not resolved by font-kit", self.label()))?;
+        let face_index = match &handle {
+            Handle::Path { font_index, .. } => *font_index,
+            Handle::Memory { font_index, .. } => *font_index,
+        };
+        let font = handle.load().map_err(|_| {
+            anyhow!(
+                "Font '{}' could not be loaded from the system source",
+                self.label()
+            )
+        })?;
+        let bytes = font
             .copy_font_data()
             .ok_or_else(|| anyhow!("Font '{}' could not expose raw font data", self.label()))?
             .as_slice()
-            .to_vec())
+            .to_vec();
+        Ok(MatchedFont { bytes, face_index })
     }
 
     /// Persist the resolved font bytes to one reusable cache path.
@@ -149,6 +160,20 @@ impl FontPath {
     }
 }
 
+/// Bytes plus the .ttc face index for one resolved font query.
+struct MatchedFont {
+    bytes: Vec<u8>,
+    face_index: u32,
+}
+
+/// One resolved font: a filesystem path the renderer can hand to printpdf,
+/// plus the face index into a .ttc collection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedFont {
+    pub path: PathBuf,
+    pub face_index: u32,
+}
+
 /// Resolve regular and bold variants of one system font family.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct FontFamily {
@@ -172,35 +197,114 @@ impl FontFamily {
     }
 
     /// Return the regular font path.
-    pub fn regular(&self) -> Result<PathBuf> {
+    pub fn regular(&self) -> Result<ResolvedFont> {
         self.regular.resolved()
     }
 
     /// Return the bold font path.
-    pub fn bold(&self) -> Result<PathBuf> {
+    pub fn bold(&self) -> Result<ResolvedFont> {
         self.bold.resolved()
     }
 }
 
-/// Parse one filesystem font file into one PDF font.
-pub(super) fn parsed(path: &Path) -> Result<ParsedFont> {
-    let bytes = fs::read(path)?;
-    ParsedFont::from_bytes(bytes.as_slice(), 0, &mut Vec::new())
-        .ok_or_else(|| anyhow!("Font '{}' could not be parsed", path.display()))
+/// Three-track palette: primary Latin/Greek/Cyrillic (Arial), CJK (Hiragino
+/// Sans GB), and a wide-coverage fallback (Arial Unicode MS) for glyphs the
+/// primary or CJK weight is missing — IPA in bold is the canonical example.
+/// The renderer routes each glyph at the current weight to the first track
+/// that carries it, so a single line can mix scripts and weights without
+/// dropping glyphs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FontPalette {
+    primary: FontFamily,
+    cjk: FontFamily,
+    fallback: FontFamily,
 }
 
-/// Measure one text span in millimeters for one parsed font and point size.
-pub(super) fn measure(font: &ParsedFont, text: &str, size: f32) -> f32 {
-    let units = f32::from(font.font_metrics.units_per_em).max(1.0);
-    let advance: f32 = text
-        .chars()
-        .map(|ch| {
-            font.lookup_glyph_index(ch as u32)
-                .map(|gid| f32::from(font.get_horizontal_advance(gid)))
-                .unwrap_or_else(|| units * 0.5)
-        })
-        .sum();
-    advance / units * size * 25.4 / 72.0
+impl Default for FontPalette {
+    /// Return the default palette: macOS-shipped Arial (separate Regular and
+    /// Bold .ttf files, so the .ttc-subface issue does not apply), Hiragino
+    /// Sans GB for CJK, and Arial Unicode MS as the wide-coverage fallback.
+    fn default() -> Self {
+        Self {
+            primary: FontFamily::new("Arial"),
+            cjk: FontFamily::new("Hiragino Sans GB"),
+            fallback: FontFamily::new("Arial Unicode MS"),
+        }
+    }
+}
+
+impl FontPalette {
+    /// Create one explicit palette.
+    pub fn new(primary: FontFamily, cjk: FontFamily, fallback: FontFamily) -> Self {
+        Self {
+            primary,
+            cjk,
+            fallback,
+        }
+    }
+
+    /// Return the primary (Latin/Greek/Cyrillic) family.
+    pub fn primary(&self) -> &FontFamily {
+        &self.primary
+    }
+
+    /// Return the CJK family.
+    pub fn cjk(&self) -> &FontFamily {
+        &self.cjk
+    }
+
+    /// Return the wide-coverage fallback family.
+    pub fn fallback(&self) -> &FontFamily {
+        &self.fallback
+    }
+}
+
+/// Parse one filesystem font file into one PDF font, picking the requested
+/// face index out of a .ttc when needed.
+pub(super) fn parsed(resolved: &ResolvedFont) -> Result<ParsedFont> {
+    let bytes = fs::read(&resolved.path)?;
+    ParsedFont::from_bytes(
+        bytes.as_slice(),
+        resolved.face_index as usize,
+        &mut Vec::new(),
+    )
+    .ok_or_else(|| anyhow!("Font '{}' could not be parsed", resolved.path.display()))
+}
+
+/// Return whether the parsed font carries a real (non-notdef) glyph for the
+/// character.
+pub(super) fn carries(font: &ParsedFont, ch: char) -> bool {
+    font.lookup_glyph_index(ch as u32)
+        .is_some_and(|gid| gid != 0)
+}
+
+/// Measure one text span in millimeters using a primary + CJK + fallback
+/// chain at the current weight. Each codepoint is measured against the first
+/// track that carries it so wrap decisions match what the renderer emits.
+pub(super) fn measure(
+    primary: &ParsedFont,
+    cjk: &ParsedFont,
+    fallback: &ParsedFont,
+    text: &str,
+    size: f32,
+) -> f32 {
+    let mut total = 0.0_f32;
+    for ch in text.chars() {
+        let font = if carries(primary, ch) {
+            primary
+        } else if carries(cjk, ch) {
+            cjk
+        } else {
+            fallback
+        };
+        let units = f32::from(font.font_metrics.units_per_em).max(1.0);
+        let advance = font
+            .lookup_glyph_index(ch as u32)
+            .map(|gid| f32::from(font.get_horizontal_advance(gid)))
+            .unwrap_or(units * 0.5);
+        total += advance / units;
+    }
+    total * size * 25.4 / 72.0
 }
 
 /// Return the leading for one point size in millimeters.
@@ -208,8 +312,16 @@ pub(super) fn leading(size: f32) -> f32 {
     size * 1.2 * 25.4 / 72.0
 }
 
-/// Wrap one report line to fit the target width using actual glyph advances.
-pub(super) fn wrap(text: &str, size: f32, width: f32, font: &ParsedFont) -> Vec<String> {
+/// Wrap one report line to fit the target width using the same primary + CJK
+/// + fallback chain the renderer uses.
+pub(super) fn wrap(
+    text: &str,
+    size: f32,
+    width: f32,
+    primary: &ParsedFont,
+    cjk: &ParsedFont,
+    fallback: &ParsedFont,
+) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
     for word in text.split_whitespace() {
@@ -218,14 +330,14 @@ pub(super) fn wrap(text: &str, size: f32, width: f32, font: &ParsedFont) -> Vec<
         } else {
             format!("{current} {word}")
         };
-        if measure(font, candidate.as_str(), size) <= width {
+        if measure(primary, cjk, fallback, candidate.as_str(), size) <= width {
             current = candidate;
             continue;
         }
         if !current.is_empty() {
             lines.push(std::mem::take(&mut current));
         }
-        if measure(font, word, size) <= width {
+        if measure(primary, cjk, fallback, word, size) <= width {
             current = String::from(word);
             continue;
         }
@@ -233,7 +345,7 @@ pub(super) fn wrap(text: &str, size: f32, width: f32, font: &ParsedFont) -> Vec<
         for ch in word.chars() {
             let mut next = head.clone();
             next.push(ch);
-            if measure(font, next.as_str(), size) <= width {
+            if measure(primary, cjk, fallback, next.as_str(), size) <= width {
                 head = next;
                 continue;
             }

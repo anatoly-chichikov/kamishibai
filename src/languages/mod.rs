@@ -1,6 +1,5 @@
 //! Language profiles, naming, and report labels.
 
-const DEFAULT_FONT: &str = "DejaVu Sans";
 const DEFAULT_DECK: &str = "Kamishibai Deck";
 const DEFAULT_PREFIX: &str = "kamishibai-deck";
 const DEFAULT_FILE: &str = "kamishibai.json";

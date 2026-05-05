@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use kamishibai::languages::{LanguageEntry, ReportLabels, catalog, language};
-use kamishibai::report::ReportFonts;
 use kamishibai::vocabulary::{
     Importance, LanguageCode, NonEmptyText, VocabularyEntry, VocabularySource, VocabularyTarget,
 };
@@ -49,12 +48,11 @@ fn score(value: u8) -> Importance {
 fn english_profile_keeps_the_frozen_runtime_values() -> Result<()> {
     let item = language("en")?;
     assert_eq!(
-        (item.prompt, item.ocr, item.naming.name, item.report_font),
+        (item.prompt, item.ocr, item.naming.name),
         (
             String::from("English"),
             String::from("eng"),
             String::from("English Vocabulary"),
-            String::from("DejaVu Sans"),
         ),
         "english profile drifted away from the frozen runtime values"
     );
@@ -113,20 +111,6 @@ fn mixed_targets_keep_the_generic_deck_fallback() {
     assert_eq!(
         item.name, "Kamishibai Deck",
         "mixed targets no longer fall back to the generic deck name"
-    );
-}
-
-/// Font selection keeps the source or target Chinese override.
-#[test]
-fn font_selection_keeps_the_chinese_override_on_source_or_target() {
-    assert_eq!(
-        (
-            ReportFonts::default().selected(&entry("ru", "zh")).name(),
-            ReportFonts::default().selected(&entry("zh", "en")).name(),
-            ReportFonts::default().selected(&entry("ru", "en")).name()
-        ),
-        ("Hiragino Sans GB", "Hiragino Sans GB", "DejaVu Sans"),
-        "font selection no longer keeps the frozen source-target asymmetry"
     );
 }
 

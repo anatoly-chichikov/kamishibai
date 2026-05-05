@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-use super::{DEFAULT_FONT, DeckNaming, FALLBACK_OCR, LanguageProfile, UiLabels};
+use super::{DeckNaming, FALLBACK_OCR, LanguageProfile, UiLabels};
 
 /// Registry for supported language profiles.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -17,7 +17,6 @@ impl LanguageCatalog {
                 ocr: String::from("eng+deu"),
                 image_cache: String::from("manga-de"),
                 naming: DeckNaming::new("German Vocabulary", "de", super::DEFAULT_FILE),
-                report_font: String::from(DEFAULT_FONT),
                 labels: UiLabels::new("Übersetzung", "Kontext", "Hinweis", "Wichtigkeit"),
             }),
             "el" => Ok(LanguageProfile {
@@ -27,7 +26,6 @@ impl LanguageCatalog {
                 ocr: String::from("eng+ell"),
                 image_cache: String::from("manga-el"),
                 naming: DeckNaming::new("Greek Vocabulary", "el", super::DEFAULT_FILE),
-                report_font: String::from(DEFAULT_FONT),
                 labels: UiLabels::new("Μετάφραση", "Πλαίσιο", "Υπόδειξη", "Σπουδαιότητα"),
             }),
             "en" => Ok(LanguageProfile {
@@ -37,7 +35,6 @@ impl LanguageCatalog {
                 ocr: String::from("eng"),
                 image_cache: String::from("manga-en"),
                 naming: DeckNaming::new("English Vocabulary", "en", super::DEFAULT_FILE),
-                report_font: String::from(DEFAULT_FONT),
                 labels: UiLabels::new("Translation", "Context", "Hint", "Importance"),
             }),
             "es" => Ok(LanguageProfile {
@@ -47,7 +44,6 @@ impl LanguageCatalog {
                 ocr: String::from("eng+spa"),
                 image_cache: String::from("manga-es"),
                 naming: DeckNaming::new("Spanish Vocabulary", "es", super::DEFAULT_FILE),
-                report_font: String::from(DEFAULT_FONT),
                 labels: UiLabels::new("Traducción", "Contexto", "Pista", "Importancia"),
             }),
             "ru" => Ok(LanguageProfile {
@@ -57,7 +53,6 @@ impl LanguageCatalog {
                 ocr: String::from("eng+rus"),
                 image_cache: String::from("manga-ru"),
                 naming: DeckNaming::new("Russian Vocabulary", "ru", super::DEFAULT_FILE),
-                report_font: String::from(DEFAULT_FONT),
                 labels: UiLabels::new("Перевод", "Контекст", "Подсказка", "Важность"),
             }),
             "zh" => Ok(LanguageProfile {
@@ -67,7 +62,6 @@ impl LanguageCatalog {
                 ocr: String::from("eng+chi_sim"),
                 image_cache: String::from("manga-zh"),
                 naming: DeckNaming::new("Chinese Vocabulary", "zh", super::DEFAULT_FILE),
-                report_font: String::from("Hiragino Sans GB"),
                 labels: UiLabels::new("翻译", "语境", "提示", "重要性"),
             }),
             _ => bail!("Unsupported language '{code}'"),

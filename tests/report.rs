@@ -6,9 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use image::{Rgb, RgbImage};
 use kamishibai::languages::ReportLabels;
-use kamishibai::report::{
-    FontFamily, FontPath, Report, ReportFonts, ReportLayout, Thumbnail, VocabularyLayout,
-};
+use kamishibai::report::{FontFamily, FontPath, Report, ReportLayout, Thumbnail, VocabularyLayout};
 use kamishibai::vocabulary::{
     Importance, LanguageCode, NonEmptyText, VocabularyDocument, VocabularyEntry, VocabularySource,
     VocabularyTarget,
@@ -205,20 +203,21 @@ fn vocabulary_layout_keeps_the_strict_placeholder_row_structure() {
 #[test]
 fn font_path_resolution_finds_the_configured_system_font() -> Result<()> {
     assert!(
-        FontPath::new("DejaVu Sans").resolved()?.is_file(),
+        FontPath::new("Arial").resolved()?.path.is_file(),
         "font path resolution no longer finds the configured system font"
     );
     Ok(())
 }
 
-/// Font family resolution finds both regular and bold font variants.
+/// Font family resolution gives regular and bold distinct file paths.
 #[test]
-fn font_family_resolution_finds_both_regular_and_bold_font_variants() -> Result<()> {
-    let family = FontFamily::new("DejaVu Sans");
-    assert_eq!(
-        (family.regular()?.is_file(), family.bold()?.is_file()),
-        (true, true),
-        "font family resolution no longer finds both regular and bold font variants"
+fn font_family_resolution_gives_regular_and_bold_distinct_paths() -> Result<()> {
+    let family = FontFamily::new("Arial");
+    let regular = family.regular()?;
+    let bold = family.bold()?;
+    assert!(
+        regular.path.is_file() && bold.path.is_file() && regular.path != bold.path,
+        "font family resolution no longer differentiates regular and bold faces"
     );
     Ok(())
 }
@@ -242,11 +241,7 @@ fn thumbnail_scaling_clamps_the_longest_side_to_the_configured_pixel_budget() ->
 fn reports_with_no_entries_still_produce_a_nonempty_pdf() -> Result<()> {
     let directory = TempDir::new()?;
     let path = directory.path().join("empty.pdf");
-    Report::new(
-        StaticLayout { rows: vec![] },
-        FontFamily::new("DejaVu Sans"),
-    )
-    .save(&path, &Thumbnail::new(150))?;
+    Report::new(StaticLayout { rows: vec![] }).save(&path, &Thumbnail::new(150))?;
     assert!(
         bytes(&path) > 0,
         "reports with no entries no longer produce a nonempty PDF"
@@ -259,15 +254,12 @@ fn reports_with_no_entries_still_produce_a_nonempty_pdf() -> Result<()> {
 fn reports_with_images_produce_a_larger_pdf_payload() -> Result<()> {
     let directory = TempDir::new()?;
     let path = directory.path().join("image.pdf");
-    let mut report = Report::new(
-        StaticLayout {
-            rows: vec![
-                (String::from("Ünïcödé línë"), 10.0),
-                (String::from("wörd"), 14.0),
-            ],
-        },
-        FontFamily::new("DejaVu Sans"),
-    );
+    let mut report = Report::new(StaticLayout {
+        rows: vec![
+            (String::from("Ünïcödé línë"), 10.0),
+            (String::from("wörd"), 14.0),
+        ],
+    });
     report.append(
         &entry("wörd", "en", "ru"),
         Some(image(directory.path(), 128)),
@@ -285,16 +277,13 @@ fn reports_with_images_produce_a_larger_pdf_payload() -> Result<()> {
 fn reports_render_mixed_script_text_without_failing() -> Result<()> {
     let directory = TempDir::new()?;
     let path = directory.path().join("mixed.pdf");
-    let mut report = Report::new(
-        StaticLayout {
-            rows: vec![
-                (String::from("Кириллица проверка"), 10.0),
-                (String::from("Ελληνικά δοκιμή"), 14.0),
-                (String::from("Mixed Ünïcödé ñ ü ö"), 9.0),
-            ],
-        },
-        FontFamily::new("DejaVu Sans"),
-    );
+    let mut report = Report::new(StaticLayout {
+        rows: vec![
+            (String::from("Кириллица проверка"), 10.0),
+            (String::from("Ελληνικά δοκιμή"), 14.0),
+            (String::from("Mixed Ünïcödé ñ ü ö"), 9.0),
+        ],
+    });
     report.append(&entry("Ελληνικά", "ru", "el"), None);
     report.save(&path, &Thumbnail::new(150))?;
     assert!(
@@ -304,23 +293,21 @@ fn reports_render_mixed_script_text_without_failing() -> Result<()> {
     Ok(())
 }
 
-/// Reports switch font families between non-Chinese and Chinese entries.
+/// Reports route CJK glyphs to the CJK fallback while non-CJK glyphs stay
+/// on the embedded primary, on the same line and the same entry.
 #[test]
-fn reports_switch_font_families_between_non_chinese_and_chinese_entries() -> Result<()> {
+fn reports_route_cjk_glyphs_to_the_cjk_fallback() -> Result<()> {
     let directory = TempDir::new()?;
     let path = directory.path().join("fonts.pdf");
-    let mut report = Report::new(
-        StaticLayout {
-            rows: vec![(String::from("Mixed script"), 10.0)],
-        },
-        ReportFonts::default(),
-    );
+    let mut report = Report::new(StaticLayout {
+        rows: vec![(String::from("hello 朋友 world"), 10.0)],
+    });
     report.append(&entry("plain", "en", "en"), None);
     report.append(&entry("朋友", "el", "zh"), None);
     report.save(&path, &Thumbnail::new(150))?;
     assert!(
         bytes(&path) > 0,
-        "reports no longer switch font families between non Chinese and Chinese entries"
+        "reports no longer route CJK glyphs to the CJK fallback"
     );
     Ok(())
 }
@@ -331,12 +318,9 @@ fn reports_wrap_long_text_without_failing() -> Result<()> {
     let directory = TempDir::new()?;
     let path = directory.path().join("wrap.pdf");
     let paragraph = "Ünïcödé ".repeat(80);
-    let mut report = Report::new(
-        StaticLayout {
-            rows: vec![(paragraph.clone(), 10.0)],
-        },
-        FontFamily::new("DejaVu Sans"),
-    );
+    let mut report = Report::new(StaticLayout {
+        rows: vec![(paragraph.clone(), 10.0)],
+    });
     report.append(&entry("wörd", "en", "ru"), None);
     report.save(&path, &Thumbnail::new(150))?;
     assert!(
@@ -351,15 +335,12 @@ fn reports_wrap_long_text_without_failing() -> Result<()> {
 fn reports_with_many_entries_still_span_multiple_pages() -> Result<()> {
     let directory = TempDir::new()?;
     let path = directory.path().join("pages.pdf");
-    let mut report = Report::new(
-        StaticLayout {
-            rows: vec![
-                (String::from("Строка öднä"), 11.0),
-                (String::from("Пример prédlözhéniÿa"), 9.0),
-            ],
-        },
-        FontFamily::new("DejaVu Sans"),
-    );
+    let mut report = Report::new(StaticLayout {
+        rows: vec![
+            (String::from("Строка öднä"), 11.0),
+            (String::from("Пример prédlözhéniÿa"), 9.0),
+        ],
+    });
     for index in 0..30 {
         report.append(
             &VocabularyEntry {
@@ -396,12 +377,9 @@ fn reports_with_many_entries_still_span_multiple_pages() -> Result<()> {
 fn reports_near_the_page_bottom_still_avoid_nearly_empty_trailing_pages() -> Result<()> {
     let directory = TempDir::new()?;
     let path = directory.path().join("threshold.pdf");
-    let mut report = Report::new(
-        StaticLayout {
-            rows: vec![(String::from("Wörd"), 11.0), ("À".repeat(1000), 9.0)],
-        },
-        FontFamily::new("DejaVu Sans"),
-    );
+    let mut report = Report::new(StaticLayout {
+        rows: vec![(String::from("Wörd"), 11.0), ("À".repeat(1000), 9.0)],
+    });
     for _ in 0..5 {
         report.append(
             &entry("wörd", "en", "ru"),
@@ -423,10 +401,7 @@ fn reports_keep_the_frozen_layout_rows_labels_fonts_and_page_count_snapshot() ->
     let path = directory.path().join("reference.pdf");
     let reference = report();
     let rows = entries();
-    let mut report = Report::new(
-        VocabularyLayout::new(ReportLabels::default()),
-        ReportFonts::default(),
-    );
+    let mut report = Report::new(VocabularyLayout::new(ReportLabels::default()));
     let first = image(directory.path(), 256);
     let second = image(directory.path(), 256);
     report.append(&rows[0], Some(first.clone()));
@@ -436,7 +411,6 @@ fn reports_keep_the_frozen_layout_rows_labels_fonts_and_page_count_snapshot() ->
         json!({
             "entries": rows.iter().zip([first, second]).map(|(entry, _image)| {
                 json!({
-                    "font": ReportFonts::default().selected(entry).name(),
                     "labels": {
                         "context": ReportLabels::default().selected(entry).context,
                         "hint": ReportLabels::default().selected(entry).hint,
@@ -457,7 +431,6 @@ fn reports_keep_the_frozen_layout_rows_labels_fonts_and_page_count_snapshot() ->
         json!({
             "entries": reference["entries"].as_array().expect("reference entries must be an array").iter().map(|entry| {
                 json!({
-                    "font": entry["font"],
                     "labels": entry["labels"],
                     "rows": entry["rows"],
                     "source_lang": entry["source_lang"],
