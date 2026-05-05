@@ -1,7 +1,6 @@
 {
   "entries": [
     {
-      "font": "DejaVu Sans",
       "image": "$REPO/tmp/reference/payload/cache/manga-en/51a07a17e75e.jpg",
       "labels": {
         "context": "Context",
@@ -40,7 +39,6 @@
       "word": "harbor"
     },
     {
-      "font": "Hiragino Sans GB",
       "image": "$REPO/tmp/reference/payload/cache/manga-en/179104d071c6.jpg",
       "labels": {
         "context": "Πλαίσιο",

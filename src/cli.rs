@@ -39,7 +39,7 @@ use crate::generation::manga::{
 use crate::generation::speech::Audio;
 use crate::generation::{SceneComposer, render_audio_prompt};
 use crate::languages::{LanguageCatalog, ReportLabels, catalog, naming};
-use crate::report::{Report, ReportFonts, Thumbnail, VocabularyLayout};
+use crate::report::{Report, Thumbnail, VocabularyLayout};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
     Artifact, ArtifactFile, BulkCorrection, CardBody, CardBodyGeneration, CardCorrection,
@@ -994,10 +994,7 @@ impl MediaPasses for ProductionPasses {
             VocabularyNote::new(model),
             Vec::<PathBuf>::new(),
         );
-        let mut report = Report::new(
-            VocabularyLayout::new(ReportLabels::default()),
-            ReportFonts::default(),
-        );
+        let mut report = Report::new(VocabularyLayout::new(ReportLabels::default()));
         for draft in drafts.iter().filter(|draft| draft.artifacts().all_ready()) {
             let entry = to_entry(draft)?;
             let audio_file = draft

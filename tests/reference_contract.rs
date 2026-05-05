@@ -98,24 +98,3 @@ fn the_apkg_reference_manifest_keeps_the_eleven_note_fields_in_order() {
         "the apkg reference manifest no longer keeps the eleven note fields in order"
     );
 }
-
-/// The report reference manifest keeps the Chinese font-selection case.
-#[test]
-fn the_report_reference_manifest_keeps_the_chinese_font_selection_case() {
-    assert_eq!(
-        json("report.json")["entries"].as_array().map(|item| {
-            item.iter()
-                .filter(|entry| entry["target_lang"].as_str() == Some("zh"))
-                .map(|entry| {
-                    String::from(
-                        entry["font"]
-                            .as_str()
-                            .expect("report font entry must be a string"),
-                    )
-                })
-                .collect::<Vec<_>>()
-        }),
-        Some(vec![String::from("Hiragino Sans GB")]),
-        "the report reference manifest no longer keeps the Chinese font-selection case"
-    );
-}

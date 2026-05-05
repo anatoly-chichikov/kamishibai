@@ -78,6 +78,5 @@ pub struct LanguageProfile {
     pub ocr: String,
     pub image_cache: String,
     pub naming: DeckNaming,
-    pub report_font: String,
     pub labels: UiLabels,
 }
