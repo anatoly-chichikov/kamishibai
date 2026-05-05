@@ -299,6 +299,13 @@ pub fn scroll_viewport(app: &App, terminal_area: Rect) -> u16 {
     body_height.saturating_sub(banner_rows)
 }
 
+/// Body-rect width in chars for the current `terminal_area`. Used by callers
+/// that need to feed the layout calc — `Your cards` wraps the meta sentence on
+/// the head row, so scroll clamp and click hit-test must agree on the width.
+pub fn scroll_body_width(terminal_area: Rect) -> u16 {
+    frame_rects(terminal_area).body.width
+}
+
 fn banner_visible(app: &App) -> bool {
     if !super::banner::has_entries(app) {
         return false;

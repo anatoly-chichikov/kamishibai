@@ -22,6 +22,6 @@ pub use input::to_app;
 pub use links::{language_chip_at, link_at};
 pub use render::draw;
 pub use screen::{KeySource, ModalKind, Screen, WelcomeStage};
-pub use screens::common::scroll_viewport;
+pub use screens::common::{scroll_body_width, scroll_viewport};
 pub use screens::modals::picker_geometry;
 pub use transition::{Side, transit};
