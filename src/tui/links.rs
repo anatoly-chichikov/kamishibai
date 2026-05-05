@@ -14,7 +14,7 @@ use super::App;
 use super::screen::Screen;
 use super::screens::banner;
 use super::screens::common::{GUTTER, HEADER_GAP, TOP_MARGIN, language_chip};
-use super::screens::your_cards::detail_pane_height;
+use super::screens::your_cards::{detail_pane_height, head_rows_for};
 
 const STEP_ARTIFACT_ORDER: [Artifact; 4] = [
     Artifact::Body,
@@ -87,8 +87,9 @@ pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<
         return None;
     }
     let mut row = (row_in_body - banner_rows) as usize + app.body_scroll() as usize;
+    let width = usize::from(body_width);
     for (idx, draft) in app.cards().iter().enumerate() {
-        let head_height = 1usize;
+        let head_height = head_rows_for(draft, width);
         let steps_height = STEP_ARTIFACT_ORDER.len();
         let detail = if idx == app.card_selected() && app.card_expanded() {
             detail_pane_height(draft)

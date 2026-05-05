@@ -127,7 +127,7 @@ fn card_block<'a>(
     let artifacts = draft.artifacts();
     let progressed = card_progressed(artifacts, running);
     let mut lines: Vec<Line<'a>> = Vec::new();
-    lines.push(card_head(draft, idx, focused, expanded, progressed, width));
+    lines.extend(card_head(draft, idx, focused, expanded, progressed, width));
     if progressed {
         for &(name, kind) in &STEPS {
             let slot = slot_for(artifacts, kind);
@@ -146,6 +146,10 @@ fn card_block<'a>(
     lines
 }
 
+const HEAD_PREFIX_CHARS: usize = 7;
+const HEAD_ARROW: &str = " → ";
+const HEAD_ARROW_CHARS: usize = 3;
+
 fn card_head<'a>(
     draft: &'a CardDraft,
     idx: usize,
@@ -153,7 +157,7 @@ fn card_head<'a>(
     expanded: bool,
     progressed: bool,
     width: usize,
-) -> Line<'a> {
+) -> Vec<Line<'a>> {
     let row_style = if focused {
         palette::highlight()
     } else {
@@ -184,16 +188,114 @@ fn card_head<'a>(
         (false, true) => palette::highlight_dim(),
         (false, false) => palette::dim2(),
     };
-    let mut spans: Vec<Span<'a>> = Vec::new();
-    spans.push(Span::styled(format!(" {glyph} "), glyph_style));
-    spans.push(Span::styled(format!("{:0>2}  ", idx + 1), num_style));
-    spans.push(Span::styled(String::from(draft.term()), term_style));
-    let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-    let pad = width.saturating_sub(used);
+    let sentence_style = if focused {
+        palette::highlight_dim()
+    } else {
+        palette::dim()
+    };
+    let term_chars = draft.term().chars().count();
+    let head_used = HEAD_PREFIX_CHARS + term_chars;
+    let mut head_spans: Vec<Span<'a>> = Vec::new();
+    head_spans.push(Span::styled(format!(" {glyph} "), glyph_style));
+    head_spans.push(Span::styled(format!("{:0>2}  ", idx + 1), num_style));
+    head_spans.push(Span::styled(String::from(draft.term()), term_style));
+    let Some(body) = draft.body() else {
+        let pad = width.saturating_sub(head_used);
+        if pad > 0 {
+            head_spans.push(Span::styled(" ".repeat(pad), row_style));
+        }
+        return vec![Line::from(head_spans)];
+    };
+    let row1_used = head_used + HEAD_ARROW_CHARS;
+    let avail_first = width.saturating_sub(row1_used);
+    let chunks = wrap_sentence(body.target_sentence(), avail_first, avail_first);
+    let first = chunks.first().cloned().unwrap_or_default();
+    head_spans.push(Span::styled(HEAD_ARROW, sentence_style));
+    let first_len = first.chars().count();
+    head_spans.push(Span::styled(first, sentence_style));
+    let pad = width.saturating_sub(row1_used + first_len);
     if pad > 0 {
-        spans.push(Span::styled(" ".repeat(pad), row_style));
+        head_spans.push(Span::styled(" ".repeat(pad), row_style));
     }
-    Line::from(spans)
+    let mut lines: Vec<Line<'a>> = Vec::with_capacity(chunks.len().max(1));
+    lines.push(Line::from(head_spans));
+    let cont_indent: String = " ".repeat(row1_used);
+    for chunk in chunks.into_iter().skip(1) {
+        let chunk_len = chunk.chars().count();
+        let mut spans: Vec<Span<'a>> = Vec::new();
+        spans.push(Span::styled(cont_indent.clone(), row_style));
+        spans.push(Span::styled(chunk, sentence_style));
+        let pad = width.saturating_sub(row1_used + chunk_len);
+        if pad > 0 {
+            spans.push(Span::styled(" ".repeat(pad), row_style));
+        }
+        lines.push(Line::from(spans));
+    }
+    lines
+}
+
+fn wrap_sentence(sentence: &str, first_avail: usize, cont_avail: usize) -> Vec<String> {
+    if first_avail == 0 || cont_avail == 0 {
+        return vec![String::from(sentence)];
+    }
+    let mut chunks: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_len: usize = 0;
+    let mut limit = first_avail;
+    for word in sentence.split_whitespace() {
+        let word_len = word.chars().count();
+        let separator = usize::from(!current.is_empty());
+        if current_len + separator + word_len <= limit {
+            if separator == 1 {
+                current.push(' ');
+            }
+            current.push_str(word);
+            current_len += separator + word_len;
+            continue;
+        }
+        if !current.is_empty() {
+            chunks.push(std::mem::take(&mut current));
+            limit = cont_avail;
+        }
+        let mut tail = word;
+        loop {
+            let tail_len = tail.chars().count();
+            if tail_len <= limit {
+                current.push_str(tail);
+                current_len = tail_len;
+                break;
+            }
+            let mut byte_idx = tail.len();
+            for (i, (pos, _)) in tail.char_indices().enumerate() {
+                if i == limit {
+                    byte_idx = pos;
+                    break;
+                }
+            }
+            chunks.push(String::from(&tail[..byte_idx]));
+            tail = &tail[byte_idx..];
+            limit = cont_avail;
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    if chunks.is_empty() {
+        chunks.push(String::new());
+    }
+    chunks
+}
+
+fn head_rows(draft: &CardDraft, width: usize) -> usize {
+    let Some(body) = draft.body() else {
+        return 1;
+    };
+    let term_chars = draft.term().chars().count();
+    let row1_used = HEAD_PREFIX_CHARS + term_chars + HEAD_ARROW_CHARS;
+    let avail = width.saturating_sub(row1_used);
+    wrap_sentence(body.target_sentence(), avail, avail)
+        .len()
+        .max(1)
 }
 
 fn card_finished(draft: &CardDraft) -> bool {
@@ -417,8 +519,8 @@ fn all_finished(app: &App) -> bool {
 /// Row offset and height of the currently focused card inside the scrolling
 /// card list, in body-rect rows. Returns `None` when there are no cards yet.
 /// Mirrors the per-card layout used by `cards_paragraph` so scroll-snapping
-/// and renderer stay in lockstep.
-pub(crate) fn focused_card_range(app: &App) -> Option<(u16, u16)> {
+/// and renderer stay in lockstep. `width` is the body-rect width in chars.
+pub(crate) fn focused_card_range(app: &App, width: usize) -> Option<(u16, u16)> {
     if app.cards().is_empty() {
         return None;
     }
@@ -428,7 +530,7 @@ pub(crate) fn focused_card_range(app: &App) -> Option<(u16, u16)> {
         let running_for_card =
             running_target.and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
         let expanded = idx == app.card_selected() && app.card_expanded();
-        let (rows, trailing) = card_layout(draft, running_for_card, expanded);
+        let (rows, trailing) = card_layout(draft, running_for_card, expanded, width);
         if idx == app.card_selected() {
             return Some((
                 u16::try_from(offset).unwrap_or(u16::MAX),
@@ -441,12 +543,13 @@ pub(crate) fn focused_card_range(app: &App) -> Option<(u16, u16)> {
 }
 
 /// Total number of lines `cards_paragraph` will produce for the current state
-/// of `app`. Mirrors the per-card layout: 1 head row + visible step rows +
-/// optional detail pane (only on the focused, expanded card) + trailing blank
-/// line for any card that emitted extra rows. Used by both the scroll clamp
-/// in `tui::app` and the click hit tester in `tui::links`, so they stay in
-/// lockstep with the renderer.
-pub(crate) fn content_height(app: &App) -> u16 {
+/// of `app`. Mirrors the per-card layout: head rows (one or more, depending on
+/// how the term + meta sentence wrap) + visible step rows + optional detail
+/// pane (only on the focused, expanded card) + trailing blank line for any
+/// card that emitted extra rows. Used by both the scroll clamp in `tui::app`
+/// and the click hit tester in `tui::links`, so they stay in lockstep with the
+/// renderer. `width` is the body-rect width in chars.
+pub(crate) fn content_height(app: &App, width: usize) -> u16 {
     if app.cards().is_empty() {
         return 0;
     }
@@ -456,16 +559,28 @@ pub(crate) fn content_height(app: &App) -> u16 {
         let running_for_card =
             running_target.and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
         let expanded = idx == app.card_selected() && app.card_expanded();
-        let (rows, trailing) = card_layout(draft, running_for_card, expanded);
+        let (rows, trailing) = card_layout(draft, running_for_card, expanded, width);
         total = total.saturating_add(rows + trailing);
     }
     u16::try_from(total).unwrap_or(u16::MAX)
 }
 
-fn card_layout(draft: &CardDraft, running: Option<Artifact>, expanded: bool) -> (usize, usize) {
+/// Number of head rows the focused card produces given the current body-rect
+/// width. Mirrors the wrap that `card_head` runs at render time, so the click
+/// hit-tester in `tui::links` can find the start of the step rows.
+pub(crate) fn head_rows_for(draft: &CardDraft, width: usize) -> usize {
+    head_rows(draft, width)
+}
+
+fn card_layout(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+    expanded: bool,
+    width: usize,
+) -> (usize, usize) {
     let artifacts = draft.artifacts();
     let progressed = card_progressed(artifacts, running);
-    let mut rows: usize = 1;
+    let mut rows = head_rows(draft, width);
     if progressed {
         for &(_, kind) in &STEPS {
             if slot_visible(slot_for(artifacts, kind), kind, running) {

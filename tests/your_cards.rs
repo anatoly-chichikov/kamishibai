@@ -87,7 +87,7 @@ fn seeded(drafts: Vec<CardDraft>) -> App {
 }
 
 #[test]
-fn your_cards_lists_each_card_with_a_bare_term_head_and_artifact_check_marks() {
+fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_marks() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("at the end", ready_artifacts()),
@@ -98,10 +98,10 @@ fn your_cards_lists_each_card_with_a_bare_term_head_and_artifact_check_marks() {
     assert!(
         rendered.contains("building your cards")
             && rendered.contains("2/4 ready")
-            && rendered.contains("whilst")
-            && rendered.contains("at the end")
-            && rendered.contains("in the end")
-            && rendered.contains("wreck")
+            && rendered.contains("whilst → Example with whilst.")
+            && rendered.contains("at the end → Example with at the end.")
+            && rendered.contains("in the end → Example with in the end.")
+            && rendered.contains("wreck → Example with wreck.")
             && rendered.contains("✓ scene")
             && rendered.contains("✓ picture")
             && rendered.contains("RU → EN")
@@ -110,9 +110,8 @@ fn your_cards_lists_each_card_with_a_bare_term_head_and_artifact_check_marks() {
             && rendered.contains("[R] change")
             && !rendered.contains("[D] drop")
             && !rendered.contains("working…")
-            && !rendered.contains("queued")
-            && !rendered.contains("Example with"),
-        "during-generation footer must drop the obsolete drop hint and spell out every remaining key: {rendered}"
+            && !rendered.contains("queued"),
+        "each generated card must reveal its meta sentence on the head row right after the term: {rendered}"
     );
 }
 

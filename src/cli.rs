@@ -48,7 +48,7 @@ use crate::session::{
 };
 use crate::tui::{
     App, AppEvent, BusyKind, ModalKind, Screen, Side, draw, language_chip_at, link_at,
-    picker_geometry, scroll_viewport, to_app, transit,
+    picker_geometry, scroll_body_width, scroll_viewport, to_app, transit,
 };
 use crate::vocabulary::{VocabularyDocument, VocabularyEntry};
 
@@ -214,7 +214,8 @@ where
             height: area.height,
         };
         let viewport = scroll_viewport(shell.app(), rect);
-        shell.reclamp_scroll(viewport);
+        let body_width = scroll_body_width(rect);
+        shell.reclamp_scroll(viewport, body_width);
         terminal.draw(|frame| draw(frame, shell.app()))?;
         if !poll(Duration::from_millis(100))? {
             shell.tick()?;
@@ -237,7 +238,7 @@ where
                     return Ok(());
                 }
                 if was_nav {
-                    shell.snap_scroll_to_selection(viewport);
+                    shell.snap_scroll_to_selection(viewport, body_width);
                 }
                 shell.tick()?;
             }
@@ -251,12 +252,13 @@ where
                         height: area.height,
                     };
                     let viewport = scroll_viewport(shell.app(), rect);
+                    let body_width = scroll_body_width(rect);
                     let delta = if matches!(mouse.kind, MouseEventKind::ScrollUp) {
                         -1
                     } else {
                         1
                     };
-                    shell.scroll(delta, viewport);
+                    shell.scroll(delta, viewport, body_width);
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
                     let area = terminal.size()?;
@@ -410,16 +412,19 @@ where
         &self.app
     }
 
-    fn scroll(&mut self, delta: i32, viewport: u16) {
-        self.app = self.app.clone().body_scrolled(delta, viewport);
+    fn scroll(&mut self, delta: i32, viewport: u16, body_width: u16) {
+        self.app = self.app.clone().body_scrolled(delta, viewport, body_width);
     }
 
-    fn reclamp_scroll(&mut self, viewport: u16) {
-        self.app = self.app.clone().body_scroll_clamped(viewport);
+    fn reclamp_scroll(&mut self, viewport: u16, body_width: u16) {
+        self.app = self.app.clone().body_scroll_clamped(viewport, body_width);
     }
 
-    fn snap_scroll_to_selection(&mut self, viewport: u16) {
-        self.app = self.app.clone().body_scroll_to_selection(viewport);
+    fn snap_scroll_to_selection(&mut self, viewport: u16, body_width: u16) {
+        self.app = self
+            .app
+            .clone()
+            .body_scroll_to_selection(viewport, body_width);
     }
 
     fn arm_quit(&mut self) -> bool {
