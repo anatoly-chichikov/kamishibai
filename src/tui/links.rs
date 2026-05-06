@@ -65,24 +65,25 @@ pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<
     let body_y = TOP_MARGIN + 1 + HEADER_GAP;
     let body_x = GUTTER;
     let body_width = terminal.width.saturating_sub(GUTTER * 2);
-    if click_y < body_y {
-        return None;
-    }
     if click_x < body_x || click_x >= body_x + body_width {
         return None;
     }
     let banner_rows = if banner_visible(app) {
-        banner::HEIGHT
+        banner::height(app)
     } else {
         0
     };
-    let row_in_body = click_y - body_y;
-    if banner_rows > 0 && row_in_body == 0 {
-        return banner_label_hit(app, body_x, click_x);
+    let banner_top = body_y.saturating_sub(banner::LIFT);
+    if banner_rows > 0 && click_y >= banner_top && click_y < banner_top + banner_rows {
+        return banner_label_hit(app, body_x, click_x, click_y - banner_top);
+    }
+    if click_y < body_y {
+        return None;
     }
     if app.screen() != Screen::YourCards {
         return None;
     }
+    let row_in_body = click_y - body_y;
     if row_in_body < banner_rows {
         return None;
     }
@@ -131,21 +132,15 @@ fn banner_visible(app: &App) -> bool {
     }
 }
 
-fn banner_label_hit(app: &App, body_x: u16, click_x: u16) -> Option<String> {
+fn banner_label_hit(app: &App, body_x: u16, click_x: u16, row: u16) -> Option<String> {
     let entries = banner::entries(app);
-    let mut pos = banner::INDENT_WIDTH as u16;
-    for (idx, (label, path)) in entries.iter().enumerate() {
-        if idx > 0 {
-            pos = pos.saturating_add(banner::SEPARATOR_WIDTH as u16);
-        }
-        pos = pos.saturating_add(banner::GLYPH.chars().count() as u16);
-        let label_start = body_x + pos;
-        let label_len = label.chars().count() as u16;
-        let label_end = label_start.saturating_add(label_len);
-        if click_x >= label_start && click_x < label_end {
-            return Some(String::from(*path));
-        }
-        pos = pos.saturating_add(label_len);
+    let (label, path) = entries.get(row as usize)?;
+    let prefix = banner::INDENT_WIDTH as u16 + banner::GLYPH.chars().count() as u16;
+    let label_start = body_x + prefix;
+    let label_len = label.chars().count() as u16;
+    let label_end = label_start.saturating_add(label_len);
+    if click_x >= label_start && click_x < label_end {
+        return Some(String::from(*path));
     }
     None
 }
