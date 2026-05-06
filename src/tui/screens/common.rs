@@ -292,7 +292,7 @@ pub fn paint_background(frame: &mut Frame, area: Rect) {
 pub fn scroll_viewport(app: &App, terminal_area: Rect) -> u16 {
     let body_height = frame_rects(terminal_area).body.height;
     let banner_rows = if banner_visible(app) {
-        super::banner::HEIGHT
+        super::banner::height(app)
     } else {
         0
     };
