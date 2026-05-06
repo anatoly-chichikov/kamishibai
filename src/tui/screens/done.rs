@@ -47,23 +47,12 @@ impl ScreenView for Done {
             frame.render_widget(card_summary(app).scroll((app.body_scroll(), 0)), area);
             return;
         }
-        let lift = super::banner::LIFT.min(area.y);
-        let lifted = Rect {
-            x: area.x,
-            y: area.y - lift,
-            width: area.width,
-            height: area.height + lift,
-        };
         let split = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(banner_rows),
-                Constraint::Length(1),
-                Constraint::Min(0),
-            ])
-            .split(lifted);
+            .constraints([Constraint::Length(banner_rows), Constraint::Min(0)])
+            .split(area);
         frame.render_widget(super::banner::widget(app), split[0]);
-        frame.render_widget(card_summary(app).scroll((app.body_scroll(), 0)), split[2]);
+        frame.render_widget(card_summary(app).scroll((app.body_scroll(), 0)), split[1]);
     }
 }
 
