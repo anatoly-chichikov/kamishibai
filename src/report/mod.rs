@@ -6,6 +6,6 @@ mod layout;
 mod thumbnail;
 
 pub use document::Report;
-pub use font::{FontFamily, FontPalette, FontPath};
+pub use font::{FontFamily, FontPalette, FontPath, warm_fonts_async};
 pub use layout::{LabelSource, ReportLayout, VocabularyLayout};
 pub use thumbnail::Thumbnail;

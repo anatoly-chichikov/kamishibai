@@ -48,6 +48,10 @@ pub enum BusyKind {
     Understanding,
     BulkCorrection,
     CardCorrection,
+    /// Phase 1 of `publish`: building the Anki .apkg container.
+    PublishingDeck,
+    /// Phase 2 of `publish`: rendering the PDF report.
+    PublishingReport,
 }
 
 impl BusyKind {
@@ -57,6 +61,8 @@ impl BusyKind {
             BusyKind::Understanding => "understanding your words",
             BusyKind::BulkCorrection => "applying your changes",
             BusyKind::CardCorrection => "updating this card",
+            BusyKind::PublishingDeck => "building your Anki deck",
+            BusyKind::PublishingReport => "rendering your PDF report",
         }
     }
 }
@@ -90,6 +96,14 @@ impl BusyView {
     /// Return the loader with a refreshed elapsed duration.
     pub fn with_elapsed(mut self, elapsed: Duration) -> Self {
         self.elapsed = elapsed;
+        self
+    }
+
+    /// Return the loader with the kind swapped, preserving elapsed time. Used
+    /// when a single background job advances through multiple phases (the
+    /// publish job flips from `PublishingDeck` to `PublishingReport`).
+    pub fn with_kind(mut self, kind: BusyKind) -> Self {
+        self.kind = kind;
         self
     }
 }
@@ -401,6 +415,17 @@ impl App {
     /// Return the app with the universal blocking loader hidden.
     pub fn busy_finished(mut self) -> Self {
         self.busy = None;
+        self
+    }
+
+    /// Return the app with the active loader's kind replaced — elapsed time
+    /// keeps ticking. No-op if no loader is currently shown. Used by the
+    /// publish flow to flip the label from `PublishingDeck` to
+    /// `PublishingReport` mid-job.
+    pub fn busy_kind_swapped(mut self, kind: BusyKind) -> Self {
+        if let Some(busy) = self.busy.take() {
+            self.busy = Some(busy.with_kind(kind));
+        }
         self
     }
 

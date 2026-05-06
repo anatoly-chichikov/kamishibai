@@ -4,13 +4,15 @@
 //! for both text passes (understand / bulk / per-card correction / card body)
 //! and media passes (scene / picture / audio). Every Gemini call runs in a
 //! background thread so the TUI never blocks on network I/O. Once a batch
-//! finishes, `PublishDone` saves a real APKG deck and a real PDF report.
+//! finishes, `Side::StartPublish` hands the deck and report build off to a
+//! background thread that surfaces its `PublishingDeck` → `PublishingReport`
+//! phase flip through the universal busy loader.
 
 use std::fs;
 use std::io::{Write, stdout};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -217,7 +219,8 @@ where
         let body_width = scroll_body_width(rect);
         shell.reclamp_scroll(viewport, body_width);
         terminal.draw(|frame| draw(frame, shell.app()))?;
-        if !poll(Duration::from_millis(100))? {
+        let timeout = shell.poll_timeout();
+        if !poll(timeout)? {
             shell.tick()?;
             continue;
         }
@@ -331,7 +334,15 @@ trait MediaPasses: Clone + Send + 'static {
         pair: &LanguagePair,
         body: &CardBody,
     ) -> Result<ArtifactFile>;
-    fn publish(&self, drafts: &[CardDraft]) -> Result<(String, String, String)>;
+    /// Materialize the .apkg deck and the .pdf report. The shell drives this
+    /// from a background thread so the TUI stays interactive; `progress` lets
+    /// the implementation announce the phase flip from deck-building to
+    /// report-rendering so the loader copy stays accurate.
+    fn publish(
+        &self,
+        drafts: &[CardDraft],
+        progress: &PublishProgress,
+    ) -> Result<(String, String, String)>;
 }
 
 trait Lifecycle: TextPasses + MediaPasses {}
@@ -363,6 +374,42 @@ struct PendingArtifactJob {
     started: Instant,
 }
 
+/// Progress signalled by the background publish job.
+///
+/// `Phase` updates the active `BusyKind` so the loader text flips between
+/// `PublishingDeck` and `PublishingReport` as the work moves on. `Done`
+/// terminates the job and carries the final (deck, report, output) tuple or
+/// the failure that aborted it.
+enum PublishMessage {
+    Phase(BusyKind),
+    Done(Result<(String, String, String)>),
+}
+
+/// Progress sender handed to `MediaPasses::publish` so the implementation
+/// can report phase transitions to the shell. Send failures are deliberately
+/// swallowed: if the receiver is gone the shell already gave up on this job.
+#[derive(Clone)]
+pub struct PublishProgress {
+    sender: Sender<PublishMessage>,
+}
+
+impl PublishProgress {
+    fn new(sender: Sender<PublishMessage>) -> Self {
+        Self { sender }
+    }
+
+    /// Announce the publish job has moved to a new phase.
+    pub fn report_phase(&self, kind: BusyKind) {
+        let _ = self.sender.send(PublishMessage::Phase(kind));
+    }
+}
+
+struct PendingPublishJob {
+    receiver: Receiver<PublishMessage>,
+    handle: JoinHandle<()>,
+    started: Instant,
+}
+
 const QUIT_WINDOW: Duration = Duration::from_millis(1000);
 
 struct Shell<P> {
@@ -370,6 +417,7 @@ struct Shell<P> {
     engine: Option<SessionEngine>,
     text: Option<PendingTextJob>,
     artifact_job: Option<PendingArtifactJob>,
+    publish_job: Option<PendingPublishJob>,
     started: Option<Instant>,
     quit_armed_at: Option<Instant>,
     passes: P,
@@ -380,11 +428,13 @@ impl Shell<ProductionPasses> {
         let client = GeminiClient::from_env()?;
         let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
         let output = default_output()?;
+        crate::report::warm_fonts_async();
         Ok(Self {
             app,
             engine: None,
             text: None,
             artifact_job: None,
+            publish_job: None,
             started: None,
             quit_armed_at: None,
             passes: ProductionPasses::new(client, cache, output),
@@ -410,6 +460,34 @@ where
 {
     fn app(&self) -> &App {
         &self.app
+    }
+
+    /// Crossterm poll budget for the next loop iteration.
+    ///
+    /// Idle TUI: 100 ms keeps redraw cost negligible.
+    ///
+    /// Background work pending (text pass running, artifact thread in flight,
+    /// or the engine has more artifacts to spawn): 2 ms tightens the loop so
+    /// every cached transition resolves on the next tick instead of waiting
+    /// 100 ms. With 33 cards × 3 media artifacts, the original 100 ms cadence
+    /// added ~10 s of pure poll overhead to a fully cached publish.
+    fn poll_timeout(&self) -> Duration {
+        if self.text.is_some()
+            || self.artifact_job.is_some()
+            || self.publish_job.is_some()
+            || self.has_engine_work()
+        {
+            return Duration::from_millis(2);
+        }
+        Duration::from_millis(100)
+    }
+
+    /// Return whether the session engine still has artifacts to dispatch.
+    fn has_engine_work(&self) -> bool {
+        self.engine
+            .as_ref()
+            .map(|engine| engine.next_target().is_some())
+            .unwrap_or(false)
     }
 
     fn scroll(&mut self, delta: i32, viewport: u16, body_width: u16) {
@@ -476,6 +554,10 @@ where
         }
         self.poll_artifact()?;
         if self.artifact_job.is_some() {
+            return Ok(());
+        }
+        self.poll_publish()?;
+        if self.publish_job.is_some() {
             return Ok(());
         }
         self.advance_engine()
@@ -735,12 +817,8 @@ where
                     })?;
                 }
             }
-            Side::PublishDone => {
-                let drafts = self.app.cards().to_vec();
-                let (deck, report, output) = self.passes.publish(&drafts)?;
-                self.app = self.app.clone().done_published(deck, report, output);
-                self.engine = None;
-                self.started = None;
+            Side::StartPublish => {
+                self.start_publish()?;
             }
             Side::PersistMyLanguage(code) => {
                 if let Ok(store) = default_store(&SystemContext) {
@@ -772,6 +850,88 @@ where
         });
         self.app = self.app.clone().busy_started(kind);
         Ok(())
+    }
+
+    /// Spawn the publish job (APKG + PDF) on a background thread and put the
+    /// universal busy loader up at `PublishingDeck`. The thread reports the
+    /// flip to `PublishingReport` over the same channel before rendering the
+    /// PDF, and finally sends the `(deck, report, output)` triple. Without
+    /// this the main loop would block for ~70 ms warm / ~2 s in debug, leaving
+    /// the last card looking hung.
+    fn start_publish(&mut self) -> Result<()> {
+        if self.publish_job.is_some() {
+            bail!("background publish job already running");
+        }
+        let drafts = self.app.cards().to_vec();
+        let passes = self.passes.clone();
+        let (sender, receiver) = channel();
+        let progress = PublishProgress::new(sender.clone());
+        let handle = thread::spawn(move || {
+            let outcome = passes.publish(&drafts, &progress);
+            let _ = sender.send(PublishMessage::Done(outcome));
+        });
+        self.publish_job = Some(PendingPublishJob {
+            receiver,
+            handle,
+            started: Instant::now(),
+        });
+        self.app = self.app.clone().busy_started(BusyKind::PublishingDeck);
+        Ok(())
+    }
+
+    fn poll_publish(&mut self) -> Result<()> {
+        let Some(job) = self.publish_job.as_ref() else {
+            return Ok(());
+        };
+        self.app = self.app.clone().busy_elapsed(job.started.elapsed());
+        loop {
+            let message = match job.receiver.try_recv() {
+                Ok(message) => message,
+                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Disconnected) => {
+                    let job = self
+                        .publish_job
+                        .take()
+                        .expect("invariant: publish job must exist");
+                    let message = join_thread(job.handle)
+                        .map(|()| String::from("background publish job disconnected"))
+                        .unwrap_or_else(|error| error.to_string());
+                    self.app = self.app.clone().busy_finished().error_shown(message);
+                    return Ok(());
+                }
+            };
+            match message {
+                PublishMessage::Phase(kind) => {
+                    self.app = self.app.clone().busy_kind_swapped(kind);
+                }
+                PublishMessage::Done(result) => {
+                    let job = self
+                        .publish_job
+                        .take()
+                        .expect("invariant: publish job must exist");
+                    if let Err(error) = join_thread(job.handle) {
+                        self.app = self
+                            .app
+                            .clone()
+                            .busy_finished()
+                            .error_shown(error.to_string());
+                        return Ok(());
+                    }
+                    self.app = self.app.clone().busy_finished();
+                    match result {
+                        Ok((deck, report, output)) => {
+                            self.app = self.app.clone().done_published(deck, report, output);
+                            self.engine = None;
+                            self.started = None;
+                        }
+                        Err(error) => {
+                            self.app = self.app.clone().error_shown(error.to_string());
+                        }
+                    }
+                    return Ok(());
+                }
+            }
+        }
     }
 }
 
@@ -976,7 +1136,11 @@ impl MediaPasses for ProductionPasses {
         Ok(ArtifactFile::new(filename, path, format_size(size), cached))
     }
 
-    fn publish(&self, drafts: &[CardDraft]) -> Result<(String, String, String)> {
+    fn publish(
+        &self,
+        drafts: &[CardDraft],
+        progress: &PublishProgress,
+    ) -> Result<(String, String, String)> {
         fs::create_dir_all(&self.output)?;
         let entries: Vec<VocabularyEntry> = drafts
             .iter()
@@ -1027,6 +1191,7 @@ impl MediaPasses for ProductionPasses {
             .output
             .join(format!("{}_{}.apkg", decknaming.prefix, stamp));
         container.save(&apkg)?;
+        progress.report_phase(BusyKind::PublishingReport);
         let pdf = self
             .output
             .join(format!("{}_{}.pdf", decknaming.prefix, stamp));
@@ -1205,7 +1370,12 @@ mod tests {
             Ok(ArtifactFile::new(name, path, "1 B", false))
         }
 
-        fn publish(&self, drafts: &[CardDraft]) -> Result<(String, String, String)> {
+        fn publish(
+            &self,
+            drafts: &[CardDraft],
+            progress: &PublishProgress,
+        ) -> Result<(String, String, String)> {
+            progress.report_phase(BusyKind::PublishingReport);
             Ok((
                 format!("local-{}-cards.apkg", drafts.len()),
                 format!("local-{}-cards.pdf", drafts.len()),
@@ -1242,6 +1412,7 @@ mod tests {
             engine: None,
             text: None,
             artifact_job: None,
+            publish_job: None,
             started: None,
             quit_armed_at: None,
             passes: LocalPasses,
@@ -1254,6 +1425,7 @@ mod tests {
             engine: None,
             text: None,
             artifact_job: None,
+            publish_job: None,
             started: None,
             quit_armed_at: None,
             passes: FailingPasses,
@@ -1366,7 +1538,11 @@ mod tests {
         ) -> Result<ArtifactFile> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }
-        fn publish(&self, _drafts: &[CardDraft]) -> Result<(String, String, String)> {
+        fn publish(
+            &self,
+            _drafts: &[CardDraft],
+            _progress: &PublishProgress,
+        ) -> Result<(String, String, String)> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }
     }
@@ -1447,6 +1623,44 @@ mod tests {
                 && shell.app.done_artifacts().report.ends_with(".pdf")
                 && !shell.app.done_artifacts().output.is_empty(),
             "generation must publish deck, report, and output path while staying on YourCards"
+        );
+    }
+
+    #[test]
+    fn publish_surfaces_the_building_deck_label_before_completing() {
+        let _output = tempdir().expect("temp output must exist");
+        let mut shell = shell(review().understood(vec![candidate("whilst")]));
+        shell
+            .handle(AppEvent::KeyEnter)
+            .expect("enter must start generation");
+        let started = Instant::now();
+        while shell.app.busy().is_none() && started.elapsed() < Duration::from_secs(5) {
+            shell.tick().expect("tick must succeed");
+            thread::sleep(Duration::from_millis(2));
+        }
+        let initial_kind = shell.app.busy().map(|busy| busy.kind());
+        settle_engine(&mut shell, 200);
+        assert_eq!(
+            (
+                initial_kind,
+                shell.app.busy().is_none(),
+                shell.app.done_artifacts().deck.is_empty(),
+            ),
+            (Some(BusyKind::PublishingDeck), true, false),
+            "publish must put the building-deck loader up first, clear it once done, and populate done artifacts"
+        );
+    }
+
+    #[test]
+    fn busy_kind_swapped_preserves_elapsed_time() {
+        let app = App::new(pair())
+            .busy_started(BusyKind::PublishingDeck)
+            .busy_elapsed(Duration::from_millis(345))
+            .busy_kind_swapped(BusyKind::PublishingReport);
+        assert_eq!(
+            app.busy().map(|busy| (busy.kind(), busy.elapsed())),
+            Some((BusyKind::PublishingReport, Duration::from_millis(345))),
+            "swapping kind mid-job must not reset the elapsed counter"
         );
     }
 

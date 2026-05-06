@@ -37,9 +37,9 @@ fn skeleton_flow_publishes_done_inline_on_your_cards() {
             Screen::YourCards,
             Side::StartGeneration,
             Screen::YourCards,
-            Side::PublishDone,
+            Side::StartPublish,
         ),
-        "skeleton flow must publish Done inline on YourCards instead of leaving the screen"
+        "skeleton flow must hand off to publish on YourCards instead of leaving the screen"
     );
 }
 
