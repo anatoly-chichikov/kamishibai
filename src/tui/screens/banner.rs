@@ -14,8 +14,9 @@ use ratatui::widgets::Paragraph;
 use crate::tui::app::App;
 use crate::tui::palette;
 
-/// Labels shown in the panel, in render order.
-pub const LABELS: [&str; 3] = ["APKG", "PDF", "FOLDER"];
+/// Labels shown in the panel, in render order. The folder row leads so the
+/// file rows below it inherit its directory context without repeating it.
+pub const LABELS: [&str; 3] = ["FOLDER", "APKG", "PDF"];
 
 /// Lead glyph repeated before every label.
 pub const GLYPH: &str = "↓ ";
@@ -29,16 +30,17 @@ pub const LABEL_PAD: usize = 6;
 /// Visible characters separating the padded label from the path.
 pub const PATH_GAP: usize = 2;
 
-/// Number of rows of *artifact text* the panel occupies — one row per
-/// artifact, no trailing blank. Callers leave their own breathing rows
-/// around the panel.
+/// Number of rows the panel occupies inside the body rect (the artifact
+/// rows plus one trailing blank line for breathing). Returns zero when no
+/// artifact is ready yet.
 pub fn height(app: &App) -> u16 {
-    u16::try_from(entries(app).len()).unwrap_or(u16::MAX)
+    let count = entries(app).len();
+    if count == 0 {
+        0
+    } else {
+        u16::try_from(count + 1).unwrap_or(u16::MAX)
+    }
 }
-
-/// Number of rows the panel is lifted upward into the header-gap slot so it
-/// sits closer to the title.
-pub const LIFT: u16 = 1;
 
 /// Return `true` if at least one of the three artifact paths is available.
 pub fn has_entries(app: &App) -> bool {
@@ -48,19 +50,19 @@ pub fn has_entries(app: &App) -> bool {
 /// Return the (label, path) pairs that should be rendered, in order.
 pub fn entries(app: &App) -> Vec<(&'static str, &str)> {
     let done = app.done_artifacts();
-    let paths = [
-        done.deck.as_str(),
-        done.report.as_str(),
-        done.output.as_str(),
-    ];
     LABELS
         .iter()
-        .zip(paths.iter())
-        .filter_map(|(label, path)| {
+        .filter_map(|label| {
+            let path = match *label {
+                "FOLDER" => done.output.as_str(),
+                "APKG" => done.deck.as_str(),
+                "PDF" => done.report.as_str(),
+                _ => "",
+            };
             if path.is_empty() {
                 None
             } else {
-                Some((*label, *path))
+                Some((*label, path))
             }
         })
         .collect()
@@ -80,7 +82,7 @@ pub fn basename(path: &str) -> String {
 /// directory path so the file rows above don't need to repeat it.
 pub fn widget(app: &App) -> Paragraph<'static> {
     let entries = entries(app);
-    let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries.len());
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries.len() + 1);
     for (label, path) in &entries {
         let padding = LABEL_PAD.saturating_sub(label.chars().count()) + PATH_GAP;
         let display = if *label == "FOLDER" {
@@ -97,5 +99,6 @@ pub fn widget(app: &App) -> Paragraph<'static> {
         ];
         lines.push(Line::from(spans));
     }
+    lines.push(Line::from(""));
     Paragraph::new(lines).style(palette::base())
 }

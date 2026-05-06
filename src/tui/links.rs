@@ -65,6 +65,9 @@ pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<
     let body_y = TOP_MARGIN + 1 + HEADER_GAP;
     let body_x = GUTTER;
     let body_width = terminal.width.saturating_sub(GUTTER * 2);
+    if click_y < body_y {
+        return None;
+    }
     if click_x < body_x || click_x >= body_x + body_width {
         return None;
     }
@@ -73,18 +76,11 @@ pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<
     } else {
         0
     };
-    let banner_top = body_y.saturating_sub(banner::LIFT);
-    if banner_rows > 0 && click_y >= banner_top && click_y < banner_top + banner_rows {
-        return banner_label_hit(app, body_x, click_x, click_y - banner_top);
-    }
-    if click_y < body_y {
-        return None;
+    let row_in_body = click_y - body_y;
+    if banner_rows > 0 && row_in_body < banner_rows {
+        return banner_label_hit(app, body_x, click_x, row_in_body);
     }
     if app.screen() != Screen::YourCards {
-        return None;
-    }
-    let row_in_body = click_y - body_y;
-    if row_in_body < banner_rows {
         return None;
     }
     let mut row = (row_in_body - banner_rows) as usize + app.body_scroll() as usize;
