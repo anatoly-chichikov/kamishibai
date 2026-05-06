@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
+use std::thread;
 
 use anyhow::Result;
 use image::{DynamicImage, GenericImageView};
@@ -13,7 +14,7 @@ use printpdf::{
 use crate::vocabulary::VocabularyEntry;
 
 use super::FontPalette;
-use super::font::{carries, leading, parsed, rgb, target, wrap};
+use super::font::{carries, font_arc, leading, rgb, target, wrap};
 use super::{ReportLayout, Thumbnail};
 
 const GAP: f32 = 1.0;
@@ -67,24 +68,16 @@ where
         let prepared = self.prepared_fonts()?;
         let mut doc = PdfDocument::new("Kamishibai Report");
         let registered = prepared.register(&mut doc);
+        let scaled = scale_thumbnails(self.rows.as_slice(), thumbnail)?;
         let mut pages = vec![Vec::new()];
         let mut y = 10.0f32;
-        for (entry, image) in &self.rows {
+        for ((entry, _), image) in self.rows.iter().zip(scaled.into_iter()) {
             if y > LIMIT {
                 pages.push(Vec::new());
                 y = 10.0;
             }
             let ops = pages.last_mut().expect("report must keep one active page");
-            self.row(
-                &mut doc,
-                ops,
-                &prepared,
-                &registered,
-                entry,
-                image.as_deref(),
-                thumbnail,
-                &mut y,
-            )?;
+            self.row(&mut doc, ops, &prepared, &registered, entry, image, &mut y)?;
         }
         let pdf = doc
             .with_pages(
@@ -110,11 +103,13 @@ where
     /// the prepare and render passes use the same dispatch so subsets are
     /// always sufficient.
     fn prepared_fonts(&self) -> Result<PaletteFonts> {
-        let primary_regular_full = Rc::new(parsed(&self.palette.primary().regular()?)?);
-        let primary_bold_full = Rc::new(parsed(&self.palette.primary().bold()?)?);
-        let cjk_regular_full = Rc::new(parsed(&self.palette.cjk().regular()?)?);
-        let cjk_bold_full = Rc::new(parsed(&self.palette.cjk().bold()?)?);
-        let fallback_full = Rc::new(parsed(&self.palette.fallback().regular()?)?);
+        let (
+            primary_regular_full,
+            primary_bold_full,
+            cjk_regular_full,
+            cjk_bold_full,
+            fallback_full,
+        ) = parse_palette_parallel(&self.palette)?;
         let mut buckets = CharBuckets::default();
         for (entry, _) in &self.rows {
             for (index, (line, _)) in self.layout.row(entry).into_iter().enumerate() {
@@ -140,17 +135,17 @@ where
             buckets.primary_bold.insert(' ');
         }
         Ok(PaletteFonts {
-            primary_regular: Rc::new(subset_or_full(
+            primary_regular: Arc::new(subset_or_full(
                 &primary_regular_full,
                 &buckets.primary_regular,
             )),
-            primary_bold: Rc::new(subset_or_full(&primary_bold_full, &buckets.primary_bold)),
+            primary_bold: Arc::new(subset_or_full(&primary_bold_full, &buckets.primary_bold)),
             cjk_regular: (!buckets.cjk_regular.is_empty())
-                .then(|| Rc::new(subset_or_full(&cjk_regular_full, &buckets.cjk_regular))),
+                .then(|| Arc::new(subset_or_full(&cjk_regular_full, &buckets.cjk_regular))),
             cjk_bold: (!buckets.cjk_bold.is_empty())
-                .then(|| Rc::new(subset_or_full(&cjk_bold_full, &buckets.cjk_bold))),
+                .then(|| Arc::new(subset_or_full(&cjk_bold_full, &buckets.cjk_bold))),
             fallback: (!buckets.fallback.is_empty())
-                .then(|| Rc::new(subset_or_full(&fallback_full, &buckets.fallback))),
+                .then(|| Arc::new(subset_or_full(&fallback_full, &buckets.fallback))),
             classifier_primary_regular: primary_regular_full,
             classifier_primary_bold: primary_bold_full,
             classifier_cjk_regular: cjk_regular_full,
@@ -168,13 +163,12 @@ where
         fonts: &PaletteFonts,
         ids: &PageFonts,
         entry: &VocabularyEntry,
-        image: Option<&Path>,
-        thumbnail: &Thumbnail,
+        scaled: Option<DynamicImage>,
         y: &mut f32,
     ) -> Result<()> {
         let top = *y;
-        if let Some(path) = image.filter(|path| path.is_file()) {
-            let image = raw(thumbnail.scaled(path)?);
+        if let Some(scaled) = scaled {
+            let image = raw(scaled);
             let scale_x = target(IMAGE, image.width as f32);
             let scale_y = target(IMAGE, image.height as f32);
             let id = doc.add_image(&image);
@@ -393,16 +387,16 @@ impl CharBuckets {
 
 #[derive(Clone, Debug)]
 struct PaletteFonts {
-    primary_regular: Rc<ParsedFont>,
-    primary_bold: Rc<ParsedFont>,
-    cjk_regular: Option<Rc<ParsedFont>>,
-    cjk_bold: Option<Rc<ParsedFont>>,
-    fallback: Option<Rc<ParsedFont>>,
-    classifier_primary_regular: Rc<ParsedFont>,
-    classifier_primary_bold: Rc<ParsedFont>,
-    classifier_cjk_regular: Rc<ParsedFont>,
-    classifier_cjk_bold: Rc<ParsedFont>,
-    classifier_fallback: Rc<ParsedFont>,
+    primary_regular: Arc<ParsedFont>,
+    primary_bold: Arc<ParsedFont>,
+    cjk_regular: Option<Arc<ParsedFont>>,
+    cjk_bold: Option<Arc<ParsedFont>>,
+    fallback: Option<Arc<ParsedFont>>,
+    classifier_primary_regular: Arc<ParsedFont>,
+    classifier_primary_bold: Arc<ParsedFont>,
+    classifier_cjk_regular: Arc<ParsedFont>,
+    classifier_cjk_bold: Arc<ParsedFont>,
+    classifier_fallback: Arc<ParsedFont>,
 }
 
 impl PaletteFonts {
@@ -448,6 +442,88 @@ fn raw(image: DynamicImage) -> RawImage {
         data_format: RawImageFormat::RGB8,
         tag: Vec::new(),
     }
+}
+
+/// Resolve and parse all five embedded font tracks concurrently. Each thread
+/// runs the full font-kit lookup and `ParsedFont::from_bytes` for one track,
+/// so the wall-clock collapses to roughly the time of the single slowest face
+/// (Arial Unicode MS at ~108 ms in release). `parsed_shared` keeps a
+/// process-wide parse cache so repeated calls inside one session pay zero.
+#[allow(clippy::type_complexity)]
+fn parse_palette_parallel(
+    palette: &FontPalette,
+) -> Result<(
+    Arc<ParsedFont>,
+    Arc<ParsedFont>,
+    Arc<ParsedFont>,
+    Arc<ParsedFont>,
+    Arc<ParsedFont>,
+)> {
+    thread::scope(|scope| {
+        let primary = palette.primary();
+        let cjk = palette.cjk();
+        let fallback = palette.fallback();
+        let pr = scope.spawn(|| font_arc(primary, false));
+        let pb = scope.spawn(|| font_arc(primary, true));
+        let cr = scope.spawn(|| font_arc(cjk, false));
+        let cb = scope.spawn(|| font_arc(cjk, true));
+        let fb = scope.spawn(|| font_arc(fallback, false));
+        Ok((
+            pr.join()
+                .map_err(|_| anyhow::anyhow!("font parse panicked"))??,
+            pb.join()
+                .map_err(|_| anyhow::anyhow!("font parse panicked"))??,
+            cr.join()
+                .map_err(|_| anyhow::anyhow!("font parse panicked"))??,
+            cb.join()
+                .map_err(|_| anyhow::anyhow!("font parse panicked"))??,
+            fb.join()
+                .map_err(|_| anyhow::anyhow!("font parse panicked"))??,
+        ))
+    })
+}
+
+/// Decode and resize every row's thumbnail in parallel. Image decoding +
+/// Lanczos resize is CPU-heavy — at ~4 ms per JPEG, 33 rows in serial cost
+/// ~130 ms. Running across the available cores collapses that to roughly the
+/// time of a single decode.
+fn scale_thumbnails(
+    rows: &[(VocabularyEntry, Option<PathBuf>)],
+    thumbnail: &Thumbnail,
+) -> Result<Vec<Option<DynamicImage>>> {
+    let paths: Vec<Option<PathBuf>> = rows
+        .iter()
+        .map(|(_, image)| {
+            image
+                .as_ref()
+                .filter(|path| path.is_file())
+                .map(|path| path.to_path_buf())
+        })
+        .collect();
+    thread::scope(|scope| {
+        let handles: Vec<_> = paths
+            .iter()
+            .map(|path| {
+                let thumbnail = thumbnail.clone();
+                let path = path.clone();
+                scope.spawn(move || -> Result<Option<DynamicImage>> {
+                    match path {
+                        Some(path) => Ok(Some(thumbnail.scaled(path.as_path())?)),
+                        None => Ok(None),
+                    }
+                })
+            })
+            .collect();
+        let mut out = Vec::with_capacity(handles.len());
+        for handle in handles {
+            out.push(
+                handle
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("thumbnail decode panicked"))??,
+            );
+        }
+        Ok(out)
+    })
 }
 
 /// Subset one font down to the supplied character set; falls back to the

@@ -16,7 +16,11 @@ pub enum Side {
     PersistMyLanguage(String),
     PersistApiKey(String),
     OpenKeyHelp,
-    PublishDone,
+    /// Engine drained — kick off the (asynchronous) publish phase. The shell
+    /// spawns a background thread that builds the .apkg and the .pdf, surfacing
+    /// progress through the universal busy loader (`PublishingDeck` →
+    /// `PublishingReport`).
+    StartPublish,
     ExitApp,
 }
 
@@ -153,8 +157,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::KeyBackspace) => {
             (app.rubbed(), Side::None)
         }
-        (Screen::YourCards, None, AppEvent::BatchReady) => (app, Side::PublishDone),
-        (Screen::YourCards, None, AppEvent::BatchDone { failed: _ }) => (app, Side::PublishDone),
+        (Screen::YourCards, None, AppEvent::BatchReady) => (app, Side::StartPublish),
+        (Screen::YourCards, None, AppEvent::BatchDone { failed: _ }) => (app, Side::StartPublish),
         (Screen::Done, None, AppEvent::Quit) => (app, Side::ExitApp),
         (_, _, AppEvent::Redraw) => (app, Side::None),
         (_, _, _) => (app, Side::None),

@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use anyhow::{Result, anyhow, bail};
 use font_kit::family_name::FamilyName as QueryName;
@@ -259,16 +261,67 @@ impl FontPalette {
     }
 }
 
-/// Parse one filesystem font file into one PDF font, picking the requested
-/// face index out of a .ttc when needed.
-pub(super) fn parsed(resolved: &ResolvedFont) -> Result<ParsedFont> {
-    let bytes = fs::read(&resolved.path)?;
-    ParsedFont::from_bytes(
-        bytes.as_slice(),
-        resolved.face_index as usize,
+/// Cache key for one parsed font slot: family name plus weight.
+type FontKey = (String, bool);
+
+/// Process-wide cache of fully parsed PDF fonts. The system font files do not
+/// change between invocations within a process, and parsing the largest face
+/// (Arial Unicode MS, 23 MB) costs ~100 ms in release. The cache lets a second
+/// report.save() in the same session pay zero parse cost.
+static FONT_PARSE_CACHE: LazyLock<Mutex<HashMap<FontKey, Arc<ParsedFont>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Eagerly parse the default report palette on a background thread.
+///
+/// The five system fonts the report embeds (Arial regular + bold, Hiragino
+/// Sans GB regular + bold, Arial Unicode MS) cost ~100 ms parallel and ~220 ms
+/// serial in release. Calling this when the TUI starts means the parses run
+/// while the user is reviewing cards, so `Report::save()` later finds every
+/// face already in the process-wide cache and skips the parse phase entirely.
+/// The thread is detached: failures land in the cache as a miss so the next
+/// real call retries normally.
+pub fn warm_fonts_async() {
+    std::thread::spawn(|| {
+        let palette = FontPalette::default();
+        let _ = font_arc(palette.primary(), false);
+        let _ = font_arc(palette.primary(), true);
+        let _ = font_arc(palette.cjk(), false);
+        let _ = font_arc(palette.cjk(), true);
+        let _ = font_arc(palette.fallback(), false);
+    });
+}
+
+/// Return the parsed font for one family + weight, cached process-wide.
+///
+/// The first call asks font-kit for the system match and parses the bytes
+/// directly — bypassing the on-disk materialization step that the public
+/// `FontPath::resolved()` round-tripped through. Later calls return the
+/// cached `Arc` instantly.
+pub(super) fn font_arc(family: &FontFamily, bold: bool) -> Result<Arc<ParsedFont>> {
+    let key: FontKey = (family.name().to_string(), bold);
+    if let Some(cached) = FONT_PARSE_CACHE
+        .lock()
+        .expect("font cache mutex must not be poisoned")
+        .get(&key)
+        .cloned()
+    {
+        return Ok(cached);
+    }
+    let path = if bold { &family.bold } else { &family.regular };
+    let matched = path.matched()?;
+    let font = ParsedFont::from_bytes(
+        matched.bytes.as_slice(),
+        matched.face_index as usize,
         &mut Vec::new(),
     )
-    .ok_or_else(|| anyhow!("Font '{}' could not be parsed", resolved.path.display()))
+    .ok_or_else(|| anyhow!("Font '{}' could not be parsed", path.label()))?;
+    let arc = Arc::new(font);
+    FONT_PARSE_CACHE
+        .lock()
+        .expect("font cache mutex must not be poisoned")
+        .entry(key)
+        .or_insert_with(|| arc.clone());
+    Ok(arc)
 }
 
 /// Return whether the parsed font carries a real (non-notdef) glyph for the
