@@ -1,4 +1,4 @@
-Output capture.gif
+Output live/capture.gif
 
 Set Shell "bash"
 Set FontSize 14
@@ -13,61 +13,61 @@ Enter
 Sleep 1500ms
 
 # State 0: Welcome
-Screenshot "00-welcome.png"
+Screenshot "live/00-welcome.png"
 
 Space
 Sleep 600ms
 
 # State 1: Your words
-Screenshot "01-your-words.png"
+Screenshot "live/01-your-words.png"
 
 Space
 Sleep 600ms
 
 # State 1b: Busy understanding
-Screenshot "01b-busy.png"
+Screenshot "live/01b-busy.png"
 
 Space
 Sleep 600ms
 
 # State 2: What I understood
-Screenshot "02-what-i-understood.png"
+Screenshot "live/02-what-i-understood.png"
 
 Space
 Sleep 600ms
 
 # State 2b: Change something modal
-Screenshot "03-change-something-modal.png"
+Screenshot "live/03-change-something-modal.png"
 
 Space
 Sleep 600ms
 
 # State 3: Your cards
-Screenshot "04-your-cards.png"
+Screenshot "live/04-your-cards.png"
 
 Space
 Sleep 600ms
 
 # State 3b: Change this card modal
-Screenshot "05-change-this-card-modal.png"
+Screenshot "live/05-change-this-card-modal.png"
 
 Space
 Sleep 600ms
 
 # State 3c: Your cards retrying
-Screenshot "06-your-cards-retrying.png"
+Screenshot "live/06-your-cards-retrying.png"
 
 Space
 Sleep 600ms
 
 # State 3d: Your cards couldn't finish
-Screenshot "07-your-cards-couldnt-finish.png"
+Screenshot "live/07-your-cards-couldnt-finish.png"
 
 Space
 Sleep 1500ms
 
 # State 4: Done
-Screenshot "08-done.png"
+Screenshot "live/08-done.png"
 
 Sleep 500ms
 Type "q"
