@@ -1,10 +1,9 @@
 //! Sticky outputs panel shared by `your cards` and `done`.
 //!
 //! The panel lists the produced artifacts — APKG (deck), PDF (report) and
-//! FOLDER (output directory) — one per row. Each row shows the underlined
-//! label followed by the path in dim grey, so the user can read where the
-//! artifact landed without leaving the TUI. The hit tester in `tui::links`
-//! mirrors the column maths laid out here.
+//! FOLDER (output directory) — one per row. Each row shows an underlined
+//! placeholder label followed by the path in dim grey. The hit tester in
+//! `tui::links` mirrors the column maths laid out here.
 
 use std::path::Path;
 
@@ -76,6 +75,15 @@ pub fn basename(path: &str) -> String {
         .unwrap_or_else(|| String::from(path))
 }
 
+/// Return the visible file/path display for one banner row.
+#[must_use]
+pub fn display(label: &str, path: &str) -> String {
+    if label == "FOLDER" {
+        return String::from(path);
+    }
+    basename(path)
+}
+
 /// Render the panel widget. Caller is responsible for rendering it into a
 /// `height(app)`-row sub-rect at the top of the body area. The deck and
 /// report rows show only the file name; the folder row shows the full
@@ -85,11 +93,7 @@ pub fn widget(app: &App) -> Paragraph<'static> {
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries.len() + 1);
     for (label, path) in &entries {
         let padding = LABEL_PAD.saturating_sub(label.chars().count()) + PATH_GAP;
-        let display = if *label == "FOLDER" {
-            String::from(*path)
-        } else {
-            basename(path)
-        };
+        let display = display(label, path);
         let spans: Vec<Span<'static>> = vec![
             Span::styled("│ ", palette::base()),
             Span::styled(GLYPH, palette::dim()),

@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::ExecutableCommand;
+use crossterm::event::MouseEventKind;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -17,19 +18,40 @@ use kamishibai::session::{
     Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
     WordCandidate,
 };
-use kamishibai::tui::{App, BusyKind, KeySource, ModalKind, Screen, draw};
+use kamishibai::tui::{
+    App, BusyKind, KeySource, ModalKind, MousePointer, Screen, draw, mouse_pointer_at,
+    reset_mouse_pointer, write_mouse_pointer,
+};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
+
+const POINTER_REFRESH: Duration = Duration::from_millis(50);
 
 fn main() -> Result<()> {
     let states = build_states();
     enable_raw_mode()?;
-    stdout().execute(EnterAlternateScreen)?;
-    let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+    let mut out = stdout();
+    out.execute(EnterAlternateScreen)?;
+    enable_hover_mouse_capture(&mut out);
+    write_mouse_pointer(&mut out, MousePointer::Arrow);
+    let mut terminal = Terminal::new(CrosstermBackend::new(out))?;
     let result = run(&mut terminal, &states);
+    reset_mouse_pointer(terminal.backend_mut());
+    disable_hover_mouse_capture(terminal.backend_mut());
     disable_raw_mode()?;
-    stdout().execute(LeaveAlternateScreen)?;
+    terminal.backend_mut().execute(LeaveAlternateScreen)?;
     Ok(result?)
+}
+
+fn enable_hover_mouse_capture<W: io::Write>(out: &mut W) {
+    let _ = out.write_all(b"\x1b[?1006h\x1b[?1003h");
+    let _ = out.flush();
+}
+
+fn disable_hover_mouse_capture<W: io::Write>(out: &mut W) {
+    let _ = out.write_all(b"\x1b[?1003l\x1b[?1006l");
+    let _ = out.flush();
 }
 
 fn run(
@@ -37,28 +59,66 @@ fn run(
     states: &[(String, App)],
 ) -> io::Result<()> {
     let mut index = 0usize;
+    let mut mouse_position: Option<(u16, u16)> = None;
     loop {
         let (label, app) = &states[index];
         terminal.draw(|frame| {
             draw(frame, app);
         })?;
+        let size = terminal.size()?;
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: size.width,
+            height: size.height,
+        };
+        if let Some((column, row)) = mouse_position {
+            let next = mouse_pointer_at(app, rect, column, row);
+            write_mouse_pointer(terminal.backend_mut(), next);
+        }
         let _ = label;
-        if event::poll(Duration::from_secs(60))?
-            && let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => break,
-                KeyCode::Left | KeyCode::Char('p') => {
-                    if index == 0 {
-                        index = states.len() - 1;
-                    } else {
-                        index -= 1;
+        let timeout = if mouse_position.is_some() {
+            POINTER_REFRESH
+        } else {
+            Duration::from_secs(60)
+        };
+        if event::poll(timeout)? {
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Left | KeyCode::Char('p') => {
+                        if index == 0 {
+                            index = states.len() - 1;
+                        } else {
+                            index -= 1;
+                        }
                     }
+                    _ => {
+                        index = (index + 1) % states.len();
+                    }
+                },
+                Event::Mouse(mouse)
+                    if matches!(
+                        mouse.kind,
+                        MouseEventKind::Moved
+                            | MouseEventKind::Drag(_)
+                            | MouseEventKind::Down(_)
+                            | MouseEventKind::ScrollUp
+                            | MouseEventKind::ScrollDown
+                    ) =>
+                {
+                    mouse_position = Some((mouse.column, mouse.row));
+                    let size = terminal.size()?;
+                    let rect = Rect {
+                        x: 0,
+                        y: 0,
+                        width: size.width,
+                        height: size.height,
+                    };
+                    let next = mouse_pointer_at(app, rect, mouse.column, mouse.row);
+                    write_mouse_pointer(terminal.backend_mut(), next);
                 }
-                _ => {
-                    index = (index + 1) % states.len();
-                }
+                _ => {}
             }
         }
     }

@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event, KeyboardEnhancementFlags, MouseButton,
-    MouseEventKind, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags, poll, read,
+    Event, KeyboardEnhancementFlags, MouseButton, MouseEventKind, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags, poll, read,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -49,8 +49,9 @@ use crate::session::{
     Understanding, Understood, WordCandidate, from_entry, to_entry,
 };
 use crate::tui::{
-    App, AppEvent, BusyKind, ModalKind, Screen, Side, draw, language_chip_at, link_at,
-    picker_geometry, scroll_body_width, scroll_viewport, to_app, transit,
+    App, AppEvent, BusyKind, ModalKind, MousePointer, Screen, Side, draw, language_chip_at,
+    link_at, mouse_pointer_at, picker_geometry, reset_mouse_pointer, scroll_body_width,
+    scroll_viewport, to_app, transit, write_mouse_pointer,
 };
 use crate::vocabulary::{VocabularyDocument, VocabularyEntry};
 
@@ -58,6 +59,7 @@ use crate::vocabulary::{VocabularyDocument, VocabularyEntry};
 use crate::session::{ScriptDetection, TargetDetection, catalog_for_detection};
 
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
+const POINTER_REFRESH: Duration = Duration::from_millis(50);
 
 /// Execute the TUI and translate failures into a process exit code.
 ///
@@ -148,8 +150,9 @@ fn run_tui(app: App, primed: Option<Vec<CardDraft>>) -> Result<()> {
     enable_raw_mode()?;
     let mut out = stdout();
     let enhanced = supports_keyboard_enhancement().unwrap_or(false);
-    execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
-    set_pointer_cursor(&mut out);
+    execute!(out, EnterAlternateScreen)?;
+    enable_hover_mouse_capture(&mut out);
+    write_mouse_pointer(&mut out, MousePointer::Arrow);
     if enhanced {
         execute!(
             out,
@@ -167,29 +170,20 @@ fn run_tui(app: App, primed: Option<Vec<CardDraft>>) -> Result<()> {
     if enhanced {
         execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags).ok();
     }
-    reset_pointer_cursor(terminal.backend_mut());
-    execute!(terminal.backend_mut(), DisableMouseCapture).ok();
+    reset_mouse_pointer(terminal.backend_mut());
+    disable_hover_mouse_capture(terminal.backend_mut());
     disable_raw_mode().ok();
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     outcome
 }
 
-/// Ask the terminal to swap the I-beam mouse pointer for a plain arrow while
-/// the TUI owns the screen. Mouse capture suppresses the terminal's native
-/// text-selection so the I-beam is misleading. The escape is `OSC 22 ; default
-/// ST` per xterm; iTerm2, WezTerm, kitty, Ghostty, recent Alacritty and xterm
-/// honour it. Apple Terminal silently ignores it. Errors are non-fatal — the
-/// TUI keeps working with whatever cursor the host shows.
-fn set_pointer_cursor<W: Write>(out: &mut W) {
-    let _ = out.write_all(b"\x1b]22;default\x1b\\");
+fn enable_hover_mouse_capture<W: Write>(out: &mut W) {
+    let _ = out.write_all(b"\x1b[?1006h\x1b[?1003h");
     let _ = out.flush();
 }
 
-/// Restore the terminal's default mouse pointer when the TUI gives up the
-/// screen. Empty `OSC 22 ; ST` resets the pointer name on the terminals that
-/// support it.
-fn reset_pointer_cursor<W: Write>(out: &mut W) {
-    let _ = out.write_all(b"\x1b]22;\x1b\\");
+fn disable_hover_mouse_capture<W: Write>(out: &mut W) {
+    let _ = out.write_all(b"\x1b[?1003l\x1b[?1006l");
     let _ = out.flush();
 }
 
@@ -199,13 +193,14 @@ fn loop_forever<B>(
     primed: Option<Vec<CardDraft>>,
 ) -> Result<()>
 where
-    B: ratatui::backend::Backend,
+    B: ratatui::backend::Backend + Write,
     <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
 {
     let mut shell = match primed {
         Some(drafts) => Shell::primed(app, drafts)?,
         None => Shell::new(app)?,
     };
+    let mut mouse_position: Option<(u16, u16)> = None;
     loop {
         shell.refresh_quit_pending();
         let area = terminal.size()?;
@@ -219,7 +214,14 @@ where
         let body_width = scroll_body_width(rect);
         shell.reclamp_scroll(viewport, body_width);
         terminal.draw(|frame| draw(frame, shell.app()))?;
-        let timeout = shell.poll_timeout();
+        if let Some((column, row)) = mouse_position {
+            let next = mouse_pointer_at(shell.app(), rect, column, row);
+            write_mouse_pointer(terminal.backend_mut(), next);
+        }
+        let timeout = match mouse_position {
+            Some(_) => shell.poll_timeout().min(POINTER_REFRESH),
+            None => shell.poll_timeout(),
+        };
         if !poll(timeout)? {
             shell.tick()?;
             continue;
@@ -246,7 +248,15 @@ where
                 shell.tick()?;
             }
             Event::Mouse(mouse) => match mouse.kind {
+                MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+                    mouse_position = Some((mouse.column, mouse.row));
+                    let next = mouse_pointer_at(shell.app(), rect, mouse.column, mouse.row);
+                    write_mouse_pointer(terminal.backend_mut(), next);
+                }
                 MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                    mouse_position = Some((mouse.column, mouse.row));
+                    let next = mouse_pointer_at(shell.app(), rect, mouse.column, mouse.row);
+                    write_mouse_pointer(terminal.backend_mut(), next);
                     let area = terminal.size()?;
                     let rect = ratatui::layout::Rect {
                         x: 0,
@@ -264,6 +274,9 @@ where
                     shell.scroll(delta, viewport, body_width);
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
+                    mouse_position = Some((mouse.column, mouse.row));
+                    let next = mouse_pointer_at(shell.app(), rect, mouse.column, mouse.row);
+                    write_mouse_pointer(terminal.backend_mut(), next);
                     let area = terminal.size()?;
                     let rect = ratatui::layout::Rect {
                         x: 0,

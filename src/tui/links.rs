@@ -8,20 +8,27 @@
 
 use ratatui::layout::Rect;
 
-use crate::session::Artifact;
-
 use super::App;
 use super::screen::Screen;
 use super::screens::banner;
 use super::screens::common::{GUTTER, HEADER_GAP, TOP_MARGIN, language_chip};
-use super::screens::your_cards::{detail_pane_height, head_rows_for};
+use super::screens::your_cards::{detail_pane_height, head_rows_for, step_rows_for};
 
-const STEP_ARTIFACT_ORDER: [Artifact; 4] = [
-    Artifact::Body,
-    Artifact::Sound,
-    Artifact::Scene,
-    Artifact::Picture,
-];
+const STEP_FILE_LABEL_START: u16 = 15;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LinkRegion {
+    row: u16,
+    hit_start: u16,
+    hit_end: u16,
+    target: String,
+}
+
+impl LinkRegion {
+    fn contains(&self, column: u16, row: u16) -> bool {
+        row == self.row && column >= self.hit_start && column < self.hit_end
+    }
+}
 
 /// Return `true` if the click landed on the language chip in the header row
 /// AND the active screen actually allows the user to change `my` language.
@@ -59,62 +66,83 @@ pub fn language_chip_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -
 /// 2. Per-card step rows whose artifact is `ready` — clickable on the
 ///    rendered file label so the user can jump straight to that artifact.
 pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<String> {
+    link_regions(app, terminal)
+        .into_iter()
+        .find(|region| region.contains(click_x, click_y))
+        .map(|region| region.target)
+}
+
+fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
+    let mut links = Vec::new();
     if !matches!(app.screen(), Screen::YourCards | Screen::Done) {
-        return None;
+        return links;
     }
-    let body_y = TOP_MARGIN + 1 + HEADER_GAP;
-    let body_x = GUTTER;
+    let body_y = terminal.y + TOP_MARGIN + 1 + HEADER_GAP;
+    let body_x = terminal.x + GUTTER;
     let body_width = terminal.width.saturating_sub(GUTTER * 2);
-    if click_y < body_y {
-        return None;
-    }
-    if click_x < body_x || click_x >= body_x + body_width {
-        return None;
-    }
     let banner_rows = if banner_visible(app) {
         banner::height(app)
     } else {
         0
     };
-    let row_in_body = click_y - body_y;
-    if banner_rows > 0 && row_in_body < banner_rows {
-        return banner_label_hit(app, body_x, click_x, row_in_body);
+    if banner_rows > 0 {
+        links.extend(banner_regions(app, body_x, body_y));
     }
     if app.screen() != Screen::YourCards {
-        return None;
+        return links;
     }
-    let mut row = (row_in_body - banner_rows) as usize + app.body_scroll() as usize;
+    let body_height = terminal
+        .height
+        .saturating_sub(TOP_MARGIN + 1 + HEADER_GAP)
+        .saturating_sub(2)
+        .saturating_sub(banner_rows);
+    let mut content_row = 0usize;
     let width = usize::from(body_width);
     for (idx, draft) in app.cards().iter().enumerate() {
+        let running = app
+            .cards_running_target()
+            .and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
         let head_height = head_rows_for(draft, width);
-        let steps_height = STEP_ARTIFACT_ORDER.len();
+        let steps = step_rows_for(draft, running);
         let detail = if idx == app.card_selected() && app.card_expanded() {
             detail_pane_height(draft)
         } else {
             0
         };
-        let card_total = head_height + steps_height + detail + 1; // + trailing blank
-        if row < head_height {
-            return None;
-        }
-        if row < head_height + steps_height {
-            let step_idx = row - head_height;
-            let artifact = STEP_ARTIFACT_ORDER[step_idx];
-            let slot = match artifact {
-                Artifact::Body => draft.artifacts().body(),
-                Artifact::Sound => draft.artifacts().sound(),
-                Artifact::Scene => draft.artifacts().scene(),
-                Artifact::Picture => draft.artifacts().picture(),
+        let trailing = usize::from(!steps.is_empty() || detail > 0);
+        let card_total = head_height + steps.len() + detail + trailing;
+        for (step_idx, artifact) in steps.iter().enumerate() {
+            let absolute = content_row + head_height + step_idx;
+            let Some(screen_row) = visible_content_row(
+                body_y + banner_rows,
+                body_height,
+                absolute,
+                app.body_scroll(),
+            ) else {
+                continue;
             };
-            let file = slot.file()?;
-            return Some(file.path().to_string_lossy().into_owned());
+            let slot = match artifact {
+                crate::session::Artifact::Body => draft.artifacts().body(),
+                crate::session::Artifact::Sound => draft.artifacts().sound(),
+                crate::session::Artifact::Scene => draft.artifacts().scene(),
+                crate::session::Artifact::Picture => draft.artifacts().picture(),
+            };
+            let Some(file) = slot.file() else {
+                continue;
+            };
+            let label_start = body_x + STEP_FILE_LABEL_START;
+            let label_end = label_start
+                .saturating_add(u16::try_from(file.name().chars().count()).unwrap_or(u16::MAX));
+            links.push(LinkRegion {
+                row: screen_row,
+                hit_start: label_start,
+                hit_end: label_end,
+                target: file.path().to_string_lossy().into_owned(),
+            });
         }
-        if row < card_total {
-            return None;
-        }
-        row -= card_total;
+        content_row += card_total;
     }
-    None
+    links
 }
 
 fn banner_visible(app: &App) -> bool {
@@ -128,17 +156,26 @@ fn banner_visible(app: &App) -> bool {
     }
 }
 
-fn banner_label_hit(app: &App, body_x: u16, click_x: u16, row: u16) -> Option<String> {
+fn banner_regions(app: &App, body_x: u16, body_y: u16) -> Vec<LinkRegion> {
     let entries = banner::entries(app);
-    let (label, path) = entries.get(row as usize)?;
-    let prefix = banner::INDENT_WIDTH as u16 + banner::GLYPH.chars().count() as u16;
-    let label_start = body_x + prefix;
-    let label_len = label.chars().count() as u16;
-    let label_end = label_start.saturating_add(label_len);
-    if click_x >= label_start && click_x < label_end {
-        return Some(String::from(*path));
-    }
-    None
+    entries
+        .into_iter()
+        .enumerate()
+        .map(|(row, (label, path))| {
+            let prefix = u16::try_from(banner::INDENT_WIDTH).unwrap_or(u16::MAX);
+            let label_start = body_x
+                .saturating_add(prefix)
+                .saturating_add(u16::try_from(banner::GLYPH.chars().count()).unwrap_or(u16::MAX));
+            let label_end = label_start
+                .saturating_add(u16::try_from(label.chars().count()).unwrap_or(u16::MAX));
+            LinkRegion {
+                row: body_y.saturating_add(u16::try_from(row).unwrap_or(u16::MAX)),
+                hit_start: label_start,
+                hit_end: label_end,
+                target: String::from(path),
+            }
+        })
+        .collect()
 }
 
 fn all_finished(app: &App) -> bool {
@@ -147,4 +184,21 @@ fn all_finished(app: &App) -> bool {
             .cards()
             .iter()
             .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed())
+}
+
+fn visible_content_row(
+    body_start: u16,
+    body_height: u16,
+    absolute: usize,
+    scroll: u16,
+) -> Option<u16> {
+    let absolute = u16::try_from(absolute).ok()?;
+    if absolute < scroll {
+        return None;
+    }
+    let row = absolute - scroll;
+    if row >= body_height {
+        return None;
+    }
+    Some(body_start + row)
 }
