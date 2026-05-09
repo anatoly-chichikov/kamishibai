@@ -572,26 +572,37 @@ pub(crate) fn head_rows_for(draft: &CardDraft, width: usize) -> usize {
     head_rows(draft, width)
 }
 
+/// Return the artifact step rows visible for one card.
+pub(crate) fn step_rows_for(draft: &CardDraft, running: Option<Artifact>) -> Vec<Artifact> {
+    let artifacts = draft.artifacts();
+    if !card_progressed(artifacts, running) {
+        return Vec::new();
+    }
+    STEPS
+        .iter()
+        .filter_map(|&(_, kind)| {
+            if slot_visible(slot_for(artifacts, kind), kind, running) {
+                Some(kind)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn card_layout(
     draft: &CardDraft,
     running: Option<Artifact>,
     expanded: bool,
     width: usize,
 ) -> (usize, usize) {
-    let artifacts = draft.artifacts();
-    let progressed = card_progressed(artifacts, running);
+    let steps = step_rows_for(draft, running);
     let mut rows = head_rows(draft, width);
-    if progressed {
-        for &(_, kind) in &STEPS {
-            if slot_visible(slot_for(artifacts, kind), kind, running) {
-                rows += 1;
-            }
-        }
-    }
+    rows += steps.len();
     if expanded {
         rows = rows.saturating_add(detail_pane_height(draft));
     }
-    let trailing = if progressed || expanded { 1 } else { 0 };
+    let trailing = if !steps.is_empty() || expanded { 1 } else { 0 };
     (rows, trailing)
 }
 
