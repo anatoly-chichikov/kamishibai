@@ -2,7 +2,7 @@
 name = "kamishibai"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94.1"
+rust-version = "1.95.0"
 description = "Generate illustrated Anki decks from schema-driven vocabulary JSON"
 publish = false
 
