@@ -15,12 +15,18 @@ All future work references this map instead of re-deriving transitions.
 | --------------------- | ----------- | --------------------------------------------------------- |
 | `YourWords`           | fullscreen  | `01-your-words.png`                                       |
 | `WhatIUnderstood`     | fullscreen  | `02-what-i-understood.png`                                |
-| `ChangeSomething`     | modal       | `03-change-something-modal.png` over `WhatIUnderstood`    |
-| `YourCards`           | fullscreen  | `04-your-cards.png`, `06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png` |
-| `ChangeThisCard`      | modal       | `05-change-this-card-modal.png` over `YourCards`          |
+| `ChangeSomething`     | modal       | over `WhatIUnderstood` — reference shot pending           |
+| `YourCards`           | fullscreen  | `04-your-cards.png`, `04b-your-cards-mid.png`             |
+| `ChangeThisCard`      | modal       | over `YourCards` — reference shot pending                 |
 | `Done`                | fullscreen  | `08-done.png`                                             |
 
 Retry, failure banner and recovery are inline within `YourCards` — not separate screens.
+
+The four edge-case PNGs (`03-change-something-modal.png`, `05-change-this-card-modal.png`,
+`06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`) are intentionally absent
+from `live/`. They require failure injection or modal interaction during recording, which
+the live-binary `capture.tape` does not exercise. Re-snap them via `examples/tui_states.rs`
+when those particular states need fresh references.
 
 Text-only Gemini passes use one universal blocking overlay on top of the current
 screen: first understanding, bulk correction, and per-card correction. The

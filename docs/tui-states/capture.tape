@@ -2,73 +2,56 @@ Output live/capture.gif
 
 Set Shell "bash"
 Set FontSize 14
-Set Width 1400
-Set Height 720
+Set Width 1152
+Set Height 864
 Set Padding 24
-Set Theme "Builtin Solarized Dark"
-Set TypingSpeed 5ms
+Set Theme { "name": "kamishibai", "black": "#0e0e10", "red": "#e6e3da", "green": "#e6e3da", "yellow": "#e6e3da", "blue": "#e6e3da", "purple": "#e6e3da", "cyan": "#e6e3da", "white": "#e6e3da", "brightBlack": "#5a5953", "brightRed": "#e6e3da", "brightGreen": "#e6e3da", "brightYellow": "#e6e3da", "brightBlue": "#e6e3da", "brightPurple": "#e6e3da", "brightCyan": "#e6e3da", "brightWhite": "#e6e3da", "background": "#0e0e10", "foreground": "#e6e3da", "selection": "#1c1c1f", "cursor": "#e6e3da" }
+Set TypingSpeed 35ms
+Set WaitTimeout 60s
 
-Type "../../target/debug/examples/tui_states"
+Hide
+Type "cd /Users/anatoly/Source/kamishibai && rm -rf kamishibai-out && clear"
 Enter
-Sleep 1500ms
+Type "KAMISHIBAI_RECORDING_HOTKEYS=1 ./target/release/kamishibai"
+Enter
+Show
 
-# State 0: Welcome
-Screenshot "live/00-welcome.png"
-
-Space
+Wait+Screen /words you want to learn/
+Sleep 400ms
+Type "lantern"
+Enter
+Type "harbor"
+Enter
+Type "moonlight"
+Enter
+Type "bittersweet"
+Enter
+Type "homesick"
 Sleep 600ms
-
-# State 1: Your words
 Screenshot "live/01-your-words.png"
 
-Space
-Sleep 600ms
+Ctrl+S
 
-# State 1b: Busy understanding
+Wait+Screen /understanding your words/
+Sleep 250ms
 Screenshot "live/01b-busy.png"
 
-Space
-Sleep 600ms
-
-# State 2: What I understood
+Wait+Screen@2m /5 cards/
+Sleep 1500ms
 Screenshot "live/02-what-i-understood.png"
 
-Space
-Sleep 600ms
+Ctrl+S
 
-# State 2b: Change something modal
-Screenshot "live/03-change-something-modal.png"
-
-Space
-Sleep 600ms
-
-# State 3: Your cards
+Wait+Screen@5m /your cards/
+Sleep 8s
 Screenshot "live/04-your-cards.png"
+Sleep 25s
+Screenshot "live/04b-your-cards-mid.png"
 
-Space
-Sleep 600ms
-
-# State 3b: Change this card modal
-Screenshot "live/05-change-this-card-modal.png"
-
-Space
-Sleep 600ms
-
-# State 3c: Your cards retrying
-Screenshot "live/06-your-cards-retrying.png"
-
-Space
-Sleep 600ms
-
-# State 3d: Your cards couldn't finish
-Screenshot "live/07-your-cards-couldnt-finish.png"
-
-Space
-Sleep 1500ms
-
-# State 4: Done
+Wait+Screen@5m /all done/
+Sleep 800ms
 Screenshot "live/08-done.png"
 
-Sleep 500ms
-Type "q"
-Sleep 500ms
+Ctrl+C
+Sleep 250ms
+Ctrl+C
