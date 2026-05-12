@@ -74,7 +74,7 @@ fn unknown_profiles_raise_the_frozen_error_message() {
 fn registry_keeps_the_supported_codes_in_stable_order() {
     assert_eq!(
         catalog().codes(),
-        ["de", "el", "en", "es", "ru", "zh"],
+        ["en", "zh", "es", "ja", "fr", "de", "ru", "it", "pt", "el"],
         "profile registry codes no longer match the frozen order"
     );
 }

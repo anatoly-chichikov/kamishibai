@@ -54,6 +54,7 @@ struct Tally {
     cyrillic: usize,
     greek: usize,
     han: usize,
+    kana: usize,
     latin: usize,
 }
 
@@ -68,10 +69,11 @@ impl Tally {
             self.greek += 1;
             return;
         }
-        if (0x3400..=0x4DBF).contains(&point)
-            || (0x4E00..=0x9FFF).contains(&point)
-            || (0x3040..=0x30FF).contains(&point)
-        {
+        if (0x3040..=0x30FF).contains(&point) {
+            self.kana += 1;
+            return;
+        }
+        if (0x3400..=0x4DBF).contains(&point) || (0x4E00..=0x9FFF).contains(&point) {
             self.han += 1;
             return;
         }
@@ -81,6 +83,9 @@ impl Tally {
     }
 
     fn finalize(self) -> TargetGuess {
+        if self.kana > 0 {
+            return TargetGuess::new("ja", true);
+        }
         let max = self.cyrillic.max(self.greek).max(self.han).max(self.latin);
         if max == 0 {
             return TargetGuess::new("en", false);

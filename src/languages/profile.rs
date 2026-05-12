@@ -72,7 +72,7 @@ impl UiLabels {
 /// One language profile composed from runtime and UI settings.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LanguageProfile {
-    pub code: String,
+    pub code: &'static str,
     pub prompt: String,
     pub audio_cache: String,
     pub ocr: String,

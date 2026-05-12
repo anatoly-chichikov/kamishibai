@@ -26,7 +26,7 @@ use crate::tui::screen::ModalKind;
 
 const TEXT_MODAL_WIDTH: u16 = 64;
 const TEXT_MODAL_HEIGHT: u16 = 9;
-const PICKER_MODAL_WIDTH: u16 = 60;
+const PICKER_MODAL_WIDTH: u16 = 66;
 const PICKER_MODAL_HEIGHT: u16 = 7;
 const HORIZONTAL_PADDING: u16 = 2;
 const INPUT_LINE_OFFSET: u16 = 3;
