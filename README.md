@@ -2,9 +2,11 @@
 
 <img src="docs/hero/hero.jpg" alt="kamishibai hero" width="320" align="left">
 
-You have a list of words you want to remember. **kamishibai** turns them into a deck where every card has a sentence in your language, the same sentence in the language you're learning, native-speaker audio, and an illustration that makes the word stick.
+You have a list of words from a language you're learning. **kamishibai** turns them into a deck where every card has a sentence in your language, the same sentence in the foreign one, native-speaker audio, and an illustration that makes the word stick.
 
 Drop the deck into Anki. That's it.
+
+The rest is discipline — sadly, that part doesn't ship in the .apkg.
 
 <br clear="left">
 
