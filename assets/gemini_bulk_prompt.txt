@@ -1,46 +1,41 @@
-You are refining the Kamishibai understanding list after a user comment.
+You are refining the Kamishibai understanding list after a user comment. The original list was produced by the intake pass; the user has glanced at it and now points out something that needs to change across the whole batch (a sense choice, a register tweak, an extra item to drop, etc).
 
-Target language:
+Target language (already chosen by the intake pass — do not change it):
 {target_language}
 
 Support language for explanations:
 {support_language}
 
-Apply the user's correction to the whole list while keeping the target language fixed. Keep rows that should not be turned into cards with `"ok": false` and explain why in their `understanding`.
+Apply the user's correction to the whole list. Keep rows that should not be turned into cards with `"ok": false` and explain why in their `understanding`. Output every row from the input — even untouched ones — in the same order.
 
-Each item has three fields:
+Each item has three fields.
 
-1. "term" — the surface form the next step will use. Correct typos silently if needed. Preserve morphological form unless the user's correction explicitly asks otherwise.
+1. "term" — the surface form to learn. Correct typos silently. Preserve the user's morphological form unless the user's correction explicitly asks otherwise.
 
-2. "understanding" — one short, scannable line in {support_language}, structured as `<part of speech abbreviation> · <gloss>[ · <decision marker if any>]`.
+2. "understanding" — exactly one sentence in {support_language}, between 6 and 14 words, written for a human reader. State directly what the term means in the chosen sense.
 
-   The entire line — POS, gloss, decision marker — must be written in {support_language}. Never mix English POS labels into a non-English line. Pick the right abbreviation set for {support_language}:
-   - Russian (`ru`): `сущ.`, `гл.`, `прил.`, `нареч.`, `мест.`, `союз`, `предл.`, `част.`, `межд.`, `числ.`; phrases `фраза`; idioms `идиома`; collocations `колл.`; full sentences `предл.`.
-   - English (`en`): `noun`, `verb`, `adj.`, `adv.`, `pron.`, `conj.`, `prep.`, `part.`, `interj.`, `num.`; phrases `phrase`; idioms `idiom`; collocations `collocation`; full sentences `sentence`.
-   - Spanish (`es`): `sust.`, `verbo`, `adj.`, `adv.`, `pron.`, `conj.`, `prep.`, `part.`, `interj.`, `num.`; phrases `frase`; idioms `idiom.`; collocations `coloc.`; full sentences `oración`.
-   - German (`de`): `Subst.`, `Verb`, `Adj.`, `Adv.`, `Pron.`, `Konj.`, `Präp.`, `Part.`, `Interj.`, `Num.`; phrases `Phrase`; idioms `Idiom`; collocations `Kollok.`; full sentences `Satz`.
-   - Greek (`el`): `ουσ.`, `ρ.`, `επίθ.`, `επίρρ.`, `αντων.`, `σύνδ.`, `πρόθ.`, `μόρ.`, `επιφ.`, `αριθμ.`; phrases `φράση`; idioms `ιδιωτ.`; collocations `συνεμφ.`; full sentences `πρόταση`.
-   - Chinese (`zh`): `名`, `动`, `形`, `副`, `代`, `连`, `介`, `助`, `叹`, `数`; phrases `短语`; idioms `成语`; collocations `搭配`; full sentences `句子`.
-   - For other support languages, use that language's standard short POS labels — never fall back to English.
+   Hard rules for "understanding":
+   - **Do not start with «Учим», «Изучаем», «Учимся», «We learn», «Studying» or any other narration of the learning act.** Skip straight to the meaning.
+   - **Pick exactly one sense.** When the term is polysemous and the user did not pin a sense — pick the most common modern sense in {target_language} and stop. Never write "X или Y", "X or Y", "может означать X, а также Y".
+   - Reflect any sense, register, or focus the user named in their correction.
+   - **Stay tight to the meaning the learner needs.** Do not pile on incidental detail (appearance, behaviour anecdotes, common similes). No "ловит мышей и крыс", no "красный как помидор", no "пушистое млекопитающее".
+   - Mention part of speech, idiom, or register only when it actually clarifies — never as a label-only line.
+   - Never use filler words: "обычное", "обычный", "повседневное", "стандартное", "обыкновенное", "regular", "common", "ordinary", "everyday", "standard", "basic", "simple".
+   - Never produce a structured "POS · gloss · marker" line. Write a real, scannable sentence.
+   - When `ok` is false, the sentence states the reason briefly in {support_language}.
 
-   The gloss is one word or a couple of comma-separated translations in {support_language}, never a full sentence.
+3. "ok" — boolean. `true` if the item belongs to the target language and can be turned into a card. `false` otherwise. When `false`, `understanding` must briefly state the reason.
 
-   Add a third segment after ` · ` only when a real decision applies — chosen polysemous sense (with what was rejected), non-default morphology, typo correction, non-neutral register or style, idiom/collocation note, or the reason for exclusion when `ok` is false.
+Examples (target=en, support=ru) — shape only:
 
-   Hard prohibitions:
-   - Never use empty filler words like "обычное", "обычный", "повседневное", "стандартное", "обыкновенное", "regular", "common", "ordinary", "everyday", "standard", "basic", "simple". Drop them.
-   - Do not describe the obvious semantic field a user already knows (e.g., "одомашненное животное", "цвет", "день недели").
-   - Do not write a full prose sentence. Stick to the `<pos> · <gloss>[ · <marker>]` shape with ` · ` separators.
-
-   Examples for an EN→RU pair: `сущ. · кошка`, `прил. · красный`, `союз · пока, в то время как · формальный британский`, `гл. · дебютировать · прошедшее время`, `гл. · исключить · из учебного заведения, не «выпустить газ»`, `пропуск · слово на русском, не на target-языке`.
-
-   Do not introduce labels, tags, or structured fields beyond the dot-separated segments.
-
-3. "ok" — boolean. `true` if the item belongs to the target language and can be turned into a card; `false` otherwise. When `false`, `understanding` must state the reason briefly.
+- term "cat", understanding "Базовое существительное «кошка», бытовая лексика."
+- term "to boot", understanding "Идиома «в придачу» — добавочная выгода поверх основной."
+- term "harbor", understanding "Переносный глагол «носить в себе чувство», не порт."
+- term "сообщение", ok false, understanding "Слово на русском, не на target-языке — карточка не создаётся."
 
 Return only JSON with this shape, no prose, no code fences:
 
-{"target_lang":"<iso code>","items":[{"term":"<surface form>","understanding":"<one or two sentences in the support language>","ok":true}]}
+{"target_lang":"<iso code of {target_language}>","items":[{"term":"<surface form>","understanding":"<one sentence in the support language>","ok":true}]}
 
 Current rows:
 {current_rows}
