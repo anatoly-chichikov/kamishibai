@@ -71,7 +71,7 @@ where
         let scaled = scale_thumbnails(self.rows.as_slice(), thumbnail)?;
         let mut pages = vec![Vec::new()];
         let mut y = 10.0f32;
-        for ((entry, _), image) in self.rows.iter().zip(scaled.into_iter()) {
+        for ((entry, _), image) in self.rows.iter().zip(scaled) {
             if y > LIMIT {
                 pages.push(Vec::new());
                 y = 10.0;
