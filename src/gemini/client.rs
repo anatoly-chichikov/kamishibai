@@ -1,6 +1,6 @@
 use std::env;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use rand::RngExt;
 use reqwest::blocking::Client;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
@@ -116,11 +116,22 @@ pub struct GeminiClient<T> {
 }
 
 impl GeminiClient<HttpTransport> {
-    /// Build the live Gemini client from GEMINI_API_KEY.
-    pub fn from_env() -> Result<Self> {
-        let Some(key) = env::var("GEMINI_API_KEY").ok() else {
-            bail!("GEMINI_API_KEY environment variable is not set; export it before running");
-        };
+    /// Build the live Gemini client from `GEMINI_API_KEY`, falling back to a
+    /// saved key. The env value wins when both are present so a shell-set key
+    /// always overrides whatever was last persisted through the Welcome
+    /// screen.
+    pub fn from_env_or_saved(saved: Option<&str>) -> Result<Self> {
+        let env_key = env::var("GEMINI_API_KEY")
+            .ok()
+            .filter(|value| !value.is_empty());
+        let key = env_key
+            .or_else(|| saved.filter(|value| !value.is_empty()).map(String::from))
+            .ok_or_else(|| {
+                anyhow!(
+                    "no Gemini API key found in GEMINI_API_KEY or saved preferences; \
+                     run kamishibai once to set one up"
+                )
+            })?;
         Ok(Self::new(key, HttpTransport::new()))
     }
 }
@@ -159,6 +170,13 @@ where
         enforce(&mut scene);
         validate(&scene)?;
         Ok(scene)
+    }
+
+    /// Send one free-form prompt to a text model and return the raw textual
+    /// response. Used by eval/dev tooling that swaps prompts without going
+    /// through the typed `understand` / `generate_card_body` paths.
+    pub fn complete(&self, model: &str, prompt: String) -> Result<String> {
+        self.text(model, prompt)
     }
 
     /// Resolve raw user input into reviewed rows using the Flash text model.

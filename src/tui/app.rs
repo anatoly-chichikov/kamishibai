@@ -173,11 +173,24 @@ impl App {
         self
     }
 
-    /// Return the app rerouted onto the first-run Welcome screen.
-    pub fn opening_welcome(mut self, source: KeySource, key: impl Into<String>) -> Self {
+    /// Return the app rerouted onto the first-run Welcome screen starting
+    /// at the language-pick stage.
+    pub fn opening_welcome(self, source: KeySource, key: impl Into<String>) -> Self {
+        self.opening_welcome_at(WelcomeStage::PickLanguage, source, key)
+    }
+
+    /// Return the app rerouted onto the first-run Welcome screen with an
+    /// explicit starting stage. Used by `start()` to skip past whichever step
+    /// is already satisfied by the loaded preferences and environment.
+    pub fn opening_welcome_at(
+        mut self,
+        stage: WelcomeStage,
+        source: KeySource,
+        key: impl Into<String>,
+    ) -> Self {
         self.screen = Screen::Welcome;
         self.welcome = WelcomeView {
-            stage: WelcomeStage::PickLanguage,
+            stage,
             key: key.into(),
             source,
         };

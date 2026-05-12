@@ -225,16 +225,18 @@ fn card_correction_uses_pro_to_recompose_term_understanding_and_body() -> Result
     Ok(())
 }
 
-/// Missing API keys keep the frozen startup error wording.
+/// Missing API keys surface the configured startup error wording.
 #[test]
-fn missing_api_keys_keep_the_frozen_startup_error_wording() {
+fn missing_api_keys_surface_a_setup_hint() {
     unsafe {
         std::env::remove_var("GEMINI_API_KEY");
     }
-    assert_eq!(
-        GeminiClient::from_env().unwrap_err().to_string(),
-        "GEMINI_API_KEY environment variable is not set; export it before running",
-        "missing api keys no longer keep the frozen startup error wording"
+    let error = GeminiClient::from_env_or_saved(None)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("no Gemini API key"),
+        "missing api keys no longer surface the configured startup error wording: {error}"
     );
 }
 

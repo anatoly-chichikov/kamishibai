@@ -60,23 +60,23 @@ impl Understanding for FakeUnderstanding {
             vec![
                 WordCandidate::new(
                     "sincerely",
-                    "наречие; искренне; формальная закрывающая фраза в письмах",
+                    "Наречие «искренне» — формальная закрывающая фраза в письмах.",
                     true,
                 ),
                 WordCandidate::new(
                     "expel",
-                    "глагол; выбран смысл «исключить из учебного заведения или организации»",
+                    "Глагол «исключить» в смысле учебного заведения, не «выпустить газ».",
                     true,
                 ),
-                WordCandidate::new("at the end", "фраза о времени или месте; в конце", true),
+                WordCandidate::new("at the end", "Фраза о времени или месте — «в конце».", true),
                 WordCandidate::new(
                     "celebratory",
-                    "прилагательное «праздничный»; исправлена опечатка: было «celeblatory»",
+                    "Прилагательное «праздничный»; в исходнике опечатка, исправлено.",
                     true,
                 ),
                 WordCandidate::new(
                     "debuted",
-                    "прошедшее время от слова «debut»; о первом публичном появлении",
+                    "Прошедшая форма глагола «дебютировать», окончание -ed.",
                     true,
                 ),
             ],
@@ -148,13 +148,13 @@ fn excluded_candidate_renders_with_strikethrough_and_dim_gloss() {
         .confirmed_target("en")
         .understood(vec![WordCandidate::new(
             "сообщение",
-            "this is Russian, not the target language; will not be turned into a card",
+            "Слово на русском, не на target-языке — карточка не создаётся.",
             false,
         )]);
     let rendered = flat(&app);
     let term_modifiers = modifiers(&app, "сообщение");
     assert!(
-        rendered.contains("not the target language")
+        rendered.contains("не на target-языке")
             && term_modifiers
                 .iter()
                 .any(|modifier| modifier.contains(Modifier::CROSSED_OUT)),
@@ -217,7 +217,7 @@ fn skipped_candidate_list_keeps_user_on_what_i_understood() {
         .confirmed_target("en")
         .understood(vec![WordCandidate::new(
             "окно",
-            "this is Russian, not the EN target batch; will not be turned into a card",
+            "Слово на русском, не на EN-target — карточка не создаётся.",
             false,
         )]);
     let (next, side) = transit(app, kamishibai::tui::AppEvent::Submit);
@@ -251,7 +251,7 @@ fn uppercase_t_on_what_i_understood_cycles_target_language() {
     let next = transit(app, to_app(press(KeyCode::Char('T'))).expect("map")).0;
     assert_eq!(
         (next.pair().target().to_string(), next.target_pending()),
-        (String::from("es"), false),
+        (String::from("zh"), false),
         "uppercase T on What I understood must cycle the target override"
     );
 }

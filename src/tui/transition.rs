@@ -2,7 +2,7 @@ use crate::languages::catalog;
 
 use super::app::App;
 use super::event::AppEvent;
-use super::screen::{ModalKind, Screen, WelcomeStage};
+use super::screen::{KeySource, ModalKind, Screen, WelcomeStage};
 
 /// A side effect requested by a transition. The shell interprets it outside the pure function.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -15,6 +15,13 @@ pub enum Side {
     RegenerateFailed,
     PersistMyLanguage(String),
     PersistApiKey(String),
+    /// Persist both the picked language and (optionally) the API key in one
+    /// write — emitted by the Welcome screen on final Submit so partial state
+    /// from one stage never lands on disk on its own.
+    PersistWelcome {
+        language: String,
+        api_key: Option<String>,
+    },
     OpenKeyHelp,
     /// Engine drained — kick off the (asynchronous) publish phase. The shell
     /// spawns a background thread that builds the .apkg and the .pdf, surfacing
@@ -170,40 +177,65 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
     match (stage, event) {
         (WelcomeStage::PickLanguage, AppEvent::WelcomeNextLanguage) => {
             let next = next_support(app.pair().support(), 1);
-            let next_app = app.set_support(next.clone());
-            (next_app, Side::PersistMyLanguage(next))
+            (app.set_support(next), Side::None)
         }
         (WelcomeStage::PickLanguage, AppEvent::WelcomePrevLanguage) => {
             let next = next_support(app.pair().support(), -1);
-            let next_app = app.set_support(next.clone());
-            (next_app, Side::PersistMyLanguage(next))
+            (app.set_support(next), Side::None)
         }
         (WelcomeStage::PickLanguage, AppEvent::Submit)
-        | (WelcomeStage::PickLanguage, AppEvent::KeyEnter) => (app.welcome_advance(), Side::None),
+        | (WelcomeStage::PickLanguage, AppEvent::KeyEnter) => {
+            if welcome_key_ready(&app) {
+                let side = welcome_persist(&app);
+                (app.with_screen(Screen::YourWords), side)
+            } else {
+                (app.welcome_advance(), Side::None)
+            }
+        }
         (WelcomeStage::EnterKey, AppEvent::Cancel) => (app.welcome_step_back(), Side::None),
         (WelcomeStage::EnterKey, AppEvent::WelcomePasteKey(text)) => {
             let trimmed = text.trim().to_string();
-            let next = app.welcome_paste_key(trimmed.clone());
-            (next, Side::PersistApiKey(trimmed))
+            (app.welcome_paste_key(trimmed), Side::None)
         }
         (WelcomeStage::EnterKey, AppEvent::KeyChar(symbol)) => {
             let mut key = app.welcome().key.clone();
             key.push(symbol);
             (app.welcome_paste_key(key), Side::None)
         }
-        (WelcomeStage::EnterKey, AppEvent::KeyBackspace) => {
-            (app.welcome_clear_key(), Side::PersistApiKey(String::new()))
-        }
+        (WelcomeStage::EnterKey, AppEvent::KeyBackspace) => (app.welcome_clear_key(), Side::None),
         (WelcomeStage::EnterKey, AppEvent::WelcomeOpenKeyHelp) => (app, Side::OpenKeyHelp),
         (WelcomeStage::EnterKey, AppEvent::Submit)
         | (WelcomeStage::EnterKey, AppEvent::KeyEnter) => {
-            if app.welcome().key.chars().count() >= 20 {
-                (app.with_screen(Screen::YourWords), Side::None)
+            if welcome_key_ready(&app) {
+                let side = welcome_persist(&app);
+                (app.with_screen(Screen::YourWords), side)
             } else {
                 (app, Side::None)
             }
         }
         _ => (app, Side::None),
+    }
+}
+
+/// Welcome considers the key ready when there's enough characters in the
+/// buffer to plausibly be a Gemini key (env-provided keys land here too —
+/// they're seeded into the buffer at start).
+fn welcome_key_ready(app: &App) -> bool {
+    app.welcome().key.chars().count() >= 20
+}
+
+/// Build the persist side effect emitted on final Welcome submit. The API
+/// key is only handed over when the user pasted it (or restored from a prior
+/// session); env-sourced keys are intentionally left untouched so they stay
+/// the responsibility of the shell.
+fn welcome_persist(app: &App) -> Side {
+    let api_key = match app.welcome().source {
+        KeySource::Pasted | KeySource::Restored => Some(app.welcome().key.clone()),
+        KeySource::Env | KeySource::Empty => None,
+    };
+    Side::PersistWelcome {
+        language: app.pair().support().to_string(),
+        api_key,
     }
 }
 

@@ -37,4 +37,4 @@ cargo run --release -- path/to/words.json
 
 ## Languages
 
-kamishibai works for any source/target pair declared in [`src/languages`](src/languages). Adding a new pair is a profile, not a code branch.
+Pairs ship as profiles in [`src/languages`](src/languages): `en`, `zh`, `es`, `ja`, `fr`, `de`, `ru`, `it`, `pt`, `el`. Native side picks one of these for the UI labels in your language; target side picks one of these for the deck — Gemini generates the audio, so the practical ceiling on adding a new pair is whether Gemini TTS speaks it (it covers most of the world).

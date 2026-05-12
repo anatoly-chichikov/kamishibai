@@ -32,7 +32,7 @@ use time::OffsetDateTime;
 use time::format_description::parse as parse_time;
 
 use crate::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
-use crate::config::{Preferences, default_store};
+use crate::config::default_store;
 use crate::gemini::{GeminiClient, HttpTransport};
 use crate::generation::artifact_cache::Cache;
 use crate::generation::manga::{
@@ -49,9 +49,9 @@ use crate::session::{
     Understanding, Understood, WordCandidate, from_entry, to_entry,
 };
 use crate::tui::{
-    App, AppEvent, BusyKind, ModalKind, MousePointer, Screen, Side, draw, language_chip_at,
-    link_at, mouse_pointer_at, picker_geometry, reset_mouse_pointer, scroll_body_width,
-    scroll_viewport, to_app, transit, write_mouse_pointer,
+    App, AppEvent, BusyKind, KeySource, ModalKind, MousePointer, Screen, Side, WelcomeStage, draw,
+    language_chip_at, link_at, mouse_pointer_at, picker_geometry, reset_mouse_pointer,
+    scroll_body_width, scroll_viewport, to_app, transit, write_mouse_pointer,
 };
 use crate::vocabulary::{VocabularyDocument, VocabularyEntry};
 
@@ -90,9 +90,34 @@ pub fn run() -> u8 {
 }
 
 fn start() -> Result<()> {
-    let preferences = load_preferences().unwrap_or_default();
+    let store = default_store(&SystemContext)?;
+    let stored = store.path().exists();
+    let preferences = store.read().unwrap_or_default();
+    let env_key = std::env::var("GEMINI_API_KEY")
+        .ok()
+        .filter(|key| !key.is_empty());
+    let saved_key = preferences.api_key.clone().filter(|key| !key.is_empty());
     let pair = LanguagePair::new(String::from("en"), preferences.my_language.clone());
     let app = App::new(pair);
+    let needs_language = !stored;
+    let needs_key = env_key.is_none() && saved_key.is_none();
+    let app = if needs_language || needs_key {
+        let (source, key) = if let Some(env) = env_key.as_deref() {
+            (KeySource::Env, String::from(env))
+        } else if let Some(saved) = saved_key.as_deref() {
+            (KeySource::Restored, String::from(saved))
+        } else {
+            (KeySource::Empty, String::new())
+        };
+        let stage = if needs_language {
+            WelcomeStage::PickLanguage
+        } else {
+            WelcomeStage::EnterKey
+        };
+        app.opening_welcome_at(stage, source, key)
+    } else {
+        app
+    };
     run_tui(app, None)
 }
 
@@ -438,7 +463,11 @@ struct Shell<P> {
 
 impl Shell<ProductionPasses> {
     fn new(app: App) -> Result<Self> {
-        let client = GeminiClient::from_env()?;
+        let saved_key = default_store(&SystemContext)
+            .ok()
+            .and_then(|store| store.read().ok())
+            .and_then(|prefs| prefs.api_key);
+        let client = GeminiClient::from_env_or_saved(saved_key.as_deref())?;
         let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
         let output = default_output()?;
         crate::report::warm_fonts_async();
@@ -835,10 +864,25 @@ where
             }
             Side::PersistMyLanguage(code) => {
                 if let Ok(store) = default_store(&SystemContext) {
-                    let _ = store.write(&Preferences::new(code));
+                    let prefs = store.read().unwrap_or_default().adopt(code);
+                    let _ = store.write(&prefs);
                 }
             }
-            Side::PersistApiKey(_) => {}
+            Side::PersistApiKey(key) => {
+                if let Ok(store) = default_store(&SystemContext) {
+                    let prefs = store.read().unwrap_or_default().with_api_key(key);
+                    let _ = store.write(&prefs);
+                }
+            }
+            Side::PersistWelcome { language, api_key } => {
+                if let Ok(store) = default_store(&SystemContext) {
+                    let mut prefs = store.read().unwrap_or_default().adopt(language);
+                    if let Some(key) = api_key {
+                        prefs = prefs.with_api_key(key);
+                    }
+                    let _ = store.write(&prefs);
+                }
+            }
             Side::OpenKeyHelp => {}
             Side::ExitApp | Side::None => {}
         }
@@ -1261,11 +1305,6 @@ fn open_path(path: &str) -> Result<()> {
             .spawn()?;
     }
     Ok(())
-}
-
-fn load_preferences() -> Result<Preferences> {
-    let store = default_store(&SystemContext)?;
-    store.read()
 }
 
 #[cfg(test)]

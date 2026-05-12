@@ -14,13 +14,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
+use crate::languages::catalog;
 use crate::tui::app::App;
 use crate::tui::palette;
 use crate::tui::screen::{KeySource, WelcomeStage};
 
 const INTRO: &str = "kamishibai turns a list of words you want to learn into an anki deck built for retention: for each word it writes a natural example sentence, illustrates the scene as a manga panel, and reads it aloud in a studio-grade voice.";
 const KEY_URL: &str = "aistudio.google.com/apikey";
-const LANG_CODES: &[&str] = &["EN", "RU", "DE", "FR", "ES", "IT", "JA", "ZH"];
 const VALID_KEY_LENGTH: usize = 20;
 const HEADLINE: &str = "kamishibai";
 const HINT: &str = "set up two things";
@@ -111,13 +111,14 @@ fn language_row(app: &App) -> Paragraph<'static> {
         label_style,
     ));
     spans.push(Span::raw(" "));
-    let current = app.pair().support().to_uppercase();
-    for code in LANG_CODES {
-        let is_active = *code == current;
+    let current = app.pair().support().to_ascii_lowercase();
+    for code in catalog().codes() {
+        let label = code.to_ascii_uppercase();
+        let is_active = code == current;
         let chip = if is_active {
-            Span::styled(format!(" {code} "), palette::invert())
+            Span::styled(format!(" {label} "), palette::invert())
         } else {
-            Span::styled(format!(" {code} "), palette::dim())
+            Span::styled(format!(" {label} "), palette::dim())
         };
         spans.push(chip);
         spans.push(Span::raw(" "));
