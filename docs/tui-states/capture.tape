@@ -20,13 +20,17 @@ Wait+Screen /words you want to learn/
 Sleep 400ms
 Type "lantern"
 Enter
-Type "harbor"
+Type "ghosting"
 Enter
-Type "moonlight"
+Type "serendipity"
+Enter
+Type "cold feet"
+Enter
+Type "bark"
+Enter
+Type "spoiler"
 Enter
 Type "bittersweet"
-Enter
-Type "homesick"
 Sleep 600ms
 Screenshot "live/01-your-words.png"
 
@@ -36,9 +40,24 @@ Wait+Screen /understanding your words/
 Sleep 250ms
 Screenshot "live/01b-busy.png"
 
-Wait+Screen@2m /5 cards/
-Sleep 1500ms
+Wait+Screen@2m /—/
+Sleep 15s
 Screenshot "live/02-what-i-understood.png"
+
+Down 4
+Sleep 2s
+Type "r"
+Sleep 2s
+Screenshot "live/03-change-something-modal.png"
+Type "в значении кора дерева"
+Sleep 1s
+Enter
+
+Sleep 1.5s
+Screenshot "live/01c-busy-correction.png"
+
+Sleep 12s
+Screenshot "live/02b-what-i-understood-corrected.png"
 
 Ctrl+S
 
@@ -48,7 +67,7 @@ Screenshot "live/04-your-cards.png"
 Sleep 25s
 Screenshot "live/04b-your-cards-mid.png"
 
-Wait+Screen@5m /all done/
+Wait+Screen@15m /(all done|make it)/
 Sleep 800ms
 Screenshot "live/08-done.png"
 
