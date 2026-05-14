@@ -11,7 +11,7 @@ use image::{DynamicImage, GenericImageView};
 use printpdf::{
     Color, CurTransMat, FontId, ImageCompression, ImageOptimizationOptions, Line, LineDashPattern,
     LinePoint, Mm, Op, PaintMode, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions,
-    Point, Polygon, PolygonRing, Pt, Rgb, TextItem, XObjectTransform,
+    Point, Polygon, PolygonRing, Pt, Rgb, TextItem, TextMatrix, XObjectTransform,
 };
 
 use crate::vocabulary::VocabularyEntry;
@@ -37,8 +37,8 @@ const CUT_DASH: f32 = 1.4;
 const CUT_GAP: f32 = 1.0;
 const BEZIER_CIRCLE_K: f32 = 0.552_284_8;
 
-const PHRASE_SIZE: f32 = 9.0;
-const GLOSS_SIZE: f32 = 6.8;
+const PHRASE_SIZE: f32 = 7.65;
+const GLOSS_SIZE: f32 = 5.0;
 const EN_SIZE: f32 = 10.6;
 const IPA_SIZE: f32 = 6.8;
 const LEX_SIZE: f32 = 8.6;
@@ -47,9 +47,11 @@ const EXPLAIN_SIZE: f32 = 7.4;
 const EXPLAIN_SIZE_MIN: f32 = 5.5;
 const EXPLAIN_SIZE_STEP: f32 = 0.4;
 const IMP_SIZE: f32 = 6.8;
+const ITALIC_SLANT: f32 = 0.21;
 
 const INK: (u8, u8, u8) = (0, 0, 0);
 const MUTED: (u8, u8, u8) = (110, 108, 100);
+const GLOSS_INK: (u8, u8, u8) = (150, 148, 142);
 const HAIRLINE: (u8, u8, u8) = (215, 213, 208);
 
 /// Accumulate vocabulary cards and render them onto printable A4 sheets.
@@ -152,9 +154,7 @@ impl CardSheet {
                 &fallback,
             );
         }
-        if buckets.primary_regular.is_empty() {
-            buckets.primary_regular.insert(' ');
-        }
+        buckets.primary_regular.insert(' ');
         if buckets.primary_bold.is_empty() {
             buckets.primary_bold.insert(' ');
         }
@@ -235,7 +235,10 @@ impl CardSheet {
     }
 
     /// Render the front face inside the local (0,0)→(CARD_W, HALF_H) frame:
-    /// manga panel on the left, source sentence and gloss on the right.
+    /// manga panel on the left, source sentence and gloss on the right. The
+    /// sentence always starts 30% down from the top so it sits in the panel's
+    /// upper third; the gloss hangs below it, small and faint so it reads only
+    /// on demand.
     fn draw_front(
         &self,
         doc: &mut PdfDocument,
@@ -251,16 +254,26 @@ impl CardSheet {
         draw_panel_border(ops, IMAGE_X, IMAGE_Y, IMAGE_SIDE);
         let text_x = IMAGE_X + IMAGE_SIDE + COL_GAP;
         let text_w = CARD_W - text_x - TEXT_PAD_RIGHT;
-        let mut cursor = IMAGE_Y + IMAGE_SIDE;
         let phrase_lines = wrap_runs(
             plan.front_phrase.as_slice(),
             text_w,
             PHRASE_SIZE,
             ClassifierView::from(fonts),
         );
-        for line in phrase_lines {
+        let mut cursor = HALF_H * 0.70;
+        for line in &phrase_lines {
             cursor -= leading(PHRASE_SIZE);
-            draw_runs(ops, fonts, ids, &line, PHRASE_SIZE, text_x, cursor, INK);
+            draw_runs(
+                ops,
+                fonts,
+                ids,
+                line,
+                PHRASE_SIZE,
+                text_x,
+                cursor,
+                INK,
+                false,
+            );
         }
         cursor -= leading(PHRASE_SIZE) * 0.4;
         let gloss_lines = wrap_runs(
@@ -271,7 +284,9 @@ impl CardSheet {
         );
         for line in gloss_lines {
             cursor -= leading(GLOSS_SIZE);
-            draw_runs(ops, fonts, ids, &line, GLOSS_SIZE, text_x, cursor, MUTED);
+            draw_runs(
+                ops, fonts, ids, &line, GLOSS_SIZE, text_x, cursor, GLOSS_INK, true,
+            );
         }
     }
 
@@ -288,7 +303,7 @@ impl CardSheet {
         );
         for line in en_lines {
             cursor -= leading(EN_SIZE);
-            draw_runs(ops, fonts, ids, &line, EN_SIZE, PAD, cursor, INK);
+            draw_runs(ops, fonts, ids, &line, EN_SIZE, PAD, cursor, INK, false);
         }
         cursor -= 1.4;
         draw_hairline(ops, PAD, cursor, CARD_W - PAD, cursor);
@@ -303,6 +318,7 @@ impl CardSheet {
             PAD,
             cursor,
             INK,
+            false,
         );
         cursor -= leading(IPA_SIZE) * 0.95;
         draw_mono(
@@ -324,7 +340,17 @@ impl CardSheet {
         );
         for line in meaning_lines {
             cursor -= leading(MEANING_SIZE);
-            draw_runs(ops, fonts, ids, &line, MEANING_SIZE, PAD, cursor, INK);
+            draw_runs(
+                ops,
+                fonts,
+                ids,
+                &line,
+                MEANING_SIZE,
+                PAD,
+                cursor,
+                INK,
+                false,
+            );
         }
         cursor -= leading(IMP_SIZE) * 0.4;
         cursor -= leading(IMP_SIZE);
@@ -343,7 +369,17 @@ impl CardSheet {
                 if cursor < PAD {
                     break 'paragraphs;
                 }
-                draw_runs(ops, fonts, ids, &line, explain_size, PAD, cursor, INK);
+                draw_runs(
+                    ops,
+                    fonts,
+                    ids,
+                    &line,
+                    explain_size,
+                    PAD,
+                    cursor,
+                    INK,
+                    false,
+                );
             }
         }
     }
@@ -737,6 +773,7 @@ fn draw_importance(
         x,
         y,
         MUTED,
+        false,
     );
     let label_w = measure_runs(
         ClassifierView::from(fonts),
@@ -819,7 +856,9 @@ fn draw_mono(
 
 /// Emit one line composed of (text, bold) chunks at the given baseline. Each
 /// chunk is split per character into primary / CJK / fallback runs at its
-/// weight so mixed scripts share the same baseline.
+/// weight so mixed scripts share the same baseline. When `italic` is set the
+/// line is sheared into a synthetic oblique — there is no italic font track,
+/// so the gloss leans via the text matrix instead.
 #[allow(clippy::too_many_arguments)]
 fn draw_runs(
     ops: &mut Vec<Op>,
@@ -830,14 +869,28 @@ fn draw_runs(
     x: f32,
     y: f32,
     color: (u8, u8, u8),
+    italic: bool,
 ) {
     if chunks.iter().all(|(text, _)| text.is_empty()) {
         return;
     }
     ops.push(Op::StartTextSection);
-    ops.push(Op::SetTextCursor {
-        pos: Point::new(Mm(x), Mm(y)),
-    });
+    if italic {
+        ops.push(Op::SetTextMatrix {
+            matrix: TextMatrix::Raw([
+                1.0,
+                0.0,
+                ITALIC_SLANT,
+                1.0,
+                x * 72.0 / 25.4,
+                y * 72.0 / 25.4,
+            ]),
+        });
+    } else {
+        ops.push(Op::SetTextCursor {
+            pos: Point::new(Mm(x), Mm(y)),
+        });
+    }
     ops.push(Op::SetLineHeight { lh: Pt(size) });
     ops.push(Op::SetFillColor {
         col: rgb_tuple(color),
@@ -916,32 +969,36 @@ fn emit_run(ops: &mut Vec<Op>, ids: &SheetIds, text: &str, track: Track, bold: b
 
 /// Wrap a sequence of (text, bold) runs to fit the given width in mm. Each
 /// output line preserves the per-run bold flag so the renderer can switch
-/// fonts inside one visual line.
+/// fonts inside one visual line. Glued punctuation — a comma or period the
+/// regular run carries straight after the bold highlight — wraps together
+/// with the word it abuts instead of drifting onto its own line.
 fn wrap_runs(
     runs: &[(String, bool)],
     width: f32,
     size: f32,
     view: ClassifierView<'_>,
 ) -> Vec<Vec<(String, bool)>> {
-    let words = tokenize(runs);
+    let groups = group_tokens(tokenize(runs));
     let mut lines: Vec<Vec<(String, bool)>> = Vec::new();
     let mut current: Vec<(String, bool)> = Vec::new();
     let mut current_width = 0.0_f32;
     let space_width = view.measure(" ", false, size);
-    for (word, bold) in words {
-        let word_width = view.measure(word.as_str(), bold, size);
+    for group in groups {
+        let group_width: f32 = group
+            .iter()
+            .map(|(text, bold)| view.measure(text.as_str(), *bold, size))
+            .sum();
         let extra = if current.is_empty() { 0.0 } else { space_width };
-        if current_width + extra + word_width <= width || current.is_empty() {
-            if extra > 0.0 {
-                current.push((String::from(" "), bold));
-            }
-            current.push((word, bold));
-            current_width += extra + word_width;
-            continue;
+        if !current.is_empty() && current_width + extra + group_width > width {
+            lines.push(std::mem::take(&mut current));
+            current_width = 0.0;
         }
-        lines.push(std::mem::take(&mut current));
-        current.push((word, bold));
-        current_width = word_width;
+        if !current.is_empty() {
+            current.push((String::from(" "), false));
+            current_width += space_width;
+        }
+        current_width += group_width;
+        current.extend(group);
     }
     if !current.is_empty() {
         lines.push(current);
@@ -952,15 +1009,64 @@ fn wrap_runs(
     lines
 }
 
-/// Return the (word, bold) tokens taken from a run sequence.
-fn tokenize(runs: &[(String, bool)]) -> Vec<(String, bool)> {
+/// One wrap token: its text, weight, and whether whitespace precedes it in
+/// the source. A `space_before` of false marks punctuation glued to the
+/// previous token — carried into the regular run straight after the bold
+/// highlight — so it never gains a leading space or wraps away from it.
+#[derive(Clone, Debug)]
+struct WrapToken {
+    text: String,
+    bold: bool,
+    space_before: bool,
+}
+
+/// Split a run sequence into wrap tokens. `split_whitespace` marks the gaps
+/// inside one run; at a run boundary a space exists unless the previous run
+/// ends and the next run starts on non-whitespace, which is exactly how
+/// `bold_split` leaves a trailing comma or period attached to the highlight.
+fn tokenize(runs: &[(String, bool)]) -> Vec<WrapToken> {
     let mut tokens = Vec::new();
+    let mut prev_open = false;
     for (text, bold) in runs {
-        for word in text.split_whitespace() {
-            tokens.push((word.to_string(), *bold));
+        if text.is_empty() {
+            continue;
         }
+        let starts_ws = text.starts_with(char::is_whitespace);
+        for (index, word) in text.split_whitespace().enumerate() {
+            let space_before = if tokens.is_empty() {
+                false
+            } else if index == 0 {
+                starts_ws || !prev_open
+            } else {
+                true
+            };
+            tokens.push(WrapToken {
+                text: word.to_string(),
+                bold: *bold,
+                space_before,
+            });
+        }
+        prev_open = !text.ends_with(char::is_whitespace);
     }
     tokens
+}
+
+/// Coalesce wrap tokens into groups: each group is one space-preceded token
+/// plus any glued punctuation that follows it, so a trailing comma or period
+/// wraps as a unit and never lands alone on the next line.
+fn group_tokens(tokens: Vec<WrapToken>) -> Vec<Vec<(String, bool)>> {
+    let mut groups: Vec<Vec<(String, bool)>> = Vec::new();
+    for token in tokens {
+        if token.space_before || groups.is_empty() {
+            groups.push(vec![(token.text, token.bold)]);
+        } else {
+            groups
+                .last_mut()
+                .expect("invariant: a glued token always follows an existing group")
+                .push((token.text, token.bold));
+        }
+    }
+    groups
 }
 
 /// Return the measured width (mm) of (text, bold) chunks at the given size.
@@ -1255,4 +1361,50 @@ fn rgb_tuple(rgb: (u8, u8, u8)) -> Color {
         f32::from(rgb.2) / 255.0,
         None,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bold_split, group_tokens, tokenize};
+
+    /// A comma carried into the regular run right after the bold highlight
+    /// stays in the same wrap group as the word it abuts.
+    #[test]
+    fn punctuation_after_the_highlight_stays_glued_to_its_word() {
+        let runs = bold_split("Сегодня холоднее, чем было вчера.", "холоднее");
+        let groups = group_tokens(tokenize(runs.as_slice()));
+        let glued = groups
+            .iter()
+            .find(|group| group.iter().any(|(text, _)| text == "холоднее"))
+            .is_some_and(|group| group.iter().any(|(text, _)| text == ","));
+        assert!(
+            glued,
+            "a comma abutting the bold highlight drifted out of its word group"
+        );
+    }
+
+    /// A sentence-final period after the highlight does not become a lonely,
+    /// space-prefixed token of its own.
+    #[test]
+    fn a_sentence_final_period_does_not_become_its_own_token() {
+        let runs = bold_split("Они посмотрели военное шествие.", "шествие");
+        let lonely_period = tokenize(runs.as_slice())
+            .iter()
+            .any(|token| token.text == "." && token.space_before);
+        assert!(
+            !lonely_period,
+            "a sentence-final period gained a leading space instead of hugging its word"
+        );
+    }
+
+    /// Ordinary whitespace-separated words keep the spaces between them.
+    #[test]
+    fn ordinary_words_keep_their_separating_spaces() {
+        let tokens = tokenize(&[(String::from("one two three"), false)]);
+        let spaced = tokens.iter().skip(1).all(|token| token.space_before);
+        assert!(
+            spaced,
+            "ordinary whitespace-separated words lost the spaces between them"
+        );
+    }
 }
