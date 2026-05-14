@@ -25,6 +25,7 @@ For each non-empty input line, return one item with three fields.
    - **Pick exactly one sense** for polysemous words. When the user gave a hint (after a dash, in quotes, "focus on …", "не X, а Y") — use that sense. When no hint is given — pick the most common modern sense and stop. Never write "X или Y", "X or Y", "может означать X, а также Y".
    - When the entry is a sentence and the user pointed at a focus, treat the focus as the chosen sense.
    - Mention part of speech, idiom, or register only when it actually clarifies — never as a label-only line.
+   - **Always abbreviate part-of-speech labels** in whichever support language you use — write the standard dictionary short form, never the full word. Russian: «сущ.», «прил.», «гл.», «нар.», «мест.», «предл.», «част.», «межд.», «числ.» (союз stays). English: «n.», «v.», «adj.», «adv.», «pron.», «prep.», «conj.», «interj.». Spanish: «sust.», «adj.», «v.», «adv.», «pron.». Do the same in any other support language. Never spell out «существительное», «прилагательное», «глагол», «наречие», «noun», «verb», «adjective», «adverb», etc. — it eats the column for no information.
    - **Stay tight to the meaning the learner needs.** Do not pile on incidental detail (appearance, behaviour anecdotes, common similes) that does not help retain the term. No "ловит мышей и крыс", no "красный как помидор", no "пушистое млекопитающее".
    - Never use filler words like "обычное", "обычный", "повседневное", "стандартное", "обыкновенное", "regular", "common", "ordinary", "everyday", "standard", "basic", "simple".
    - Never produce a structured "POS · gloss · marker" line. Write a real, scannable sentence.
@@ -34,16 +35,16 @@ For each non-empty input line, return one item with three fields.
 
 Examples (target=en, support=ru) — these illustrate the *shape* of "understanding". Notice none of them start with «Учим» or pile on filler:
 
-- input "cat" → term "cat", understanding "Базовое существительное «кошка», бытовая лексика."
+- input "cat" → term "cat", understanding "Базовое сущ. «кошка», бытовая лексика."
 - input "red" → term "red", understanding "Базовый цвет, нужен в повседневных описаниях."
-- input "expel" → term "expel", understanding "Глагол «исключать» в смысле учебного заведения."
+- input "expel" → term "expel", understanding "Гл. «исключать» в смысле учебного заведения."
 - input "debuted" → term "debuted", understanding "Прошедшая форма: окончание -ed, не словарную форму."
-- input "celeblatory" → term "celebratory", understanding "Прилагательное «праздничный»; в исходнике опечатка, исправлено."
-- input "bank" → term "bank", understanding "Существительное «банк» в финансовом смысле, не «берег»."
-- input "bank — financial, not riverbank" → term "bank", understanding "Существительное «банк» в финансовом смысле, не «берег»."
+- input "celeblatory" → term "celebratory", understanding "Прил. «праздничный»; в исходнике опечатка, исправлено."
+- input "bank" → term "bank", understanding "Сущ. «банк» в финансовом смысле, не «берег»."
+- input "bank — financial, not riverbank" → term "bank", understanding "Сущ. «банк» в финансовом смысле, не «берег»."
 - input "to boot — идиома, «в придачу», не ботинок" → term "to boot", understanding "Идиома «в придачу» — добавочная выгода поверх основной."
-- input "harbor — метафорически, как harbor a grudge" → term "harbor", understanding "Переносный глагол «носить в себе чувство», не порт."
-- input "bittersweet feeling" → term "bittersweet", understanding "Прилагательное про смешанное чувство — и радостно, и грустно."
+- input "harbor — метафорически, как harbor a grudge" → term "harbor", understanding "Переносный гл. «носить в себе чувство», не порт."
+- input "bittersweet feeling" → term "bittersweet", understanding "Прил. про смешанное чувство — и радостно, и грустно."
 - input "She braced herself before opening the letter — focus on \"brace yourself\"" → term "brace yourself", understanding "Выражение «собраться, приготовиться к чему-то неприятному»."
 - input "whilst — formal British" → term "whilst", understanding "Формальный британский союз «пока, в то время как»."
 - input "Schadenfreude" → term "Schadenfreude", understanding "Заимствованное «злорадство» — радость от чужой неудачи."

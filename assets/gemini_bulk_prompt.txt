@@ -20,6 +20,7 @@ Each item has three fields.
    - Reflect any sense, register, or focus the user named in their correction.
    - **Stay tight to the meaning the learner needs.** Do not pile on incidental detail (appearance, behaviour anecdotes, common similes). No "ловит мышей и крыс", no "красный как помидор", no "пушистое млекопитающее".
    - Mention part of speech, idiom, or register only when it actually clarifies — never as a label-only line.
+   - **Always abbreviate part-of-speech labels** in whichever support language you use — write the standard dictionary short form, never the full word. Russian: «сущ.», «прил.», «гл.», «нар.», «мест.», «предл.», «част.», «межд.», «числ.» (союз stays). English: «n.», «v.», «adj.», «adv.», «pron.», «prep.», «conj.», «interj.». Spanish: «sust.», «adj.», «v.», «adv.», «pron.». Do the same in any other support language. Never spell out «существительное», «прилагательное», «глагол», «наречие», «noun», «verb», «adjective», «adverb», etc.
    - Never use filler words: "обычное", "обычный", "повседневное", "стандартное", "обыкновенное", "regular", "common", "ordinary", "everyday", "standard", "basic", "simple".
    - Never produce a structured "POS · gloss · marker" line. Write a real, scannable sentence.
    - When `ok` is false, the sentence states the reason briefly in {support_language}.
@@ -28,9 +29,9 @@ Each item has three fields.
 
 Examples (target=en, support=ru) — shape only:
 
-- term "cat", understanding "Базовое существительное «кошка», бытовая лексика."
+- term "cat", understanding "Базовое сущ. «кошка», бытовая лексика."
 - term "to boot", understanding "Идиома «в придачу» — добавочная выгода поверх основной."
-- term "harbor", understanding "Переносный глагол «носить в себе чувство», не порт."
+- term "harbor", understanding "Переносный гл. «носить в себе чувство», не порт."
 - term "сообщение", ok false, understanding "Слово на русском, не на target-языке — карточка не создаётся."
 
 Return only JSON with this shape, no prose, no code fences:
