@@ -105,6 +105,13 @@ impl FontPath {
                 "SimHei",
             ],
             "Arial Unicode MS" => &["Arial Unicode", "Lucida Sans Unicode"],
+            "Courier New" => &[
+                "CourierNewPSMT",
+                "Courier",
+                "Liberation Mono",
+                "DejaVu Sans Mono",
+                "Consolas",
+            ],
             _ => &[],
         }
     }

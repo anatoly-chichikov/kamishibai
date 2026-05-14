@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use image::{Rgb, RgbImage};
 use kamishibai::languages::ReportLabels;
-use kamishibai::report::{FontFamily, FontPath, Report, ReportLayout, Thumbnail, VocabularyLayout};
+use kamishibai::report::{
+    CardSheet, FontFamily, FontPath, Report, ReportLayout, Thumbnail, VocabularyLayout,
+};
 use kamishibai::vocabulary::{
     Importance, LanguageCode, NonEmptyText, VocabularyDocument, VocabularyEntry, VocabularySource,
     VocabularyTarget,
@@ -390,6 +392,43 @@ fn reports_near_the_page_bottom_still_avoid_nearly_empty_trailing_pages() -> Res
     assert!(
         pages(&path) <= 3,
         "reports near the page bottom no longer avoid nearly empty trailing pages"
+    );
+    Ok(())
+}
+
+/// Card sheets fit four duplex cards onto each printable A4 page.
+#[test]
+fn card_sheets_fit_four_duplex_cards_onto_each_printable_a4_page() -> Result<()> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("cards.pdf");
+    let mut sheet = CardSheet::new();
+    for _ in 0..9 {
+        sheet.append(
+            &entry("idiom", "ru", "en"),
+            Some(image(directory.path(), 256)),
+        );
+    }
+    sheet.save(&path, &Thumbnail::new(256))?;
+    assert_eq!(
+        pages(&path),
+        3,
+        "card sheets no longer fit four duplex cards onto each printable A4 page"
+    );
+    Ok(())
+}
+
+/// Card sheets render mixed-script content without panicking.
+#[test]
+fn card_sheets_render_mixed_script_content_without_panicking() -> Result<()> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("cards-mixed.pdf");
+    let mut sheet = CardSheet::new();
+    sheet.append(&entry("光", "ru", "zh"), Some(image(directory.path(), 256)));
+    sheet.append(&entry("Ελληνικά", "ru", "el"), None);
+    sheet.save(&path, &Thumbnail::new(256))?;
+    assert!(
+        bytes(&path) > 1000,
+        "card sheets no longer render mixed-script content without panicking"
     );
     Ok(())
 }
