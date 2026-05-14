@@ -136,49 +136,125 @@ From the repo root:
    `live/04-your-cards.png`, `live/04b-your-cards-mid.png`, `live/08-done.png`, and a raw
    `live/capture.gif` that is roughly two minutes long.
 
-5. **Post-process the gif** into the variable-speed README payload. The raw recording is
-   90 % static spinner frames; the README version compresses those and preserves the
-   typing animation:
+5. **Stash the raw recording** before any post-processing — keep it around as `/tmp/raw.gif`
+   so you can redo the slice/encode pass without re-running VHS. The raw is 1–5 min long and
+   ~1 MB; the README payload is built on top of it.
 
    ```bash
-   cp live/capture.gif /tmp/capture-original.gif
-   mkdir -p /tmp/seq && rm -f /tmp/seq/*.png
+   cp live/capture.gif /tmp/raw.gif
+   ```
+
+   Do NOT delete `/tmp/raw.gif` until you've reviewed the final gif and decided you don't
+   need another iteration.
+
+6. **Detect scene transitions** automatically — never assume the time windows from a previous
+   recording apply. Gemini latency varies wildly between runs (this session swung between
+   2 min and 7 min wall-clock).
+
+   ```bash
+   ffmpeg -i /tmp/raw.gif -vf "select='gt(scene,0.005)',showinfo" -f null - 2>&1 \
+     | awk '/pts_time/{gsub(/.*pts_time:/,"");print $1}' > /tmp/transitions.txt
+   cat /tmp/transitions.txt
+   ```
+
+   The `0.005` threshold catches the major TUI transitions (TUI screens change in only a
+   slice of cells per frame, so the default `0.3` returns 0 hits). The number of transitions
+   is **not fixed** — it grows when new states are added to the flow. Don't hardcode an
+   expected count.
+
+7. **Dump a frame at every transition** and eyeball them to map each one to a screen state.
+
+   ```bash
+   mkdir -p /tmp/cuts && rm -f /tmp/cuts/*.png
+   ffmpeg -y -ss 0 -i /tmp/raw.gif -frames:v 1 /tmp/cuts/cut-00.png
    i=1
-   # A: typing 0–1.7s at 25 fps (full animation)
-   ffmpeg -y -ss 0 -t 1.7 -i /tmp/capture-original.gif -vf "fps=25" /tmp/a-%03d.png
-   for f in /tmp/a-*.png; do cp "$f" /tmp/seq/$(printf %04d $i).png; i=$((i+1)); done
-   rm /tmp/a-*.png
-   # B: busy understanding 2–6s at 12.5 fps (spinner stays animated, half the frames)
-   ffmpeg -y -ss 2 -t 4 -i /tmp/capture-original.gif -vf "fps=12.5" /tmp/b-%03d.png
-   for f in /tmp/b-*.png; do cp "$f" /tmp/seq/$(printf %04d $i).png; i=$((i+1)); done
-   rm /tmp/b-*.png
-   # C: WhatIUnderstood static splice for 1.2s (30 frames)
-   ffmpeg -y -i live/02-what-i-understood.png -pix_fmt rgba /tmp/what-rgba.png
-   for k in $(seq 1 30); do cp /tmp/what-rgba.png /tmp/seq/$(printf %04d $i).png; i=$((i+1)); done
-   # D: generation 6.5–121s sampled at 0.66 fps (~75 frames in 3s of output)
-   ffmpeg -y -ss 6.5 -t 114 -i /tmp/capture-original.gif -vf "fps=0.66" /tmp/d-%03d.png
-   for f in /tmp/d-*.png; do cp "$f" /tmp/seq/$(printf %04d $i).png; i=$((i+1)); done
-   rm /tmp/d-*.png
-   # E: done state 121–122s at 25 fps (full speed, shows panel cleanly)
-   ffmpeg -y -ss 121 -t 1 -i /tmp/capture-original.gif -vf "fps=25" /tmp/e-%03d.png
-   for f in /tmp/e-*.png; do cp "$f" /tmp/seq/$(printf %04d $i).png; i=$((i+1)); done
-   rm /tmp/e-*.png
-   # Encode with palette for size
-   ffmpeg -y -framerate 25 -i /tmp/seq/%04d.png -filter_complex "[0:v]palettegen=max_colors=64[p]" -map "[p]" /tmp/palette.png
-   ffmpeg -y -framerate 25 -i /tmp/seq/%04d.png -i /tmp/palette.png -filter_complex "[0:v][1:v]paletteuse" -loop 0 live/capture.gif
-   rm -rf /tmp/seq /tmp/palette.png /tmp/what-rgba.png /tmp/capture-original.gif
+   while read t; do
+     ffmpeg -y -ss "$t" -i /tmp/raw.gif -frames:v 1 /tmp/cuts/cut-$(printf %02d $i)-t${t}.png
+     i=$((i+1))
+   done < /tmp/transitions.txt
+   open /tmp/cuts
    ```
 
-   Final gif is ~9 s, ~400 KB at 1152×864.
+8. **Classify each section** between consecutive transitions:
 
-6. **Revert the chord patch** before staging anything:
+   | Type | Signal | Sampling for the gif |
+   | --- | --- | --- |
+   | **workflow** | user-driven step or new content (typing, candidates land, Done lands) | `fps=25` on the section's natural window; preserve real-time animation |
+   | **read** | a state that's only briefly visible in the recording but the viewer needs time to read (e.g. WhatIUnderstood gets click-through via `Shift+Enter` after ~1 s) | static splice from the matching `live/NN-…png` for 2–3 s — duplicate frames; do NOT use the raw window |
+   | **indicator-wait** | spinner / progress bar; visually static minus the rotating indicator (Gemini text pass, generation queue) | compress aggressively. `fps = output_frames / source_duration`. Budget 1–2 s output total no matter how long the source is |
+   | **transition** | a fast cross-fade between two states, < 1 s | usually skipped or rolled into the neighbouring section |
 
-   ```bash
-   git restore src/tui/input.rs
+   For the standard kamishibai flow the typical mapping is:
+   - `0s → first_busy`: A typing (workflow, 1.5 s output)
+   - `first_busy → candidates_appear`: B busy understanding (indicator-wait, 1.2 s output)
+   - candidates window: C `02-what-i-understood.png` static splice (read, 2.5 s output)
+   - `building_starts → all_done`: D generation (indicator-wait, 1.5–2 s output)
+   - `all_done → end`: E done (workflow, 1 s output)
+
+   New states (e.g. an extra confirmation step, a style picker) will surface as additional
+   transitions — slot them into a type by inspecting the cut frame, don't drop them.
+
+9. **Propose the slice plan to the operator** — print a table with section type, source
+   window, sample rate, and projected output duration **before** running ffmpeg. Get the
+   green light, then encode. Sample sketch:
+
+   ```
+   Section          Type             Source           fps         Output
+   A typing         workflow         1.0 → 2.5 s      25          1.5 s   (38 frames)
+   B busy           indicator-wait   2.56 → 3.76 s    25          1.2 s   (30 frames)
+   C candidates     read (splice)    static PNG       —           2.5 s   (62 frames)
+   D generation    indicator-wait   11 → 405 s       0.114       1.8 s   (45 frames)
+   E done           workflow         404.76 → 405.76  25          1.0 s   (25 frames)
+   Total                                                          8.0 s   (200 frames)
    ```
 
-7. **Confirm** with `git diff src/tui/input.rs` (must be empty) and `git status` (only the
-   regenerated assets should be staged).
+10. **Encode** once the plan is approved:
+
+    ```bash
+    mkdir -p /tmp/seq && rm -f /tmp/seq/*.png
+    i=1
+    # Repeat per section: ffmpeg -ss <start> -t <dur> -i /tmp/raw.gif -vf "fps=<rate>" /tmp/x-%03d.png
+    # then: for f in /tmp/x-*.png; do cp "$f" /tmp/seq/$(printf %04d $i).png; i=$((i+1)); done
+    # For static splices: cp the chosen live/NN-…png N times into /tmp/seq/
+
+    ffmpeg -y -framerate 25 -i /tmp/seq/%04d.png \
+      -filter_complex "[0:v]palettegen=max_colors=64[p]" -map "[p]" /tmp/palette.png
+    ffmpeg -y -framerate 25 -i /tmp/seq/%04d.png -i /tmp/palette.png \
+      -filter_complex "[0:v][1:v]paletteuse" -loop 0 live/capture.gif
+
+    rm -rf /tmp/seq /tmp/palette.png /tmp/cuts /tmp/transitions.txt
+    ```
+
+    Final gif is ~8–10 s, ~300–500 KB at 1152×864. `/tmp/raw.gif` stays on disk for the next
+    iteration.
+
+### Common pitfalls — read before recording
+
+- **Never sample a spinner section below 25 fps.** Each source frame represents N × 40 ms
+  of real rotation; if N > 1, the spinner appears N × faster in the output. Keep the source
+  fps high (25) and shorten the window instead.
+- **Never treat WhatIUnderstood (or any other click-through state) as a workflow section.**
+  Submit fires immediately after candidates land, so the raw recording shows it for ~1.5 s.
+  Use the screenshot as a static splice for 2–3 s so the glosses are readable.
+- **Never carry over hardcoded section windows from a prior recording.** Gemini latency
+  varies. Run scene-detect first.
+- **Never count transitions in advance.** New states get added to the flow over time —
+  scene-detect surfaces them automatically; classify by inspecting `cut-NN.png`, don't drop
+  unknown sections.
+- **Never delete `/tmp/raw.gif` until you've decided you don't need another slice pass.**
+  Re-recording costs a few minutes of Gemini wall-clock; re-slicing is seconds.
+- **Don't try to "fix" an already-post-processed gif by duplicating its frames.** A
+  derivative gif has already lost spinner sampling fidelity; you have to go back to the raw.
+
+11. **Revert the chord patch** before staging anything:
+
+    ```bash
+    git restore src/tui/input.rs
+    ```
+
+12. **Confirm** with `git diff src/tui/input.rs` (must be empty) and `git status` (only the
+    regenerated assets should be staged). Once you're sure you don't need another slice pass,
+    `rm /tmp/raw.gif`.
 
 ### Demo input
 
