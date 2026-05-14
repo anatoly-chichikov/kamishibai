@@ -40,8 +40,8 @@ use crate::generation::manga::{
 };
 use crate::generation::speech::Audio;
 use crate::generation::{SceneComposer, render_audio_prompt};
-use crate::languages::{LanguageCatalog, ReportLabels, catalog, naming};
-use crate::report::{Report, Thumbnail, VocabularyLayout};
+use crate::languages::{LanguageCatalog, catalog, naming};
+use crate::report::{CardSheet, Thumbnail};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
     Artifact, ArtifactFile, BulkCorrection, CardBody, CardBodyGeneration, CardCorrection,
@@ -1215,7 +1215,7 @@ impl MediaPasses for ProductionPasses {
             VocabularyNote::new(model),
             Vec::<PathBuf>::new(),
         );
-        let mut report = Report::new(VocabularyLayout::new(ReportLabels::default()));
+        let mut report = CardSheet::new();
         for draft in drafts.iter().filter(|draft| draft.artifacts().all_ready()) {
             let entry = to_entry(draft)?;
             let audio_file = draft
@@ -1252,7 +1252,7 @@ impl MediaPasses for ProductionPasses {
         let pdf = self
             .output
             .join(format!("{}_{}.pdf", decknaming.prefix, stamp));
-        report.save(&pdf, &Thumbnail::new(150))?;
+        report.save(&pdf, &Thumbnail::new(1024))?;
         Ok((
             apkg.to_string_lossy().into_owned(),
             pdf.to_string_lossy().into_owned(),
