@@ -60,6 +60,10 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourWords, None, AppEvent::KeyEnter) => (app.typed('\n'), Side::None),
         (Screen::YourWords, None, AppEvent::KeyChar(symbol)) => (app.typed(symbol), Side::None),
         (Screen::YourWords, None, AppEvent::KeyBackspace) => (app.rubbed(), Side::None),
+        (Screen::YourWords, None, AppEvent::CursorLeft) => (app.cursor_left(), Side::None),
+        (Screen::YourWords, None, AppEvent::CursorRight) => (app.cursor_right(), Side::None),
+        (Screen::YourWords, None, AppEvent::NavPrev) => (app.cursor_up(), Side::None),
+        (Screen::YourWords, None, AppEvent::NavNext) => (app.cursor_down(), Side::None),
         (Screen::YourWords, None, AppEvent::OpenLanguagePicker) => {
             (open_language_picker(app), Side::None)
         }
@@ -249,6 +253,8 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
     match (app.screen(), &event) {
         (Screen::Welcome, AppEvent::NavPrev) => AppEvent::WelcomePrevLanguage,
         (Screen::Welcome, AppEvent::NavNext) => AppEvent::WelcomeNextLanguage,
+        (Screen::Welcome, AppEvent::CursorLeft) => AppEvent::WelcomePrevLanguage,
+        (Screen::Welcome, AppEvent::CursorRight) => AppEvent::WelcomeNextLanguage,
         (Screen::Welcome, AppEvent::KeyChar('?')) => AppEvent::WelcomeOpenKeyHelp,
         (Screen::WhatIUnderstood, AppEvent::KeyChar('r'))
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
@@ -256,6 +262,8 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('T')) => {
             AppEvent::OverrideTarget(next_target(app.pair().target(), app.pair().support()))
         }
+        (Screen::WhatIUnderstood, AppEvent::CursorLeft) => AppEvent::NavPrev,
+        (Screen::WhatIUnderstood, AppEvent::CursorRight) => AppEvent::NavNext,
         (Screen::YourCards, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
         (Screen::YourCards, AppEvent::KeyChar('r')) => {
             if app.cards_failed() > 0 {
@@ -264,6 +272,8 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
                 AppEvent::RequestChange
             }
         }
+        (Screen::YourCards, AppEvent::CursorLeft) => AppEvent::NavPrev,
+        (Screen::YourCards, AppEvent::CursorRight) => AppEvent::NavNext,
         _ => event,
     }
 }
@@ -273,8 +283,8 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
 /// generic modal dismissal arm.
 fn promote_picker(app: &App, event: AppEvent) -> AppEvent {
     match event {
-        AppEvent::NavPrev => AppEvent::LanguagePickerPrev,
-        AppEvent::NavNext => AppEvent::LanguagePickerNext,
+        AppEvent::NavPrev | AppEvent::CursorLeft => AppEvent::LanguagePickerPrev,
+        AppEvent::NavNext | AppEvent::CursorRight => AppEvent::LanguagePickerNext,
         AppEvent::Submit | AppEvent::KeyEnter => {
             AppEvent::SetMyLanguage(picker_selected(app).to_string())
         }

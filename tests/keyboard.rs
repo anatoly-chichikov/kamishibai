@@ -121,6 +121,16 @@ fn release_events_from_keyboard_enhancement_do_not_type_twice() {
 }
 
 #[test]
+fn left_arrow_maps_to_the_text_cursor_event() {
+    let event = to_app(press(KeyCode::Left));
+    assert_eq!(
+        event,
+        Some(AppEvent::CursorLeft),
+        "left arrow must reach text editors as a cursor move instead of list navigation"
+    );
+}
+
+#[test]
 fn release_submit_from_keyboard_enhancement_does_not_submit_twice() {
     let press = to_app(KeyEvent::new_with_kind(
         KeyCode::Enter,
