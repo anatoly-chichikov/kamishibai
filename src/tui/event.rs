@@ -34,10 +34,14 @@ pub enum AppEvent {
     LanguagePickerNext,
     /// User overrode the detected target language.
     OverrideTarget(String),
-    /// Text editor appended characters.
+    /// Text editor inserted a character.
     KeyChar(char),
     /// Text editor pressed backspace.
     KeyBackspace,
+    /// Text editor moved its cursor left.
+    CursorLeft,
+    /// Text editor moved its cursor right.
+    CursorRight,
     /// Arrow up or k — previous row.
     NavPrev,
     /// Arrow down or j — next row.

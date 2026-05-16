@@ -15,6 +15,7 @@ pub struct App {
     error: Option<String>,
     pair: LanguagePair,
     input: AppInput,
+    blob_cursor: usize,
     review: Review,
     cards: CardsView,
     done: DoneArtifacts,
@@ -151,6 +152,7 @@ impl App {
                 target_pending: true,
                 ..AppInput::default()
             },
+            blob_cursor: 0,
             review: Review::default(),
             cards: CardsView::default(),
             done: DoneArtifacts::default(),
@@ -267,6 +269,11 @@ impl App {
     /// Return the raw blob currently typed on Your words.
     pub fn blob(&self) -> &str {
         self.input.blob.as_str()
+    }
+
+    /// Return the raw blob cursor as a byte offset.
+    pub fn blob_cursor(&self) -> usize {
+        self.blob_cursor
     }
 
     /// Return the comment currently typed in an open modal.
@@ -725,12 +732,14 @@ impl App {
         self
     }
 
-    /// Return the app with one character appended to the active text buffer.
+    /// Return the app with one character inserted into the active text buffer.
     pub fn typed(mut self, symbol: char) -> Self {
         if self.modal.is_some() {
             self.input.modal.push(symbol);
         } else if self.screen == Screen::YourWords {
-            self.input.blob.push(symbol);
+            let cursor = boundary_at_or_before(&self.input.blob, self.blob_cursor);
+            self.input.blob.insert(cursor, symbol);
+            self.blob_cursor = cursor + symbol.len_utf8();
         }
         self
     }
@@ -740,22 +749,158 @@ impl App {
         if self.modal.is_some() {
             self.input.modal.pop();
         } else if self.screen == Screen::YourWords {
-            self.input.blob.pop();
+            let cursor = boundary_at_or_before(&self.input.blob, self.blob_cursor);
+            let previous = boundary_before(&self.input.blob, cursor);
+            self.input.blob.replace_range(previous..cursor, "");
+            self.blob_cursor = previous;
         }
+        self
+    }
+
+    /// Return the app with the raw blob cursor moved one character left.
+    pub fn cursor_left(mut self) -> Self {
+        self.blob_cursor = boundary_before(&self.input.blob, self.blob_cursor);
+        self
+    }
+
+    /// Return the app with the raw blob cursor moved one character right.
+    pub fn cursor_right(mut self) -> Self {
+        self.blob_cursor = boundary_after(&self.input.blob, self.blob_cursor);
+        self
+    }
+
+    /// Return the app with the raw blob cursor moved one visual row up.
+    pub fn cursor_up(mut self) -> Self {
+        self.blob_cursor = cursor_above(&self.input.blob, self.blob_cursor);
+        self
+    }
+
+    /// Return the app with the raw blob cursor moved one visual row down.
+    pub fn cursor_down(mut self) -> Self {
+        self.blob_cursor = cursor_below(&self.input.blob, self.blob_cursor);
         self
     }
 
     /// Return the app with a brand new blob installed (used for clipboard paste).
     pub fn seeded_blob(mut self, blob: impl Into<String>) -> Self {
         self.input.blob = blob.into();
+        self.blob_cursor = self.input.blob.len();
         self
     }
 
     /// Return the app with the blob wiped (used after successful submission).
     pub fn clear_blob(mut self) -> Self {
         self.input.blob.clear();
+        self.blob_cursor = 0;
         self
     }
+}
+
+fn boundary_at_or_before(text: &str, cursor: usize) -> usize {
+    if cursor >= text.len() {
+        return text.len();
+    }
+    if text.is_char_boundary(cursor) {
+        return cursor;
+    }
+    let mut boundary = 0;
+    for (index, _) in text.char_indices() {
+        if index > cursor {
+            return boundary;
+        }
+        boundary = index;
+    }
+    text.len()
+}
+
+fn boundary_before(text: &str, cursor: usize) -> usize {
+    let cursor = boundary_at_or_before(text, cursor);
+    let mut boundary = 0;
+    for (index, _) in text.char_indices() {
+        if index >= cursor {
+            return boundary;
+        }
+        boundary = index;
+    }
+    boundary
+}
+
+fn boundary_after(text: &str, cursor: usize) -> usize {
+    let cursor = boundary_at_or_before(text, cursor);
+    if cursor >= text.len() {
+        return text.len();
+    }
+    let mut characters = text[cursor..].chars();
+    match characters.next() {
+        Some(character) => cursor + character.len_utf8(),
+        None => text.len(),
+    }
+}
+
+fn cursor_above(text: &str, cursor: usize) -> usize {
+    let starts = line_starts(text);
+    let (row, column) = cursor_row_column(text, cursor);
+    if row == 0 {
+        return boundary_at_or_before(text, cursor);
+    }
+    cursor_for_column(text, starts[row - 1], column)
+}
+
+fn cursor_below(text: &str, cursor: usize) -> usize {
+    let starts = line_starts(text);
+    let (row, column) = cursor_row_column(text, cursor);
+    let next = row + 1;
+    if next >= starts.len() {
+        return boundary_at_or_before(text, cursor);
+    }
+    cursor_for_column(text, starts[next], column)
+}
+
+fn cursor_row_column(text: &str, cursor: usize) -> (usize, usize) {
+    let cursor = boundary_at_or_before(text, cursor);
+    let mut row = 0;
+    let mut column = 0;
+    for (index, character) in text.char_indices() {
+        if index >= cursor {
+            return (row, column);
+        }
+        if character == '\n' {
+            row += 1;
+            column = 0;
+        } else {
+            column += 1;
+        }
+    }
+    (row, column)
+}
+
+fn line_starts(text: &str) -> Vec<usize> {
+    let mut starts = vec![0];
+    for (index, character) in text.char_indices() {
+        if character == '\n' {
+            starts.push(index + character.len_utf8());
+        }
+    }
+    starts
+}
+
+fn cursor_for_column(text: &str, start: usize, column: usize) -> usize {
+    let end = line_end(text, start);
+    for (seen, (offset, _)) in text[start..end].char_indices().enumerate() {
+        if seen == column {
+            return start + offset;
+        }
+    }
+    end
+}
+
+fn line_end(text: &str, start: usize) -> usize {
+    for (offset, character) in text[start..].char_indices() {
+        if character == '\n' {
+            return start + offset;
+        }
+    }
+    text.len()
 }
 
 fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {

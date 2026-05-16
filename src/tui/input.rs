@@ -25,8 +25,8 @@ pub fn to_app(key: KeyEvent) -> Option<AppEvent> {
         KeyCode::Backspace => Some(AppEvent::KeyBackspace),
         KeyCode::Up => Some(AppEvent::NavPrev),
         KeyCode::Down => Some(AppEvent::NavNext),
-        KeyCode::Left => Some(AppEvent::NavPrev),
-        KeyCode::Right => Some(AppEvent::NavNext),
+        KeyCode::Left => Some(AppEvent::CursorLeft),
+        KeyCode::Right => Some(AppEvent::CursorRight),
         KeyCode::Char(symbol) if key.modifiers.contains(KeyModifiers::SUPER) => {
             match latin_for_ctrl(symbol) {
                 'l' => Some(AppEvent::OpenLanguagePicker),

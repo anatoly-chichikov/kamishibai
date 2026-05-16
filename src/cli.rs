@@ -262,7 +262,13 @@ where
                     continue;
                 }
                 shell.disarm_quit();
-                let was_nav = matches!(event, AppEvent::NavPrev | AppEvent::NavNext);
+                let was_nav = matches!(
+                    event,
+                    AppEvent::NavPrev
+                        | AppEvent::NavNext
+                        | AppEvent::CursorLeft
+                        | AppEvent::CursorRight
+                );
                 let side = shell.handle(event)?;
                 if side == Side::ExitApp {
                     return Ok(());

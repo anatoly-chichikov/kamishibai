@@ -58,31 +58,33 @@ impl ScreenView for YourWords {
 }
 
 fn place_cursor(frame: &mut Frame, app: &App, body: Rect) {
-    let row = if app.blob().is_empty() {
-        0
-    } else {
-        active_line_index(app) as u16
-    };
-    let column = if app.blob().is_empty() {
-        0
-    } else {
-        let active = active_line_index(app);
-        app.blob()
-            .split('\n')
-            .nth(active)
-            .map(|line| line.chars().count() as u16)
-            .unwrap_or(0)
-    };
+    let (row, column) = cursor_row_column(app);
+    let row = u16::try_from(row).unwrap_or(u16::MAX);
+    let column = u16::try_from(column).unwrap_or(u16::MAX);
     let cursor_x = body.x + column.min(body.width.saturating_sub(1));
     let cursor_y = body.y + row.min(body.height.saturating_sub(1));
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
 fn active_line_index(app: &App) -> usize {
-    if app.blob().is_empty() {
-        return 0;
+    cursor_row_column(app).0
+}
+
+fn cursor_row_column(app: &App) -> (usize, usize) {
+    let mut row = 0;
+    let mut column = 0;
+    for (index, character) in app.blob().char_indices() {
+        if index >= app.blob_cursor() {
+            return (row, column);
+        }
+        if character == '\n' {
+            row += 1;
+            column = 0;
+        } else {
+            column += 1;
+        }
     }
-    app.blob().split('\n').count().saturating_sub(1)
+    (row, column)
 }
 
 fn highlight_strip(body: Rect, row: usize) -> Option<Rect> {

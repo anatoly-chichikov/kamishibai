@@ -148,6 +148,51 @@ fn enter_on_empty_blob_inserts_newline_and_stays_on_your_words() {
 }
 
 #[test]
+fn left_arrow_on_your_words_inserts_before_the_last_character() {
+    let app = App::new(LanguagePair::new("en", "ru")).seeded_blob("harbor");
+    let (after_left, _) = transit(app, to_app(press(KeyCode::Left)).expect("Left must map"));
+    let (after_type, side) = transit(
+        after_left,
+        to_app(press(KeyCode::Char('u'))).expect("char must map"),
+    );
+    assert_eq!(
+        (after_type.blob().to_string(), side),
+        (String::from("harbour"), Side::None),
+        "left arrow on Your words must move the text cursor before the next insertion"
+    );
+}
+
+#[test]
+fn left_arrow_on_your_words_moves_over_utf8_characters() {
+    let app = App::new(LanguagePair::new("en", "ru")).seeded_blob("окно");
+    let (after_left, _) = transit(app, to_app(press(KeyCode::Left)).expect("Left must map"));
+    let (after_type, side) = transit(
+        after_left,
+        to_app(press(KeyCode::Char('!'))).expect("char must map"),
+    );
+    assert_eq!(
+        (after_type.blob().to_string(), side),
+        (String::from("окн!о"), Side::None),
+        "left arrow on Your words must move by UTF-8 character boundaries instead of bytes"
+    );
+}
+
+#[test]
+fn up_arrow_on_your_words_inserts_on_the_previous_line() {
+    let app = App::new(LanguagePair::new("en", "ru")).seeded_blob("moon\nship");
+    let (after_up, _) = transit(app, to_app(press(KeyCode::Up)).expect("Up must map"));
+    let (after_type, side) = transit(
+        after_up,
+        to_app(press(KeyCode::Char('!'))).expect("char must map"),
+    );
+    assert_eq!(
+        (after_type.blob().to_string(), side),
+        (String::from("moon!\nship"), Side::None),
+        "up arrow on Your words must move the text cursor onto the previous line"
+    );
+}
+
+#[test]
 fn typing_and_pressing_shift_enter_advances_to_what_i_understood_and_locks_target_language() {
     let app = App::new(LanguagePair::new("en", "ru"));
     let mut state = app;
