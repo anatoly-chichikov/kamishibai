@@ -765,19 +765,19 @@ impl App {
 
     /// Return the app with the raw blob cursor moved one character right.
     pub fn cursor_right(mut self) -> Self {
-        self.blob_cursor = boundary_after(&self.input.blob, self.blob_cursor);
+        self.blob_cursor = cursor_forward(&mut self.input.blob, self.blob_cursor);
         self
     }
 
     /// Return the app with the raw blob cursor moved one visual row up.
     pub fn cursor_up(mut self) -> Self {
-        self.blob_cursor = cursor_above(&self.input.blob, self.blob_cursor);
+        self.blob_cursor = cursor_above(&mut self.input.blob, self.blob_cursor);
         self
     }
 
     /// Return the app with the raw blob cursor moved one visual row down.
     pub fn cursor_down(mut self) -> Self {
-        self.blob_cursor = cursor_below(&self.input.blob, self.blob_cursor);
+        self.blob_cursor = cursor_below(&mut self.input.blob, self.blob_cursor);
         self
     }
 
@@ -825,10 +825,11 @@ fn boundary_before(text: &str, cursor: usize) -> usize {
     boundary
 }
 
-fn boundary_after(text: &str, cursor: usize) -> usize {
+fn cursor_forward(text: &mut String, cursor: usize) -> usize {
     let cursor = boundary_at_or_before(text, cursor);
     if cursor >= text.len() {
-        return text.len();
+        text.insert(cursor, ' ');
+        return cursor + 1;
     }
     let mut characters = text[cursor..].chars();
     match characters.next() {
@@ -837,7 +838,7 @@ fn boundary_after(text: &str, cursor: usize) -> usize {
     }
 }
 
-fn cursor_above(text: &str, cursor: usize) -> usize {
+fn cursor_above(text: &mut String, cursor: usize) -> usize {
     let starts = line_starts(text);
     let (row, column) = cursor_row_column(text, cursor);
     if row == 0 {
@@ -846,12 +847,15 @@ fn cursor_above(text: &str, cursor: usize) -> usize {
     cursor_for_column(text, starts[row - 1], column)
 }
 
-fn cursor_below(text: &str, cursor: usize) -> usize {
-    let starts = line_starts(text);
+fn cursor_below(text: &mut String, cursor: usize) -> usize {
+    let cursor = boundary_at_or_before(text, cursor);
     let (row, column) = cursor_row_column(text, cursor);
+    let starts = line_starts(text);
     let next = row + 1;
     if next >= starts.len() {
-        return boundary_at_or_before(text, cursor);
+        let end = line_end(text, cursor);
+        text.insert(end, '\n');
+        return cursor_for_column(text, end + 1, column);
     }
     cursor_for_column(text, starts[next], column)
 }
@@ -884,14 +888,16 @@ fn line_starts(text: &str) -> Vec<usize> {
     starts
 }
 
-fn cursor_for_column(text: &str, start: usize, column: usize) -> usize {
+fn cursor_for_column(text: &mut String, start: usize, column: usize) -> usize {
     let end = line_end(text, start);
     for (seen, (offset, _)) in text[start..end].char_indices().enumerate() {
         if seen == column {
             return start + offset;
         }
     }
-    end
+    let missing = column.saturating_sub(text[start..end].chars().count());
+    text.insert_str(end, &" ".repeat(missing));
+    end + missing
 }
 
 fn line_end(text: &str, start: usize) -> usize {

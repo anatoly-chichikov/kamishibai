@@ -193,6 +193,25 @@ fn up_arrow_on_your_words_inserts_on_the_previous_line() {
 }
 
 #[test]
+fn arrows_on_empty_your_words_materialize_the_requested_position() {
+    let app = App::new(LanguagePair::new("en", "ru"));
+    let (after_down, _) = transit(app, to_app(press(KeyCode::Down)).expect("Down must map"));
+    let (after_right, _) = transit(
+        after_down,
+        to_app(press(KeyCode::Right)).expect("Right must map"),
+    );
+    let (after_type, side) = transit(
+        after_right,
+        to_app(press(KeyCode::Char('x'))).expect("char must map"),
+    );
+    assert_eq!(
+        (after_type.blob().to_string(), side),
+        (String::from("\n x"), Side::None),
+        "arrows on empty Your words must let the first typed character land at the chosen row and column"
+    );
+}
+
+#[test]
 fn typing_and_pressing_shift_enter_advances_to_what_i_understood_and_locks_target_language() {
     let app = App::new(LanguagePair::new("en", "ru"));
     let mut state = app;
