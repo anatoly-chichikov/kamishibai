@@ -8,6 +8,8 @@ Drop the deck into Anki. That's it.
 
 The rest is discipline — sadly, that part doesn't ship in the .apkg.
 
+> **Example** — 20 French cards, generated end-to-end by this repo: [**PDF preview**](docs/samples/fr-en.pdf) · [**Anki deck (.apkg)**](docs/samples/fr-en.apkg)
+
 <br clear="left">
 
 ## Why kamishibai
