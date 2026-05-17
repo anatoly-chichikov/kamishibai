@@ -8,6 +8,8 @@ Drop the deck into Anki. That's it.
 
 The rest is discipline — sadly, that part doesn't ship in the .apkg.
 
+> Example Deck (EN→FR): [**PDF**](docs/samples/fr-en.pdf) · [**Anki APKG**](docs/samples/fr-en.apkg)
+
 <br clear="left">
 
 ## Why kamishibai
