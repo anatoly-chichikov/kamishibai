@@ -1,3 +1,4 @@
+use crate::markdown::{parse_markdown, to_html};
 use crate::vocabulary::VocabularyEntry;
 
 use super::Model;
@@ -107,7 +108,7 @@ impl NoteFormat for VocabularyNote {
             String::from(audio),
             String::from(image),
             String::from(entry.source.hint.as_str()),
-            HtmlLineBreaks::new(entry.source.context.as_str()).formatted(),
+            to_html(&parse_markdown(entry.source.context.as_str())),
             Transcription::new(entry.transcription.as_str()).formatted(),
         ];
         Note {

@@ -48,7 +48,7 @@
       "[sound:9c0f6ba9a5a7.wav]",
       "<img src='51a07a17e75e.jpg' style='max-width: 100%; height: auto; border-radius: 10px'>",
       "coast",
-      "calm evening",
+      "<p style=\"margin: 0.4em 0;\">calm evening</p>",
       "/harbor/"
     ],
     [
@@ -61,7 +61,7 @@
       "[sound:24d2497f1d81.wav]",
       "<img src='179104d071c6.jpg' style='max-width: 100%; height: auto; border-radius: 10px'>",
       "morning",
-      "soft scene",
+      "<p style=\"margin: 0.4em 0;\">soft scene</p>",
       "/fos/"
     ]
   ],
