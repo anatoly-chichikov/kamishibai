@@ -339,20 +339,13 @@ impl App {
         self
     }
 
-    /// Return the app with the body scroll snapped so the focused card is
-    /// fully inside the `viewport`. Used after arrow-key navigation: if the
-    /// user wheel-scrolled the selection out of view, the next ↑/↓ press
-    /// pulls scroll back so the new selection lands at the top or bottom
-    /// edge of the visible area. Inert on screens without a card cursor.
+    /// Return the app with the focused row fully inside the body viewport.
+    /// Used after text edits and keyboard navigation so wheel-scrolled content
+    /// follows the active text cursor, review candidate, or card selection.
     /// `body_width` is the body rect width in chars; passed through so the
-    /// snap math agrees with the renderer about the wrapped head-row height.
+    /// `YourCards` snap math agrees with the renderer's wrapped head rows.
     pub fn body_scroll_to_selection(mut self, viewport: u16, body_width: u16) -> Self {
-        if !matches!(self.screen, Screen::YourCards) {
-            return self;
-        }
-        let Some((top, height)) =
-            crate::tui::screens::your_cards::focused_card_range(&self, usize::from(body_width))
-        else {
+        let Some((top, height)) = self.focused_body_range(body_width) else {
             return self;
         };
         let max = self
@@ -372,13 +365,32 @@ impl App {
         self
     }
 
+    fn focused_body_range(&self, body_width: u16) -> Option<(u16, u16)> {
+        match self.screen {
+            Screen::YourWords => {
+                let (row, _) = cursor_row_column(&self.input.blob, self.blob_cursor);
+                Some((u16::try_from(row).unwrap_or(u16::MAX), 1))
+            }
+            Screen::WhatIUnderstood if !self.review.candidates.is_empty() => Some((
+                u16::try_from(self.review.selected.min(self.review.candidates.len() - 1))
+                    .unwrap_or(u16::MAX),
+                1,
+            )),
+            Screen::YourCards => {
+                crate::tui::screens::your_cards::focused_card_range(self, usize::from(body_width))
+            }
+            _ => None,
+        }
+    }
+
     fn body_content_height(&self, body_width: u16) -> u16 {
         let width = usize::from(body_width);
         match self.screen {
             Screen::YourCards => crate::tui::screens::your_cards::content_height(self, width),
             Screen::Done => crate::tui::screens::done::content_height(self),
             Screen::WhatIUnderstood => crate::tui::screens::what_i_understood::content_height(self),
-            Screen::YourWords | Screen::Welcome => 0,
+            Screen::YourWords => crate::tui::screens::your_words::content_height(self),
+            Screen::Welcome => 0,
         }
     }
 

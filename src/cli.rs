@@ -262,18 +262,22 @@ where
                     continue;
                 }
                 shell.disarm_quit();
-                let was_nav = matches!(
-                    event,
-                    AppEvent::NavPrev
-                        | AppEvent::NavNext
-                        | AppEvent::CursorLeft
-                        | AppEvent::CursorRight
-                );
+                let follow_focus = shell.app().modal().is_none()
+                    && matches!(
+                        event,
+                        AppEvent::KeyEnter
+                            | AppEvent::KeyChar(_)
+                            | AppEvent::KeyBackspace
+                            | AppEvent::NavPrev
+                            | AppEvent::NavNext
+                            | AppEvent::CursorLeft
+                            | AppEvent::CursorRight
+                    );
                 let side = shell.handle(event)?;
                 if side == Side::ExitApp {
                     return Ok(());
                 }
-                if was_nav {
+                if follow_focus {
                     shell.snap_scroll_to_selection(viewport, body_width);
                 }
                 shell.tick()?;
