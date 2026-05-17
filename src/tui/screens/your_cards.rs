@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
+use crate::markdown::{parse_markdown, to_ratatui};
 use crate::session::{Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft};
 use crate::tui::app::App;
 use crate::tui::palette;
@@ -138,7 +139,7 @@ fn card_block<'a>(
         }
     }
     if expanded {
-        lines.extend(detail_pane(draft));
+        lines.extend(detail_pane(draft, width));
     }
     if progressed || expanded {
         lines.push(Line::from(""));
@@ -421,12 +422,12 @@ fn step_state<'a>(
     )
 }
 
-fn detail_pane(draft: &CardDraft) -> Vec<Line<'_>> {
+fn detail_pane(draft: &CardDraft, width: usize) -> Vec<Line<'_>> {
     let mut lines: Vec<Line<'_>> = Vec::new();
     let indent = "      ";
     lines.push(Line::from(""));
     if let Some(body) = draft.body() {
-        lines.extend(body_preview(body, indent));
+        lines.extend(body_preview(body, indent, width));
     } else {
         lines.push(Line::from(vec![
             Span::styled(indent, palette::base()),
@@ -436,7 +437,7 @@ fn detail_pane(draft: &CardDraft) -> Vec<Line<'_>> {
     lines
 }
 
-fn body_preview<'a>(body: &'a CardBody, indent: &'static str) -> Vec<Line<'a>> {
+fn body_preview<'a>(body: &'a CardBody, indent: &'static str, width: usize) -> Vec<Line<'a>> {
     let mut lines: Vec<Line<'a>> = Vec::new();
     let label = |text: &'static str| {
         Line::from(vec![
@@ -472,11 +473,117 @@ fn body_preview<'a>(body: &'a CardBody, indent: &'static str) -> Vec<Line<'a>> {
     if !body.source_context().trim().is_empty() {
         lines.push(Line::from(""));
         lines.push(label("context"));
-        for chunk in body.source_context().lines() {
-            lines.push(value(chunk.to_string()));
+        let indent_w = display_width(indent);
+        let inner = width.saturating_sub(indent_w).max(20);
+        for line in to_ratatui(&parse_markdown(body.source_context())) {
+            for wrapped in softwrap_line(line, inner) {
+                lines.push(restyle_with_indent(wrapped, indent));
+            }
         }
     }
     lines
+}
+
+/// Soft-wrap one markdown-rendered line into chunks that each fit `width`
+/// display columns. Preserves per-span style + modifiers across wrap points.
+/// CJK code points count as two cells, others as one — close enough to the
+/// real terminal width without pulling in `unicode-width`.
+fn softwrap_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
+    if width == 0 {
+        return vec![line];
+    }
+    let total: usize = line
+        .spans
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum();
+    if total <= width {
+        return vec![line];
+    }
+    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_width = 0usize;
+    let mut current_text = String::new();
+    let mut current_style = line
+        .spans
+        .first()
+        .map(|span| span.style)
+        .unwrap_or_default();
+    let flush_span =
+        |spans: &mut Vec<Span<'static>>, text: &mut String, style: ratatui::style::Style| {
+            if !text.is_empty() {
+                spans.push(Span::styled(std::mem::take(text), style));
+            }
+        };
+    for span in line.spans {
+        if span.style != current_style {
+            flush_span(&mut current_spans, &mut current_text, current_style);
+            current_style = span.style;
+        }
+        for ch in span.content.chars() {
+            let cw = char_width(ch);
+            if current_width + cw > width && (current_width > 0 || !current_text.is_empty()) {
+                flush_span(&mut current_spans, &mut current_text, current_style);
+                if !current_spans.is_empty() {
+                    out.push(Line::from(std::mem::take(&mut current_spans)));
+                }
+                current_width = 0;
+            }
+            current_text.push(ch);
+            current_width += cw;
+        }
+    }
+    flush_span(&mut current_spans, &mut current_text, current_style);
+    if !current_spans.is_empty() {
+        out.push(Line::from(current_spans));
+    }
+    if out.is_empty() {
+        out.push(Line::from(""));
+    }
+    out
+}
+
+/// Display width of one string in terminal cells — sum of `char_width` per
+/// codepoint.
+fn display_width(text: &str) -> usize {
+    text.chars().map(char_width).sum()
+}
+
+/// Display width of one codepoint in terminal cells. Two cells for the CJK
+/// ranges + fullwidth forms, one cell for everything else.
+fn char_width(ch: char) -> usize {
+    let code = ch as u32;
+    let wide = matches!(
+        code,
+        0x1100..=0x115F
+            | 0x2E80..=0x303E
+            | 0x3041..=0x33FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xA000..=0xA4CF
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFE30..=0xFE4F
+            | 0xFF00..=0xFF60
+            | 0xFFE0..=0xFFE6
+            | 0x20000..=0x2FFFD
+            | 0x30000..=0x3FFFD
+    );
+    if wide { 2 } else { 1 }
+}
+
+/// Repaint one markdown-rendered line with the preview palette and prepend the
+/// shared indent span. The markdown layer emits neutral spans carrying only
+/// BOLD / ITALIC modifiers — we keep those and force the foreground colour to
+/// `palette::base()` so context blends with the surrounding preview rows.
+fn restyle_with_indent(line: Line<'static>, indent: &'static str) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len() + 1);
+    spans.push(Span::styled(indent, palette::base()));
+    for span in line.spans {
+        let style = palette::base().add_modifier(span.style.add_modifier);
+        spans.push(Span::styled(span.content, style));
+    }
+    Line::from(spans)
 }
 
 fn highlight_line<'a>(body: &'a CardBody, indent: &'static str) -> Line<'a> {
@@ -600,7 +707,7 @@ fn card_layout(
     let mut rows = head_rows(draft, width);
     rows += steps.len();
     if expanded {
-        rows = rows.saturating_add(detail_pane_height(draft));
+        rows = rows.saturating_add(detail_pane_height(draft, width));
     }
     let trailing = if !steps.is_empty() || expanded { 1 } else { 0 };
     (rows, trailing)
@@ -609,7 +716,7 @@ fn card_layout(
 /// Number of body-rect rows the expanded body-preview pane consumes for one
 /// card. Verbatim mirror of `detail_pane` / `body_preview` so callers can keep
 /// scroll offsets and click hit-tests aligned with the rendered output.
-pub(crate) fn detail_pane_height(draft: &CardDraft) -> usize {
+pub(crate) fn detail_pane_height(draft: &CardDraft, width: usize) -> usize {
     let mut h = 1;
     let Some(body) = draft.body() else {
         return h + 1;
@@ -620,7 +727,12 @@ pub(crate) fn detail_pane_height(draft: &CardDraft) -> usize {
     h += 1 + 2;
     if !body.source_context().trim().is_empty() {
         h += 1 + 1;
-        h += body.source_context().lines().count();
+        let indent_w = display_width("      ");
+        let inner = width.saturating_sub(indent_w).max(20);
+        h += to_ratatui(&parse_markdown(body.source_context()))
+            .into_iter()
+            .map(|line| softwrap_line(line, inner).len())
+            .sum::<usize>();
     }
     h
 }

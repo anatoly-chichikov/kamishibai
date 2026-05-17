@@ -95,7 +95,8 @@ impl FontPath {
                 "Liberation Sans",
                 "DejaVu Sans",
             ],
-            "Hiragino Sans GB" => &[
+            "Hiragino Sans" => &[
+                "Hiragino Sans GB",
                 "PingFang SC",
                 "STHeiti",
                 "Heiti SC",
@@ -217,10 +218,11 @@ impl FontFamily {
 }
 
 /// Three-track palette: primary Latin/Greek/Cyrillic (Arial), CJK (Hiragino
-/// Sans GB), and a wide-coverage fallback (Arial Unicode MS) for glyphs the
-/// primary or CJK weight is missing — IPA in bold is the canonical example.
-/// The renderer routes each glyph at the current weight to the first track
-/// that carries it, so a single line can mix scripts and weights without
+/// Sans, which ships distinct regular and bold faces on macOS unlike
+/// Hiragino Sans GB), and a wide-coverage fallback (Arial Unicode MS) for
+/// glyphs the primary or CJK weight is missing — IPA in bold is the canonical
+/// example. The renderer routes each glyph at the current weight to the first
+/// track that carries it, so a single line can mix scripts and weights without
 /// dropping glyphs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FontPalette {
@@ -232,11 +234,14 @@ pub struct FontPalette {
 impl Default for FontPalette {
     /// Return the default palette: macOS-shipped Arial (separate Regular and
     /// Bold .ttf files, so the .ttc-subface issue does not apply), Hiragino
-    /// Sans GB for CJK, and Arial Unicode MS as the wide-coverage fallback.
+    /// Sans (W3 and W6 in separate .ttc subfaces) for CJK, and Arial Unicode
+    /// MS as the wide-coverage fallback. Hiragino Sans GB used to be the CJK
+    /// pick but font-kit resolves its bold to the same face as its regular
+    /// on macOS, so bold CJK never actually rendered bold.
     fn default() -> Self {
         Self {
             primary: FontFamily::new("Arial"),
-            cjk: FontFamily::new("Hiragino Sans GB"),
+            cjk: FontFamily::new("Hiragino Sans"),
             fallback: FontFamily::new("Arial Unicode MS"),
         }
     }
@@ -372,8 +377,10 @@ pub(super) fn leading(size: f32) -> f32 {
     size * 1.2 * 25.4 / 72.0
 }
 
-/// Wrap one report line to fit the target width using the same primary + CJK
-/// + fallback chain the renderer uses.
+/// Wrap one report line to fit the target width using the same primary, CJK,
+/// and fallback chain the renderer uses. Handles CJK by allowing any CJK
+/// character to be a line-break candidate, since these scripts do not use
+/// inter-word spaces.
 pub(super) fn wrap(
     text: &str,
     size: f32,
@@ -385,36 +392,39 @@ pub(super) fn wrap(
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
     for word in text.split_whitespace() {
-        let candidate = if current.is_empty() {
-            String::from(word)
-        } else {
-            format!("{current} {word}")
-        };
-        if measure(primary, cjk, fallback, candidate.as_str(), size) <= width {
-            current = candidate;
-            continue;
-        }
-        if !current.is_empty() {
-            lines.push(std::mem::take(&mut current));
-        }
-        if measure(primary, cjk, fallback, word, size) <= width {
-            current = String::from(word);
-            continue;
-        }
-        let mut head = String::new();
-        for ch in word.chars() {
-            let mut next = head.clone();
-            next.push(ch);
-            if measure(primary, cjk, fallback, next.as_str(), size) <= width {
-                head = next;
+        for piece in cjk_segments(word) {
+            let joiner = if current.is_empty() || piece_is_glued(current.as_str(), piece.as_str()) {
+                ""
+            } else {
+                " "
+            };
+            let candidate = format!("{current}{joiner}{piece}");
+            if measure(primary, cjk, fallback, candidate.as_str(), size) <= width {
+                current = candidate;
                 continue;
             }
-            if !head.is_empty() {
-                lines.push(std::mem::take(&mut head));
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
             }
-            head.push(ch);
+            if measure(primary, cjk, fallback, piece.as_str(), size) <= width {
+                current = piece;
+                continue;
+            }
+            let mut head = String::new();
+            for ch in piece.chars() {
+                let mut next = head.clone();
+                next.push(ch);
+                if measure(primary, cjk, fallback, next.as_str(), size) <= width {
+                    head = next;
+                    continue;
+                }
+                if !head.is_empty() {
+                    lines.push(std::mem::take(&mut head));
+                }
+                head.push(ch);
+            }
+            current = head;
         }
-        current = head;
     }
     if !current.is_empty() {
         lines.push(current);
@@ -423,6 +433,60 @@ pub(super) fn wrap(
         lines.push(String::new());
     }
     lines
+}
+
+/// Split one whitespace-delimited word into pieces where each CJK character
+/// is its own piece and runs of non-CJK letters stay glued together. Lets
+/// the wrap loop pick line-break points inside scripts that do not use
+/// spaces between words.
+fn cjk_segments(word: &str) -> Vec<String> {
+    if !word.chars().any(is_cjk) {
+        return vec![String::from(word)];
+    }
+    let mut out = Vec::new();
+    let mut buffer = String::new();
+    for ch in word.chars() {
+        if is_cjk(ch) {
+            if !buffer.is_empty() {
+                out.push(std::mem::take(&mut buffer));
+            }
+            out.push(ch.to_string());
+        } else {
+            buffer.push(ch);
+        }
+    }
+    if !buffer.is_empty() {
+        out.push(buffer);
+    }
+    out
+}
+
+/// Return whether the boundary between the tail of `left` and the head of
+/// `right` should NOT take a literal space — true for CJK-on-either-side
+/// boundaries inside one whitespace-delimited input word.
+fn piece_is_glued(left: &str, right: &str) -> bool {
+    let left_cjk = left.chars().next_back().is_some_and(is_cjk);
+    let right_cjk = right.chars().next().is_some_and(is_cjk);
+    left_cjk || right_cjk
+}
+
+/// Return whether the character belongs to a script that does not separate
+/// words with spaces — Hiragana, Katakana, Hangul, and the CJK ideographic
+/// ranges. Treated as line-break candidates per character.
+pub(super) fn is_cjk(ch: char) -> bool {
+    let code = ch as u32;
+    matches!(
+        code,
+        0x3000..=0x303F
+            | 0x3040..=0x309F
+            | 0x30A0..=0x30FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0xFF00..=0xFFEF
+            | 0x20000..=0x2A6DF
+            | 0xAC00..=0xD7AF
+    )
 }
 
 /// Return one PDF RGB color value.
@@ -442,4 +506,31 @@ pub(super) fn target(mm: f32, pixels: f32) -> f32 {
     }
     let points = mm * 72.0 / 25.4;
     points * 300.0 / (pixels * 72.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FontPalette;
+
+    /// Regression for the Hiragino Sans GB pitfall: font-kit used to resolve
+    /// the bold weight to the exact same .ttc subface as the regular weight,
+    /// so bold CJK never actually rendered bold. The default CJK family must
+    /// expose distinct files (or distinct face indices) for the two weights.
+    #[test]
+    fn cjk_bold_resolves_to_a_distinct_face_from_cjk_regular() {
+        let palette = FontPalette::default();
+        let regular = palette
+            .cjk()
+            .regular()
+            .expect("CJK regular must resolve on the test platform");
+        let bold = palette
+            .cjk()
+            .bold()
+            .expect("CJK bold must resolve on the test platform");
+        let same_face = regular.path == bold.path && regular.face_index == bold.face_index;
+        assert!(
+            !same_face,
+            "CJK bold ({bold:?}) collapsed onto the CJK regular face ({regular:?}) — bold weight will silently render as regular"
+        );
+    }
 }

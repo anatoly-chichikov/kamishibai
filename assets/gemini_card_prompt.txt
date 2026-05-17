@@ -20,7 +20,7 @@ User correction:
 
 Produce a single JSON object with exactly these fields and no others, no prose, no code fences:
 
-{"term":"<possibly revised term>","understanding":"<possibly revised understanding>","pronunciation":"<IPA of term, no slashes>","transcription":"<IPA of target_sentence, no slashes>","meaning":"<short translation in source language>","importance":<integer 1..10>,"source_sentence":"<translation of target_sentence>","source_highlight":"<exact substring of source_sentence translating term>","source_hint":"<one source-language sentence; vivid memory cue; never mentions term>","source_context":"<up to ten source-language sentences of usage notes>","target_sentence":"<natural example sentence in target language using term>"}
+{"term":"<possibly revised term>","understanding":"<possibly revised understanding>","pronunciation":"<IPA of term, no slashes>","transcription":"<IPA of target_sentence, no slashes>","meaning":"<short translation in source language>","importance":<integer 1..10>,"source_sentence":"<translation of target_sentence>","source_highlight":"<exact substring of source_sentence translating term>","source_hint":"<one contrastive source-language sentence, hard limit 11 words; never mentions term>","source_context":"<four mentor-voice sections in source language; see source_context rules>","target_sentence":"<natural example sentence in target language using term>"}
 
 Rules:
 
@@ -29,8 +29,8 @@ Rules:
 - Whenever you regenerate a field, follow the same rules as the original card-body author:
   - target_sentence is natural and uses `term` in the chosen sense/form.
   - source_highlight is an exact substring of source_sentence.
-  - source_hint is one sentence; it never mentions `term`, its translation, or any of its forms; it builds a vivid recall image instead.
-  - source_context is at most ten sentences of usage notes.
+  - source_hint is one sentence in source language, hard limit 11 words, in a contrastive shape «not …, but …» (natural equivalent in source_language). Contrast `term` with one near-but-different word in target_language — name that other word verbatim, show the visual/concrete difference. Never mention `term`, its translation, or any of its forms.
+  - source_context is exactly four mentor-voice sections in source language, separated by single blank lines. Each section starts with a bold header on its own line, written in the natural source_language equivalent of: **Meaning.** / **Where you'll hear it.** / **Where it's out of place.** / **Subtlety.** First section is up to three `- ` bullets giving the unambiguous senses (lowercase labels). Second names concrete scenes/genres. Third names a setting to avoid plus the safer target_language word. Fourth gives one sharp non-obvious detail. No ALL CAPS anywhere, no italic, no English register tags.
   - pronunciation is IPA for the term (no slashes); transcription is IPA for the full target_sentence.
   - importance is an integer in 1..10.
 

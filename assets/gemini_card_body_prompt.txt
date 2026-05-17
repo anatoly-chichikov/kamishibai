@@ -14,7 +14,7 @@ Understanding (in source language; the parsed sense, form, register, or note the
 
 Produce a single JSON object with exactly these fields, in this order, no extra fields, no prose, no code fences:
 
-{"pronunciation":"<IPA of term, no slashes>","transcription":"<IPA of the full target_sentence, no slashes>","meaning":"<one short translation of term in source language; comma-separated alternates allowed>","importance":<integer 1..10>,"source_sentence":"<translation of target_sentence into source language>","source_highlight":"<exact substring of source_sentence that translates term, in the form it appears there>","source_hint":"<one sentence in source language; a vivid memory cue>","source_context":"<up to ten sentences in source language; usage notes>","target_sentence":"<a natural example sentence in target language using term in the chosen sense and form>"}
+{"pronunciation":"<IPA of term, no slashes>","transcription":"<IPA of the full target_sentence, no slashes>","meaning":"<one short translation of term in source language; comma-separated alternates allowed>","importance":<integer 1..10>,"source_sentence":"<translation of target_sentence into source language>","source_highlight":"<exact substring of source_sentence that translates term, in the form it appears there>","source_hint":"<one contrastive sentence in source language, hard limit 11 words>","source_context":"<four mentor-voice sections in source language; see source_context rules>","target_sentence":"<a natural example sentence in target language using term in the chosen sense and form>"}
 
 Field rules:
 
@@ -32,10 +32,22 @@ Field rules:
 
 - source_highlight: the substring of `source_sentence` that corresponds to `term`, in the exact form it appears in `source_sentence` (not the dictionary form). It must be an exact substring of `source_sentence`.
 
-- source_hint: exactly one sentence in source language. It is a memory cue that helps the learner recall `term` from a context, not a dictionary definition. Build a vivid image, metaphor, situational picture, register signal, or cultural cue. Do NOT mention `term` itself, its translation, or its forms anywhere in this sentence.
+- source_hint: exactly one sentence in source language, hard limit 11 words, in a contrastive shape — «not …, but …» / «… , but not …» (use the natural equivalent phrasing in source_language). Contrast `term` with one near-but-different word in target_language: name that other target_language word verbatim and show what distinguishes `term` from it. The contrast must be visual or concrete, never a definition. Do NOT mention `term` itself, its translation, or any of its forms. No words like "means", "used", "commonly".
    Bad examples (do not produce these): "Used when politely asking for something." / "Means tired." / "Common in business contexts."
-   Good shape (illustrative): "Battery flat — not just tired, squeezed dry like a lemon."
+   Good shape (illustrative): "Не шумный port с кранами и фурами, а тихая каменная подкова."
 
-- source_context: up to ten sentences in source language. Cover whichever of the following are useful: how visible or frequent the word is in real use, register (formal, neutral, colloquial, slang), where the word fits naturally and where to avoid it, common collocations and example phrasings, false friends or common learner mistakes, useful synonyms or antonyms. Use plain newlines for separation; the renderer will turn them into HTML breaks.
+- source_context: a friendly mentor walking a source_language-speaking learner into target_language. Not primitive, not academic. Concrete examples, no jargon, no English register tags, never ALL CAPS — lowercase labels only.
+
+   Exactly four sections separated by single blank lines. Each starts with a bold header on its own line, written in the natural source_language equivalent of these four English labels (translate the labels into source_language, do not leave them in English): **Meaning.** / **Where you'll hear it.** / **Where it's out of place.** / **Subtlety.**
+
+   - First section (Meaning): up to three bullets `- `. Each bullet shape: `<short lowercase label, one or two source_language words>: <one short source_language sentence explaining the sense>.` If the term has a single sense, emit one bullet. This block must give the unambiguous answer to "what does this word mean".
+
+   - Second section (Where you'll hear it): 1–2 short source_language sentences naming concrete scenes, conversations, or genres where this word naturally surfaces. If rare or wordy, say so plainly in source_language (e.g. "rare, classical prose").
+
+   - Third section (Where it's out of place): 1–2 short source_language sentences naming a concrete setting where the learner should NOT use it (rude / archaic / weirdly formal / too slangy / wrong) AND the safer target_language word to swap in. Name the swap word verbatim.
+
+   - Fourth section (Subtlety): one sharp non-obvious detail — false friend, grammar trap, typical learner mistake, tricky preposition. One single point.
+
+   Markdown allowed in source_context: `**bold**` for the four headers, `- ` bullets inside the first section only. No italic, no other markup, no ALL CAPS. Use real blank lines between sections; the renderer turns plain newlines into HTML breaks.
 
 Write nothing outside the JSON object.

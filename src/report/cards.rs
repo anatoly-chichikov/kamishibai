@@ -14,6 +14,7 @@ use printpdf::{
     Point, Polygon, PolygonRing, Pt, Rgb, TextItem, TextMatrix, XObjectTransform,
 };
 
+use crate::markdown::{Block, TextChunk, parse_markdown};
 use crate::vocabulary::VocabularyEntry;
 
 use super::Thumbnail;
@@ -32,6 +33,9 @@ const COL_GAP: f32 = 5.0;
 const TEXT_PAD_RIGHT: f32 = 5.0;
 const PANEL_BORDER_PT: f32 = 0.6;
 const IMPORTANCE_GLYPHS: &str = "Importance ";
+const BULLET_MARKER: &str = "•  ";
+const BULLET_INDENT_STEP: f32 = 3.5;
+const BLOCK_GAP_RATIO: f32 = 0.35;
 const HAIR: f32 = 0.4;
 const CUT_DASH: f32 = 1.4;
 const CUT_GAP: f32 = 1.0;
@@ -263,21 +267,11 @@ impl CardSheet {
         let mut cursor = HALF_H * 0.70;
         for line in &phrase_lines {
             cursor -= leading(PHRASE_SIZE);
-            draw_runs(
-                ops,
-                fonts,
-                ids,
-                line,
-                PHRASE_SIZE,
-                text_x,
-                cursor,
-                INK,
-                false,
-            );
+            draw_runs(ops, fonts, ids, line, PHRASE_SIZE, text_x, cursor, INK);
         }
         cursor -= leading(PHRASE_SIZE) * 0.4;
         let gloss_lines = wrap_runs(
-            &[(plan.gloss.clone(), false)],
+            &[italic_chunk(plan.gloss.as_str())],
             text_w,
             GLOSS_SIZE,
             ClassifierView::from(fonts),
@@ -285,7 +279,7 @@ impl CardSheet {
         for line in gloss_lines {
             cursor -= leading(GLOSS_SIZE);
             draw_runs(
-                ops, fonts, ids, &line, GLOSS_SIZE, text_x, cursor, GLOSS_INK, true,
+                ops, fonts, ids, &line, GLOSS_SIZE, text_x, cursor, GLOSS_INK,
             );
         }
     }
@@ -303,7 +297,7 @@ impl CardSheet {
         );
         for line in en_lines {
             cursor -= leading(EN_SIZE);
-            draw_runs(ops, fonts, ids, &line, EN_SIZE, PAD, cursor, INK, false);
+            draw_runs(ops, fonts, ids, &line, EN_SIZE, PAD, cursor, INK);
         }
         cursor -= 1.4;
         draw_hairline(ops, PAD, cursor, CARD_W - PAD, cursor);
@@ -313,12 +307,11 @@ impl CardSheet {
             ops,
             fonts,
             ids,
-            &[(plan.lemma.clone(), true)],
+            &[bold_chunk(plan.lemma.as_str())],
             LEX_SIZE,
             PAD,
             cursor,
             INK,
-            false,
         );
         cursor -= leading(IPA_SIZE) * 0.95;
         draw_mono(
@@ -333,24 +326,14 @@ impl CardSheet {
         );
         cursor -= leading(MEANING_SIZE) * 0.4;
         let meaning_lines = wrap_runs(
-            &[(plan.meaning.clone(), false)],
+            &[plain_chunk(plan.meaning.as_str())],
             text_w,
             MEANING_SIZE,
             ClassifierView::from(fonts),
         );
         for line in meaning_lines {
             cursor -= leading(MEANING_SIZE);
-            draw_runs(
-                ops,
-                fonts,
-                ids,
-                &line,
-                MEANING_SIZE,
-                PAD,
-                cursor,
-                INK,
-                false,
-            );
+            draw_runs(ops, fonts, ids, &line, MEANING_SIZE, PAD, cursor, INK);
         }
         cursor -= leading(IMP_SIZE) * 0.4;
         cursor -= leading(IMP_SIZE);
@@ -358,54 +341,79 @@ impl CardSheet {
         cursor -= leading(EXPLAIN_SIZE) * 0.6;
         let view = ClassifierView::from(fonts);
         let explain_size = fit_explanation(&plan.explanation, text_w, cursor - PAD, view);
-        let para_gap = leading(explain_size) * 0.35;
-        'paragraphs: for (idx, paragraph) in plan.explanation.iter().enumerate() {
+        let block_gap = leading(explain_size) * BLOCK_GAP_RATIO;
+        let marker_width = view.measure(BULLET_MARKER, false, explain_size);
+        'blocks: for (idx, block) in plan.explanation.iter().enumerate() {
             if idx > 0 {
-                cursor -= para_gap;
+                cursor -= block_gap;
             }
-            let lines = wrap_runs(&[(paragraph.clone(), false)], text_w, explain_size, view);
-            for line in lines {
-                cursor -= leading(explain_size);
-                if cursor < PAD {
-                    break 'paragraphs;
+            match block {
+                Block::Paragraph(chunks) => {
+                    let lines = wrap_runs(chunks.as_slice(), text_w, explain_size, view);
+                    for line in lines {
+                        cursor -= leading(explain_size);
+                        if cursor < PAD {
+                            break 'blocks;
+                        }
+                        draw_runs(ops, fonts, ids, &line, explain_size, PAD, cursor, INK);
+                    }
                 }
-                draw_runs(
-                    ops,
-                    fonts,
-                    ids,
-                    &line,
-                    explain_size,
-                    PAD,
-                    cursor,
-                    INK,
-                    false,
-                );
+                Block::Bullet { indent, chunks } => {
+                    let indent_mm = f32::from(*indent) * BULLET_INDENT_STEP;
+                    let marker_x = PAD + indent_mm;
+                    let text_x = marker_x + marker_width;
+                    let inner_w = (text_w - indent_mm - marker_width).max(10.0);
+                    let lines = wrap_runs(chunks.as_slice(), inner_w, explain_size, view);
+                    for (line_idx, line) in lines.into_iter().enumerate() {
+                        cursor -= leading(explain_size);
+                        if cursor < PAD {
+                            break 'blocks;
+                        }
+                        if line_idx == 0 {
+                            draw_runs(
+                                ops,
+                                fonts,
+                                ids,
+                                &[plain_chunk(BULLET_MARKER)],
+                                explain_size,
+                                marker_x,
+                                cursor,
+                                INK,
+                            );
+                        }
+                        draw_runs(ops, fonts, ids, &line, explain_size, text_x, cursor, INK);
+                    }
+                }
             }
         }
     }
 }
 
 /// Return the largest size in `[EXPLAIN_SIZE_MIN, EXPLAIN_SIZE]` (stepping by
-/// `EXPLAIN_SIZE_STEP`) at which the wrapped, multi-paragraph explanation
-/// fits inside `available` millimetres of vertical space. Accounts for the
-/// inter-paragraph gap; falls back to the minimum size when even the
-/// smallest pass overflows so the caller can still emit and let the cursor
-/// guard clip the tail.
-fn fit_explanation(
-    paragraphs: &[String],
-    width: f32,
-    available: f32,
-    view: ClassifierView<'_>,
-) -> f32 {
+/// `EXPLAIN_SIZE_STEP`) at which the wrapped, multi-block explanation fits
+/// inside `available` millimetres of vertical space. Accounts for the
+/// inter-block gap and bullet indents; falls back to the minimum size when
+/// even the smallest pass overflows so the caller can still emit and let the
+/// cursor guard clip the tail.
+fn fit_explanation(blocks: &[Block], width: f32, available: f32, view: ClassifierView<'_>) -> f32 {
     let mut size = EXPLAIN_SIZE;
     while size >= EXPLAIN_SIZE_MIN {
-        let para_gap = leading(size) * 0.35;
+        let block_gap = leading(size) * BLOCK_GAP_RATIO;
+        let marker_width = view.measure(BULLET_MARKER, false, size);
         let mut total = 0.0_f32;
-        for (idx, paragraph) in paragraphs.iter().enumerate() {
+        for (idx, block) in blocks.iter().enumerate() {
             if idx > 0 {
-                total += para_gap;
+                total += block_gap;
             }
-            let lines = wrap_runs(&[(paragraph.clone(), false)], width, size, view);
+            let (chunks, inner_w) = match block {
+                Block::Paragraph(chunks) => (chunks.as_slice(), width),
+                Block::Bullet { indent, chunks } => {
+                    let indent_mm = f32::from(*indent) * BULLET_INDENT_STEP;
+                    let inner = (width - indent_mm - marker_width).max(10.0);
+                    (chunks.as_slice(), inner)
+                }
+            };
+            let lines = wrap_runs(chunks, inner_w, size, view);
             total += lines.len() as f32 * leading(size);
         }
         if total <= available {
@@ -419,21 +427,23 @@ fn fit_explanation(
 /// One card's pre-computed text content with bold-highlighted runs.
 #[derive(Clone, Debug)]
 struct CardPlan {
-    front_phrase: Vec<(String, bool)>,
+    front_phrase: Vec<TextChunk>,
     gloss: String,
-    back_phrase: Vec<(String, bool)>,
+    back_phrase: Vec<TextChunk>,
     lemma: String,
     lemma_ipa: String,
     meaning: String,
     importance: u8,
-    explanation: Vec<String>,
+    explanation: Vec<Block>,
 }
 
 impl CardPlan {
     /// Build one card plan from one vocabulary entry. The source sentence is
     /// split into [before, highlight, after] runs so the idiom prints bold
     /// inside a regular-weight phrase; the target sentence reuses the term as
-    /// its highlight when present, otherwise stays plain.
+    /// its highlight when present, otherwise stays plain. `source_context`
+    /// is parsed as light markdown so V14-style bold headers and bulleted
+    /// senses render as structured blocks on the card back.
     fn build(entry: &VocabularyEntry) -> Self {
         let highlight = entry.source.highlight.as_str();
         let sentence = entry.source.sentence.as_str();
@@ -449,15 +459,7 @@ impl CardPlan {
             lemma_ipa: pronounce(entry.pronunciation.as_str()),
             meaning: entry.meaning.as_str().to_string(),
             importance: entry.importance.value(),
-            explanation: entry
-                .source
-                .context
-                .as_str()
-                .split('\n')
-                .map(str::trim)
-                .filter(|paragraph| !paragraph.is_empty())
-                .map(String::from)
-                .collect(),
+            explanation: parse_markdown(entry.source.context.as_str()),
         }
     }
 
@@ -472,31 +474,37 @@ impl CardPlan {
         cjk_bold: &ParsedFont,
         fallback: &ParsedFont,
     ) {
-        let mut push_runs = |runs: &[(String, bool)]| {
-            for (text, bold) in runs {
-                for ch in text.chars() {
+        let mut push_runs = |runs: &[TextChunk]| {
+            for chunk in runs {
+                for ch in chunk.text.chars() {
                     let track = dispatch(
                         ch,
-                        *bold,
+                        chunk.bold,
                         primary_regular,
                         primary_bold,
                         cjk_regular,
                         cjk_bold,
                         fallback,
                     );
-                    buckets.insert(track, *bold, ch);
+                    buckets.insert(track, chunk.bold, ch);
                 }
             }
         };
         push_runs(self.front_phrase.as_slice());
-        push_runs(&[(self.gloss.clone(), false)]);
+        push_runs(&[italic_chunk(self.gloss.as_str())]);
         push_runs(self.back_phrase.as_slice());
-        push_runs(&[(self.lemma.clone(), true)]);
-        push_runs(&[(self.meaning.clone(), false)]);
-        for paragraph in &self.explanation {
-            push_runs(&[(paragraph.clone(), false)]);
+        push_runs(&[bold_chunk(self.lemma.as_str())]);
+        push_runs(&[plain_chunk(self.meaning.as_str())]);
+        for block in &self.explanation {
+            match block {
+                Block::Paragraph(chunks) => push_runs(chunks.as_slice()),
+                Block::Bullet { chunks, .. } => {
+                    push_runs(&[plain_chunk(BULLET_MARKER)]);
+                    push_runs(chunks.as_slice());
+                }
+            }
         }
-        push_runs(&[(String::from(IMPORTANCE_GLYPHS), false)]);
+        push_runs(&[plain_chunk(IMPORTANCE_GLYPHS)]);
         for ch in self.lemma_ipa.chars() {
             buckets.mono.insert(ch);
         }
@@ -506,24 +514,55 @@ impl CardPlan {
 /// Return the source sentence split into regular and bold runs around the
 /// highlighted span. Falls back to a single regular run when the highlight is
 /// not a verbatim substring.
-fn bold_split(sentence: &str, highlight: &str) -> Vec<(String, bool)> {
+fn bold_split(sentence: &str, highlight: &str) -> Vec<TextChunk> {
     if highlight.is_empty() {
-        return vec![(sentence.to_string(), false)];
+        return vec![plain_chunk(sentence)];
     }
     if let Some(start) = sentence.find(highlight) {
         let before = &sentence[..start];
         let after = &sentence[start + highlight.len()..];
         let mut runs = Vec::new();
         if !before.is_empty() {
-            runs.push((before.to_string(), false));
+            runs.push(plain_chunk(before));
         }
-        runs.push((highlight.to_string(), true));
+        runs.push(TextChunk {
+            text: highlight.to_string(),
+            bold: true,
+            italic: false,
+        });
         if !after.is_empty() {
-            runs.push((after.to_string(), false));
+            runs.push(plain_chunk(after));
         }
         return runs;
     }
-    vec![(sentence.to_string(), false)]
+    vec![plain_chunk(sentence)]
+}
+
+/// Build one neutral text chunk — no bold, no italic.
+fn plain_chunk(text: &str) -> TextChunk {
+    TextChunk {
+        text: text.to_string(),
+        bold: false,
+        italic: false,
+    }
+}
+
+/// Build one bold-only text chunk — used for lemma-style runs.
+fn bold_chunk(text: &str) -> TextChunk {
+    TextChunk {
+        text: text.to_string(),
+        bold: true,
+        italic: false,
+    }
+}
+
+/// Build one italic-only text chunk — used for the front-face gloss.
+fn italic_chunk(text: &str) -> TextChunk {
+    TextChunk {
+        text: text.to_string(),
+        bold: false,
+        italic: true,
+    }
 }
 
 /// Return one pronunciation string wrapped in IPA slashes when the source has
@@ -768,16 +807,15 @@ fn draw_importance(
         ops,
         fonts,
         ids,
-        &[(String::from("Importance "), false)],
+        &[plain_chunk(IMPORTANCE_GLYPHS)],
         IMP_SIZE,
         x,
         y,
         MUTED,
-        false,
     );
     let label_w = measure_runs(
         ClassifierView::from(fonts),
-        &[(String::from("Importance "), false)],
+        &[plain_chunk(IMPORTANCE_GLYPHS)],
         IMP_SIZE,
     );
     let radius = 0.6_f32;
@@ -854,54 +892,54 @@ fn draw_mono(
     ops.push(Op::EndTextSection);
 }
 
-/// Emit one line composed of (text, bold) chunks at the given baseline. Each
-/// chunk is split per character into primary / CJK / fallback runs at its
-/// weight so mixed scripts share the same baseline. When `italic` is set the
-/// line is sheared into a synthetic oblique — there is no italic font track,
-/// so the gloss leans via the text matrix instead.
+/// Draw one logical line of styled chunks starting at the given baseline.
+/// Each chunk runs in its own text section so per-chunk italic slants stay
+/// independent and per-character font dispatch routes mixed scripts. Italic
+/// is rendered as a synthetic oblique through the text matrix — there is no
+/// italic font track.
 #[allow(clippy::too_many_arguments)]
 fn draw_runs(
     ops: &mut Vec<Op>,
     fonts: &SheetFonts,
     ids: &SheetIds,
-    chunks: &[(String, bool)],
+    chunks: &[TextChunk],
     size: f32,
-    x: f32,
+    x_start: f32,
     y: f32,
     color: (u8, u8, u8),
-    italic: bool,
 ) {
-    if chunks.iter().all(|(text, _)| text.is_empty()) {
-        return;
-    }
-    ops.push(Op::StartTextSection);
-    if italic {
-        ops.push(Op::SetTextMatrix {
-            matrix: TextMatrix::Raw([
-                1.0,
-                0.0,
-                ITALIC_SLANT,
-                1.0,
-                x * 72.0 / 25.4,
-                y * 72.0 / 25.4,
-            ]),
-        });
-    } else {
-        ops.push(Op::SetTextCursor {
-            pos: Point::new(Mm(x), Mm(y)),
-        });
-    }
-    ops.push(Op::SetLineHeight { lh: Pt(size) });
-    ops.push(Op::SetFillColor {
-        col: rgb_tuple(color),
-    });
-    for (text, bold) in chunks {
-        if text.is_empty() {
+    let view = ClassifierView::from(fonts);
+    let mut x = x_start;
+    for chunk in chunks {
+        if chunk.text.is_empty() {
             continue;
         }
-        emit_chunk(ops, fonts, ids, text, *bold, size);
+        let width = view.measure(chunk.text.as_str(), chunk.bold, size);
+        ops.push(Op::StartTextSection);
+        if chunk.italic {
+            ops.push(Op::SetTextMatrix {
+                matrix: TextMatrix::Raw([
+                    1.0,
+                    0.0,
+                    ITALIC_SLANT,
+                    1.0,
+                    x * 72.0 / 25.4,
+                    y * 72.0 / 25.4,
+                ]),
+            });
+        } else {
+            ops.push(Op::SetTextCursor {
+                pos: Point::new(Mm(x), Mm(y)),
+            });
+        }
+        ops.push(Op::SetLineHeight { lh: Pt(size) });
+        ops.push(Op::SetFillColor {
+            col: rgb_tuple(color),
+        });
+        emit_chunk(ops, fonts, ids, chunk.text.as_str(), chunk.bold, size);
+        ops.push(Op::EndTextSection);
+        x += width;
     }
-    ops.push(Op::EndTextSection);
 }
 
 /// Emit one (text, bold) chunk inside an open text section, switching fonts
@@ -967,34 +1005,49 @@ fn emit_run(ops: &mut Vec<Op>, ids: &SheetIds, text: &str, track: Track, bold: b
     });
 }
 
-/// Wrap a sequence of (text, bold) runs to fit the given width in mm. Each
-/// output line preserves the per-run bold flag so the renderer can switch
-/// fonts inside one visual line. Glued punctuation — a comma or period the
-/// regular run carries straight after the bold highlight — wraps together
-/// with the word it abuts instead of drifting onto its own line.
+/// Wrap a sequence of styled chunks to fit the given width in mm. Each
+/// output line preserves the per-chunk weight and italic flags so the
+/// renderer can switch fonts and matrices inside one visual line. Glued
+/// punctuation — a comma or period the regular run carries straight after
+/// the bold highlight — wraps together with the word it abuts instead of
+/// drifting onto its own line.
 fn wrap_runs(
-    runs: &[(String, bool)],
+    runs: &[TextChunk],
     width: f32,
     size: f32,
     view: ClassifierView<'_>,
-) -> Vec<Vec<(String, bool)>> {
+) -> Vec<Vec<TextChunk>> {
     let groups = group_tokens(tokenize(runs));
-    let mut lines: Vec<Vec<(String, bool)>> = Vec::new();
-    let mut current: Vec<(String, bool)> = Vec::new();
+    let mut lines: Vec<Vec<TextChunk>> = Vec::new();
+    let mut current: Vec<TextChunk> = Vec::new();
     let mut current_width = 0.0_f32;
     let space_width = view.measure(" ", false, size);
     for group in groups {
         let group_width: f32 = group
             .iter()
-            .map(|(text, bold)| view.measure(text.as_str(), *bold, size))
+            .map(|chunk| view.measure(chunk.text.as_str(), chunk.bold, size))
             .sum();
-        let extra = if current.is_empty() { 0.0 } else { space_width };
+        let new_first_cjk = group
+            .first()
+            .and_then(|chunk| chunk.text.chars().next())
+            .is_some_and(is_cjk);
+        let current_last_cjk = current
+            .last()
+            .and_then(|chunk| chunk.text.chars().next_back())
+            .is_some_and(is_cjk);
+        let needs_space = !current.is_empty() && !new_first_cjk && !current_last_cjk;
+        let extra = if needs_space { space_width } else { 0.0 };
         if !current.is_empty() && current_width + extra + group_width > width {
             lines.push(std::mem::take(&mut current));
             current_width = 0.0;
         }
-        if !current.is_empty() {
-            current.push((String::from(" "), false));
+        let needs_space = !current.is_empty() && !new_first_cjk && !current_last_cjk;
+        if needs_space {
+            current.push(TextChunk {
+                text: String::from(" "),
+                bold: false,
+                italic: false,
+            });
             current_width += space_width;
         }
         current_width += group_width;
@@ -1009,30 +1062,34 @@ fn wrap_runs(
     lines
 }
 
-/// One wrap token: its text, weight, and whether whitespace precedes it in
-/// the source. A `space_before` of false marks punctuation glued to the
-/// previous token — carried into the regular run straight after the bold
-/// highlight — so it never gains a leading space or wraps away from it.
+/// One wrap token: its text, weight, italic flag, and whether whitespace
+/// precedes it in the source. A `space_before` of false marks punctuation
+/// glued to the previous token — carried into the regular run straight after
+/// the bold highlight — so it never gains a leading space or wraps away from it.
 #[derive(Clone, Debug)]
 struct WrapToken {
     text: String,
     bold: bool,
+    italic: bool,
     space_before: bool,
 }
 
-/// Split a run sequence into wrap tokens. `split_whitespace` marks the gaps
-/// inside one run; at a run boundary a space exists unless the previous run
-/// ends and the next run starts on non-whitespace, which is exactly how
-/// `bold_split` leaves a trailing comma or period attached to the highlight.
-fn tokenize(runs: &[(String, bool)]) -> Vec<WrapToken> {
+/// Split a chunk sequence into wrap tokens. `split_whitespace` marks the gaps
+/// inside one chunk; at a chunk boundary a space exists unless the previous
+/// chunk ends and the next chunk starts on non-whitespace, which is exactly
+/// how `bold_split` leaves a trailing comma or period attached to the
+/// highlight. CJK-bearing tokens are then expanded character-by-character so
+/// wrap has real break points inside scripts that do not use spaces between
+/// words.
+fn tokenize(runs: &[TextChunk]) -> Vec<WrapToken> {
     let mut tokens = Vec::new();
     let mut prev_open = false;
-    for (text, bold) in runs {
-        if text.is_empty() {
+    for chunk in runs {
+        if chunk.text.is_empty() {
             continue;
         }
-        let starts_ws = text.starts_with(char::is_whitespace);
-        for (index, word) in text.split_whitespace().enumerate() {
+        let starts_ws = chunk.text.starts_with(char::is_whitespace);
+        for (index, word) in chunk.text.split_whitespace().enumerate() {
             let space_before = if tokens.is_empty() {
                 false
             } else if index == 0 {
@@ -1040,40 +1097,123 @@ fn tokenize(runs: &[(String, bool)]) -> Vec<WrapToken> {
             } else {
                 true
             };
-            tokens.push(WrapToken {
+            tokens.extend(expand_cjk(WrapToken {
                 text: word.to_string(),
-                bold: *bold,
+                bold: chunk.bold,
+                italic: chunk.italic,
                 space_before,
-            });
+            }));
         }
-        prev_open = !text.ends_with(char::is_whitespace);
+        prev_open = !chunk.text.ends_with(char::is_whitespace);
     }
     tokens
 }
 
+/// Expand one whitespace-delimited token into per-character sub-tokens when
+/// it carries CJK code points. Latin / Cyrillic runs inside the same token
+/// stay glued together as a single sub-token. CJK sub-tokens keep
+/// `space_before=false` so the renderer never inserts a literal space; the
+/// fresh wrap-group decision lives in `group_tokens`.
+fn expand_cjk(token: WrapToken) -> Vec<WrapToken> {
+    if !token.text.chars().any(is_cjk) {
+        return vec![token];
+    }
+    let mut out = Vec::new();
+    let mut buffer = String::new();
+    let mut first = true;
+    let chars: Vec<char> = token.text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if is_cjk(chars[i]) {
+            if !buffer.is_empty() {
+                out.push(WrapToken {
+                    text: std::mem::take(&mut buffer),
+                    bold: token.bold,
+                    italic: token.italic,
+                    space_before: first && token.space_before,
+                });
+                first = false;
+            }
+            out.push(WrapToken {
+                text: chars[i].to_string(),
+                bold: token.bold,
+                italic: token.italic,
+                space_before: first && token.space_before,
+            });
+            first = false;
+            i += 1;
+        } else {
+            while i < chars.len() && !is_cjk(chars[i]) {
+                buffer.push(chars[i]);
+                i += 1;
+            }
+        }
+    }
+    if !buffer.is_empty() {
+        out.push(WrapToken {
+            text: buffer,
+            bold: token.bold,
+            italic: token.italic,
+            space_before: first && token.space_before,
+        });
+    }
+    out
+}
+
+/// Return whether the character belongs to a script that does not separate
+/// words with spaces — Hiragana, Katakana, Hangul, and the CJK ideographic
+/// ranges. These need to be treated as line-break candidates per character.
+fn is_cjk(ch: char) -> bool {
+    let code = ch as u32;
+    matches!(
+        code,
+        0x3000..=0x303F
+            | 0x3040..=0x309F
+            | 0x30A0..=0x30FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0xFF00..=0xFFEF
+            | 0x20000..=0x2A6DF
+            | 0xAC00..=0xD7AF
+    )
+}
+
 /// Coalesce wrap tokens into groups: each group is one space-preceded token
-/// plus any glued punctuation that follows it, so a trailing comma or period
-/// wraps as a unit and never lands alone on the next line.
-fn group_tokens(tokens: Vec<WrapToken>) -> Vec<Vec<(String, bool)>> {
-    let mut groups: Vec<Vec<(String, bool)>> = Vec::new();
+/// plus any glued punctuation that follows it. CJK characters always start a
+/// fresh group on either side so wrap can pick any of them as a break point.
+fn group_tokens(tokens: Vec<WrapToken>) -> Vec<Vec<TextChunk>> {
+    let mut groups: Vec<Vec<TextChunk>> = Vec::new();
     for token in tokens {
-        if token.space_before || groups.is_empty() {
-            groups.push(vec![(token.text, token.bold)]);
+        let starts_with_cjk = token.text.chars().next().is_some_and(is_cjk);
+        let prev_ends_with_cjk = groups
+            .last()
+            .and_then(|group| group.last())
+            .and_then(|chunk| chunk.text.chars().next_back())
+            .is_some_and(is_cjk);
+        let break_here = token.space_before || starts_with_cjk || prev_ends_with_cjk;
+        let chunk = TextChunk {
+            text: token.text,
+            bold: token.bold,
+            italic: token.italic,
+        };
+        if break_here || groups.is_empty() {
+            groups.push(vec![chunk]);
         } else {
             groups
                 .last_mut()
                 .expect("invariant: a glued token always follows an existing group")
-                .push((token.text, token.bold));
+                .push(chunk);
         }
     }
     groups
 }
 
-/// Return the measured width (mm) of (text, bold) chunks at the given size.
-fn measure_runs(view: ClassifierView<'_>, chunks: &[(String, bool)], size: f32) -> f32 {
+/// Return the measured width (mm) of styled chunks at the given size.
+fn measure_runs(view: ClassifierView<'_>, chunks: &[TextChunk], size: f32) -> f32 {
     chunks
         .iter()
-        .map(|(text, bold)| view.measure(text.as_str(), *bold, size))
+        .map(|chunk| view.measure(chunk.text.as_str(), chunk.bold, size))
         .sum()
 }
 
@@ -1365,7 +1505,7 @@ fn rgb_tuple(rgb: (u8, u8, u8)) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use super::{bold_split, group_tokens, tokenize};
+    use super::{bold_split, group_tokens, plain_chunk, tokenize};
 
     /// A comma carried into the regular run right after the bold highlight
     /// stays in the same wrap group as the word it abuts.
@@ -1375,8 +1515,8 @@ mod tests {
         let groups = group_tokens(tokenize(runs.as_slice()));
         let glued = groups
             .iter()
-            .find(|group| group.iter().any(|(text, _)| text == "холоднее"))
-            .is_some_and(|group| group.iter().any(|(text, _)| text == ","));
+            .find(|group| group.iter().any(|chunk| chunk.text == "холоднее"))
+            .is_some_and(|group| group.iter().any(|chunk| chunk.text == ","));
         assert!(
             glued,
             "a comma abutting the bold highlight drifted out of its word group"
@@ -1400,7 +1540,7 @@ mod tests {
     /// Ordinary whitespace-separated words keep the spaces between them.
     #[test]
     fn ordinary_words_keep_their_separating_spaces() {
-        let tokens = tokenize(&[(String::from("one two three"), false)]);
+        let tokens = tokenize(&[plain_chunk("one two three")]);
         let spaced = tokens.iter().skip(1).all(|token| token.space_before);
         assert!(
             spaced,

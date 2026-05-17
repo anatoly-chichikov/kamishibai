@@ -105,7 +105,7 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
         let head_height = head_rows_for(draft, width);
         let steps = step_rows_for(draft, running);
         let detail = if idx == app.card_selected() && app.card_expanded() {
-            detail_pane_height(draft)
+            detail_pane_height(draft, width)
         } else {
             0
         };

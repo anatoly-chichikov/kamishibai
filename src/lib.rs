@@ -8,6 +8,7 @@ pub mod config;
 pub mod gemini;
 pub mod generation;
 pub mod languages;
+pub mod markdown;
 pub mod report;
 pub mod runtime;
 pub mod session;
