@@ -44,9 +44,9 @@ use crate::languages::{LanguageCatalog, catalog, naming};
 use crate::report::{CardSheet, Thumbnail};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    Artifact, ArtifactFile, BulkCorrection, CardBody, CardBodyGeneration, CardCorrection,
-    CardDraft, CardRevision, EngineEvent, LanguagePair, RawInputBatch, SessionEngine,
-    Understanding, Understood, WordCandidate, from_entry, to_entry,
+    Artifact, ArtifactFile, BulkCorrection, CachedUnderstanding, CardBody, CardBodyCache,
+    CardBodyGeneration, CardCorrection, CardDraft, CardRevision, EngineEvent, LanguagePair,
+    RawInputBatch, SessionEngine, Understanding, Understood, WordCandidate, from_entry, to_entry,
 };
 use crate::tui::{
     App, AppEvent, BusyKind, KeySource, ModalKind, MousePointer, Screen, Side, WelcomeStage, draw,
@@ -375,6 +375,7 @@ trait MediaPasses: Clone + Send + 'static {
     fn persist_body(
         &self,
         term: &str,
+        understanding: &str,
         pair: &LanguagePair,
         body: &CardBody,
     ) -> Result<ArtifactFile>;
@@ -660,7 +661,9 @@ where
                     passes
                         .generate_card_body(&term, &understanding, &pair)
                         .map(|body| {
-                            let file = passes.persist_body(&term, &pair, &body).ok();
+                            let file = passes
+                                .persist_body(&term, &understanding, &pair, &body)
+                                .ok();
                             (body, file)
                         }),
                 ),
@@ -857,7 +860,12 @@ where
                                 .correct_card(&draft, comment.as_str(), &pair)
                                 .map(|revision| {
                                     let file = passes
-                                        .persist_body(revision.term(), &pair, revision.body())
+                                        .persist_body(
+                                            revision.term(),
+                                            revision.understanding(),
+                                            &pair,
+                                            revision.body(),
+                                        )
                                         .ok();
                                     Box::new((revision, file))
                                 }),
@@ -1039,6 +1047,10 @@ impl ProductionPasses {
         }
     }
 
+    fn body_cache(&self) -> CardBodyCache {
+        CardBodyCache::new(self.cache.clone())
+    }
+
     fn audio_for(&self, target_lang: &str) -> Result<Audio<GeminiClient<HttpTransport>>> {
         let item = self.catalog.item(target_lang)?;
         Ok(Audio::new(
@@ -1070,7 +1082,7 @@ impl ProductionPasses {
 
 impl Understanding for ProductionPasses {
     fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
-        self.client.understand(raw, my)
+        CachedUnderstanding::new(self.client.clone(), self.cache.clone()).understand(raw, my)
     }
 }
 
@@ -1092,6 +1104,9 @@ impl CardBodyGeneration for ProductionPasses {
         understanding: &str,
         pair: &LanguagePair,
     ) -> Result<CardBody> {
+        if let Some(body) = self.body_cache().load(term, understanding, pair)? {
+            return Ok(body);
+        }
         self.client.generate_card_body(term, understanding, pair)
     }
 }
@@ -1160,39 +1175,11 @@ impl MediaPasses for ProductionPasses {
     fn persist_body(
         &self,
         term: &str,
+        understanding: &str,
         pair: &LanguagePair,
         body: &CardBody,
     ) -> Result<ArtifactFile> {
-        let item = self.catalog.item(pair.target())?;
-        let cache = Cache::new(format!("body-{}", item.code), self.cache.clone());
-        let digest_full = format!("{:x}", md5::compute(format!("{}\0{}", pair.target(), term)));
-        let filename = format!("{}.json", &digest_full[..12]);
-        let path = cache.filepath(filename.as_str())?;
-        let cached = cache.exists(filename.as_str());
-        if !cached {
-            let payload = serde_json::json!({
-                "term": term,
-                "target_lang": pair.target(),
-                "source_lang": pair.support(),
-                "pronunciation": body.pronunciation(),
-                "transcription": body.transcription(),
-                "meaning": body.meaning(),
-                "importance": body.importance(),
-                "source_sentence": body.source_sentence(),
-                "source_highlight": body.source_highlight(),
-                "source_hint": body.source_hint(),
-                "source_context": body.source_context(),
-                "target_sentence": body.target_sentence(),
-            });
-            let staged = cache.stage(".json")?;
-            let result = fs::write(&staged, serde_json::to_string_pretty(&payload)?)
-                .map_err(anyhow::Error::from)
-                .and_then(|()| cache.commit(&staged, filename.as_str()));
-            if result.is_err() {
-                let _ = fs::remove_file(&staged);
-            }
-            result?;
-        }
+        let (filename, path, cached) = self.body_cache().store(term, understanding, pair, body)?;
         let size = fs::metadata(&path)
             .map(|metadata| metadata.len())
             .unwrap_or(0);
@@ -1420,6 +1407,7 @@ mod tests {
         fn persist_body(
             &self,
             term: &str,
+            _understanding: &str,
             _pair: &LanguagePair,
             _body: &CardBody,
         ) -> Result<ArtifactFile> {
@@ -1591,6 +1579,7 @@ mod tests {
         fn persist_body(
             &self,
             _term: &str,
+            _understanding: &str,
             _pair: &LanguagePair,
             _body: &CardBody,
         ) -> Result<ArtifactFile> {
