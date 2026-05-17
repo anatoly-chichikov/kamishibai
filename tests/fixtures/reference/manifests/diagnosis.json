@@ -1,7 +1,0 @@
-{
-  "plain": [
-    "Error: problem",
-    "  File: $REPO/tmp/broken.json"
-  ],
-  "rich_count": 1
-}

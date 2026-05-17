@@ -25,12 +25,6 @@ pub const HEADER_GAP: u16 = 1;
 /// body, dashed status separator, status bar.
 pub struct ScreenFrame {
     pub header: Rect,
-    /// Vestigial slot from when the header had a solid rule under it. The
-    /// rule is gone (font-dependent rendering put the line at the bottom of
-    /// the cell on some terminals); the slot stays as a 0-height rect so
-    /// callers don't have to care.
-    #[allow(dead_code)]
-    pub header_rule: Rect,
     pub body: Rect,
     pub status_rule: Rect,
     pub status: Rect,
@@ -39,12 +33,7 @@ pub struct ScreenFrame {
 /// Split the available area into the common screen frame.
 ///
 /// Order top-down: top margin, header, breathing row, body, dashed rule above
-/// status, status bar pinned to the last row. The solid rule under the header
-/// is gone — terminal-font rendering of `─` and SGR 9 strikethrough varies
-/// from cell-center to baseline depending on the user's font, so we rely on
-/// the inverted title block plus a clean blank gutter for the visual break.
-/// `header_rule` stays as a zero-height field for callers that still want
-/// to address the slot symbolically.
+/// status, status bar pinned to the last row.
 pub fn frame_rects(area: Rect) -> ScreenFrame {
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -59,12 +48,6 @@ pub fn frame_rects(area: Rect) -> ScreenFrame {
         .split(area);
     ScreenFrame {
         header: inset_horizontal(rows[1], GUTTER),
-        header_rule: Rect {
-            x: rows[2].x,
-            y: rows[2].y,
-            width: rows[2].width,
-            height: 0,
-        },
         body: inset_horizontal(rows[3], GUTTER),
         status_rule: rows[4],
         status: inset_horizontal(rows[5], GUTTER),
@@ -77,22 +60,7 @@ pub fn paint_rules(frame: &mut Frame, rects: &ScreenFrame) {
     frame.render_widget(dashed_rule(rects.status_rule.width), rects.status_rule);
 }
 
-/// Render a solid full-width rule line in `--rule` color. Currently unused
-/// — kept around in case a future screen wants a lightweight horizontal
-/// rule and is willing to live with font-dependent vertical placement.
-#[allow(dead_code)]
-pub fn solid_rule(width: u16) -> Paragraph<'static> {
-    Paragraph::new(Line::from(Span::styled(
-        " ".repeat(width as usize),
-        palette::rule().add_modifier(Modifier::CROSSED_OUT),
-    )))
-    .style(palette::base())
-}
-
 /// Render a dashed full-width rule line in `--rule` color.
-///
-/// Same vertical-centering trick as `solid_rule`: every other cell is a plain
-/// space, the marked cells carry the strikethrough.
 pub fn dashed_rule(width: u16) -> Paragraph<'static> {
     let mut spans: Vec<Span<'static>> = Vec::with_capacity(width as usize);
     let dash_style = palette::rule().add_modifier(Modifier::CROSSED_OUT);

@@ -419,8 +419,6 @@ struct PendingArtifactJob {
     handle: JoinHandle<()>,
     card: usize,
     artifact: Artifact,
-    #[allow(dead_code)]
-    started: Instant,
 }
 
 /// Progress signalled by the background publish job.
@@ -682,7 +680,6 @@ where
             handle,
             card,
             artifact,
-            started: Instant::now(),
         });
         self.app = self.app.clone().cards_running(Some((card, artifact)));
         Ok(())

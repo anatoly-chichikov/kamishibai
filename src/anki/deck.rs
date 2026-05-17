@@ -12,7 +12,6 @@ use zip::CompressionMethod;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-use crate::generation::Deck;
 use crate::vocabulary::VocabularyEntry;
 
 use super::{Model, Note, NoteFormat};
@@ -366,21 +365,6 @@ where
             "timeToday": [163, 23598],
             "usn": -1,
         })
-    }
-}
-
-impl<F> Deck for VocabularyDeck<F>
-where
-    F: NoteFormat,
-{
-    /// Attach one media file path.
-    fn attach(&mut self, path: &Path) {
-        VocabularyDeck::<F>::attach(self, path.to_path_buf());
-    }
-
-    /// Add one note to the deck.
-    fn add(&mut self, entry: &VocabularyEntry, audio: &str, image: &str) {
-        VocabularyDeck::<F>::add(self, entry, audio, image);
     }
 }
 

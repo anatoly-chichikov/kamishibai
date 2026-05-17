@@ -14,17 +14,18 @@ All future work references this map instead of re-deriving transitions.
 | Id                    | Kind        | PDF reference                                             |
 | --------------------- | ----------- | --------------------------------------------------------- |
 | `YourWords`           | fullscreen  | `01-your-words.png`                                       |
-| `WhatIUnderstood`     | fullscreen  | `02-what-i-understood.png`                                |
-| `ChangeSomething`     | modal       | over `WhatIUnderstood` — reference shot pending           |
+| `WhatIUnderstood`     | fullscreen  | `02-what-i-understood.png`, `02b-what-i-understood-corrected.png` |
+| `ChangeSomething`     | modal       | `03-change-something-modal.png` over `WhatIUnderstood`    |
+| `BulkCorrectionBusy`  | overlay     | `01c-busy-correction.png` over `WhatIUnderstood`          |
 | `YourCards`           | fullscreen  | `04-your-cards.png`, `04b-your-cards-mid.png`             |
 | `ChangeThisCard`      | modal       | over `YourCards` — reference shot pending                 |
 | `Done`                | fullscreen  | `08-done.png`                                             |
 
 Retry, failure banner and recovery are inline within `YourCards` — not separate screens.
 
-The four edge-case PNGs (`03-change-something-modal.png`, `05-change-this-card-modal.png`,
+The remaining edge-case PNGs (`05-change-this-card-modal.png`,
 `06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`) are intentionally absent
-from `live/`. They require failure injection or modal interaction during recording, which
+from `live/`. They require per-card modal setup or failure injection during recording, which
 the live-binary `capture.tape` does not exercise. Re-snap them via `examples/tui_states.rs`
 when those particular states need fresh references.
 
@@ -49,31 +50,17 @@ the same visual language.
 `target language` is resolved before `WhatIUnderstood`. `my language` is read
 from `config/preferences.json` at batch start and defaults to `en`.
 
-## Candidate kind contract
+## Candidate contract
 
-`WordCandidate::kind()` is a closed learning-unit category, not a free-form
-grammar label.
+`WordCandidate` is intentionally small: it carries the target `term`, one
+support-language `understanding` sentence, and an `ok` inclusion flag. The first
+Gemini pass folds part of speech, inflection, selected sense, register, typo
+correction, ambiguity, and exclusion reason into that sentence instead of
+maintaining a parallel taxonomy.
 
-Generated values are exactly five: `word`, `phrase`, `collocation`, `idiom`,
-`sentence`. `skip` is a service status for rows excluded from generation, not a
-learning category.
-
-`word` covers any single lexical word, including nouns, verbs, adjectives,
-inflected forms, and proper names. `phrase` covers normal mostly literal
-multi-word expressions. `collocation` covers natural pairings where the word
-combination matters. `idiom` covers fixed non-literal expressions. `sentence`
-is only for a full sentence or clause learned as a unit.
-
-Screen-facing form details such as part of speech, inflection, selected sense,
-register, typo correction, and ambiguity highlighting belong in
-`WordCandidate::meta()`. `WordCandidate::note()` remains an internal generation
-hint for the next card pass. Unknown `kind` values from Gemini fail fast instead
-of being accepted.
-
-`WhatIUnderstood` never renders the technical `kind` labels. Each row shows the
-target surface form, the support-language translation, and localized metadata
-segments joined with ` · `. Each metadata segment carries its own dim or bright
-tone so only actual model decisions are highlighted.
+`WhatIUnderstood` renders one row per candidate: included rows proceed to card
+generation, while `ok=false` rows stay visible with a struck-through term so the
+user can see what was rejected and why.
 
 ## Transitions
 
