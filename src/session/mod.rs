@@ -1,6 +1,7 @@
 //! Word-first session contracts: language pair, target detection, and batch state.
 
 mod bridge;
+mod cache;
 mod candidate;
 mod detection;
 mod draft;
@@ -10,6 +11,7 @@ mod pass;
 mod state;
 
 pub use bridge::{from_entry, to_document, to_entry};
+pub use cache::{CachedUnderstanding, CardBodyCache};
 pub use candidate::{RawInputBatch, WordCandidate};
 pub use detection::{ScriptDetection, TargetDetection, TargetGuess};
 pub use draft::{
