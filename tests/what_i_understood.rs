@@ -7,7 +7,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::session::TargetGuess;
 use kamishibai::session::{LanguagePair, RawInputBatch, Understanding, Understood, WordCandidate};
-use kamishibai::tui::{App, Screen, Side, draw, to_app, transit};
+use kamishibai::tui::{App, AppEvent, Screen, Side, draw, to_app, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Modifier;
@@ -51,6 +51,18 @@ fn modifiers(app: &App, needle: &str) -> Vec<Modifier> {
     Vec::new()
 }
 
+fn many_candidates(count: usize) -> Vec<WordCandidate> {
+    (1..=count)
+        .map(|index| {
+            WordCandidate::new(
+                format!("term-{index:02}"),
+                format!("understanding for term-{index:02}"),
+                true,
+            )
+        })
+        .collect()
+}
+
 struct FakeUnderstanding;
 
 impl Understanding for FakeUnderstanding {
@@ -90,6 +102,24 @@ fn run_understanding(app: App) -> App {
         .expect("fake understanding must succeed");
     app.confirmed_target(result.guess().code())
         .understood(result.candidates().to_vec())
+}
+
+#[test]
+fn long_what_i_understood_list_scrolls_to_the_selected_candidate() {
+    let mut app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_target("en")
+        .understood(many_candidates(35));
+    for _ in 0..29 {
+        app = transit(app, AppEvent::NavNext)
+            .0
+            .body_scroll_to_selection(6, 132);
+    }
+    let rendered = flat(&app);
+    assert!(
+        app.body_scroll() > 0 && rendered.contains("term-30") && !rendered.contains("term-01"),
+        "long review lists must keep the selected candidate inside the visible scroll window: {rendered}"
+    );
 }
 
 #[test]

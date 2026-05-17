@@ -11,7 +11,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::languages::catalog;
 use kamishibai::session::{LanguagePair, ScriptDetection, TargetDetection};
-use kamishibai::tui::{App, BusyKind, Screen, Side, draw, to_app, transit};
+use kamishibai::tui::{App, AppEvent, BusyKind, Screen, Side, draw, to_app, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use tempfile::tempdir;
@@ -41,6 +41,13 @@ fn flatten(app: &App) -> String {
     flat
 }
 
+fn long_blob(count: usize) -> String {
+    (1..=count)
+        .map(|index| format!("word-{index:02}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn apply_side(app: App, side: Side) -> App {
     match side {
         Side::RunUnderstanding => {
@@ -51,6 +58,34 @@ fn apply_side(app: App, side: Side) -> App {
         }
         _ => app,
     }
+}
+
+#[test]
+fn long_pasted_your_words_scrolls_to_the_cursor_line() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob(long_blob(60))
+        .body_scroll_to_selection(7, 72);
+    let flat = flatten(&app);
+    assert!(
+        flat.contains("word-60") && !flat.contains("word-01"),
+        "long pasted word lists must render the cursor end of the scrollable editor: {flat}"
+    );
+}
+
+#[test]
+fn repeated_enter_on_your_words_moves_the_editor_scroll() {
+    let mut app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob("word-01")
+        .body_scroll_to_selection(4, 72);
+    for _ in 0..12 {
+        app = transit(app, AppEvent::KeyEnter)
+            .0
+            .body_scroll_to_selection(4, 72);
+    }
+    assert!(
+        app.body_scroll() > 0,
+        "typing past the visible editor height must advance the body scroll"
+    );
 }
 
 #[test]

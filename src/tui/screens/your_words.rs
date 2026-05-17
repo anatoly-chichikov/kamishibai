@@ -44,21 +44,29 @@ impl ScreenView for YourWords {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(4), Constraint::Min(1)])
             .split(area);
+        let scroll = app.body_scroll();
         let lines = body_lines(app, columns[1].width);
         let active_row = active_line_index(app);
         if !app.blob().is_empty()
-            && let Some(strip) = highlight_strip(area, active_row)
+            && active_row >= usize::from(scroll)
+            && let Some(strip) = highlight_strip(area, active_row - usize::from(scroll))
         {
             paint_strip(frame, strip);
         }
-        frame.render_widget(gutter(app, area.height as usize), columns[0]);
-        frame.render_widget(Paragraph::new(lines).style(palette::base()), columns[1]);
+        frame.render_widget(gutter(app).scroll((scroll, 0)), columns[0]);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .style(palette::base())
+                .scroll((scroll, 0)),
+            columns[1],
+        );
         place_cursor(frame, app, columns[1]);
     }
 }
 
 fn place_cursor(frame: &mut Frame, app: &App, body: Rect) {
     let (row, column) = cursor_row_column(app);
+    let row = row.saturating_sub(usize::from(app.body_scroll()));
     let row = u16::try_from(row).unwrap_or(u16::MAX);
     let column = u16::try_from(column).unwrap_or(u16::MAX);
     let cursor_x = body.x + column.min(body.width.saturating_sub(1));
@@ -108,13 +116,13 @@ fn paint_strip(frame: &mut Frame, area: Rect) {
     );
 }
 
-fn gutter(app: &App, available: usize) -> Paragraph<'static> {
+fn gutter(app: &App) -> Paragraph<'static> {
     let actual = if app.blob().is_empty() {
         0
     } else {
         app.blob().split('\n').count()
     };
-    let visible = available.min(actual.max(PLACEHOLDER_LINES));
+    let visible = actual.max(PLACEHOLDER_LINES);
     let active = active_line_index(app);
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible);
     for index in 0..visible {
@@ -129,6 +137,16 @@ fn gutter(app: &App, available: usize) -> Paragraph<'static> {
         lines.push(Line::from(Span::styled(label, style)));
     }
     Paragraph::new(lines).style(palette::base())
+}
+
+/// Total number of lines the raw word editor renders for scroll clamping.
+pub(crate) fn content_height(app: &App) -> u16 {
+    let height = if app.blob().is_empty() {
+        PLACEHOLDER_LINES
+    } else {
+        app.blob().split('\n').count()
+    };
+    u16::try_from(height).unwrap_or(u16::MAX)
 }
 
 fn body_lines(app: &App, width: u16) -> Vec<Line<'static>> {
