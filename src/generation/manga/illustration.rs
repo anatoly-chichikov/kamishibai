@@ -7,7 +7,6 @@ use image::DynamicImage;
 use image::codecs::jpeg::JpegEncoder;
 use serde_json::Value;
 
-use crate::generation::IllustrationGenerator;
 use crate::generation::artifact_cache::Cache;
 
 use super::{Progress, Renderer, Translator};
@@ -187,25 +186,4 @@ fn write_image(path: &Path, image: &DynamicImage) -> Result<()> {
     let mut encoder = JpegEncoder::new_with_quality(writer, 60);
     encoder.encode_image(image)?;
     Ok(())
-}
-
-impl<T, R> IllustrationGenerator for Illustration<T, R>
-where
-    T: Translator,
-    R: Renderer,
-{
-    /// Generate one cached illustration filename and cache label.
-    fn generate(
-        &self,
-        sentence: &str,
-        target: &str,
-        progress: &mut dyn Progress,
-    ) -> Result<(String, bool)> {
-        Illustration::<T, R>::generate(self, sentence, target, progress)
-    }
-
-    /// Return one absolute cached illustration path.
-    fn filepath(&self, filename: &str) -> Result<PathBuf> {
-        Illustration::<T, R>::filepath(self, filename)
-    }
 }

@@ -1,5 +1,3 @@
-//! Runtime-facing support for CLI execution, diagnostics, progress, and locations.
+//! Runtime-facing support for CLI execution and filesystem locations.
 
-pub mod diagnosis;
 pub mod locations;
-pub mod progress;
