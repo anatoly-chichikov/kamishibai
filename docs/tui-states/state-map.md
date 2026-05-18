@@ -47,7 +47,7 @@ steady-state fullscreen screen in the same visual language.
 | Screen            | What is shown                                                                                  |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
 | `Welcome`         | Unlocked setup language. `←/→` or `Ctrl+L` cycles `my language`; `Enter` confirms it.          |
-| `YourWords`       | Detected target (pending), persisted `my` language. `[Ctrl+L]` flips `my` language.          |
+| `YourWords`       | Detected target (pending), persisted `my` language. `[Ctrl+L]` opens language.          |
 | `WhatIUnderstood` | Confirmed target, current `my`. `[L]` can flip `my`, `[T]` cycles target if unsure.           |
 | `YourCards`       | Frozen pair for the batch — read-only.                                                         |
 | `Done`            | Pair remains visible next to the batch summary.                                                |
@@ -108,7 +108,7 @@ user can see what was rejected and why.
 
 | State             | Keys                                                                                     |
 | ----------------- | ---------------------------------------------------------------------------------------- |
-| `YourWords`       | type/paste one item per line · `Enter` newline · `Ctrl+G` continue · `Ctrl+L` toggle my language |
+| `YourWords`       | type/paste one item per line · `Enter` newline · `Ctrl+G` continue · `Ctrl+L` language |
 | `WhatIUnderstood` | `↑↓` nav · `d` drop row · `Enter` / `R` refine row · `Ctrl+G` make cards · `L` flip my · `T` cycle target |
 | `ChangeSomething` | text area input · `Enter` send · `Esc` cancel                                            |
 | `YourCards`       | `↑↓` nav · `Enter` expand/collapse · `R` / `r` change this card · `Ctrl+G` regenerate state/rebuild publish |

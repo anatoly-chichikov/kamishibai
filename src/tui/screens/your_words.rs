@@ -205,9 +205,12 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     let mut right: Vec<Span<'static>> = Vec::new();
     if count > 0 {
         right.extend(super::common::key_hint("Ctrl+G", "continue"));
+        right.push(super::common::status_sep());
     } else {
-        right.extend(super::common::key_hint("Cmd+V", "paste a list"));
+        right.push(Span::styled("paste", palette::dim()));
+        right.push(super::common::status_sep());
     }
+    right.extend(super::common::key_hint("Ctrl+L", "language"));
     super::common::append_quit(&mut right, app.quit_pending());
     super::common::status_bar(left, right, width)
 }

@@ -137,8 +137,8 @@ Contract(
                         Element(
                             id: ElementId("yw.footer_paste"),
                             kind: KeyHint(Footer),
-                            text: Literal("[type/paste] one per line"),
-                            source: SourceRef(file: "src/tui/screens/your_words.rs", line: 18),
+                            text: Literal("paste"),
+                            source: SourceRef(file: "src/tui/screens/your_words.rs", line: 210),
                             purpose: "reminds the user that paste is the expected entry path",
                             importance: 4,
                             usefulness: 4,
@@ -159,8 +159,8 @@ Contract(
                         Element(
                             id: ElementId("yw.toggle_my_language"),
                             kind: KeyHint(Footer),
-                            text: Literal("[Ctrl+L] my language"),
-                            source: SourceRef(file: "src/tui/screens/your_words.rs", line: 18),
+                            text: Literal("[Ctrl+L] language"),
+                            source: SourceRef(file: "src/tui/screens/your_words.rs", line: 213),
                             purpose: "let the user flip support language before running detection",
                             importance: 3,
                             usefulness: 3,
