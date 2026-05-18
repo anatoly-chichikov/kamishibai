@@ -35,6 +35,45 @@ fn failed_picture() -> CardArtifacts {
     )
 }
 
+fn failed_body() -> CardArtifacts {
+    let mut body = ArtifactSlot::fresh(Artifact::Body);
+    for _ in 0..3 {
+        body = body.attempted();
+    }
+    CardArtifacts::from_parts(
+        body,
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        ArtifactSlot::fresh(Artifact::Picture).succeeded(),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    )
+}
+
+fn failed_scene() -> CardArtifacts {
+    let mut scene = ArtifactSlot::fresh(Artifact::Scene);
+    for _ in 0..3 {
+        scene = scene.attempted();
+    }
+    CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        scene,
+        ArtifactSlot::fresh(Artifact::Picture).discard(),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    )
+}
+
+fn failed_sound() -> CardArtifacts {
+    let mut sound = ArtifactSlot::fresh(Artifact::Sound);
+    for _ in 0..3 {
+        sound = sound.attempted();
+    }
+    CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        ArtifactSlot::fresh(Artifact::Picture).succeeded(),
+        sound,
+    )
+}
+
 fn body_for(term: &str) -> CardBody {
     CardBody::new(
         format!("/{term}/"),
@@ -50,13 +89,17 @@ fn body_for(term: &str) -> CardBody {
 }
 
 fn seeded() -> App {
+    seeded_with(failed_picture())
+}
+
+fn seeded_with(artifacts: CardArtifacts) -> App {
     let draft = CardDraft::new(
         "wreck",
         "verb sense — destroyed vehicle",
         LanguagePair::new("en", "ru"),
     )
     .with_body(body_for("wreck"), None)
-    .with_artifacts(failed_picture());
+    .with_artifacts(artifacts);
     App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::YourCards)
         .confirmed_target("en")
@@ -74,13 +117,24 @@ fn your_cards_surfaces_failure_banner_when_any_card_fails_terminally() {
 }
 
 #[test]
-fn lowercase_r_emits_regenerate_failed_when_any_card_failed_terminally() {
+fn ctrl_g_emits_regenerate_current_when_any_card_failed_terminally() {
     let app = seeded();
-    let (_, side) = transit(app, AppEvent::KeyChar('r'));
+    let (_, side) = transit(app, AppEvent::Generate);
     assert_eq!(
         side,
-        Side::RegenerateFailed,
-        "lowercase r on Your cards must emit the RegenerateFailed side-effect when a card failed"
+        Side::RegenerateCurrent,
+        "Ctrl+G on Your cards must regenerate the current card state even when failures are visible"
+    );
+}
+
+#[test]
+fn lowercase_r_opens_change_this_card_even_with_failures_present() {
+    let app = seeded();
+    let (after, _) = transit(app, AppEvent::KeyChar('r'));
+    assert_eq!(
+        after.modal(),
+        Some(kamishibai::tui::ModalKind::ChangeThisCard),
+        "lowercase r must open Change this card even when a failure banner is visible"
     );
 }
 
@@ -113,9 +167,71 @@ fn regenerate_failed_resets_only_the_failed_slots_and_keeps_ready_slots() {
 }
 
 #[test]
+fn regenerate_body_failure_resets_all_body_dependents() {
+    let app = seeded_with(failed_body());
+    let recovered = app.cards_reset_failures();
+    let card = &recovered.cards()[0];
+    assert_eq!(
+        (
+            card.artifacts().body().failed_terminally(),
+            card.artifacts().scene().ready(),
+            card.artifacts().picture().ready(),
+            card.artifacts().sound().ready(),
+        ),
+        (false, false, false, false),
+        "regenerating a failed body must reset body and all generated media"
+    );
+}
+
+#[test]
+fn regenerate_scene_failure_resets_picture_but_keeps_sound() {
+    let app = seeded_with(failed_scene());
+    let recovered = app.cards_reset_failures();
+    let card = &recovered.cards()[0];
+    assert_eq!(
+        (
+            card.artifacts().body().ready(),
+            card.artifacts().scene().failed_terminally(),
+            card.artifacts().picture().discarded(),
+            card.artifacts().sound().ready(),
+        ),
+        (true, false, false, true),
+        "regenerating a failed scene must reset scene and picture while keeping independent artifacts"
+    );
+}
+
+#[test]
+fn regenerate_sound_failure_keeps_ready_visual_artifacts() {
+    let app = seeded_with(failed_sound());
+    let recovered = app.cards_reset_failures();
+    let card = &recovered.cards()[0];
+    assert_eq!(
+        (
+            card.artifacts().body().ready(),
+            card.artifacts().scene().ready(),
+            card.artifacts().picture().ready(),
+            card.artifacts().sound().failed_terminally(),
+        ),
+        (true, true, true, false),
+        "regenerating a failed sound must keep ready visual artifacts"
+    );
+}
+
+#[test]
+fn regenerate_failed_clears_stale_done_artifacts() {
+    let app = seeded().done_published("old.apkg", "old.pdf", "old-out");
+    let recovered = app.cards_reset_failures();
+    assert_eq!(
+        recovered.done_artifacts().deck.as_str(),
+        "",
+        "regenerating failed cards must clear stale published outputs"
+    );
+}
+
+#[test]
 fn recovery_keeps_the_user_on_your_cards() {
     let app = seeded();
-    let (after, _) = transit(app, AppEvent::KeyChar('r'));
+    let (after, _) = transit(app, AppEvent::Generate);
     assert_eq!(
         after.screen(),
         Screen::YourCards,

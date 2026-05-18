@@ -65,11 +65,11 @@ user can see what was rejected and why.
 ## Transitions
 
 ```
-              [Shift+Enter]
+              [Ctrl+G]
     YourWords ─────────► resolving target ─► WhatIUnderstood
         ▲                                          │
         │                                          │
-        │            [Esc] from WhatIUnderstood    │ [R]
+        │            [Esc] from WhatIUnderstood    │ [Enter/R]
         └──────────────────────────────────────────┤
                                                    ▼
                                            ChangeSomething
@@ -84,28 +84,29 @@ user can see what was rejected and why.
                                              ▼
                                       WhatIUnderstood
 
-    WhatIUnderstood ──[Enter]──► YourCards
+    WhatIUnderstood ──[Ctrl+G]──► YourCards
     YourCards ──[R on card]──► ChangeThisCard ──[Enter]──► YourCards
     YourCards ──[R on card]──► ChangeThisCard ──[Esc]────► YourCards
+    YourCards ──[Ctrl+G]──► regenerate current card state / rebuild publish
     YourCards ──[all ready]──► Done
     YourCards ──[all attempts done]──► Done (if nothing fatal)
                                  │
                                  └─[has failed cards]─► Done (with failure summary)
 
-    Done ──[N]──► YourWords (new batch, same my language)
-    Done ──[Q]──► exit
+    Done ──[Ctrl+G if failures]──► YourCards
+    Done ──[Ctrl+C]──► exit
 ```
 
 ## Keyboard contract (per state)
 
 | State             | Keys                                                                                     |
 | ----------------- | ---------------------------------------------------------------------------------------- |
-| `YourWords`       | type/paste one item per line · `Enter` newline · `Shift+Enter` continue · `Ctrl+L` toggle my language |
-| `WhatIUnderstood` | `↑↓` nav · `d` drop row · `R` change something · `Enter` make cards · `L` flip my · `T` cycle target |
+| `YourWords`       | type/paste one item per line · `Enter` newline · `Ctrl+G` continue · `Ctrl+L` toggle my language |
+| `WhatIUnderstood` | `↑↓` nav · `d` drop row · `Enter` / `R` refine row · `Ctrl+G` make cards · `L` flip my · `T` cycle target |
 | `ChangeSomething` | text area input · `Enter` send · `Esc` cancel                                            |
-| `YourCards`       | `↑↓` nav · `Enter` expand/collapse · `R` change this card · `d` drop artifact · `r` regenerate failed |
+| `YourCards`       | `↑↓` nav · `Enter` expand/collapse · `R` / `r` change this card · `Ctrl+G` regenerate state/rebuild publish |
 | `ChangeThisCard`  | text area input · `Enter` send · `Esc` cancel                                            |
-| `Done`            | `N` new batch · `Q` quit · file paths stay visible                                       |
+| `Done`            | `Ctrl+G` regenerate failed · `Ctrl+C` quit · file paths stay visible                      |
 
 ## Event ownership
 
@@ -120,7 +121,7 @@ Events are divided between the app shell and individual screens:
 
 `YourWords` input is line-delimited. Plain `Enter` appends a new line to the raw
 blob. Commas are literal text, not separators. The continue command must be a
-distinct chord from text entry; the contract label is `Shift+Enter`.
+distinct chord from text entry; the contract label is `Ctrl+G`.
 
 The first pass is a Gemini Flash understanding request. It chooses one global
 target language for the batch, returns candidate rows with part-of-speech/form
@@ -132,7 +133,7 @@ not forwarded to card generation.
 - Retry: each artifact (`scene`, `picture`, `sound`) retries up to 3 times. Between
   attempts the card row shows an inline retry indicator without blocking the queue.
 - Terminal failure: after 3 attempts, the card stays in the queue but marked as failed.
-- Recovery: the `Done` screen exposes `regenerate failed` when at least one card failed.
+- Recovery: the final card views expose `Ctrl+G`: on `YourCards` it regenerates failed work or rebuilds APKG/PDF from ready cards; on `Done` it regenerates failed cards when failures exist.
 - There is no `Retry` fullscreen and no separate `Failure` fullscreen.
 
 ## App shell and ratatui mapping

@@ -7,13 +7,17 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::session::TargetGuess;
 use kamishibai::session::{LanguagePair, RawInputBatch, Understanding, Understood, WordCandidate};
-use kamishibai::tui::{App, AppEvent, Screen, Side, draw, to_app, transit};
+use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, draw, to_app, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Modifier;
 
 fn press(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn modified(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent::new(code, modifiers)
 }
 
 fn flat(app: &App) -> String {
@@ -145,7 +149,8 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
             && rendered.contains("expel")
             && rendered.contains("at the end")
             && rendered.contains("[↑↓]")
-            && rendered.contains("[Enter]")
+            && rendered.contains("[Enter] refine")
+            && rendered.contains("[Ctrl+G]")
             && rendered.contains("generate"),
         "sense check must render the new mono header, gloss list, and key hints: {rendered}"
     );
@@ -196,24 +201,39 @@ fn excluded_candidate_renders_with_strikethrough_and_dim_gloss() {
 fn drop_selected_removes_candidate_and_make_cards_advances_to_your_cards() {
     let start = App::new(LanguagePair::new("en", "ru"))
         .seeded_blob("whilst\nat the end\nin the end\nwreck");
-    let (after_submit, side) = transit(start, kamishibai::tui::AppEvent::Submit);
+    let (after_submit, side) = transit(start, kamishibai::tui::AppEvent::Generate);
     assert_eq!(
         side,
         Side::RunUnderstanding,
-        "Submit on blob must request the understanding pass"
+        "Generate on blob must request the understanding pass"
     );
     let reviewing = run_understanding(after_submit);
     let after_nav = transit(reviewing, to_app(press(KeyCode::Down)).expect("map")).0;
     let after_drop = transit(after_nav, to_app(press(KeyCode::Char('d'))).expect("map")).0;
-    let (after_make, make_side) = transit(after_drop, to_app(press(KeyCode::Enter)).expect("map"));
+    let (after_refine, refine_side) = transit(
+        after_drop.clone(),
+        to_app(press(KeyCode::Enter)).expect("map"),
+    );
+    let (after_make, make_side) = transit(
+        after_drop,
+        to_app(modified(KeyCode::Char('g'), KeyModifiers::CONTROL)).expect("map"),
+    );
     let remaining: Vec<String> = after_make
         .candidates()
         .iter()
         .map(|candidate| String::from(candidate.term()))
         .collect();
     assert_eq!(
-        (after_make.screen(), make_side, remaining),
         (
+            after_refine.modal(),
+            refine_side,
+            after_make.screen(),
+            make_side,
+            remaining,
+        ),
+        (
+            Some(ModalKind::ChangeSomething),
+            Side::None,
             Screen::YourCards,
             Side::StartGeneration,
             vec![
@@ -223,7 +243,7 @@ fn drop_selected_removes_candidate_and_make_cards_advances_to_your_cards() {
                 String::from("debuted"),
             ],
         ),
-        "flow must drop the highlighted row, then Enter must advance to Your Cards with StartGeneration"
+        "flow must drop the highlighted row, then Enter must refine and Ctrl+G must advance to Your Cards with StartGeneration"
     );
 }
 
@@ -232,7 +252,7 @@ fn empty_candidate_list_keeps_user_on_what_i_understood() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_target("en");
-    let (next, side) = transit(app, kamishibai::tui::AppEvent::Submit);
+    let (next, side) = transit(app, kamishibai::tui::AppEvent::Generate);
     assert_eq!(
         (next.screen(), side),
         (Screen::WhatIUnderstood, Side::None),
@@ -250,7 +270,7 @@ fn skipped_candidate_list_keeps_user_on_what_i_understood() {
             "Слово на русском, не на EN-target — карточка не создаётся.",
             false,
         )]);
-    let (next, side) = transit(app, kamishibai::tui::AppEvent::Submit);
+    let (next, side) = transit(app, kamishibai::tui::AppEvent::Generate);
     assert_eq!(
         (next.screen(), side),
         (Screen::WhatIUnderstood, Side::None),

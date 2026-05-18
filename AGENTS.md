@@ -75,17 +75,13 @@ If a new language is needed, add a new profile instead of editing the fixed runt
 ## Recording the demo GIF and screenshots
 
 `docs/tui-states/live/capture.gif` (linked from `README.md`) and the per-screen PNGs next to
-it are produced by two VHS tapes in `docs/tui-states/`. The pipeline is manual end-to-end —
-do NOT add automation that lands the recording-only chord patch (described below) in
-production code. The keyboard contract on `Submit` stays exactly `Shift+Enter`.
+it are produced by two VHS tapes in `docs/tui-states/`. The pipeline is manual end-to-end.
+The generation keyboard contract is `Ctrl+G`.
 
-### Why a manual chord patch is required
+### Why no manual chord patch is required
 
-VHS cannot synthesize the kitty-format CSI u byte sequence that crossterm needs to recognize
-`Shift+Enter`: VHS sends the ESC byte and the bracket bytes through the pty with delays that
-exceed crossterm's escape-sequence timeout, so the parser falls back to plain Enter. The
-recording therefore needs a temporary `Ctrl+S` → `Submit` chord, gated behind an env flag so
-it cannot escape locally.
+`Ctrl+G` is a simple control byte, which crossterm reads as the generation hotkey in raw
+mode. The old temporary `Ctrl+S` recording chord is obsolete and must not be reintroduced.
 
 ### Procedure
 
@@ -98,18 +94,7 @@ From the repo root:
    cargo build --release --example tui_states
    ```
 
-2. **Apply the recording-only chord patch** to `src/tui/input.rs`. Locate the
-   `KeyCode::Char(symbol) if key.modifiers.contains(KeyModifiers::CONTROL)` arm and add the
-   `'s'` case beneath the existing `'c'` and `'l'` cases:
-
-   ```rust
-   's' if std::env::var_os("KAMISHIBAI_RECORDING_HOTKEYS").is_some() => {
-       Some(AppEvent::Submit)
-   }
-   ```
-
-   The chord only fires when the env var is set, so the patch never affects production
-   users. Re-build:
+2. **Confirm the release binary is current**. No recording-only key patch is needed:
 
    ```bash
    cargo build --release
@@ -180,7 +165,7 @@ From the repo root:
    | Type | Signal | Sampling for the gif |
    | --- | --- | --- |
    | **workflow** | user-driven step or new content (typing, candidates land, Done lands) | `fps=25` on the section's natural window; preserve real-time animation |
-   | **read** | a state that's only briefly visible in the recording but the viewer needs time to read (e.g. WhatIUnderstood gets click-through via `Shift+Enter` after ~1 s) | static splice from the matching `live/NN-…png` for 2–3 s — duplicate frames; do NOT use the raw window |
+   | **read** | a state that's only briefly visible in the recording but the viewer needs time to read (e.g. WhatIUnderstood gets click-through via `Ctrl+G` after ~1 s) | static splice from the matching `live/NN-…png` for 2–3 s — duplicate frames; do NOT use the raw window |
    | **indicator-wait** | spinner / progress bar; visually static minus the rotating indicator (Gemini text pass, generation queue) | compress aggressively. `fps = output_frames / source_duration`. Budget 1–2 s output total no matter how long the source is |
    | **transition** | a fast cross-fade between two states, < 1 s | usually skipped or rolled into the neighbouring section |
 
@@ -234,7 +219,7 @@ From the repo root:
   of real rotation; if N > 1, the spinner appears N × faster in the output. Keep the source
   fps high (25) and shorten the window instead.
 - **Never treat WhatIUnderstood (or any other click-through state) as a workflow section.**
-  Submit fires immediately after candidates land, so the raw recording shows it for ~1.5 s.
+  `Ctrl+G` fires immediately after candidates land, so the raw recording shows it for ~1.5 s.
   Use the screenshot as a static splice for 2–3 s so the glosses are readable.
 - **Never carry over hardcoded section windows from a prior recording.** Gemini latency
   varies. Run scene-detect first.
@@ -246,14 +231,8 @@ From the repo root:
 - **Don't try to "fix" an already-post-processed gif by duplicating its frames.** A
   derivative gif has already lost spinner sampling fidelity; you have to go back to the raw.
 
-11. **Revert the chord patch** before staging anything:
-
-    ```bash
-    git restore src/tui/input.rs
-    ```
-
-12. **Confirm** with `git diff src/tui/input.rs` (must be empty) and `git status` (only the
-    regenerated assets should be staged). Once you're sure you don't need another slice pass,
+11. **Confirm** with `git status` that only the regenerated assets and intentional docs/code
+    changes are staged. Once you're sure you don't need another slice pass,
     `rm /tmp/raw.gif`.
 
 ### Demo input

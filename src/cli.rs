@@ -836,6 +836,9 @@ where
                 self.engine = Some(SessionEngine::start(self.app.cards().to_vec()));
                 self.started = Some(Instant::now());
             }
+            Side::RegenerateCurrent => {
+                self.regenerate_current()?;
+            }
             Side::RunBulkCorrection(comment) => {
                 let Some(focused) = self.app.candidates().get(self.app.selected()).cloned() else {
                     return Ok(());
@@ -921,6 +924,32 @@ where
             started: Instant::now(),
         });
         self.app = self.app.clone().busy_started(kind);
+        Ok(())
+    }
+
+    fn regenerate_current(&mut self) -> Result<()> {
+        if self.artifact_job.is_some() || self.publish_job.is_some() || self.app.cards().is_empty()
+        {
+            return Ok(());
+        }
+        if self.app.cards_failed() > 0 {
+            self.app = self.app.clone().cards_reset_failures();
+            self.engine = Some(SessionEngine::start(self.app.cards().to_vec()));
+            self.started = Some(Instant::now());
+            return Ok(());
+        }
+        self.app = self.app.clone().publication_cleared();
+        if self
+            .app
+            .cards()
+            .iter()
+            .all(|draft| draft.artifacts().all_ready())
+        {
+            self.start_publish()?;
+        } else {
+            self.engine = Some(SessionEngine::start(self.app.cards().to_vec()));
+            self.started = Some(Instant::now());
+        }
         Ok(())
     }
 
@@ -1525,6 +1554,24 @@ mod tests {
         }
     }
 
+    fn settle_shell<P>(shell: &mut Shell<P>, max_ticks: usize)
+    where
+        P: Lifecycle,
+    {
+        for _ in 0..max_ticks {
+            shell.tick().expect("shell tick must succeed");
+            if shell.engine.is_none()
+                && shell.artifact_job.is_none()
+                && shell.publish_job.is_none()
+                && shell.text.is_none()
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("shell did not settle before the deadline");
+    }
+
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
     struct FailingPasses;
 
@@ -1600,8 +1647,8 @@ mod tests {
         let _output = tempdir().expect("temp output must exist");
         let mut shell = shell(App::new(pair()).seeded_blob("whilst, in the end\nwreck"));
         shell
-            .handle(AppEvent::Submit)
-            .expect("submit must run understanding");
+            .handle(AppEvent::Generate)
+            .expect("generate must run understanding");
         settle_text(&mut shell);
         assert_eq!(
             (
@@ -1619,8 +1666,8 @@ mod tests {
         let _output = tempdir().expect("temp output must exist");
         let mut shell = failing_shell(App::new(pair()).seeded_blob("wreck"));
         shell
-            .handle(AppEvent::Submit)
-            .expect("submit must start understanding");
+            .handle(AppEvent::Generate)
+            .expect("generate must start understanding");
         settle_text(&mut shell);
         let before = (
             shell.app.screen(),
@@ -1662,8 +1709,8 @@ mod tests {
         let _output = tempdir().expect("temp output must exist");
         let mut shell = shell(review().understood(vec![candidate("whilst"), skipped("окно")]));
         shell
-            .handle(AppEvent::KeyEnter)
-            .expect("enter must start generation");
+            .handle(AppEvent::Generate)
+            .expect("generate must start generation");
         settle_engine(&mut shell, 200);
         assert!(
             shell.app.screen() == Screen::YourCards
@@ -1679,8 +1726,8 @@ mod tests {
         let _output = tempdir().expect("temp output must exist");
         let mut shell = shell(review().understood(vec![candidate("whilst")]));
         shell
-            .handle(AppEvent::KeyEnter)
-            .expect("enter must start generation");
+            .handle(AppEvent::Generate)
+            .expect("generate must start generation");
         let started = Instant::now();
         while shell.app.busy().is_none() && started.elapsed() < Duration::from_secs(5) {
             shell.tick().expect("tick must succeed");
@@ -1696,6 +1743,42 @@ mod tests {
             ),
             (Some(BusyKind::PublishingDeck), true, false),
             "publish must put the building-deck loader up first, clear it once done, and populate done artifacts"
+        );
+    }
+
+    #[test]
+    fn ctrl_g_on_finished_cards_rebuilds_publish_outputs() {
+        let _output = tempdir().expect("temp output must exist");
+        let mut shell = shell(review().understood(vec![candidate("whilst")]));
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generate must start generation");
+        settle_engine(&mut shell, 200);
+        let side = shell
+            .handle(AppEvent::Generate)
+            .expect("Ctrl+G regenerate must start");
+        let during = (
+            side,
+            shell.app.busy().map(|busy| busy.kind()),
+            shell.app.done_artifacts().deck.is_empty(),
+        );
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                during,
+                shell.app.done_artifacts().deck.ends_with(".apkg"),
+                shell.app.done_artifacts().report.ends_with(".pdf"),
+            ),
+            (
+                (
+                    Side::RegenerateCurrent,
+                    Some(BusyKind::PublishingDeck),
+                    true
+                ),
+                true,
+                true,
+            ),
+            "Ctrl+G on finished cards must clear stale outputs and rebuild APKG/PDF"
         );
     }
 
@@ -1717,8 +1800,8 @@ mod tests {
         let _output = tempdir().expect("temp output must exist");
         let mut shell = shell(review().understood(vec![candidate("whilst"), skipped("окно")]));
         shell
-            .handle(AppEvent::Submit)
-            .expect("submit must start generation");
+            .handle(AppEvent::Generate)
+            .expect("generate must start generation");
         assert_eq!(
             shell
                 .app
