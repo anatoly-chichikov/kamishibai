@@ -15,7 +15,6 @@ pub enum Side {
     RegenerateFailed,
     RegenerateCurrent,
     PersistMyLanguage(String),
-    PersistApiKey(String),
     /// Persist both the picked language and (optionally) the API key in one
     /// write — emitted by the Welcome screen on final Submit so partial state
     /// from one stage never lands on disk on its own.
@@ -260,6 +259,11 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         (Screen::Welcome, AppEvent::NavNext) => AppEvent::WelcomeNextLanguage,
         (Screen::Welcome, AppEvent::CursorLeft) => AppEvent::WelcomePrevLanguage,
         (Screen::Welcome, AppEvent::CursorRight) => AppEvent::WelcomeNextLanguage,
+        (Screen::Welcome, AppEvent::OpenLanguagePicker)
+            if app.welcome().stage == WelcomeStage::PickLanguage =>
+        {
+            AppEvent::WelcomeNextLanguage
+        }
         (Screen::Welcome, AppEvent::KeyChar('?')) => AppEvent::WelcomeOpenKeyHelp,
         (Screen::WhatIUnderstood, AppEvent::KeyChar('r'))
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('R')) => AppEvent::RequestChange,

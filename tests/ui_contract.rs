@@ -41,6 +41,7 @@ fn loads_ui_contract() {
     check_duplicate_targets(&contract, &known_ids, &mut errs);
     check_broken_or_fake_have_issues(&contract, &mut errs);
     check_issueful_elements_are_degraded(&contract, &mut errs);
+    check_meta_sources(&contract, &mut errs);
     check_source_refs(&contract, &mut errs);
     check_your_words_input_contract(&contract, &mut errs);
     assert!(
@@ -118,6 +119,14 @@ fn check_issueful_elements_are_degraded(contract: &Contract, errs: &mut Vec<Stri
     });
 }
 
+fn check_meta_sources(contract: &Contract, errs: &mut Vec<String>) {
+    for source in &contract.meta.sources_checked {
+        if !source.exists() {
+            errs.push(format!("meta source {:?} does not exist", source));
+        }
+    }
+}
+
 fn check_source_refs(contract: &Contract, errs: &mut Vec<String>) {
     let mut refs: Vec<SourceRef> = Vec::new();
     visit_elements(contract, |e| {
@@ -131,6 +140,17 @@ fn check_source_refs(contract: &Contract, errs: &mut Vec<String>) {
         if !p.exists() {
             errs.push(format!("source file {:?} does not exist", r.file));
             continue;
+        }
+        let Ok(text) = fs::read_to_string(p) else {
+            errs.push(format!("source file {:?} cannot be read", r.file));
+            continue;
+        };
+        let lines = u32::try_from(text.lines().count()).unwrap_or(u32::MAX);
+        if r.line == 0 || r.line > lines {
+            errs.push(format!(
+                "source ref {:?}:{} is outside 1..={}",
+                r.file, r.line, lines
+            ));
         }
     }
 }

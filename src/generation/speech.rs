@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use crate::generation::SpeechGenerator;
 use crate::generation::artifact_cache::Cache;
 
 /// Generate raw PCM speech bytes for one prompt.
@@ -94,19 +93,4 @@ fn write(path: &Path, data: &[u8]) -> Result<()> {
     wav.extend_from_slice(data);
     fs::write(path, &wav)?;
     Ok(())
-}
-
-impl<S> SpeechGenerator for Audio<S>
-where
-    S: Speaker,
-{
-    /// Generate one cached audio filename and cache label.
-    fn generate(&self, text: &str) -> Result<(String, bool)> {
-        Audio::<S>::generate(self, text)
-    }
-
-    /// Return one absolute cached audio path.
-    fn filepath(&self, filename: &str) -> Result<PathBuf> {
-        Audio::<S>::filepath(self, filename)
-    }
 }

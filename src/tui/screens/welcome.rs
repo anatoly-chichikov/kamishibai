@@ -244,6 +244,8 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         WelcomeStage::PickLanguage => {
             left.extend(super::common::key_hint("← →", "pick"));
             left.push(super::common::status_sep());
+            left.extend(super::common::key_hint("Ctrl+L", "pick"));
+            left.push(super::common::status_sep());
             left.extend(super::common::key_hint("Enter", "next"));
         }
         WelcomeStage::EnterKey => {
