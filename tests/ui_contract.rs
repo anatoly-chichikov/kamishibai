@@ -172,8 +172,8 @@ fn check_your_words_input_contract(contract: &Contract, errs: &mut Vec<String>) 
         errs.push(String::from("yw.footer_paste is missing"));
         return;
     };
-    if !text_contains(paste, "paste") {
-        errs.push(String::from("yw.footer_paste does not remind paste entry"));
+    if !text_contains(paste, "Cmd+V") || !text_contains(paste, "paste") {
+        errs.push(String::from("yw.footer_paste does not reveal Cmd+V paste"));
     }
     let Some(continue_hint) = element_by_id(contract, "yw.footer_continue") else {
         errs.push(String::from("yw.footer_continue is missing"));

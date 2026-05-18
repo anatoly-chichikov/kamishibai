@@ -137,7 +137,7 @@ Contract(
                         Element(
                             id: ElementId("yw.footer_paste"),
                             kind: KeyHint(Footer),
-                            text: Literal("paste"),
+                            text: Literal("[Cmd+V] paste"),
                             source: SourceRef(file: "src/tui/screens/your_words.rs", line: 210),
                             purpose: "reminds the user that paste is the expected entry path",
                             importance: 4,
