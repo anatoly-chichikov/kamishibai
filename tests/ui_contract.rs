@@ -163,14 +163,17 @@ fn check_your_words_input_contract(contract: &Contract, errs: &mut Vec<String>) 
     if text_contains(placeholder, "comma") {
         errs.push(String::from("yw.placeholder still advertises comma input"));
     }
+    if !text_contains(placeholder, "per line") {
+        errs.push(String::from(
+            "yw.placeholder does not lock line-delimited input",
+        ));
+    }
     let Some(paste) = element_by_id(contract, "yw.footer_paste") else {
         errs.push(String::from("yw.footer_paste is missing"));
         return;
     };
-    if !text_contains(paste, "one per line") {
-        errs.push(String::from(
-            "yw.footer_paste does not lock line-delimited input",
-        ));
+    if !text_contains(paste, "Cmd+V") || !text_contains(paste, "paste") {
+        errs.push(String::from("yw.footer_paste does not reveal Cmd+V paste"));
     }
     let Some(continue_hint) = element_by_id(contract, "yw.footer_continue") else {
         errs.push(String::from("yw.footer_continue is missing"));
@@ -181,6 +184,15 @@ fn check_your_words_input_contract(contract: &Contract, errs: &mut Vec<String>) 
     }
     if text_contains(continue_hint, "[Enter] continue") {
         errs.push(String::from("yw.footer_continue still binds plain Enter"));
+    }
+    let Some(language_hint) = element_by_id(contract, "yw.toggle_my_language") else {
+        errs.push(String::from("yw.toggle_my_language is missing"));
+        return;
+    };
+    if !text_contains(language_hint, "Ctrl+L") || !text_contains(language_hint, "language") {
+        errs.push(String::from(
+            "yw.toggle_my_language does not reveal Ctrl+L language",
+        ));
     }
 }
 

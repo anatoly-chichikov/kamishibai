@@ -101,6 +101,26 @@ fn your_words_renders_placeholder_tagline_and_language_pair() {
 }
 
 #[test]
+fn your_words_footer_shows_language_shortcut() {
+    let app = App::new(LanguagePair::new("en", "ru"));
+    let flat = flatten(&app);
+    assert!(
+        flat.contains("[Ctrl+L] language"),
+        "your words footer must reveal the language picker shortcut: {flat}"
+    );
+}
+
+#[test]
+fn your_words_footer_keeps_paste_shortcut() {
+    let app = App::new(LanguagePair::new("en", "ru"));
+    let flat = flatten(&app);
+    assert!(
+        flat.contains("[Cmd+V] paste"),
+        "your words footer must keep the paste shortcut: {flat}"
+    );
+}
+
+#[test]
 fn busy_loader_covers_the_current_screen_with_request_status() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .busy_started(BusyKind::Understanding)

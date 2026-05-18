@@ -193,7 +193,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     left.push(Span::styled("step 1/3", palette::dim2()));
     left.push(super::common::status_sep());
     if count == 0 {
-        left.push(Span::styled("no words yet", palette::dim2()));
+        left.push(Span::styled("empty", palette::dim2()));
     } else {
         let noun = if count == 1 { "card" } else { "cards" };
         left.push(Span::styled(
@@ -205,9 +205,12 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     let mut right: Vec<Span<'static>> = Vec::new();
     if count > 0 {
         right.extend(super::common::key_hint("Ctrl+G", "continue"));
+        right.push(super::common::status_sep());
     } else {
-        right.extend(super::common::key_hint("Cmd+V", "paste a list"));
+        right.extend(super::common::key_hint("Cmd+V", "paste"));
+        right.push(super::common::status_sep());
     }
+    right.extend(super::common::key_hint("Ctrl+L", "language"));
     super::common::append_quit(&mut right, app.quit_pending());
     super::common::status_bar(left, right, width)
 }
