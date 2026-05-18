@@ -63,18 +63,18 @@ fn plain_enter_on_your_words_inserts_newline_without_advancing() {
 }
 
 #[test]
-fn shift_enter_on_your_words_advances_to_what_i_understood_with_language_pair_visible() {
+fn ctrl_g_on_your_words_advances_to_what_i_understood_with_language_pair_visible() {
     let mut state = App::new(LanguagePair::new("en", "ru"));
     for symbol in "whilst".chars() {
         let event = to_app(press(KeyCode::Char(symbol))).expect("char must map");
         let (next, _) = transit(state, event);
         state = next;
     }
-    let submit = to_app(modified(KeyCode::Enter, KeyModifiers::SHIFT)).expect("map");
+    let submit = to_app(modified(KeyCode::Char('g'), KeyModifiers::CONTROL)).expect("map");
     assert_eq!(
         submit,
-        AppEvent::Submit,
-        "Shift+Enter must produce the semantic submit event"
+        AppEvent::Generate,
+        "Ctrl+G must produce the generation event"
     );
     let (after, _) = transit(state, submit);
     let next = after.confirmed_target("en");
@@ -85,7 +85,37 @@ fn shift_enter_on_your_words_advances_to_what_i_understood_with_language_pair_vi
             render_contains(&next, "RU → EN"),
         ),
         (Screen::WhatIUnderstood, true, true),
-        "after typing and pressing Shift+Enter the shell must render What I understood with a visible language pair"
+        "after typing and pressing Ctrl+G the shell must render What I understood with a visible language pair"
+    );
+}
+
+#[test]
+fn shift_enter_on_your_words_is_just_enter() {
+    let event = to_app(modified(KeyCode::Enter, KeyModifiers::SHIFT));
+    assert_eq!(
+        event,
+        Some(AppEvent::KeyEnter),
+        "Shift+Enter must not produce a generation event"
+    );
+}
+
+#[test]
+fn ctrl_g_normalizes_ascii_russian_and_greek_layouts() {
+    let events = ['g', 'G', 'п', 'П', 'γ', 'Γ']
+        .into_iter()
+        .map(|symbol| to_app(modified(KeyCode::Char(symbol), KeyModifiers::CONTROL)))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        events,
+        vec![
+            Some(AppEvent::Generate),
+            Some(AppEvent::Generate),
+            Some(AppEvent::Generate),
+            Some(AppEvent::Generate),
+            Some(AppEvent::Generate),
+            Some(AppEvent::Generate),
+        ],
+        "Ctrl+G must survive supported layout and case variants"
     );
 }
 
@@ -131,16 +161,16 @@ fn left_arrow_maps_to_the_text_cursor_event() {
 }
 
 #[test]
-fn release_submit_from_keyboard_enhancement_does_not_submit_twice() {
+fn release_generate_from_keyboard_enhancement_does_not_submit_twice() {
     let press = to_app(KeyEvent::new_with_kind(
-        KeyCode::Enter,
-        KeyModifiers::SHIFT,
+        KeyCode::Char('g'),
+        KeyModifiers::CONTROL,
         KeyEventKind::Press,
     ));
-    let release = to_app(release(KeyCode::Enter, KeyModifiers::SHIFT));
+    let release = to_app(release(KeyCode::Char('g'), KeyModifiers::CONTROL));
     assert_eq!(
         (press, release),
-        (Some(AppEvent::Submit), None),
-        "release events from enhanced keyboard mode must not duplicate submit"
+        (Some(AppEvent::Generate), None),
+        "release events from enhanced keyboard mode must not duplicate generation"
     );
 }

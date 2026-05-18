@@ -12,7 +12,7 @@ Set WaitTimeout 60s
 Hide
 Type "cd /Users/anatoly/Source/kamishibai && rm -rf kamishibai-out && clear"
 Enter
-Type "KAMISHIBAI_RECORDING_HOTKEYS=1 ./target/release/kamishibai"
+Type "./target/release/kamishibai"
 Enter
 Show
 
@@ -34,7 +34,7 @@ Type "bittersweet"
 Sleep 600ms
 Screenshot "live/01-your-words.png"
 
-Ctrl+S
+Ctrl+G
 
 Wait+Screen /understanding your words/
 Sleep 250ms
@@ -59,7 +59,7 @@ Screenshot "live/01c-busy-correction.png"
 Sleep 12s
 Screenshot "live/02b-what-i-understood-corrected.png"
 
-Ctrl+S
+Ctrl+G
 
 Wait+Screen@5m /your cards/
 Sleep 8s

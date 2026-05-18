@@ -247,7 +247,7 @@ fn arrows_on_empty_your_words_materialize_the_requested_position() {
 }
 
 #[test]
-fn typing_and_pressing_shift_enter_advances_to_what_i_understood_and_locks_target_language() {
+fn typing_and_pressing_ctrl_g_advances_to_what_i_understood_and_locks_target_language() {
     let app = App::new(LanguagePair::new("en", "ru"));
     let mut state = app;
     for symbol in "окно".chars() {
@@ -255,7 +255,8 @@ fn typing_and_pressing_shift_enter_advances_to_what_i_understood_and_locks_targe
         let (next, _) = transit(state, event);
         state = next;
     }
-    let submit = to_app(modified(KeyCode::Enter, KeyModifiers::SHIFT)).expect("Enter must map");
+    let submit =
+        to_app(modified(KeyCode::Char('g'), KeyModifiers::CONTROL)).expect("Ctrl+G must map");
     let (after_submit, side) = transit(state, submit);
     let resolved = apply_side(after_submit, side.clone());
     assert_eq!(
@@ -271,7 +272,7 @@ fn typing_and_pressing_shift_enter_advances_to_what_i_understood_and_locks_targe
             false,
             String::from("ru"),
         ),
-        "Shift+Enter on non-empty blob must move to What I understood, request understanding, and confirm the detected target language"
+        "Ctrl+G on non-empty blob must move to What I understood, request understanding, and confirm the detected target language"
     );
 }
 

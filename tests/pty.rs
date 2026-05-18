@@ -42,10 +42,10 @@ fn pty_flow_advances_from_your_words_to_what_i_understood() {
         .expect("[screen] Your words")
         .expect("skeleton must render Your words on launch");
     session.send("a").expect("must seed blob character");
-    session.send("\r").expect("must send Enter");
+    session.send("\x07\r").expect("must send Ctrl+G");
     session
         .expect("[screen] What I understood")
-        .expect("skeleton must advance to What I understood after Enter");
+        .expect("skeleton must advance to What I understood after Ctrl+G");
     session.send_line("q").expect("must send quit key");
     std::thread::sleep(Duration::from_millis(800));
     assert!(

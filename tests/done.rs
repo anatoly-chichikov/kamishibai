@@ -1,6 +1,8 @@
 //! Integration flow for the `Done` screen (08-done.png).
 
-use kamishibai::session::LanguagePair;
+use kamishibai::session::{
+    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
+};
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -31,6 +33,34 @@ fn published() -> App {
         )
 }
 
+fn failed_published() -> App {
+    let mut picture = ArtifactSlot::fresh(Artifact::Picture);
+    for _ in 0..3 {
+        picture = picture.attempted();
+    }
+    let artifacts = CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        picture,
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    );
+    let body = CardBody::new(
+        "/wreck/",
+        "/wreck sentence/",
+        "meaning of wreck",
+        5,
+        "source for wreck",
+        "wreck",
+        "hint for wreck",
+        "context for wreck",
+        "Example with wreck.",
+    );
+    let draft = CardDraft::new("wreck", "verb sense", LanguagePair::new("en", "ru"))
+        .with_body(body, None)
+        .with_artifacts(artifacts);
+    published().cards_started(vec![draft])
+}
+
 #[test]
 fn done_screen_lists_short_artifact_labels_and_quit_hint() {
     let rendered = flat(&published());
@@ -54,5 +84,25 @@ fn quit_from_done_requests_app_exit() {
         side,
         Side::ExitApp,
         "Q on Done must request the shell to exit the application"
+    );
+}
+
+#[test]
+fn done_with_failed_cards_offers_regenerate() {
+    let rendered = flat(&failed_published());
+    assert!(
+        rendered.contains("[Ctrl+G] Regenerate"),
+        "Done with failed cards must expose Ctrl+G Regenerate: {rendered}"
+    );
+}
+
+#[test]
+fn ctrl_g_from_done_restarts_failed_cards_on_your_cards() {
+    let app = failed_published();
+    let (next, side) = transit(app, AppEvent::Generate);
+    assert_eq!(
+        (next.screen(), side),
+        (Screen::YourCards, Side::RegenerateFailed),
+        "Ctrl+G on Done must return to YourCards and restart failed artifacts"
     );
 }

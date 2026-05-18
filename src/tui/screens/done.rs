@@ -108,6 +108,9 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         ));
     }
     let mut right: Vec<Span<'static>> = Vec::new();
+    if app.cards_failed() > 0 {
+        right.extend(super::common::key_hint("Ctrl+G", "Regenerate"));
+    }
     super::common::append_quit(&mut right, app.quit_pending());
     super::common::status_bar(left, right, width)
 }

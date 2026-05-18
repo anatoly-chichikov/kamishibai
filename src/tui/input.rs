@@ -19,7 +19,6 @@ pub fn to_app(key: KeyEvent) -> Option<AppEvent> {
         return None;
     }
     match key.code {
-        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => Some(AppEvent::Submit),
         KeyCode::Enter => Some(AppEvent::KeyEnter),
         KeyCode::Esc => Some(AppEvent::Cancel),
         KeyCode::Backspace => Some(AppEvent::KeyBackspace),
@@ -36,6 +35,7 @@ pub fn to_app(key: KeyEvent) -> Option<AppEvent> {
         KeyCode::Char(symbol) if key.modifiers.contains(KeyModifiers::CONTROL) => {
             match latin_for_ctrl(symbol) {
                 'c' => Some(AppEvent::Quit),
+                'g' => Some(AppEvent::Generate),
                 'l' => Some(AppEvent::OpenLanguagePicker),
                 _ => None,
             }
@@ -85,6 +85,31 @@ pub fn latin_for_ctrl(symbol: char) -> char {
         'и' | 'И' => 'b',
         'т' | 'Т' => 'n',
         'ь' | 'Ь' => 'm',
+        'α' | 'Α' => 'a',
+        'β' | 'Β' => 'b',
+        'ψ' | 'Ψ' => 'c',
+        'δ' | 'Δ' => 'd',
+        'ε' | 'Ε' => 'e',
+        'φ' | 'Φ' => 'f',
+        'γ' | 'Γ' => 'g',
+        'η' | 'Η' => 'h',
+        'ι' | 'Ι' => 'i',
+        'ξ' | 'Ξ' => 'j',
+        'κ' | 'Κ' => 'k',
+        'λ' | 'Λ' => 'l',
+        'μ' | 'Μ' => 'm',
+        'ν' | 'Ν' => 'n',
+        'ο' | 'Ο' => 'o',
+        'π' | 'Π' => 'p',
+        'ρ' | 'Ρ' => 'r',
+        'σ' | 'Σ' => 's',
+        'τ' | 'Τ' => 't',
+        'θ' | 'Θ' => 'u',
+        'ω' | 'Ω' => 'v',
+        'ς' => 'w',
+        'χ' | 'Χ' => 'x',
+        'υ' | 'Υ' => 'y',
+        'ζ' | 'Ζ' => 'z',
         _ => lowered,
     }
 }
