@@ -26,6 +26,7 @@ Contract(
             "src/tui/transition.rs",
             "src/tui/input.rs",
             "src/tui/screens/common.rs",
+            "src/tui/screens/welcome.rs",
             "src/tui/screens/your_words.rs",
             "src/tui/screens/what_i_understood.rs",
             "src/tui/screens/your_cards.rs",

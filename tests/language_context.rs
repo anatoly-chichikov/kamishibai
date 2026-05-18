@@ -6,7 +6,9 @@ use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::session::{
     Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair, WordCandidate,
 };
-use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
+use kamishibai::tui::{
+    App, AppEvent, KeySource, Screen, Side, WelcomeStage, draw, to_app, transit,
+};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use tempfile::tempdir;
@@ -51,6 +53,44 @@ fn body_for(term: &str) -> CardBody {
 
 fn base() -> App {
     App::new(LanguagePair::new("en", "ru"))
+}
+
+#[test]
+fn ctrl_l_on_welcome_language_step_cycles_the_language() {
+    let app = App::new(LanguagePair::new("en", "en"))
+        .opening_welcome(KeySource::Env, "123456789012345678901234567890");
+    let event = to_app(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('l'),
+        crossterm::event::KeyModifiers::CONTROL,
+    ))
+    .expect("Ctrl+L must map");
+    let (after, side) = transit(app, event);
+    assert_eq!(
+        (
+            after.screen(),
+            after.welcome().stage,
+            after.pair().support().to_string(),
+            side,
+        ),
+        (
+            Screen::Welcome,
+            WelcomeStage::PickLanguage,
+            kamishibai::languages::catalog().codes()[1].to_string(),
+            Side::None,
+        ),
+        "Ctrl+L on the first Welcome slide must cycle the language without persisting it"
+    );
+}
+
+#[test]
+fn welcome_language_step_renders_the_ctrl_l_hint() {
+    let app = App::new(LanguagePair::new("en", "en"))
+        .opening_welcome(KeySource::Env, "123456789012345678901234567890");
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("[Ctrl+L] pick"),
+        "Welcome language step must show Ctrl+L as an available language switch shortcut"
+    );
 }
 
 #[test]

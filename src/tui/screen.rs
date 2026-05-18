@@ -1,5 +1,5 @@
-/// The locked-in fullscreen TUI states. The first-run `Welcome` screen is
-/// shown only on a brand new install; the rest is the steady-state flow.
+/// The locked-in fullscreen TUI states. The `Welcome` screen is shown until
+/// the user has explicitly confirmed setup; the rest is the steady-state flow.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Screen {
     Welcome,

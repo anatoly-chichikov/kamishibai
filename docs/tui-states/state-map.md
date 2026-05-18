@@ -13,6 +13,7 @@ All future work references this map instead of re-deriving transitions.
 
 | Id                    | Kind        | PDF reference                                             |
 | --------------------- | ----------- | --------------------------------------------------------- |
+| `Welcome`             | fullscreen  | first-run setup; no live reference yet                    |
 | `YourWords`           | fullscreen  | `01-your-words.png`                                       |
 | `WhatIUnderstood`     | fullscreen  | `02-what-i-understood.png`, `02b-what-i-understood-corrected.png` |
 | `ChangeSomething`     | modal       | `03-change-something-modal.png` over `WhatIUnderstood`    |
@@ -33,22 +34,28 @@ Text-only Gemini passes use one universal blocking overlay on top of the current
 screen: first understanding, bulk correction, and per-card correction. The
 overlay owns keyboard input until the background request finishes.
 
-There is **no** standalone fullscreen language wizard. Language pair is rendered
-as a compact header widget on every fullscreen screen. The widget is a missing
-requirement relative to the PDF and must be added on top of every screenshot in
-the same visual language.
+`Welcome` is the explicit setup gate. It appears until the user has confirmed
+`my language` and a Gemini key is available from the environment, saved
+preferences, or paste. `GEMINI_API_KEY` may prefill the key step, but it must
+never skip the first-run language choice.
+
+After setup, the language pair is rendered as a compact header widget on every
+steady-state fullscreen screen in the same visual language.
 
 ## Language pair surface
 
 | Screen            | What is shown                                                                                  |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
+| `Welcome`         | Unlocked setup language. `←/→` or `Ctrl+L` cycles `my language`; `Enter` confirms it.          |
 | `YourWords`       | Detected target (pending), persisted `my` language. `[Ctrl+L]` flips `my` language.          |
 | `WhatIUnderstood` | Confirmed target, current `my`. `[L]` can flip `my`, `[T]` cycles target if unsure.           |
 | `YourCards`       | Frozen pair for the batch — read-only.                                                         |
 | `Done`            | Pair remains visible next to the batch summary.                                                |
 
 `target language` is resolved before `WhatIUnderstood`. `my language` is read
-from `config/preferences.json` at batch start and defaults to `en`.
+from `config/preferences.json` only after the stored value has been explicitly
+confirmed by the user; otherwise startup falls back to `en` while showing
+`Welcome`.
 
 ## Candidate contract
 
