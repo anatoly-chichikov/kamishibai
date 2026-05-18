@@ -28,7 +28,8 @@ fn main() -> Result<()> {
             break;
         }
         let event = match byte[0] {
-            b'\r' | b'\n' => AppEvent::Submit,
+            0x07 => AppEvent::Generate,
+            b'\r' | b'\n' => AppEvent::KeyEnter,
             b'r' | b'R' => AppEvent::RequestChange,
             0x1B => AppEvent::Cancel,
             other => AppEvent::KeyChar(other as char),
@@ -63,7 +64,7 @@ fn render(app: &App) -> io::Result<()> {
 
 fn promote(event: AppEvent, app: &App) -> AppEvent {
     match (app.screen(), &event) {
-        (Screen::YourCards, AppEvent::Submit) => AppEvent::BatchReady,
+        (Screen::YourCards, AppEvent::Generate) => AppEvent::BatchReady,
         _ => event,
     }
 }

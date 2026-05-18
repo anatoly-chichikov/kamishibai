@@ -204,7 +204,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     }
     let mut right: Vec<Span<'static>> = Vec::new();
     if count > 0 {
-        right.extend(super::common::key_hint("Shift+Enter", "continue"));
+        right.extend(super::common::key_hint("Ctrl+G", "continue"));
     } else {
         right.extend(super::common::key_hint("Cmd+V", "paste a list"));
     }

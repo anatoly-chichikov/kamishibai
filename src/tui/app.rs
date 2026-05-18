@@ -644,30 +644,41 @@ impl App {
         &self.done
     }
 
-    /// Return the app with every failed artifact slot reset to fresh so the
-    /// session engine can re-enqueue it.
+    /// Return the app with stale published output paths cleared.
+    pub fn publication_cleared(mut self) -> Self {
+        self.done = DoneArtifacts::default();
+        self
+    }
+
+    /// Return the app with failed artifacts and their blocked dependents reset
+    /// so the session engine can re-enqueue them.
     pub fn cards_reset_failures(mut self) -> Self {
+        self.done = DoneArtifacts::default();
         for draft in self.cards.drafts.iter_mut() {
             if !draft.artifacts().has_failed() {
                 continue;
             }
             let artifacts = draft.artifacts();
-            let body = if artifacts.body().failed_terminally() {
+            let body_failed = artifacts.body().failed_terminally();
+            let scene_failed = artifacts.scene().failed_terminally();
+            let picture_failed = artifacts.picture().failed_terminally();
+            let sound_failed = artifacts.sound().failed_terminally();
+            let body = if body_failed {
                 ArtifactSlot::fresh(Artifact::Body)
             } else {
                 artifacts.body().clone()
             };
-            let scene = if artifacts.scene().failed_terminally() {
+            let scene = if body_failed || scene_failed {
                 ArtifactSlot::fresh(Artifact::Scene)
             } else {
                 artifacts.scene().clone()
             };
-            let picture = if artifacts.picture().failed_terminally() {
+            let picture = if body_failed || scene_failed || picture_failed {
                 ArtifactSlot::fresh(Artifact::Picture)
             } else {
                 artifacts.picture().clone()
             };
-            let sound = if artifacts.sound().failed_terminally() {
+            let sound = if body_failed || sound_failed {
                 ArtifactSlot::fresh(Artifact::Sound)
             } else {
                 artifacts.sound().clone()

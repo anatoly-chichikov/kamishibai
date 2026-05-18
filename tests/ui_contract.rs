@@ -156,8 +156,8 @@ fn check_your_words_input_contract(contract: &Contract, errs: &mut Vec<String>) 
         errs.push(String::from("yw.footer_continue is missing"));
         return;
     };
-    if !text_contains(continue_hint, "Shift+Enter") {
-        errs.push(String::from("yw.footer_continue does not use Shift+Enter"));
+    if !text_contains(continue_hint, "Ctrl+G") {
+        errs.push(String::from("yw.footer_continue does not use Ctrl+G"));
     }
     if text_contains(continue_hint, "[Enter] continue") {
         errs.push(String::from("yw.footer_continue still binds plain Enter"));

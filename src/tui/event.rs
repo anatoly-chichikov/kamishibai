@@ -11,8 +11,10 @@ pub enum EditingOwner {
 /// All user and session-engine events the transition function accepts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppEvent {
-    /// User asked to move forward from the current screen (Enter on body).
+    /// User asked to move forward from the current screen.
     Submit,
+    /// User pressed Ctrl+G to start or restart generation.
+    Generate,
     /// User pressed the physical Enter key.
     KeyEnter,
     /// User asked to back out of a modal or go back a screen.

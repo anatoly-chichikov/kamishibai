@@ -13,6 +13,7 @@ pub enum Side {
     RunCardCorrection(String),
     StartGeneration,
     RegenerateFailed,
+    RegenerateCurrent,
     PersistMyLanguage(String),
     PersistApiKey(String),
     /// Persist both the picked language and (optionally) the API key in one
@@ -43,7 +44,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
     let event = promote(&app, event);
     match (app.screen(), app.modal(), event) {
         (Screen::Welcome, _, e) => welcome(app, e),
-        (Screen::YourWords, None, AppEvent::Submit) => {
+        (Screen::YourWords, None, AppEvent::Generate) => {
             if app
                 .blob()
                 .chars()
@@ -67,13 +68,15 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourWords, None, AppEvent::OpenLanguagePicker) => {
             (open_language_picker(app), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::Submit)
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) => {
+        (Screen::WhatIUnderstood, None, AppEvent::Generate) => {
             if !app.candidates().iter().any(|candidate| candidate.ok()) {
                 (app, Side::None)
             } else {
                 (app.with_screen(Screen::YourCards), Side::StartGeneration)
             }
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) if !app.candidates().is_empty() => {
+            (app.with_modal(ModalKind::ChangeSomething), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::RequestChange) => {
             (app.with_modal(ModalKind::ChangeSomething), Side::None)
@@ -142,10 +145,9 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_selected_previous(), Side::None),
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
-        (Screen::YourCards, None, AppEvent::Submit)
-        | (Screen::YourCards, None, AppEvent::KeyEnter) => (app.card_toggle_expanded(), Side::None),
-        (Screen::YourCards, None, AppEvent::KeyChar('r')) if app.cards_failed() > 0 => {
-            (app, Side::RegenerateFailed)
+        (Screen::YourCards, None, AppEvent::KeyEnter) => (app.card_toggle_expanded(), Side::None),
+        (Screen::YourCards, None, AppEvent::Generate) if !app.cards().is_empty() => {
+            (app, Side::RegenerateCurrent)
         }
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::SendCorrection(text)) => {
             (app.close_modal(), Side::RunCardCorrection(text))
@@ -170,6 +172,9 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::YourCards, None, AppEvent::BatchReady) => (app, Side::StartPublish),
         (Screen::YourCards, None, AppEvent::BatchDone { failed: _ }) => (app, Side::StartPublish),
+        (Screen::Done, None, AppEvent::Generate) if app.cards_failed() > 0 => {
+            (app.with_screen(Screen::YourCards), Side::RegenerateFailed)
+        }
         (Screen::Done, None, AppEvent::Quit) => (app, Side::ExitApp),
         (_, _, AppEvent::Redraw) => (app, Side::None),
         (_, _, _) => (app, Side::None),
@@ -264,14 +269,8 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         }
         (Screen::WhatIUnderstood, AppEvent::CursorLeft) => AppEvent::NavPrev,
         (Screen::WhatIUnderstood, AppEvent::CursorRight) => AppEvent::NavNext,
-        (Screen::YourCards, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
-        (Screen::YourCards, AppEvent::KeyChar('r')) => {
-            if app.cards_failed() > 0 {
-                event
-            } else {
-                AppEvent::RequestChange
-            }
-        }
+        (Screen::YourCards, AppEvent::KeyChar('R'))
+        | (Screen::YourCards, AppEvent::KeyChar('r')) => AppEvent::RequestChange,
         (Screen::YourCards, AppEvent::CursorLeft) => AppEvent::NavPrev,
         (Screen::YourCards, AppEvent::CursorRight) => AppEvent::NavNext,
         _ => event,

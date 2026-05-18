@@ -4,7 +4,7 @@
 use kamishibai::session::{
     Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
 };
-use kamishibai::tui::{App, AppEvent, Screen, draw, transit};
+use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -108,6 +108,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
             && rendered.contains("[↑↓] nav")
             && rendered.contains("[Enter] expand")
             && rendered.contains("[R] change")
+            && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[D] drop")
             && !rendered.contains("working…")
             && !rendered.contains("queued"),
@@ -116,7 +117,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
 }
 
 #[test]
-fn your_cards_done_footer_carries_expand_and_change_hints_only() {
+fn your_cards_done_footer_carries_expand_change_and_regenerate_hints() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("at the end", ready_artifacts()),
@@ -130,10 +131,22 @@ fn your_cards_done_footer_carries_expand_and_change_hints_only() {
             && rendered.contains("[↑↓] nav")
             && rendered.contains("[Enter] expand")
             && rendered.contains("[R] change")
+            && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("new batch")
             && !rendered.contains("[D] drop")
             && !rendered.contains("working…"),
-        "all-done footer must offer only expand/change hints — no new-batch or drop hooks: {rendered}"
+        "all-done footer must offer expand/change/regenerate hints and no new-batch or drop hooks: {rendered}"
+    );
+}
+
+#[test]
+fn ctrl_g_on_ready_cards_requests_regeneration() {
+    let app = seeded(vec![draft("whilst", ready_artifacts())]);
+    let (_, side) = transit(app, AppEvent::Generate);
+    assert_eq!(
+        side,
+        Side::RegenerateCurrent,
+        "Ctrl+G on ready cards must request regeneration so publish can be rebuilt"
     );
 }
 
@@ -184,7 +197,7 @@ fn arrows_and_enter_navigate_and_toggle_expansion_of_the_focused_card() {
         draft("at the end", ready_artifacts()),
     ]);
     let after_down = transit(start.clone(), AppEvent::NavNext).0;
-    let expanded = transit(after_down.clone(), AppEvent::Submit).0;
+    let expanded = transit(after_down.clone(), AppEvent::KeyEnter).0;
     assert_eq!(
         (
             start.card_selected(),
@@ -200,7 +213,7 @@ fn arrows_and_enter_navigate_and_toggle_expansion_of_the_focused_card() {
 #[test]
 fn expanded_card_shows_body_preview_only_no_duplicate_artifact_pane() {
     let start = seeded(vec![draft("whilst", ready_artifacts())]);
-    let expanded = transit(start, AppEvent::Submit).0;
+    let expanded = transit(start, AppEvent::KeyEnter).0;
     let rendered = flat(&expanded);
     let artifact_lines = rendered.matches("scene").count();
     assert!(
