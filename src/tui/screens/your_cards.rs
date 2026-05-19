@@ -25,6 +25,7 @@ const HEADLINE_DONE: &str = "your cards";
 const HINT_WORKING: &str = "drawing each card one by one";
 const HINT_DONE: &str = "all done";
 const HINT_DONE_FAILED: &str = "some cards didn't make it";
+const SPINNER_FRAME_MILLIS: u128 = 250;
 const STEPS: [(&str, Artifact); 4] = [
     ("meta", Artifact::Body),
     ("audio", Artifact::Sound),
@@ -96,7 +97,8 @@ fn cards_paragraph(app: &App, width: usize) -> Paragraph<'_> {
         lines.push(Line::from(Span::styled("preparing cards…", palette::dim())));
         return Paragraph::new(lines).style(palette::base());
     }
-    let spinner_frame = (app.elapsed().as_millis() / 180) as usize % SPINNER_FRAMES.len();
+    let spinner_frame =
+        (app.elapsed().as_millis() / SPINNER_FRAME_MILLIS) as usize % SPINNER_FRAMES.len();
     let running_target = app.cards_running_target();
     for (index, draft) in app.cards().iter().enumerate() {
         let focused = index == app.card_selected();
