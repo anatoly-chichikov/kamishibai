@@ -60,6 +60,11 @@ use crate::session::{ScriptDetection, TargetDetection, catalog_for_detection};
 
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
 const POINTER_REFRESH: Duration = Duration::from_millis(50);
+const ANIMATION_FRAME_MILLIS: u64 = 250;
+const IDLE_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
+const BACKGROUND_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
+const FAST_JOB_POLL: Duration = Duration::from_millis(25);
+const FAST_JOB_WINDOW: Duration = Duration::from_millis(50);
 
 /// Execute the TUI and translate failures into a process exit code.
 ///
@@ -232,8 +237,9 @@ where
         None => Shell::new(app)?,
     };
     let mut mouse_position: Option<(u16, u16)> = None;
+    let mut dirty = true;
     loop {
-        shell.refresh_quit_pending();
+        dirty |= shell.refresh_quit_pending();
         let area = terminal.size()?;
         let rect = ratatui::layout::Rect {
             x: 0,
@@ -243,18 +249,25 @@ where
         };
         let viewport = scroll_viewport(shell.app(), rect);
         let body_width = scroll_body_width(rect);
-        shell.reclamp_scroll(viewport, body_width);
-        terminal.draw(|frame| draw(frame, shell.app()))?;
-        if let Some((column, row)) = mouse_position {
-            let next = mouse_pointer_at(shell.app(), rect, column, row);
-            write_mouse_pointer(terminal.backend_mut(), next);
+        dirty |= shell.reclamp_scroll(viewport, body_width);
+        if dirty {
+            terminal.draw(|frame| draw(frame, shell.app()))?;
+            if let Some((column, row)) = mouse_position {
+                let next = mouse_pointer_at(shell.app(), rect, column, row);
+                write_mouse_pointer(terminal.backend_mut(), next);
+            }
+            dirty = false;
         }
         let timeout = match mouse_position {
             Some(_) => shell.poll_timeout().min(POINTER_REFRESH),
             None => shell.poll_timeout(),
         };
         if !poll(timeout)? {
-            shell.tick()?;
+            dirty |= shell.tick()?;
+            if let Some((column, row)) = mouse_position {
+                let next = mouse_pointer_at(shell.app(), rect, column, row);
+                write_mouse_pointer(terminal.backend_mut(), next);
+            }
             continue;
         }
         let event = read()?;
@@ -265,6 +278,7 @@ where
                     if shell.arm_quit() {
                         return Ok(());
                     }
+                    dirty = true;
                     continue;
                 }
                 shell.disarm_quit();
@@ -283,10 +297,11 @@ where
                 if side == Side::ExitApp {
                     return Ok(());
                 }
+                dirty = true;
                 if follow_focus {
-                    shell.snap_scroll_to_selection(viewport, body_width);
+                    dirty |= shell.snap_scroll_to_selection(viewport, body_width);
                 }
-                shell.tick()?;
+                dirty |= shell.tick()?;
             }
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::Moved | MouseEventKind::Drag(_) => {
@@ -312,7 +327,7 @@ where
                     } else {
                         1
                     };
-                    shell.scroll(delta, viewport, body_width);
+                    dirty |= shell.scroll(delta, viewport, body_width);
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
                     mouse_position = Some((mouse.column, mouse.row));
@@ -335,7 +350,8 @@ where
                                 if side == Side::ExitApp {
                                     return Ok(());
                                 }
-                                shell.tick()?;
+                                dirty = true;
+                                dirty |= shell.tick()?;
                             }
                         }
                     } else if language_chip_at(shell.app(), rect, mouse.column, mouse.row) {
@@ -343,7 +359,8 @@ where
                         if side == Side::ExitApp {
                             return Ok(());
                         }
-                        shell.tick()?;
+                        dirty = true;
+                        dirty |= shell.tick()?;
                     } else if let Some(target) = link_at(shell.app(), rect, mouse.column, mouse.row)
                     {
                         let _ = open_path(target.as_str());
@@ -351,8 +368,11 @@ where
                 }
                 _ => {}
             },
+            Event::Resize(_, _) => {
+                dirty = true;
+            }
             _ => {
-                shell.tick()?;
+                dirty |= shell.tick()?;
             }
         }
     }
@@ -425,6 +445,7 @@ struct PendingArtifactJob {
     handle: JoinHandle<()>,
     card: usize,
     artifact: Artifact,
+    started: Instant,
 }
 
 /// Progress signalled by the background publish job.
@@ -520,23 +541,35 @@ where
     }
 
     /// Crossterm poll budget for the next loop iteration.
-    ///
-    /// Idle TUI: 100 ms keeps redraw cost negligible.
-    ///
-    /// Background work pending (text pass running, artifact thread in flight,
-    /// or the engine has more artifacts to spawn): 2 ms tightens the loop so
-    /// every cached transition resolves on the next tick instead of waiting
-    /// 100 ms. With 33 cards × 3 media artifacts, the original 100 ms cadence
-    /// added ~10 s of pure poll overhead to a fully cached publish.
     fn poll_timeout(&self) -> Duration {
-        if self.text.is_some()
-            || self.artifact_job.is_some()
-            || self.publish_job.is_some()
-            || self.has_engine_work()
-        {
-            return Duration::from_millis(2);
+        if self.has_engine_work() || self.has_fresh_job() {
+            return FAST_JOB_POLL;
         }
-        Duration::from_millis(100)
+        if self.has_background_work() {
+            return BACKGROUND_POLL;
+        }
+        IDLE_POLL
+    }
+
+    fn has_fresh_job(&self) -> bool {
+        self.text
+            .as_ref()
+            .map(|job| job.started.elapsed() <= FAST_JOB_WINDOW)
+            .unwrap_or(false)
+            || self
+                .artifact_job
+                .as_ref()
+                .map(|job| job.started.elapsed() <= FAST_JOB_WINDOW)
+                .unwrap_or(false)
+            || self
+                .publish_job
+                .as_ref()
+                .map(|job| job.started.elapsed() <= FAST_JOB_WINDOW)
+                .unwrap_or(false)
+    }
+
+    fn has_background_work(&self) -> bool {
+        self.text.is_some() || self.artifact_job.is_some() || self.publish_job.is_some()
     }
 
     /// Return whether the session engine still has artifacts to dispatch.
@@ -547,19 +580,25 @@ where
             .unwrap_or(false)
     }
 
-    fn scroll(&mut self, delta: i32, viewport: u16, body_width: u16) {
+    fn scroll(&mut self, delta: i32, viewport: u16, body_width: u16) -> bool {
+        let before = self.app.body_scroll();
         self.app = self.app.clone().body_scrolled(delta, viewport, body_width);
+        self.app.body_scroll() != before
     }
 
-    fn reclamp_scroll(&mut self, viewport: u16, body_width: u16) {
+    fn reclamp_scroll(&mut self, viewport: u16, body_width: u16) -> bool {
+        let before = self.app.body_scroll();
         self.app = self.app.clone().body_scroll_clamped(viewport, body_width);
+        self.app.body_scroll() != before
     }
 
-    fn snap_scroll_to_selection(&mut self, viewport: u16, body_width: u16) {
+    fn snap_scroll_to_selection(&mut self, viewport: u16, body_width: u16) -> bool {
+        let before = self.app.body_scroll();
         self.app = self
             .app
             .clone()
             .body_scroll_to_selection(viewport, body_width);
+        self.app.body_scroll() != before
     }
 
     fn arm_quit(&mut self) -> bool {
@@ -576,19 +615,22 @@ where
         false
     }
 
-    fn disarm_quit(&mut self) {
+    fn disarm_quit(&mut self) -> bool {
         self.quit_armed_at = None;
         if self.app.quit_pending() {
             self.app = self.app.clone().with_quit_pending(false);
+            return true;
         }
+        false
     }
 
-    fn refresh_quit_pending(&mut self) {
+    fn refresh_quit_pending(&mut self) -> bool {
         if let Some(armed) = self.quit_armed_at
             && armed.elapsed() > QUIT_WINDOW
         {
-            self.disarm_quit();
+            return self.disarm_quit();
         }
+        false
     }
 
     fn handle(&mut self, event: AppEvent) -> Result<Side> {
@@ -601,53 +643,78 @@ where
         Ok(side)
     }
 
-    fn tick(&mut self) -> Result<()> {
-        if let Some(started) = self.started {
-            self.app = self.app.clone().with_elapsed(started.elapsed());
-        }
-        self.poll_text()?;
+    fn tick(&mut self) -> Result<bool> {
+        let mut changed = self.refresh_generation_elapsed();
+        changed |= self.poll_text()?;
         if self.text.is_some() {
-            return Ok(());
+            return Ok(changed);
         }
-        self.poll_artifact()?;
+        changed |= self.poll_artifact()?;
         if self.artifact_job.is_some() {
-            return Ok(());
+            return Ok(changed);
         }
-        self.poll_publish()?;
+        changed |= self.poll_publish()?;
         if self.publish_job.is_some() {
-            return Ok(());
+            return Ok(changed);
         }
-        self.advance_engine()
+        changed |= self.advance_engine()?;
+        Ok(changed)
     }
 
-    fn advance_engine(&mut self) -> Result<()> {
+    fn refresh_generation_elapsed(&mut self) -> bool {
+        let Some(started) = self.started else {
+            return false;
+        };
+        let elapsed = animation_elapsed(started.elapsed());
+        if self.app.elapsed() == elapsed {
+            return false;
+        }
+        self.app = self.app.clone().with_elapsed(elapsed);
+        true
+    }
+
+    fn refresh_busy_elapsed(&mut self, started: Instant) -> bool {
+        let Some(current) = self.app.busy().map(|busy| busy.elapsed()) else {
+            return false;
+        };
+        let elapsed = animation_elapsed(started.elapsed());
+        if current == elapsed {
+            return false;
+        }
+        self.app = self.app.clone().busy_elapsed(elapsed);
+        true
+    }
+
+    fn advance_engine(&mut self) -> Result<bool> {
         let Some(engine) = self.engine.as_ref() else {
-            return Ok(());
+            return Ok(false);
         };
         if let Some((card, kind)) = engine.next_target() {
             self.spawn_artifact(card, kind)?;
-            return Ok(());
+            return Ok(true);
         }
         if let Some(event) = engine.batch_state() {
             match event {
                 EngineEvent::BatchReady => {
                     let side = self.handle(AppEvent::BatchReady)?;
                     if side == Side::ExitApp {
-                        return Ok(());
+                        return Ok(true);
                     }
+                    return Ok(true);
                 }
                 EngineEvent::BatchDone { failed_cards } => {
                     let side = self.handle(AppEvent::BatchDone {
                         failed: failed_cards,
                     })?;
                     if side == Side::ExitApp {
-                        return Ok(());
+                        return Ok(true);
                     }
+                    return Ok(true);
                 }
                 _ => {}
             }
         }
-        Ok(())
+        Ok(false)
     }
 
     fn spawn_artifact(&mut self, card: usize, artifact: Artifact) -> Result<()> {
@@ -686,14 +753,15 @@ where
             handle,
             card,
             artifact,
+            started: Instant::now(),
         });
         self.app = self.app.clone().cards_running(Some((card, artifact)));
         Ok(())
     }
 
-    fn poll_artifact(&mut self) -> Result<()> {
+    fn poll_artifact(&mut self) -> Result<bool> {
         let Some(job) = self.artifact_job.as_ref() else {
-            return Ok(());
+            return Ok(false);
         };
         match job.receiver.try_recv() {
             Ok(outcome) => {
@@ -703,8 +771,9 @@ where
                     .expect("invariant: artifact job must exist");
                 let _ = join_thread(job.handle);
                 self.apply_artifact_outcome(job.card, job.artifact, outcome);
+                Ok(true)
             }
-            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Empty) => Ok(false),
             Err(TryRecvError::Disconnected) => {
                 let job = self
                     .artifact_job
@@ -717,9 +786,9 @@ where
                     _ => ArtifactOutcome::Media(Err(synthetic)),
                 };
                 self.apply_artifact_outcome(job.card, job.artifact, outcome);
+                Ok(true)
             }
         }
-        Ok(())
     }
 
     fn apply_artifact_outcome(
@@ -740,18 +809,22 @@ where
         self.app = self.app.clone().cards_replaced(drafts).cards_running(None);
     }
 
-    fn poll_text(&mut self) -> Result<()> {
-        let Some(job) = self.text.as_ref() else {
-            return Ok(());
+    fn poll_text(&mut self) -> Result<bool> {
+        let Some(started) = self.text.as_ref().map(|job| job.started) else {
+            return Ok(false);
         };
-        self.app = self.app.clone().busy_elapsed(job.started.elapsed());
+        let mut changed = self.refresh_busy_elapsed(started);
+        let Some(job) = self.text.as_ref() else {
+            return Ok(changed);
+        };
         match job.receiver.try_recv() {
             Ok(outcome) => {
                 let job = self.text.take().expect("invariant: text job must exist");
                 self.app = self.app.clone().busy_finished();
+                changed = true;
                 if let Err(error) = join_thread(job.handle) {
                     self.app = self.app.clone().error_shown(error.to_string());
-                    return Ok(());
+                    return Ok(true);
                 }
                 self.finish_text(outcome);
             }
@@ -762,9 +835,10 @@ where
                     .map(|()| String::from("background text pass disconnected"))
                     .unwrap_or_else(|error| error.to_string());
                 self.app = self.app.clone().busy_finished().error_shown(message);
+                changed = true;
             }
         }
-        Ok(())
+        Ok(changed)
     }
 
     fn finish_text(&mut self, outcome: TextOutcome) {
@@ -980,15 +1054,18 @@ where
         Ok(())
     }
 
-    fn poll_publish(&mut self) -> Result<()> {
-        let Some(job) = self.publish_job.as_ref() else {
-            return Ok(());
+    fn poll_publish(&mut self) -> Result<bool> {
+        let Some(started) = self.publish_job.as_ref().map(|job| job.started) else {
+            return Ok(false);
         };
-        self.app = self.app.clone().busy_elapsed(job.started.elapsed());
+        let mut changed = self.refresh_busy_elapsed(started);
+        let Some(job) = self.publish_job.as_ref() else {
+            return Ok(changed);
+        };
         loop {
             let message = match job.receiver.try_recv() {
                 Ok(message) => message,
-                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Empty) => return Ok(changed),
                 Err(TryRecvError::Disconnected) => {
                     let job = self
                         .publish_job
@@ -998,12 +1075,13 @@ where
                         .map(|()| String::from("background publish job disconnected"))
                         .unwrap_or_else(|error| error.to_string());
                     self.app = self.app.clone().busy_finished().error_shown(message);
-                    return Ok(());
+                    return Ok(true);
                 }
             };
             match message {
                 PublishMessage::Phase(kind) => {
                     self.app = self.app.clone().busy_kind_swapped(kind);
+                    changed = true;
                 }
                 PublishMessage::Done(result) => {
                     let job = self
@@ -1016,7 +1094,7 @@ where
                             .clone()
                             .busy_finished()
                             .error_shown(error.to_string());
-                        return Ok(());
+                        return Ok(true);
                     }
                     self.app = self.app.clone().busy_finished();
                     match result {
@@ -1029,7 +1107,7 @@ where
                             self.app = self.app.clone().error_shown(error.to_string());
                         }
                     }
-                    return Ok(());
+                    return Ok(true);
                 }
             }
         }
@@ -1041,6 +1119,15 @@ fn join_thread(handle: JoinHandle<()>) -> Result<()> {
         bail!("background task panicked");
     }
     Ok(())
+}
+
+fn animation_elapsed(elapsed: Duration) -> Duration {
+    let frame = u128::from(ANIMATION_FRAME_MILLIS);
+    let millis = (elapsed.as_millis() / frame).saturating_mul(frame);
+    let Ok(milliseconds) = u64::try_from(millis) else {
+        return Duration::from_millis(u64::MAX);
+    };
+    Duration::from_millis(milliseconds)
 }
 
 fn drafts_from(app: &App) -> Vec<CardDraft> {
@@ -1869,6 +1956,53 @@ mod tests {
             app.busy().map(|busy| (busy.kind(), busy.elapsed())),
             Some((BusyKind::PublishingReport, Duration::from_millis(345))),
             "swapping kind mid-job must not reset the elapsed counter"
+        );
+    }
+
+    #[test]
+    fn stale_background_jobs_cannot_keep_fast_redraws() {
+        let (_sender, receiver) = channel::<TextOutcome>();
+        let mut fresh = shell(App::new(pair()));
+        fresh.text = Some(PendingTextJob {
+            receiver,
+            handle: thread::spawn(|| {}),
+            started: Instant::now(),
+        });
+        let (_sender, receiver) = channel::<TextOutcome>();
+        let mut stale = shell(App::new(pair()));
+        stale.text = Some(PendingTextJob {
+            receiver,
+            handle: thread::spawn(|| {}),
+            started: Instant::now() - FAST_JOB_WINDOW - Duration::from_millis(1),
+        });
+        assert_eq!(
+            (fresh.poll_timeout(), stale.poll_timeout()),
+            (FAST_JOB_POLL, BACKGROUND_POLL),
+            "background work must leave the fast cadence after the cache-hit window"
+        );
+    }
+
+    #[test]
+    fn elapsed_ticks_redraw_only_on_animation_frames() {
+        let mut early = shell(App::new(pair()));
+        early.started = Some(Instant::now() - Duration::from_millis(ANIMATION_FRAME_MILLIS / 2));
+        let early_dirty = early.tick().expect("early tick must succeed");
+        let mut framed = shell(App::new(pair()));
+        framed.started = Some(Instant::now() - Duration::from_millis(ANIMATION_FRAME_MILLIS));
+        let framed_dirty = framed.tick().expect("framed tick must succeed");
+        assert_eq!(
+            (early_dirty, framed_dirty, framed.app.elapsed()),
+            (false, true, Duration::from_millis(ANIMATION_FRAME_MILLIS)),
+            "elapsed updates must repaint only on animation-frame boundaries"
+        );
+    }
+
+    #[test]
+    fn idle_ticks_cannot_request_redraws() {
+        let mut shell = shell(App::new(pair()));
+        assert!(
+            !shell.tick().expect("idle tick must succeed"),
+            "idle ticks must not keep repainting the terminal"
         );
     }
 

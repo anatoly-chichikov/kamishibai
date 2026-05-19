@@ -17,6 +17,7 @@ use crate::tui::palette;
 const WIDTH: u16 = 50;
 const HEIGHT: u16 = 6;
 const HORIZONTAL_PADDING: u16 = 2;
+const FRAME_MILLIS: u128 = 250;
 const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
 
 /// Draw the universal blocking loader over the full terminal area.
@@ -68,7 +69,7 @@ fn panel(busy: &BusyView) -> Paragraph<'static> {
 }
 
 fn spinner(busy: &BusyView) -> &'static str {
-    let index = (busy.elapsed().as_millis() / 180) as usize % FRAMES.len();
+    let index = (busy.elapsed().as_millis() / FRAME_MILLIS) as usize % FRAMES.len();
     FRAMES[index]
 }
 
