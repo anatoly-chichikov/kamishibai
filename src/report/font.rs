@@ -3,14 +3,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
 
-use anyhow::{Result, anyhow, bail};
-use font_kit::family_name::FamilyName as QueryName;
-use font_kit::handle::Handle;
-use font_kit::properties::{Properties, Weight};
-use font_kit::source::SystemSource;
 use printpdf::{Color, ParsedFont, Rgb};
+use rust_fontconfig::{FcFontCache, FcPattern, FcWeight, FontSource, OperatingSystem};
 
-/// Resolve one font family + weight to one filesystem path through font-kit.
+use anyhow::{Result, anyhow, bail};
+
+/// Resolve one font family + weight to one filesystem path through the report
+/// font cache.
 /// macOS ships Arial (Regular and Bold as separate .ttf files), Hiragino
 /// Sans GB, and Arial Unicode MS — these three together cover every script
 /// the report uses, so the binary stays fontless and the embed is whatever
@@ -39,7 +38,7 @@ impl FontPath {
     }
 
     /// Return the resolved filesystem path and face index for the font. The
-    /// index points into the .ttc collection font-kit hands back (macOS ships
+    /// index points into the .ttc collection the resolver hands back (macOS ships
     /// every Helvetica Neue weight inside one .ttc), so the renderer reaches
     /// the correct subface instead of always reading face 0.
     pub fn resolved(&self) -> Result<ResolvedFont> {
@@ -47,17 +46,17 @@ impl FontPath {
         let path = self.materialized(resolved.bytes.as_slice())?;
         Ok(ResolvedFont {
             path,
-            face_index: resolved.face_index,
+            face_index: u32::try_from(resolved.face_index)
+                .map_err(|_| anyhow!("Font '{}' face index does not fit into u32", self.label()))?,
         })
     }
 
-    /// Return the matching system-font properties for the resolver.
-    fn properties(&self) -> Properties {
-        let mut value = Properties::new();
+    /// Return the requested font weight.
+    fn weight(&self) -> FcWeight {
         if self.bold {
-            value.weight(Weight::BOLD);
+            return FcWeight::Bold;
         }
-        value
+        FcWeight::Normal
     }
 
     /// Return the raw bytes and face index for the first matching font query.
@@ -68,20 +67,20 @@ impl FontPath {
             }
         }
         Err(anyhow!(
-            "Font '{}' was not resolved by font-kit or platform fallbacks",
+            "Font '{}' was not resolved by the report font cache or platform fallbacks",
             self.label()
         ))
     }
 
-    /// Return the font-kit family queries for the resolver.
-    fn queries(&self) -> Vec<QueryName> {
-        let mut value = vec![QueryName::Title(self.family.clone())];
+    /// Return the family queries for the resolver.
+    fn queries(&self) -> Vec<String> {
+        let mut value = vec![self.family.clone()];
         for item in self.aliases() {
             if *item != self.family.as_str() {
-                value.push(QueryName::Title(String::from(*item)));
+                value.push(String::from(*item));
             }
         }
-        value.push(QueryName::SansSerif);
+        value.extend(OperatingSystem::current().expand_generic_family("sans-serif", &[]));
         value
     }
 
@@ -105,7 +104,17 @@ impl FontPath {
                 "Microsoft YaHei",
                 "SimHei",
             ],
-            "Arial Unicode MS" => &["Arial Unicode", "Lucida Sans Unicode"],
+            "Arial Unicode MS" => &[
+                "Arial Unicode",
+                "Lucida Sans Unicode",
+                "Noto Sans CJK SC",
+                "Noto Sans CJK JP",
+                "Noto Sans CJK KR",
+                "Noto Sans",
+                "DejaVu Sans",
+                "Liberation Sans",
+                "Segoe UI Symbol",
+            ],
             "Courier New" => &[
                 "CourierNewPSMT",
                 "Courier",
@@ -117,26 +126,32 @@ impl FontPath {
         }
     }
 
-    /// Return the raw bytes and face index for one font-kit family query.
-    fn bytes(&self, query: QueryName) -> Result<MatchedFont> {
-        let handle = SystemSource::new()
-            .select_best_match(&[query], &self.properties())
-            .map_err(|_| anyhow!("Font '{}' was not resolved by font-kit", self.label()))?;
-        let face_index = match &handle {
-            Handle::Path { font_index, .. } => *font_index,
-            Handle::Memory { font_index, .. } => *font_index,
+    /// Return the raw bytes and face index for one family query.
+    fn bytes(&self, query: String) -> Result<MatchedFont> {
+        let pattern = FcPattern {
+            family: Some(query),
+            weight: self.weight(),
+            ..Default::default()
         };
-        let font = handle.load().map_err(|_| {
-            anyhow!(
-                "Font '{}' could not be loaded from the system source",
-                self.label()
-            )
-        })?;
-        let bytes = font
-            .copy_font_data()
-            .ok_or_else(|| anyhow!("Font '{}' could not expose raw font data", self.label()))?
-            .as_slice()
-            .to_vec();
+        let mut trace = Vec::new();
+        let font = FONT_SOURCE_CACHE
+            .query(&pattern, &mut trace)
+            .ok_or_else(|| {
+                anyhow!(
+                    "Font '{}' was not resolved by the report font cache",
+                    self.label()
+                )
+            })?;
+        let source = FONT_SOURCE_CACHE
+            .get_font_by_id(&font.id)
+            .ok_or_else(|| anyhow!("Font '{}' resolved to a missing font id", self.label()))?;
+        let face_index = match source {
+            FontSource::Disk(path) => path.font_index,
+            FontSource::Memory(font) => font.font_index,
+        };
+        let bytes = FONT_SOURCE_CACHE
+            .get_font_bytes(&font.id)
+            .ok_or_else(|| anyhow!("Font '{}' could not expose raw font data", self.label()))?;
         Ok(MatchedFont { bytes, face_index })
     }
 
@@ -173,7 +188,7 @@ impl FontPath {
 /// Bytes plus the .ttc face index for one resolved font query.
 struct MatchedFont {
     bytes: Vec<u8>,
-    face_index: u32,
+    face_index: usize,
 }
 
 /// One resolved font: a filesystem path the renderer can hand to printpdf,
@@ -283,6 +298,9 @@ type FontKey = (String, bool);
 static FONT_PARSE_CACHE: LazyLock<Mutex<HashMap<FontKey, Arc<ParsedFont>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Process-wide cache of system font metadata and paths.
+static FONT_SOURCE_CACHE: LazyLock<FcFontCache> = LazyLock::new(FcFontCache::build);
+
 /// Eagerly parse the default report palette on a background thread.
 ///
 /// The five system fonts the report embeds (Arial regular + bold, Hiragino
@@ -305,7 +323,7 @@ pub fn warm_fonts_async() {
 
 /// Return the parsed font for one family + weight, cached process-wide.
 ///
-/// The first call asks font-kit for the system match and parses the bytes
+/// The first call asks the report font cache for the system match and parses the bytes
 /// directly — bypassing the on-disk materialization step that the public
 /// `FontPath::resolved()` round-tripped through. Later calls return the
 /// cached `Arc` instantly.
@@ -323,7 +341,7 @@ pub(super) fn font_arc(family: &FontFamily, bold: bool) -> Result<Arc<ParsedFont
     let matched = path.matched()?;
     let font = ParsedFont::from_bytes(
         matched.bytes.as_slice(),
-        matched.face_index as usize,
+        matched.face_index,
         &mut Vec::new(),
     )
     .ok_or_else(|| anyhow!("Font '{}' could not be parsed", path.label()))?;
