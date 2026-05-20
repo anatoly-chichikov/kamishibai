@@ -20,7 +20,7 @@ Contract(
         framework: "ratatui + crossterm",
         terminal_size_assumed: TerminalSize(cols: 80, rows: 12),
         sources_checked: [
-            "src/cli.rs",
+            "src/cli/mod.rs",
             "src/session/engine.rs",
             "src/tui/event.rs",
             "src/tui/transition.rs",
