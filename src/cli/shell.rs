@@ -6,8 +6,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 
-use super::passes::{ArtifactOutcome, Lifecycle, PublishMessage, PublishProgress, TextOutcome};
-use super::production::{ProductionPasses, default_output};
+use super::card_workflow::{
+    ArtifactOutcome, CardWorkflow, DeckPublishMessage, DeckPublishProgress, TextOutcome,
+};
+use super::live_generator::{LiveCardGenerator, default_output};
 use crate::config::default_store;
 use crate::gemini::GeminiClient;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
@@ -36,12 +38,12 @@ struct PendingArtifactJob {
 }
 
 struct PendingPublishJob {
-    receiver: Receiver<PublishMessage>,
+    receiver: Receiver<DeckPublishMessage>,
     handle: JoinHandle<()>,
     started: Instant,
 }
 
-/// Stateful coordinator for TUI app transitions and background pass execution.
+/// Stateful coordinator for TUI app transitions and background card workflow execution.
 pub(super) struct Shell<P> {
     app: App,
     engine: Option<SessionEngine>,
@@ -50,11 +52,11 @@ pub(super) struct Shell<P> {
     publish_job: Option<PendingPublishJob>,
     started: Option<Instant>,
     quit_armed_at: Option<Instant>,
-    passes: P,
+    generator: P,
 }
 
-impl Shell<ProductionPasses> {
-    /// Build a production shell for an interactive empty session.
+impl Shell<LiveCardGenerator> {
+    /// Build a live card shell for an interactive empty session.
     pub(super) fn new(app: App) -> Result<Self> {
         let saved_key = default_store(&SystemContext)
             .ok()
@@ -72,11 +74,11 @@ impl Shell<ProductionPasses> {
             publish_job: None,
             started: None,
             quit_armed_at: None,
-            passes: ProductionPasses::new(client, cache, output),
+            generator: LiveCardGenerator::new(client, cache, output),
         })
     }
 
-    /// Build a production shell that starts with generation already running.
+    /// Build a live card shell that starts with generation already running.
     pub(super) fn primed(app: App, drafts: Vec<CardDraft>) -> Result<Self> {
         let mut shell = Self::new(app)?;
         shell.engine = Some(SessionEngine::start(drafts));
@@ -87,7 +89,7 @@ impl Shell<ProductionPasses> {
 
 impl<P> Shell<P>
 where
-    P: Lifecycle,
+    P: CardWorkflow,
 {
     /// Borrow the app model for rendering and pointer geometry.
     pub(super) fn app(&self) -> &App {
@@ -289,23 +291,23 @@ where
         let pair = draft.pair().clone();
         let term = draft.term().to_string();
         let understanding = draft.understanding().to_string();
-        let passes = self.passes.clone();
+        let generator = self.generator.clone();
         let (sender, receiver) = channel();
         let handle = thread::spawn(move || {
             let outcome = match artifact {
                 Artifact::Body => ArtifactOutcome::Body(
-                    passes
+                    generator
                         .generate_card_body(&term, &understanding, &pair)
                         .map(|body| {
-                            let file = passes
-                                .persist_body(&term, &understanding, &pair, &body)
+                            let file = generator
+                                .store_card_text(&term, &understanding, &pair, &body)
                                 .ok();
                             (body, file)
                         }),
                 ),
-                Artifact::Scene => ArtifactOutcome::Media(passes.produce_scene(&draft)),
-                Artifact::Picture => ArtifactOutcome::Media(passes.produce_picture(&draft)),
-                Artifact::Sound => ArtifactOutcome::Media(passes.produce_sound(&draft)),
+                Artifact::Scene => ArtifactOutcome::Media(generator.generate_scene(&draft)),
+                Artifact::Picture => ArtifactOutcome::Media(generator.generate_picture(&draft)),
+                Artifact::Sound => ArtifactOutcome::Media(generator.generate_sound(&draft)),
             };
             let _ = sender.send(outcome);
         });
@@ -461,9 +463,9 @@ where
             Side::RunUnderstanding => {
                 let raw = RawInputBatch::new(self.app.blob());
                 let support = self.app.pair().support().to_string();
-                let passes = self.passes.clone();
+                let generator = self.generator.clone();
                 self.start_text(BusyKind::Understanding, move || {
-                    TextOutcome::Understanding(passes.understand(&raw, support.as_str()))
+                    TextOutcome::Understanding(generator.understand(&raw, support.as_str()))
                 })?;
             }
             Side::StartGeneration => {
@@ -485,9 +487,9 @@ where
                     return Ok(());
                 };
                 let pair = self.app.pair().clone();
-                let passes = self.passes.clone();
+                let generator = self.generator.clone();
                 self.start_text(BusyKind::BulkCorrection, move || {
-                    TextOutcome::BulkCorrection(passes.correct_bulk(
+                    TextOutcome::BulkCorrection(generator.correct_bulk(
                         std::slice::from_ref(&focused),
                         comment.as_str(),
                         &pair,
@@ -498,14 +500,13 @@ where
                 if let Some(draft) = self.app.cards().get(self.app.card_selected()) {
                     let draft = draft.clone();
                     let pair = self.app.pair().clone();
-                    let passes = self.passes.clone();
+                    let generator = self.generator.clone();
                     self.start_text(BusyKind::CardCorrection, move || {
                         TextOutcome::CardCorrection(
-                            passes
-                                .correct_card(&draft, comment.as_str(), &pair)
-                                .map(|revision| {
-                                    let file = passes
-                                        .persist_body(
+                            generator.correct_card(&draft, comment.as_str(), &pair).map(
+                                |revision| {
+                                    let file = generator
+                                        .store_card_text(
                                             revision.term(),
                                             revision.understanding(),
                                             &pair,
@@ -513,7 +514,8 @@ where
                                         )
                                         .ok();
                                     Box::new((revision, file))
-                                }),
+                                },
+                            ),
                         )
                     })?;
                 }
@@ -593,12 +595,12 @@ where
             bail!("background publish job already running");
         }
         let drafts = self.app.cards().to_vec();
-        let passes = self.passes.clone();
+        let generator = self.generator.clone();
         let (sender, receiver) = channel();
-        let progress = PublishProgress::new(sender.clone());
+        let progress = DeckPublishProgress::new(sender.clone());
         let handle = thread::spawn(move || {
-            let outcome = passes.publish(&drafts, &progress);
-            let _ = sender.send(PublishMessage::Done(outcome));
+            let outcome = generator.publish_deck(&drafts, &progress);
+            let _ = sender.send(DeckPublishMessage::Done(outcome));
         });
         self.publish_job = Some(PendingPublishJob {
             receiver,
@@ -634,11 +636,11 @@ where
                 }
             };
             match message {
-                PublishMessage::Phase(kind) => {
+                DeckPublishMessage::Phase(kind) => {
                     self.app = self.app.clone().busy_kind_swapped(kind);
                     changed = true;
                 }
-                PublishMessage::Done(result) => {
+                DeckPublishMessage::Done(result) => {
                     let job = self
                         .publish_job
                         .take()
@@ -708,7 +710,9 @@ mod tests {
     use anyhow::Result;
     use tempfile::tempdir;
 
-    use super::super::passes::{MediaPasses, PublishProgress, TextOutcome};
+    use super::super::card_workflow::{
+        CardGeneration, DeckPublishProgress, DeckPublishing, TextOutcome,
+    };
     use super::*;
     use crate::session::{
         ArtifactFile, BulkCorrection, CardBody, CardBodyGeneration, CardCorrection, CardRevision,
@@ -717,9 +721,9 @@ mod tests {
     };
 
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-    struct LocalPasses;
+    struct LocalCardGenerator;
 
-    impl LocalPasses {
+    impl LocalCardGenerator {
         fn local_body(term: &str, understanding: &str) -> CardBody {
             CardBody::new(
                 format!("/{term}/"),
@@ -735,7 +739,7 @@ mod tests {
         }
     }
 
-    impl Understanding for LocalPasses {
+    impl Understanding for LocalCardGenerator {
         fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
             let guess = ScriptDetection.detect(raw.text(), &catalog_for_detection())?;
             let candidates = raw
@@ -755,7 +759,7 @@ mod tests {
         }
     }
 
-    impl BulkCorrection for LocalPasses {
+    impl BulkCorrection for LocalCardGenerator {
         fn correct_bulk(
             &self,
             candidates: &[WordCandidate],
@@ -775,7 +779,7 @@ mod tests {
         }
     }
 
-    impl CardBodyGeneration for LocalPasses {
+    impl CardBodyGeneration for LocalCardGenerator {
         fn generate_card_body(
             &self,
             term: &str,
@@ -786,7 +790,7 @@ mod tests {
         }
     }
 
-    impl CardCorrection for LocalPasses {
+    impl CardCorrection for LocalCardGenerator {
         fn correct_card(
             &self,
             draft: &CardDraft,
@@ -799,20 +803,20 @@ mod tests {
         }
     }
 
-    impl MediaPasses for LocalPasses {
-        fn produce_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+    impl CardGeneration for LocalCardGenerator {
+        fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
             local_artifact(draft, Artifact::Scene)
         }
 
-        fn produce_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+        fn generate_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
             local_artifact(draft, Artifact::Picture)
         }
 
-        fn produce_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+        fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
             local_artifact(draft, Artifact::Sound)
         }
 
-        fn persist_body(
+        fn store_card_text(
             &self,
             term: &str,
             _understanding: &str,
@@ -823,11 +827,13 @@ mod tests {
             let path = std::env::temp_dir().join(&name);
             Ok(ArtifactFile::new(name, path, "1 B", false))
         }
+    }
 
-        fn publish(
+    impl DeckPublishing for LocalCardGenerator {
+        fn publish_deck(
             &self,
             drafts: &[CardDraft],
-            progress: &PublishProgress,
+            progress: &DeckPublishProgress,
         ) -> Result<(String, String, String)> {
             progress.report_phase(BusyKind::PublishingReport);
             Ok((
@@ -860,7 +866,7 @@ mod tests {
         String::from(trimmed)
     }
 
-    fn shell(app: App) -> Shell<LocalPasses> {
+    fn shell(app: App) -> Shell<LocalCardGenerator> {
         Shell {
             app,
             engine: None,
@@ -869,11 +875,11 @@ mod tests {
             publish_job: None,
             started: None,
             quit_armed_at: None,
-            passes: LocalPasses,
+            generator: LocalCardGenerator,
         }
     }
 
-    fn failing_shell(app: App) -> Shell<FailingPasses> {
+    fn failing_shell(app: App) -> Shell<FailingCardGenerator> {
         Shell {
             app,
             engine: None,
@@ -882,7 +888,7 @@ mod tests {
             publish_job: None,
             started: None,
             quit_armed_at: None,
-            passes: FailingPasses,
+            generator: FailingCardGenerator,
         }
     }
 
@@ -907,7 +913,7 @@ mod tests {
 
     fn settle_text<P>(shell: &mut Shell<P>)
     where
-        P: Lifecycle,
+        P: CardWorkflow,
     {
         for _ in 0..200 {
             shell.tick().expect("text pass tick must succeed");
@@ -921,7 +927,7 @@ mod tests {
 
     fn settle_engine<P>(shell: &mut Shell<P>, max_ticks: usize)
     where
-        P: Lifecycle,
+        P: CardWorkflow,
     {
         for _ in 0..max_ticks {
             shell.tick().expect("engine tick must succeed");
@@ -934,7 +940,7 @@ mod tests {
 
     fn settle_shell<P>(shell: &mut Shell<P>, max_ticks: usize)
     where
-        P: Lifecycle,
+        P: CardWorkflow,
     {
         for _ in 0..max_ticks {
             shell.tick().expect("shell tick must succeed");
@@ -951,15 +957,15 @@ mod tests {
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-    struct FailingPasses;
+    struct FailingCardGenerator;
 
-    impl Understanding for FailingPasses {
+    impl Understanding for FailingCardGenerator {
         fn understand(&self, _raw: &RawInputBatch, _my: &str) -> Result<Understood> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }
     }
 
-    impl BulkCorrection for FailingPasses {
+    impl BulkCorrection for FailingCardGenerator {
         fn correct_bulk(
             &self,
             _candidates: &[WordCandidate],
@@ -970,7 +976,7 @@ mod tests {
         }
     }
 
-    impl CardBodyGeneration for FailingPasses {
+    impl CardBodyGeneration for FailingCardGenerator {
         fn generate_card_body(
             &self,
             _term: &str,
@@ -981,7 +987,7 @@ mod tests {
         }
     }
 
-    impl CardCorrection for FailingPasses {
+    impl CardCorrection for FailingCardGenerator {
         fn correct_card(
             &self,
             _draft: &CardDraft,
@@ -992,20 +998,20 @@ mod tests {
         }
     }
 
-    impl MediaPasses for FailingPasses {
-        fn produce_scene(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
+    impl CardGeneration for FailingCardGenerator {
+        fn generate_scene(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }
 
-        fn produce_picture(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
+        fn generate_picture(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }
 
-        fn produce_sound(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
+        fn generate_sound(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }
 
-        fn persist_body(
+        fn store_card_text(
             &self,
             _term: &str,
             _understanding: &str,
@@ -1014,11 +1020,13 @@ mod tests {
         ) -> Result<ArtifactFile> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }
+    }
 
-        fn publish(
+    impl DeckPublishing for FailingCardGenerator {
+        fn publish_deck(
             &self,
             _drafts: &[CardDraft],
-            _progress: &PublishProgress,
+            _progress: &DeckPublishProgress,
         ) -> Result<(String, String, String)> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }

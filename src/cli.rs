@@ -1,13 +1,13 @@
 //! TUI entrypoint for the word-first kamishibai flow.
 //!
 //! The CLI module owns process arguments and startup decisions. The interactive
-//! shell, production pass adapter, terminal loop, and primed JSON batch model
+//! shell, live card generator, terminal loop, and primed JSON batch model
 //! live in focused submodules so the entrypoint stays small.
 
 mod batch;
+mod card_workflow;
 mod host;
-mod passes;
-mod production;
+mod live_generator;
 mod shell;
 mod terminal;
 

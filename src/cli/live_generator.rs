@@ -1,4 +1,4 @@
-//! Production implementation of the CLI pass contracts.
+//! Live implementation of the UI-shaped card workflow.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use anyhow::{Result, anyhow, bail};
 use time::OffsetDateTime;
 use time::format_description::parse as parse_time;
 
-use super::passes::{MediaPasses, PublishProgress};
+use super::card_workflow::{CardGeneration, DeckPublishProgress, DeckPublishing};
 use crate::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
 use crate::gemini::{GeminiClient, HttpTransport};
 use crate::generation::artifact_cache::Cache;
@@ -29,17 +29,17 @@ use crate::vocabulary::VocabularyEntry;
 
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
 
-/// Production media and lifecycle passes backed by Gemini and the on-disk cache.
+/// Live card generator backed by Gemini and the on-disk cache.
 #[derive(Clone)]
-pub(super) struct ProductionPasses {
+pub(super) struct LiveCardGenerator {
     client: GeminiClient<HttpTransport>,
     cache: PathBuf,
     output: PathBuf,
     catalog: LanguageCatalog,
 }
 
-impl ProductionPasses {
-    /// Build production passes from a live Gemini client and on-disk locations.
+impl LiveCardGenerator {
+    /// Build a live card generator from a Gemini client and on-disk locations.
     pub(super) fn new(
         client: GeminiClient<HttpTransport>,
         cache: PathBuf,
@@ -86,13 +86,13 @@ impl ProductionPasses {
     }
 }
 
-impl Understanding for ProductionPasses {
+impl Understanding for LiveCardGenerator {
     fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
         CachedUnderstanding::new(self.client.clone(), self.cache.clone()).understand(raw, my)
     }
 }
 
-impl BulkCorrection for ProductionPasses {
+impl BulkCorrection for LiveCardGenerator {
     fn correct_bulk(
         &self,
         candidates: &[WordCandidate],
@@ -103,7 +103,7 @@ impl BulkCorrection for ProductionPasses {
     }
 }
 
-impl CardBodyGeneration for ProductionPasses {
+impl CardBodyGeneration for LiveCardGenerator {
     fn generate_card_body(
         &self,
         term: &str,
@@ -117,7 +117,7 @@ impl CardBodyGeneration for ProductionPasses {
     }
 }
 
-impl CardCorrection for ProductionPasses {
+impl CardCorrection for LiveCardGenerator {
     fn correct_card(
         &self,
         draft: &CardDraft,
@@ -128,8 +128,8 @@ impl CardCorrection for ProductionPasses {
     }
 }
 
-impl MediaPasses for ProductionPasses {
-    fn produce_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+impl CardGeneration for LiveCardGenerator {
+    fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
         let body = draft
             .body()
             .ok_or_else(|| anyhow!("body must be ready before scene"))?;
@@ -147,7 +147,7 @@ impl MediaPasses for ProductionPasses {
         Ok(ArtifactFile::new(filename, path, format_size(size), cached))
     }
 
-    fn produce_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+    fn generate_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
         let body = draft
             .body()
             .ok_or_else(|| anyhow!("body must be ready before picture"))?;
@@ -165,7 +165,7 @@ impl MediaPasses for ProductionPasses {
         Ok(ArtifactFile::new(filename, path, format_size(size), cached))
     }
 
-    fn produce_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+    fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
         let body = draft
             .body()
             .ok_or_else(|| anyhow!("body must be ready before sound"))?;
@@ -178,7 +178,7 @@ impl MediaPasses for ProductionPasses {
         Ok(ArtifactFile::new(filename, path, format_size(size), cached))
     }
 
-    fn persist_body(
+    fn store_card_text(
         &self,
         term: &str,
         understanding: &str,
@@ -191,11 +191,13 @@ impl MediaPasses for ProductionPasses {
             .unwrap_or(0);
         Ok(ArtifactFile::new(filename, path, format_size(size), cached))
     }
+}
 
-    fn publish(
+impl DeckPublishing for LiveCardGenerator {
+    fn publish_deck(
         &self,
         drafts: &[CardDraft],
-        progress: &PublishProgress,
+        progress: &DeckPublishProgress,
     ) -> Result<(String, String, String)> {
         fs::create_dir_all(&self.output)?;
         let entries: Vec<VocabularyEntry> = drafts
