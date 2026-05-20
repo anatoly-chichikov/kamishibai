@@ -1,4 +1,4 @@
-//! Strict vocabulary JSON loading for the primed CLI flow.
+//! Strict vocabulary JSON loading for cards available at startup.
 
 use std::path::Path;
 
@@ -8,20 +8,20 @@ use crate::session::{CardDraft, LanguagePair, from_entry};
 use crate::tui::{App, Screen};
 use crate::vocabulary::VocabularyDocument;
 
-/// Preloaded batch that can skip intake and enter card generation directly.
-pub(super) struct PrimedBatch {
+/// Cards loaded before the TUI starts so generation can begin on `Your Cards`.
+pub(super) struct StartupCards {
     app: App,
     drafts: Vec<CardDraft>,
 }
 
-impl PrimedBatch {
+impl StartupCards {
     /// Load one strict vocabulary JSON document from disk.
     pub(super) fn load(path: &Path) -> Result<Self> {
         let document = VocabularyDocument::load(path)?;
         Self::from_document(&document)
     }
 
-    /// Build a primed batch from an already validated vocabulary document.
+    /// Build startup cards from an already validated vocabulary document.
     pub(super) fn from_document(document: &VocabularyDocument) -> Result<Self> {
         let pair = pair_from_document(document)?;
         let drafts: Vec<CardDraft> = document
@@ -99,7 +99,7 @@ mod tests {
         });
         let document: VocabularyDocument =
             serde_json::from_value(payload).expect("batch must parse");
-        let (app, _drafts) = PrimedBatch::from_document(&document)
+        let (app, _drafts) = StartupCards::from_document(&document)
             .expect("batch must derive app and drafts")
             .into_parts();
         assert_eq!(

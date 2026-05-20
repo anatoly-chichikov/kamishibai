@@ -79,7 +79,7 @@ impl Shell<LiveCardGenerator> {
     }
 
     /// Build a live card shell that starts with generation already running.
-    pub(super) fn primed(app: App, drafts: Vec<CardDraft>) -> Result<Self> {
+    pub(super) fn startup(app: App, drafts: Vec<CardDraft>) -> Result<Self> {
         let mut shell = Self::new(app)?;
         shell.engine = Some(SessionEngine::start(drafts));
         shell.started = Some(Instant::now());

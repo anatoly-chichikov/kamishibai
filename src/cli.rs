@@ -1,7 +1,7 @@
 //! TUI entrypoint for the word-first kamishibai flow.
 //!
 //! The CLI module owns process arguments and startup decisions. The interactive
-//! shell, live card generator, terminal loop, and primed JSON batch model
+//! shell, live card generator, terminal loop, and startup card loader
 //! live in focused submodules so the entrypoint stays small.
 
 mod batch;
@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use batch::PrimedBatch;
+use batch::StartupCards;
 use terminal::run_tui;
 
 use crate::config::{Preferences, default_store};
@@ -88,7 +88,7 @@ fn startup_app(preferences: &Preferences, env_key: Option<String>) -> App {
 }
 
 fn start_with_batch(path: PathBuf) -> Result<()> {
-    let (app, drafts) = PrimedBatch::load(path.as_path())?.into_parts();
+    let (app, drafts) = StartupCards::load(path.as_path())?.into_parts();
     run_tui(app, Some(drafts))
 }
 

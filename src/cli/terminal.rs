@@ -27,8 +27,8 @@ use crate::tui::{
 
 const POINTER_REFRESH: Duration = Duration::from_millis(50);
 
-/// Run the TUI from one initial app state and optional primed generation batch.
-pub(super) fn run_tui(app: App, primed: Option<Vec<CardDraft>>) -> Result<()> {
+/// Run the TUI from one initial app state and optional startup generation batch.
+pub(super) fn run_tui(app: App, startup: Option<Vec<CardDraft>>) -> Result<()> {
     enable_raw_mode()?;
     let mut out = stdout();
     let enhanced = supports_keyboard_enhancement().unwrap_or(false);
@@ -48,7 +48,7 @@ pub(super) fn run_tui(app: App, primed: Option<Vec<CardDraft>>) -> Result<()> {
     }
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
-    let outcome = loop_forever(&mut terminal, app, primed);
+    let outcome = loop_forever(&mut terminal, app, startup);
     if enhanced {
         execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags).ok();
     }
@@ -72,14 +72,14 @@ fn disable_hover_mouse_capture<W: Write>(out: &mut W) {
 fn loop_forever<B>(
     terminal: &mut Terminal<B>,
     app: App,
-    primed: Option<Vec<CardDraft>>,
+    startup: Option<Vec<CardDraft>>,
 ) -> Result<()>
 where
     B: ratatui::backend::Backend + Write,
     <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
 {
-    let mut shell = match primed {
-        Some(drafts) => Shell::primed(app, drafts)?,
+    let mut shell = match startup {
+        Some(drafts) => Shell::startup(app, drafts)?,
         None => Shell::new(app)?,
     };
     let mut mouse_position: Option<(u16, u16)> = None;
