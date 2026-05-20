@@ -122,7 +122,7 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
                 continue;
             };
             let slot = match artifact {
-                crate::session::Artifact::Body => draft.artifacts().body(),
+                crate::session::Artifact::Meta => draft.artifacts().meta(),
                 crate::session::Artifact::Sound => draft.artifacts().sound(),
                 crate::session::Artifact::Scene => draft.artifacts().scene(),
                 crate::session::Artifact::Picture => draft.artifacts().picture(),

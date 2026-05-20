@@ -3,7 +3,7 @@
 
 use anyhow::{Result, anyhow};
 use kamishibai::session::{
-    Artifact, ArtifactFile, CardBody, CardDraft, EngineEvent, LanguagePair, SessionEngine,
+    Artifact, ArtifactFile, CardDraft, CardMeta, EngineEvent, LanguagePair, SessionEngine,
 };
 use kamishibai::tui::{App, Screen, draw};
 use ratatui::Terminal;
@@ -32,8 +32,8 @@ fn draft(term: &str) -> CardDraft {
     )
 }
 
-fn body_for(term: &str) -> CardBody {
-    CardBody::new(
+fn meta_for(term: &str) -> CardMeta {
+    CardMeta::new(
         format!("/{term}/"),
         format!("/{term} sentence/"),
         format!("meaning of {term}"),
@@ -55,7 +55,7 @@ fn file_for(term: &str, kind: Artifact) -> ArtifactFile {
 #[test]
 fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() -> Result<()> {
     let mut engine = SessionEngine::start(vec![draft("in the end")]);
-    engine.applied_body(0, Ok((body_for("in the end"), None)));
+    engine.applied_meta(0, Ok((meta_for("in the end"), None)));
     engine.applied_media(
         0,
         Artifact::Scene,

@@ -1,7 +1,7 @@
 //! Integration flow for the `Done` screen (08-done.png).
 
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
+    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
@@ -39,12 +39,12 @@ fn failed_published() -> App {
         picture = picture.attempted();
     }
     let artifacts = CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         picture,
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
     );
-    let body = CardBody::new(
+    let meta = CardMeta::new(
         "/wreck/",
         "/wreck sentence/",
         "meaning of wreck",
@@ -56,7 +56,7 @@ fn failed_published() -> App {
         "Example with wreck.",
     );
     let draft = CardDraft::new("wreck", "verb sense", LanguagePair::new("en", "ru"))
-        .with_body(body, None)
+        .with_meta(meta, None)
         .with_artifacts(artifacts);
     published().cards_started(vec![draft])
 }

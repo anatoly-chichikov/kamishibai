@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use kamishibai::session::{
-    Artifact, BulkCorrection, CardArtifacts, CardBody, CardDraft, LanguagePair, RawInputBatch,
+    Artifact, BulkCorrection, CardArtifacts, CardDraft, CardMeta, LanguagePair, RawInputBatch,
     ScriptDetection, SessionState, TargetDetection, TargetGuess, Understanding, Understood,
     WordCandidate, to_document, to_entry,
 };
@@ -52,9 +52,9 @@ impl BulkCorrection for FakeBulk {
     }
 }
 
-fn body_for(candidate: &WordCandidate) -> CardBody {
+fn meta_for(candidate: &WordCandidate) -> CardMeta {
     let term = candidate.term();
-    CardBody::new(
+    CardMeta::new(
         format!("/{term}/"),
         format!("/sentence with {term}/"),
         format!("local meaning of {term}"),
@@ -69,7 +69,7 @@ fn body_for(candidate: &WordCandidate) -> CardBody {
 
 fn draft_for(candidate: &WordCandidate, pair: &LanguagePair) -> CardDraft {
     CardDraft::new(candidate.term(), candidate.understanding(), pair.clone())
-        .with_body(body_for(candidate), None)
+        .with_meta(meta_for(candidate), None)
 }
 
 #[test]

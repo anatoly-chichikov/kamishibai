@@ -1,7 +1,7 @@
 //! Recovery flow for failed cards (`07-your-cards-couldnt-finish.png`).
 
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
+    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
@@ -28,20 +28,20 @@ fn failed_picture() -> CardArtifacts {
         picture = picture.attempted();
     }
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         picture,
         ArtifactSlot::fresh(Artifact::Sound),
     )
 }
 
-fn failed_body() -> CardArtifacts {
-    let mut body = ArtifactSlot::fresh(Artifact::Body);
+fn failed_meta() -> CardArtifacts {
+    let mut meta = ArtifactSlot::fresh(Artifact::Meta);
     for _ in 0..3 {
-        body = body.attempted();
+        meta = meta.attempted();
     }
     CardArtifacts::from_parts(
-        body,
+        meta,
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
@@ -54,7 +54,7 @@ fn failed_scene() -> CardArtifacts {
         scene = scene.attempted();
     }
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         scene,
         ArtifactSlot::fresh(Artifact::Picture).discard(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
@@ -67,15 +67,15 @@ fn failed_sound() -> CardArtifacts {
         sound = sound.attempted();
     }
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         sound,
     )
 }
 
-fn body_for(term: &str) -> CardBody {
-    CardBody::new(
+fn meta_for(term: &str) -> CardMeta {
+    CardMeta::new(
         format!("/{term}/"),
         format!("/{term} sentence/"),
         format!("meaning of {term}"),
@@ -98,7 +98,7 @@ fn seeded_with(artifacts: CardArtifacts) -> App {
         "verb sense — destroyed vehicle",
         LanguagePair::new("en", "ru"),
     )
-    .with_body(body_for("wreck"), None)
+    .with_meta(meta_for("wreck"), None)
     .with_artifacts(artifacts);
     App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::YourCards)
@@ -167,19 +167,19 @@ fn regenerate_failed_resets_only_the_failed_slots_and_keeps_ready_slots() {
 }
 
 #[test]
-fn regenerate_body_failure_resets_all_body_dependents() {
-    let app = seeded_with(failed_body());
+fn regenerate_meta_failure_resets_all_meta_dependents() {
+    let app = seeded_with(failed_meta());
     let recovered = app.cards_reset_failures();
     let card = &recovered.cards()[0];
     assert_eq!(
         (
-            card.artifacts().body().failed_terminally(),
+            card.artifacts().meta().failed_terminally(),
             card.artifacts().scene().ready(),
             card.artifacts().picture().ready(),
             card.artifacts().sound().ready(),
         ),
         (false, false, false, false),
-        "regenerating a failed body must reset body and all generated media"
+        "regenerating a failed meta must reset meta and all generated media"
     );
 }
 
@@ -190,7 +190,7 @@ fn regenerate_scene_failure_resets_picture_but_keeps_sound() {
     let card = &recovered.cards()[0];
     assert_eq!(
         (
-            card.artifacts().body().ready(),
+            card.artifacts().meta().ready(),
             card.artifacts().scene().failed_terminally(),
             card.artifacts().picture().discarded(),
             card.artifacts().sound().ready(),
@@ -207,7 +207,7 @@ fn regenerate_sound_failure_keeps_ready_visual_artifacts() {
     let card = &recovered.cards()[0];
     assert_eq!(
         (
-            card.artifacts().body().ready(),
+            card.artifacts().meta().ready(),
             card.artifacts().scene().ready(),
             card.artifacts().picture().ready(),
             card.artifacts().sound().failed_terminally(),

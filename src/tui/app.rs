@@ -659,33 +659,33 @@ impl App {
                 continue;
             }
             let artifacts = draft.artifacts();
-            let body_failed = artifacts.body().failed_terminally();
+            let meta_failed = artifacts.meta().failed_terminally();
             let scene_failed = artifacts.scene().failed_terminally();
             let picture_failed = artifacts.picture().failed_terminally();
             let sound_failed = artifacts.sound().failed_terminally();
-            let body = if body_failed {
-                ArtifactSlot::fresh(Artifact::Body)
+            let meta = if meta_failed {
+                ArtifactSlot::fresh(Artifact::Meta)
             } else {
-                artifacts.body().clone()
+                artifacts.meta().clone()
             };
-            let scene = if body_failed || scene_failed {
+            let scene = if meta_failed || scene_failed {
                 ArtifactSlot::fresh(Artifact::Scene)
             } else {
                 artifacts.scene().clone()
             };
-            let picture = if body_failed || scene_failed || picture_failed {
+            let picture = if meta_failed || scene_failed || picture_failed {
                 ArtifactSlot::fresh(Artifact::Picture)
             } else {
                 artifacts.picture().clone()
             };
-            let sound = if body_failed || sound_failed {
+            let sound = if meta_failed || sound_failed {
                 ArtifactSlot::fresh(Artifact::Sound)
             } else {
                 artifacts.sound().clone()
             };
             *draft = draft
                 .clone()
-                .with_artifacts(CardArtifacts::from_parts(body, scene, picture, sound));
+                .with_artifacts(CardArtifacts::from_parts(meta, scene, picture, sound));
         }
         self
     }
@@ -934,7 +934,7 @@ fn line_end(text: &str, start: usize) -> usize {
 
 fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {
     let slot = match kind {
-        Artifact::Body => artifacts.body(),
+        Artifact::Meta => artifacts.meta(),
         Artifact::Scene => artifacts.scene(),
         Artifact::Picture => artifacts.picture(),
         Artifact::Sound => artifacts.sound(),

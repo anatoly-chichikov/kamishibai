@@ -5,7 +5,7 @@ use std::sync::mpsc::Sender;
 use anyhow::Result;
 
 use crate::session::{
-    ArtifactFile, BulkCorrection, CardBody, CardBodyGeneration, CardCorrection, CardDraft,
+    ArtifactFile, BulkCorrection, CardCorrection, CardDraft, CardMeta, CardMetaGeneration,
     CardRevision, LanguagePair, Understanding, Understood, WordCandidate,
 };
 use crate::tui::BusyKind;
@@ -18,19 +18,19 @@ pub(super) trait WordUnderstanding:
 
 impl<T> WordUnderstanding for T where T: Understanding + BulkCorrection + Clone + Send + 'static {}
 
-/// Capability that turns understood words into card text and media.
+/// Capability that turns understood words into card meta and media.
 pub(super) trait CardGeneration:
-    CardBodyGeneration + CardCorrection + Clone + Send + 'static
+    CardMetaGeneration + CardCorrection + Clone + Send + 'static
 {
     fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile>;
     fn generate_picture(&self, draft: &CardDraft) -> Result<ArtifactFile>;
     fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile>;
-    fn store_card_text(
+    fn store_card_meta(
         &self,
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
-        body: &CardBody,
+        meta: &CardMeta,
     ) -> Result<ArtifactFile>;
 }
 
@@ -57,7 +57,7 @@ pub(super) enum TextOutcome {
 
 /// Result produced by one background artifact pass.
 pub(super) enum ArtifactOutcome {
-    Body(Result<(CardBody, Option<ArtifactFile>)>),
+    Meta(Result<(CardMeta, Option<ArtifactFile>)>),
     Media(Result<ArtifactFile>),
 }
 

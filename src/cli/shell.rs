@@ -295,14 +295,14 @@ where
         let (sender, receiver) = channel();
         let handle = thread::spawn(move || {
             let outcome = match artifact {
-                Artifact::Body => ArtifactOutcome::Body(
+                Artifact::Meta => ArtifactOutcome::Meta(
                     generator
-                        .generate_card_body(&term, &understanding, &pair)
-                        .map(|body| {
+                        .generate_card_meta(&term, &understanding, &pair)
+                        .map(|meta| {
                             let file = generator
-                                .store_card_text(&term, &understanding, &pair, &body)
+                                .store_card_meta(&term, &understanding, &pair, &meta)
                                 .ok();
-                            (body, file)
+                            (meta, file)
                         }),
                 ),
                 Artifact::Scene => ArtifactOutcome::Media(generator.generate_scene(&draft)),
@@ -345,7 +345,7 @@ where
                 let _ = join_thread(job.handle);
                 let synthetic = anyhow!("background artifact task disconnected");
                 let outcome = match job.artifact {
-                    Artifact::Body => ArtifactOutcome::Body(Err(synthetic)),
+                    Artifact::Meta => ArtifactOutcome::Meta(Err(synthetic)),
                     _ => ArtifactOutcome::Media(Err(synthetic)),
                 };
                 self.apply_artifact_outcome(job.card, job.artifact, outcome);
@@ -365,7 +365,7 @@ where
             return;
         };
         let _event = match outcome {
-            ArtifactOutcome::Body(result) => engine.applied_body(card, result),
+            ArtifactOutcome::Meta(result) => engine.applied_meta(card, result),
             ArtifactOutcome::Media(result) => engine.applied_media(card, artifact, result),
         };
         let drafts = engine.drafts().to_vec();
@@ -441,12 +441,12 @@ where
             TextOutcome::CardCorrection(result) => match result {
                 Ok(payload) => {
                     let (revision, file) = *payload;
-                    let (term, understanding, body) = revision.into_parts();
+                    let (term, understanding, meta) = revision.into_parts();
                     let Some(current) = self.app.cards().get(self.app.card_selected()).cloned()
                     else {
                         return;
                     };
-                    let updated = current.recomposed(term, understanding, body, file);
+                    let updated = current.recomposed(term, understanding, meta, file);
                     self.app = self.app.clone().card_replaced(updated);
                     self.engine = Some(SessionEngine::start(self.app.cards().to_vec()));
                     self.started = Some(Instant::now());
@@ -506,11 +506,11 @@ where
                             generator.correct_card(&draft, comment.as_str(), &pair).map(
                                 |revision| {
                                     let file = generator
-                                        .store_card_text(
+                                        .store_card_meta(
                                             revision.term(),
                                             revision.understanding(),
                                             &pair,
-                                            revision.body(),
+                                            revision.meta(),
                                         )
                                         .ok();
                                     Box::new((revision, file))
@@ -715,7 +715,7 @@ mod tests {
     };
     use super::*;
     use crate::session::{
-        ArtifactFile, BulkCorrection, CardBody, CardBodyGeneration, CardCorrection, CardRevision,
+        ArtifactFile, BulkCorrection, CardCorrection, CardMeta, CardMetaGeneration, CardRevision,
         LanguagePair, RawInputBatch, ScriptDetection, TargetDetection, Understanding, Understood,
         WordCandidate, catalog_for_detection,
     };
@@ -724,8 +724,8 @@ mod tests {
     struct LocalCardGenerator;
 
     impl LocalCardGenerator {
-        fn local_body(term: &str, understanding: &str) -> CardBody {
-            CardBody::new(
+        fn local_meta(term: &str, understanding: &str) -> CardMeta {
+            CardMeta::new(
                 format!("/{term}/"),
                 format!("/{term} sentence/"),
                 format!("local meaning of {term}"),
@@ -779,14 +779,14 @@ mod tests {
         }
     }
 
-    impl CardBodyGeneration for LocalCardGenerator {
-        fn generate_card_body(
+    impl CardMetaGeneration for LocalCardGenerator {
+        fn generate_card_meta(
             &self,
             term: &str,
             understanding: &str,
             _pair: &LanguagePair,
-        ) -> Result<CardBody> {
-            Ok(Self::local_body(term, understanding))
+        ) -> Result<CardMeta> {
+            Ok(Self::local_meta(term, understanding))
         }
     }
 
@@ -798,8 +798,8 @@ mod tests {
             _pair: &LanguagePair,
         ) -> Result<CardRevision> {
             let understanding = format!("{} · change: {comment}", draft.understanding());
-            let body = Self::local_body(draft.term(), understanding.as_str());
-            Ok(CardRevision::new(draft.term(), understanding, body))
+            let meta = Self::local_meta(draft.term(), understanding.as_str());
+            Ok(CardRevision::new(draft.term(), understanding, meta))
         }
     }
 
@@ -816,14 +816,14 @@ mod tests {
             local_artifact(draft, Artifact::Sound)
         }
 
-        fn store_card_text(
+        fn store_card_meta(
             &self,
             term: &str,
             _understanding: &str,
             _pair: &LanguagePair,
-            _body: &CardBody,
+            _meta: &CardMeta,
         ) -> Result<ArtifactFile> {
-            let name = format!("{}-body.local.json", slug(term));
+            let name = format!("{}-meta.local.json", slug(term));
             let path = std::env::temp_dir().join(&name);
             Ok(ArtifactFile::new(name, path, "1 B", false))
         }
@@ -976,13 +976,13 @@ mod tests {
         }
     }
 
-    impl CardBodyGeneration for FailingCardGenerator {
-        fn generate_card_body(
+    impl CardMetaGeneration for FailingCardGenerator {
+        fn generate_card_meta(
             &self,
             _term: &str,
             _understanding: &str,
             _pair: &LanguagePair,
-        ) -> Result<CardBody> {
+        ) -> Result<CardMeta> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }
     }
@@ -1011,12 +1011,12 @@ mod tests {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }
 
-        fn store_card_text(
+        fn store_card_meta(
             &self,
             _term: &str,
             _understanding: &str,
             _pair: &LanguagePair,
-            _body: &CardBody,
+            _meta: &CardMeta,
         ) -> Result<ArtifactFile> {
             Err(anyhow::anyhow!("INTERNAL: boom"))
         }

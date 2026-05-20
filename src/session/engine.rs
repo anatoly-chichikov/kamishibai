@@ -8,7 +8,7 @@
 
 use anyhow::Result;
 
-use super::draft::{Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardBody, CardDraft};
+use super::draft::{Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta};
 
 /// One step emitted by the engine for the outer shell to consume.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -51,7 +51,7 @@ impl SessionEngine {
         for (index, draft) in self.drafts.iter().enumerate() {
             let artifacts = draft.artifacts();
             for kind in [
-                Artifact::Body,
+                Artifact::Meta,
                 Artifact::Sound,
                 Artifact::Scene,
                 Artifact::Picture,
@@ -65,42 +65,42 @@ impl SessionEngine {
         None
     }
 
-    /// Apply the outcome of a body-generation pass for one card.
-    pub fn applied_body(
+    /// Apply the outcome of a meta-generation pass for one card.
+    pub fn applied_meta(
         &mut self,
         card: usize,
-        result: Result<(CardBody, Option<ArtifactFile>)>,
+        result: Result<(CardMeta, Option<ArtifactFile>)>,
     ) -> EngineEvent {
-        let attempt_before = slot(self.drafts[card].artifacts(), Artifact::Body)
+        let attempt_before = slot(self.drafts[card].artifacts(), Artifact::Meta)
             .tally()
             .done()
             .saturating_add(1);
         match result {
-            Ok((body, file)) => {
-                self.drafts[card] = self.drafts[card].clone().with_body(body, file);
+            Ok((meta, file)) => {
+                self.drafts[card] = self.drafts[card].clone().with_meta(meta, file);
                 EngineEvent::ArtifactReady {
                     card,
-                    artifact: Artifact::Body,
+                    artifact: Artifact::Meta,
                 }
             }
             Err(_) => {
-                let bumped = mark_attempted(self.drafts[card].artifacts().clone(), Artifact::Body);
-                let cascaded = if slot(&bumped, Artifact::Body).failed_terminally() {
-                    discard_dependents_of_body(bumped)
+                let bumped = mark_attempted(self.drafts[card].artifacts().clone(), Artifact::Meta);
+                let cascaded = if slot(&bumped, Artifact::Meta).failed_terminally() {
+                    discard_dependents_of_meta(bumped)
                 } else {
                     bumped
                 };
                 self.drafts[card] = self.drafts[card].clone().with_artifacts(cascaded);
-                let latest = slot(self.drafts[card].artifacts(), Artifact::Body);
+                let latest = slot(self.drafts[card].artifacts(), Artifact::Meta);
                 if latest.failed_terminally() {
                     EngineEvent::RetryExhausted {
                         card,
-                        artifact: Artifact::Body,
+                        artifact: Artifact::Meta,
                     }
                 } else {
                     EngineEvent::RetryStarted {
                         card,
-                        artifact: Artifact::Body,
+                        artifact: Artifact::Meta,
                         attempt: attempt_before,
                     }
                 }
@@ -116,8 +116,8 @@ impl SessionEngine {
         result: Result<ArtifactFile>,
     ) -> EngineEvent {
         debug_assert!(
-            !matches!(artifact, Artifact::Body),
-            "applied_media must not be called with Artifact::Body"
+            !matches!(artifact, Artifact::Meta),
+            "applied_media must not be called with Artifact::Meta"
         );
         let attempt_before = slot(self.drafts[card].artifacts(), artifact)
             .tally()
@@ -180,7 +180,7 @@ impl SessionEngine {
         self.drafts.iter().all(|draft| {
             let artifacts = draft.artifacts();
             [
-                Artifact::Body,
+                Artifact::Meta,
                 Artifact::Sound,
                 Artifact::Scene,
                 Artifact::Picture,
@@ -200,7 +200,7 @@ impl SessionEngine {
 
 fn slot(artifacts: &CardArtifacts, kind: Artifact) -> &ArtifactSlot {
     match kind {
-        Artifact::Body => artifacts.body(),
+        Artifact::Meta => artifacts.meta(),
         Artifact::Scene => artifacts.scene(),
         Artifact::Picture => artifacts.picture(),
         Artifact::Sound => artifacts.sound(),
@@ -215,7 +215,7 @@ fn mark_attempted(artifacts: CardArtifacts, kind: Artifact) -> CardArtifacts {
     reshape(artifacts, kind, |slot| slot.attempted())
 }
 
-fn discard_dependents_of_body(artifacts: CardArtifacts) -> CardArtifacts {
+fn discard_dependents_of_meta(artifacts: CardArtifacts) -> CardArtifacts {
     reshape(
         reshape(
             reshape(artifacts, Artifact::Scene, |slot| slot.discard()),
@@ -235,10 +235,10 @@ fn reshape<F>(artifacts: CardArtifacts, kind: Artifact, mutate: F) -> CardArtifa
 where
     F: Fn(ArtifactSlot) -> ArtifactSlot,
 {
-    let body = if kind == Artifact::Body {
-        mutate(artifacts.body().clone())
+    let meta = if kind == Artifact::Meta {
+        mutate(artifacts.meta().clone())
     } else {
-        artifacts.body().clone()
+        artifacts.meta().clone()
     };
     let scene = if kind == Artifact::Scene {
         mutate(artifacts.scene().clone())
@@ -255,5 +255,5 @@ where
     } else {
         artifacts.sound().clone()
     };
-    CardArtifacts::from_parts(body, scene, picture, sound)
+    CardArtifacts::from_parts(meta, scene, picture, sound)
 }

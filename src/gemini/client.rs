@@ -10,13 +10,13 @@ use serde_json::Value;
 use crate::generation::{manga_template, render_scene_prompt};
 use crate::languages::catalog;
 use crate::session::{
-    CardBody, CardDraft, CardRevision, LanguagePair, RawInputBatch, TargetGuess, Understood,
+    CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch, TargetGuess, Understood,
     WordCandidate,
 };
 
 use super::codec::decode;
 use super::prompts::{
-    render_bulk_prompt, render_card_body_prompt, render_card_prompt, render_intake_prompt,
+    render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
 };
 use super::protocol::{
     GenerationConfig, Request, Response, api_error, diagnosis, enforce, unfence, validate,
@@ -24,7 +24,7 @@ use super::protocol::{
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 const TEXT_MODEL: &str = "gemini-3-flash-preview";
-const BODY_MODEL: &str = "gemini-3.1-pro-preview";
+const META_MODEL: &str = "gemini-3.1-pro-preview";
 const SCENE_MODEL: &str = "gemini-3-flash-preview";
 const IMAGE_MODEL: &str = "gemini-3.1-flash-image-preview";
 const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
@@ -174,7 +174,7 @@ where
 
     /// Send one free-form prompt to a text model and return the raw textual
     /// response. Used by eval/dev tooling that swaps prompts without going
-    /// through the typed `understand` / `generate_card_body` paths.
+    /// through the typed `understand` / `generate_card_meta` paths.
     pub fn complete(&self, model: &str, prompt: String) -> Result<String> {
         self.text(model, prompt)
     }
@@ -213,18 +213,18 @@ where
             .collect()
     }
 
-    /// Build the rich card body for one term using the Pro tier.
-    pub fn generate_card_body(
+    /// Build the rich card meta for one term using the Pro tier.
+    pub fn generate_card_meta(
         &self,
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
-    ) -> Result<CardBody> {
+    ) -> Result<CardMeta> {
         let catalog = catalog();
-        let prompt = render_card_body_prompt(term, understanding, pair, &catalog)?;
-        let decoded: CardBodyResponse =
-            serde_json::from_str(unfence(self.text(BODY_MODEL, prompt)?.trim()))?;
-        Ok(decoded.into_body())
+        let prompt = render_card_meta_prompt(term, understanding, pair, &catalog)?;
+        let decoded: CardMetaResponse =
+            serde_json::from_str(unfence(self.text(META_MODEL, prompt)?.trim()))?;
+        Ok(decoded.into_meta())
     }
 
     /// Recompose one card draft after a per-card refinement.
@@ -237,10 +237,10 @@ where
         let catalog = catalog();
         let prompt = render_card_prompt(draft, comment, pair, &catalog)?;
         let decoded: CardCorrectionResponse =
-            serde_json::from_str(unfence(self.text(BODY_MODEL, prompt)?.trim()))?;
+            serde_json::from_str(unfence(self.text(META_MODEL, prompt)?.trim()))?;
         let term = decoded.term.clone();
         let understanding = decoded.understanding.clone();
-        Ok(CardRevision::new(term, understanding, decoded.into_body()))
+        Ok(CardRevision::new(term, understanding, decoded.into_meta()))
     }
 
     /// Render one scene JSON payload into raw image bytes.
@@ -352,7 +352,7 @@ impl IntakeItem {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct CardBodyResponse {
+struct CardMetaResponse {
     pronunciation: String,
     transcription: String,
     meaning: String,
@@ -364,9 +364,9 @@ struct CardBodyResponse {
     target_sentence: String,
 }
 
-impl CardBodyResponse {
-    fn into_body(self) -> CardBody {
-        CardBody::new(
+impl CardMetaResponse {
+    fn into_meta(self) -> CardMeta {
+        CardMeta::new(
             self.pronunciation,
             self.transcription,
             self.meaning,
@@ -396,8 +396,8 @@ struct CardCorrectionResponse {
 }
 
 impl CardCorrectionResponse {
-    fn into_body(self) -> CardBody {
-        CardBody::new(
+    fn into_meta(self) -> CardMeta {
+        CardMeta::new(
             self.pronunciation,
             self.transcription,
             self.meaning,

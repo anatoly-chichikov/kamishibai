@@ -20,8 +20,8 @@ use crate::languages::{LanguageCatalog, catalog, naming};
 use crate::report::{CardSheet, Thumbnail};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    ArtifactFile, BulkCorrection, CachedUnderstanding, CardBody, CardBodyCache, CardBodyGeneration,
-    CardCorrection, CardDraft, CardRevision, LanguagePair, RawInputBatch, Understanding,
+    ArtifactFile, BulkCorrection, CachedUnderstanding, CardCorrection, CardDraft, CardMeta,
+    CardMetaCache, CardMetaGeneration, CardRevision, LanguagePair, RawInputBatch, Understanding,
     Understood, WordCandidate, to_entry,
 };
 use crate::tui::BusyKind;
@@ -53,8 +53,8 @@ impl LiveCardGenerator {
         }
     }
 
-    fn body_cache(&self) -> CardBodyCache {
-        CardBodyCache::new(self.cache.clone())
+    fn meta_cache(&self) -> CardMetaCache {
+        CardMetaCache::new(self.cache.clone())
     }
 
     fn audio_for(&self, target_lang: &str) -> Result<Audio<GeminiClient<HttpTransport>>> {
@@ -103,17 +103,17 @@ impl BulkCorrection for LiveCardGenerator {
     }
 }
 
-impl CardBodyGeneration for LiveCardGenerator {
-    fn generate_card_body(
+impl CardMetaGeneration for LiveCardGenerator {
+    fn generate_card_meta(
         &self,
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
-    ) -> Result<CardBody> {
-        if let Some(body) = self.body_cache().load(term, understanding, pair)? {
-            return Ok(body);
+    ) -> Result<CardMeta> {
+        if let Some(meta) = self.meta_cache().load(term, understanding, pair)? {
+            return Ok(meta);
         }
-        self.client.generate_card_body(term, understanding, pair)
+        self.client.generate_card_meta(term, understanding, pair)
     }
 }
 
@@ -130,13 +130,13 @@ impl CardCorrection for LiveCardGenerator {
 
 impl CardGeneration for LiveCardGenerator {
     fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-        let body = draft
-            .body()
-            .ok_or_else(|| anyhow!("body must be ready before scene"))?;
+        let meta = draft
+            .meta()
+            .ok_or_else(|| anyhow!("meta must be ready before scene"))?;
         let illustration = self.illustration_for(draft.pair().target())?;
         let mut progress = NoopProgress;
         let (filename, cached) = illustration.scene_only(
-            body.target_sentence(),
+            meta.target_sentence(),
             draft.pair().target(),
             &mut progress,
         )?;
@@ -148,13 +148,13 @@ impl CardGeneration for LiveCardGenerator {
     }
 
     fn generate_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-        let body = draft
-            .body()
-            .ok_or_else(|| anyhow!("body must be ready before picture"))?;
+        let meta = draft
+            .meta()
+            .ok_or_else(|| anyhow!("meta must be ready before picture"))?;
         let illustration = self.illustration_for(draft.pair().target())?;
         let mut progress = NoopProgress;
         let (filename, cached) = illustration.picture_only(
-            body.target_sentence(),
+            meta.target_sentence(),
             draft.pair().target(),
             &mut progress,
         )?;
@@ -166,11 +166,11 @@ impl CardGeneration for LiveCardGenerator {
     }
 
     fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-        let body = draft
-            .body()
-            .ok_or_else(|| anyhow!("body must be ready before sound"))?;
+        let meta = draft
+            .meta()
+            .ok_or_else(|| anyhow!("meta must be ready before sound"))?;
         let audio = self.audio_for(draft.pair().target())?;
-        let (filename, cached) = audio.generate(body.target_sentence())?;
+        let (filename, cached) = audio.generate(meta.target_sentence())?;
         let path = audio.filepath(filename.as_str())?;
         let size = fs::metadata(&path)
             .map(|metadata| metadata.len())
@@ -178,14 +178,14 @@ impl CardGeneration for LiveCardGenerator {
         Ok(ArtifactFile::new(filename, path, format_size(size), cached))
     }
 
-    fn store_card_text(
+    fn store_card_meta(
         &self,
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
-        body: &CardBody,
+        meta: &CardMeta,
     ) -> Result<ArtifactFile> {
-        let (filename, path, cached) = self.body_cache().store(term, understanding, pair, body)?;
+        let (filename, path, cached) = self.meta_cache().store(term, understanding, pair, meta)?;
         let size = fs::metadata(&path)
             .map(|metadata| metadata.len())
             .unwrap_or(0);

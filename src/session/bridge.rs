@@ -5,31 +5,31 @@ use crate::vocabulary::{
     VocabularyTarget,
 };
 
-use super::draft::{CardBody, CardDraft};
+use super::draft::{CardDraft, CardMeta};
 use super::pair::LanguagePair;
 
 /// Bridge one card draft into the strict internal vocabulary entry consumed by
-/// the existing `src/generation/*` pipeline. Fails if the body has not been
+/// the existing `src/generation/*` pipeline. Fails if the meta has not been
 /// generated yet — every field on `VocabularyEntry` is non-empty by contract.
 pub fn to_entry(draft: &CardDraft) -> Result<VocabularyEntry> {
-    let Some(body) = draft.body() else {
-        bail!("invariant: card body must be generated before bridging to VocabularyEntry");
+    let Some(meta) = draft.meta() else {
+        bail!("invariant: card meta must be generated before bridging to VocabularyEntry");
     };
     Ok(VocabularyEntry {
         term: NonEmptyText::new(draft.term())?,
-        meaning: NonEmptyText::new(body.meaning())?,
-        pronunciation: NonEmptyText::new(body.pronunciation())?,
-        transcription: NonEmptyText::new(body.transcription())?,
-        importance: Importance::new(body.importance())?,
+        meaning: NonEmptyText::new(meta.meaning())?,
+        pronunciation: NonEmptyText::new(meta.pronunciation())?,
+        transcription: NonEmptyText::new(meta.transcription())?,
+        importance: Importance::new(meta.importance())?,
         source: VocabularySource {
-            sentence: NonEmptyText::new(body.source_sentence())?,
+            sentence: NonEmptyText::new(meta.source_sentence())?,
             lang: LanguageCode::new(draft.pair().support())?,
-            highlight: NonEmptyText::new(body.source_highlight())?,
-            hint: NonEmptyText::new(body.source_hint())?,
-            context: NonEmptyText::new(body.source_context())?,
+            highlight: NonEmptyText::new(meta.source_highlight())?,
+            hint: NonEmptyText::new(meta.source_hint())?,
+            context: NonEmptyText::new(meta.source_context())?,
         },
         target: VocabularyTarget {
-            sentence: NonEmptyText::new(body.target_sentence())?,
+            sentence: NonEmptyText::new(meta.target_sentence())?,
             lang: LanguageCode::new(draft.pair().target())?,
         },
     })
@@ -44,12 +44,12 @@ pub fn to_document(drafts: &[CardDraft]) -> Result<VocabularyDocument> {
     Ok(VocabularyDocument { entries })
 }
 
-/// Build one card draft from a strict vocabulary entry, with the rich body
-/// already attached. The engine treats the Body slot as ready and starts at the
+/// Build one card draft from a strict vocabulary entry, with the rich meta
+/// already attached. The engine treats the Meta slot as ready and starts at the
 /// first media artifact, so callers loading a pre-rendered batch from JSON skip
-/// the Pro body-generation pass entirely.
+/// the Pro meta-generation pass entirely.
 pub fn from_entry(entry: &VocabularyEntry, pair: LanguagePair) -> CardDraft {
-    let body = CardBody::new(
+    let meta = CardMeta::new(
         entry.pronunciation.as_str(),
         entry.transcription.as_str(),
         entry.meaning.as_str(),
@@ -60,7 +60,7 @@ pub fn from_entry(entry: &VocabularyEntry, pair: LanguagePair) -> CardDraft {
         entry.source.context.as_str(),
         entry.target.sentence.as_str(),
     );
-    CardDraft::new(entry.term.as_str(), entry.meaning.as_str(), pair).with_body(body, None)
+    CardDraft::new(entry.term.as_str(), entry.meaning.as_str(), pair).with_meta(meta, None)
 }
 
 #[cfg(test)]
@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    fn from_entry_attaches_body_so_engine_skips_body_pass() {
+    fn from_entry_attaches_meta_so_engine_skips_meta_pass() {
         let entry = sample_entry();
         let pair = LanguagePair::new("en", "ru");
         let draft = from_entry(&entry, pair);
@@ -106,7 +106,7 @@ mod tests {
         assert_eq!(
             engine.next_target().map(|(_, kind)| kind),
             Some(Artifact::Sound),
-            "engine cannot start at Body when the JSON batch already supplies one"
+            "engine cannot start at Meta when the JSON batch already supplies one"
         );
     }
 }

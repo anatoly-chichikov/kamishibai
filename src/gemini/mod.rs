@@ -12,7 +12,7 @@ use anyhow::Result;
 use crate::generation::SceneSource;
 use crate::generation::Speaker;
 use crate::session::{
-    BulkCorrection, CardBody, CardBodyGeneration, CardCorrection, CardDraft, CardRevision,
+    BulkCorrection, CardCorrection, CardDraft, CardMeta, CardMetaGeneration, CardRevision,
     LanguagePair, RawInputBatch, Understanding, Understood, WordCandidate,
 };
 
@@ -61,18 +61,18 @@ where
     }
 }
 
-impl<T> CardBodyGeneration for GeminiClient<T>
+impl<T> CardMetaGeneration for GeminiClient<T>
 where
     T: Transport,
 {
-    /// Return one rich card body for a term plus the understanding context.
-    fn generate_card_body(
+    /// Return one rich card meta for a term plus the understanding context.
+    fn generate_card_meta(
         &self,
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
-    ) -> Result<CardBody> {
-        GeminiClient::<T>::generate_card_body(self, term, understanding, pair)
+    ) -> Result<CardMeta> {
+        GeminiClient::<T>::generate_card_meta(self, term, understanding, pair)
     }
 }
 

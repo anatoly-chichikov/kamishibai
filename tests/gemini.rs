@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use kamishibai::gemini::{GeminiClient, Transport, TransportResponse};
-use kamishibai::session::{CardBody, CardDraft, LanguagePair, RawInputBatch, WordCandidate};
+use kamishibai::session::{CardDraft, CardMeta, LanguagePair, RawInputBatch, WordCandidate};
 use serde_json::{Value, json};
 
 /// Fake transport that records requests and replays fixed responses.
@@ -134,9 +134,9 @@ fn bulk_correction_uses_flash_and_updates_understanding() -> Result<()> {
     Ok(())
 }
 
-/// Card-body generation uses the Pro model and returns the full rich body.
+/// Card-meta generation uses the Pro model and returns the full rich meta.
 #[test]
-fn card_body_generation_uses_pro_and_returns_full_body() -> Result<()> {
+fn card_meta_generation_uses_pro_and_returns_full_meta() -> Result<()> {
     let transport = FakeTransport::new(vec![Ok(body(json!({
         "candidates": [{
             "content": {
@@ -148,7 +148,7 @@ fn card_body_generation_uses_pro_and_returns_full_body() -> Result<()> {
     }))?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let body_out = client.generate_card_body(
+    let meta_out = client.generate_card_meta(
         "borrow",
         "verb sense — to take something temporarily",
         &LanguagePair::new("en", "ru"),
@@ -156,10 +156,10 @@ fn card_body_generation_uses_pro_and_returns_full_body() -> Result<()> {
     assert_eq!(
         (
             requests.borrow()[0].0.as_str(),
-            body_out.pronunciation(),
-            body_out.target_sentence(),
-            body_out.source_highlight(),
-            body_out.importance(),
+            meta_out.pronunciation(),
+            meta_out.target_sentence(),
+            meta_out.source_highlight(),
+            meta_out.importance(),
         ),
         (
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent",
@@ -168,14 +168,14 @@ fn card_body_generation_uses_pro_and_returns_full_body() -> Result<()> {
             "одолжить",
             8,
         ),
-        "card-body generation must hit the Pro model and decode every rich field"
+        "card-meta generation must hit the Pro model and decode every rich field"
     );
     Ok(())
 }
 
-/// Per-card correction uses Pro and may revise term, understanding, and full body.
+/// Per-card correction uses Pro and may revise term, understanding, and full meta.
 #[test]
-fn card_correction_uses_pro_to_recompose_term_understanding_and_body() -> Result<()> {
+fn card_correction_uses_pro_to_recompose_term_understanding_and_meta() -> Result<()> {
     let transport = FakeTransport::new(vec![Ok(body(json!({
         "candidates": [{
             "content": {
@@ -186,7 +186,7 @@ fn card_correction_uses_pro_to_recompose_term_understanding_and_body() -> Result
         }]
     }))?)]);
     let client = GeminiClient::new("key", transport);
-    let body_seed = CardBody::new(
+    let meta_seed = CardMeta::new(
         "/wound/",
         "/wound seed/",
         "рана",
@@ -198,20 +198,20 @@ fn card_correction_uses_pro_to_recompose_term_understanding_and_body() -> Result
         "Example.",
     );
     let draft = CardDraft::new("wound", "noun: a wound", LanguagePair::new("en", "ru"))
-        .with_body(body_seed, None);
+        .with_meta(meta_seed, None);
     let revision = client.correct_card(
         &draft,
         "treat as past tense of wind",
         &LanguagePair::new("en", "ru"),
     )?;
-    let (term, understanding, body_out) = revision.into_parts();
+    let (term, understanding, meta_out) = revision.into_parts();
     assert_eq!(
         (
             term,
             understanding,
-            body_out.target_sentence().to_string(),
-            body_out.source_highlight().to_string(),
-            body_out.importance(),
+            meta_out.target_sentence().to_string(),
+            meta_out.source_highlight().to_string(),
+            meta_out.importance(),
         ),
         (
             String::from("wound"),
@@ -220,7 +220,7 @@ fn card_correction_uses_pro_to_recompose_term_understanding_and_body() -> Result
             String::from("завел"),
             6,
         ),
-        "card correction must recompose term, understanding, and full body from Pro JSON"
+        "card correction must recompose term, understanding, and full meta from Pro JSON"
     );
     Ok(())
 }
@@ -274,7 +274,7 @@ fn scene_generation_rejects_non_array_responses() {
     let transport = FakeTransport::new(vec![Ok(body(
         json!({"candidates":[{"content":{"parts":[{"text":"{\"panels\":[]}"}]}}]}),
     )
-    .expect("response body must serialize"))]);
+    .expect("response meta must serialize"))]);
     let client = GeminiClient::new("key", transport);
     assert_eq!(
         client
@@ -314,7 +314,7 @@ fn image_generation_keeps_the_image_modality_and_square_aspect_ratio() -> Result
 /// Image generation surfaces blocked-response diagnostics.
 #[test]
 fn image_generation_surfaces_blocked_response_diagnostics() {
-    let transport = FakeTransport::new(vec![Ok(body(json!({"candidates":[],"promptFeedback":{"blockReason":"SAFETY","blockReasonMessage":"blocked","safetyRatings":[{"category":"HARM_CATEGORY_HARASSMENT","probability":"MEDIUM","blocked":true}]}})).expect("response body must serialize"))]);
+    let transport = FakeTransport::new(vec![Ok(body(json!({"candidates":[],"promptFeedback":{"blockReason":"SAFETY","blockReasonMessage":"blocked","safetyRatings":[{"category":"HARM_CATEGORY_HARASSMENT","probability":"MEDIUM","blocked":true}]}})).expect("response meta must serialize"))]);
     let client = GeminiClient::new("key", transport);
     assert_eq!(
         client

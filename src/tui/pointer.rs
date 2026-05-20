@@ -114,7 +114,7 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::session::{
-        Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
+        Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
     };
     use crate::tui::{Screen, draw};
     use ratatui::Terminal;
@@ -127,8 +127,8 @@ mod tests {
         LanguagePair::new("en", "ru")
     }
 
-    fn body(term: &str) -> CardBody {
-        CardBody::new(
+    fn meta(term: &str) -> CardMeta {
+        CardMeta::new(
             format!("/{term}/"),
             format!("/{term}/"),
             format!("meaning of {term}"),
@@ -147,7 +147,7 @@ mod tests {
 
     fn artifacts() -> CardArtifacts {
         CardArtifacts::from_parts(
-            ArtifactSlot::fresh(Artifact::Body).succeeded_with(file("meta.local.json")),
+            ArtifactSlot::fresh(Artifact::Meta).succeeded_with(file("meta.local.json")),
             ArtifactSlot::fresh(Artifact::Scene).succeeded_with(file("scene.local.json")),
             ArtifactSlot::fresh(Artifact::Picture).succeeded_with(file("picture.local.jpg")),
             ArtifactSlot::fresh(Artifact::Sound).succeeded_with(file("sound.local.wav")),
@@ -156,7 +156,7 @@ mod tests {
 
     fn card(term: &str) -> CardDraft {
         CardDraft::new(term, format!("understanding for {term}"), pair())
-            .with_body(body(term), None)
+            .with_meta(meta(term), None)
             .with_artifacts(artifacts())
     }
 

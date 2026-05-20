@@ -2,7 +2,7 @@
 //! and its two inline variants (retry, failure).
 
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
+    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
@@ -25,7 +25,7 @@ fn flat(app: &App) -> String {
 
 fn ready_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
@@ -35,7 +35,7 @@ fn ready_artifacts() -> CardArtifacts {
 fn retrying_artifacts() -> CardArtifacts {
     let picture = ArtifactSlot::fresh(Artifact::Picture).attempted();
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         picture,
         ArtifactSlot::fresh(Artifact::Sound),
@@ -48,15 +48,15 @@ fn failed_artifacts() -> CardArtifacts {
         picture = picture.attempted();
     }
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         picture,
         ArtifactSlot::fresh(Artifact::Sound),
     )
 }
 
-fn body_for(term: &str) -> CardBody {
-    CardBody::new(
+fn meta_for(term: &str) -> CardMeta {
+    CardMeta::new(
         format!("/{term}/"),
         format!("/{term} sentence/"),
         format!("meaning of {term}"),
@@ -75,7 +75,7 @@ fn draft(term: &str, artifacts: CardArtifacts) -> CardDraft {
         format!("understanding for {term}"),
         LanguagePair::new("en", "ru"),
     )
-    .with_body(body_for(term), None)
+    .with_meta(meta_for(term), None)
     .with_artifacts(artifacts)
 }
 
@@ -211,7 +211,7 @@ fn arrows_and_enter_navigate_and_toggle_expansion_of_the_focused_card() {
 }
 
 #[test]
-fn expanded_card_shows_body_preview_only_no_duplicate_artifact_pane() {
+fn expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane() {
     let start = seeded(vec![draft("whilst", ready_artifacts())]);
     let expanded = transit(start, AppEvent::KeyEnter).0;
     let rendered = flat(&expanded);
@@ -222,6 +222,6 @@ fn expanded_card_shows_body_preview_only_no_duplicate_artifact_pane() {
             && rendered.contains("hint")
             && rendered.contains("meaning")
             && artifact_lines <= 1,
-        "expanded row must reveal the body preview without duplicating the step list: {rendered}"
+        "expanded row must reveal the meta preview without duplicating the step list: {rendered}"
     );
 }

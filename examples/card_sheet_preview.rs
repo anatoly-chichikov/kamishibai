@@ -1,7 +1,7 @@
 //! Render a ten-card preview sheet from the local Gemini cache.
 //!
-//! Walks `~/Library/Caches/kamishibai/body-*/*.json` (the flat card-body
-//! payload that `src/cli.rs::persist_body` writes after every Gemini Pro
+//! Walks `~/Library/Caches/kamishibai/meta-*/*.json` (the flat card-meta
+//! payload that `LiveCardGenerator::store_card_meta` writes after every Gemini Pro
 //! pass), reconstructs each `VocabularyEntry`, and pairs it with the
 //! matching `manga-{lang}/{digest}.jpg` panel using the same MD5 key the
 //! production flow computes. No network calls. Use it as the visual
@@ -23,9 +23,9 @@ use kamishibai::vocabulary::{
 const CAP: usize = 10;
 const MIN_CARDS: usize = 4;
 
-/// Flat schema persisted to `body-{lang}/<digest>.json` by the publish flow.
+/// Flat schema persisted to `meta-{lang}/<digest>.json` by the publish flow.
 #[derive(Debug, Deserialize)]
-struct BodyRecord {
+struct MetaRecord {
     term: String,
     meaning: String,
     pronunciation: String,
@@ -40,7 +40,7 @@ struct BodyRecord {
     target_lang: String,
 }
 
-impl BodyRecord {
+impl MetaRecord {
     /// Build one strict `VocabularyEntry` out of the cached flat payload.
     fn into_entry(self) -> Result<VocabularyEntry> {
         Ok(VocabularyEntry {
@@ -74,17 +74,17 @@ struct Candidate {
 
 /// Return the first twelve hex chars of `md5(lang + "\0" + target_sentence)`.
 /// Matches `src/generation/picture.rs` and the inline computation in
-/// `src/cli.rs::persist_body`.
+/// `LiveCardGenerator::store_card_meta`.
 fn manga_digest(target_lang: &str, target_sentence: &str) -> String {
     let payload = format!("{}\0{}", target_lang, target_sentence);
     let full = format!("{:x}", md5::compute(payload));
     full[..12].to_string()
 }
 
-/// Collect every body record whose manga panel also exists on disk.
+/// Collect every meta record whose manga panel also exists on disk.
 fn collect_candidates(cache: &Path) -> Result<Vec<Candidate>> {
     let mut out = Vec::new();
-    let body_dirs = fs::read_dir(cache)
+    let meta_dirs = fs::read_dir(cache)
         .map_err(|err| anyhow!("cache root '{}' is unreadable: {err}", cache.display()))?
         .filter_map(|entry| entry.ok().map(|item| item.path()))
         .filter(|path| {
@@ -92,27 +92,27 @@ fn collect_candidates(cache: &Path) -> Result<Vec<Candidate>> {
                 && path
                     .file_name()
                     .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("body-"))
+                    .is_some_and(|name| name.starts_with("meta-"))
         });
-    for body_dir in body_dirs {
-        let lang = body_dir
+    for meta_dir in meta_dirs {
+        let lang = meta_dir
             .file_name()
             .and_then(|name| name.to_str())
-            .and_then(|name| name.strip_prefix("body-"))
+            .and_then(|name| name.strip_prefix("meta-"))
             .map(str::to_string)
-            .ok_or_else(|| anyhow!("body dir '{}' has no language tag", body_dir.display()))?;
+            .ok_or_else(|| anyhow!("meta dir '{}' has no language tag", meta_dir.display()))?;
         let manga_dir = cache.join(format!("manga-{lang}"));
         if !manga_dir.is_dir() {
             continue;
         }
-        for entry in fs::read_dir(&body_dir)? {
+        for entry in fs::read_dir(&meta_dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
             let raw = fs::read_to_string(&path)?;
-            let record: BodyRecord = match serde_json::from_str(raw.as_str()) {
+            let record: MetaRecord = match serde_json::from_str(raw.as_str()) {
                 Ok(value) => value,
                 Err(_) => continue,
             };
