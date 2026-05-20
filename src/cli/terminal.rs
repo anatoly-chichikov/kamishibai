@@ -15,6 +15,7 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 
 use super::host::open_path;
 use super::shell::Shell;
@@ -86,22 +87,12 @@ where
     let mut dirty = true;
     loop {
         dirty |= shell.refresh_quit_pending();
-        let area = terminal.size()?;
-        let rect = ratatui::layout::Rect {
-            x: 0,
-            y: 0,
-            width: area.width,
-            height: area.height,
-        };
-        let viewport = scroll_viewport(shell.app(), rect);
-        let body_width = scroll_body_width(rect);
+        let rect = terminal_rect(terminal)?;
+        let (viewport, body_width) = scroll_frame(shell.app(), rect);
         dirty |= shell.reclamp_scroll(viewport, body_width);
         if dirty {
             terminal.draw(|frame| draw(frame, shell.app()))?;
-            if let Some((column, row)) = mouse_position {
-                let next = mouse_pointer_at(shell.app(), rect, column, row);
-                write_mouse_pointer(terminal.backend_mut(), next);
-            }
+            write_pointer_at(terminal, shell.app(), rect, mouse_position);
             dirty = false;
         }
         let timeout = match mouse_position {
@@ -110,10 +101,7 @@ where
         };
         if !poll(timeout)? {
             dirty |= shell.tick()?;
-            if let Some((column, row)) = mouse_position {
-                let next = mouse_pointer_at(shell.app(), rect, column, row);
-                write_mouse_pointer(terminal.backend_mut(), next);
-            }
+            write_pointer_at(terminal, shell.app(), rect, mouse_position);
             continue;
         }
         let event = read()?;
@@ -152,22 +140,12 @@ where
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::Moved | MouseEventKind::Drag(_) => {
                     mouse_position = Some((mouse.column, mouse.row));
-                    let next = mouse_pointer_at(shell.app(), rect, mouse.column, mouse.row);
-                    write_mouse_pointer(terminal.backend_mut(), next);
+                    write_pointer_at(terminal, shell.app(), rect, mouse_position);
                 }
                 MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                     mouse_position = Some((mouse.column, mouse.row));
-                    let next = mouse_pointer_at(shell.app(), rect, mouse.column, mouse.row);
-                    write_mouse_pointer(terminal.backend_mut(), next);
-                    let area = terminal.size()?;
-                    let rect = ratatui::layout::Rect {
-                        x: 0,
-                        y: 0,
-                        width: area.width,
-                        height: area.height,
-                    };
-                    let viewport = scroll_viewport(shell.app(), rect);
-                    let body_width = scroll_body_width(rect);
+                    write_pointer_at(terminal, shell.app(), rect, mouse_position);
+                    let (viewport, body_width) = scroll_frame(shell.app(), rect);
                     let delta = if matches!(mouse.kind, MouseEventKind::ScrollUp) {
                         -1
                     } else {
@@ -177,15 +155,7 @@ where
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
                     mouse_position = Some((mouse.column, mouse.row));
-                    let next = mouse_pointer_at(shell.app(), rect, mouse.column, mouse.row);
-                    write_mouse_pointer(terminal.backend_mut(), next);
-                    let area = terminal.size()?;
-                    let rect = ratatui::layout::Rect {
-                        x: 0,
-                        y: 0,
-                        width: area.width,
-                        height: area.height,
-                    };
+                    write_pointer_at(terminal, shell.app(), rect, mouse_position);
                     if shell.app().modal() == Some(ModalKind::PickMyLanguage) {
                         if let Some(index) = picker_geometry::chip_at(rect, mouse.column, mouse.row)
                         {
@@ -221,5 +191,37 @@ where
                 dirty |= shell.tick()?;
             }
         }
+    }
+}
+
+fn terminal_rect<B>(terminal: &mut Terminal<B>) -> Result<Rect>
+where
+    B: ratatui::backend::Backend,
+    <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
+{
+    let area = terminal.size()?;
+    Ok(Rect {
+        x: 0,
+        y: 0,
+        width: area.width,
+        height: area.height,
+    })
+}
+
+fn scroll_frame(app: &App, rect: Rect) -> (u16, u16) {
+    (scroll_viewport(app, rect), scroll_body_width(rect))
+}
+
+fn write_pointer_at<B>(
+    terminal: &mut Terminal<B>,
+    app: &App,
+    rect: Rect,
+    position: Option<(u16, u16)>,
+) where
+    B: ratatui::backend::Backend + Write,
+{
+    if let Some((column, row)) = position {
+        let next = mouse_pointer_at(app, rect, column, row);
+        write_mouse_pointer(terminal.backend_mut(), next);
     }
 }

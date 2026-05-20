@@ -29,6 +29,9 @@ use crate::vocabulary::VocabularyEntry;
 
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
 
+type LiveIllustration =
+    Illustration<SceneComposer<GeminiClient<HttpTransport>>, MangaRenderer<TextDetector>>;
+
 /// Live card generator backed by Gemini and the on-disk cache.
 #[derive(Clone)]
 pub(super) struct LiveCardGenerator {
@@ -66,11 +69,7 @@ impl LiveCardGenerator {
         ))
     }
 
-    fn illustration_for(
-        &self,
-        target_lang: &str,
-    ) -> Result<Illustration<SceneComposer<GeminiClient<HttpTransport>>, MangaRenderer<TextDetector>>>
-    {
+    fn illustration_for(&self, target_lang: &str) -> Result<LiveIllustration> {
         let item = self.catalog.item(target_lang)?;
         let client = self.client.clone();
         Ok(Illustration::new(
@@ -83,6 +82,27 @@ impl LiveCardGenerator {
                 BorderDetector::new(6, 240, 10),
             ),
         ))
+    }
+
+    fn generate_visual<F>(
+        &self,
+        draft: &CardDraft,
+        artifact: &str,
+        render: F,
+    ) -> Result<ArtifactFile>
+    where
+        F: FnOnce(&LiveIllustration, &str, &str, &mut NoopProgress) -> Result<(String, bool)>,
+    {
+        let meta = draft
+            .meta()
+            .ok_or_else(|| anyhow!("meta must be ready before {artifact}"))?;
+        let target = draft.pair().target();
+        let illustration = self.illustration_for(target)?;
+        let mut progress = NoopProgress;
+        let (filename, cached) =
+            render(&illustration, meta.target_sentence(), target, &mut progress)?;
+        let path = illustration.filepath(filename.as_str())?;
+        Ok(artifact_file(filename, path, cached))
     }
 }
 
@@ -130,39 +150,23 @@ impl CardCorrection for LiveCardGenerator {
 
 impl CardGeneration for LiveCardGenerator {
     fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-        let meta = draft
-            .meta()
-            .ok_or_else(|| anyhow!("meta must be ready before scene"))?;
-        let illustration = self.illustration_for(draft.pair().target())?;
-        let mut progress = NoopProgress;
-        let (filename, cached) = illustration.scene_only(
-            meta.target_sentence(),
-            draft.pair().target(),
-            &mut progress,
-        )?;
-        let path = illustration.filepath(filename.as_str())?;
-        let size = fs::metadata(&path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        Ok(ArtifactFile::new(filename, path, format_size(size), cached))
+        self.generate_visual(
+            draft,
+            "scene",
+            |illustration, sentence, target, progress| {
+                illustration.scene_only(sentence, target, progress)
+            },
+        )
     }
 
     fn generate_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-        let meta = draft
-            .meta()
-            .ok_or_else(|| anyhow!("meta must be ready before picture"))?;
-        let illustration = self.illustration_for(draft.pair().target())?;
-        let mut progress = NoopProgress;
-        let (filename, cached) = illustration.picture_only(
-            meta.target_sentence(),
-            draft.pair().target(),
-            &mut progress,
-        )?;
-        let path = illustration.filepath(filename.as_str())?;
-        let size = fs::metadata(&path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        Ok(ArtifactFile::new(filename, path, format_size(size), cached))
+        self.generate_visual(
+            draft,
+            "picture",
+            |illustration, sentence, target, progress| {
+                illustration.picture_only(sentence, target, progress)
+            },
+        )
     }
 
     fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
@@ -172,10 +176,7 @@ impl CardGeneration for LiveCardGenerator {
         let audio = self.audio_for(draft.pair().target())?;
         let (filename, cached) = audio.generate(meta.target_sentence())?;
         let path = audio.filepath(filename.as_str())?;
-        let size = fs::metadata(&path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        Ok(ArtifactFile::new(filename, path, format_size(size), cached))
+        Ok(artifact_file(filename, path, cached))
     }
 
     fn store_card_meta(
@@ -186,10 +187,7 @@ impl CardGeneration for LiveCardGenerator {
         meta: &CardMeta,
     ) -> Result<ArtifactFile> {
         let (filename, path, cached) = self.meta_cache().store(term, understanding, pair, meta)?;
-        let size = fs::metadata(&path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        Ok(ArtifactFile::new(filename, path, format_size(size), cached))
+        Ok(artifact_file(filename, path, cached))
     }
 }
 
@@ -282,6 +280,13 @@ fn format_size(bytes: u64) -> String {
     } else {
         format_unit(bytes, 1024 * 1024, "MB")
     }
+}
+
+fn artifact_file(filename: String, path: PathBuf, cached: bool) -> ArtifactFile {
+    let size = fs::metadata(&path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    ArtifactFile::new(filename, path, format_size(size), cached)
 }
 
 fn format_unit(bytes: u64, unit: u64, suffix: &str) -> String {
