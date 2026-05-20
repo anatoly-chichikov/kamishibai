@@ -5,7 +5,7 @@
 //! visual verification of the wrap behavior and styling.
 
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
+    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
 };
 use kamishibai::tui::{App, Screen, draw};
 use ratatui::Terminal;
@@ -13,16 +13,16 @@ use ratatui::backend::TestBackend;
 
 fn ready_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
     )
 }
 
-fn body_only_artifacts() -> CardArtifacts {
+fn meta_only_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene),
         ArtifactSlot::fresh(Artifact::Picture),
         ArtifactSlot::fresh(Artifact::Sound),
@@ -35,7 +35,7 @@ fn draft(
     artifacts: CardArtifacts,
     pair: LanguagePair,
 ) -> CardDraft {
-    let body = CardBody::new(
+    let meta = CardMeta::new(
         format!("/{term}/"),
         format!("/{term} sentence/"),
         format!("meaning of {term}"),
@@ -47,7 +47,7 @@ fn draft(
         target_sentence,
     );
     CardDraft::new(term, format!("understanding for {term}"), pair)
-        .with_body(body, None)
+        .with_meta(meta, None)
         .with_artifacts(artifacts)
 }
 
@@ -108,14 +108,14 @@ fn main() {
             draft(
                 "at the end",
                 "We were exhausted at the end.",
-                body_only_artifacts(),
+                meta_only_artifacts(),
                 pair_ru_en.clone(),
             ),
             untouched("ancient", pair_ru_en.clone()),
             draft(
                 "in the long run",
                 "In the long run all of us are dead, but some of us still have laundry to fold tonight.",
-                body_only_artifacts(),
+                meta_only_artifacts(),
                 pair_ru_en.clone(),
             ),
         ],
@@ -141,13 +141,13 @@ fn main() {
             draft(
                 "雨が降る",
                 "Дождь идёт.",
-                body_only_artifacts(),
+                meta_only_artifacts(),
                 pair_ja_ru.clone(),
             ),
             draft(
                 "図書館",
                 "Я хожу в библиотеку каждое воскресенье после обеда, чтобы взять новые книги и просто посидеть в тишине.",
-                body_only_artifacts(),
+                meta_only_artifacts(),
                 pair_ja_ru.clone(),
             ),
         ],
@@ -171,7 +171,7 @@ fn main() {
             draft(
                 "morning",
                 "光从窗户照进来。",
-                body_only_artifacts(),
+                meta_only_artifacts(),
                 pair_ru_en.clone(),
             ),
         ],

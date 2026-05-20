@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardCorrection, CardDraft, CardRevision,
+    Artifact, ArtifactSlot, CardArtifacts, CardCorrection, CardDraft, CardMeta, CardRevision,
     LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, draw, transit};
@@ -19,7 +19,7 @@ impl CardCorrection for FakeCardCorrection {
         _pair: &LanguagePair,
     ) -> Result<CardRevision> {
         let understanding = format!("{} · revised: verb sense", draft.understanding());
-        let body = CardBody::new(
+        let meta = CardMeta::new(
             "/updated/",
             "/updated front sentence/",
             "updated meaning",
@@ -30,7 +30,7 @@ impl CardCorrection for FakeCardCorrection {
             "updated context",
             "updated front",
         );
-        Ok(CardRevision::new(draft.term(), understanding, body))
+        Ok(CardRevision::new(draft.term(), understanding, meta))
     }
 }
 
@@ -51,15 +51,15 @@ fn flat(app: &App) -> String {
 
 fn ready_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
     )
 }
 
-fn body_for(term: &str) -> CardBody {
-    CardBody::new(
+fn meta_for(term: &str) -> CardMeta {
+    CardMeta::new(
         format!("/{term}/"),
         format!("/{term} sentence/"),
         format!("meaning of {term}"),
@@ -78,7 +78,7 @@ fn draft(term: &str) -> CardDraft {
         format!("understanding for {term}"),
         LanguagePair::new("en", "ru"),
     )
-    .with_body(body_for(term), None)
+    .with_meta(meta_for(term), None)
     .with_artifacts(ready_artifacts())
 }
 
@@ -126,8 +126,8 @@ fn correction_result_reaches_focused_card_without_touching_neighbors() {
     let revision = FakeCardCorrection
         .correct_card(&focused, "verb", app.pair())
         .expect("mock card correction");
-    let (term, understanding, body) = revision.into_parts();
-    let updated = focused.recomposed(term, understanding, body, None);
+    let (term, understanding, meta) = revision.into_parts();
+    let updated = focused.recomposed(term, understanding, meta, None);
     let with_updated = app.clone().cards_started({
         let mut drafts = app.cards().to_vec();
         drafts[0] = updated;

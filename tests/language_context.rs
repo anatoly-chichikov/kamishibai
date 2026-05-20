@@ -4,7 +4,7 @@
 
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair, WordCandidate,
+    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair, WordCandidate,
 };
 use kamishibai::tui::{
     App, AppEvent, KeySource, Screen, Side, WelcomeStage, draw, to_app, transit,
@@ -30,15 +30,15 @@ fn flat(app: &App) -> String {
 
 fn ready() -> CardArtifacts {
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
     )
 }
 
-fn body_for(term: &str) -> CardBody {
-    CardBody::new(
+fn meta_for(term: &str) -> CardMeta {
+    CardMeta::new(
         format!("/{term}/"),
         format!("/{term} sentence/"),
         format!("meaning of {term}"),
@@ -109,7 +109,7 @@ fn language_badge_is_consistent_across_every_fullscreen_screen() {
         .confirmed_target("en")
         .cards_started(vec![
             CardDraft::new("whilst", "understanding", LanguagePair::new("en", "ru"))
-                .with_body(body_for("whilst"), None)
+                .with_meta(meta_for("whilst"), None)
                 .with_artifacts(ready()),
         ]);
     let done = base()

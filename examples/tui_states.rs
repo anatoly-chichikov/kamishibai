@@ -15,7 +15,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use kamishibai::session::{
-    Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardBody, CardDraft, LanguagePair,
+    Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
     WordCandidate,
 };
 use kamishibai::tui::{
@@ -131,7 +131,7 @@ fn pair() -> LanguagePair {
 
 fn ready_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
@@ -141,7 +141,7 @@ fn ready_artifacts() -> CardArtifacts {
 fn cached_artifacts() -> CardArtifacts {
     let tmp = std::env::temp_dir();
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded_with(ArtifactFile::new(
             "a345532c.json",
             tmp.join("a345532c.json"),
@@ -165,7 +165,7 @@ fn cached_artifacts() -> CardArtifacts {
 
 fn retrying_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture)
             .attempted()
@@ -176,7 +176,7 @@ fn retrying_artifacts() -> CardArtifacts {
 
 fn second_retrying_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).attempted().attempted(),
@@ -185,7 +185,7 @@ fn second_retrying_artifacts() -> CardArtifacts {
 
 fn making_picture_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).attempted(),
         ArtifactSlot::fresh(Artifact::Sound),
@@ -198,15 +198,15 @@ fn failed_picture_artifacts() -> CardArtifacts {
         picture = picture.attempted();
     }
     CardArtifacts::from_parts(
-        ArtifactSlot::fresh(Artifact::Body).succeeded(),
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         picture,
         ArtifactSlot::fresh(Artifact::Sound),
     )
 }
 
-fn body_for(term: &str, target: &str, source: &str, hint: &str, highlight: &str) -> CardBody {
-    CardBody::new(
+fn meta_for(term: &str, target: &str, source: &str, hint: &str, highlight: &str) -> CardMeta {
+    CardMeta::new(
         format!("/{term}/"),
         format!("/{target}/"),
         format!("translation of {term}"),
@@ -225,9 +225,9 @@ fn body_for(term: &str, target: &str, source: &str, hint: &str, highlight: &str)
 }
 
 fn card(term: &str, front: &str, back: &str, artifacts: CardArtifacts) -> CardDraft {
-    let body = body_for(term, front, back, "", "");
+    let meta = meta_for(term, front, back, "", "");
     CardDraft::new(term, format!("understanding for {term}"), pair())
-        .with_body(body, None)
+        .with_meta(meta, None)
         .with_artifacts(artifacts)
 }
 
@@ -238,9 +238,9 @@ fn card_with_hint(
     hint: &str,
     artifacts: CardArtifacts,
 ) -> CardDraft {
-    let body = body_for(term, front, back, hint, "");
+    let meta = meta_for(term, front, back, hint, "");
     CardDraft::new(term, format!("understanding for {term}"), pair())
-        .with_body(body, None)
+        .with_meta(meta, None)
         .with_artifacts(artifacts)
 }
 
@@ -252,9 +252,9 @@ fn card_with_highlight(
     highlight: &str,
     artifacts: CardArtifacts,
 ) -> CardDraft {
-    let body = body_for(term, front, back, hint, highlight);
+    let meta = meta_for(term, front, back, hint, highlight);
     CardDraft::new(term, format!("understanding for {term}"), pair())
-        .with_body(body, None)
+        .with_meta(meta, None)
         .with_artifacts(artifacts)
 }
 

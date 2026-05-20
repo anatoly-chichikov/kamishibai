@@ -1,4 +1,4 @@
-//! Persistent session caches for reviewed input and card bodies.
+//! Persistent session caches for reviewed input and card meta.
 
 use std::fs;
 use std::path::PathBuf;
@@ -10,13 +10,13 @@ use crate::generation::artifact_cache::Cache;
 use crate::languages::catalog;
 
 use super::{
-    CardBody, LanguagePair, RawInputBatch, ScriptDetection, TargetDetection, TargetGuess,
+    CardMeta, LanguagePair, RawInputBatch, ScriptDetection, TargetDetection, TargetGuess,
     Understanding, Understood, WordCandidate,
 };
 
 const UNDERSTANDING_CACHE: &str = "understanding-v1";
 const UNDERSTANDING_VERSION: &str = "understanding-v1";
-const BODY_VERSION: &str = "body-v2";
+const META_VERSION: &str = "meta-v2";
 
 /// Caching decorator for the first-pass understanding contract.
 #[derive(Clone, Debug)]
@@ -144,63 +144,63 @@ impl<T> CachedUnderstanding<T> {
     }
 }
 
-/// Persistent cache for Pro card-body payloads.
+/// Persistent cache for Pro card-meta payloads.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CardBodyCache {
+pub struct CardMetaCache {
     root: PathBuf,
 }
 
-impl CardBodyCache {
-    /// Create one card-body cache rooted in the shared application cache.
+impl CardMetaCache {
+    /// Create one card-meta cache rooted in the shared application cache.
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
 
-    /// Return a cached card body for the exact term, understanding, and language pair.
+    /// Return a cached card meta for the exact term, understanding, and language pair.
     pub fn load(
         &self,
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
-    ) -> Result<Option<CardBody>> {
-        let cache = self.body_cache(pair);
+    ) -> Result<Option<CardMeta>> {
+        let cache = self.meta_cache(pair);
         let filename = self.filename(term, understanding, pair);
         if !cache.exists(filename.as_str()) {
             return Ok(None);
         }
-        let record: BodyRecord = read_json(&cache, filename.as_str())?;
-        Ok(Some(record.body()))
+        let record: MetaRecord = read_json(&cache, filename.as_str())?;
+        Ok(Some(record.meta()))
     }
 
-    /// Persist one card body and return filename, path, and whether it already existed.
+    /// Persist one card meta and return filename, path, and whether it already existed.
     pub fn store(
         &self,
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
-        body: &CardBody,
+        meta: &CardMeta,
     ) -> Result<(String, PathBuf, bool)> {
-        let cache = self.body_cache(pair);
+        let cache = self.meta_cache(pair);
         let filename = self.filename(term, understanding, pair);
         let cached = cache.exists(filename.as_str());
         if !cached {
             write_json(
                 &cache,
                 filename.as_str(),
-                &BodyRecord::from_body(term, understanding, pair, body),
+                &MetaRecord::from_meta(term, understanding, pair, meta),
             )?;
         }
         let path = cache.filepath(filename.as_str())?;
         Ok((filename, path, cached))
     }
 
-    fn body_cache(&self, pair: &LanguagePair) -> Cache {
-        Cache::new(format!("body-{}", pair.target()), self.root.clone())
+    fn meta_cache(&self, pair: &LanguagePair) -> Cache {
+        Cache::new(format!("meta-{}", pair.target()), self.root.clone())
     }
 
     fn filename(&self, term: &str, understanding: &str, pair: &LanguagePair) -> String {
         let key = format!(
-            "{BODY_VERSION}\0{}\0{}\0{term}\0{understanding}",
+            "{META_VERSION}\0{}\0{}\0{term}\0{understanding}",
             pair.target(),
             pair.support()
         );
@@ -274,7 +274,7 @@ impl CandidateRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct BodyRecord {
+struct MetaRecord {
     term: String,
     #[serde(default)]
     understanding: String,
@@ -291,27 +291,27 @@ struct BodyRecord {
     target_sentence: String,
 }
 
-impl BodyRecord {
-    fn from_body(term: &str, understanding: &str, pair: &LanguagePair, body: &CardBody) -> Self {
+impl MetaRecord {
+    fn from_meta(term: &str, understanding: &str, pair: &LanguagePair, meta: &CardMeta) -> Self {
         Self {
             term: term.to_string(),
             understanding: understanding.to_string(),
             target_lang: pair.target().to_string(),
             source_lang: pair.support().to_string(),
-            pronunciation: body.pronunciation().to_string(),
-            transcription: body.transcription().to_string(),
-            meaning: body.meaning().to_string(),
-            importance: body.importance(),
-            source_sentence: body.source_sentence().to_string(),
-            source_highlight: body.source_highlight().to_string(),
-            source_hint: body.source_hint().to_string(),
-            source_context: body.source_context().to_string(),
-            target_sentence: body.target_sentence().to_string(),
+            pronunciation: meta.pronunciation().to_string(),
+            transcription: meta.transcription().to_string(),
+            meaning: meta.meaning().to_string(),
+            importance: meta.importance(),
+            source_sentence: meta.source_sentence().to_string(),
+            source_highlight: meta.source_highlight().to_string(),
+            source_hint: meta.source_hint().to_string(),
+            source_context: meta.source_context().to_string(),
+            target_sentence: meta.target_sentence().to_string(),
         }
     }
 
-    fn body(self) -> CardBody {
-        CardBody::new(
+    fn meta(self) -> CardMeta {
+        CardMeta::new(
             self.pronunciation,
             self.transcription,
             self.meaning,
@@ -420,8 +420,8 @@ mod tests {
         }
     }
 
-    fn body(sentence: &str) -> CardBody {
-        CardBody::new(
+    fn meta(sentence: &str) -> CardMeta {
+        CardMeta::new(
             "/lantern/",
             "/the lantern glowed/",
             "фонарь",
@@ -512,30 +512,30 @@ mod tests {
     }
 
     #[test]
-    fn card_body_cache_reopens_the_same_sentence_for_the_same_understanding() {
+    fn card_meta_cache_reopens_the_same_sentence_for_the_same_understanding() {
         let directory = TempDir::new().expect("tempdir must be created");
         let pair = LanguagePair::new("en", "ru");
-        let cache = CardBodyCache::new(directory.path());
+        let cache = CardMetaCache::new(directory.path());
         let first = cache
             .store(
                 "lantern",
                 "a portable lamp",
                 &pair,
-                &body("The lantern glowed under rain"),
+                &meta("The lantern glowed under rain"),
             )
-            .expect("body must store");
+            .expect("meta must store");
         let loaded = cache
             .load("lantern", "a portable lamp", &pair)
-            .expect("body must load")
-            .expect("body must exist");
+            .expect("meta must load")
+            .expect("meta must exist");
         let second = cache
             .store(
                 "lantern",
                 "a portable lamp",
                 &pair,
-                &body("A new sentence should not replace it"),
+                &meta("A new sentence should not replace it"),
             )
-            .expect("body must store again");
+            .expect("meta must store again");
         assert_eq!(
             (
                 first.0 == second.0,
@@ -544,61 +544,61 @@ mod tests {
                 loaded.target_sentence()
             ),
             (true, false, true, "The lantern glowed under rain"),
-            "card body cache no longer preserves the first generated sentence"
+            "card meta cache no longer preserves the first generated sentence"
         );
     }
 
     #[test]
-    fn card_body_cache_key_includes_the_understanding() {
+    fn card_meta_cache_key_includes_the_understanding() {
         let directory = TempDir::new().expect("tempdir must be created");
         let pair = LanguagePair::new("en", "ru");
-        let cache = CardBodyCache::new(directory.path());
+        let cache = CardMetaCache::new(directory.path());
         let noun = cache
             .store(
                 "wreck",
                 "a ruined ship",
                 &pair,
-                &body("The wreck leaned in the fog"),
+                &meta("The wreck leaned in the fog"),
             )
-            .expect("noun body must store");
+            .expect("noun meta must store");
         let verb = cache
             .store(
                 "wreck",
                 "to destroy",
                 &pair,
-                &body("I might wreck the old bike"),
+                &meta("I might wreck the old bike"),
             )
-            .expect("verb body must store");
+            .expect("verb meta must store");
         let loaded = cache
             .load("wreck", "to destroy", &pair)
-            .expect("verb body must load")
-            .expect("verb body must exist");
+            .expect("verb meta must load")
+            .expect("verb meta must exist");
         assert_eq!(
             (noun.0 == verb.0, loaded.target_sentence()),
             (false, "I might wreck the old bike"),
-            "card body cache no longer separates corrected meanings"
+            "card meta cache no longer separates corrected meanings"
         );
     }
 
     #[test]
-    fn card_body_cache_cannot_reuse_a_term_after_understanding_changes() {
+    fn card_meta_cache_cannot_reuse_a_term_after_understanding_changes() {
         let directory = TempDir::new().expect("tempdir must be created");
         let pair = LanguagePair::new("en", "ru");
-        let cache = CardBodyCache::new(directory.path());
+        let cache = CardMetaCache::new(directory.path());
         cache
             .store(
                 "cat",
                 "Сущ. «кошка», домашнее животное.",
                 &pair,
-                &body("The cat slept on the windowsill"),
+                &meta("The cat slept on the windowsill"),
             )
-            .expect("body must store");
+            .expect("meta must store");
         let loaded = cache
             .load("cat", "Сущ. «кот», домашнее животное.", &pair)
-            .expect("body lookup must succeed");
+            .expect("meta lookup must succeed");
         assert_eq!(
             loaded, None,
-            "card body cache must not reuse a stale body after the user changes understanding"
+            "card meta cache must not reuse a stale meta after the user changes understanding"
         );
     }
 }

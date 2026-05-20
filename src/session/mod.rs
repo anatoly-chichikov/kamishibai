@@ -11,16 +11,16 @@ mod pass;
 mod state;
 
 pub use bridge::{from_entry, to_document, to_entry};
-pub use cache::{CachedUnderstanding, CardBodyCache};
+pub use cache::{CachedUnderstanding, CardMetaCache};
 pub use candidate::{RawInputBatch, WordCandidate};
 pub use detection::{ScriptDetection, TargetDetection, TargetGuess};
 pub use draft::{
-    Artifact, ArtifactFile, ArtifactSlot, AttemptTally, CardArtifacts, CardBody, CardDraft,
+    Artifact, ArtifactFile, ArtifactSlot, AttemptTally, CardArtifacts, CardDraft, CardMeta,
 };
 pub use engine::{EngineEvent, SessionEngine};
 pub use pair::LanguagePair;
 pub use pass::{
-    BulkCorrection, CardBodyGeneration, CardCorrection, CardRevision, Understanding, Understood,
+    BulkCorrection, CardCorrection, CardMetaGeneration, CardRevision, Understanding, Understood,
 };
 pub use state::SessionState;
 

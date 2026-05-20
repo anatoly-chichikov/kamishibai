@@ -2,9 +2,9 @@
 //!
 //! Mirrors `kamishibai-simple/project/steps-2.jsx` (StepGenerating). One block
 //! per card: head row plus four step lines (meta · scene · audio · picture).
-//! "meta" is the rich body produced by the Pro Gemini pass and is the first
+//! "meta" is the rich card metadata produced by the Pro Gemini pass and is the first
 //! real step in the pipeline. When a card is selected and finished the row
-//! expands into a body preview + artifact pane.
+//! expands into a meta preview + artifact pane.
 
 use std::borrow::Cow;
 
@@ -16,7 +16,7 @@ use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
 use crate::markdown::{parse_markdown, to_ratatui};
-use crate::session::{Artifact, ArtifactSlot, CardArtifacts, CardBody, CardDraft};
+use crate::session::{Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta};
 use crate::tui::app::App;
 use crate::tui::palette;
 
@@ -27,7 +27,7 @@ const HINT_DONE: &str = "all done";
 const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
 const STEPS: [(&str, Artifact); 4] = [
-    ("meta", Artifact::Body),
+    ("meta", Artifact::Meta),
     ("audio", Artifact::Sound),
     ("scene", Artifact::Scene),
     ("picture", Artifact::Picture),
@@ -202,7 +202,7 @@ fn card_head<'a>(
     head_spans.push(Span::styled(format!(" {glyph} "), glyph_style));
     head_spans.push(Span::styled(format!("{:0>2}  ", idx + 1), num_style));
     head_spans.push(Span::styled(String::from(draft.term()), term_style));
-    let Some(body) = draft.body() else {
+    let Some(meta) = draft.meta() else {
         let pad = width.saturating_sub(head_used);
         if pad > 0 {
             head_spans.push(Span::styled(" ".repeat(pad), row_style));
@@ -211,7 +211,7 @@ fn card_head<'a>(
     };
     let row1_used = head_used + HEAD_ARROW_CHARS;
     let avail_first = width.saturating_sub(row1_used);
-    let chunks = wrap_sentence(body.target_sentence(), avail_first, avail_first);
+    let chunks = wrap_sentence(meta.target_sentence(), avail_first, avail_first);
     let first = chunks.first().cloned().unwrap_or_default();
     head_spans.push(Span::styled(HEAD_ARROW, sentence_style));
     let first_len = first.chars().count();
@@ -290,13 +290,13 @@ fn wrap_sentence(sentence: &str, first_avail: usize, cont_avail: usize) -> Vec<S
 }
 
 fn head_rows(draft: &CardDraft, width: usize) -> usize {
-    let Some(body) = draft.body() else {
+    let Some(meta) = draft.meta() else {
         return 1;
     };
     let term_chars = draft.term().chars().count();
     let row1_used = HEAD_PREFIX_CHARS + term_chars + HEAD_ARROW_CHARS;
     let avail = width.saturating_sub(row1_used);
-    wrap_sentence(body.target_sentence(), avail, avail)
+    wrap_sentence(meta.target_sentence(), avail, avail)
         .len()
         .max(1)
 }
@@ -308,7 +308,7 @@ fn card_finished(draft: &CardDraft) -> bool {
 
 fn slot_for(artifacts: &CardArtifacts, kind: Artifact) -> &ArtifactSlot {
     match kind {
-        Artifact::Body => artifacts.body(),
+        Artifact::Meta => artifacts.meta(),
         Artifact::Scene => artifacts.scene(),
         Artifact::Picture => artifacts.picture(),
         Artifact::Sound => artifacts.sound(),
@@ -428,18 +428,18 @@ fn detail_pane(draft: &CardDraft, width: usize) -> Vec<Line<'_>> {
     let mut lines: Vec<Line<'_>> = Vec::new();
     let indent = "      ";
     lines.push(Line::from(""));
-    if let Some(body) = draft.body() {
-        lines.extend(body_preview(body, indent, width));
+    if let Some(meta) = draft.meta() {
+        lines.extend(meta_preview(meta, indent, width));
     } else {
         lines.push(Line::from(vec![
             Span::styled(indent, palette::base()),
-            Span::styled("body not generated yet", palette::dim2()),
+            Span::styled("meta not generated yet", palette::dim2()),
         ]));
     }
     lines
 }
 
-fn body_preview<'a>(body: &'a CardBody, indent: &'static str, width: usize) -> Vec<Line<'a>> {
+fn meta_preview<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -> Vec<Line<'a>> {
     let mut lines: Vec<Line<'a>> = Vec::new();
     let label = |text: &'static str| {
         Line::from(vec![
@@ -454,30 +454,30 @@ fn body_preview<'a>(body: &'a CardBody, indent: &'static str, width: usize) -> V
         ])
     };
     lines.push(label("target"));
-    lines.push(value(body.target_sentence().to_string()));
+    lines.push(value(meta.target_sentence().to_string()));
     lines.push(Line::from(""));
     lines.push(label("source"));
-    lines.push(highlight_line(body, indent));
+    lines.push(highlight_line(meta, indent));
     lines.push(Line::from(""));
     lines.push(label("hint"));
-    lines.push(value(body.source_hint().to_string()));
+    lines.push(value(meta.source_hint().to_string()));
     lines.push(Line::from(""));
     lines.push(label(
         "meaning · pronunciation · transcription · importance",
     ));
     lines.push(value(format!(
         "{} · /{}/ · /{}/ · {}/10",
-        body.meaning(),
-        body.pronunciation(),
-        body.transcription(),
-        body.importance(),
+        meta.meaning(),
+        meta.pronunciation(),
+        meta.transcription(),
+        meta.importance(),
     )));
-    if !body.source_context().trim().is_empty() {
+    if !meta.source_context().trim().is_empty() {
         lines.push(Line::from(""));
         lines.push(label("context"));
         let indent_w = display_width(indent);
         let inner = width.saturating_sub(indent_w).max(20);
-        for line in to_ratatui(&parse_markdown(body.source_context())) {
+        for line in to_ratatui(&parse_markdown(meta.source_context())) {
             for wrapped in softwrap_line(line, inner) {
                 lines.push(restyle_with_indent(wrapped, indent));
             }
@@ -588,9 +588,9 @@ fn restyle_with_indent(line: Line<'static>, indent: &'static str) -> Line<'stati
     Line::from(spans)
 }
 
-fn highlight_line<'a>(body: &'a CardBody, indent: &'static str) -> Line<'a> {
-    let sentence = body.source_sentence();
-    let highlight = body.source_highlight();
+fn highlight_line<'a>(meta: &'a CardMeta, indent: &'static str) -> Line<'a> {
+    let sentence = meta.source_sentence();
+    let highlight = meta.source_highlight();
     if highlight.is_empty() {
         return Line::from(vec![
             Span::styled(indent, palette::base()),
@@ -715,23 +715,23 @@ fn card_layout(
     (rows, trailing)
 }
 
-/// Number of body-rect rows the expanded body-preview pane consumes for one
-/// card. Verbatim mirror of `detail_pane` / `body_preview` so callers can keep
+/// Number of body-rect rows the expanded meta-preview pane consumes for one
+/// card. Verbatim mirror of `detail_pane` / `meta_preview` so callers can keep
 /// scroll offsets and click hit-tests aligned with the rendered output.
 pub(crate) fn detail_pane_height(draft: &CardDraft, width: usize) -> usize {
     let mut h = 1;
-    let Some(body) = draft.body() else {
+    let Some(meta) = draft.meta() else {
         return h + 1;
     };
     h += 2;
     h += 1 + 2;
     h += 1 + 2;
     h += 1 + 2;
-    if !body.source_context().trim().is_empty() {
+    if !meta.source_context().trim().is_empty() {
         h += 1 + 1;
         let indent_w = display_width("      ");
         let inner = width.saturating_sub(indent_w).max(20);
-        h += to_ratatui(&parse_markdown(body.source_context()))
+        h += to_ratatui(&parse_markdown(meta.source_context()))
             .into_iter()
             .map(|line| softwrap_line(line, inner).len())
             .sum::<usize>();

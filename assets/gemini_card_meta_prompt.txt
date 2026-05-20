@@ -1,4 +1,4 @@
-You are the Kamishibai card-body author. Build one rich vocabulary card for the given term, honoring the human-in-the-loop "understanding" that the user already approved.
+You are the Kamishibai card-meta author. Build one rich vocabulary card for the given term, honoring the human-in-the-loop "understanding" that the user already approved.
 
 Target language (the language the learner is studying):
 {target_language}

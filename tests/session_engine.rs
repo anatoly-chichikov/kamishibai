@@ -1,4 +1,4 @@
-//! Session engine integration: body → scene → picture → sound queue with retries.
+//! Session engine integration: meta → scene → picture → sound queue with retries.
 //!
 //! No Gemini, no disk, no network. Tests drive the engine directly via
 //! `next_target` + `applied_*` instead of the old producer trait.
@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use kamishibai::session::{
-    Artifact, ArtifactFile, CardBody, CardDraft, EngineEvent, LanguagePair, SessionEngine,
+    Artifact, ArtifactFile, CardDraft, CardMeta, EngineEvent, LanguagePair, SessionEngine,
 };
 
 fn draft(term: &str) -> CardDraft {
@@ -18,8 +18,8 @@ fn draft(term: &str) -> CardDraft {
     )
 }
 
-fn body_for(term: &str) -> CardBody {
-    CardBody::new(
+fn meta_for(term: &str) -> CardMeta {
+    CardMeta::new(
         format!("/{term}/"),
         format!("/{term} sentence/"),
         format!("meaning of {term}"),
@@ -47,11 +47,11 @@ fn run(
         if let Some((card, kind)) = engine.next_target() {
             let outcome = step(card, kind);
             let event = match (kind, outcome) {
-                (Artifact::Body, StepOutcome::BodyOk(body)) => {
-                    engine.applied_body(card, Ok((body, None)))
+                (Artifact::Meta, StepOutcome::MetaOk(meta)) => {
+                    engine.applied_meta(card, Ok((meta, None)))
                 }
-                (Artifact::Body, StepOutcome::Fail) => {
-                    engine.applied_body(card, Err(anyhow!("transient")))
+                (Artifact::Meta, StepOutcome::Fail) => {
+                    engine.applied_meta(card, Err(anyhow!("transient")))
                 }
                 (kind, StepOutcome::MediaOk(file)) => engine.applied_media(card, kind, Ok(file)),
                 (kind, StepOutcome::Fail) => {
@@ -72,7 +72,7 @@ fn run(
 }
 
 enum StepOutcome {
-    BodyOk(CardBody),
+    MetaOk(CardMeta),
     MediaOk(ArtifactFile),
     Fail,
 }
@@ -82,7 +82,7 @@ fn happy_path_produces_each_artifact_in_order_and_reports_batch_ready() {
     let mut engine = SessionEngine::start(vec![draft("whilst"), draft("wreck")]);
     let drafts: Vec<CardDraft> = engine.drafts().to_vec();
     let events = run(&mut engine, |card, artifact| match artifact {
-        Artifact::Body => StepOutcome::BodyOk(body_for(drafts[card].term())),
+        Artifact::Meta => StepOutcome::MetaOk(meta_for(drafts[card].term())),
         kind => StepOutcome::MediaOk(file_for(&drafts[card], kind)),
     });
     let kinds: Vec<Artifact> = events
@@ -104,12 +104,12 @@ fn happy_path_produces_each_artifact_in_order_and_reports_batch_ready() {
         (
             Some(&EngineEvent::BatchReady),
             8,
-            Artifact::Body,
+            Artifact::Meta,
             Artifact::Sound,
             Artifact::Scene,
             Artifact::Picture,
         ),
-        "engine must produce body → sound → scene → picture per card and end with BatchReady"
+        "engine must produce meta → sound → scene → picture per card and end with BatchReady"
     );
 }
 
@@ -119,7 +119,7 @@ fn transient_scene_failures_retry_up_to_three_times_before_moving_on() {
     let drafts: Vec<CardDraft> = engine.drafts().to_vec();
     let mut scene_calls: HashMap<String, u8> = HashMap::new();
     let events = run(&mut engine, |card, artifact| match artifact {
-        Artifact::Body => StepOutcome::BodyOk(body_for(drafts[card].term())),
+        Artifact::Meta => StepOutcome::MetaOk(meta_for(drafts[card].term())),
         Artifact::Scene => {
             let count = scene_calls
                 .entry(String::from(drafts[card].term()))
@@ -157,7 +157,7 @@ fn terminal_scene_failure_discards_picture_and_completes_remaining() {
     let mut engine = SessionEngine::start(vec![draft("whilst")]);
     let drafts: Vec<CardDraft> = engine.drafts().to_vec();
     let events = run(&mut engine, |card, artifact| match artifact {
-        Artifact::Body => StepOutcome::BodyOk(body_for(drafts[card].term())),
+        Artifact::Meta => StepOutcome::MetaOk(meta_for(drafts[card].term())),
         Artifact::Scene => StepOutcome::Fail,
         kind => StepOutcome::MediaOk(file_for(&drafts[card], kind)),
     });

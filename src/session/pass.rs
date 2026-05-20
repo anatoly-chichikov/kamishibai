@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use super::candidate::{RawInputBatch, WordCandidate};
 use super::detection::TargetGuess;
-use super::draft::{CardBody, CardDraft};
+use super::draft::{CardDraft, CardMeta};
 use super::pair::LanguagePair;
 
 /// The outcome of the cheap first-pass understanding step.
@@ -46,19 +46,19 @@ pub trait BulkCorrection {
     ) -> Result<Vec<WordCandidate>>;
 }
 
-/// Contract for the rich Pro-tier card body generation pass.
+/// Contract for the rich Pro-tier card meta generation pass.
 ///
 /// Run once per draft right after the user confirms `what i understood`.
-/// Produces the full `CardBody` consumed by scene/picture/sound and by the
+/// Produces the full `CardMeta` consumed by scene/picture/sound and by the
 /// `VocabularyEntry` bridge.
-pub trait CardBodyGeneration {
-    /// Produce one rich card body for one term plus its understanding.
-    fn generate_card_body(
+pub trait CardMetaGeneration {
+    /// Produce one rich card meta for one term plus its understanding.
+    fn generate_card_meta(
         &self,
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
-    ) -> Result<CardBody>;
+    ) -> Result<CardMeta>;
 }
 
 /// Outcome of the per-card correction pass.
@@ -66,16 +66,16 @@ pub trait CardBodyGeneration {
 pub struct CardRevision {
     term: String,
     understanding: String,
-    body: CardBody,
+    meta: CardMeta,
 }
 
 impl CardRevision {
     /// Create one card revision.
-    pub fn new(term: impl Into<String>, understanding: impl Into<String>, body: CardBody) -> Self {
+    pub fn new(term: impl Into<String>, understanding: impl Into<String>, meta: CardMeta) -> Self {
         Self {
             term: term.into(),
             understanding: understanding.into(),
-            body,
+            meta,
         }
     }
 
@@ -89,14 +89,14 @@ impl CardRevision {
         self.understanding.as_str()
     }
 
-    /// Return the rebuilt rich body.
-    pub fn body(&self) -> &CardBody {
-        &self.body
+    /// Return the rebuilt rich meta.
+    pub fn meta(&self) -> &CardMeta {
+        &self.meta
     }
 
     /// Consume the revision and return its parts.
-    pub fn into_parts(self) -> (String, String, CardBody) {
-        (self.term, self.understanding, self.body)
+    pub fn into_parts(self) -> (String, String, CardMeta) {
+        (self.term, self.understanding, self.meta)
     }
 }
 

@@ -2,11 +2,11 @@ use anyhow::Result;
 use serde_json::json;
 
 use crate::languages::LanguageCatalog;
-use crate::session::{CardBody, CardDraft, LanguagePair, WordCandidate};
+use crate::session::{CardDraft, CardMeta, LanguagePair, WordCandidate};
 
 const INTAKE_PROMPT: &str = include_str!("../../assets/gemini_intake_prompt.txt");
 const BULK_PROMPT: &str = include_str!("../../assets/gemini_bulk_prompt.txt");
-const CARD_BODY_PROMPT: &str = include_str!("../../assets/gemini_card_body_prompt.txt");
+const CARD_META_PROMPT: &str = include_str!("../../assets/gemini_card_meta_prompt.txt");
 const CARD_PROMPT: &str = include_str!("../../assets/gemini_card_prompt.txt");
 
 /// Render the human-in-the-loop intake prompt.
@@ -56,15 +56,15 @@ pub(super) fn render_bulk_prompt(
     )
 }
 
-/// Render the Pro card-body generation prompt.
-pub(super) fn render_card_body_prompt(
+/// Render the Pro card-meta generation prompt.
+pub(super) fn render_card_meta_prompt(
     term: &str,
     understanding: &str,
     pair: &LanguagePair,
     catalog: &LanguageCatalog,
 ) -> Result<String> {
     render(
-        CARD_BODY_PROMPT,
+        CARD_META_PROMPT,
         &[
             ("{target_language}", language_label(catalog, pair.target())?),
             (
@@ -84,17 +84,17 @@ pub(super) fn render_card_prompt(
     pair: &LanguagePair,
     catalog: &LanguageCatalog,
 ) -> Result<String> {
-    let body = draft.body().cloned().unwrap_or_else(empty_body);
-    let body_json = serde_json::to_string_pretty(&json!({
-        "pronunciation": body.pronunciation(),
-        "transcription": body.transcription(),
-        "meaning": body.meaning(),
-        "importance": body.importance(),
-        "source_sentence": body.source_sentence(),
-        "source_highlight": body.source_highlight(),
-        "source_hint": body.source_hint(),
-        "source_context": body.source_context(),
-        "target_sentence": body.target_sentence(),
+    let meta = draft.meta().cloned().unwrap_or_else(empty_meta);
+    let meta_json = serde_json::to_string_pretty(&json!({
+        "pronunciation": meta.pronunciation(),
+        "transcription": meta.transcription(),
+        "meaning": meta.meaning(),
+        "importance": meta.importance(),
+        "source_sentence": meta.source_sentence(),
+        "source_highlight": meta.source_highlight(),
+        "source_hint": meta.source_hint(),
+        "source_context": meta.source_context(),
+        "target_sentence": meta.target_sentence(),
     }))?;
     render(
         CARD_PROMPT,
@@ -106,14 +106,14 @@ pub(super) fn render_card_prompt(
             ),
             ("{term}", String::from(draft.term())),
             ("{understanding}", String::from(draft.understanding())),
-            ("{current_body}", body_json),
+            ("{current_meta}", meta_json),
             ("{user_correction}", String::from(comment)),
         ],
     )
 }
 
-fn empty_body() -> CardBody {
-    CardBody::new("", "", "", 5, "", "", "", "", "")
+fn empty_meta() -> CardMeta {
+    CardMeta::new("", "", "", 5, "", "", "", "", "")
 }
 
 fn language_choices(catalog: &LanguageCatalog) -> Result<String> {

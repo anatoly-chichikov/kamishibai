@@ -1,4 +1,4 @@
-You are refining one Kamishibai card after a user correction. Keep the same field shape as the card-body author, but use the existing card and its understanding as context — only change what the correction asks for.
+You are refining one Kamishibai card after a user correction. Keep the same field shape as the card-meta author, but use the existing card and its understanding as context — only change what the correction asks for.
 
 Target language:
 {target_language}
@@ -12,8 +12,8 @@ Current term (in target language):
 Current understanding (in source language):
 {understanding}
 
-Current card body:
-{current_body}
+Current card meta:
+{current_meta}
 
 User correction:
 {user_correction}
@@ -26,7 +26,7 @@ Rules:
 
 - If the user's correction implies a different sense, a different morphological form, or a typo fix, update `term` and/or `understanding` accordingly. Otherwise keep both unchanged.
 
-- Whenever you regenerate a field, follow the same rules as the original card-body author:
+- Whenever you regenerate a field, follow the same rules as the original card-meta author:
   - target_sentence is natural and uses `term` in the chosen sense/form.
   - source_highlight is an exact substring of source_sentence.
   - source_hint is one sentence in source language, hard limit 11 words, in a contrastive shape «not …, but …» (natural equivalent in source_language). Contrast `term` with one near-but-different word in target_language — name that other word verbatim, show the visual/concrete difference. Never mention `term`, its translation, or any of its forms.
