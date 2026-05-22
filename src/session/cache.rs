@@ -144,7 +144,7 @@ impl<T> CachedUnderstanding<T> {
     }
 }
 
-/// Persistent cache for Pro card-meta payloads.
+/// Persistent cache for Gemini card-meta payloads.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CardMetaCache {
     root: PathBuf,

@@ -2,7 +2,7 @@
 //!
 //! Mirrors `kamishibai-simple/project/steps-2.jsx` (StepGenerating). One block
 //! per card: head row plus four step lines (meta · scene · audio · picture).
-//! "meta" is the rich card metadata produced by the Pro Gemini pass and is the first
+//! "meta" is the rich card metadata produced by the Gemini card pass and is the first
 //! real step in the pipeline. When a card is selected and finished the row
 //! expands into a meta preview + artifact pane.
 

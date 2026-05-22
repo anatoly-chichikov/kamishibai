@@ -47,7 +47,7 @@ pub fn to_document(drafts: &[CardDraft]) -> Result<VocabularyDocument> {
 /// Build one card draft from a strict vocabulary entry, with the rich meta
 /// already attached. The engine treats the Meta slot as ready and starts at the
 /// first media artifact, so callers loading a pre-rendered batch from JSON skip
-/// the Pro meta-generation pass entirely.
+/// the Gemini meta-generation pass entirely.
 pub fn from_entry(entry: &VocabularyEntry, pair: LanguagePair) -> CardDraft {
     let meta = CardMeta::new(
         entry.pronunciation.as_str(),

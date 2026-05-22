@@ -56,7 +56,7 @@ pub(super) fn render_bulk_prompt(
     )
 }
 
-/// Render the Pro card-meta generation prompt.
+/// Render the card-meta generation prompt.
 pub(super) fn render_card_meta_prompt(
     term: &str,
     understanding: &str,

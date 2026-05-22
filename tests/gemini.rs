@@ -82,7 +82,7 @@ fn understanding_uses_flash_and_returns_simple_understanding_rows() -> Result<()
             understood.candidates()[1].ok(),
         ),
         (
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
             true,
             "en",
             "wrecked",
@@ -134,9 +134,9 @@ fn bulk_correction_uses_flash_and_updates_understanding() -> Result<()> {
     Ok(())
 }
 
-/// Card-meta generation uses the Pro model and returns the full rich meta.
+/// Card-meta generation uses Flash and returns the full rich meta.
 #[test]
-fn card_meta_generation_uses_pro_and_returns_full_meta() -> Result<()> {
+fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
     let transport = FakeTransport::new(vec![Ok(body(json!({
         "candidates": [{
             "content": {
@@ -162,20 +162,20 @@ fn card_meta_generation_uses_pro_and_returns_full_meta() -> Result<()> {
             meta_out.importance(),
         ),
         (
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
             "ˈbɒrəʊ",
             "Can I borrow your pen?",
             "одолжить",
             8,
         ),
-        "card-meta generation must hit the Pro model and decode every rich field"
+        "card-meta generation must hit the Flash model and decode every rich field"
     );
     Ok(())
 }
 
-/// Per-card correction uses Pro and may revise term, understanding, and full meta.
+/// Per-card correction uses Flash and may revise term, understanding, and full meta.
 #[test]
-fn card_correction_uses_pro_to_recompose_term_understanding_and_meta() -> Result<()> {
+fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Result<()> {
     let transport = FakeTransport::new(vec![Ok(body(json!({
         "candidates": [{
             "content": {
@@ -220,7 +220,7 @@ fn card_correction_uses_pro_to_recompose_term_understanding_and_meta() -> Result
             String::from("завел"),
             6,
         ),
-        "card correction must recompose term, understanding, and full meta from Pro JSON"
+        "card correction must recompose term, understanding, and full meta from Flash JSON"
     );
     Ok(())
 }
