@@ -46,7 +46,7 @@ pub trait BulkCorrection {
     ) -> Result<Vec<WordCandidate>>;
 }
 
-/// Contract for the rich Pro-tier card meta generation pass.
+/// Contract for the rich Gemini card meta generation pass.
 ///
 /// Run once per draft right after the user confirms `what i understood`.
 /// Produces the full `CardMeta` consumed by scene/picture/sound and by the

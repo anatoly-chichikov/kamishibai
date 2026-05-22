@@ -23,9 +23,9 @@ use super::protocol::{
 };
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
-const TEXT_MODEL: &str = "gemini-3-flash-preview";
-const META_MODEL: &str = "gemini-3.1-pro-preview";
-const SCENE_MODEL: &str = "gemini-3-flash-preview";
+const TEXT_MODEL: &str = "gemini-3.5-flash";
+const META_MODEL: &str = TEXT_MODEL;
+const SCENE_MODEL: &str = TEXT_MODEL;
 const IMAGE_MODEL: &str = "gemini-3.1-flash-image-preview";
 const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
 const VOICES: [&str; 30] = [
@@ -213,7 +213,7 @@ where
             .collect()
     }
 
-    /// Build the rich card meta for one term using the Pro tier.
+    /// Build the rich card meta for one term using the Flash text model.
     pub fn generate_card_meta(
         &self,
         term: &str,
