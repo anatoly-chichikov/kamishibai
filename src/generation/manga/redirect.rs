@@ -1,16 +1,18 @@
-use std::fs::File;
-use std::io::Write;
-use std::os::fd::OwnedFd;
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Result, anyhow};
 
+#[cfg(unix)]
+use std::{fs::File, io::Write, os::fd::OwnedFd};
+
+#[cfg(unix)]
 pub(super) struct Redirect {
     sink: File,
     stdout: Option<OwnedFd>,
     stderr: Option<OwnedFd>,
 }
 
+#[cfg(unix)]
 impl Redirect {
     /// Redirect stdout and stderr into one sink file.
     pub(super) fn new(sink: File) -> Result<Self> {
@@ -74,6 +76,7 @@ where
 }
 
 /// Run one closure while stdout and stderr stay redirected to /dev/null.
+#[cfg(unix)]
 pub(super) fn quiet<T, F>(action: F) -> Result<T>
 where
     F: FnOnce() -> Result<T>,
@@ -85,6 +88,15 @@ where
     result
 }
 
+/// Run one closure without native stream redirection on non-Unix systems.
+#[cfg(not(unix))]
+pub(super) fn quiet<T, F>(action: F) -> Result<T>
+where
+    F: FnOnce() -> Result<T>,
+{
+    action()
+}
+
 /// Drop one value while stdout and stderr stay redirected to /dev/null.
 pub(super) fn discarded<T>(item: T) -> Result<()> {
     quiet(|| {
@@ -94,6 +106,7 @@ pub(super) fn discarded<T>(item: T) -> Result<()> {
 }
 
 /// Flush the noisy output stream before one descriptor swap.
+#[cfg(unix)]
 fn flushed() -> Result<()> {
     std::io::stdout().flush()?;
     std::io::stderr().flush()?;
@@ -101,18 +114,21 @@ fn flushed() -> Result<()> {
 }
 
 /// Return one duplicate of stdout.
+#[cfg(unix)]
 fn saved_stdout() -> Result<OwnedFd> {
     rustix::io::dup(std::io::stdout())
         .map_err(|error| anyhow!("Failed to duplicate stdout: {}", error))
 }
 
 /// Return one duplicate of stderr.
+#[cfg(unix)]
 fn saved_stderr() -> Result<OwnedFd> {
     rustix::io::dup(std::io::stderr())
         .map_err(|error| anyhow!("Failed to duplicate stderr: {}", error))
 }
 
 /// Redirect stdout and stderr into the sink file.
+#[cfg(unix)]
 fn muted(sink: &File) -> Result<()> {
     rustix::stdio::dup2_stdout(sink)
         .map_err(|error| anyhow!("Failed to redirect stdout: {}", error))?;
@@ -121,12 +137,14 @@ fn muted(sink: &File) -> Result<()> {
 }
 
 /// Restore stdout from the saved descriptor.
+#[cfg(unix)]
 fn restored_stdout(saved: OwnedFd) -> Result<()> {
     rustix::stdio::dup2_stdout(&saved)
         .map_err(|error| anyhow!("Failed to restore stdout: {}", error))
 }
 
 /// Restore stderr from the saved descriptor.
+#[cfg(unix)]
 fn restored_stderr(saved: OwnedFd) -> Result<()> {
     rustix::stdio::dup2_stderr(&saved)
         .map_err(|error| anyhow!("Failed to restore stderr: {}", error))

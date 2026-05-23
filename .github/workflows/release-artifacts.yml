@@ -1,0 +1,97 @@
+name: Release Artifacts
+
+on:
+  pull_request:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux x86_64
+            runner: ubuntu-24.04
+            archive: kamishibai-linux-x86_64.tar.gz
+          - name: macos arm64
+            runner: macos-26
+            archive: kamishibai-macos-arm64.tar.gz
+          - name: macos x86_64
+            runner: macos-26-intel
+            archive: kamishibai-macos-x86_64.tar.gz
+          - name: windows x86_64
+            runner: windows-2025
+            archive: kamishibai-windows-x86_64.zip
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            clang \
+            cmake \
+            fontconfig \
+            fonts-dejavu-core \
+            fonts-liberation2 \
+            fonts-noto-cjk \
+            libclang-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libsqlite3-dev \
+            pkg-config
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install llvm --yes --no-progress
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2.9.1
+        with:
+          cache-bin: "false"
+          cache-on-failure: "true"
+          env-vars: "CARGO CC CFLAGS CXX CMAKE LIBCLANG_PATH PKG_CONFIG RUST"
+          save-if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+      - run: cargo build --release --locked
+      - name: Verify binary
+        shell: bash
+        run: |
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            target/release/kamishibai.exe --version
+          else
+            target/release/kamishibai --version
+          fi
+      - name: Package Unix binary
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist
+          cp target/release/kamishibai dist/kamishibai
+          tar -C dist -czf "${{ matrix.archive }}" kamishibai
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist
+          Copy-Item target\release\kamishibai.exe dist\kamishibai.exe
+          Compress-Archive -Path dist\kamishibai.exe -DestinationPath "${{ matrix.archive }}"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+          if-no-files-found: error
