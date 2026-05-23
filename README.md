@@ -23,19 +23,13 @@ The rest is discipline — sadly, that part doesn't ship in the .apkg.
 
 ## Install
 
-Install the latest release:
+Install with the shell installer:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/install.sh | sh
 ```
 
-Or pin a version:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/install.sh | env KAMISHIBAI_VERSION=1.0.0 sh
-```
-
-On macOS you can also use Homebrew:
+Or through Homebrew:
 
 ```bash
 brew install anatoly-chichikov/tap/kamishibai
