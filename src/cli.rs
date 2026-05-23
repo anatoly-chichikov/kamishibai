@@ -83,7 +83,35 @@ fn help() -> &'static str {
         "  [WORDS_JSON]  Optional path to a pre-built words JSON. If omitted, kamishibai walks you through the TUI.\n\n",
         "Options:\n",
         "  -h, --help     Print help\n",
-        "  -V, --version  Print version"
+        "  -V, --version  Print version\n\n",
+        "WORDS_JSON format:\n",
+        "{\n",
+        "  \"entries\": [\n",
+        "    {\n",
+        "      \"term\": \"lantern\",\n",
+        "      \"meaning\": \"a portable lamp\",\n",
+        "      \"pronunciation\": \"LAN-tern\",\n",
+        "      \"transcription\": \"/lantern/\",\n",
+        "      \"importance\": 7,\n",
+        "      \"source\": {\n",
+        "        \"sentence\": \"I carried a lantern through the dark hallway.\",\n",
+        "        \"lang\": \"en\",\n",
+        "        \"highlight\": \"lantern\",\n",
+        "        \"hint\": \"portable light\",\n",
+        "        \"context\": \"a simple everyday sentence\"\n",
+        "      },\n",
+        "      \"target\": {\n",
+        "        \"sentence\": \"Ich trug eine Laterne durch den dunklen Flur.\",\n",
+        "        \"lang\": \"de\"\n",
+        "      }\n",
+        "    }\n",
+        "  ]\n",
+        "}\n\n",
+        "JSON rules:\n",
+        "  - entries must contain at least one item\n",
+        "  - all fields are required; unknown fields are rejected\n",
+        "  - text fields and lang values must be non-empty strings\n",
+        "  - importance must be an integer from 1 to 10"
     )
 }
 
@@ -222,10 +250,10 @@ mod tests {
     }
 
     #[test]
-    fn help_output_keeps_the_homebrew_test_path_noninteractive() {
+    fn help_output_documents_the_json_bypass_format() {
         assert!(
-            help().contains("Usage: kamishibai [WORDS_JSON]"),
-            "help output must not require opening the interactive terminal"
+            help().contains("WORDS_JSON format:"),
+            "help output must not hide the strict JSON bypass format"
         );
     }
 }

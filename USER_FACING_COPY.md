@@ -19,6 +19,36 @@ Arguments:
 Options:
   -h, --help     Print help
   -V, --version  Print version
+
+WORDS_JSON format:
+{
+  "entries": [
+    {
+      "term": "lantern",
+      "meaning": "a portable lamp",
+      "pronunciation": "LAN-tern",
+      "transcription": "/lantern/",
+      "importance": 7,
+      "source": {
+        "sentence": "I carried a lantern through the dark hallway.",
+        "lang": "en",
+        "highlight": "lantern",
+        "hint": "portable light",
+        "context": "a simple everyday sentence"
+      },
+      "target": {
+        "sentence": "Ich trug eine Laterne durch den dunklen Flur.",
+        "lang": "de"
+      }
+    }
+  ]
+}
+
+JSON rules:
+  - entries must contain at least one item
+  - all fields are required; unknown fields are rejected
+  - text fields and lang values must be non-empty strings
+  - importance must be an integer from 1 to 10
 ```
 
 Короткий usage при лишних аргументах:
