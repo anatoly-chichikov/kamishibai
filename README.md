@@ -35,10 +35,10 @@ Or through Homebrew:
 brew install anatoly-chichikov/tap/kamishibai
 ```
 
-## Run from source
+## Run
 
 ```bash
-cargo run --release
+kamishibai
 ```
 
 If `GEMINI_API_KEY` is set in your environment, kamishibai picks it up and runs straight through. Otherwise it asks for the key on the welcome screen and remembers it for next time.
@@ -50,7 +50,7 @@ The TUI walks you from raw words through review to finished cards, and writes th
 Got the JSON already? Pass it as an argument:
 
 ```bash
-cargo run --release -- path/to/words.json
+kamishibai path/to/words.json
 ```
 
 ## Languages
