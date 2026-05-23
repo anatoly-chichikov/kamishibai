@@ -134,7 +134,7 @@ pub fn header(
 
 /// Build the language chip — bold bright `support → target`.
 ///
-/// Reading order is `support → target` so the user reads "from my language
+/// Reading order is `support → target` so the user reads "from your language
 /// into the language i'm learning". The whole chip — both languages and the
 /// arrow between them — is rendered in bold bright `palette::base()`,
 /// matching the title block on the opposite side of the header.

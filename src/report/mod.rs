@@ -1,4 +1,4 @@
-//! PDF report rendering with embedded fonts and thumbnails.
+//! Printable PDF rendering with embedded fonts and thumbnails.
 
 mod cards;
 mod document;

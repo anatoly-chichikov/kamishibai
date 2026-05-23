@@ -66,7 +66,7 @@ fn draw_picker(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(block, inset);
     let content = padded(inner);
     frame.render_widget(picker_panel(app, content.width as usize), content);
-    paint_title(frame, inset, "my language");
+    paint_title(frame, inset, "your language");
 }
 
 fn surround() -> Block<'static> {
@@ -103,7 +103,7 @@ fn text_title(kind: ModalKind) -> &'static str {
     match kind {
         ModalKind::ChangeSomething => "change · this row",
         ModalKind::ChangeThisCard => "change · this card",
-        ModalKind::PickMyLanguage => "my language",
+        ModalKind::PickMyLanguage => "your language",
     }
 }
 

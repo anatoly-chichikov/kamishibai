@@ -41,7 +41,9 @@ where
     let mut args = args.into_iter();
     let first = args.next();
     if args.next().is_some() {
-        eprintln!("usage: kamishibai [path-to-vocabulary.json]");
+        eprintln!(
+            "usage: kamishibai [WORDS_JSON]   # optional; without it kamishibai opens the TUI"
+        );
         return 2;
     }
     let outcome = match first {
@@ -74,7 +76,15 @@ fn version() -> String {
 }
 
 fn help() -> &'static str {
-    "Generate illustrated Anki decks from schema-driven vocabulary JSON\n\nUsage: kamishibai [path-to-vocabulary.json]\n\nOptions:\n  -h, --help     Print help\n  -V, --version  Print version"
+    concat!(
+        "Turn a list of words into an illustrated Anki deck — sentences, native-speaker audio, manga-style art.\n\n",
+        "Usage: kamishibai [WORDS_JSON]\n\n",
+        "Arguments:\n",
+        "  [WORDS_JSON]  Optional path to a pre-built words JSON. If omitted, kamishibai walks you through the TUI.\n\n",
+        "Options:\n",
+        "  -h, --help     Print help\n",
+        "  -V, --version  Print version"
+    )
 }
 
 fn start() -> Result<()> {
@@ -214,7 +224,7 @@ mod tests {
     #[test]
     fn help_output_keeps_the_homebrew_test_path_noninteractive() {
         assert!(
-            help().contains("Usage: kamishibai [path-to-vocabulary.json]"),
+            help().contains("Usage: kamishibai [WORDS_JSON]"),
             "help output must not require opening the interactive terminal"
         );
     }

@@ -55,7 +55,7 @@ impl SessionState {
         self
     }
 
-    /// Return the session with a different language pair (target or my language change).
+    /// Return the session with a different language pair.
     pub fn reframed(mut self, pair: LanguagePair) -> Self {
         self.pair = pair;
         self

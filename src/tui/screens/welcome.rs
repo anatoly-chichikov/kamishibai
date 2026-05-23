@@ -19,7 +19,7 @@ use crate::tui::app::App;
 use crate::tui::palette;
 use crate::tui::screen::{KeySource, WelcomeStage};
 
-const INTRO: &str = "kamishibai turns a list of words you want to learn into an anki deck built for retention: for each word it writes a natural example sentence, illustrates the scene as a manga panel, and reads it aloud in a studio-grade voice.";
+const INTRO: &str = "kamishibai turns a list of words you want to learn into an anki deck plus a printable pdf. for each word it writes a natural example sentence, illustrates the scene as a manga panel, and reads it aloud in a natural, native-speaker voice.";
 const KEY_URL: &str = "aistudio.google.com/apikey";
 const VALID_KEY_LENGTH: usize = 20;
 const HEADLINE: &str = "kamishibai";
