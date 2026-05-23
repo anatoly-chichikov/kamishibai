@@ -1,0 +1,136 @@
+name: Release Artifacts
+
+on:
+  pull_request:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - name: macos arm64
+            runner: macos-26
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+          - name: macos x86_64
+            runner: macos-26-intel
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+          - name: windows x86_64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            clang \
+            cmake \
+            fontconfig \
+            fonts-dejavu-core \
+            fonts-liberation2 \
+            fonts-noto-cjk \
+            libclang-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libsqlite3-dev \
+            pkg-config
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install llvm --yes --no-progress
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2.9.1
+        with:
+          cache-bin: "false"
+          cache-on-failure: "true"
+          env-vars: "CARGO CC CFLAGS CXX CMAKE LIBCLANG_PATH PKG_CONFIG RUST"
+          save-if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+      - name: Resolve package version
+        shell: bash
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          archive="kamishibai-v${version}-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          echo "KAMISHIBAI_VERSION=${version}" >> "${GITHUB_ENV}"
+          echo "KAMISHIBAI_ARCHIVE=${archive}" >> "${GITHUB_ENV}"
+      - run: cargo build --release --locked
+      - name: Verify binary
+        shell: bash
+        run: |
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            target/release/kamishibai.exe --version
+          else
+            target/release/kamishibai --version
+          fi
+      - name: Package Unix binary
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist
+          cp target/release/kamishibai dist/kamishibai
+          tar -C dist -czf "${KAMISHIBAI_ARCHIVE}" kamishibai
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist
+          Copy-Item target\release\kamishibai.exe dist\kamishibai.exe
+          Compress-Archive -Path dist\kamishibai.exe -DestinationPath "${env:KAMISHIBAI_ARCHIVE}"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.KAMISHIBAI_ARCHIVE }}
+          path: ${{ env.KAMISHIBAI_ARCHIVE }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  release:
+    name: github release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          shasum -a 256 kamishibai-* > SHA256SUMS.txt
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" release-assets/* \
+            --title "kamishibai ${GITHUB_REF_NAME}" \
+            --notes "kamishibai ${GITHUB_REF_NAME}" \
+            --verify-tag

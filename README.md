@@ -21,10 +21,24 @@ The rest is discipline — sadly, that part doesn't ship in the .apkg.
 5. Give it a word, get a sentence. You memorize phrases, not flashcards — and a language matrix forms in your head.
 6. Bring your own Gemini key — your data, your control.
 
-## Get it running
+## Install
+
+Install with the shell installer:
 
 ```bash
-cargo run --release
+curl -fsSL https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/install.sh | sh
+```
+
+Or through Homebrew:
+
+```bash
+brew install anatoly-chichikov/tap/kamishibai
+```
+
+## Run
+
+```bash
+kamishibai
 ```
 
 If `GEMINI_API_KEY` is set in your environment, kamishibai picks it up and runs straight through. Otherwise it asks for the key on the welcome screen and remembers it for next time.
@@ -36,7 +50,7 @@ The TUI walks you from raw words through review to finished cards, and writes th
 Got the JSON already? Pass it as an argument:
 
 ```bash
-cargo run --release -- path/to/words.json
+kamishibai path/to/words.json
 ```
 
 ## Languages

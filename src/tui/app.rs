@@ -51,7 +51,7 @@ pub enum BusyKind {
     CardCorrection,
     /// Phase 1 of `publish`: building the Anki .apkg container.
     PublishingDeck,
-    /// Phase 2 of `publish`: rendering the PDF report.
+    /// Phase 2 of `publish`: rendering the printable PDF.
     PublishingReport,
 }
 
@@ -62,8 +62,8 @@ impl BusyKind {
             BusyKind::Understanding => "understanding your words",
             BusyKind::BulkCorrection => "applying your changes",
             BusyKind::CardCorrection => "updating this card",
-            BusyKind::PublishingDeck => "building your Anki deck",
-            BusyKind::PublishingReport => "rendering your PDF report",
+            BusyKind::PublishingDeck => "building your anki deck",
+            BusyKind::PublishingReport => "rendering your printable pdf",
         }
     }
 }

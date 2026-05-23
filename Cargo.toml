@@ -1,9 +1,12 @@
 [package]
 name = "kamishibai"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.95.0"
-description = "Generate illustrated Anki decks from schema-driven vocabulary JSON"
+description = "Turn a list of words into an illustrated Anki deck with native-speaker audio"
+license = "Apache-2.0"
+homepage = "https://github.com/anatoly-chichikov/kamishibai"
+repository = "https://github.com/anatoly-chichikov/kamishibai"
 publish = false
 
 [dependencies]

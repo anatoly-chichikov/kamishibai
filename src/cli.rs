@@ -11,6 +11,7 @@ mod live_generator;
 mod shell;
 mod terminal;
 
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -30,14 +31,31 @@ use crate::tui::{App, KeySource, WelcomeStage};
 /// strict-schema vocabulary JSON document is loaded and generation starts from
 /// the `Your Cards` screen.
 pub fn run() -> u8 {
-    let mut args = std::env::args_os().skip(1);
+    run_with_args(std::env::args_os().skip(1))
+}
+
+fn run_with_args<I>(args: I) -> u8
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let mut args = args.into_iter();
     let first = args.next();
     if args.next().is_some() {
-        eprintln!("usage: kamishibai [path-to-vocabulary.json]");
+        eprintln!(
+            "usage: kamishibai [WORDS_JSON]   # optional; without it kamishibai opens the TUI"
+        );
         return 2;
     }
     let outcome = match first {
         None => start(),
+        Some(path) if is_flag(path.as_os_str(), "--help") || is_flag(path.as_os_str(), "-h") => {
+            println!("{}", help());
+            return 0;
+        }
+        Some(path) if is_flag(path.as_os_str(), "--version") || is_flag(path.as_os_str(), "-V") => {
+            println!("{}", version());
+            return 0;
+        }
         Some(path) => start_with_batch(PathBuf::from(path)),
     };
     match outcome {
@@ -47,6 +65,58 @@ pub fn run() -> u8 {
             1
         }
     }
+}
+
+fn is_flag(value: &OsStr, flag: &str) -> bool {
+    value == OsStr::new(flag)
+}
+
+fn version() -> String {
+    format!("kamishibai {}", env!("CARGO_PKG_VERSION"))
+}
+
+fn help() -> &'static str {
+    concat!(
+        "Turn a list of words into an illustrated Anki deck — sentences, native-speaker audio, manga-style art.\n\n",
+        "Usage: kamishibai [WORDS_JSON]\n\n",
+        "Arguments:\n",
+        "  [WORDS_JSON]  Optional path to a pre-built words JSON. If omitted, kamishibai walks you through the TUI.\n\n",
+        "Options:\n",
+        "  -h, --help     Print help\n",
+        "  -V, --version  Print version\n\n",
+        "With WORDS_JSON:\n",
+        "  Bring your own JSON with the required fields. kamishibai skips word entry,\n",
+        "  then uses its prompts to generate an Anki .apkg, a printable PDF,\n",
+        "  native-speaker audio, and manga-style illustrations.\n\n",
+        "WORDS_JSON format:\n",
+        "{\n",
+        "  \"entries\": [\n",
+        "    {\n",
+        "      \"term\": \"lantern\",\n",
+        "      \"meaning\": \"a portable lamp\",\n",
+        "      \"pronunciation\": \"LAN-tern\",\n",
+        "      \"transcription\": \"/lantern/\",\n",
+        "      \"importance\": 7,\n",
+        "      \"source\": {\n",
+        "        \"sentence\": \"I carried a lantern through the dark hallway.\",\n",
+        "        \"lang\": \"en\",\n",
+        "        \"highlight\": \"lantern\",\n",
+        "        \"hint\": \"portable light\",\n",
+        "        \"context\": \"a simple everyday sentence\"\n",
+        "      },\n",
+        "      \"target\": {\n",
+        "        \"sentence\": \"Ich trug eine Laterne durch den dunklen Flur.\",\n",
+        "        \"lang\": \"de\"\n",
+        "      }\n",
+        "    }\n",
+        "  ]\n",
+        "}\n\n",
+        "JSON rules:\n",
+        "  - entries must contain at least one item\n",
+        "  - all fields are required; unknown fields are rejected\n",
+        "  - text fields and lang values must be non-empty strings\n",
+        "  - importance must be an integer from 1 to 10"
+    )
 }
 
 fn start() -> Result<()> {
@@ -171,6 +241,31 @@ mod tests {
                 String::from("ru"),
             ),
             "a confirmed language with no key must ask only for the missing key"
+        );
+    }
+
+    #[test]
+    fn version_output_reports_the_first_public_release() {
+        assert_eq!(
+            version(),
+            String::from("kamishibai 1.0.0"),
+            "version output must not report the pre-release version"
+        );
+    }
+
+    #[test]
+    fn help_output_documents_the_json_bypass_format() {
+        assert!(
+            help().contains("WORDS_JSON format:"),
+            "help output must not hide the strict JSON bypass format"
+        );
+    }
+
+    #[test]
+    fn help_output_explains_what_json_bypass_generates() {
+        assert!(
+            help().contains("generate an Anki .apkg, a printable PDF"),
+            "help output must not hide the artifacts generated from JSON input"
         );
     }
 }

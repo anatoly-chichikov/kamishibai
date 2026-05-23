@@ -31,16 +31,20 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::fs;
 
     use anyhow::Result;
 
     use super::TextDetector;
+    #[cfg(unix)]
     use super::redirect::{Redirect, discarded, locked, quiet};
     use super::text::resolved;
 
+    #[cfg(unix)]
     struct NoisyDrop;
 
+    #[cfg(unix)]
     impl Drop for NoisyDrop {
         /// Write to stdout and stderr when the test value is dropped.
         fn drop(&mut self) {
@@ -50,6 +54,7 @@ mod tests {
     }
 
     /// Redirect routes noisy process output into the sink file.
+    #[cfg(unix)]
     #[test]
     fn redirect_routes_stdout_and_stderr_into_the_sink_file() -> Result<()> {
         let sink = tempfile::NamedTempFile::new()?;
@@ -69,6 +74,7 @@ mod tests {
     }
 
     /// Quiet redirection discards noisy process output inside the closure.
+    #[cfg(unix)]
     #[test]
     fn quiet_redirection_discards_stdout_and_stderr_inside_the_closure() -> Result<()> {
         let sink = tempfile::NamedTempFile::new()?;
@@ -91,6 +97,7 @@ mod tests {
     }
 
     /// Discarded drops mute stdout and stderr during value destruction.
+    #[cfg(unix)]
     #[test]
     fn discarded_drops_mute_stdout_and_stderr_during_value_destruction() -> Result<()> {
         let sink = tempfile::NamedTempFile::new()?;
