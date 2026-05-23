@@ -21,7 +21,27 @@ The rest is discipline — sadly, that part doesn't ship in the .apkg.
 5. Give it a word, get a sentence. You memorize phrases, not flashcards — and a language matrix forms in your head.
 6. Bring your own Gemini key — your data, your control.
 
-## Get it running
+## Install
+
+Install the latest release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/install.sh | sh
+```
+
+Or pin a version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/install.sh | env KAMISHIBAI_VERSION=1.0.0 sh
+```
+
+On macOS you can also use Homebrew:
+
+```bash
+brew install anatoly-chichikov/tap/kamishibai
+```
+
+## Run from source
 
 ```bash
 cargo run --release
