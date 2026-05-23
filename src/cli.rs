@@ -11,6 +11,7 @@ mod live_generator;
 mod shell;
 mod terminal;
 
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -30,7 +31,14 @@ use crate::tui::{App, KeySource, WelcomeStage};
 /// strict-schema vocabulary JSON document is loaded and generation starts from
 /// the `Your Cards` screen.
 pub fn run() -> u8 {
-    let mut args = std::env::args_os().skip(1);
+    run_with_args(std::env::args_os().skip(1))
+}
+
+fn run_with_args<I>(args: I) -> u8
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let mut args = args.into_iter();
     let first = args.next();
     if args.next().is_some() {
         eprintln!("usage: kamishibai [path-to-vocabulary.json]");
@@ -38,6 +46,14 @@ pub fn run() -> u8 {
     }
     let outcome = match first {
         None => start(),
+        Some(path) if is_flag(path.as_os_str(), "--help") || is_flag(path.as_os_str(), "-h") => {
+            println!("{}", help());
+            return 0;
+        }
+        Some(path) if is_flag(path.as_os_str(), "--version") || is_flag(path.as_os_str(), "-V") => {
+            println!("{}", version());
+            return 0;
+        }
         Some(path) => start_with_batch(PathBuf::from(path)),
     };
     match outcome {
@@ -47,6 +63,18 @@ pub fn run() -> u8 {
             1
         }
     }
+}
+
+fn is_flag(value: &OsStr, flag: &str) -> bool {
+    value == OsStr::new(flag)
+}
+
+fn version() -> String {
+    format!("kamishibai {}", env!("CARGO_PKG_VERSION"))
+}
+
+fn help() -> &'static str {
+    "Generate illustrated Anki decks from schema-driven vocabulary JSON\n\nUsage: kamishibai [path-to-vocabulary.json]\n\nOptions:\n  -h, --help     Print help\n  -V, --version  Print version"
 }
 
 fn start() -> Result<()> {
@@ -171,6 +199,23 @@ mod tests {
                 String::from("ru"),
             ),
             "a confirmed language with no key must ask only for the missing key"
+        );
+    }
+
+    #[test]
+    fn version_output_reports_the_first_public_release() {
+        assert_eq!(
+            version(),
+            String::from("kamishibai 1.0.0"),
+            "version output must not report the pre-release version"
+        );
+    }
+
+    #[test]
+    fn help_output_keeps_the_homebrew_test_path_noninteractive() {
+        assert!(
+            help().contains("Usage: kamishibai [path-to-vocabulary.json]"),
+            "help output must not require opening the interactive terminal"
         );
     }
 }
