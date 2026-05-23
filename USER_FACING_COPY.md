@@ -20,6 +20,11 @@ Options:
   -h, --help     Print help
   -V, --version  Print version
 
+With WORDS_JSON:
+  Bring your own JSON with the required fields. kamishibai skips word entry,
+  then uses its prompts to generate an Anki .apkg, a printable PDF,
+  native-speaker audio, and manga-style illustrations.
+
 WORDS_JSON format:
 {
   "entries": [

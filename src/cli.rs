@@ -84,6 +84,10 @@ fn help() -> &'static str {
         "Options:\n",
         "  -h, --help     Print help\n",
         "  -V, --version  Print version\n\n",
+        "With WORDS_JSON:\n",
+        "  Bring your own JSON with the required fields. kamishibai skips word entry,\n",
+        "  then uses its prompts to generate an Anki .apkg, a printable PDF,\n",
+        "  native-speaker audio, and manga-style illustrations.\n\n",
         "WORDS_JSON format:\n",
         "{\n",
         "  \"entries\": [\n",
@@ -254,6 +258,14 @@ mod tests {
         assert!(
             help().contains("WORDS_JSON format:"),
             "help output must not hide the strict JSON bypass format"
+        );
+    }
+
+    #[test]
+    fn help_output_explains_what_json_bypass_generates() {
+        assert!(
+            help().contains("generate an Anki .apkg, a printable PDF"),
+            "help output must not hide the artifacts generated from JSON input"
         );
     }
 }
