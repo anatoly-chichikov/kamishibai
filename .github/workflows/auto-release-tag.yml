@@ -1,0 +1,53 @@
+name: Auto Release Tag
+
+on:
+  workflow_run:
+    workflows:
+      - Rust
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  tag:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          version="$(sed -nE 's/^version = "([^"]+)"/\1/p' Cargo.toml | head -n 1)"
+          tag="v${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Create release tag
+        if: steps.release.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.release.outputs.tag }}" -m "kamishibai ${{ steps.release.outputs.version }}"
+          git push origin "refs/tags/${{ steps.release.outputs.tag }}"
+      - name: Dispatch release artifacts
+        if: steps.release.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release-artifacts.yml --ref "${{ steps.release.outputs.tag }}"
+      - name: Report existing release tag
+        if: steps.release.outputs.exists == 'true'
+        run: echo "release tag ${{ steps.release.outputs.tag }} already exists; skipping"
