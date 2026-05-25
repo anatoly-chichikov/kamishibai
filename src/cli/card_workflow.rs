@@ -43,16 +43,31 @@ pub(super) trait DeckPublishing: Clone + Send + 'static {
     ) -> Result<(String, String, String)>;
 }
 
-/// Full card workflow required by the interactive shell.
-pub(super) trait CardWorkflow: WordUnderstanding + CardGeneration + DeckPublishing {}
+/// Capability that confirms a freshly entered API key is accepted by Gemini.
+///
+/// Takes the key from the Welcome buffer (not the saved one) so the check
+/// happens before anything is written to preferences.
+pub(super) trait KeyValidation: Clone + Send + 'static {
+    fn check_key(&self, key: &str) -> Result<()>;
+}
 
-impl<T> CardWorkflow for T where T: WordUnderstanding + CardGeneration + DeckPublishing {}
+/// Full card workflow required by the interactive shell.
+pub(super) trait CardWorkflow:
+    WordUnderstanding + CardGeneration + DeckPublishing + KeyValidation
+{
+}
+
+impl<T> CardWorkflow for T where
+    T: WordUnderstanding + CardGeneration + DeckPublishing + KeyValidation
+{
+}
 
 /// Result produced by one background text pass.
 pub(super) enum TextOutcome {
     Understanding(Result<Understood>),
     BulkCorrection(Result<Vec<WordCandidate>>),
     CardCorrection(Result<Box<(CardRevision, Option<ArtifactFile>)>>),
+    KeyCheck(Result<()>),
 }
 
 /// Result produced by one background artifact pass.

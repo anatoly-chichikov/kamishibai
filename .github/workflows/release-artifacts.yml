@@ -135,5 +135,5 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" release-assets/* \
             --title "kamishibai ${GITHUB_REF_NAME}" \
-            --notes "kamishibai ${GITHUB_REF_NAME}" \
+            --generate-notes \
             --verify-tag

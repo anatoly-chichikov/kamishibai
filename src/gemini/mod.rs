@@ -6,6 +6,7 @@ mod prompts;
 mod protocol;
 
 pub use client::{GeminiClient, HttpTransport, Transport, TransportResponse};
+pub use protocol::GeminiApiError;
 
 use anyhow::Result;
 
@@ -15,6 +16,15 @@ use crate::session::{
     BulkCorrection, CardCorrection, CardDraft, CardMeta, CardMetaGeneration, CardRevision,
     LanguagePair, RawInputBatch, Understanding, Understood, WordCandidate,
 };
+
+/// Return whether one error means Gemini rejected the configured API key.
+#[must_use]
+pub fn rejects_key(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<GeminiApiError>()
+        .map(GeminiApiError::rejects_key)
+        .unwrap_or(false)
+}
 
 impl<T> SceneSource for GeminiClient<T>
 where

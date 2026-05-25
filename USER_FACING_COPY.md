@@ -85,7 +85,7 @@ desc "Turn a list of words into an illustrated Anki deck with native-speaker aud
 ```text
 kamishibai turns a list of words you want to learn into an illustrated Anki deck plus a printable PDF. Each card has a sentence in your language, the same sentence in the target one, native-speaker audio, and an illustration.
 
-Set GEMINI_API_KEY before running, or paste the key on the welcome screen.
+Paste the key on the welcome screen, or choose `load from env` there to import GEMINI_API_KEY.
 ```
 
 ## 5. Welcome Screen
@@ -99,6 +99,18 @@ set up two things
 
 ```text
 kamishibai turns a list of words you want to learn into an anki deck plus a printable pdf. for each word it writes a natural example sentence, illustrates the scene as a manga panel, and reads it aloud in a natural, native-speaker voice.
+```
+
+Key step — input, helper line (by state), buttons, and inline notices:
+
+```text
+gemini api key
+paste your key [Cmd+V]
+submit
+load from env
+enter a key first
+key invalid
+couldn't reach gemini
 ```
 
 ## 6. Visible Workflow Copy
@@ -119,6 +131,7 @@ each line becomes one anki card
 Файл: `/Users/anatoly/Source/kamishibai/src/tui/app.rs`
 
 ```text
+checking your key
 building your anki deck
 rendering your printable pdf
 ```

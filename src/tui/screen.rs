@@ -36,3 +36,14 @@ pub enum KeySource {
     Restored,
     Pasted,
 }
+
+/// Which button of the `EnterKey` step currently holds focus. The key field
+/// itself is always editable and never takes focus.
+///
+/// `←/→` move focus between the buttons; `LoadEnv` only joins the cycle when
+/// `GEMINI_API_KEY` is present in the environment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WelcomeFocus {
+    Submit,
+    LoadEnv,
+}

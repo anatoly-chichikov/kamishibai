@@ -21,9 +21,9 @@ use super::host::open_path;
 use super::shell::Shell;
 use crate::session::CardDraft;
 use crate::tui::{
-    App, AppEvent, ModalKind, MousePointer, Side, draw, language_chip_at, link_at,
+    App, AppEvent, ModalKind, MousePointer, Side, WelcomeFocus, draw, language_chip_at, link_at,
     mouse_pointer_at, picker_geometry, reset_mouse_pointer, scroll_body_width, scroll_viewport,
-    to_app, write_mouse_pointer,
+    to_app, welcome_control_at, write_mouse_pointer,
 };
 
 const POINTER_REFRESH: Duration = Duration::from_millis(50);
@@ -172,6 +172,20 @@ where
                         }
                     } else if language_chip_at(shell.app(), rect, mouse.column, mouse.row) {
                         let side = shell.handle(AppEvent::OpenLanguagePicker)?;
+                        if side == Side::ExitApp {
+                            return Ok(());
+                        }
+                        dirty = true;
+                        dirty |= shell.tick()?;
+                    } else if let Some(focus) =
+                        welcome_control_at(shell.app(), rect, mouse.column, mouse.row)
+                    {
+                        shell.handle(AppEvent::WelcomeFocusTo(focus))?;
+                        let action = match focus {
+                            WelcomeFocus::Submit => AppEvent::Submit,
+                            WelcomeFocus::LoadEnv => AppEvent::WelcomeLoadEnvKey,
+                        };
+                        let side = shell.handle(action)?;
                         if side == Side::ExitApp {
                             return Ok(());
                         }

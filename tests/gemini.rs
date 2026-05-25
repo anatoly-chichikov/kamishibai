@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use anyhow::Result;
-use kamishibai::gemini::{GeminiClient, Transport, TransportResponse};
+use kamishibai::gemini::{GeminiClient, Transport, TransportResponse, rejects_key};
 use kamishibai::session::{CardDraft, CardMeta, LanguagePair, RawInputBatch, WordCandidate};
 use serde_json::{Value, json};
 
@@ -228,15 +228,62 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
 /// Missing API keys surface the configured startup error wording.
 #[test]
 fn missing_api_keys_surface_a_setup_hint() {
-    unsafe {
-        std::env::remove_var("GEMINI_API_KEY");
-    }
-    let error = GeminiClient::from_env_or_saved(None)
-        .unwrap_err()
-        .to_string();
+    let error = GeminiClient::from_saved(None).unwrap_err().to_string();
     assert!(
         error.contains("no Gemini API key"),
         "missing api keys no longer surface the configured startup error wording: {error}"
+    );
+}
+
+/// Invalid API-key responses are classified without treating all 403s as key failures.
+#[test]
+fn api_key_errors_are_classified_narrowly() {
+    let invalid = FakeTransport::new(vec![Ok(TransportResponse {
+        status: 400,
+        body: String::from(
+            "{\"error\":{\"status\":\"INVALID_ARGUMENT\",\"message\":\"API key not valid. Please pass a valid API key.\",\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.ErrorInfo\",\"reason\":\"API_KEY_INVALID\"}]}}",
+        ),
+    })]);
+    let generic = FakeTransport::new(vec![Ok(TransportResponse {
+        status: 403,
+        body: String::from(
+            "{\"error\":{\"status\":\"PERMISSION_DENIED\",\"message\":\"Access denied for this model\"}}",
+        ),
+    })]);
+    let invalid_error = GeminiClient::new("key", invalid)
+        .understand(&RawInputBatch::new("wreck"), "ru")
+        .unwrap_err();
+    let generic_error = GeminiClient::new("key", generic)
+        .understand(&RawInputBatch::new("wreck"), "ru")
+        .unwrap_err();
+    assert_eq!(
+        (rejects_key(&invalid_error), rejects_key(&generic_error)),
+        (true, false),
+        "Gemini key rejection classification must not collapse every permission failure into a bad key"
+    );
+}
+
+/// Key validation accepts any 2xx and flags a rejected key without parsing the body.
+#[test]
+fn validate_key_accepts_2xx_and_flags_rejected_keys() {
+    let valid = FakeTransport::new(vec![Ok(TransportResponse {
+        status: 200,
+        body: String::from("{}"),
+    })]);
+    let rejected = FakeTransport::new(vec![Ok(TransportResponse {
+        status: 400,
+        body: String::from(
+            "{\"error\":{\"status\":\"INVALID_ARGUMENT\",\"message\":\"API key not valid. Please pass a valid API key.\",\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.ErrorInfo\",\"reason\":\"API_KEY_INVALID\"}]}}",
+        ),
+    })]);
+    let valid_ok = GeminiClient::new("key", valid).validate_key().is_ok();
+    let rejected_error = GeminiClient::new("key", rejected)
+        .validate_key()
+        .unwrap_err();
+    assert_eq!(
+        (valid_ok, rejects_key(&rejected_error)),
+        (true, true),
+        "key validation must pass on any 2xx and flag an invalid-key response as a rejected key"
     );
 }
 

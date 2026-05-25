@@ -9,9 +9,10 @@
 use ratatui::layout::Rect;
 
 use super::App;
-use super::screen::Screen;
+use super::screen::{Screen, WelcomeFocus, WelcomeStage};
 use super::screens::banner;
 use super::screens::common::{GUTTER, HEADER_GAP, TOP_MARGIN, language_chip};
+use super::screens::welcome;
 use super::screens::your_cards::{detail_pane_height, head_rows_for, step_rows_for};
 
 const STEP_FILE_LABEL_START: u16 = 15;
@@ -70,6 +71,21 @@ pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<
         .into_iter()
         .find(|region| region.contains(click_x, click_y))
         .map(|region| region.target)
+}
+
+/// Return which Welcome key-step control one cell lands on, if any. The key
+/// input, the `submit` chip, and (when env offers a key) the `load from env`
+/// chip are the click targets.
+pub fn welcome_control_at(
+    app: &App,
+    terminal: Rect,
+    click_x: u16,
+    click_y: u16,
+) -> Option<WelcomeFocus> {
+    if app.screen() != Screen::Welcome || app.welcome().stage != WelcomeStage::EnterKey {
+        return None;
+    }
+    welcome::control_at(app, terminal, click_x, click_y)
 }
 
 fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {

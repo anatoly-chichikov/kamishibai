@@ -42,6 +42,22 @@ fn stored_api_key_does_not_confirm_the_default_language() {
 }
 
 #[test]
+fn clearing_api_key_preserves_the_confirmed_language() {
+    let preferences = Preferences::new("ru")
+        .with_api_key("123456789012345678901234567890")
+        .without_api_key();
+    assert_eq!(
+        (
+            preferences.my_language,
+            preferences.my_language_confirmed,
+            preferences.api_key,
+        ),
+        (String::from("ru"), true, None),
+        "clearing a rejected API key must not reset the confirmed language"
+    );
+}
+
+#[test]
 fn legacy_preference_without_confirmation_cannot_silently_pick_german() {
     let home = tempdir().expect("must create temp home");
     let store = PreferenceStore::at(home.path().join("kamishibai").join("preferences.json"));

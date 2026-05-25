@@ -122,14 +122,11 @@ fn help() -> &'static str {
 fn start() -> Result<()> {
     let store = default_store(&SystemContext)?;
     let preferences = store.read().unwrap_or_default();
-    let env_key = std::env::var("GEMINI_API_KEY")
-        .ok()
-        .filter(|key| !key.is_empty());
-    let app = startup_app(&preferences, env_key);
+    let app = startup_app(&preferences);
     run_tui(app, None)
 }
 
-fn startup_app(preferences: &Preferences, env_key: Option<String>) -> App {
+fn startup_app(preferences: &Preferences) -> App {
     let saved_key = preferences.api_key.clone().filter(|key| !key.is_empty());
     let pair = LanguagePair::new(
         String::from("en"),
@@ -137,11 +134,9 @@ fn startup_app(preferences: &Preferences, env_key: Option<String>) -> App {
     );
     let app = App::new(pair);
     let needs_language = preferences.requires_language_choice();
-    let needs_key = env_key.is_none() && saved_key.is_none();
+    let needs_key = saved_key.is_none();
     if needs_language || needs_key {
-        let (source, key) = if let Some(env) = env_key.as_deref() {
-            (KeySource::Env, String::from(env))
-        } else if let Some(saved) = saved_key.as_deref() {
+        let (source, key) = if let Some(saved) = saved_key.as_deref() {
             (KeySource::Restored, String::from(saved))
         } else {
             (KeySource::Empty, String::new())
@@ -151,10 +146,19 @@ fn startup_app(preferences: &Preferences, env_key: Option<String>) -> App {
         } else {
             WelcomeStage::EnterKey
         };
-        app.opening_welcome_at(stage, source, key)
+        app.opening_welcome_at(stage, source, key, env_has_gemini_key())
     } else {
         app
     }
+}
+
+/// Return whether `GEMINI_API_KEY` is present and non-empty. The key is never
+/// loaded into the Welcome buffer implicitly — this only decides whether the
+/// key step offers the `load from env` action.
+fn env_has_gemini_key() -> bool {
+    std::env::var("GEMINI_API_KEY")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
 }
 
 fn start_with_batch(path: PathBuf) -> Result<()> {
@@ -168,11 +172,8 @@ mod tests {
     use crate::tui::Screen;
 
     #[test]
-    fn env_key_does_not_skip_unconfirmed_language_choice() {
-        let app = startup_app(
-            &Preferences::default(),
-            Some(String::from("123456789012345678901234567890")),
-        );
+    fn env_key_is_not_loaded_at_startup() {
+        let app = startup_app(&Preferences::default());
         assert_eq!(
             (
                 app.screen(),
@@ -183,17 +184,17 @@ mod tests {
             (
                 Screen::Welcome,
                 WelcomeStage::PickLanguage,
-                KeySource::Env,
+                KeySource::Empty,
                 String::from("en"),
             ),
-            "GEMINI_API_KEY must not skip the explicit first-run language choice"
+            "GEMINI_API_KEY must not be treated as loaded until the user asks for it"
         );
     }
 
     #[test]
     fn saved_key_does_not_skip_unconfirmed_language_choice() {
         let preferences = Preferences::default().with_api_key("123456789012345678901234567890");
-        let app = startup_app(&preferences, None);
+        let app = startup_app(&preferences);
         assert_eq!(
             (
                 app.screen(),
@@ -212,21 +213,19 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_language_and_env_key_skip_welcome() {
-        let app = startup_app(
-            &Preferences::new("de"),
-            Some(String::from("123456789012345678901234567890")),
-        );
+    fn confirmed_language_and_saved_key_skip_welcome() {
+        let app =
+            startup_app(&Preferences::new("de").with_api_key("123456789012345678901234567890"));
         assert_eq!(
             (app.screen(), app.pair().support().to_string()),
             (Screen::YourWords, String::from("de")),
-            "only an explicitly confirmed language may skip Welcome when an env key exists"
+            "a confirmed language may skip Welcome only when a saved key exists"
         );
     }
 
     #[test]
     fn confirmed_language_without_key_starts_on_key_stage() {
-        let app = startup_app(&Preferences::new("ru"), None);
+        let app = startup_app(&Preferences::new("ru"));
         assert_eq!(
             (
                 app.screen(),
@@ -245,11 +244,11 @@ mod tests {
     }
 
     #[test]
-    fn version_output_reports_the_first_public_release() {
+    fn version_output_reports_the_release_version() {
         assert_eq!(
             version(),
-            String::from("kamishibai 1.0.0"),
-            "version output must not report the pre-release version"
+            String::from("kamishibai 1.1.0"),
+            "version output must report the current release version"
         );
     }
 

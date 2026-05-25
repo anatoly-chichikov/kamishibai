@@ -389,7 +389,7 @@ fn build_states() -> Vec<(String, App)> {
         );
 
     let welcome = App::new(pair())
-        .opening_welcome(KeySource::Empty, String::new())
+        .opening_welcome(KeySource::Empty, String::new(), false)
         .welcome_advance();
 
     let busy_understanding = App::new(pair())
