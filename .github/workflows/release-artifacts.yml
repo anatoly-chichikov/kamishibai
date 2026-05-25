@@ -44,6 +44,9 @@ jobs:
             archive_ext: zip
     steps:
       - uses: actions/checkout@v6.0.2
+      - name: Use the latest stable Rust
+        shell: bash
+        run: rustup update stable
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
