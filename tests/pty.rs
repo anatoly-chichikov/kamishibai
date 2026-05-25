@@ -26,10 +26,36 @@ fn example_binary(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn kamishibai_binary() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_kamishibai"))
+}
+
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
+}
+
+#[test]
+fn pty_binary_without_key_opens_welcome_setup() {
+    let home = tempfile::tempdir().expect("temporary home must be created");
+    let mut command = Command::new(kamishibai_binary());
+    command.env("HOME", home.path());
+    command.env_remove("GEMINI_API_KEY");
+    command.env_remove("KAMISHIBAI_CACHE");
+    command.env_remove("XDG_CACHE_HOME");
+    command.env_remove("XDG_DATA_HOME");
+    let mut session = Session::spawn(command).expect("spawn must succeed");
+    session.set_expect_timeout(Some(Duration::from_secs(10)));
+    let opened = session
+        .expect("your language")
+        .map(|_| true)
+        .unwrap_or(false);
+    let _ = session.get_process_mut().exit(true);
+    assert!(
+        opened,
+        "first run without a key must render Welcome instead of exiting"
+    );
 }
 
 #[test]

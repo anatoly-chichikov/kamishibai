@@ -10,11 +10,11 @@ use super::card_workflow::{
     ArtifactOutcome, CardWorkflow, DeckPublishMessage, DeckPublishProgress, TextOutcome,
 };
 use super::live_generator::{LiveCardGenerator, default_output};
-use crate::config::{Preferences, default_store};
-use crate::gemini::GeminiClient;
+use crate::config::{PreferenceStore, Preferences, default_store};
+use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{Artifact, CardDraft, RawInputBatch, SessionEngine};
-use crate::tui::{App, AppEvent, BusyKind, Screen, Side, transit};
+use crate::tui::{App, AppEvent, BusyKind, KeySource, Screen, Side, WelcomeStage, transit};
 
 const ANIMATION_FRAME_MILLIS: u64 = 250;
 const IDLE_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
@@ -22,6 +22,7 @@ const BACKGROUND_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
 const FAST_JOB_POLL: Duration = Duration::from_millis(25);
 const FAST_JOB_WINDOW: Duration = Duration::from_millis(50);
 const QUIT_WINDOW: Duration = Duration::from_millis(1000);
+const KEY_REJECTED_MESSAGE: &str = "Gemini rejected this API key; saved key was cleared";
 
 struct PendingJob<T> {
     receiver: Receiver<T>,
@@ -74,11 +75,6 @@ pub(super) struct Shell<P> {
 impl Shell<LiveCardGenerator> {
     /// Build a live card shell for an interactive empty session.
     pub(super) fn new(app: App) -> Result<Self> {
-        let saved_key = default_store(&SystemContext)
-            .ok()
-            .and_then(|store| store.read().ok())
-            .and_then(|prefs| prefs.api_key);
-        let client = GeminiClient::from_env_or_saved(saved_key.as_deref())?;
         let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
         let output = default_output()?;
         crate::report::warm_fonts_async();
@@ -90,7 +86,7 @@ impl Shell<LiveCardGenerator> {
             publish_job: None,
             started: None,
             quit_armed_at: None,
-            generator: LiveCardGenerator::new(client, cache, output),
+            generator: LiveCardGenerator::new(cache, output),
         })
     }
 
@@ -361,6 +357,10 @@ where
         artifact: Artifact,
         outcome: ArtifactOutcome,
     ) {
+        if artifact_rejects_key(&outcome) {
+            self.recover_key_rejection();
+            return;
+        }
         let Some(engine) = self.engine.as_mut() else {
             self.app = self.app.clone().cards_running(None);
             return;
@@ -416,6 +416,10 @@ where
                         .understood(understood.candidates().to_vec());
                 }
                 Err(error) => {
+                    if rejects_key(&error) {
+                        self.recover_key_rejection();
+                        return;
+                    }
                     self.app = self
                         .app
                         .clone()
@@ -436,6 +440,10 @@ where
                     }
                 }
                 Err(error) => {
+                    if rejects_key(&error) {
+                        self.recover_key_rejection();
+                        return;
+                    }
                     self.app = self.app.clone().error_shown(error.to_string());
                 }
             },
@@ -452,7 +460,27 @@ where
                     self.start_engine();
                 }
                 Err(error) => {
+                    if rejects_key(&error) {
+                        self.recover_key_rejection();
+                        return;
+                    }
                     self.app = self.app.clone().error_shown(error.to_string());
+                }
+            },
+            TextOutcome::KeyCheck(result) => match result {
+                Ok(()) => {
+                    let language = self.app.pair().support().to_string();
+                    let key = self.app.welcome().key.clone();
+                    persist_preferences(move |prefs| prefs.adopt(language).with_api_key(key));
+                    self.app = self.app.clone().with_screen(Screen::YourWords);
+                }
+                Err(error) => {
+                    let message = if rejects_key(&error) {
+                        "key invalid"
+                    } else {
+                        "couldn't reach gemini"
+                    };
+                    self.app = self.app.clone().welcome_notice(message);
                 }
             },
         }
@@ -524,20 +552,51 @@ where
             Side::PersistMyLanguage(code) => {
                 persist_preferences(|prefs| prefs.adopt(code));
             }
-            Side::PersistWelcome { language, api_key } => {
-                persist_preferences(|prefs| {
-                    let prefs = prefs.adopt(language);
-                    if let Some(key) = api_key {
-                        prefs.with_api_key(key)
-                    } else {
-                        prefs
-                    }
-                });
+            Side::ValidateKey(key) => {
+                let generator = self.generator.clone();
+                self.start_text(BusyKind::CheckingKey, move || {
+                    TextOutcome::KeyCheck(generator.check_key(key.as_str()))
+                })?;
             }
-            Side::OpenKeyHelp => {}
+            Side::LoadEnvKey => {
+                self.load_env_key();
+            }
             Side::ExitApp | Side::None => {}
         }
         Ok(())
+    }
+
+    fn load_env_key(&mut self) {
+        let key = std::env::var("GEMINI_API_KEY")
+            .ok()
+            .filter(|value| !value.is_empty());
+        self.apply_env_key(key);
+    }
+
+    fn apply_env_key(&mut self, key: Option<String>) {
+        self.app = match key {
+            Some(value) => self.app.clone().welcome_env_key(value),
+            None => self.app.clone().welcome_notice("GEMINI_API_KEY is not set"),
+        };
+    }
+
+    fn recover_key_rejection(&mut self) {
+        clear_saved_key();
+        self.engine = None;
+        self.started = None;
+        let env_available = super::env_has_gemini_key();
+        self.app = self
+            .app
+            .clone()
+            .busy_finished()
+            .cards_running(None)
+            .opening_welcome_at(
+                WelcomeStage::EnterKey,
+                KeySource::Empty,
+                String::new(),
+                env_available,
+            )
+            .welcome_notice(KEY_REJECTED_MESSAGE);
     }
 
     fn start_text<F>(&mut self, kind: BusyKind, run: F) -> Result<()>
@@ -692,6 +751,26 @@ fn drafts_from(app: &App) -> Vec<CardDraft> {
         .collect()
 }
 
+fn artifact_rejects_key(outcome: &ArtifactOutcome) -> bool {
+    match outcome {
+        ArtifactOutcome::Meta(Err(error)) | ArtifactOutcome::Media(Err(error)) => {
+            rejects_key(error)
+        }
+        _ => false,
+    }
+}
+
+fn clear_saved_key() {
+    if let Ok(store) = default_store(&SystemContext) {
+        clear_saved_key_in(&store);
+    }
+}
+
+fn clear_saved_key_in(store: &PreferenceStore) {
+    let prefs = store.read().unwrap_or_default().without_api_key();
+    let _ = store.write(&prefs);
+}
+
 fn persist_preferences(update: impl FnOnce(Preferences) -> Preferences) {
     if let Ok(store) = default_store(&SystemContext) {
         let prefs = update(store.read().unwrap_or_default());
@@ -706,7 +785,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::super::card_workflow::{
-        CardGeneration, DeckPublishProgress, DeckPublishing, TextOutcome,
+        CardGeneration, DeckPublishProgress, DeckPublishing, KeyValidation, TextOutcome,
     };
     use super::*;
     use crate::session::{
@@ -716,18 +795,32 @@ mod tests {
     };
     use anyhow::Result;
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum TestFailure {
+        Internal,
+        Key,
+    }
+
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
     struct TestCardGenerator {
-        fail: bool,
+        failure: Option<TestFailure>,
     }
 
     impl TestCardGenerator {
         fn local() -> Self {
-            Self { fail: false }
+            Self { failure: None }
         }
 
         fn failing() -> Self {
-            Self { fail: true }
+            Self {
+                failure: Some(TestFailure::Internal),
+            }
+        }
+
+        fn key_rejecting() -> Self {
+            Self {
+                failure: Some(TestFailure::Key),
+            }
         }
 
         fn local_meta(term: &str, understanding: &str) -> CardMeta {
@@ -745,11 +838,18 @@ mod tests {
         }
 
         fn failed<T>(&self) -> Result<T> {
-            Err(anyhow::anyhow!("INTERNAL: boom"))
+            match self.failure {
+                Some(TestFailure::Key) => Err(anyhow::anyhow!(crate::gemini::GeminiApiError::new(
+                    "UNAUTHENTICATED",
+                    Some(String::from("API key not valid")),
+                    Vec::new(),
+                ))),
+                _ => Err(anyhow::anyhow!("INTERNAL: boom")),
+            }
         }
 
         fn ready(&self) -> Result<()> {
-            if self.fail {
+            if self.failure.is_some() {
                 return self.failed();
             }
             Ok(())
@@ -870,6 +970,12 @@ mod tests {
         }
     }
 
+    impl KeyValidation for TestCardGenerator {
+        fn check_key(&self, _key: &str) -> Result<()> {
+            self.ready()
+        }
+    }
+
     fn local_artifact(draft: &CardDraft, artifact: Artifact) -> Result<ArtifactFile> {
         let name = format!("{}-{}.local", slug(draft.term()), artifact.label());
         let path = std::env::temp_dir().join(&name);
@@ -898,6 +1004,10 @@ mod tests {
 
     fn failing_shell(app: App) -> Shell<TestCardGenerator> {
         shell_with(app, TestCardGenerator::failing())
+    }
+
+    fn key_rejecting_shell(app: App) -> Shell<TestCardGenerator> {
+        shell_with(app, TestCardGenerator::key_rejecting())
     }
 
     fn shell_with(app: App, generator: TestCardGenerator) -> Shell<TestCardGenerator> {
@@ -1007,6 +1117,119 @@ mod tests {
                 Side::None,
             ),
             "Gemini text errors must keep the TUI alive, preserve the input, and dismiss cleanly"
+        );
+    }
+
+    #[test]
+    fn key_rejection_returns_to_welcome_key_step() {
+        let mut shell = key_rejecting_shell(App::new(pair()).seeded_blob("wreck"));
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generate must start understanding");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.welcome().stage,
+                shell.app.welcome().source,
+                shell.app.welcome().key.to_string(),
+                shell.app.welcome().notice.clone(),
+                shell.app.blob().to_string(),
+                shell.engine.is_none(),
+            ),
+            (
+                Screen::Welcome,
+                WelcomeStage::EnterKey,
+                KeySource::Empty,
+                String::new(),
+                Some(String::from(KEY_REJECTED_MESSAGE)),
+                String::from("wreck"),
+                true,
+            ),
+            "Gemini key rejection must clear the key field, preserve typed words, and reopen Welcome on the key step"
+        );
+    }
+
+    #[test]
+    fn submit_with_invalid_key_shows_inline_error_and_stays_on_welcome() {
+        let mut shell = key_rejecting_shell(App::new(pair()).opening_welcome_at(
+            WelcomeStage::EnterKey,
+            KeySource::Pasted,
+            "123456789012345678901234567890",
+            false,
+        ));
+        shell
+            .handle(AppEvent::Submit)
+            .expect("submit must start the key check");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.welcome().stage,
+                shell.app.welcome().notice.clone(),
+            ),
+            (
+                Screen::Welcome,
+                WelcomeStage::EnterKey,
+                Some(String::from("key invalid")),
+            ),
+            "a rejected key must surface an inline notice and keep the user on the key step"
+        );
+    }
+
+    #[test]
+    fn load_env_key_action_reports_missing_or_loads_the_key() {
+        let mut shell = shell(App::new(pair()).opening_welcome_at(
+            WelcomeStage::EnterKey,
+            KeySource::Empty,
+            "",
+            false,
+        ));
+        shell.apply_env_key(None);
+        let missing = (
+            shell.app.welcome().source,
+            shell.app.welcome().key.to_string(),
+            shell.app.welcome().notice.clone(),
+        );
+        shell.apply_env_key(Some(String::from("123456789012345678901234567890")));
+        assert_eq!(
+            (
+                missing,
+                shell.app.welcome().source,
+                shell.app.welcome().key.to_string(),
+                shell.app.welcome().notice.clone(),
+            ),
+            (
+                (
+                    KeySource::Empty,
+                    String::new(),
+                    Some(String::from("GEMINI_API_KEY is not set")),
+                ),
+                KeySource::Env,
+                String::from("123456789012345678901234567890"),
+                None,
+            ),
+            "load env must either show a missing-env notice or place GEMINI_API_KEY into the welcome key buffer"
+        );
+    }
+
+    #[test]
+    fn clearing_rejected_key_preserves_confirmed_language() {
+        let home = tempfile::tempdir().expect("temp home");
+        let store = PreferenceStore::at(home.path().join("kamishibai").join("preferences.json"));
+        store
+            .write(&Preferences::new("ru").with_api_key("123456789012345678901234567890"))
+            .expect("seed preferences");
+        clear_saved_key_in(&store);
+        let restored = store.read().expect("reload preferences");
+        assert_eq!(
+            (
+                restored.my_language,
+                restored.my_language_confirmed,
+                restored.api_key,
+            ),
+            (String::from("ru"), true, None),
+            "clearing a rejected key must not reset the confirmed support language"
         );
     }
 

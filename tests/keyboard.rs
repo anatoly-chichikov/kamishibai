@@ -120,6 +120,16 @@ fn ctrl_g_normalizes_ascii_russian_and_greek_layouts() {
 }
 
 #[test]
+fn ctrl_e_maps_to_the_welcome_env_loader() {
+    let event = to_app(modified(KeyCode::Char('e'), KeyModifiers::CONTROL));
+    assert_eq!(
+        event,
+        Some(AppEvent::WelcomeLoadEnvKey),
+        "Ctrl+E must request the explicit GEMINI_API_KEY loader"
+    );
+}
+
+#[test]
 fn ctrl_d_on_your_words_does_not_submit_or_type() {
     let mut state = App::new(LanguagePair::new("en", "ru"));
     for symbol in "whilst".chars() {

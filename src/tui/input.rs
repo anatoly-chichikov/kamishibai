@@ -35,6 +35,7 @@ pub fn to_app(key: KeyEvent) -> Option<AppEvent> {
         KeyCode::Char(symbol) if key.modifiers.contains(KeyModifiers::CONTROL) => {
             match latin_for_ctrl(symbol) {
                 'c' => Some(AppEvent::Quit),
+                'e' => Some(AppEvent::WelcomeLoadEnvKey),
                 'g' => Some(AppEvent::Generate),
                 'l' => Some(AppEvent::OpenLanguagePicker),
                 _ => None,

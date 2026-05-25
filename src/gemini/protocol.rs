@@ -1,3 +1,6 @@
+use std::error::Error;
+use std::fmt;
+
 use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -186,6 +189,88 @@ struct ErrorEnvelope {
 struct ApiError {
     status: Option<String>,
     message: Option<String>,
+    #[serde(default)]
+    details: Vec<ApiErrorDetail>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ApiErrorDetail {
+    reason: Option<String>,
+}
+
+/// Structured Gemini API error returned by the REST API.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GeminiApiError {
+    status: String,
+    message: Option<String>,
+    reasons: Vec<String>,
+}
+
+impl GeminiApiError {
+    /// Create one Gemini API error from status, message, and detail reasons.
+    pub fn new(status: impl Into<String>, message: Option<String>, reasons: Vec<String>) -> Self {
+        Self {
+            status: status.into(),
+            message,
+            reasons,
+        }
+    }
+
+    /// Return whether the API response clearly rejects the configured key.
+    #[must_use]
+    pub fn rejects_key(&self) -> bool {
+        if self.reasons.iter().any(|reason| key_reason(reason)) {
+            return true;
+        }
+        if self
+            .message
+            .as_ref()
+            .map(|message| key_message(message))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        if self.status == "UNAUTHENTICATED" {
+            return true;
+        }
+        false
+    }
+}
+
+impl fmt::Display for GeminiApiError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.status)?;
+        if let Some(message) = self.message.as_ref()
+            && !message.is_empty()
+        {
+            write!(formatter, ": {message}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Error for GeminiApiError {}
+
+fn key_reason(reason: &str) -> bool {
+    matches!(
+        reason,
+        "API_KEY_INVALID"
+            | "API_KEY_SERVICE_BLOCKED"
+            | "API_KEY_HTTP_REFERRER_BLOCKED"
+            | "API_KEY_IP_ADDRESS_BLOCKED"
+            | "API_KEY_ANDROID_APP_BLOCKED"
+            | "API_KEY_IOS_APP_BLOCKED"
+    )
+}
+
+fn key_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("api key")
+        && (lower.contains("not valid")
+            || lower.contains("invalid")
+            || lower.contains("blocked")
+            || lower.contains("disabled")
+            || lower.contains("expired"))
 }
 
 /// Remove Markdown fences from one JSON payload.
@@ -290,18 +375,22 @@ pub(super) fn diagnosis(response: &Response) -> String {
 /// Convert one error body into a typed anyhow error.
 pub(super) fn api_error(body: &str) -> anyhow::Error {
     match serde_json::from_str::<ErrorEnvelope>(body) {
-        Ok(error) => anyhow!(
-            "{}{}",
-            error
+        Ok(error) => {
+            let reasons = error
                 .error
-                .status
-                .unwrap_or_else(|| String::from("UNKNOWN")),
-            error
-                .error
-                .message
-                .map(|message| format!(": {message}"))
-                .unwrap_or_default()
-        ),
+                .details
+                .into_iter()
+                .filter_map(|detail| detail.reason)
+                .collect();
+            anyhow!(GeminiApiError::new(
+                error
+                    .error
+                    .status
+                    .unwrap_or_else(|| String::from("UNKNOWN")),
+                error.error.message,
+                reasons,
+            ))
+        }
         Err(_) => anyhow!(body.to_owned()),
     }
 }

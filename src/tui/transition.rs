@@ -2,7 +2,7 @@ use crate::languages::catalog;
 
 use super::app::App;
 use super::event::AppEvent;
-use super::screen::{KeySource, ModalKind, Screen, WelcomeStage};
+use super::screen::{ModalKind, Screen, WelcomeFocus, WelcomeStage};
 
 /// A side effect requested by a transition. The shell interprets it outside the pure function.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -15,14 +15,11 @@ pub enum Side {
     RegenerateFailed,
     RegenerateCurrent,
     PersistMyLanguage(String),
-    /// Persist both the picked language and (optionally) the API key in one
-    /// write — emitted by the Welcome screen on final Submit so partial state
-    /// from one stage never lands on disk on its own.
-    PersistWelcome {
-        language: String,
-        api_key: Option<String>,
-    },
-    OpenKeyHelp,
+    /// Welcome key step: probe Gemini with the entered key. The shell runs the
+    /// check off-thread, persists language + key only on success, then moves to
+    /// `Your Words`; a rejected key stays on Welcome with an inline notice.
+    ValidateKey(String),
+    LoadEnvKey,
     /// Engine drained — kick off the (asynchronous) publish phase. The shell
     /// spawns a background thread that builds the .apkg and the .pdf, surfacing
     /// progress through the universal busy loader (`PublishingDeck` →
@@ -193,17 +190,17 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
         }
         (WelcomeStage::PickLanguage, AppEvent::Submit)
         | (WelcomeStage::PickLanguage, AppEvent::KeyEnter) => {
-            if welcome_key_ready(&app) {
-                let side = welcome_persist(&app);
-                (app.with_screen(Screen::YourWords), side)
-            } else {
-                (app.welcome_advance(), Side::None)
-            }
+            let language = app.pair().support().to_string();
+            (app.welcome_advance(), Side::PersistMyLanguage(language))
         }
         (WelcomeStage::EnterKey, AppEvent::Cancel) => (app.welcome_step_back(), Side::None),
+        (WelcomeStage::EnterKey, AppEvent::CursorLeft) => (app.welcome_focus_prev(), Side::None),
+        (WelcomeStage::EnterKey, AppEvent::CursorRight) => (app.welcome_focus_next(), Side::None),
+        (WelcomeStage::EnterKey, AppEvent::WelcomeFocusTo(focus)) => {
+            (app.welcome_focus(focus), Side::None)
+        }
         (WelcomeStage::EnterKey, AppEvent::WelcomePasteKey(text)) => {
-            let trimmed = text.trim().to_string();
-            (app.welcome_paste_key(trimmed), Side::None)
+            (app.welcome_paste_key(text.trim().to_string()), Side::None)
         }
         (WelcomeStage::EnterKey, AppEvent::KeyChar(symbol)) => {
             let mut key = app.welcome().key.clone();
@@ -211,40 +208,25 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
             (app.welcome_paste_key(key), Side::None)
         }
         (WelcomeStage::EnterKey, AppEvent::KeyBackspace) => (app.welcome_clear_key(), Side::None),
-        (WelcomeStage::EnterKey, AppEvent::WelcomeOpenKeyHelp) => (app, Side::OpenKeyHelp),
+        (WelcomeStage::EnterKey, AppEvent::WelcomeLoadEnvKey) => (app, Side::LoadEnvKey),
         (WelcomeStage::EnterKey, AppEvent::Submit)
-        | (WelcomeStage::EnterKey, AppEvent::KeyEnter) => {
-            if welcome_key_ready(&app) {
-                let side = welcome_persist(&app);
-                (app.with_screen(Screen::YourWords), side)
-            } else {
-                (app, Side::None)
-            }
-        }
+        | (WelcomeStage::EnterKey, AppEvent::KeyEnter) => welcome_submit(app),
         _ => (app, Side::None),
     }
 }
 
-/// Welcome considers the key ready when there's enough characters in the
-/// buffer to plausibly be a Gemini key (env-provided keys land here too —
-/// they're seeded into the buffer at start).
-fn welcome_key_ready(app: &App) -> bool {
-    app.welcome().key.chars().count() >= 20
-}
-
-/// Build the persist side effect emitted on final Welcome submit. The API
-/// key is only handed over when the user pasted it (or restored from a prior
-/// session); env-sourced keys are intentionally left untouched so they stay
-/// the responsibility of the shell.
-fn welcome_persist(app: &App) -> Side {
-    let api_key = match app.welcome().source {
-        KeySource::Pasted | KeySource::Restored => Some(app.welcome().key.clone()),
-        KeySource::Env | KeySource::Empty => None,
-    };
-    Side::PersistWelcome {
-        language: app.pair().support().to_string(),
-        api_key,
+/// Activate the focused control on the key step. Focus on `load from env`
+/// pulls the key from the environment; otherwise an empty buffer just nudges
+/// the user and a filled one is sent off for an API validity check.
+fn welcome_submit(app: App) -> (App, Side) {
+    if app.welcome().focus == WelcomeFocus::LoadEnv {
+        return (app, Side::LoadEnvKey);
     }
+    let key = app.welcome().key.trim().to_string();
+    if key.is_empty() {
+        return (app.welcome_notice("enter a key first"), Side::None);
+    }
+    (app, Side::ValidateKey(key))
 }
 
 fn promote(app: &App, event: AppEvent) -> AppEvent {
@@ -255,16 +237,31 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         return event;
     }
     match (app.screen(), &event) {
-        (Screen::Welcome, AppEvent::NavPrev) => AppEvent::WelcomePrevLanguage,
-        (Screen::Welcome, AppEvent::NavNext) => AppEvent::WelcomeNextLanguage,
-        (Screen::Welcome, AppEvent::CursorLeft) => AppEvent::WelcomePrevLanguage,
-        (Screen::Welcome, AppEvent::CursorRight) => AppEvent::WelcomeNextLanguage,
+        (Screen::Welcome, AppEvent::NavPrev)
+            if app.welcome().stage == WelcomeStage::PickLanguage =>
+        {
+            AppEvent::WelcomePrevLanguage
+        }
+        (Screen::Welcome, AppEvent::NavNext)
+            if app.welcome().stage == WelcomeStage::PickLanguage =>
+        {
+            AppEvent::WelcomeNextLanguage
+        }
+        (Screen::Welcome, AppEvent::CursorLeft)
+            if app.welcome().stage == WelcomeStage::PickLanguage =>
+        {
+            AppEvent::WelcomePrevLanguage
+        }
+        (Screen::Welcome, AppEvent::CursorRight)
+            if app.welcome().stage == WelcomeStage::PickLanguage =>
+        {
+            AppEvent::WelcomeNextLanguage
+        }
         (Screen::Welcome, AppEvent::OpenLanguagePicker)
             if app.welcome().stage == WelcomeStage::PickLanguage =>
         {
             AppEvent::WelcomeNextLanguage
         }
-        (Screen::Welcome, AppEvent::KeyChar('?')) => AppEvent::WelcomeOpenKeyHelp,
         (Screen::WhatIUnderstood, AppEvent::KeyChar('r'))
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
         (Screen::WhatIUnderstood, AppEvent::KeyChar('t'))
@@ -355,4 +352,115 @@ fn next_support(current: &str, direction: i32) -> String {
     }
     let next = (position + direction).rem_euclid(codes.len() as i32) as usize;
     String::from(codes[next])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::LanguagePair;
+    use crate::tui::screen::{KeySource, WelcomeFocus};
+
+    fn enter_key(env_available: bool) -> App {
+        App::new(LanguagePair::new("en", "ru")).opening_welcome_at(
+            WelcomeStage::EnterKey,
+            KeySource::Empty,
+            "",
+            env_available,
+        )
+    }
+
+    #[test]
+    fn confirming_the_language_persists_it_before_the_key_step() {
+        let app =
+            App::new(LanguagePair::new("en", "ru")).opening_welcome(KeySource::Empty, "", false);
+        let (next, side) = transit(app, AppEvent::KeyEnter);
+        assert_eq!(
+            (next.welcome().stage, side),
+            (
+                WelcomeStage::EnterKey,
+                Side::PersistMyLanguage(String::from("ru")),
+            ),
+            "confirming the language must advance to the key step and persist that choice"
+        );
+    }
+
+    #[test]
+    fn submit_with_a_key_asks_for_validation() {
+        let app = enter_key(false).welcome_paste_key("123456789012345678901234567890");
+        let (_next, side) = transit(app, AppEvent::Submit);
+        assert_eq!(
+            side,
+            Side::ValidateKey(String::from("123456789012345678901234567890")),
+            "submitting a filled key must request a live validity check"
+        );
+    }
+
+    #[test]
+    fn submit_without_a_key_nudges_instead_of_validating() {
+        let (next, side) = transit(enter_key(false), AppEvent::Submit);
+        assert_eq!(
+            (side, next.welcome().notice.clone()),
+            (Side::None, Some(String::from("enter a key first"))),
+            "submitting an empty key must nudge the user, not call the API"
+        );
+    }
+
+    #[test]
+    fn the_env_action_joins_focus_only_when_env_has_a_key() {
+        let with_env = transit(enter_key(true), AppEvent::CursorRight).0;
+        let without_env = transit(enter_key(false), AppEvent::CursorRight).0;
+        assert_eq!(
+            (with_env.welcome().focus, without_env.welcome().focus),
+            (WelcomeFocus::LoadEnv, WelcomeFocus::Submit),
+            "← → reaches load-from-env only when env offers a key; otherwise focus stays on submit"
+        );
+    }
+
+    #[test]
+    fn submit_while_the_env_action_is_focused_loads_from_env() {
+        let app = transit(
+            enter_key(true),
+            AppEvent::WelcomeFocusTo(WelcomeFocus::LoadEnv),
+        )
+        .0;
+        let (_next, side) = transit(app, AppEvent::Submit);
+        assert_eq!(
+            side,
+            Side::LoadEnvKey,
+            "submit on the focused env action must load the key from env, not validate"
+        );
+    }
+
+    #[test]
+    fn horizontal_arrows_move_focus_without_touching_language() {
+        let before = enter_key(true);
+        let support_before = before.pair().support().to_string();
+        let after = transit(before, AppEvent::CursorRight).0;
+        assert_eq!(
+            (after.pair().support().to_string(), after.welcome().focus),
+            (support_before, WelcomeFocus::LoadEnv),
+            "← → must move control focus and leave the language untouched"
+        );
+    }
+
+    #[test]
+    fn vertical_arrows_on_the_key_step_do_nothing() {
+        let down = transit(enter_key(true), AppEvent::NavNext).0;
+        let up = transit(enter_key(true), AppEvent::NavPrev).0;
+        assert_eq!(
+            (down.welcome().focus, up.welcome().focus),
+            (WelcomeFocus::Submit, WelcomeFocus::Submit),
+            "↑↓ must not move focus on the key step — movement is horizontal only"
+        );
+    }
+
+    #[test]
+    fn typing_on_the_key_step_keeps_the_button_focus() {
+        let app = transit(enter_key(false), AppEvent::KeyChar('A')).0;
+        assert_eq!(
+            (app.welcome().key.clone(), app.welcome().focus),
+            (String::from("A"), WelcomeFocus::Submit),
+            "typing fills the always-editable field and leaves focus on the button"
+        );
+    }
 }

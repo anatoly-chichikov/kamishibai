@@ -1,4 +1,4 @@
-use super::screen::ModalKind;
+use super::screen::{ModalKind, WelcomeFocus};
 
 /// Identifies which text editor currently owns keystrokes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -70,8 +70,10 @@ pub enum AppEvent {
     WelcomeNextLanguage,
     /// Welcome: a clipboard paste landed on the API key input.
     WelcomePasteKey(String),
-    /// Welcome: user pressed `?` to be taken to the key URL.
-    WelcomeOpenKeyHelp,
+    /// Welcome: user asked to load `GEMINI_API_KEY` from the environment.
+    WelcomeLoadEnvKey,
+    /// Welcome key step: move focus to a specific control (mouse click).
+    WelcomeFocusTo(WelcomeFocus),
 }
 
 impl AppEvent {

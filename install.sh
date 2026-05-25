@@ -59,7 +59,6 @@ target() {
       printf '%s|%s|%s\n' "$cpu-apple-darwin" "$archive_ext" "$binary"
       ;;
     Linux)
-      [ "$cpu" = "x86_64" ] || fail "linux arm64 release asset is not available yet"
       archive_ext="tar.gz"
       binary="kamishibai"
       printf '%s|%s|%s\n' "$cpu-unknown-linux-gnu" "$archive_ext" "$binary"

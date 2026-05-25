@@ -1,11 +1,15 @@
 //! First-run Welcome screen.
 //!
-//! Mirrors `kamishibai-simple/project/step-welcome.jsx`. Two stages walked in
-//! sequence: pick the user's language, then paste a Gemini API key. The
-//! status line under the key reflects where the key came from (env, prior
-//! session, fresh paste, or nothing yet).
+//! Two stages walked in sequence: pick the user's language, then enter a Gemini
+//! API key. The key step is a small focusable form — the masked key input plus
+//! a `submit` chip and, when `GEMINI_API_KEY` is present, a `load from env`
+//! chip. Focus moves with the arrow keys and the focused control is drawn with
+//! the same inverted block as the active language chip. `submit` hands the key
+//! to the shell for a live validity check; the result lands back as a notice
+//! beside the buttons (outside the input).
 
 use std::borrow::Cow;
+use std::rc::Rc;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -17,13 +21,20 @@ use super::ScreenView;
 use crate::languages::catalog;
 use crate::tui::app::App;
 use crate::tui::palette;
-use crate::tui::screen::{KeySource, WelcomeStage};
+use crate::tui::screen::{WelcomeFocus, WelcomeStage};
 
 const INTRO: &str = "kamishibai turns a list of words you want to learn into an anki deck plus a printable pdf. for each word it writes a natural example sentence, illustrates the scene as a manga panel, and reads it aloud in a natural, native-speaker voice.";
-const KEY_URL: &str = "aistudio.google.com/apikey";
-const VALID_KEY_LENGTH: usize = 20;
 const HEADLINE: &str = "kamishibai";
 const HINT: &str = "set up two things";
+const SUBMIT_LABEL: &str = "submit";
+const LOAD_ENV_LABEL: &str = "load from env";
+/// Gap between the key field and the notice printed to its right.
+const TRAILING_GAP: u16 = 3;
+/// Column where the key value, helper line, and button row all start:
+/// `"02  "` (4) + the 16-wide label + the 2-cell focus-caret gutter.
+const FIELD_INDENT: u16 = 4 + 16 + 2;
+/// Fixed width of the underlined key input field, matching the mask cap.
+const KEY_FIELD_WIDTH: u16 = 39;
 
 /// `ScreenView` handle for the first-run Welcome screen. Skips the language
 /// chip — the language pair is not yet locked in at this point.
@@ -47,25 +58,58 @@ impl ScreenView for Welcome {
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
-        let body_rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),
-                Constraint::Length(1),
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Length(1),
-                Constraint::Length(2),
-                Constraint::Length(1),
-                Constraint::Min(0),
-            ])
-            .split(area);
-        frame.render_widget(intro(area.width), body_rows[0]);
-        frame.render_widget(language_row(app), body_rows[2]);
-        frame.render_widget(api_row(app), body_rows[3]);
-        frame.render_widget(status_row(app), body_rows[4]);
-        frame.render_widget(help_row(app), body_rows[5]);
+        let rows = body_rows(area);
+        frame.render_widget(intro(area.width), rows[0]);
+        frame.render_widget(language_row(app), rows[2]);
+        let (input_line, notice_line) = input_lines(app, rows[4].width);
+        frame.render_widget(input_line, rows[4]);
+        frame.render_widget(key_underline_row(app), rows[5]);
+        frame.render_widget(notice_line, rows[6]);
+        frame.render_widget(buttons_line(app), rows[7]);
     }
+}
+
+/// Return which key-step control one terminal cell lands on, if any. Drives
+/// both the hand-pointer policy and click dispatch in the shell.
+pub fn control_at(app: &App, area: Rect, x: u16, y: u16) -> Option<WelcomeFocus> {
+    if app.welcome().stage != WelcomeStage::EnterKey {
+        return None;
+    }
+    let frame = super::common::frame_rects(area);
+    let rows = body_rows(frame.body);
+    let base = frame.body.x;
+    if y == rows[7].y {
+        let submit_start = base + FIELD_INDENT;
+        let submit_end = submit_start + chip_width(SUBMIT_LABEL);
+        if x >= submit_start && x < submit_end {
+            return Some(WelcomeFocus::Submit);
+        }
+        if app.welcome().env_available {
+            let env_start = submit_end + 3;
+            let env_end = env_start + chip_width(LOAD_ENV_LABEL);
+            if x >= env_start && x < env_end {
+                return Some(WelcomeFocus::LoadEnv);
+            }
+        }
+    }
+    None
+}
+
+fn body_rows(area: Rect) -> Rc<[Rect]> {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // intro
+            Constraint::Length(1), // blank
+            Constraint::Length(1), // 01 · language
+            Constraint::Length(1), // blank
+            Constraint::Length(1), // 02 · key field
+            Constraint::Length(1), // input underline
+            Constraint::Length(1), // blank · notice wraps here on a narrow terminal
+            Constraint::Length(1), // buttons
+            Constraint::Min(0),
+        ])
+        .split(area)
 }
 
 fn intro(width: u16) -> Paragraph<'static> {
@@ -110,7 +154,7 @@ fn language_row(app: &App) -> Paragraph<'static> {
         super::common::pad_right("your language", 16),
         label_style,
     ));
-    spans.push(Span::raw(" "));
+    spans.push(chevron(active));
     let current = app.pair().support().to_ascii_lowercase();
     for code in catalog().codes() {
         let label = code.to_ascii_uppercase();
@@ -126,19 +170,18 @@ fn language_row(app: &App) -> Paragraph<'static> {
     Paragraph::new(Line::from(spans)).style(palette::base())
 }
 
-fn api_row(app: &App) -> Paragraph<'static> {
-    let stage = app.welcome().stage;
-    let active = stage == WelcomeStage::EnterKey;
+/// Build the `02 gemini api key` row spans and the visual width of its value.
+fn input_row(app: &App) -> (Vec<Span<'static>>, u16) {
+    let welcome = app.welcome();
+    let active = welcome.stage == WelcomeStage::EnterKey;
     let mut spans: Vec<Span<'static>> = Vec::new();
     let num_style = if active {
         palette::base()
-    } else if stage == WelcomeStage::PickLanguage {
-        palette::dim2()
     } else {
-        palette::dim()
+        palette::dim2()
     };
     spans.push(Span::styled("02  ", num_style));
-    let label_style = if active || !app.welcome().key.is_empty() {
+    let label_style = if active || !welcome.key.is_empty() {
         palette::base()
     } else {
         palette::dim()
@@ -147,135 +190,163 @@ fn api_row(app: &App) -> Paragraph<'static> {
         super::common::pad_right("gemini api key", 16),
         label_style,
     ));
-    spans.push(Span::raw(" "));
-    if !app.welcome().key.is_empty() {
-        let masked = "•".repeat(app.welcome().key.chars().count().min(39));
-        spans.push(Span::styled(masked, palette::base()));
-    } else if active {
-        spans.push(Span::styled("Cmd+V to paste", palette::dim2()));
-    } else {
-        spans.push(Span::styled("after step 01", palette::dim2()));
+    spans.push(chevron(active));
+    if !active {
+        if !welcome.key.is_empty() {
+            spans.push(Span::styled(masked(welcome.key.as_str()), palette::dim()));
+        }
+        return (spans, 0);
     }
-    Paragraph::new(Line::from(spans)).style(palette::base())
-}
-
-fn status_row(app: &App) -> Paragraph<'static> {
-    let stage = app.welcome().stage;
-    if stage != WelcomeStage::EnterKey {
-        return Paragraph::new("").style(palette::base());
-    }
-    let valid = app.welcome().key.chars().count() >= VALID_KEY_LENGTH;
-    let indent = " ".repeat(4 + 16 + 1);
-    let badge = |label: &str| -> Span<'static> {
-        Span::styled(
-            String::from(label),
-            palette::base().add_modifier(Modifier::BOLD),
+    if welcome.key.is_empty() {
+        let placeholder = "paste your key [Cmd+V]";
+        spans.push(Span::styled(String::from(placeholder), palette::dim2()));
+        (
+            spans,
+            u16::try_from(placeholder.chars().count()).unwrap_or(u16::MAX),
         )
-    };
-    let dim_badge = Span::styled("·", palette::dim2());
-    let mut spans: Vec<Span<'static>> = vec![Span::raw(indent)];
-    match (app.welcome().source, valid) {
-        (KeySource::Env, true) => {
-            spans.push(badge("env"));
-            spans.push(Span::styled(
-                "  found GEMINI_API_KEY · using it · Backspace to override",
-                palette::base(),
-            ));
-        }
-        (KeySource::Restored, true) => {
-            spans.push(badge("saved"));
-            spans.push(Span::styled(
-                "  using your key from last time · Backspace to override",
-                palette::base(),
-            ));
-        }
-        (KeySource::Pasted, true) => {
-            spans.push(badge("ok"));
-            spans.push(Span::styled(
-                format!(
-                    "  {} chars · stays on this device",
-                    app.welcome().key.chars().count()
-                ),
-                palette::base(),
-            ));
-        }
-        (_, _) if !app.welcome().key.is_empty() => {
-            spans.push(badge("…"));
-            spans.push(Span::styled(
-                "  short key — gemini keys are usually 39+ chars",
-                palette::dim(),
-            ));
-        }
-        _ => {
-            spans.push(dim_badge);
-            spans.push(Span::styled(
-                "  no key found in env. paste one with Cmd+V or press ? to get one.",
-                palette::dim(),
-            ));
-        }
+    } else {
+        let value = masked(welcome.key.as_str());
+        let width = u16::try_from(value.chars().count()).unwrap_or(u16::MAX);
+        spans.push(Span::styled(value, palette::base()));
+        (spans, width)
     }
+}
+
+/// Build the input row (02) and the row under it. The submit notice (`key
+/// invalid`, `enter a key first`, …) sits to the right of the input field, and
+/// drops to the row under the underline when the terminal is too narrow.
+fn input_lines(app: &App, width: u16) -> (Paragraph<'static>, Paragraph<'static>) {
+    let (mut spans, value_width) = input_row(app);
+    let notice = if app.welcome().stage == WelcomeStage::EnterKey {
+        app.welcome().notice.clone()
+    } else {
+        None
+    };
+    let Some(notice) = notice else {
+        return (
+            Paragraph::new(Line::from(spans)).style(palette::base()),
+            Paragraph::new("").style(palette::base()),
+        );
+    };
+    let notice_width = u16::try_from(notice.chars().count()).unwrap_or(u16::MAX);
+    let notice_span = Span::styled(notice, palette::base().add_modifier(Modifier::BOLD));
+    if FIELD_INDENT + KEY_FIELD_WIDTH + TRAILING_GAP + notice_width <= width {
+        let pad = usize::from(KEY_FIELD_WIDTH.saturating_sub(value_width) + TRAILING_GAP);
+        spans.push(Span::raw(" ".repeat(pad)));
+        spans.push(notice_span);
+        (
+            Paragraph::new(Line::from(spans)).style(palette::base()),
+            Paragraph::new("").style(palette::base()),
+        )
+    } else {
+        let below = vec![
+            Span::raw(" ".repeat(usize::from(FIELD_INDENT))),
+            notice_span,
+        ];
+        (
+            Paragraph::new(Line::from(spans)).style(palette::base()),
+            Paragraph::new(Line::from(below)).style(palette::base()),
+        )
+    }
+}
+
+/// Build the buttons row, indented to sit under the key field. Blank until the
+/// key step.
+fn buttons_line(app: &App) -> Paragraph<'static> {
+    if app.welcome().stage != WelcomeStage::EnterKey {
+        return Paragraph::new("").style(palette::base());
+    }
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ".repeat(usize::from(FIELD_INDENT)))];
+    spans.extend(button_spans(app));
     Paragraph::new(Line::from(spans)).style(palette::base())
 }
 
-fn help_row(app: &App) -> Paragraph<'static> {
-    let stage = app.welcome().stage;
-    let valid = app.welcome().key.chars().count() >= VALID_KEY_LENGTH;
-    if stage != WelcomeStage::EnterKey || valid {
+/// The submit chip plus the env loader chip when env can supply a key.
+fn button_spans(app: &App) -> Vec<Span<'static>> {
+    let welcome = app.welcome();
+    let mut spans = vec![chip(SUBMIT_LABEL, welcome.focus == WelcomeFocus::Submit)];
+    if welcome.env_available {
+        spans.push(Span::raw("   "));
+        spans.push(chip(LOAD_ENV_LABEL, welcome.focus == WelcomeFocus::LoadEnv));
+    }
+    spans
+}
+
+fn chip(label: &str, focused: bool) -> Span<'static> {
+    let text = format!(" {label} ");
+    if focused {
+        Span::styled(text, palette::invert().add_modifier(Modifier::BOLD))
+    } else {
+        Span::styled(text, palette::dim())
+    }
+}
+
+fn chip_width(label: &str) -> u16 {
+    u16::try_from(label.chars().count() + 2).unwrap_or(u16::MAX)
+}
+
+/// The 2-cell focus caret shown after a step's label: a bright `›` on the
+/// active row, blank on the inactive one, so both rows stay aligned.
+fn chevron(active: bool) -> Span<'static> {
+    if active {
+        Span::styled("› ", palette::base().add_modifier(Modifier::BOLD))
+    } else {
+        Span::styled("  ", palette::base())
+    }
+}
+
+/// Solid rule drawn on the row below the key field so it reads as a text
+/// input. Only on the key step; blank otherwise.
+fn key_underline_row(app: &App) -> Paragraph<'static> {
+    if app.welcome().stage != WelcomeStage::EnterKey {
         return Paragraph::new("").style(palette::base());
     }
-    let indent = " ".repeat(4 + 16 + 1);
-    let line = Line::from(vec![
+    let indent = " ".repeat(usize::from(FIELD_INDENT));
+    Paragraph::new(Line::from(vec![
         Span::raw(indent),
-        Span::styled("no key? get one free at ", palette::dim()),
-        Span::styled(KEY_URL, palette::link()),
-        Span::styled(
-            " — stays on this device, only sent to gemini.",
-            palette::dim(),
-        ),
-    ]);
-    Paragraph::new(line).style(palette::base())
+        Span::styled("─".repeat(usize::from(KEY_FIELD_WIDTH)), palette::dim()),
+    ]))
+    .style(palette::base())
+}
+
+fn masked(key: &str) -> String {
+    "•".repeat(key.chars().count().min(39))
 }
 
 fn footer(app: &App, width: u16) -> Paragraph<'static> {
-    let stage = app.welcome().stage;
-    let valid = app.welcome().key.chars().count() >= VALID_KEY_LENGTH;
-    let mut left: Vec<Span<'static>> = Vec::new();
-    match stage {
+    let welcome = app.welcome();
+    let counter = match welcome.stage {
+        WelcomeStage::PickLanguage => "step 1/2",
+        WelcomeStage::EnterKey => "step 2/2",
+    };
+    let left: Vec<Span<'static>> = vec![Span::styled(String::from(counter), palette::dim2())];
+    let sep = || Span::styled(String::from("   "), palette::base());
+    let mut right: Vec<Span<'static>> = Vec::new();
+    match welcome.stage {
         WelcomeStage::PickLanguage => {
-            left.extend(super::common::key_hint("← →", "pick"));
-            left.push(super::common::status_sep());
-            left.extend(super::common::key_hint("Ctrl+L", "pick"));
-            left.push(super::common::status_sep());
-            left.extend(super::common::key_hint("Enter", "next"));
+            right.extend(super::common::key_hint("← →", "language"));
+            right.push(sep());
+            right.extend(super::common::key_hint("Enter", "next"));
         }
         WelcomeStage::EnterKey => {
-            if valid {
-                left.extend(super::common::key_hint("Enter", "start"));
-                left.push(super::common::status_sep());
-                left.extend(super::common::key_hint("Esc", "back"));
-                left.push(super::common::status_sep());
-                let label = match app.welcome().source {
-                    KeySource::Env | KeySource::Restored => "override",
-                    _ => "clear",
-                };
-                left.extend(super::common::key_hint("Backspace", label));
-            } else {
-                left.extend(super::common::key_hint("Cmd+V", "paste key"));
-                left.push(super::common::status_sep());
-                left.extend(super::common::key_hint("?", "get one"));
-                left.push(super::common::status_sep());
-                left.extend(super::common::key_hint("Esc", "back"));
+            if welcome.env_available {
+                right.extend(super::common::key_hint("← →", "move"));
+                right.push(sep());
             }
+            right.extend(super::common::key_hint("Enter", "submit"));
+            right.push(sep());
+            right.extend(super::common::key_hint("Esc", "back"));
         }
     }
-    let counter = match stage {
-        WelcomeStage::PickLanguage => "step 1 of 2",
-        WelcomeStage::EnterKey => "step 2 of 2",
-    };
-    let mut right: Vec<Span<'static>> = vec![Span::styled(
-        String::from(counter),
-        palette::dim2().add_modifier(Modifier::DIM),
-    )];
-    super::common::append_quit(&mut right, app.quit_pending());
+    right.push(sep());
+    right.push(Span::styled(
+        "[Ctrl+C]",
+        palette::base().add_modifier(Modifier::BOLD),
+    ));
+    right.push(if app.quit_pending() {
+        Span::styled(" again", palette::base().add_modifier(Modifier::BOLD))
+    } else {
+        Span::styled(" quit", palette::dim())
+    });
     super::common::status_bar(left, right, width)
 }

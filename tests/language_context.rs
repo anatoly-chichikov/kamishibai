@@ -57,8 +57,11 @@ fn base() -> App {
 
 #[test]
 fn ctrl_l_on_welcome_language_step_cycles_the_language() {
-    let app = App::new(LanguagePair::new("en", "en"))
-        .opening_welcome(KeySource::Env, "123456789012345678901234567890");
+    let app = App::new(LanguagePair::new("en", "en")).opening_welcome(
+        KeySource::Env,
+        "123456789012345678901234567890",
+        true,
+    );
     let event = to_app(crossterm::event::KeyEvent::new(
         crossterm::event::KeyCode::Char('l'),
         crossterm::event::KeyModifiers::CONTROL,
@@ -83,13 +86,145 @@ fn ctrl_l_on_welcome_language_step_cycles_the_language() {
 }
 
 #[test]
-fn welcome_language_step_renders_the_ctrl_l_hint() {
-    let app = App::new(LanguagePair::new("en", "en"))
-        .opening_welcome(KeySource::Env, "123456789012345678901234567890");
+fn welcome_language_step_footer_is_clean() {
+    let app = App::new(LanguagePair::new("en", "en")).opening_welcome(
+        KeySource::Env,
+        "123456789012345678901234567890",
+        true,
+    );
+    let rendered = flat(&app);
+    assert_eq!(
+        (
+            rendered.contains("[← →] language"),
+            rendered.contains("Ctrl+L")
+        ),
+        (true, false),
+        "the language step footer must offer the arrow-key language switch and drop the redundant Ctrl+L"
+    );
+}
+
+#[test]
+fn welcome_key_step_offers_load_from_env_only_when_present() {
+    let with_env = flat(&App::new(LanguagePair::new("en", "ru")).opening_welcome_at(
+        WelcomeStage::EnterKey,
+        KeySource::Empty,
+        "",
+        true,
+    ));
+    let without_env = flat(&App::new(LanguagePair::new("en", "ru")).opening_welcome_at(
+        WelcomeStage::EnterKey,
+        KeySource::Empty,
+        "",
+        false,
+    ));
+    assert_eq!(
+        (
+            with_env.contains("load from env"),
+            without_env.contains("load from env"),
+        ),
+        (true, false),
+        "the key step must offer load-from-env only when GEMINI_API_KEY is present"
+    );
+}
+
+#[test]
+fn key_step_does_not_advertise_where_to_get_a_key() {
+    let rendered = flat(&App::new(LanguagePair::new("en", "ru")).opening_welcome_at(
+        WelcomeStage::EnterKey,
+        KeySource::Empty,
+        "",
+        false,
+    ));
+    assert_eq!(
+        (
+            rendered.contains("get a key"),
+            rendered.contains("aistudio")
+        ),
+        (false, false),
+        "the key step must not advertise where to get a key — the user sorts that out themselves"
+    );
+}
+
+#[test]
+fn loaded_and_env_key_steps_drop_helper_prose() {
+    let loaded = flat(&App::new(LanguagePair::new("en", "ru")).opening_welcome_at(
+        WelcomeStage::EnterKey,
+        KeySource::Env,
+        "123456789012345678901234567890",
+        true,
+    ));
+    let env_empty = flat(&App::new(LanguagePair::new("en", "ru")).opening_welcome_at(
+        WelcomeStage::EnterKey,
+        KeySource::Empty,
+        "",
+        true,
+    ));
+    assert_eq!(
+        (
+            loaded.contains("Enter to start"),
+            env_empty.contains("found in env"),
+        ),
+        (false, false),
+        "the key step drops helper prose once a key exists or env can supply one"
+    );
+}
+
+#[test]
+fn empty_welcome_submit_asks_for_a_key_without_leaving_setup() {
+    let app = App::new(LanguagePair::new("en", "ru")).opening_welcome_at(
+        WelcomeStage::EnterKey,
+        KeySource::Empty,
+        "",
+        false,
+    );
+    let (after, side) = transit(app, AppEvent::Submit);
+    assert_eq!(
+        (
+            after.screen(),
+            after.welcome().stage,
+            after.welcome().notice.clone(),
+            side,
+        ),
+        (
+            Screen::Welcome,
+            WelcomeStage::EnterKey,
+            Some(String::from("enter a key first")),
+            Side::None,
+        ),
+        "submitting an empty key step must stay on Welcome and tell the user how to provide a key"
+    );
+}
+
+#[test]
+fn welcome_key_is_checked_before_it_is_saved() {
+    let app = App::new(LanguagePair::new("en", "ru")).opening_welcome_at(
+        WelcomeStage::EnterKey,
+        KeySource::Env,
+        "123456789012345678901234567890",
+        true,
+    );
+    let (_after, side) = transit(app, AppEvent::Submit);
+    assert_eq!(
+        side,
+        Side::ValidateKey(String::from("123456789012345678901234567890")),
+        "submitting a key must request a live validity check before anything is persisted"
+    );
+}
+
+#[test]
+fn rejected_key_notice_renders_on_the_key_step() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .opening_welcome_at(
+            WelcomeStage::EnterKey,
+            KeySource::Pasted,
+            "123456789012345678901234567890",
+            false,
+        )
+        .welcome_notice("key invalid");
     let rendered = flat(&app);
     assert!(
-        rendered.contains("[Ctrl+L] pick"),
-        "Welcome language step must show Ctrl+L as an available language switch shortcut"
+        rendered.contains("key invalid"),
+        "a rejected key must surface its notice inline on the key step"
     );
 }
 

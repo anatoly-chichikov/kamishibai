@@ -7,8 +7,9 @@ use anyhow::{Result, anyhow, bail};
 use time::OffsetDateTime;
 use time::format_description::parse as parse_time;
 
-use super::card_workflow::{CardGeneration, DeckPublishProgress, DeckPublishing};
+use super::card_workflow::{CardGeneration, DeckPublishProgress, DeckPublishing, KeyValidation};
 use crate::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
+use crate::config::default_store;
 use crate::gemini::{GeminiClient, HttpTransport};
 use crate::generation::artifact_cache::Cache;
 use crate::generation::manga::{
@@ -35,25 +36,27 @@ type LiveIllustration =
 /// Live card generator backed by Gemini and the on-disk cache.
 #[derive(Clone)]
 pub(super) struct LiveCardGenerator {
-    client: GeminiClient<HttpTransport>,
     cache: PathBuf,
     output: PathBuf,
     catalog: LanguageCatalog,
 }
 
 impl LiveCardGenerator {
-    /// Build a live card generator from a Gemini client and on-disk locations.
-    pub(super) fn new(
-        client: GeminiClient<HttpTransport>,
-        cache: PathBuf,
-        output: PathBuf,
-    ) -> Self {
+    /// Build a live card generator from on-disk locations.
+    pub(super) fn new(cache: PathBuf, output: PathBuf) -> Self {
         Self {
-            client,
             cache,
             output,
             catalog: catalog(),
         }
+    }
+
+    fn client(&self) -> Result<GeminiClient<HttpTransport>> {
+        let saved_key = default_store(&SystemContext)
+            .ok()
+            .and_then(|store| store.read().ok())
+            .and_then(|prefs| prefs.api_key);
+        GeminiClient::from_saved(saved_key.as_deref())
     }
 
     fn meta_cache(&self) -> CardMetaCache {
@@ -65,13 +68,13 @@ impl LiveCardGenerator {
         Ok(Audio::new(
             Cache::new(item.audio_cache.as_str(), self.cache.clone()),
             render_audio_prompt(item.prompt.as_str()),
-            self.client.clone(),
+            self.client()?,
         ))
     }
 
     fn illustration_for(&self, target_lang: &str) -> Result<LiveIllustration> {
         let item = self.catalog.item(target_lang)?;
-        let client = self.client.clone();
+        let client = self.client()?;
         Ok(Illustration::new(
             Cache::new(item.image_cache.as_str(), self.cache.clone()),
             SceneComposer::new(client.clone(), item.prompt.as_str()),
@@ -108,7 +111,7 @@ impl LiveCardGenerator {
 
 impl Understanding for LiveCardGenerator {
     fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
-        CachedUnderstanding::new(self.client.clone(), self.cache.clone()).understand(raw, my)
+        CachedUnderstanding::new(self.client()?, self.cache.clone()).understand(raw, my)
     }
 }
 
@@ -119,7 +122,7 @@ impl BulkCorrection for LiveCardGenerator {
         comment: &str,
         pair: &LanguagePair,
     ) -> Result<Vec<WordCandidate>> {
-        self.client.correct_bulk(candidates, comment, pair)
+        self.client()?.correct_bulk(candidates, comment, pair)
     }
 }
 
@@ -133,7 +136,7 @@ impl CardMetaGeneration for LiveCardGenerator {
         if let Some(meta) = self.meta_cache().load(term, understanding, pair)? {
             return Ok(meta);
         }
-        self.client.generate_card_meta(term, understanding, pair)
+        self.client()?.generate_card_meta(term, understanding, pair)
     }
 }
 
@@ -144,7 +147,13 @@ impl CardCorrection for LiveCardGenerator {
         comment: &str,
         pair: &LanguagePair,
     ) -> Result<CardRevision> {
-        self.client.correct_card(draft, comment, pair)
+        self.client()?.correct_card(draft, comment, pair)
+    }
+}
+
+impl KeyValidation for LiveCardGenerator {
+    fn check_key(&self, key: &str) -> Result<()> {
+        GeminiClient::new(key, HttpTransport::new()).validate_key()
     }
 }
 

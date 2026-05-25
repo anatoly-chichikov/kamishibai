@@ -13,7 +13,7 @@ use ratatui::layout::Rect;
 use crate::languages::catalog;
 
 use super::app::App;
-use super::links::{language_chip_at, link_at};
+use super::links::{language_chip_at, link_at, welcome_control_at};
 use super::screen::ModalKind;
 use super::screens::modals::picker_geometry;
 
@@ -83,7 +83,9 @@ fn clickable_at(app: &App, terminal: Rect, column: u16, row: u16) -> bool {
             .map(|index| index < catalog().codes().len())
             .unwrap_or(false);
     }
-    language_chip_at(app, terminal, column, row) || link_at(app, terminal, column, row).is_some()
+    language_chip_at(app, terminal, column, row)
+        || welcome_control_at(app, terminal, column, row).is_some()
+        || link_at(app, terminal, column, row).is_some()
 }
 
 fn pointer_dialect() -> PointerDialect {
@@ -212,6 +214,67 @@ mod tests {
                 MousePointer::Arrow,
             ),
             "file-backed artifact rows must use the hand only on the visible file name and arrow outside it"
+        );
+    }
+
+    #[test]
+    fn welcome_key_step_controls_get_the_hand_pointer() {
+        let app = App::new(pair()).opening_welcome_at(
+            crate::tui::WelcomeStage::EnterKey,
+            crate::tui::KeySource::Empty,
+            "",
+            true,
+        );
+        assert_eq!(
+            (
+                mouse_pointer_at(&app, terminal(), 28, 12),
+                mouse_pointer_at(&app, terminal(), 42, 12),
+                mouse_pointer_at(&app, terminal(), 10, 9),
+                mouse_pointer_at(&app, terminal(), 8, 12),
+                mouse_pointer_at(&app, terminal(), 8, 20),
+            ),
+            (
+                MousePointer::Hand,
+                MousePointer::Hand,
+                MousePointer::Arrow,
+                MousePointer::Arrow,
+                MousePointer::Arrow,
+            ),
+            "Welcome key step must show the hand over both chips and the arrow over the field row and empty space"
+        );
+    }
+
+    #[test]
+    fn welcome_key_step_rules_the_field_and_marks_the_active_step() {
+        let app = App::new(pair()).opening_welcome_at(
+            crate::tui::WelcomeStage::EnterKey,
+            crate::tui::KeySource::Empty,
+            "",
+            true,
+        );
+        let backend = TestBackend::new(120, 50);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        terminal.draw(|frame| draw(frame, &app)).expect("draw");
+        let buffer = terminal.backend().buffer();
+        let mut rule_in_row = 0usize;
+        let mut caret = false;
+        for row in 0..buffer.area.height {
+            let mut rule = 0usize;
+            for column in 0..buffer.area.width {
+                let symbol = buffer[(column, row)].symbol();
+                if symbol == "─" {
+                    rule += 1;
+                }
+                if symbol == "›" {
+                    caret = true;
+                }
+            }
+            rule_in_row = rule_in_row.max(rule);
+        }
+        assert_eq!(
+            (rule_in_row >= 20, caret),
+            (true, true),
+            "the key step must draw the solid input underline and mark the active step with a caret"
         );
     }
 

@@ -58,6 +58,15 @@ impl Preferences {
         }
     }
 
+    /// Return a preference bundle with the API key cleared.
+    pub fn without_api_key(&self) -> Self {
+        Self {
+            my_language: self.my_language.clone(),
+            my_language_confirmed: self.my_language_confirmed,
+            api_key: None,
+        }
+    }
+
     /// Return whether startup still needs an explicit language confirmation.
     #[must_use]
     pub fn requires_language_choice(&self) -> bool {

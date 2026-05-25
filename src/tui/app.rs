@@ -4,7 +4,7 @@ use crate::session::{
     Artifact, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, WordCandidate,
 };
 
-use super::screen::{KeySource, ModalKind, Screen, WelcomeStage};
+use super::screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
 
 /// The immutable shell state carried between transitions.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,12 +25,16 @@ pub struct App {
     picker_cursor: usize,
 }
 
-/// First-run welcome state: stage, pasted key, source of that key.
+/// First-run welcome state: stage, typed key, source of that key, focused
+/// control on the key step, and whether `GEMINI_API_KEY` is offered from env.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WelcomeView {
     pub stage: WelcomeStage,
     pub key: String,
     pub source: KeySource,
+    pub notice: Option<String>,
+    pub focus: WelcomeFocus,
+    pub env_available: bool,
 }
 
 impl Default for WelcomeView {
@@ -39,6 +43,9 @@ impl Default for WelcomeView {
             stage: WelcomeStage::PickLanguage,
             key: String::new(),
             source: KeySource::Empty,
+            notice: None,
+            focus: WelcomeFocus::Submit,
+            env_available: false,
         }
     }
 }
@@ -49,6 +56,8 @@ pub enum BusyKind {
     Understanding,
     BulkCorrection,
     CardCorrection,
+    /// Welcome key step: probing Gemini to confirm the entered key is accepted.
+    CheckingKey,
     /// Phase 1 of `publish`: building the Anki .apkg container.
     PublishingDeck,
     /// Phase 2 of `publish`: rendering the printable PDF.
@@ -62,6 +71,7 @@ impl BusyKind {
             BusyKind::Understanding => "understanding your words",
             BusyKind::BulkCorrection => "applying your changes",
             BusyKind::CardCorrection => "updating this card",
+            BusyKind::CheckingKey => "checking your key",
             BusyKind::PublishingDeck => "building your anki deck",
             BusyKind::PublishingReport => "rendering your printable pdf",
         }
@@ -176,25 +186,37 @@ impl App {
     }
 
     /// Return the app rerouted onto the first-run Welcome screen starting
-    /// at the language-pick stage.
-    pub fn opening_welcome(self, source: KeySource, key: impl Into<String>) -> Self {
-        self.opening_welcome_at(WelcomeStage::PickLanguage, source, key)
+    /// at the language-pick stage. `env_available` tells the key step whether
+    /// to offer the `load from env` action.
+    pub fn opening_welcome(
+        self,
+        source: KeySource,
+        key: impl Into<String>,
+        env_available: bool,
+    ) -> Self {
+        self.opening_welcome_at(WelcomeStage::PickLanguage, source, key, env_available)
     }
 
     /// Return the app rerouted onto the first-run Welcome screen with an
     /// explicit starting stage. Used by `start()` to skip past whichever step
-    /// is already satisfied by the loaded preferences and environment.
+    /// is already satisfied by the loaded preferences. `env_available` reflects
+    /// whether `GEMINI_API_KEY` is present — it is never loaded into the buffer
+    /// implicitly, only offered as the `load from env` action.
     pub fn opening_welcome_at(
         mut self,
         stage: WelcomeStage,
         source: KeySource,
         key: impl Into<String>,
+        env_available: bool,
     ) -> Self {
         self.screen = Screen::Welcome;
         self.welcome = WelcomeView {
             stage,
             key: key.into(),
             source,
+            notice: None,
+            focus: WelcomeFocus::Submit,
+            env_available,
         };
         self
     }
@@ -207,12 +229,15 @@ impl App {
     /// Return the app advanced from picking language to entering a key.
     pub fn welcome_advance(mut self) -> Self {
         self.welcome.stage = WelcomeStage::EnterKey;
+        self.welcome.notice = None;
+        self.welcome.focus = WelcomeFocus::Submit;
         self
     }
 
     /// Return the app stepped back from entering the key to picking the language.
     pub fn welcome_step_back(mut self) -> Self {
         self.welcome.stage = WelcomeStage::PickLanguage;
+        self.welcome.notice = None;
         self
     }
 
@@ -226,6 +251,29 @@ impl App {
         } else {
             KeySource::Pasted
         };
+        self.welcome.notice = None;
+        self
+    }
+
+    /// Return the app with an API key explicitly loaded from the environment.
+    pub fn welcome_env_key(mut self, key: impl Into<String>) -> Self {
+        let key: String = key.into();
+        let trimmed = key.trim().to_string();
+        self.welcome.key = trimmed.clone();
+        self.welcome.source = if trimmed.is_empty() {
+            KeySource::Empty
+        } else {
+            KeySource::Env
+        };
+        self.welcome.notice = None;
+        self.welcome.focus = WelcomeFocus::Submit;
+        self
+    }
+
+    /// Return the app with a setup notice shown on the Welcome screen — used for
+    /// the inline `key invalid` / `enter a key first` / env messages.
+    pub fn welcome_notice(mut self, message: impl Into<String>) -> Self {
+        self.welcome.notice = Some(message.into());
         self
     }
 
@@ -233,6 +281,25 @@ impl App {
     pub fn welcome_clear_key(mut self) -> Self {
         self.welcome.key = String::new();
         self.welcome.source = KeySource::Empty;
+        self.welcome.notice = None;
+        self
+    }
+
+    /// Return the app with welcome focus moved to the next control in the cycle.
+    pub fn welcome_focus_next(mut self) -> Self {
+        self.welcome.focus = step_focus(self.welcome.focus, self.welcome.env_available, 1);
+        self
+    }
+
+    /// Return the app with welcome focus moved to the previous control.
+    pub fn welcome_focus_prev(mut self) -> Self {
+        self.welcome.focus = step_focus(self.welcome.focus, self.welcome.env_available, -1);
+        self
+    }
+
+    /// Return the app with welcome focus set to a specific control (mouse click).
+    pub fn welcome_focus(mut self, focus: WelcomeFocus) -> Self {
+        self.welcome.focus = focus;
         self
     }
 
@@ -930,6 +997,17 @@ fn line_end(text: &str, start: usize) -> usize {
         }
     }
     text.len()
+}
+
+fn step_focus(current: WelcomeFocus, env_available: bool, direction: i32) -> WelcomeFocus {
+    let order: &[WelcomeFocus] = if env_available {
+        &[WelcomeFocus::Submit, WelcomeFocus::LoadEnv]
+    } else {
+        &[WelcomeFocus::Submit]
+    };
+    let position = order.iter().position(|item| *item == current).unwrap_or(0) as i32;
+    let next = (position + direction).rem_euclid(order.len() as i32) as usize;
+    order[next]
 }
 
 fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {

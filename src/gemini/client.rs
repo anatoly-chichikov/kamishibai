@@ -116,6 +116,19 @@ pub struct GeminiClient<T> {
 }
 
 impl GeminiClient<HttpTransport> {
+    /// Build the live Gemini client from a saved key.
+    pub fn from_saved(saved: Option<&str>) -> Result<Self> {
+        let key = saved
+            .filter(|value| !value.is_empty())
+            .map(String::from)
+            .ok_or_else(|| {
+                anyhow!(
+                    "no Gemini API key found in saved preferences; open Welcome and paste one or load GEMINI_API_KEY"
+                )
+            })?;
+        Ok(Self::new(key, HttpTransport::new()))
+    }
+
     /// Build the live Gemini client from `GEMINI_API_KEY`, falling back to a
     /// saved key. The env value wins when both are present so a shell-set key
     /// always overrides whatever was last persisted through the Welcome
@@ -129,7 +142,7 @@ impl GeminiClient<HttpTransport> {
             .ok_or_else(|| {
                 anyhow!(
                     "no Gemini API key found in GEMINI_API_KEY or saved preferences; \
-                     run kamishibai once to set one up"
+                     set GEMINI_API_KEY or start the TUI without WORDS_JSON and paste one on Welcome"
                 )
             })?;
         Ok(Self::new(key, HttpTransport::new()))
@@ -177,6 +190,24 @@ where
     /// through the typed `understand` / `generate_card_meta` paths.
     pub fn complete(&self, model: &str, prompt: String) -> Result<String> {
         self.text(model, prompt)
+    }
+
+    /// Probe the API with one tiny request to confirm the key is accepted.
+    ///
+    /// Any `2xx` counts as a valid key — the body is not parsed, so a thin or
+    /// unusual completion still passes. A non-`2xx` is mapped through
+    /// `api_error`, so the caller can tell a rejected key (`rejects_key`) from a
+    /// transport or quota failure and message accordingly.
+    pub fn validate_key(&self) -> Result<()> {
+        let url = format!("{BASE_URL}/{TEXT_MODEL}:generateContent");
+        let body = serde_json::to_string(&Request::text(String::from("ping"), None, None))?;
+        let response = self
+            .transport
+            .post(url.as_str(), self.key.as_str(), body.as_str())?;
+        if (200..300).contains(&response.status) {
+            return Ok(());
+        }
+        Err(api_error(response.body.as_str()))
     }
 
     /// Resolve raw user input into reviewed rows using the Flash text model.
