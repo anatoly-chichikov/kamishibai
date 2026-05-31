@@ -55,12 +55,8 @@ kamishibai path/to/words.json
 
 ## Languages
 
-Ten languages, learnable in any direction:
+Ten languages:
 
-`en` English · `zh` Chinese · `es` Spanish · `ja` Japanese · `fr` French ·
-`de` German · `ru` Russian · `it` Italian · `pt` Portuguese · `el` Greek
+`en` English · `zh` Chinese · `es` Spanish · `ja` Japanese · `fr` French · `de` German · `ru` Russian · `it` Italian · `pt` Portuguese · `el` Greek
 
-Pick one as your **native** side — it sets the card labels — and one as the **target**
-you're learning, which names the deck and gets the audio and illustration. Any of the
-ten on either side. All ten have native-speaker voice, so every card gets real audio,
-guaranteed.
+You pick your own language once — that's what the card labels are in. The language you're learning is detected from the words you type, so it changes from batch to batch: paste French words, you get a French deck; Japanese words, a Japanese one. All ten work either way, each with native-speaker voice.
