@@ -70,6 +70,7 @@ pub(super) struct Shell<P> {
     started: Option<Instant>,
     quit_armed_at: Option<Instant>,
     generator: P,
+    store: PreferenceStore,
 }
 
 impl Shell<LiveCardGenerator> {
@@ -87,6 +88,7 @@ impl Shell<LiveCardGenerator> {
             started: None,
             quit_armed_at: None,
             generator: LiveCardGenerator::new(cache, output),
+            store: default_store(&SystemContext)?,
         })
     }
 
@@ -413,7 +415,7 @@ where
                         .app
                         .clone()
                         .confirmed_target(understood.guess().code())
-                        .understood(understood.candidates().to_vec());
+                        .understood_preserving_senses(understood.candidates().to_vec());
                 }
                 Err(error) => {
                     if rejects_key(&error) {
@@ -428,16 +430,12 @@ where
                 }
             },
             TextOutcome::BulkCorrection(result) => match result {
-                Ok(updated) => {
-                    let Some(refined) = updated.into_iter().next() else {
-                        return;
-                    };
-                    let mut candidates = self.app.candidates().to_vec();
-                    let selected = self.app.selected();
-                    if selected < candidates.len() {
-                        candidates[selected] = refined;
-                        self.app = self.app.clone().understood(candidates);
-                    }
+                Ok(update) => {
+                    let (senses, message) = update.into_parts();
+                    self.app = self
+                        .app
+                        .clone()
+                        .senses_appended_to_selected(senses, message);
                 }
                 Err(error) => {
                     if rejects_key(&error) {
@@ -471,7 +469,7 @@ where
                 Ok(()) => {
                     let language = self.app.pair().support().to_string();
                     let key = self.app.welcome().key.clone();
-                    persist_preferences(move |prefs| prefs.adopt(language).with_api_key(key));
+                    self.persist_preferences(move |prefs| prefs.adopt(language).with_api_key(key));
                     self.app = self.app.clone().with_screen(Screen::YourWords);
                 }
                 Err(error) => {
@@ -516,10 +514,19 @@ where
                 let generator = self.generator.clone();
                 self.start_text(BusyKind::BulkCorrection, move || {
                     TextOutcome::BulkCorrection(generator.correct_bulk(
-                        std::slice::from_ref(&focused),
+                        &focused,
                         comment.as_str(),
                         &pair,
                     ))
+                })?;
+            }
+            Side::PersistMyLanguageAndRunUnderstanding(code) => {
+                self.persist_preferences(|prefs| prefs.adopt(code));
+                let raw = RawInputBatch::new(self.app.blob());
+                let support = self.app.pair().support().to_string();
+                let generator = self.generator.clone();
+                self.start_text(BusyKind::Understanding, move || {
+                    TextOutcome::Understanding(generator.understand(&raw, support.as_str()))
                 })?;
             }
             Side::RunCardCorrection(comment) => {
@@ -550,7 +557,7 @@ where
                 self.start_publish()?;
             }
             Side::PersistMyLanguage(code) => {
-                persist_preferences(|prefs| prefs.adopt(code));
+                self.persist_preferences(|prefs| prefs.adopt(code));
             }
             Side::ValidateKey(key) => {
                 let generator = self.generator.clone();
@@ -580,8 +587,15 @@ where
         };
     }
 
+    /// Persist a preference update to this shell's own store. Tests inject a
+    /// throwaway store, so the suite never mutates the real user preferences.
+    fn persist_preferences(&self, update: impl FnOnce(Preferences) -> Preferences) {
+        let prefs = update(self.store.read().unwrap_or_default());
+        let _ = self.store.write(&prefs);
+    }
+
     fn recover_key_rejection(&mut self) {
-        clear_saved_key();
+        clear_saved_key_in(&self.store);
         self.engine = None;
         self.started = None;
         let env_available = super::env_has_gemini_key();
@@ -741,12 +755,14 @@ fn drafts_from(app: &App) -> Vec<CardDraft> {
     app.candidates()
         .iter()
         .filter(|candidate| candidate.ok())
-        .map(|candidate| {
-            CardDraft::new(
-                candidate.term(),
-                candidate.understanding(),
-                app.pair().clone(),
-            )
+        .flat_map(|candidate| {
+            candidate
+                .selected_senses()
+                .iter()
+                .filter_map(|index| candidate.senses().get(*index))
+                .map(|sense| {
+                    CardDraft::new(candidate.term(), sense.understanding(), app.pair().clone())
+                })
         })
         .collect()
 }
@@ -760,22 +776,9 @@ fn artifact_rejects_key(outcome: &ArtifactOutcome) -> bool {
     }
 }
 
-fn clear_saved_key() {
-    if let Ok(store) = default_store(&SystemContext) {
-        clear_saved_key_in(&store);
-    }
-}
-
 fn clear_saved_key_in(store: &PreferenceStore) {
     let prefs = store.read().unwrap_or_default().without_api_key();
     let _ = store.write(&prefs);
-}
-
-fn persist_preferences(update: impl FnOnce(Preferences) -> Preferences) {
-    if let Ok(store) = default_store(&SystemContext) {
-        let prefs = update(store.read().unwrap_or_default());
-        let _ = store.write(&prefs);
-    }
 }
 
 #[cfg(test)]
@@ -790,8 +793,8 @@ mod tests {
     use super::*;
     use crate::session::{
         ArtifactFile, BulkCorrection, CardCorrection, CardMeta, CardMetaGeneration, CardRevision,
-        LanguagePair, RawInputBatch, ScriptDetection, TargetDetection, Understanding, Understood,
-        WordCandidate, catalog_for_detection,
+        LanguagePair, RawInputBatch, ScriptDetection, Sense, SenseCorrection, TargetDetection,
+        Understanding, Understood, WordCandidate, catalog_for_detection,
     };
     use anyhow::Result;
 
@@ -880,21 +883,16 @@ mod tests {
     impl BulkCorrection for TestCardGenerator {
         fn correct_bulk(
             &self,
-            candidates: &[WordCandidate],
+            candidate: &WordCandidate,
             comment: &str,
             _pair: &LanguagePair,
-        ) -> Result<Vec<WordCandidate>> {
+        ) -> Result<SenseCorrection> {
             self.ready()?;
-            Ok(candidates
-                .iter()
-                .map(|candidate| {
-                    WordCandidate::new(
-                        candidate.term(),
-                        format!("{} · {}", candidate.understanding(), comment),
-                        candidate.ok(),
-                    )
-                })
-                .collect())
+            Ok(SenseCorrection::adding(vec![Sense::plain(format!(
+                "{} · {}",
+                candidate.understanding(),
+                comment
+            ))]))
         }
     }
 
@@ -1020,6 +1018,9 @@ mod tests {
             started: None,
             quit_armed_at: None,
             generator,
+            store: PreferenceStore::at(
+                std::env::temp_dir().join("kamishibai-shell-test-prefs.json"),
+            ),
         }
     }
 
@@ -1147,6 +1148,41 @@ mod tests {
                 true,
             ),
             "Gemini key rejection must clear the key field, preserve typed words, and reopen Welcome on the key step"
+        );
+    }
+
+    #[test]
+    fn generation_uses_every_selected_understanding() {
+        let candidate = WordCandidate::with_selected_senses(
+            "bank",
+            vec![
+                Sense::tagged("Сущ. «банк», финансовое учреждение.", "фин."),
+                Sense::plain("Сущ. «берег» реки или водоёма."),
+                Sense::tagged("Гл. «наклонять(ся)» при повороте самолёта.", "авиац."),
+            ],
+            vec![0, 2],
+            true,
+        );
+        let mut shell = shell(
+            App::new(pair())
+                .with_screen(Screen::WhatIUnderstood)
+                .understood(vec![candidate]),
+        );
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generate must start");
+        assert_eq!(
+            (
+                shell.app.cards().len(),
+                shell.app.cards()[0].understanding(),
+                shell.app.cards()[1].understanding()
+            ),
+            (
+                2,
+                "Сущ. «банк», финансовое учреждение.",
+                "Гл. «наклонять(ся)» при повороте самолёта.",
+            ),
+            "Ctrl+G must create one card for every selected sense"
         );
     }
 

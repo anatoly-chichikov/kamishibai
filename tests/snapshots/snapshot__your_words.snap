@@ -1,6 +1,5 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 31
 expression: render(&app)
 ---
                                                                                 
@@ -14,4 +13,4 @@ expression: render(&app)
                                                                                 
                                                                                 
                                                                                 
-    step 1/3 · empty       [Cmd+V] paste · [Ctrl+L] language · [Ctrl+C] quit
+    step 1/3  empty          [Cmd+V] paste  [Ctrl+L] language  [Ctrl+C] quit

@@ -3,14 +3,14 @@ source: tests/snapshot.rs
 expression: render(&app)
 ---
                                                                                 
-     building your cards   drawing each card one by one               RU → …    
+     what i understood   quick check before i build the cards        RU → EN    
+                                                                                
+    01  bank 2/3      multiple meanings:                                        
+                         —  [фин.] Сущ. «банк», финансовое учреждение.          
+                         —  Сущ. «берег» реки или водоёма.                      
                                                                                 
                                                                                 
-    preparing cards…                                                            
                                                                                 
                                                                                 
                                                                                 
-                                                                                
-                                                                                
-                                                                                
-    step 3/3  0/0 ready  00:00     [Enter] expand  [R] change  [Ctrl+C] quit
+    step 2/3  2 cards         [Ctrl+G] generate  [Enter] pick  [Ctrl+C] quit

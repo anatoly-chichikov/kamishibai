@@ -153,58 +153,185 @@ pub fn language_chip(app: &App) -> Vec<Span<'static>> {
     ]
 }
 
-/// Render the bottom status bar — left segment, right segment, separated by a flexible gap.
-pub fn status_bar(
+/// Color weight of a footer key hint. This only paints the hint; how soon a
+/// hint is shed on a narrow bar is decided by `FooterHint::keep`, not by tier.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Tier {
+    /// The one action that advances the screen — brightest.
+    Primary,
+    /// A useful but non-advancing action — bold key, dim label.
+    Secondary,
+    /// Conventional or omnipresent keys (navigation, quit) — fully dim.
+    Ghost,
+}
+
+/// Blank gap between status-bar segments and footer hints — two spaces, no
+/// glyph. The bar carries no punctuation between items.
+const SEPARATOR: &str = "  ";
+
+/// One `[KEY] label` footer hint: its text, its color `tier`, and `keep` — how
+/// long it survives when the bar is too narrow (higher is dropped later).
+///
+/// Built through `primary` / `secondary` / `ghost`; the status-bar renderer in
+/// this module reads the fields directly to paint the hint and to pick the
+/// drop order on a cramped line.
+pub struct FooterHint {
+    key: String,
+    label: String,
+    tier: Tier,
+    keep: u8,
+}
+
+impl FooterHint {
+    /// The screen's main action — bright label; kept the longest and shed only
+    /// when even it cannot fit beside the status.
+    pub fn primary(key: &str, label: &str) -> Self {
+        Self::with(key, label, Tier::Primary, 3)
+    }
+
+    /// A secondary action — bold key, dim label, dropped before the quit hint.
+    pub fn secondary(key: &str, label: &str) -> Self {
+        Self::with(key, label, Tier::Secondary, 1)
+    }
+
+    /// A conventional or omnipresent key — fully dim, the first to be dropped.
+    pub fn ghost(key: &str, label: &str) -> Self {
+        Self::with(key, label, Tier::Ghost, 0)
+    }
+
+    fn with(key: &str, label: &str, tier: Tier, keep: u8) -> Self {
+        Self {
+            key: String::from(key),
+            label: String::from(label),
+            tier,
+            keep,
+        }
+    }
+
+    fn width(&self) -> usize {
+        self.key.chars().count() + self.label.chars().count() + 3
+    }
+
+    /// Paint the hint as `[KEY] label` spans, colored by its tier. Used by the
+    /// status bar and by modal action rows so every hint stays in lock-step.
+    pub fn spans(&self) -> Vec<Span<'static>> {
+        let (key_style, label_style) = match self.tier {
+            Tier::Primary => (
+                palette::base().add_modifier(Modifier::BOLD),
+                palette::base(),
+            ),
+            Tier::Secondary => (palette::base().add_modifier(Modifier::BOLD), palette::dim()),
+            Tier::Ghost => (palette::dim2(), palette::dim2()),
+        };
+        vec![
+            Span::styled(format!("[{}]", self.key), key_style),
+            Span::styled(format!(" {}", self.label), label_style),
+        ]
+    }
+}
+
+/// Render the bottom status bar: a left status segment and a right cluster of
+/// key hints, separated by a flexible gap.
+///
+/// Hints arrive in reading order (primary first). When the line would overflow
+/// `width`, whole hints are shed — never clipped — lowest `keep` first
+/// (navigation, then secondaries right-to-left, then the quit hint), leaving
+/// the bright primary action standing the longest. The assembled line is
+/// finally clamped so it can never exceed `width`.
+pub fn footer_bar(
     left: Vec<Span<'static>>,
-    right: Vec<Span<'static>>,
+    hints: Vec<FooterHint>,
     width: u16,
 ) -> Paragraph<'static> {
-    let left_visible: usize = left.iter().map(|span| span.content.chars().count()).sum();
-    let right_visible: usize = right.iter().map(|span| span.content.chars().count()).sum();
-    let gap = (width as usize).saturating_sub(left_visible + right_visible);
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.extend(left);
+    Paragraph::new(Line::from(footer_spans(left, hints, width))).style(palette::base())
+}
+
+fn footer_spans(
+    left: Vec<Span<'static>>,
+    mut hints: Vec<FooterHint>,
+    width: u16,
+) -> Vec<Span<'static>> {
+    let left_width: usize = left.iter().map(|span| span.content.chars().count()).sum();
+    while !hints.is_empty() && !footer_fits(left_width, &hints, width) {
+        let victim = droppable_hint(&hints);
+        hints.remove(victim);
+    }
+    let mut right: Vec<Span<'static>> = Vec::new();
+    for hint in &hints {
+        if !right.is_empty() {
+            right.push(status_sep());
+        }
+        right.extend(hint.spans());
+    }
+    let right_width: usize = right.iter().map(|span| span.content.chars().count()).sum();
+    let gap = (width as usize).saturating_sub(left_width + right_width);
+    let mut spans = left;
     spans.push(Span::styled(" ".repeat(gap), palette::base()));
     spans.extend(right);
-    Paragraph::new(Line::from(spans)).style(palette::base())
+    clamp_spans(spans, width)
 }
 
-/// Compose a `[KEY] label` pair suitable for a status bar key hint.
-pub fn key_hint(key: &str, label: &str) -> Vec<Span<'static>> {
-    vec![
-        Span::styled(
-            format!("[{key}]"),
-            palette::base().add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(format!(" {label}"), palette::dim()),
-    ]
-}
-
-/// Compose the dim · separator between status bar segments.
-pub fn status_sep() -> Span<'static> {
-    Span::styled(" · ", palette::dim2())
-}
-
-/// Append the global Ctrl+C quit hint to a status-bar segment.
-///
-/// The hint is always present so the user never has to remember the chord;
-/// the label switches from `quit` to a bold `again` once the first Ctrl+C
-/// has been received and the next press will actually exit the process.
-pub fn append_quit(segment: &mut Vec<Span<'static>>, pending: bool) {
-    if !segment.is_empty() {
-        segment.push(status_sep());
+fn footer_fits(left_width: usize, hints: &[FooterHint], width: u16) -> bool {
+    if hints.is_empty() {
+        return left_width <= width as usize;
     }
-    segment.push(Span::styled(
-        "[Ctrl+C]",
-        palette::base().add_modifier(Modifier::BOLD),
-    ));
+    left_width + SEPARATOR.chars().count() + hints_width(hints) <= width as usize
+}
+
+fn hints_width(hints: &[FooterHint]) -> usize {
+    let keys: usize = hints.iter().map(FooterHint::width).sum();
+    keys + hints.len().saturating_sub(1) * SEPARATOR.chars().count()
+}
+
+fn droppable_hint(hints: &[FooterHint]) -> usize {
+    let mut victim = 0;
+    for index in 1..hints.len() {
+        if hints[index].keep <= hints[victim].keep {
+            victim = index;
+        }
+    }
+    victim
+}
+
+/// Trim a span run so its visible width never exceeds `width`, cutting inside
+/// the overflowing span only as a last resort. Hints are dropped whole before
+/// reaching here, so this bites only when the left status alone is wider than
+/// an extremely narrow terminal.
+fn clamp_spans(spans: Vec<Span<'static>>, width: u16) -> Vec<Span<'static>> {
+    let mut budget = width as usize;
+    let mut clamped: Vec<Span<'static>> = Vec::new();
+    for span in spans {
+        let length = span.content.chars().count();
+        if length <= budget {
+            budget -= length;
+            clamped.push(span);
+            continue;
+        }
+        let head: String = span.content.chars().take(budget).collect();
+        if !head.is_empty() {
+            clamped.push(Span::styled(head, span.style));
+        }
+        break;
+    }
+    clamped
+}
+
+/// The blank gap between status-bar segments — two spaces, no glyph.
+pub fn status_sep() -> Span<'static> {
+    Span::styled(String::from(SEPARATOR), palette::base())
+}
+
+/// The global Ctrl+C quit hint — normally the rightmost item in a footer.
+///
+/// A dim `Ghost`; once the first Ctrl+C has been seen it brightens and its
+/// label switches from `quit` to `again` to signal the next press will exit.
+/// It outlives the secondary actions on a narrow line but is dropped — never
+/// clipped — before the bar would overflow.
+pub fn quit_hint(pending: bool) -> FooterHint {
     if pending {
-        segment.push(Span::styled(
-            " again",
-            palette::base().add_modifier(Modifier::BOLD),
-        ));
+        FooterHint::with("Ctrl+C", "again", Tier::Secondary, 2)
     } else {
-        segment.push(Span::styled(" quit", palette::dim()));
+        FooterHint::with("Ctrl+C", "quit", Tier::Ghost, 2)
     }
 }
 
@@ -296,4 +423,121 @@ pub fn pad_right(value: &str, width: usize) -> String {
     let gap = width.saturating_sub(value.chars().count());
     text.push_str(" ".repeat(gap).as_str());
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn joined(spans: &[Span<'static>]) -> String {
+        spans.iter().map(|span| span.content.as_ref()).collect()
+    }
+
+    fn status() -> Vec<Span<'static>> {
+        vec![Span::styled(
+            String::from("step 2/3  nothing to make"),
+            palette::dim2(),
+        )]
+    }
+
+    fn short_status() -> Vec<Span<'static>> {
+        vec![Span::styled(String::from("step 2/3"), palette::dim2())]
+    }
+
+    fn crowded_hints() -> Vec<FooterHint> {
+        vec![
+            FooterHint::primary("Ctrl+G", "generate"),
+            FooterHint::secondary("Enter", "pick"),
+            FooterHint::secondary("D", "drop"),
+            FooterHint::ghost("↑↓", "nav"),
+            quit_hint(false),
+        ]
+    }
+
+    fn measure(spans: &[Span<'static>]) -> usize {
+        spans.iter().map(|span| span.content.chars().count()).sum()
+    }
+
+    #[test]
+    fn primary_action_survives_a_narrow_footer() {
+        let line = joined(&footer_spans(status(), crowded_hints(), 72));
+        assert!(
+            line.contains("Ctrl+G"),
+            "primary generate hint must never be dropped from a narrow footer, got: {line}"
+        );
+    }
+
+    #[test]
+    fn ghost_nav_drops_before_any_secondary_when_narrow() {
+        let line = joined(&footer_spans(status(), crowded_hints(), 72));
+        assert!(
+            !line.contains("↑↓"),
+            "ghost nav must be shed before a secondary when the footer is too narrow, got: {line}"
+        );
+    }
+
+    #[test]
+    fn quit_hint_outlives_secondaries_on_a_narrow_footer() {
+        let line = joined(&footer_spans(status(), crowded_hints(), 72));
+        assert!(
+            line.contains("Ctrl+C"),
+            "the quit hint must outlive the secondary actions when the footer is tight, got: {line}"
+        );
+    }
+
+    #[test]
+    fn quit_drops_whole_rather_than_clip_on_the_narrowest_bar() {
+        let line = joined(&footer_spans(short_status(), crowded_hints(), 30));
+        assert!(
+            !line.contains("Ctrl+C"),
+            "a hint that cannot fit must be dropped whole, never clipped, got: {line}"
+        );
+    }
+
+    #[test]
+    fn the_primary_is_the_last_hint_standing() {
+        let line = joined(&footer_spans(short_status(), crowded_hints(), 30));
+        assert!(
+            line.contains("Ctrl+G"),
+            "the bright primary action must be the last hint kept on a cramped bar, got: {line}"
+        );
+    }
+
+    #[test]
+    fn even_the_primary_is_shed_when_the_status_alone_crowds_the_bar() {
+        let line = joined(&footer_spans(status(), crowded_hints(), 30));
+        assert!(
+            !line.contains("Ctrl+G"),
+            "the primary is dropped whole — never clipped — when a long status leaves no room, got: {line}"
+        );
+    }
+
+    #[test]
+    fn wide_footer_keeps_every_hint() {
+        let line = joined(&footer_spans(status(), crowded_hints(), 200));
+        assert!(
+            line.contains("↑↓"),
+            "a wide footer must not drop ghost hints it has room for, got: {line}"
+        );
+    }
+
+    #[test]
+    fn footer_never_exceeds_its_width() {
+        let within = (8u16..=120).all(|width| {
+            measure(&footer_spans(status(), crowded_hints(), width)) <= usize::from(width)
+        });
+        assert!(
+            within,
+            "the rendered status bar must never be wider than the terminal at any width"
+        );
+    }
+
+    #[test]
+    fn footer_carries_no_dot_separators() {
+        let line = joined(&footer_spans(status(), crowded_hints(), 60));
+        assert!(
+            !line.contains('·'),
+            "the status bar must separate items with blank gaps, not dots, got: {line}"
+        );
+    }
 }

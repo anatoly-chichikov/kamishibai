@@ -3,7 +3,7 @@
 //! Uses `ratatui::backend::TestBackend` + `insta` snapshot review. No real
 //! terminal, no Gemini calls, no background threads.
 
-use kamishibai::session::LanguagePair;
+use kamishibai::session::{LanguagePair, Sense, WordCandidate};
 use kamishibai::tui::{App, AppEvent, Screen, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -96,4 +96,23 @@ fn header_hint_sits_left_of_language_chip_on_every_screen() {
             "contextual hint must sit left of the language chip on {screen:?} (hint at {hint_pos}, chip at {chip_pos})"
         );
     }
+}
+
+#[test]
+fn what_i_understood_multi_meaning_snapshot_locks_the_block() {
+    let candidate = WordCandidate::with_selected_senses(
+        "bank",
+        vec![
+            Sense::tagged("Сущ. «банк», финансовое учреждение.", "фин."),
+            Sense::plain("Сущ. «берег» реки или водоёма."),
+            Sense::tagged("Гл. «наклонять(ся)» при повороте самолёта.", "авиац."),
+        ],
+        vec![0, 1],
+        true,
+    );
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_target("en")
+        .understood(vec![candidate]);
+    insta::assert_snapshot!("what_i_understood_multi_meaning", render(&app));
 }

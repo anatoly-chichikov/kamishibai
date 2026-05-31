@@ -23,29 +23,104 @@ impl RawInputBatch {
     }
 }
 
+const MAX_SENSES: usize = 6;
+
+/// One possible meaning for a reviewed word.
+///
+/// `understanding` is a single short sentence in the user's support language.
+/// `tag` is a short domain, register, region, idiom, or part-of-use marker
+/// shown only when the sense needs it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Sense {
+    understanding: String,
+    tag: Option<String>,
+}
+
+impl Sense {
+    /// Create one sense with an optional short tag.
+    pub fn new(understanding: impl Into<String>, tag: Option<String>) -> Self {
+        let tag = tag.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        Self {
+            understanding: understanding.into(),
+            tag,
+        }
+    }
+
+    /// Create one untagged sense.
+    pub fn plain(understanding: impl Into<String>) -> Self {
+        Self::new(understanding, None)
+    }
+
+    /// Create one tagged sense.
+    pub fn tagged(understanding: impl Into<String>, tag: impl Into<String>) -> Self {
+        Self::new(understanding, Some(tag.into()))
+    }
+
+    /// Return the human-language explanation for this sense.
+    pub fn understanding(&self) -> &str {
+        self.understanding.as_str()
+    }
+
+    /// Return the optional short sense tag.
+    pub fn tag(&self) -> Option<&str> {
+        self.tag.as_deref()
+    }
+}
+
 /// One reviewed word produced by the human-in-the-loop understanding pass.
 ///
-/// `understanding` is a single short sentence in the user's support language
-/// describing how the model parsed the term: chosen sense for polysemous words,
-/// the morphological form for non-default surface forms, typo corrections,
-/// register notes, or a reason for excluding the row.
-///
-/// `ok` is the inclusion gate: `false` rows are not turned into cards but stay
-/// visible in `what i understood` (with a strikethrough) so the user can see
-/// what was rejected and why.
+/// `senses` is a non-empty ordered list from the most suitable/common sense to
+/// rarer alternatives. `selected` points at every sense that should become a
+/// card. `ok` is the row-level inclusion gate: `false` rows are not turned into
+/// cards but stay visible in `what i understood` with a strikethrough.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WordCandidate {
     term: String,
-    understanding: String,
+    senses: Vec<Sense>,
+    selected: Vec<usize>,
     ok: bool,
 }
 
 impl WordCandidate {
-    /// Create one reviewed candidate.
+    /// Create one reviewed candidate with a single sense.
     pub fn new(term: impl Into<String>, understanding: impl Into<String>, ok: bool) -> Self {
+        Self::with_senses(term, vec![Sense::plain(understanding)], 0, ok)
+    }
+
+    /// Create one reviewed candidate with an ordered sense list.
+    pub fn with_senses(
+        term: impl Into<String>,
+        senses: Vec<Sense>,
+        selected: usize,
+        ok: bool,
+    ) -> Self {
+        Self::with_selected_senses(term, senses, vec![selected], ok)
+    }
+
+    /// Create one reviewed candidate with multiple selected senses.
+    pub fn with_selected_senses(
+        term: impl Into<String>,
+        senses: Vec<Sense>,
+        selected: Vec<usize>,
+        ok: bool,
+    ) -> Self {
+        let mut senses = deduplicated(senses);
+        if senses.is_empty() {
+            senses.push(Sense::plain("модель не поняла слово"));
+        }
+        senses.truncate(MAX_SENSES);
+        let selected = normalized_selection(selected, senses.len());
         Self {
             term: term.into(),
-            understanding: understanding.into(),
+            senses,
+            selected,
             ok,
         }
     }
@@ -55,13 +130,129 @@ impl WordCandidate {
         self.term.as_str()
     }
 
-    /// Return the human-language explanation of how the model understood the term.
+    /// Return the active human-language explanation.
     pub fn understanding(&self) -> &str {
-        self.understanding.as_str()
+        self.sense().understanding()
+    }
+
+    /// Return the active sense.
+    pub fn sense(&self) -> &Sense {
+        &self.senses[self.selected()]
+    }
+
+    /// Return all available senses in display order.
+    pub fn senses(&self) -> &[Sense] {
+        self.senses.as_slice()
+    }
+
+    /// Return the active sense index.
+    pub fn selected(&self) -> usize {
+        self.selected[0]
+    }
+
+    /// Return every selected sense index in display order.
+    pub fn selected_senses(&self) -> &[usize] {
+        self.selected.as_slice()
+    }
+
+    /// Return how many cards this row will generate.
+    pub fn selected_count(&self) -> usize {
+        self.selected.len()
     }
 
     /// Return whether this row should be forwarded to card generation.
     pub fn ok(&self) -> bool {
         self.ok
     }
+
+    /// Return whether the row has more than one selectable sense.
+    pub fn has_multiple_senses(&self) -> bool {
+        self.senses.len() > 1
+    }
+
+    /// Return the candidate with a different active sense selected.
+    pub fn selecting(mut self, selected: usize) -> Self {
+        self = self.selecting_senses(vec![selected]);
+        self
+    }
+
+    /// Return the candidate with a different set of selected senses.
+    pub fn selecting_senses(mut self, selected: Vec<usize>) -> Self {
+        assert!(
+            selected.iter().all(|index| *index < self.senses.len()),
+            "invariant: every selected sense index must exist"
+        );
+        self.selected = normalized_selection(selected, self.senses.len());
+        self
+    }
+
+    /// Append non-duplicate senses and select the first appended one.
+    pub fn with_added_senses(mut self, senses: Vec<Sense>) -> (Self, Option<usize>) {
+        let mut first = None;
+        for sense in deduplicated(senses) {
+            if self.senses.len() >= MAX_SENSES {
+                break;
+            }
+            if self
+                .senses
+                .iter()
+                .any(|existing| same_understanding(existing, &sense))
+            {
+                continue;
+            }
+            if first.is_none() {
+                first = Some(self.senses.len());
+            }
+            self.senses.push(sense);
+        }
+        if let Some(index) = first {
+            self.selected = vec![index];
+        }
+        (self, first)
+    }
+}
+
+fn normalized_selection(selected: Vec<usize>, len: usize) -> Vec<usize> {
+    let last = len.saturating_sub(1);
+    let mut output = Vec::new();
+    for index in selected {
+        let index = index.min(last);
+        if !output.contains(&index) {
+            output.push(index);
+        }
+    }
+    output.sort_unstable();
+    if output.is_empty() {
+        output.push(0);
+    }
+    output
+}
+
+fn deduplicated(senses: Vec<Sense>) -> Vec<Sense> {
+    let mut output = Vec::new();
+    for sense in senses {
+        if sense.understanding().trim().is_empty() {
+            continue;
+        }
+        if output
+            .iter()
+            .any(|existing| same_understanding(existing, &sense))
+        {
+            continue;
+        }
+        output.push(sense);
+    }
+    output
+}
+
+fn same_understanding(left: &Sense, right: &Sense) -> bool {
+    normalized(left.understanding()) == normalized(right.understanding())
+}
+
+fn normalized(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }

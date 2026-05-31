@@ -54,14 +54,14 @@ fn recorded_prompt(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Result<Stri
     ))
 }
 
-/// Understanding uses Flash and returns the simple {term, understanding, ok} shape.
+/// Understanding uses Flash and returns the multi-sense row shape.
 #[test]
-fn understanding_uses_flash_and_returns_simple_understanding_rows() -> Result<()> {
+fn understanding_uses_flash_and_returns_sense_rows() -> Result<()> {
     let transport = FakeTransport::new(vec![Ok(body(json!({
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"understanding\":\"past tense of \\\"wreck\\\" — destroyed or crashed\",\"ok\":true},{\"term\":\"окно\",\"understanding\":\"this is Russian, not the target language; will not be turned into a card\",\"ok\":false}]}"
+                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"senses\":[{\"understanding\":\"past tense of \\\"wreck\\\" — destroyed or crashed\",\"tag\":null}],\"selected\":0,\"ok\":true},{\"term\":\"окно\",\"senses\":[{\"understanding\":\"this is Russian, not the target language\",\"tag\":null}],\"selected\":0,\"ok\":false}]}"
                 }]
             }
         }]
@@ -77,6 +77,7 @@ fn understanding_uses_flash_and_returns_simple_understanding_rows() -> Result<()
             understood.guess().code(),
             understood.candidates()[0].term(),
             understood.candidates()[0].understanding(),
+            understood.candidates()[0].senses().len(),
             understood.candidates()[0].ok(),
             understood.candidates()[1].term(),
             understood.candidates()[1].ok(),
@@ -87,49 +88,42 @@ fn understanding_uses_flash_and_returns_simple_understanding_rows() -> Result<()
             "en",
             "wrecked",
             "past tense of \"wreck\" — destroyed or crashed",
+            1,
             true,
             "окно",
             false,
         ),
-        "understanding must use Flash, return simple human-language understanding rows, and mark off-language rows ok=false"
+        "understanding must use Flash, return human-language sense rows, and mark off-language rows ok=false"
     );
     Ok(())
 }
 
-/// Bulk correction uses Flash and updates the understanding sentence.
+/// Add more uses Flash and returns new senses.
 #[test]
-fn bulk_correction_uses_flash_and_updates_understanding() -> Result<()> {
+fn bulk_correction_uses_flash_and_returns_new_senses() -> Result<()> {
     let transport = FakeTransport::new(vec![Ok(body(json!({
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wound\",\"understanding\":\"noun: a wound on the body, not the past tense of wind\",\"ok\":true}]}"
+                    "text": "{\"senses\":[{\"understanding\":\"Сущ. ставка игрока как банк раздачи.\",\"tag\":\"покер\"}],\"message\":null}"
                 }]
             }
         }]
     }))?)]);
     let client = GeminiClient::new("key", transport);
     let updated = client.correct_bulk(
-        &[WordCandidate::new(
-            "wound",
-            "ambiguous between noun and past-tense verb",
-            true,
-        )],
-        "treat it as a noun",
+        &WordCandidate::new("wound", "ambiguous between noun and past-tense verb", true),
+        "in poker",
         &LanguagePair::new("en", "ru"),
     )?;
     assert_eq!(
         (
-            updated[0].term(),
-            updated[0].understanding(),
-            updated[0].ok()
+            updated.senses()[0].understanding(),
+            updated.senses()[0].tag(),
+            updated.message_text()
         ),
-        (
-            "wound",
-            "noun: a wound on the body, not the past tense of wind",
-            true,
-        ),
-        "bulk correction must use Flash output to refine the understanding sentence"
+        ("Сущ. ставка игрока как банк раздачи.", Some("покер"), None,),
+        "bulk correction must use Flash output to append a tagged sense"
     );
     Ok(())
 }

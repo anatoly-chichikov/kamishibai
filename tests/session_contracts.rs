@@ -5,8 +5,8 @@
 use anyhow::Result;
 use kamishibai::session::{
     Artifact, BulkCorrection, CardArtifacts, CardDraft, CardMeta, LanguagePair, RawInputBatch,
-    ScriptDetection, SessionState, TargetDetection, TargetGuess, Understanding, Understood,
-    WordCandidate, to_document, to_entry,
+    ScriptDetection, Sense, SenseCorrection, SessionState, TargetDetection, TargetGuess,
+    Understanding, Understood, WordCandidate, to_document, to_entry,
 };
 
 struct FakeUnderstanding;
@@ -36,19 +36,14 @@ struct FakeBulk;
 impl BulkCorrection for FakeBulk {
     fn correct_bulk(
         &self,
-        candidates: &[WordCandidate],
+        candidate: &WordCandidate,
         _comment: &str,
         _pair: &LanguagePair,
-    ) -> Result<Vec<WordCandidate>> {
-        let mut patched = candidates.to_vec();
-        if let Some(last) = patched.last_mut() {
-            *last = WordCandidate::new(
-                last.term(),
-                "user clarified verb sense — to crash or destroy a vehicle",
-                true,
-            );
-        }
-        Ok(patched)
+    ) -> Result<SenseCorrection> {
+        Ok(SenseCorrection::adding(vec![Sense::plain(format!(
+            "{}; user clarified verb sense",
+            candidate.understanding()
+        ))]))
     }
 }
 
@@ -104,12 +99,13 @@ fn bulk_correction_pass_replaces_candidate_metadata_without_touching_pair() {
         .candidates()
         .to_vec();
     let after = FakeBulk
-        .correct_bulk(&before, "#2 — глагол", &pair)
+        .correct_bulk(&before[1], "#2 — глагол", &pair)
         .expect("bulk correction must succeed");
     assert!(
         after
-            .last()
-            .expect("bulk result must keep the row")
+            .senses()
+            .first()
+            .expect("bulk result must add one sense")
             .understanding()
             .contains("verb sense"),
         "bulk correction pass must apply user comment to the targeted candidate"

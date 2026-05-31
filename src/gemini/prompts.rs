@@ -5,7 +5,7 @@ use crate::languages::LanguageCatalog;
 use crate::session::{CardDraft, CardMeta, LanguagePair, WordCandidate};
 
 const INTAKE_PROMPT: &str = include_str!("../../assets/gemini_intake_prompt.txt");
-const BULK_PROMPT: &str = include_str!("../../assets/gemini_bulk_prompt.txt");
+const SENSE_PROMPT: &str = include_str!("../../assets/gemini_sense_prompt.txt");
 const CARD_META_PROMPT: &str = include_str!("../../assets/gemini_card_meta_prompt.txt");
 const CARD_PROMPT: &str = include_str!("../../assets/gemini_card_prompt.txt");
 
@@ -25,33 +25,29 @@ pub(super) fn render_intake_prompt(
     )
 }
 
-/// Render the bulk understanding refinement prompt fired from `Change something`.
+/// Render the focused sense request prompt fired from add more.
 pub(super) fn render_bulk_prompt(
-    candidates: &[WordCandidate],
+    candidate: &WordCandidate,
     comment: &str,
     pair: &LanguagePair,
     catalog: &LanguageCatalog,
 ) -> Result<String> {
-    let rows = candidates
+    let senses = candidate
+        .senses()
         .iter()
-        .map(|candidate| {
-            json!({
-                "term": candidate.term(),
-                "understanding": candidate.understanding(),
-                "ok": candidate.ok(),
-            })
-        })
+        .map(|sense| json!({"understanding": sense.understanding(), "tag": sense.tag()}))
         .collect::<Vec<_>>();
     render(
-        BULK_PROMPT,
+        SENSE_PROMPT,
         &[
             ("{target_language}", language_label(catalog, pair.target())?),
             (
                 "{support_language}",
                 language_label(catalog, pair.support())?,
             ),
-            ("{current_rows}", serde_json::to_string_pretty(&rows)?),
-            ("{user_correction}", String::from(comment)),
+            ("{term}", String::from(candidate.term())),
+            ("{shown_senses}", serde_json::to_string_pretty(&senses)?),
+            ("{user_request}", String::from(comment)),
         ],
     )
 }

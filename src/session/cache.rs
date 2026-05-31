@@ -10,12 +10,12 @@ use crate::generation::artifact_cache::Cache;
 use crate::languages::catalog;
 
 use super::{
-    CardMeta, LanguagePair, RawInputBatch, ScriptDetection, TargetDetection, TargetGuess,
+    CardMeta, LanguagePair, RawInputBatch, ScriptDetection, Sense, TargetDetection, TargetGuess,
     Understanding, Understood, WordCandidate,
 };
 
-const UNDERSTANDING_CACHE: &str = "understanding-v1";
-const UNDERSTANDING_VERSION: &str = "understanding-v1";
+const UNDERSTANDING_CACHE: &str = "understanding-v2";
+const UNDERSTANDING_VERSION: &str = "understanding-v2";
 const META_VERSION: &str = "meta-v2";
 
 /// Caching decorator for the first-pass understanding contract.
@@ -255,7 +255,11 @@ impl EntryRecord {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct CandidateRecord {
     term: String,
-    understanding: String,
+    senses: Vec<SenseRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected: Option<usize>,
+    #[serde(default)]
+    selected_senses: Vec<usize>,
     ok: bool,
 }
 
@@ -263,13 +267,50 @@ impl CandidateRecord {
     fn from_candidate(candidate: &WordCandidate) -> Self {
         Self {
             term: candidate.term().to_string(),
-            understanding: candidate.understanding().to_string(),
+            senses: candidate
+                .senses()
+                .iter()
+                .map(SenseRecord::from_sense)
+                .collect(),
+            selected: None,
+            selected_senses: candidate.selected_senses().to_vec(),
             ok: candidate.ok(),
         }
     }
 
     fn candidate(self) -> WordCandidate {
-        WordCandidate::new(self.term, self.understanding, self.ok)
+        let selected = if self.selected_senses.is_empty() {
+            self.selected
+                .map(|index| vec![index])
+                .unwrap_or_else(|| vec![0])
+        } else {
+            self.selected_senses
+        };
+        WordCandidate::with_selected_senses(
+            self.term,
+            self.senses.into_iter().map(SenseRecord::sense).collect(),
+            selected,
+            self.ok,
+        )
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct SenseRecord {
+    understanding: String,
+    tag: Option<String>,
+}
+
+impl SenseRecord {
+    fn from_sense(sense: &Sense) -> Self {
+        Self {
+            understanding: sense.understanding().to_string(),
+            tag: sense.tag().map(String::from),
+        }
+    }
+
+    fn sense(self) -> Sense {
+        Sense::new(self.understanding, self.tag)
     }
 }
 

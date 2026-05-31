@@ -1,7 +1,7 @@
-//! Integration flow for `What I understood -> Change something -> updated What I understood`.
+//! Integration flow for `What I understood -> add more -> updated What I understood`.
 
 use anyhow::Result;
-use kamishibai::session::{BulkCorrection, LanguagePair, WordCandidate};
+use kamishibai::session::{BulkCorrection, LanguagePair, Sense, SenseCorrection, WordCandidate};
 use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -11,20 +11,14 @@ struct FakeBulk;
 impl BulkCorrection for FakeBulk {
     fn correct_bulk(
         &self,
-        candidates: &[WordCandidate],
+        candidate: &WordCandidate,
         _comment: &str,
         _pair: &LanguagePair,
-    ) -> Result<Vec<WordCandidate>> {
-        candidates
-            .iter()
-            .map(|candidate| {
-                Ok(WordCandidate::new(
-                    candidate.term(),
-                    "updated by bulk pass — verb sense selected",
-                    candidate.ok(),
-                ))
-            })
-            .collect()
+    ) -> Result<SenseCorrection> {
+        Ok(SenseCorrection::adding(vec![Sense::plain(format!(
+            "{} — updated by focused pass",
+            candidate.understanding()
+        ))]))
     }
 }
 
@@ -68,12 +62,12 @@ fn modal_renders_prompt_dashes_textarea_and_send_cancel_footer() {
         .typed('b');
     let rendered = flat(&app);
     assert!(
-        rendered.contains("change")
-            && rendered.contains("tell me what to change")
+        rendered.contains("what meanings did we miss?")
+            && rendered.contains("domain, slang")
             && rendered.contains("#2 - verb")
             && rendered.contains("[Esc] cancel")
             && rendered.contains("[Enter] send"),
-        "Change something modal must render its prompt, the typed buffer, and send/cancel footer"
+        "add more modal must render its prompt, the typed buffer, and send/cancel footer"
     );
 }
 
@@ -93,7 +87,7 @@ fn submit_on_modal_runs_bulk_correction_and_closes_modal() {
     assert_eq!(
         (after.modal(), side),
         (None, expected),
-        "Enter inside Change something must emit RunBulkCorrection with the typed comment and close the modal"
+        "Enter inside add more must emit RunBulkCorrection with the typed comment and close the modal"
     );
 }
 
@@ -123,12 +117,13 @@ fn escape_on_modal_dismisses_without_touching_candidates() {
 fn bulk_pass_result_flows_back_into_what_i_understood() {
     let app = seeded();
     let updated = FakeBulk
-        .correct_bulk(app.candidates(), "#2 verb", app.pair())
+        .correct_bulk(&app.candidates()[0], "#2 verb", app.pair())
         .expect("mock bulk pass");
-    let reviewed = app.understood(updated);
+    let (senses, message) = updated.into_parts();
+    let reviewed = app.senses_appended_to_selected(senses, message);
     let rendered = flat(&reviewed);
     assert!(
-        rendered.contains("updated by bulk pass"),
-        "after returning from Change something the review screen must show the patched understanding"
+        rendered.contains("updated by focused pass"),
+        "after returning from add more the review screen must show the patched understanding"
     );
 }

@@ -10,6 +10,7 @@ pub enum Side {
     None,
     RunUnderstanding,
     RunBulkCorrection(String),
+    PersistMyLanguageAndRunUnderstanding(String),
     RunCardCorrection(String),
     StartGeneration,
     RegenerateFailed,
@@ -71,15 +72,74 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 (app.with_screen(Screen::YourCards), Side::StartGeneration)
             }
         }
+        (Screen::WhatIUnderstood, None, AppEvent::Cancel) if app.expanded_sense().is_some() => {
+            (app.senses_cancelled(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) if app.expanded_sense().is_some() => {
+            if app.expanded_add_more_focused() {
+                (app.with_modal(ModalKind::ChangeSomething), Side::None)
+            } else {
+                (app.senses_confirmed(), Side::None)
+            }
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorLeft) if app.expanded_sense().is_some() => {
+            (app.senses_confirmed(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorRight)
+            if app.expanded_sense().is_none() && !app.candidates().is_empty() =>
+        {
+            if app.selected_can_expand_senses() {
+                (app.senses_expanded(), Side::None)
+            } else {
+                (app, Side::None)
+            }
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorLeft) => (app, Side::None),
+        (Screen::WhatIUnderstood, None, AppEvent::CursorRight) => (app, Side::None),
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev) if app.expanded_sense().is_some() => {
+            (app.sense_previous(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::NavNext) if app.expanded_sense().is_some() => {
+            (app.sense_next(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar(' '))
+            if app.expanded_sense().is_some() =>
+        {
+            (app.sense_toggled(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
+        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K'))
+            if app.expanded_sense().is_some() =>
+        {
+            (app.sense_previous(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('j'))
+        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('J'))
+            if app.expanded_sense().is_some() =>
+        {
+            (app.sense_next(), Side::None)
+        }
         (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) if !app.candidates().is_empty() => {
-            (app.with_modal(ModalKind::ChangeSomething), Side::None)
+            if app.selected_can_expand_senses() {
+                (app.senses_expanded(), Side::None)
+            } else {
+                (app, Side::None)
+            }
         }
-        (Screen::WhatIUnderstood, None, AppEvent::RequestChange) => {
-            (app.with_modal(ModalKind::ChangeSomething), Side::None)
-        }
+        (Screen::WhatIUnderstood, None, AppEvent::RequestChange) => (app, Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('d'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('D')) => {
-            (app.dropped_selected(), Side::None)
+            let next = app.dropped_selected();
+            if next.candidates().is_empty() {
+                (
+                    next.with_screen(Screen::YourWords)
+                        .clear_blob()
+                        .body_scroll_reset(),
+                    Side::None,
+                )
+            } else {
+                (next, Side::None)
+            }
         }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K')) => {
@@ -91,9 +151,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::WhatIUnderstood, None, AppEvent::NavPrev) => (app.selected_previous(), Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::NavNext) => (app.selected_next(), Side::None),
-        (Screen::WhatIUnderstood, None, AppEvent::OverrideTarget(code)) => {
-            (app.override_target(code), Side::None)
-        }
         (Screen::WhatIUnderstood, None, AppEvent::OpenLanguagePicker) => {
             (open_language_picker(app), Side::None)
         }
@@ -129,10 +186,13 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (_, Some(ModalKind::PickMyLanguage), AppEvent::SetMyLanguage(code))
             if can_pick_language(app.screen()) =>
         {
-            (
-                app.close_modal().set_support(code.clone()),
-                Side::PersistMyLanguage(code),
-            )
+            let screen = app.screen();
+            let next = app.close_modal().set_support(code.clone());
+            if screen == Screen::WhatIUnderstood && !next.candidates().is_empty() {
+                (next, Side::PersistMyLanguageAndRunUnderstanding(code))
+            } else {
+                (next, Side::PersistMyLanguage(code))
+            }
         }
         (_, Some(ModalKind::PickMyLanguage), AppEvent::Cancel) => (app.close_modal(), Side::None),
         (_, Some(ModalKind::PickMyLanguage), _) => (app, Side::None),
@@ -264,12 +324,6 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         }
         (Screen::WhatIUnderstood, AppEvent::KeyChar('r'))
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
-        (Screen::WhatIUnderstood, AppEvent::KeyChar('t'))
-        | (Screen::WhatIUnderstood, AppEvent::KeyChar('T')) => {
-            AppEvent::OverrideTarget(next_target(app.pair().target(), app.pair().support()))
-        }
-        (Screen::WhatIUnderstood, AppEvent::CursorLeft) => AppEvent::NavPrev,
-        (Screen::WhatIUnderstood, AppEvent::CursorRight) => AppEvent::NavNext,
         (Screen::YourCards, AppEvent::KeyChar('R'))
         | (Screen::YourCards, AppEvent::KeyChar('r')) => AppEvent::RequestChange,
         (Screen::YourCards, AppEvent::CursorLeft) => AppEvent::NavPrev,
@@ -321,24 +375,6 @@ fn open_language_picker(app: App) -> App {
     let cursor = picker_cursor_for(app.pair().support());
     app.with_modal(ModalKind::PickMyLanguage)
         .with_picker_cursor(cursor)
-}
-
-fn next_target(current: &str, support: &str) -> String {
-    let codes = catalog().codes();
-    let mut position = 0;
-    for (index, code) in codes.iter().enumerate() {
-        if *code == current {
-            position = index;
-            break;
-        }
-    }
-    for offset in 1..=codes.len() {
-        let candidate = codes[(position + offset) % codes.len()];
-        if candidate != support {
-            return String::from(candidate);
-        }
-    }
-    String::from(current)
 }
 
 fn next_support(current: &str, direction: i32) -> String {

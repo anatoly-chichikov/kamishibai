@@ -1,6 +1,5 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 69
 expression: buffer
 ---
                                                                                 
@@ -18,4 +17,4 @@ expression: buffer
                                                                                 
                                                                                 
                                                                                 
-    step 2/3 · nothing to make[↑↓] nav · [D] drop · [Enter] refine · [Ctrl+G
+    step 2/3  nothing to make          [Enter] pick  [D] drop  [Ctrl+C] quit

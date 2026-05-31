@@ -761,16 +761,14 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     }
     left.push(super::common::status_sep());
     left.push(Span::styled(elapsed(app), palette::dim2()));
-    let mut right: Vec<Span<'static>> = Vec::new();
-    right.extend(super::common::key_hint("↑↓", "nav"));
-    right.push(super::common::status_sep());
-    right.extend(super::common::key_hint("Enter", "expand"));
-    right.push(super::common::status_sep());
-    right.extend(super::common::key_hint("R", "change"));
-    right.push(super::common::status_sep());
-    right.extend(super::common::key_hint("Ctrl+G", "regenerate"));
-    super::common::append_quit(&mut right, app.quit_pending());
-    super::common::status_bar(left, right, width)
+    let hints = vec![
+        super::common::FooterHint::primary("Enter", "expand"),
+        super::common::FooterHint::secondary("R", "change"),
+        super::common::FooterHint::secondary("Ctrl+G", "regenerate"),
+        super::common::FooterHint::ghost("↑↓", "nav"),
+        super::common::quit_hint(app.quit_pending()),
+    ];
+    super::common::footer_bar(left, hints, width)
 }
 
 fn elapsed(app: &App) -> String {
