@@ -55,4 +55,12 @@ kamishibai path/to/words.json
 
 ## Languages
 
-Pairs ship as profiles in [`src/languages`](src/languages): `en`, `zh`, `es`, `ja`, `fr`, `de`, `ru`, `it`, `pt`, `el`. Native side picks one of these for the UI labels in your language; target side picks one of these for the deck — Gemini generates the audio, so the practical ceiling on adding a new pair is whether Gemini TTS speaks it (it covers most of the world).
+Ten languages, learnable in any direction:
+
+`en` English · `zh` Chinese · `es` Spanish · `ja` Japanese · `fr` French ·
+`de` German · `ru` Russian · `it` Italian · `pt` Portuguese · `el` Greek
+
+Pick one as your **native** side — it sets the card labels — and one as the **target**
+you're learning, which names the deck and gets the audio and illustration. Any of the
+ten on either side. All ten have native-speaker voice, so every card gets real audio,
+guaranteed.
