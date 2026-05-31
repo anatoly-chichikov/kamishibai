@@ -58,9 +58,13 @@ fn language_pair_travels_untouched_through_the_full_flow() {
 }
 
 #[test]
-fn change_something_modal_returns_bulk_correction_and_closes_modal() {
-    let start = App::new(LanguagePair::new("en", "ru")).with_screen(Screen::WhatIUnderstood);
-    let (opened, _) = transit(start, AppEvent::RequestChange);
+fn add_more_modal_returns_bulk_correction_and_closes_modal() {
+    let start = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .understood(fake_candidates());
+    let expanded = transit(start, AppEvent::KeyEnter).0;
+    let add_more = transit(expanded, AppEvent::NavNext).0;
+    let (opened, _) = transit(add_more, AppEvent::KeyEnter);
     let (closed, side) = transit(
         opened.clone(),
         AppEvent::SendCorrection(String::from("#4 — глагол")),
@@ -72,7 +76,7 @@ fn change_something_modal_returns_bulk_correction_and_closes_modal() {
             None,
             Side::RunBulkCorrection(String::from("#4 — глагол")),
         ),
-        "Change something modal must open, request bulk correction, and close cleanly"
+        "add more modal must open, request bulk correction, and close cleanly"
     );
 }
 

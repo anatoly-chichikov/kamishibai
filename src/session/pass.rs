@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use super::candidate::{RawInputBatch, WordCandidate};
+use super::candidate::{RawInputBatch, Sense, WordCandidate};
 use super::detection::TargetGuess;
 use super::draft::{CardDraft, CardMeta};
 use super::pair::LanguagePair;
@@ -35,15 +35,54 @@ pub trait Understanding {
     fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood>;
 }
 
-/// Contract for the bulk correction pass fired from `Change something`.
+/// Outcome of the focused add-more sense request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SenseCorrection {
+    senses: Vec<Sense>,
+    message: Option<String>,
+}
+
+impl SenseCorrection {
+    /// Create one sense correction result.
+    pub fn new(senses: Vec<Sense>, message: Option<String>) -> Self {
+        Self { senses, message }
+    }
+
+    /// Create a result that adds senses.
+    pub fn adding(senses: Vec<Sense>) -> Self {
+        Self::new(senses, None)
+    }
+
+    /// Create a result that only carries an on-screen message.
+    pub fn message(message: impl Into<String>) -> Self {
+        Self::new(Vec::new(), Some(message.into()))
+    }
+
+    /// Return the newly suggested senses.
+    pub fn senses(&self) -> &[Sense] {
+        self.senses.as_slice()
+    }
+
+    /// Return the optional short on-screen message.
+    pub fn message_text(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+
+    /// Consume the result into new senses and an optional message.
+    pub fn into_parts(self) -> (Vec<Sense>, Option<String>) {
+        (self.senses, self.message)
+    }
+}
+
+/// Contract for the focused sense request fired from add more.
 pub trait BulkCorrection {
-    /// Apply one comment to the whole candidate list.
+    /// Apply one comment to the focused candidate and return new senses.
     fn correct_bulk(
         &self,
-        candidates: &[WordCandidate],
+        candidate: &WordCandidate,
         comment: &str,
         pair: &LanguagePair,
-    ) -> Result<Vec<WordCandidate>>;
+    ) -> Result<SenseCorrection>;
 }
 
 /// Contract for the rich Gemini card meta generation pass.

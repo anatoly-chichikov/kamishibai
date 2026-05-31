@@ -10,8 +10,8 @@ use serde_json::Value;
 use crate::generation::{manga_template, render_scene_prompt};
 use crate::languages::catalog;
 use crate::session::{
-    CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch, TargetGuess, Understood,
-    WordCandidate,
+    CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch, Sense, SenseCorrection,
+    TargetGuess, Understood, WordCandidate,
 };
 
 use super::codec::decode;
@@ -226,22 +226,18 @@ where
         ))
     }
 
-    /// Re-run the reviewed list after a user bulk refinement.
+    /// Add missing senses after a user request from the review picker.
     pub fn correct_bulk(
         &self,
-        candidates: &[WordCandidate],
+        candidate: &WordCandidate,
         comment: &str,
         pair: &LanguagePair,
-    ) -> Result<Vec<WordCandidate>> {
+    ) -> Result<SenseCorrection> {
         let catalog = catalog();
-        let prompt = render_bulk_prompt(candidates, comment, pair, &catalog)?;
-        let decoded: IntakeResponse =
+        let prompt = render_bulk_prompt(candidate, comment, pair, &catalog)?;
+        let decoded: SenseCorrectionResponse =
             serde_json::from_str(unfence(self.text(TEXT_MODEL, prompt)?.trim()))?;
-        decoded
-            .items
-            .into_iter()
-            .map(IntakeItem::candidate)
-            .collect()
+        Ok(decoded.correction())
     }
 
     /// Build the rich card meta for one term using the Flash text model.
@@ -362,23 +358,65 @@ struct IntakeResponse {
 #[derive(Clone, Debug, Deserialize)]
 struct IntakeItem {
     term: String,
-    understanding: String,
+    #[serde(default)]
+    understanding: Option<String>,
+    #[serde(default)]
+    senses: Vec<SenseItem>,
+    #[serde(default)]
+    selected: usize,
     ok: bool,
 }
 
 impl IntakeItem {
     fn candidate(self) -> Result<WordCandidate> {
         let term = nonempty(self.term.as_str(), "candidate");
-        let understanding = if self.understanding.trim().is_empty() {
-            String::from(if self.ok {
-                "no notes"
-            } else {
-                "skipped without explanation"
-            })
-        } else {
-            self.understanding
-        };
-        Ok(WordCandidate::new(term, understanding, self.ok))
+        let mut senses = self
+            .senses
+            .into_iter()
+            .map(SenseItem::sense)
+            .collect::<Vec<_>>();
+        if senses.is_empty()
+            && let Some(understanding) = self.understanding
+        {
+            senses.push(Sense::plain(understanding));
+        }
+        let ok = self.ok && !senses.is_empty();
+        if senses.is_empty() {
+            senses.push(Sense::plain("модель не поняла слово"));
+        }
+        Ok(WordCandidate::with_senses(term, senses, self.selected, ok))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct SenseItem {
+    understanding: String,
+    #[serde(default)]
+    tag: Option<String>,
+}
+
+impl SenseItem {
+    fn sense(self) -> Sense {
+        Sense::new(self.understanding, self.tag)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct SenseCorrectionResponse {
+    #[serde(default)]
+    senses: Vec<SenseItem>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+impl SenseCorrectionResponse {
+    fn correction(self) -> SenseCorrection {
+        let senses = self
+            .senses
+            .into_iter()
+            .map(SenseItem::sense)
+            .collect::<Vec<_>>();
+        SenseCorrection::new(senses, self.message)
     }
 }
 

@@ -3,9 +3,9 @@
 //! Two visual patterns share the same centred surround (solid border, padded
 //! content, action row):
 //!
-//! 1. The correction modals (`ChangeSomething`, `ChangeThisCard`) — single
+//! 1. The text modals (`ChangeSomething`, `ChangeThisCard`) — single
 //!    text-input field with an `[Esc] cancel · [Enter] send` row, used for the
-//!    bulk and per-card Gemini correction flows.
+//!    missing-sense and per-card Gemini flows.
 //! 2. The language picker (`PickMyLanguage`) — horizontal row of language
 //!    chips with the currently active one inverted, an `[← →] pick · [Enter]
 //!    confirm · [Esc] cancel` row. No text input, no cursor.
@@ -101,7 +101,7 @@ fn padded(inner: Rect) -> Rect {
 
 fn text_title(kind: ModalKind) -> &'static str {
     match kind {
-        ModalKind::ChangeSomething => "change · this row",
+        ModalKind::ChangeSomething => "what meanings did we miss?",
         ModalKind::ChangeThisCard => "change · this card",
         ModalKind::PickMyLanguage => "your language",
     }
@@ -110,7 +110,7 @@ fn text_title(kind: ModalKind) -> &'static str {
 fn text_panel<'a>(kind: ModalKind, app: &'a App, width: usize) -> Paragraph<'a> {
     let prompt = match kind {
         ModalKind::ChangeSomething => format!(
-            "tell me what to change · {}",
+            "domain, slang, idiom, region, or rare use · {}",
             app.candidates()
                 .get(app.selected())
                 .map(|candidate| candidate.term())
@@ -134,12 +134,10 @@ fn text_panel<'a>(kind: ModalKind, app: &'a App, width: usize) -> Paragraph<'a> 
         ))
     };
     let dashes = "─".repeat(width);
-    let actions = Line::from(vec![
-        Span::styled("[Esc]", palette::base().add_modifier(Modifier::BOLD)),
-        Span::styled(" cancel    ", palette::dim()),
-        Span::styled("[Enter]", palette::base().add_modifier(Modifier::BOLD)),
-        Span::styled(" send", palette::base()),
-    ]);
+    let mut action_spans = super::common::FooterHint::ghost("Esc", "cancel").spans();
+    action_spans.push(Span::styled(String::from("    "), palette::base()));
+    action_spans.extend(super::common::FooterHint::primary("Enter", "send").spans());
+    let actions = Line::from(action_spans);
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(prompt, palette::dim())),
@@ -168,14 +166,12 @@ fn picker_panel(app: &App, _width: usize) -> Paragraph<'static> {
             chip_spans.push(Span::styled("  ", palette::base()));
         }
     }
-    let actions = Line::from(vec![
-        Span::styled("[← →]", palette::base().add_modifier(Modifier::BOLD)),
-        Span::styled(" pick  ", palette::dim()),
-        Span::styled("[Enter]", palette::base().add_modifier(Modifier::BOLD)),
-        Span::styled(" confirm  ", palette::dim()),
-        Span::styled("[Esc]", palette::base().add_modifier(Modifier::BOLD)),
-        Span::styled(" cancel", palette::dim()),
-    ]);
+    let mut action_spans = super::common::FooterHint::secondary("← →", "pick").spans();
+    action_spans.push(Span::styled(String::from("  "), palette::base()));
+    action_spans.extend(super::common::FooterHint::primary("Enter", "confirm").spans());
+    action_spans.push(Span::styled(String::from("  "), palette::base()));
+    action_spans.extend(super::common::FooterHint::ghost("Esc", "cancel").spans());
+    let actions = Line::from(action_spans);
     let lines = vec![
         Line::from(""),
         Line::from(chip_spans),

@@ -1,6 +1,5 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 49
 expression: render(&app)
 ---
                                                                                 
@@ -14,4 +13,4 @@ expression: render(&app)
                                                                                 
                                                                                 
                                                                                 
-    step 3/3 · 0/0 ready                                       [Ctrl+C] quit
+    step 3/3  0/0 ready                                        [Ctrl+C] quit

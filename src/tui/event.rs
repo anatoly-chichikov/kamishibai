@@ -34,8 +34,6 @@ pub enum AppEvent {
     LanguagePickerPrev,
     /// User cycled the picker selection one step right.
     LanguagePickerNext,
-    /// User overrode the detected target language.
-    OverrideTarget(String),
     /// Text editor inserted a character.
     KeyChar(char),
     /// Text editor pressed backspace.

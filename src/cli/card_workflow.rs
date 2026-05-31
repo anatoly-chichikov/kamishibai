@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use crate::session::{
     ArtifactFile, BulkCorrection, CardCorrection, CardDraft, CardMeta, CardMetaGeneration,
-    CardRevision, LanguagePair, Understanding, Understood, WordCandidate,
+    CardRevision, LanguagePair, SenseCorrection, Understanding, Understood,
 };
 use crate::tui::BusyKind;
 
@@ -65,7 +65,7 @@ impl<T> CardWorkflow for T where
 /// Result produced by one background text pass.
 pub(super) enum TextOutcome {
     Understanding(Result<Understood>),
-    BulkCorrection(Result<Vec<WordCandidate>>),
+    BulkCorrection(Result<SenseCorrection>),
     CardCorrection(Result<Box<(CardRevision, Option<ArtifactFile>)>>),
     KeyCheck(Result<()>),
 }

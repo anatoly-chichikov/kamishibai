@@ -12,7 +12,7 @@ mod state;
 
 pub use bridge::{from_entry, to_document, to_entry};
 pub use cache::{CachedUnderstanding, CardMetaCache};
-pub use candidate::{RawInputBatch, WordCandidate};
+pub use candidate::{RawInputBatch, Sense, WordCandidate};
 pub use detection::{ScriptDetection, TargetDetection, TargetGuess};
 pub use draft::{
     Artifact, ArtifactFile, ArtifactSlot, AttemptTally, CardArtifacts, CardDraft, CardMeta,
@@ -20,7 +20,8 @@ pub use draft::{
 pub use engine::{EngineEvent, SessionEngine};
 pub use pair::LanguagePair;
 pub use pass::{
-    BulkCorrection, CardCorrection, CardMetaGeneration, CardRevision, Understanding, Understood,
+    BulkCorrection, CardCorrection, CardMetaGeneration, CardRevision, SenseCorrection,
+    Understanding, Understood,
 };
 pub use state::SessionState;
 

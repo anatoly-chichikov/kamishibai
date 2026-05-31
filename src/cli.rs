@@ -247,7 +247,7 @@ mod tests {
     fn version_output_reports_the_release_version() {
         assert_eq!(
             version(),
-            String::from("kamishibai 1.1.0"),
+            String::from("kamishibai 1.2.0"),
             "version output must report the current release version"
         );
     }

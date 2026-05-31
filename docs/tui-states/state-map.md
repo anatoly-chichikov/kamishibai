@@ -59,15 +59,15 @@ confirmed by the user; otherwise startup falls back to `en` while showing
 
 ## Candidate contract
 
-`WordCandidate` is intentionally small: it carries the target `term`, one
-support-language `understanding` sentence, and an `ok` inclusion flag. The first
-Gemini pass folds part of speech, inflection, selected sense, register, typo
-correction, ambiguity, and exclusion reason into that sentence instead of
-maintaining a parallel taxonomy.
+`WordCandidate` is intentionally small: it carries the target `term`, an ordered
+list of support-language sense sentences, the selected sense indexes, and an
+`ok` inclusion flag. The first Gemini pass still folds part of speech,
+inflection, register, typo correction, ambiguity, and exclusion reason into
+those sentences instead of maintaining a parallel taxonomy.
 
-`WhatIUnderstood` renders one row per candidate: included rows proceed to card
-generation, while `ok=false` rows stay visible with a struck-through term so the
-user can see what was rejected and why.
+`WhatIUnderstood` renders one row per candidate: included selected senses
+proceed to card generation as separate cards, while `ok=false` rows stay visible
+with a struck-through term so the user can see what was rejected and why.
 
 ## Transitions
 
@@ -76,7 +76,7 @@ user can see what was rejected and why.
     YourWords ─────────► resolving target ─► WhatIUnderstood
         ▲                                          │
         │                                          │
-        │            [Esc] from WhatIUnderstood    │ [Enter/R]
+        │            [Esc] from WhatIUnderstood    │ [R]
         └──────────────────────────────────────────┤
                                                    ▼
                                            ChangeSomething
@@ -109,7 +109,7 @@ user can see what was rejected and why.
 | State             | Keys                                                                                     |
 | ----------------- | ---------------------------------------------------------------------------------------- |
 | `YourWords`       | type/paste one item per line · `Enter` newline · `Ctrl+G` continue · `Ctrl+L` language |
-| `WhatIUnderstood` | `↑↓` nav · `d` drop row · `Enter` / `R` refine row · `Ctrl+G` make cards · `L` flip my · `T` cycle target |
+| `WhatIUnderstood` | `↑↓` nav · `Enter` pick meanings / open add more · `Space` select meaning inside picker · `d` drop row · `Ctrl+G` make cards · `L` flip my |
 | `ChangeSomething` | text area input · `Enter` send · `Esc` cancel                                            |
 | `YourCards`       | `↑↓` nav · `Enter` expand/collapse · `R` / `r` change this card · `Ctrl+G` regenerate state/rebuild publish |
 | `ChangeThisCard`  | text area input · `Enter` send · `Esc` cancel                                            |
@@ -150,7 +150,10 @@ not forwarded to card generation.
 - `header` always renders the language pair widget (target → my).
 - `body` renders the active screen. Modals are rendered last by drawing into a
   centered rectangle over `body` using `Clear + Block::bordered()`.
-- `footer` renders the keyboard hints for the active screen.
+- `footer` renders the active screen's keyboard hints as a tiered, width-aware
+  status bar: the primary action leads in bright ink, secondary actions follow,
+  and conventional keys (navigation, quit) are dimmed. When the row is too narrow
+  the dim hints are shed first — the primary action and quit never clip.
 - The crossterm event loop reads `KeyEvent`, `ResizeEvent`, and the session-engine
   channel, then dispatches through the transition function below.
 

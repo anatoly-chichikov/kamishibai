@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, WordCandidate,
+    Artifact, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, Sense, WordCandidate,
 };
 
 use super::screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
@@ -69,7 +69,7 @@ impl BusyKind {
     pub fn label(&self) -> &'static str {
         match self {
             BusyKind::Understanding => "understanding your words",
-            BusyKind::BulkCorrection => "applying your changes",
+            BusyKind::BulkCorrection => "adding missing meanings",
             BusyKind::CardCorrection => "updating this card",
             BusyKind::CheckingKey => "checking your key",
             BusyKind::PublishingDeck => "building your anki deck",
@@ -147,6 +147,16 @@ pub struct AppInput {
 pub struct Review {
     pub candidates: Vec<WordCandidate>,
     pub selected: usize,
+    pub expanded: Option<ExpandedSense>,
+    pub notice: Option<String>,
+}
+
+/// Expanded sense picker state for one review row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExpandedSense {
+    pub row: usize,
+    pub cursor: usize,
+    pub selected: Vec<usize>,
 }
 
 impl App {
@@ -438,11 +448,20 @@ impl App {
                 let (row, _) = cursor_row_column(&self.input.blob, self.blob_cursor);
                 Some((u16::try_from(row).unwrap_or(u16::MAX), 1))
             }
-            Screen::WhatIUnderstood if !self.review.candidates.is_empty() => Some((
-                u16::try_from(self.review.selected.min(self.review.candidates.len() - 1))
-                    .unwrap_or(u16::MAX),
-                1,
-            )),
+            Screen::WhatIUnderstood if !self.review.candidates.is_empty() => {
+                let selected = self.review.selected.min(self.review.candidates.len() - 1);
+                let expanded = self.review.expanded.as_ref().map(|item| item.row) == Some(selected);
+                let height = if expanded {
+                    1
+                } else {
+                    u16::try_from(crate::tui::screens::what_i_understood::candidate_rows(
+                        &self.review.candidates[selected],
+                        false,
+                    ))
+                    .unwrap_or(u16::MAX)
+                };
+                Some((self.review_focus_top(), height))
+            }
             Screen::YourCards => {
                 crate::tui::screens::your_cards::focused_card_range(self, usize::from(body_width))
             }
@@ -549,14 +568,6 @@ impl App {
         self
     }
 
-    /// Return the app with a new target language code (user override).
-    pub fn override_target(mut self, code: impl Into<String>) -> Self {
-        let pair = LanguagePair::new(code, self.pair.support().to_string());
-        self.pair = pair;
-        self.input.target_pending = false;
-        self
-    }
-
     /// Return the app with a confirmed target language guess from the LLM pass.
     pub fn confirmed_target(mut self, code: impl Into<String>) -> Self {
         let pair = LanguagePair::new(code, self.pair.support().to_string());
@@ -575,17 +586,202 @@ impl App {
         self.review.selected
     }
 
+    /// Return the expanded sense picker state, if any.
+    pub fn expanded_sense(&self) -> Option<ExpandedSense> {
+        self.review.expanded.clone()
+    }
+
+    /// Return the short review notice, if any.
+    pub fn review_notice(&self) -> Option<&str> {
+        self.review.notice.as_deref()
+    }
+
     /// Return the app with a new set of understood candidates installed.
     pub fn understood(mut self, candidates: Vec<WordCandidate>) -> Self {
         self.review = Review {
             candidates,
             selected: 0,
+            expanded: None,
+            notice: None,
         };
+        self
+    }
+
+    /// Return the app with understood candidates installed while preserving selected senses by row.
+    pub fn understood_preserving_senses(mut self, mut candidates: Vec<WordCandidate>) -> Self {
+        for (index, candidate) in candidates.iter_mut().enumerate() {
+            if let Some(previous) = self.review.candidates.get(index) {
+                let last = candidate.senses().len() - 1;
+                let selected = previous
+                    .selected_senses()
+                    .iter()
+                    .map(|index| (*index).min(last))
+                    .collect();
+                *candidate = candidate.clone().selecting_senses(selected);
+            }
+        }
+        let selected = self.review.selected.min(candidates.len().saturating_sub(1));
+        self.review = Review {
+            candidates,
+            selected,
+            expanded: None,
+            notice: None,
+        };
+        self
+    }
+
+    /// Return whether the selected row can open a sense picker.
+    pub fn selected_can_expand_senses(&self) -> bool {
+        self.review
+            .candidates
+            .get(self.review.selected)
+            .map(WordCandidate::ok)
+            .unwrap_or(false)
+    }
+
+    /// Return the app with the selected row's sense picker opened.
+    pub fn senses_expanded(mut self) -> Self {
+        let Some(candidate) = self.review.candidates.get(self.review.selected) else {
+            return self;
+        };
+        if !candidate.ok() {
+            return self;
+        }
+        let selected = candidate.selected_senses().to_vec();
+        let cursor = candidate.selected();
+        self.review.expanded = Some(ExpandedSense {
+            row: self.review.selected,
+            cursor,
+            selected,
+        });
+        self.review.notice = None;
+        self
+    }
+
+    /// Return the app with the expanded sense cursor moved down.
+    pub fn sense_next(mut self) -> Self {
+        let Some(expanded) = self.review.expanded else {
+            return self;
+        };
+        let Some(candidate) = self.review.candidates.get(expanded.row) else {
+            self.review.expanded = None;
+            return self;
+        };
+        let last = candidate.senses().len();
+        let cursor = expanded.cursor.min(last).saturating_add(1).min(last);
+        self.review.expanded = Some(ExpandedSense { cursor, ..expanded });
+        self.review.notice = None;
+        self
+    }
+
+    /// Return the app with the expanded sense cursor moved up.
+    pub fn sense_previous(mut self) -> Self {
+        let Some(expanded) = self.review.expanded else {
+            return self;
+        };
+        let Some(_candidate) = self.review.candidates.get(expanded.row) else {
+            self.review.expanded = None;
+            return self;
+        };
+        let cursor = expanded.cursor.saturating_sub(1);
+        self.review.expanded = Some(ExpandedSense { cursor, ..expanded });
+        self.review.notice = None;
+        self
+    }
+
+    /// Return the app with the focused sense toggled in the expanded multi-select.
+    pub fn sense_toggled(mut self) -> Self {
+        let Some(mut expanded) = self.review.expanded else {
+            return self;
+        };
+        let Some(candidate) = self.review.candidates.get(expanded.row) else {
+            self.review.expanded = None;
+            return self;
+        };
+        if expanded.cursor >= candidate.senses().len() {
+            self.review.expanded = Some(expanded);
+            return self;
+        }
+        if let Some(position) = expanded
+            .selected
+            .iter()
+            .position(|index| *index == expanded.cursor)
+        {
+            if expanded.selected.len() > 1 {
+                expanded.selected.remove(position);
+            }
+        } else {
+            expanded.selected.push(expanded.cursor);
+            expanded.selected.sort_unstable();
+        }
+        self.review.expanded = Some(expanded);
+        self.review.notice = None;
+        self
+    }
+
+    /// Return whether the expanded picker cursor is on its add-more row.
+    pub fn expanded_add_more_focused(&self) -> bool {
+        let Some(expanded) = &self.review.expanded else {
+            return false;
+        };
+        self.review
+            .candidates
+            .get(expanded.row)
+            .map(|candidate| expanded.cursor >= candidate.senses().len())
+            .unwrap_or(false)
+    }
+
+    /// Return the app with the expanded sense picker confirmed and closed.
+    pub fn senses_confirmed(mut self) -> Self {
+        if let Some(expanded) = self.review.expanded
+            && let Some(candidate) = self.review.candidates.get(expanded.row).cloned()
+        {
+            self.review.candidates[expanded.row] = candidate.selecting_senses(expanded.selected);
+        }
+        self.review.expanded = None;
+        self.review.notice = None;
+        self
+    }
+
+    /// Return the app with the expanded sense picker cancelled and closed.
+    pub fn senses_cancelled(mut self) -> Self {
+        self.review.expanded = None;
+        self.review.notice = None;
+        self
+    }
+
+    /// Return the app with new senses appended to the selected row.
+    pub fn senses_appended_to_selected(
+        mut self,
+        senses: Vec<Sense>,
+        message: Option<String>,
+    ) -> Self {
+        let selected = self.review.selected;
+        let Some(candidate) = self.review.candidates.get(selected).cloned() else {
+            return self;
+        };
+        let (candidate, first) = candidate.with_added_senses(senses);
+        self.review.candidates[selected] = candidate;
+        self.review.notice = if first.is_none() && message.is_none() {
+            Some(String::from("nothing to add"))
+        } else {
+            message
+        };
+        if let Some(cursor) = first {
+            let expanded_selected = self.review.candidates[selected].selected_senses().to_vec();
+            self.review.expanded = Some(ExpandedSense {
+                row: selected,
+                cursor,
+                selected: expanded_selected,
+            });
+        }
         self
     }
 
     /// Return the app with the cursor moved one row down (saturates at last).
     pub fn selected_next(mut self) -> Self {
+        self.review.expanded = None;
+        self.review.notice = None;
         if !self.review.candidates.is_empty() {
             let last = self.review.candidates.len() - 1;
             if self.review.selected < last {
@@ -597,6 +793,8 @@ impl App {
 
     /// Return the app with the cursor moved one row up (saturates at zero).
     pub fn selected_previous(mut self) -> Self {
+        self.review.expanded = None;
+        self.review.notice = None;
         if self.review.selected > 0 {
             self.review.selected -= 1;
         }
@@ -804,6 +1002,8 @@ impl App {
         if self.review.candidates.is_empty() {
             return self;
         }
+        self.review.expanded = None;
+        self.review.notice = None;
         let index = self.review.selected.min(self.review.candidates.len() - 1);
         self.review.candidates.remove(index);
         if self.review.selected >= self.review.candidates.len()
@@ -814,6 +1014,27 @@ impl App {
             self.review.selected = 0;
         }
         self
+    }
+
+    fn review_focus_top(&self) -> u16 {
+        let selected = self.review.selected.min(self.review.candidates.len() - 1);
+        let expanded_row = self.review.expanded.as_ref().map(|item| item.row);
+        let mut offset: usize = 0;
+        for (index, candidate) in self.review.candidates.iter().enumerate() {
+            if index == selected {
+                if let Some(expanded) = &self.review.expanded
+                    && expanded.row == selected
+                {
+                    offset = offset.saturating_add(1).saturating_add(expanded.cursor);
+                }
+                return u16::try_from(offset).unwrap_or(u16::MAX);
+            }
+            offset = offset.saturating_add(crate::tui::screens::what_i_understood::candidate_rows(
+                candidate,
+                expanded_row == Some(index),
+            ));
+        }
+        u16::try_from(offset).unwrap_or(u16::MAX)
     }
 
     /// Return the app with a different number of failed cards recorded.

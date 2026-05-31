@@ -107,10 +107,10 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             palette::dim(),
         ));
     }
-    let mut right: Vec<Span<'static>> = Vec::new();
+    let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if app.cards_failed() > 0 {
-        right.extend(super::common::key_hint("Ctrl+G", "Regenerate"));
+        hints.push(super::common::FooterHint::primary("Ctrl+G", "Regenerate"));
     }
-    super::common::append_quit(&mut right, app.quit_pending());
-    super::common::status_bar(left, right, width)
+    hints.push(super::common::quit_hint(app.quit_pending()));
+    super::common::footer_bar(left, hints, width)
 }

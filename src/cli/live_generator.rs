@@ -118,11 +118,11 @@ impl Understanding for LiveCardGenerator {
 impl BulkCorrection for LiveCardGenerator {
     fn correct_bulk(
         &self,
-        candidates: &[WordCandidate],
+        candidate: &WordCandidate,
         comment: &str,
         pair: &LanguagePair,
-    ) -> Result<Vec<WordCandidate>> {
-        self.client()?.correct_bulk(candidates, comment, pair)
+    ) -> Result<crate::session::SenseCorrection> {
+        self.client()?.correct_bulk(candidate, comment, pair)
     }
 }
 

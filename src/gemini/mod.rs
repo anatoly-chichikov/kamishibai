@@ -14,7 +14,7 @@ use crate::generation::SceneSource;
 use crate::generation::Speaker;
 use crate::session::{
     BulkCorrection, CardCorrection, CardDraft, CardMeta, CardMetaGeneration, CardRevision,
-    LanguagePair, RawInputBatch, Understanding, Understood, WordCandidate,
+    LanguagePair, RawInputBatch, SenseCorrection, Understanding, Understood, WordCandidate,
 };
 
 /// Return whether one error means Gemini rejected the configured API key.
@@ -63,11 +63,11 @@ where
     /// Return the candidate list after one bulk user correction.
     fn correct_bulk(
         &self,
-        candidates: &[WordCandidate],
+        candidate: &WordCandidate,
         comment: &str,
         pair: &LanguagePair,
-    ) -> Result<Vec<WordCandidate>> {
-        GeminiClient::<T>::correct_bulk(self, candidates, comment, pair)
+    ) -> Result<SenseCorrection> {
+        GeminiClient::<T>::correct_bulk(self, candidate, comment, pair)
     }
 }
 

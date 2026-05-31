@@ -202,17 +202,15 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         ));
         left.push(Span::styled(format!(" {noun}"), palette::dim()));
     }
-    let mut right: Vec<Span<'static>> = Vec::new();
+    let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if count > 0 {
-        right.extend(super::common::key_hint("Ctrl+G", "continue"));
-        right.push(super::common::status_sep());
+        hints.push(super::common::FooterHint::primary("Ctrl+G", "continue"));
     } else {
-        right.extend(super::common::key_hint("Cmd+V", "paste"));
-        right.push(super::common::status_sep());
+        hints.push(super::common::FooterHint::primary("Cmd+V", "paste"));
     }
-    right.extend(super::common::key_hint("Ctrl+L", "language"));
-    super::common::append_quit(&mut right, app.quit_pending());
-    super::common::status_bar(left, right, width)
+    hints.push(super::common::FooterHint::ghost("Ctrl+L", "language"));
+    hints.push(super::common::quit_hint(app.quit_pending()));
+    super::common::footer_bar(left, hints, width)
 }
 
 fn word_count(blob: &str) -> usize {

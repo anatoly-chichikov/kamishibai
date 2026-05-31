@@ -320,33 +320,20 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         WelcomeStage::EnterKey => "step 2/2",
     };
     let left: Vec<Span<'static>> = vec![Span::styled(String::from(counter), palette::dim2())];
-    let sep = || Span::styled(String::from("   "), palette::base());
-    let mut right: Vec<Span<'static>> = Vec::new();
+    let mut hints: Vec<super::common::FooterHint> = Vec::new();
     match welcome.stage {
         WelcomeStage::PickLanguage => {
-            right.extend(super::common::key_hint("← →", "language"));
-            right.push(sep());
-            right.extend(super::common::key_hint("Enter", "next"));
+            hints.push(super::common::FooterHint::primary("Enter", "next"));
+            hints.push(super::common::FooterHint::secondary("← →", "language"));
         }
         WelcomeStage::EnterKey => {
+            hints.push(super::common::FooterHint::primary("Enter", "submit"));
             if welcome.env_available {
-                right.extend(super::common::key_hint("← →", "move"));
-                right.push(sep());
+                hints.push(super::common::FooterHint::secondary("← →", "move"));
             }
-            right.extend(super::common::key_hint("Enter", "submit"));
-            right.push(sep());
-            right.extend(super::common::key_hint("Esc", "back"));
+            hints.push(super::common::FooterHint::secondary("Esc", "back"));
         }
     }
-    right.push(sep());
-    right.push(Span::styled(
-        "[Ctrl+C]",
-        palette::base().add_modifier(Modifier::BOLD),
-    ));
-    right.push(if app.quit_pending() {
-        Span::styled(" again", palette::base().add_modifier(Modifier::BOLD))
-    } else {
-        Span::styled(" quit", palette::dim())
-    });
-    super::common::status_bar(left, right, width)
+    hints.push(super::common::quit_hint(app.quit_pending()));
+    super::common::footer_bar(left, hints, width)
 }
