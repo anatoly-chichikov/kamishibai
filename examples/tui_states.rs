@@ -126,7 +126,7 @@ fn run(
 }
 
 fn pair() -> LanguagePair {
-    LanguagePair::new("en", "ru")
+    LanguagePair::new("fr", "en")
 }
 
 fn ready_artifacts() -> CardArtifacts {
@@ -259,132 +259,134 @@ fn card_with_highlight(
 }
 
 fn build_states() -> Vec<(String, App)> {
-    let words_seed = "sincerely\nat the end\nexpel\ndebuted";
+    let words_seed = "dépaysement\nflâner\ncanard\nchouette";
     let base_words = App::new(pair()).seeded_blob(words_seed);
 
     let candidates = vec![
         WordCandidate::new(
-            "sincerely",
-            "наречие; искренне; формальный стиль, часто в письмах",
-            true,
-        ),
-        WordCandidate::new("at the end", "фраза о времени или месте; в конце", true),
-        WordCandidate::new(
-            "expel",
-            "глагол; смысл — исключить из учебного заведения или организации",
+            "dépaysement",
+            "noun; the unsettled, refreshing feeling of being somewhere unfamiliar",
             true,
         ),
         WordCandidate::new(
-            "debuted",
-            "прошедшее время от слова «debut»; о первом публичном появлении",
+            "flâner",
+            "verb; to stroll without aim, savouring the wander itself",
+            true,
+        ),
+        WordCandidate::new(
+            "canard",
+            "noun; a duck — and, informally, a planted newspaper hoax",
+            true,
+        ),
+        WordCandidate::new(
+            "chouette",
+            "noun an owl; colloquially an adjective meaning neat or lovely",
             true,
         ),
     ];
 
     let review = App::new(pair())
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_target("fr")
         .understood(candidates.clone());
 
     let change_something = review
         .clone()
         .with_modal(ModalKind::ChangeSomething)
         .typed('#')
-        .typed('4')
+        .typed('3')
         .typed(' ')
         .typed('—')
         .typed(' ')
-        .typed('г')
-        .typed('л')
-        .typed('а')
-        .typed('г')
-        .typed('о')
-        .typed('л');
+        .typed('n')
+        .typed('o')
+        .typed('u')
+        .typed('n');
 
     let base_cards = App::new(pair())
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_target("fr")
         .cards_started(vec![
             card_with_highlight(
-                "sincerely",
-                "She sincerely thanked everyone for their help.",
-                "Она искренне поблагодарила всех за помощь.",
-                "О чувствах, выраженных честно и серьёзно.",
-                "sincerely",
+                "dépaysement",
+                "Ce dépaysement total l'a réveillée après des mois de routine.",
+                "This complete change of scenery woke her up after months of routine.",
+                "About the jolt of feeling far from the familiar.",
+                "dépaysement",
                 cached_artifacts(),
             ),
             card(
-                "at the end",
-                "The meeting starts at the end of March.",
+                "flâner",
+                "Nous aimons flâner le long de la Seine le dimanche.",
                 "",
                 ready_artifacts(),
             ),
-            card("expel", "", "", making_picture_artifacts()),
-            card("debuted", "", "", CardArtifacts::default()),
+            card("canard", "", "", making_picture_artifacts()),
+            card("chouette", "", "", CardArtifacts::default()),
         ])
         .card_toggle_expanded()
         .with_elapsed(Duration::from_secs(41));
 
     let change_this_card = App::new(pair())
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_target("fr")
         .cards_started(vec![
-            card("sincerely", "", "", ready_artifacts()),
+            card("dépaysement", "", "", ready_artifacts()),
             card_with_hint(
-                "at the end",
-                "The meeting starts at the end of March.",
+                "flâner",
+                "Nous aimons flâner le long de la Seine le dimanche.",
                 "",
-                "О временной точке завершения процесса.",
+                "About wandering slowly with no destination in mind.",
                 ready_artifacts(),
             ),
-            card("expel", "", "", making_picture_artifacts()),
-            card("debuted", "", "", CardArtifacts::default()),
+            card("canard", "", "", making_picture_artifacts()),
+            card("chouette", "", "", CardArtifacts::default()),
         ])
         .card_selected_next()
         .with_modal(ModalKind::ChangeThisCard)
-        .typed('п')
-        .typed('р')
-        .typed('и')
-        .typed('м')
-        .typed('е')
-        .typed('р')
+        .typed('m')
+        .typed('a')
+        .typed('k')
+        .typed('e')
         .typed(' ')
-        .typed('п')
-        .typed('о')
-        .typed('п')
-        .typed('р')
-        .typed('о')
-        .typed('щ')
-        .typed('е');
+        .typed('i')
+        .typed('t')
+        .typed(' ')
+        .typed('s')
+        .typed('i')
+        .typed('m')
+        .typed('p')
+        .typed('l')
+        .typed('e');
 
     let retrying = App::new(pair())
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_target("fr")
         .cards_started(vec![
-            card("sincerely", "", "", ready_artifacts()),
-            card("at the end", "", "", second_retrying_artifacts()),
-            card("expel", "", "", retrying_artifacts()),
-            card("debuted", "", "", making_picture_artifacts()),
+            card("dépaysement", "", "", ready_artifacts()),
+            card("flâner", "", "", second_retrying_artifacts()),
+            card("canard", "", "", retrying_artifacts()),
+            card("chouette", "", "", making_picture_artifacts()),
         ])
         .with_elapsed(Duration::from_secs(65));
 
     let failed = App::new(pair())
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_target("fr")
         .cards_started(vec![
-            card("sincerely", "", "", ready_artifacts()),
-            card("at the end", "", "", ready_artifacts()),
-            card("expel", "", "", failed_picture_artifacts()),
-            card("debuted", "", "", ready_artifacts()),
+            card("dépaysement", "", "", ready_artifacts()),
+            card("flâner", "", "", ready_artifacts()),
+            card("canard", "", "", failed_picture_artifacts()),
+            card("chouette", "", "", ready_artifacts()),
         ])
         .with_elapsed(Duration::from_secs(108));
 
     let done = App::new(pair())
         .with_screen(Screen::Done)
-        .confirmed_target("en")
+        .confirmed_target("fr")
         .done_published(
-            "en_2026-04-17_183029.apkg",
-            "en_2026-04-17_183029.pdf",
+            "fr_2026-06-01_183029.apkg",
+            "fr_2026-06-01_183029.pdf",
             "kamishibai-out/",
         );
 

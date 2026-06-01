@@ -13,22 +13,22 @@ All future work references this map instead of re-deriving transitions.
 
 | Id                    | Kind        | PDF reference                                             |
 | --------------------- | ----------- | --------------------------------------------------------- |
-| `Welcome`             | fullscreen  | first-run setup; no live reference yet                    |
+| `Welcome`             | fullscreen  | `00-welcome.png`                                          |
 | `YourWords`           | fullscreen  | `01-your-words.png`                                       |
-| `WhatIUnderstood`     | fullscreen  | `02-what-i-understood.png`, `02b-what-i-understood-corrected.png` |
+| `WhatIUnderstood`     | fullscreen  | `02-what-i-understood.png`                                |
 | `ChangeSomething`     | modal       | `03-change-something-modal.png` over `WhatIUnderstood`    |
-| `BulkCorrectionBusy`  | overlay     | `01c-busy-correction.png` over `WhatIUnderstood`          |
-| `YourCards`           | fullscreen  | `04-your-cards.png`, `04b-your-cards-mid.png`             |
-| `ChangeThisCard`      | modal       | over `YourCards` — reference shot pending                 |
+| `BulkCorrectionBusy`  | overlay     | inline busy overlay over `WhatIUnderstood`                |
+| `YourCards`           | fullscreen  | `04-your-cards.png`                                       |
+| `ChangeThisCard`      | modal       | `05-change-this-card-modal.png` over `YourCards`          |
 | `Done`                | fullscreen  | `08-done.png`                                             |
 
 Retry, failure banner and recovery are inline within `YourCards` — not separate screens.
 
-The remaining edge-case PNGs (`05-change-this-card-modal.png`,
-`06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`) are intentionally absent
-from `live/`. They require per-card modal setup or failure injection during recording, which
-the live-binary `capture.tape` does not exercise. Re-snap them via `examples/tui_states.rs`
-when those particular states need fresh references.
+The edge-case PNGs (`00-welcome.png`, `03-change-something-modal.png`,
+`05-change-this-card-modal.png`, `06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`)
+require modal setup or failure injection that the live-binary `capture.tape` does not exercise.
+They are produced reproducibly by `states.tape`, which drives `examples/tui_states.rs` (no Gemini)
+through the same EN→FR French flow at 2x. Re-snap them with `vhs states.tape`.
 
 Text-only Gemini passes use one universal blocking overlay on top of the current
 screen: first understanding, bulk correction, and per-card correction. The

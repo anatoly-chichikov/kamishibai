@@ -75,8 +75,19 @@ If a new language is needed, add a new profile instead of editing the fixed runt
 ## Recording the demo GIF and screenshots
 
 `docs/tui-states/live/capture.gif` (linked from `README.md`) and the per-screen PNGs next to
-it are produced by two VHS tapes in `docs/tui-states/`. The pipeline is manual end-to-end.
-The generation keyboard contract is `Ctrl+G`.
+it are produced by two VHS tapes in `docs/tui-states/`:
+
+- `capture.tape` runs the **live binary** (real Gemini) and writes the happy-path screenshots
+  plus the raw `live/capture.gif`.
+- `states.tape` drives the `examples/tui_states` **state-walker** (no Gemini) to write the
+  synthetic edge-case / modal / Welcome screenshots that the live run cannot reach.
+
+The README gif itself is then assembled deterministically by `encode.sh` from `timings.conf`
+(the single source of truth for section windows/durations); it emits `timings.timeline.txt`
+and splices the caption label PNGs (`live/cap-type.png`, `live/cap-pick.png`,
+`live/cap-generate.png`, `live/caption.png`). Only `live/capture.gif` is committed; pass
+`MAKE_HIRES=1` to `encode.sh` if you want a local-only hi-res `capture.hires.mp4` master. The
+generation keyboard contract is `Ctrl+G`.
 
 ### Why no manual chord patch is required
 
@@ -100,15 +111,19 @@ From the repo root:
    cargo build --release
    ```
 
-3. **Record the Welcome shot** (state-walker, no Gemini calls):
+3. **Record the synthetic state shots** (state-walker, no Gemini calls):
 
    ```bash
    cd docs/tui-states
-   vhs welcome.tape
-   rm -f welcome-throwaway.gif
+   vhs states.tape
+   rm -f states-throwaway.gif
    ```
 
-   Writes `live/00-welcome.png`.
+   Writes `live/00-welcome.png`, `live/03-change-something-modal.png`,
+   `live/05-change-this-card-modal.png`, `live/06-your-cards-retrying.png`, and
+   `live/07-your-cards-couldnt-finish.png` at 2x. The tape walks the state vector with `Enter`
+   (one state per keypress) and uses uniform 800 ms sleeps — short/uneven sleeps coalesce
+   keystrokes and the index drifts.
 
 4. **Record the live-binary flow** (real Gemini run, ~2 minutes wall-clock with a warm
    cache, ~4 minutes cold):
@@ -118,7 +133,8 @@ From the repo root:
    ```
 
    Writes `live/01-your-words.png`, `live/01b-busy.png`, `live/02-what-i-understood.png`,
-   `live/04-your-cards.png`, `live/04b-your-cards-mid.png`, `live/08-done.png`, and a raw
+   `live/02a-nav.png`, `live/03-senses.png`, `live/03b-senses-toggled.png`,
+   `live/04-your-cards.png`, `live/08-done.png`, `live/09-card-open.png`, and a raw
    `live/capture.gif` that is roughly two minutes long.
 
 5. **Stash the raw recording** before any post-processing — keep it around as `/tmp/raw.gif`
@@ -237,14 +253,18 @@ From the repo root:
 
 ### Demo input
 
-Tape types five English words on `YourWords` (`my_language=ru` is the user preference, so
-the target language is non-Russian): `lantern`, `harbor`, `moonlight`, `bittersweet`,
-`homesick`. Mix of concrete + emotional terms; all yield strong manga panels.
+`capture.tape` runs with `my_language=en`, so the target language resolves to French and the
+header reads **`EN → FR`**. The tape types seven French words on `YourWords`: `dépaysement`,
+`flâner`, `canard`, `chouette`, `râler`, `terroir`, `bof` — a mix of untranslatable nouns, a
+verb, and colloquialisms (`canard` doubles as "duck" and "newspaper hoax"); all yield strong
+manga panels and interesting English glosses. The synthetic `examples/tui_states.rs` walker
+mirrors this EN→FR flow with the first four of those words.
 
 ### Edge-case shots
 
-The four PNGs that need failure injection or modal interaction
-(`03-change-something-modal.png`, `05-change-this-card-modal.png`,
-`06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`) are intentionally not
-produced by `capture.tape`. Re-snap them via `examples/tui_states.rs` when the design
-changes enough to need fresh references.
+The five PNGs that need modal interaction or failure injection (`00-welcome.png`,
+`03-change-something-modal.png`, `05-change-this-card-modal.png`, `06-your-cards-retrying.png`,
+`07-your-cards-couldnt-finish.png`) are not produced by `capture.tape`. They are produced
+reproducibly by `states.tape` (step 3), which drives `examples/tui_states.rs` through the same
+EN→FR flow at 2x. When the design changes, edit the demo data in `examples/tui_states.rs` and
+re-run `vhs states.tape`.
