@@ -309,8 +309,8 @@ fn build_states() -> Vec<(String, App)> {
         .cards_started(vec![
             card_with_highlight(
                 "dépaysement",
-                "Ce dépaysement total l'a réveillée après des mois de routine.",
-                "This complete change of scenery woke her up after months of routine.",
+                "Ce dépaysement l'a réveillée d'un coup.",
+                "This change of scenery woke her up at once.",
                 "About the jolt of feeling far from the familiar.",
                 "dépaysement",
                 cached_artifacts(),
