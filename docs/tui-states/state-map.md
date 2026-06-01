@@ -11,46 +11,64 @@ All future work references this map instead of re-deriving transitions.
 
 ## Screens and overlays
 
-| Id                    | Kind        | PDF reference                                             |
-| --------------------- | ----------- | --------------------------------------------------------- |
-| `Welcome`             | fullscreen  | first-run setup; no live reference yet                    |
-| `YourWords`           | fullscreen  | `01-your-words.png`                                       |
-| `WhatIUnderstood`     | fullscreen  | `02-what-i-understood.png`, `02b-what-i-understood-corrected.png` |
-| `ChangeSomething`     | modal       | `03-change-something-modal.png` over `WhatIUnderstood`    |
-| `BulkCorrectionBusy`  | overlay     | `01c-busy-correction.png` over `WhatIUnderstood`          |
-| `YourCards`           | fullscreen  | `04-your-cards.png`, `04b-your-cards-mid.png`             |
-| `ChangeThisCard`      | modal       | over `YourCards` — reference shot pending                 |
-| `Done`                | fullscreen  | `08-done.png`                                             |
+| Id                | Kind                                                                              | Reference shot                  |
+| ----------------- | --------------------------------------------------------------------------------- | ------------------------------- |
+| `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `00-welcome.png`                |
+| `YourWords`       | fullscreen                                                                        | `01-your-words.png`             |
+| `WhatIUnderstood` | fullscreen                                                                        | `02-what-i-understood.png`      |
+| `ChangeSomething` | modal over `WhatIUnderstood`, opened from the `+ add more` row in the sense picker | `03-change-something-modal.png` |
+| `YourCards`       | fullscreen                                                                        | `04-your-cards.png`             |
+| `ChangeThisCard`  | modal over `YourCards`, opened with `R`                                           | `05-change-this-card-modal.png` |
+| `Done`            | fullscreen                                                                        | `08-done.png`                   |
+| `PickMyLanguage`  | modal over `Welcome` / `YourWords` / `WhatIUnderstood`, opened with `Ctrl+L`      | header chip (no standalone shot) |
+| Busy              | one universal blocking overlay on any screen                                      | `01b-busy.png`                  |
+
+Source of truth for these names (`src/tui/screen.rs`, `src/tui/app.rs`):
+`Screen` = {`Welcome`, `YourWords`, `WhatIUnderstood`, `YourCards`, `Done`};
+`ModalKind` = {`ChangeSomething`, `ChangeThisCard`, `PickMyLanguage`};
+`BusyKind` = {`Understanding`, `BulkCorrection`, `CardCorrection`, `CheckingKey`,
+`PublishingDeck`, `PublishingReport`}. There is no separate `BulkCorrectionBusy` screen —
+bulk correction is just `BusyKind::BulkCorrection` drawn by the universal busy overlay.
 
 Retry, failure banner and recovery are inline within `YourCards` — not separate screens.
 
-The remaining edge-case PNGs (`05-change-this-card-modal.png`,
-`06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`) are intentionally absent
-from `live/`. They require per-card modal setup or failure injection during recording, which
-the live-binary `capture.tape` does not exercise. Re-snap them via `examples/tui_states.rs`
-when those particular states need fresh references.
+The edge-case PNGs (`00-welcome.png`, `03-change-something-modal.png`,
+`05-change-this-card-modal.png`, `06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`)
+require modal setup or failure injection that the live-binary `capture.tape` does not exercise.
+They are produced reproducibly by `states.tape`, which drives `examples/tui_states.rs` (no Gemini)
+through the same EN→FR French flow at 2x. Re-snap them with `vhs states.tape`.
 
-Text-only Gemini passes use one universal blocking overlay on top of the current
-screen: first understanding, bulk correction, and per-card correction. The
-overlay owns keyboard input until the background request finishes.
+Every background phase uses one universal blocking overlay on top of the current
+screen: first understanding, bulk correction, per-card correction, the Welcome
+key check, and the two publish steps (deck then report). While a busy overlay is
+up it owns keyboard input — every non-redraw key is swallowed until the
+background request finishes (`transit` short-circuits when `app.busy()` is set).
+An error overlay behaves the same way but clears on any key.
 
-`Welcome` is the explicit setup gate. It appears until the user has confirmed
-`my language` and a Gemini key is available from the environment, saved
-preferences, or paste. `GEMINI_API_KEY` may prefill the key step, but it must
-never skip the first-run language choice.
+`Welcome` is the explicit setup gate, with two stages. **Pick language**: `←/→`
+(or `Ctrl+L`) cycle `my language`, `Enter` confirms it and advances. **Enter key**:
+type or paste a Gemini key; `←/→` move focus between the submit button and a
+`load from env` action (the env action only joins the cycle when `GEMINI_API_KEY`
+is set); `Enter` on a filled field runs a live validity check and only on success
+persists the key and moves to `YourWords`; `Esc` steps back to the language stage.
+`GEMINI_API_KEY` may prefill the key step, but it must never skip the language choice.
 
-After setup, the language pair is rendered as a compact header widget on every
-steady-state fullscreen screen in the same visual language.
+After setup, the language pair is rendered as a compact header chip on every
+steady-state fullscreen screen, reading `my → target` (e.g. `EN → FR`).
 
 ## Language pair surface
 
 | Screen            | What is shown                                                                                  |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
-| `Welcome`         | Unlocked setup language. `←/→` or `Ctrl+L` cycles `my language`; `Enter` confirms it.          |
-| `YourWords`       | Detected target (pending), persisted `my` language. `[Ctrl+L]` opens language.          |
-| `WhatIUnderstood` | Confirmed target, current `my`. `[L]` can flip `my`, `[T]` cycles target if unsure.           |
+| `Welcome`         | Unlocked setup language. `←/→` (or `Ctrl+L`) cycles `my language`; `Enter` confirms it.        |
+| `YourWords`       | Detected target (pending), persisted `my`. `Ctrl+L` opens the language picker.                 |
+| `WhatIUnderstood` | Confirmed target, current `my`. `Ctrl+L` opens the language picker (re-runs understanding).    |
 | `YourCards`       | Frozen pair for the batch — read-only.                                                         |
 | `Done`            | Pair remains visible next to the batch summary.                                                |
+
+The only way to change `my language` mid-flow is the `Ctrl+L` picker modal
+(`PickMyLanguage`), available on `Welcome`, `YourWords`, and `WhatIUnderstood`.
+There is no `[L]` flip key and no `[T]` target-cycle key — both were removed.
 
 `target language` is resolved before `WhatIUnderstood`. `my language` is read
 from `config/preferences.json` only after the stored value has been explicitly
@@ -72,59 +90,61 @@ with a struck-through term so the user can see what was rejected and why.
 ## Transitions
 
 ```
-              [Ctrl+G]
-    YourWords ─────────► resolving target ─► WhatIUnderstood
-        ▲                                          │
-        │                                          │
-        │            [Esc] from WhatIUnderstood    │ [R]
-        └──────────────────────────────────────────┤
-                                                   ▼
-                                           ChangeSomething
-                                             (bulk modal)
-                                                   │
-                                         [Enter]   │   [Esc]
-                                             ┌─────┴─────┐
-                                             │           │
-                                             ▼           ▼
-                                       bulk retry   WhatIUnderstood
-                                             │
-                                             ▼
-                                      WhatIUnderstood
+    YourWords ──[Ctrl+G, blob not blank]──► (Understanding busy) ──► WhatIUnderstood
 
-    WhatIUnderstood ──[Ctrl+G]──► YourCards
-    YourCards ──[R on card]──► ChangeThisCard ──[Enter]──► YourCards
-    YourCards ──[R on card]──► ChangeThisCard ──[Esc]────► YourCards
-    YourCards ──[Ctrl+G]──► regenerate current card state / rebuild publish
-    YourCards ──[all ready]──► Done
-    YourCards ──[all attempts done]──► Done (if nothing fatal)
-                                 │
-                                 └─[has failed cards]─► Done (with failure summary)
+    WhatIUnderstood
+        ├─ [Enter]/[→] on a row ──► sense picker opens
+        │       ├─ [Space] toggle sense · [↑↓]/[j][k] move · [Enter]/[←] done (collapse)
+        │       └─ [Enter] on the "+ add more" row ──► ChangeSomething (bulk modal)
+        │                                                  ├─ [Enter] send ──► (BulkCorrection busy) ──► WhatIUnderstood
+        │                                                  └─ [Esc] cancel ──► WhatIUnderstood
+        ├─ [D] drop selected row ──► last row dropped returns to YourWords (blob cleared)
+        ├─ [Ctrl+L] ──► PickMyLanguage modal ──► re-runs understanding
+        └─ [Ctrl+G, ≥1 ok row] ──► (StartGeneration) ──► YourCards
 
-    Done ──[Ctrl+G if failures]──► YourCards
-    Done ──[Ctrl+C]──► exit
+    YourCards
+        ├─ [↑↓]/[←→] nav · [Enter] expand/collapse
+        ├─ [R] ──► ChangeThisCard modal ──► [Enter] send (CardCorrection) | [Esc] cancel ──► YourCards
+        ├─ [Ctrl+G] ──► regenerate the selected card
+        └─ queue drained ──► (StartPublish: PublishingDeck ──► PublishingReport busy) ──► Done
+
+    Done
+        ├─ [Ctrl+G, if failed cards > 0] ──► YourCards (regenerate failed)
+        └─ [Ctrl+C] ──► exit
 ```
+
+Note: there is no `Esc`-to-go-back from `WhatIUnderstood`, and `R` is a no-op there
+(the bulk modal is reached only through the `+ add more` row). The only path back to
+`YourWords` is dropping the last remaining candidate. Publishing the deck/PDF is automatic
+once the generation queue drains — it is not a key the user presses.
 
 ## Keyboard contract (per state)
 
-| State             | Keys                                                                                     |
-| ----------------- | ---------------------------------------------------------------------------------------- |
-| `YourWords`       | type/paste one item per line · `Enter` newline · `Ctrl+G` continue · `Ctrl+L` language |
-| `WhatIUnderstood` | `↑↓` nav · `Enter` pick meanings / open add more · `Space` select meaning inside picker · `d` drop row · `Ctrl+G` make cards · `L` flip my |
-| `ChangeSomething` | text area input · `Enter` send · `Esc` cancel                                            |
-| `YourCards`       | `↑↓` nav · `Enter` expand/collapse · `R` / `r` change this card · `Ctrl+G` regenerate state/rebuild publish |
-| `ChangeThisCard`  | text area input · `Enter` send · `Esc` cancel                                            |
-| `Done`            | `Ctrl+G` regenerate failed · `Ctrl+C` quit · file paths stay visible                      |
+| State                       | Keys (footer leads with the bright primary)                                                                 |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `Welcome` · pick language   | `←/→` cycle `my language` · `Enter` next · `Ctrl+C` quit                                                     |
+| `Welcome` · enter key       | type/`Cmd+V` paste key · `←/→` move focus (submit ↔ load-from-env, env only) · `Enter` submit · `Esc` back   |
+| `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `Ctrl+L` language |
+| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav · `Enter`/`→` pick meanings · `D` drop row · `Ctrl+G` make cards · `Ctrl+L` language        |
+| `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter`/`←` done · `Enter` on `+ add more` opens ChangeSomething  |
+| `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
+| `YourCards`                 | `↑↓`/`←→` nav · `Enter` expand/collapse · `R` change this card · `Ctrl+G` regenerate selected card           |
+| `ChangeThisCard`            | text input · `Enter` send · `Esc` cancel                                                                    |
+| `PickMyLanguage`            | `←/→`/`↑↓` move · `Enter` confirm · `Esc` cancel                                                             |
+| `Done`                      | `Ctrl+G` regenerate failed (only when failures) · `Ctrl+C` quit · file paths stay visible                   |
+
+`Ctrl+C` quits from every screen (a second press confirms when a `quit_pending` prompt shows).
 
 ## Event ownership
 
 Events are divided between the app shell and individual screens:
 
-- **Shell owns**: `Resize`, `Quit`, global modal dismissal (`Esc` unwind), timers that drive
-  queue progress.
-- **Screen owns**: every key in the table above, text-editing events for modals, list
-  navigation, row expansion.
-- **Session engine owns**: LLM response events (`UnderstandingReady`, `BulkCorrectionReady`,
-  `CardCorrectionReady`, `ArtifactReady`, `ArtifactFailed`, `RetryStarted`, `RetryFailedTerminally`).
+- **Shell owns**: terminal `Resize`, pumping the session-engine channel, and the final quit.
+- **Transition owns**: every key in the table above, modal dismissal (`Esc` → `Cancel`),
+  text editing in modals, list navigation, row expansion.
+- **Session engine emits** (fed back into the transition as `AppEvent`s):
+  `UnderstandingReady`, `BulkCorrectionReady`, `CardCorrectionReady`, `RetryStarted`,
+  `RetryExhausted`, `BatchReady`, `BatchDone { failed }`.
 
 `YourWords` input is line-delimited. Plain `Enter` appends a new line to the raw
 blob. Commas are literal text, not separators. The continue command must be a
@@ -140,14 +160,18 @@ not forwarded to card generation.
 - Retry: each artifact (`scene`, `picture`, `sound`) retries up to 3 times. Between
   attempts the card row shows an inline retry indicator without blocking the queue.
 - Terminal failure: after 3 attempts, the card stays in the queue but marked as failed.
-- Recovery: the final card views expose `Ctrl+G`: on `YourCards` it regenerates failed work or rebuilds APKG/PDF from ready cards; on `Done` it regenerates failed cards when failures exist.
+- Recovery via `Ctrl+G`: on `YourCards` it regenerates the currently selected card
+  (`RegenerateCurrent`); on `Done` it regenerates every failed card, but only when
+  `cards_failed > 0` (`RegenerateFailed`). Building the `.apkg` and `.pdf` is not a
+  user action — it runs automatically once the queue drains (`StartPublish`).
 - There is no `Retry` fullscreen and no separate `Failure` fullscreen.
 
 ## App shell and ratatui mapping
 
 - Root widget: a single full-terminal area split vertically into
   `header · body · footer` using `Layout::default().constraints([Length(1), Min(1), Length(1)])`.
-- `header` always renders the language pair widget (target → my).
+- `header` always renders the language pair chip as `my → target` (`pair.label()` is
+  `"{support} → {target}"`, e.g. `EN → FR`).
 - `body` renders the active screen. Modals are rendered last by drawing into a
   centered rectangle over `body` using `Clear + Block::bordered()`.
 - `footer` renders the active screen's keyboard hints as a tiered, width-aware
@@ -159,17 +183,15 @@ not forwarded to card generation.
 
 ## Pure transition function
 
-```
-transition(state, event) -> (state, side_effects)
-```
+The state machine is the pure function `transit(app, event) -> (App, Side)` in
+`src/tui/transition.rs`: no IO, no Gemini calls. It returns the next `App` plus a
+`Side` effect the shell runs outside the function (`RunUnderstanding`,
+`RunBulkCorrection`, `RunCardCorrection`, `StartGeneration`, `RegenerateCurrent`,
+`RegenerateFailed`, `StartPublish`, `ValidateKey`, `LoadEnvKey`,
+`PersistMyLanguage…`, `ExitApp`). Tests drive it with fabricated events to verify
+the full path `YourWords → WhatIUnderstood → YourCards → Done` without touching the
+network.
 
-It is pure: no IO, no Gemini calls. Tests drive it with fabricated events to
-verify the full screen path `YourWords -> WhatIUnderstood -> YourCards -> Done`
-without touching the network.
-
-Out of scope for this map:
-
-- Final widget rendering.
-- Real Gemini integration.
-- Implementation of individual screens beyond the skeleton scaffold that proves
-  transitions.
+This map documents the state machine only. Widget rendering lives in
+`src/tui/screens/`; the real Gemini passes and the artifact pipeline live in
+`src/gemini` and `src/generation`. Both are fully implemented — not scaffold.
