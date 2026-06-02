@@ -109,10 +109,13 @@ fn pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells() {
     session
         .expect(b"\x1b]22;left_ptr\x1b\\".as_slice())
         .expect("state demo must keep reasserting the iTerm arrow while the pointer is stationary");
-    for _ in 0..5 {
-        session.send(" ").expect("must advance one state");
-        std::thread::sleep(Duration::from_millis(150));
-    }
+    session
+        .send("6")
+        .expect("must type the Your cards state index");
+    session
+        .send(" ")
+        .expect("must jump to the Your cards state (index 6)");
+    std::thread::sleep(Duration::from_millis(300));
     session
         .send("\x1b[<35;20;6M")
         .expect("must send mouse move over artifact file name");
@@ -125,10 +128,11 @@ fn pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells() {
     session
         .expect(b"\x1b]22;left_ptr\x1b\\".as_slice())
         .expect("state demo must switch back to the iTerm arrow over plain cells");
-    for _ in 0..4 {
-        session.send(" ").expect("must advance one state");
-        std::thread::sleep(Duration::from_millis(150));
-    }
+    session.send("10").expect("must type the Done state index");
+    session
+        .send(" ")
+        .expect("must jump to the Done state (index 10)");
+    std::thread::sleep(Duration::from_millis(300));
     session
         .send("\x1b[<35;9;5M")
         .expect("must send mouse move over done artifact placeholder");

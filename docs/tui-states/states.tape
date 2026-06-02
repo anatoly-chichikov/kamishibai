@@ -16,38 +16,45 @@ Type "./target/release/examples/tui_states"
 Enter
 Show
 
-# The walker advances one state per keypress. Use generous, uniform 800ms sleeps
-# between keys: short/uneven sleeps coalesce keystrokes and the index drifts.
+# The walker uses ABSOLUTE navigation: `Type "<n>"` then `Space` jumps straight
+# to state <n>, so a dropped or coalesced keystroke cannot accumulate across the
+# run and the stray Return that launches the binary cannot contaminate the
+# index. Each screenshot re-asserts its target index. Keep the uniform 800ms
+# settle after the jump so VHS never captures a mid-repaint frame.
 
-# index 0 — Welcome (API-key setup gate)
-Sleep 1500ms
+# index 0 — Welcome · key step with no GEMINI_API_KEY in env (submit only)
+Type "0"
+Space
+Sleep 800ms
 Screenshot "live/00-welcome.png"
 
-# index 4 — ChangeSomething modal over WhatIUnderstood (4 keypresses from index 0)
-Enter
+# index 1 — Welcome · key step with GEMINI_API_KEY in env (load-from-env chip)
+Type "1"
+Space
 Sleep 800ms
-Enter
-Sleep 800ms
-Enter
-Sleep 800ms
-Enter
+Screenshot "live/00b-welcome-env.png"
+
+# index 5 — ChangeSomething modal over WhatIUnderstood
+Type "5"
+Space
 Sleep 800ms
 Screenshot "live/03-change-something-modal.png"
 
-# index 6 — ChangeThisCard modal over YourCards
-Enter
-Sleep 800ms
-Enter
+# index 7 — ChangeThisCard modal over YourCards
+Type "7"
+Space
 Sleep 800ms
 Screenshot "live/05-change-this-card-modal.png"
 
-# index 7 — YourCards with inline retry indicators
-Enter
+# index 8 — YourCards with inline retry indicators
+Type "8"
+Space
 Sleep 800ms
 Screenshot "live/06-your-cards-retrying.png"
 
-# index 8 — YourCards couldn't finish (terminal failure)
-Enter
+# index 9 — YourCards couldn't finish (terminal failure)
+Type "9"
+Space
 Sleep 800ms
 Screenshot "live/07-your-cards-couldnt-finish.png"
 

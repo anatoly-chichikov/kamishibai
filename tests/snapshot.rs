@@ -4,12 +4,16 @@
 //! terminal, no Gemini calls, no background threads.
 
 use kamishibai::session::{LanguagePair, Sense, WordCandidate};
-use kamishibai::tui::{App, AppEvent, Screen, draw, transit};
+use kamishibai::tui::{App, AppEvent, KeySource, Screen, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 fn render(app: &App) -> String {
-    let backend = TestBackend::new(80, 12);
+    render_sized(app, 80, 12)
+}
+
+fn render_sized(app: &App, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test backend must boot");
     terminal
         .draw(|frame| draw(frame, app))
@@ -23,6 +27,23 @@ fn render(app: &App) -> String {
         buffer.push('\n');
     }
     buffer
+}
+
+#[test]
+fn welcome_key_step_without_env_locks_submit_only_layout() {
+    let app = App::new(LanguagePair::new("fr", "en"))
+        .opening_welcome(KeySource::Empty, String::new(), false)
+        .welcome_advance();
+    insta::assert_snapshot!("welcome_key_step_no_env", render_sized(&app, 96, 16));
+}
+
+#[test]
+fn welcome_key_step_with_env_locks_load_from_env_chip() {
+    let app = App::new(LanguagePair::new("fr", "en"))
+        .opening_welcome(KeySource::Empty, String::new(), true)
+        .welcome_advance()
+        .welcome_focus_next();
+    insta::assert_snapshot!("welcome_key_step_with_env", render_sized(&app, 96, 16));
 }
 
 #[test]
