@@ -119,11 +119,15 @@ From the repo root:
    rm -f states-throwaway.gif
    ```
 
-   Writes `live/00-welcome.png`, `live/03-change-something-modal.png`,
-   `live/05-change-this-card-modal.png`, `live/06-your-cards-retrying.png`, and
-   `live/07-your-cards-couldnt-finish.png` at 2x. The tape walks the state vector with `Enter`
-   (one state per keypress) and uses uniform 800 ms sleeps — short/uneven sleeps coalesce
-   keystrokes and the index drifts.
+   Writes `live/00-welcome.png`, `live/00b-welcome-env.png`,
+   `live/03-change-something-modal.png`, `live/05-change-this-card-modal.png`,
+   `live/06-your-cards-retrying.png`, and `live/07-your-cards-couldnt-finish.png` at 2x. The
+   tape jumps to each state by **absolute index** (`Type "<n>"` then `Space`) and keeps a
+   uniform 800 ms settle after each jump so VHS never captures a mid-repaint frame. Absolute
+   jumps are immune to keystroke coalescing and to the stray Return the shell injects when it
+   launches the binary — `Enter` in the walker only clears the queued digits. The two Welcome
+   shots are the same `EnterKey` stage: `00-welcome.png` has no `GEMINI_API_KEY` (just the
+   `submit` button), `00b-welcome-env.png` has it set (adds the focused `load from env` chip).
 
 4. **Record the live-binary flow** (real Gemini run, ~2 minutes wall-clock with a warm
    cache, ~4 minutes cold):
@@ -262,9 +266,12 @@ mirrors this EN→FR flow with the first four of those words.
 
 ### Edge-case shots
 
-The five PNGs that need modal interaction or failure injection (`00-welcome.png`,
-`03-change-something-modal.png`, `05-change-this-card-modal.png`, `06-your-cards-retrying.png`,
-`07-your-cards-couldnt-finish.png`) are not produced by `capture.tape`. They are produced
-reproducibly by `states.tape` (step 3), which drives `examples/tui_states.rs` through the same
-EN→FR flow at 2x. When the design changes, edit the demo data in `examples/tui_states.rs` and
-re-run `vhs states.tape`.
+The six PNGs that need modal interaction or environment/failure injection
+(`00-welcome.png`, `00b-welcome-env.png`, `03-change-something-modal.png`,
+`05-change-this-card-modal.png`, `06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`)
+are not produced by `capture.tape`. They are produced reproducibly by `states.tape` (step 3),
+which drives `examples/tui_states.rs` through the same EN→FR flow at 2x. When the design
+changes, edit the demo data in `examples/tui_states.rs` and re-run `vhs states.tape`. If you
+add or reorder states in the vector, update the absolute indices in `states.tape` and in the
+`pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells` test (it jumps to the
+`Your cards` and `Done` indices by number).

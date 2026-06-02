@@ -1,8 +1,14 @@
 //! Visual demo that renders every TUI state the design mockup covers.
 //!
-//! `cargo run --example tui_states` advances through the seven design states
-//! on every keypress and exits on `q`. Intended for VHS/tmux screenshots so
-//! the live render can be compared against `Kamishibai TUI A.html`.
+//! `cargo run --example tui_states` walks the design states. Navigation is
+//! absolute, not cumulative: type a state index then `Space` to jump straight
+//! to it (e.g. `5` then `Space` shows state 5). A bare `Space` with no digits
+//! queued steps forward one, `←`/`p` steps back, and `q` exits. `Enter` only
+//! clears the queued digits, so the stray Return the shell injects when it
+//! launches the binary can neither drift nor contaminate the index. Absolute
+//! jumps keep VHS screenshots reproducible — a dropped or coalesced keystroke
+//! cannot accumulate across the run. Intended for VHS/tmux screenshots so the
+//! live render can be compared against `Kamishibai TUI A.html`.
 
 use std::io::{self, stdout};
 use std::time::Duration;
@@ -59,6 +65,7 @@ fn run(
     states: &[(String, App)],
 ) -> io::Result<()> {
     let mut index = 0usize;
+    let mut pending = String::new();
     let mut mouse_position: Option<(u16, u16)> = None;
     loop {
         let (label, app) = &states[index];
@@ -86,7 +93,20 @@ fn run(
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Char(c) if c.is_ascii_digit() => pending.push(c),
+                    KeyCode::Char(' ') => {
+                        if let Ok(target) = pending.parse::<usize>() {
+                            if target < states.len() {
+                                index = target;
+                            }
+                        } else {
+                            index = (index + 1) % states.len();
+                        }
+                        pending.clear();
+                    }
+                    KeyCode::Enter => pending.clear(),
                     KeyCode::Left | KeyCode::Char('p') => {
+                        pending.clear();
                         if index == 0 {
                             index = states.len() - 1;
                         } else {
@@ -94,6 +114,7 @@ fn run(
                         }
                     }
                     _ => {
+                        pending.clear();
                         index = (index + 1) % states.len();
                     }
                 },
@@ -390,16 +411,25 @@ fn build_states() -> Vec<(String, App)> {
             "kamishibai-out/",
         );
 
-    let welcome = App::new(pair())
+    let welcome_no_env = App::new(pair())
         .opening_welcome(KeySource::Empty, String::new(), false)
         .welcome_advance();
+
+    let welcome_env = App::new(pair())
+        .opening_welcome(KeySource::Empty, String::new(), true)
+        .welcome_advance()
+        .welcome_focus_next();
 
     let busy_understanding = App::new(pair())
         .seeded_blob(words_seed)
         .busy_started(BusyKind::Understanding)
         .busy_elapsed(Duration::from_millis(540));
     vec![
-        (String::from("00 · Welcome"), welcome),
+        (String::from("00 · Welcome · no env key"), welcome_no_env),
+        (
+            String::from("00b · Welcome · env key available"),
+            welcome_env,
+        ),
         (String::from("01 · Your words"), base_words),
         (
             String::from("01b · Busy · understanding"),

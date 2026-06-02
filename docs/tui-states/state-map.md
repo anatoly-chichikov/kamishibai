@@ -13,7 +13,7 @@ All future work references this map instead of re-deriving transitions.
 
 | Id                | Kind                                                                              | Reference shot                  |
 | ----------------- | --------------------------------------------------------------------------------- | ------------------------------- |
-| `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `00-welcome.png`                |
+| `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `00-welcome.png` (no env key) · `00b-welcome-env.png` (`GEMINI_API_KEY` set) |
 | `YourWords`       | fullscreen                                                                        | `01-your-words.png`             |
 | `WhatIUnderstood` | fullscreen                                                                        | `02-what-i-understood.png`      |
 | `ChangeSomething` | modal over `WhatIUnderstood`, opened from the `+ add more` row in the sense picker | `03-change-something-modal.png` |
@@ -32,11 +32,22 @@ bulk correction is just `BusyKind::BulkCorrection` drawn by the universal busy o
 
 Retry, failure banner and recovery are inline within `YourCards` — not separate screens.
 
-The edge-case PNGs (`00-welcome.png`, `03-change-something-modal.png`,
-`05-change-this-card-modal.png`, `06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`)
-require modal setup or failure injection that the live-binary `capture.tape` does not exercise.
-They are produced reproducibly by `states.tape`, which drives `examples/tui_states.rs` (no Gemini)
-through the same EN→FR French flow at 2x. Re-snap them with `vhs states.tape`.
+The edge-case PNGs (`00-welcome.png`, `00b-welcome-env.png`,
+`03-change-something-modal.png`, `05-change-this-card-modal.png`,
+`06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`) require modal
+setup or environment/failure injection that the live-binary `capture.tape` does
+not exercise. They are produced reproducibly by `states.tape`, which drives
+`examples/tui_states.rs` (no Gemini) through the same EN→FR French flow at 2x.
+Re-snap them with `vhs states.tape`. The two Welcome shots are the same `EnterKey`
+stage with the only difference being `GEMINI_API_KEY`: absent it shows just the
+`submit` button (`00-welcome.png`), present it adds the focused `load from env`
+chip (`00b-welcome-env.png`).
+
+`states.tape` navigates the walker by **absolute index** (`Type "<n>"` then
+`Space` jumps straight to state `<n>`); each screenshot re-asserts its target, so
+a dropped or coalesced keystroke cannot accumulate across the run and the stray
+Return the shell injects when it launches the binary cannot drift or contaminate
+the index.
 
 Every background phase uses one universal blocking overlay on top of the current
 screen: first understanding, bulk correction, per-card correction, the Welcome

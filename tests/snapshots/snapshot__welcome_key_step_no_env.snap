@@ -1,0 +1,20 @@
+---
+source: tests/snapshot.rs
+expression: "render_sized(&app, 96, 16)"
+---
+                                                                                                
+     kamishibai   set up two things                                                             
+                                                                                                
+    kamishibai turns a list of words you want to learn into an anki deck plus a printable       
+    pdf. for each word it writes a natural example sentence, illustrates the scene as a         
+    manga panel, and reads it aloud in a natural, native-speaker voice.                         
+                                                                                                
+    01  your language      EN   ZH   ES   JA   FR   DE   RU   IT   PT   EL                      
+                                                                                                
+    02  gemini api key  › paste your key [Cmd+V]                                                
+                          ───────────────────────────────────────                               
+                                                                                                
+                           submit                                                               
+                                                                                                
+                                                                                                
+    step 2/2                                       [Enter] submit  [Esc] back  [Ctrl+C] quit
