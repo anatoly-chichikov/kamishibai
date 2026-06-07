@@ -24,7 +24,7 @@ cargo run --
 
 ## Required Environment
 
-- `GEMINI_API_KEY` must be set before running the application
+- a Gemini API key is required for any flow that calls Gemini — either via `GEMINI_API_KEY` (which wins) or a key previously saved through the Welcome screen; `GEMINI_API_KEY` need not be set when a saved key exists
 - the first OCR-backed run downloads the required `PP-OCRv5` model files into the media cache
 
 ## Input Schema
@@ -46,6 +46,20 @@ Every entry must contain:
 
 The input contract is strict. There are no optional entry fields.
 
+## Sessions (non-interactive)
+
+With no arguments `kamishibai` opens the interactive TUI; a bare JSON path opens the TUI on a prebuilt batch. Everything non-interactive is a **session** subcommand — a persistent, curatable unit of work an agent drives across invocations. A session moves through stages: understood → (curate) → generating → published.
+
+- `kamishibai new --word W [--word W…] [--to L] [--from L] [--senses primary|all] [--build FILE] [--id NAME] [--generate]`: understand each `--word` (or `--words FILE`/`-`), or `--build`-import a cards JSON, and create a session in the **understood** stage (`--to` is autodetected from the words when omitted)
+- `kamishibai select <id> --card T --sense 1,3` / `exclude <id> --card T` / `correct <id> --card T --note "…"`: curate the understanding before generating — pick senses, drop a card, or ask Gemini to add senses (each resets the session to understood)
+- `kamishibai generate <id> [--wait]`: commit the curated plan and start a managed background worker that generates + publishes (`--wait` runs it in the foreground)
+- `kamishibai status <id> [-q]`: stage + per-candidate senses (understood) or per-card progress (generating/published), read from the cache (no Gemini); `-q` prints just the phase word
+- `kamishibai open <id>`: open the session in the interactive TUI (resumes from the cache)
+- `kamishibai result <id> [-q | --deck | --pdf | --dir]` / `ls [-q]` / `cancel <id>` / `rm <id> [--cache]` / `cache-path`
+- `kamishibai regenerate <id> [--failed|--card T]` and `fix <id> --card T --note "…"`: re-roll committed cards
+
+Output is **plain text only — never JSON.** stdout carries the one capturable value (a session id, a path), so `id=$(kamishibai new --word bank)` works; everything else (the understood-senses preview, progress, errors) goes to stderr. Exit codes: `0` ok · `2` usage · `3` no such session · `4` not ready · `1` other. The background worker is the same binary re-invoked as the hidden `__run <id>`, detached into a new process group with its stdio redirected to `sessions/<id>/worker.log`; `status` reads the worker's pid liveness (rustix `process` feature) and the cache. The TUI shares this same session model — it persists its live state to `session.json` and registers its own pid as the worker while generating, so `ls`/`status`/`open` see interactive runs too. The full agent-facing contract lives in `llms.txt` at the repo root.
+
 ## Architecture
 
 The runtime is split into a few focused modules:
@@ -57,7 +71,20 @@ The runtime is split into a few focused modules:
 - `src/generation`: writes cached WAV audio, composes scenes, routes OCR, validates manga output, and orchestrates the fixed Gemini production pipeline
 - `src/anki`: defines the language-neutral Anki note model and APKG writer
 - `src/report`: builds the PDF report with layout, thumbnails, and font resolution
-- `src/cli.rs`: orchestrates the end-to-end command-line flow
+- `src/cli.rs`: parses arguments (clap) and routes to the interactive TUI or a `session` subcommand
+- `src/cli/console.rs`: generation primitives shared by the session worker — the `produce` engine loop (meta → sound → scene → picture, then publish) and the `Reporter` port (human / quiet)
+- `src/cli/session`: the session model — `store` (the `session.json` record + atomic IO + legacy backfill), `bridge` (projects between the live TUI `App` and the persisted record, plus the `TuiSession` the shell writes), `worker` (the managed background worker + the `__run` entrypoint), `liveness` (pid probe/kill via rustix), `view` (cache-derived status projection), and the subcommand handlers in `mod.rs`
+
+## Cache layout
+
+The cache (printed by `kamishibai cache-path`) groups one folder per card, keyed by a content hash of the card identity:
+
+- `cards/<from>-<to>/<key>/` holds `meta.json`, `scene.json`, `voice.wav`, and `illustration.jpg` for one card
+- `understanding/<from>-<to>/<key>.json` holds the understanding-pass result
+- `sessions/<id>/` holds `session.json` (identity, phase, words, curated candidates, committed plan, worker pid, result) and `worker.log`
+- `ocr-models/` holds the shared OCR model files
+
+`CardCell` (`src/session/vault.rs`) owns this layout; deleting a card's folder forces just that card to regenerate. Anki media names are decoupled from disk filenames in `src/anki/deck.rs` so per-card role-named files stay unique inside the `.apkg`.
 
 ## Language Profiles
 
@@ -65,9 +92,7 @@ Language-specific behavior belongs only in `src/languages` profile declarations.
 
 - Gemini prompt display name
 - OCR configuration
-- cache directory naming
 - default deck naming
-- report font family
 - user-facing report labels
 
 If a new language is needed, add a new profile instead of editing the fixed runtime orchestration logic.

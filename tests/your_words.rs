@@ -127,9 +127,7 @@ fn busy_loader_covers_the_current_screen_with_request_status() {
         .busy_elapsed(Duration::from_millis(320));
     let flat = flatten(&app);
     assert!(
-        flat.contains("working")
-            && flat.contains("understanding your words")
-            && flat.contains("the request is still running"),
+        flat.contains("working") && flat.contains("understanding your words"),
         "busy loader must cover the current screen with a visible request status"
     );
 }

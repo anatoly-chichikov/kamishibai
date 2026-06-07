@@ -203,10 +203,10 @@ INSERT INTO col VALUES(
 pub struct VocabularyDeck<F> {
     format: F,
     id: i64,
-    media: Vec<PathBuf>,
+    media: Vec<(PathBuf, String)>,
     name: String,
     notes: Vec<Note>,
-    seen: BTreeSet<PathBuf>,
+    seen: BTreeSet<String>,
 }
 
 impl<F> VocabularyDeck<F>
@@ -218,10 +218,13 @@ where
         id: i64,
         name: impl Into<String>,
         format: F,
-        media: impl IntoIterator<Item = PathBuf>,
+        media: impl IntoIterator<Item = (PathBuf, String)>,
     ) -> Self {
         let media = media.into_iter().collect::<Vec<_>>();
-        let seen = media.iter().cloned().collect::<BTreeSet<_>>();
+        let seen = media
+            .iter()
+            .map(|(_, name)| name.clone())
+            .collect::<BTreeSet<_>>();
         Self {
             format,
             id,
@@ -237,16 +240,20 @@ where
         self.notes.push(self.format.note(entry, audio, image));
     }
 
-    /// Attach one media file path without duplicating earlier paths.
-    pub fn attach(&mut self, path: impl Into<PathBuf>) {
-        let path = path.into();
-        if self.seen.insert(path.clone()) {
-            self.media.push(path);
+    /// Attach one media file under the package-unique name notes reference it by.
+    ///
+    /// Anki keys media by name, not by the on-disk path, so two cards whose disk
+    /// files share a basename (`voice.wav`) stay distinct as long as they attach
+    /// under different names. Re-attaching the same name is ignored.
+    pub fn attach(&mut self, path: impl Into<PathBuf>, name: impl Into<String>) {
+        let name = name.into();
+        if self.seen.insert(name.clone()) {
+            self.media.push((path.into(), name));
         }
     }
 
-    /// Return the attached media files in packaging order.
-    pub fn media(&self) -> &[PathBuf] {
+    /// Return the attached media as (path, package name) pairs in packaging order.
+    pub fn media(&self) -> &[(PathBuf, String)] {
         self.media.as_slice()
     }
 
@@ -340,7 +347,7 @@ where
         copy(database, &mut writer)?;
         writer.start_file("media", deflated)?;
         writer.write_all(media(self.media.as_slice())?.as_bytes())?;
-        for (index, path) in self.media.iter().enumerate() {
+        for (index, (path, _name)) in self.media.iter().enumerate() {
             writer.start_file(index.to_string(), stored)?;
             copy(path, &mut writer)?;
         }
@@ -390,16 +397,10 @@ fn stored(conn: &Connection, column: &str, value: Value) -> Result<()> {
     Ok(())
 }
 
-fn media(paths: &[PathBuf]) -> Result<String> {
+fn media(items: &[(PathBuf, String)]) -> Result<String> {
     let mut value = Map::new();
-    for (index, path) in paths.iter().enumerate() {
-        let Some(name) = path.file_name() else {
-            bail!("Attached media path has no filename: {}", path.display());
-        };
-        value.insert(
-            index.to_string(),
-            Value::String(name.to_string_lossy().into_owned()),
-        );
+    for (index, (_path, name)) in items.iter().enumerate() {
+        value.insert(index.to_string(), Value::String(name.clone()));
     }
     Ok(serde_json::to_string(&Value::Object(value))?)
 }

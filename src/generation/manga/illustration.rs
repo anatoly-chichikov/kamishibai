@@ -7,7 +7,7 @@ use image::DynamicImage;
 use image::codecs::jpeg::JpegEncoder;
 use serde_json::Value;
 
-use crate::generation::artifact_cache::Cache;
+use crate::generation::artifact_cache::{Cache, ILLUSTRATION_FILE, SCENE_FILE};
 
 use super::{Progress, Renderer, Translator};
 
@@ -38,106 +38,84 @@ where
         self.cache.filepath(filename)
     }
 
-    /// Return the cache key digest shared by scene and picture artifacts.
-    pub fn digest(&self, sentence: &str, target: &str) -> String {
-        let raw = format!("{:x}", md5::compute(format!("{target}\0{sentence}")));
-        raw[..12].to_string()
-    }
-
-    /// Return the cached scene filename for one (sentence, target) pair.
-    pub fn scene_filename(&self, sentence: &str, target: &str) -> String {
-        format!("{}.json", self.digest(sentence, target))
-    }
-
-    /// Return the cached picture filename for one (sentence, target) pair.
-    pub fn picture_filename(&self, sentence: &str, target: &str) -> String {
-        format!("{}.jpg", self.digest(sentence, target))
-    }
-
-    /// Generate one cached illustration and report its filename and cache state.
+    /// Generate this card's cached illustration and report its cache state.
+    ///
+    /// One illustration belongs to one card folder, so the file is always
+    /// `illustration.jpg`; the cache hit is decided by the folder.
     pub fn generate(
         &self,
         sentence: &str,
         target: &str,
         progress: &mut dyn Progress,
     ) -> Result<(String, bool)> {
-        let filename = self.picture_filename(sentence, target);
-        let imagepath = self.cache.filepath(&filename)?;
-        if self.cache.exists(&filename) {
-            self.cached_scene(sentence, target, progress)?;
+        let imagepath = self.cache.filepath(ILLUSTRATION_FILE)?;
+        if self.cache.exists(ILLUSTRATION_FILE) {
+            self.cached_scene(progress)?;
             progress.done("Rendering manga", "cached", Some(imagepath.as_path()));
-            return Ok((filename, true));
+            return Ok((ILLUSTRATION_FILE.to_string(), true));
         }
         let scene = self.scene(sentence, target, progress)?;
         progress.step("Rendering manga");
         let image = self.renderer.render(&scene, progress)?;
-        self.commit(&filename, &image)?;
+        self.commit(ILLUSTRATION_FILE, &image)?;
         progress.done("Rendering manga", "rendered", Some(imagepath.as_path()));
-        Ok((filename, false))
+        Ok((ILLUSTRATION_FILE.to_string(), false))
     }
 
-    /// Stage one: produce or load the cached scene JSON. Returns the cached filename.
+    /// Stage one: produce or load this card's cached scene JSON (`scene.json`).
     pub fn scene_only(
         &self,
         sentence: &str,
         target: &str,
         progress: &mut dyn Progress,
     ) -> Result<(String, bool)> {
-        let scenefile = self.scene_filename(sentence, target);
-        let scenepath = self.cache.filepath(&scenefile)?;
+        let scenepath = self.cache.filepath(SCENE_FILE)?;
         progress.step("Composing scene");
-        if self.cache.exists(&scenefile) {
+        if self.cache.exists(SCENE_FILE) {
             progress.done("Composing scene", "cached", Some(scenepath.as_path()));
-            return Ok((scenefile, true));
+            return Ok((SCENE_FILE.to_string(), true));
         }
         let scene = self.translator.translate(sentence, target)?;
         let staged = self.cache.stage(".json")?;
         let result =
-            write_scene(&staged, &scene).and_then(|_| self.cache.commit(&staged, &scenefile));
+            write_scene(&staged, &scene).and_then(|_| self.cache.commit(&staged, SCENE_FILE));
         if result.is_err() {
             let _ = fs::remove_file(&staged);
         }
         result?;
         progress.done("Composing scene", "translated", Some(scenepath.as_path()));
-        Ok((scenefile, false))
+        Ok((SCENE_FILE.to_string(), false))
     }
 
-    /// Stage two: render the picture from a cached scene JSON. Requires `scene_only`
-    /// to have run for the same (sentence, target) so the scene JSON sits in cache.
+    /// Stage two: render `illustration.jpg` from this card's cached `scene.json`.
+    /// Requires `scene_only` to have run for this card so the scene JSON exists.
     pub fn picture_only(
         &self,
         sentence: &str,
         target: &str,
         progress: &mut dyn Progress,
     ) -> Result<(String, bool)> {
-        let filename = self.picture_filename(sentence, target);
-        let imagepath = self.cache.filepath(&filename)?;
-        if self.cache.exists(&filename) {
+        let _ = (sentence, target);
+        let imagepath = self.cache.filepath(ILLUSTRATION_FILE)?;
+        if self.cache.exists(ILLUSTRATION_FILE) {
             progress.done("Rendering manga", "cached", Some(imagepath.as_path()));
-            return Ok((filename, true));
+            return Ok((ILLUSTRATION_FILE.to_string(), true));
         }
-        let scenefile = self.scene_filename(sentence, target);
-        if !self.cache.exists(&scenefile) {
+        if !self.cache.exists(SCENE_FILE) {
             bail!("scene JSON missing for picture stage; run scene_only first");
         }
-        let scenepath = self.cache.filepath(&scenefile)?;
+        let scenepath = self.cache.filepath(SCENE_FILE)?;
         let scene = serde_json::from_str::<Value>(&fs::read_to_string(&scenepath)?)?;
         progress.step("Rendering manga");
         let image = self.renderer.render(&scene, progress)?;
-        self.commit(&filename, &image)?;
+        self.commit(ILLUSTRATION_FILE, &image)?;
         progress.done("Rendering manga", "rendered", Some(imagepath.as_path()));
-        Ok((filename, false))
+        Ok((ILLUSTRATION_FILE.to_string(), false))
     }
 
-    fn cached_scene(
-        &self,
-        sentence: &str,
-        target: &str,
-        progress: &mut dyn Progress,
-    ) -> Result<()> {
-        let scenefile = self.scene_filename(sentence, target);
-        if self.cache.exists(&scenefile) {
-            let path = self.cache.filepath(&scenefile)?;
+    fn cached_scene(&self, progress: &mut dyn Progress) -> Result<()> {
+        if self.cache.exists(SCENE_FILE) {
+            let path = self.cache.filepath(SCENE_FILE)?;
             progress.done("Composing scene", "cached", Some(path.as_path()));
             return Ok(());
         }
@@ -146,10 +124,9 @@ where
     }
 
     fn scene(&self, sentence: &str, target: &str, progress: &mut dyn Progress) -> Result<Value> {
-        let scenefile = self.scene_filename(sentence, target);
-        let scenepath = self.cache.filepath(&scenefile)?;
+        let scenepath = self.cache.filepath(SCENE_FILE)?;
         progress.step("Composing scene");
-        if self.cache.exists(&scenefile) {
+        if self.cache.exists(SCENE_FILE) {
             let scene = serde_json::from_str::<Value>(&fs::read_to_string(&scenepath)?)?;
             progress.done("Composing scene", "cached", Some(scenepath.as_path()));
             return Ok(scene);
@@ -157,7 +134,7 @@ where
         let scene = self.translator.translate(sentence, target)?;
         let staged = self.cache.stage(".json")?;
         let result =
-            write_scene(&staged, &scene).and_then(|_| self.cache.commit(&staged, &scenefile));
+            write_scene(&staged, &scene).and_then(|_| self.cache.commit(&staged, SCENE_FILE));
         if result.is_err() {
             let _ = fs::remove_file(&staged);
         }

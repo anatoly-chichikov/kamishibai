@@ -6,17 +6,16 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::generation::artifact_cache::Cache;
+use crate::generation::artifact_cache::{Cache, META_FILE};
 use crate::languages::catalog;
 
+use super::vault::{CardCell, digest};
 use super::{
     CardMeta, LanguagePair, RawInputBatch, ScriptDetection, Sense, TargetDetection, TargetGuess,
     Understanding, Understood, WordCandidate,
 };
 
-const UNDERSTANDING_CACHE: &str = "understanding-v2";
-const UNDERSTANDING_VERSION: &str = "understanding-v2";
-const META_VERSION: &str = "meta-v2";
+const UNDERSTANDING_VERSION: &str = "v3";
 
 /// Caching decorator for the first-pass understanding contract.
 #[derive(Clone, Debug)]
@@ -41,8 +40,11 @@ where
 {
     /// Normalise raw words into reviewed rows, reusing a prior result for the same input.
     fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
-        let cache = Cache::new(UNDERSTANDING_CACHE, self.root.clone());
         let target = ScriptDetection.detect(raw.text(), &catalog())?;
+        let cache = Cache::new(
+            format!("understanding/{my}-{}", target.code()),
+            self.root.clone(),
+        );
         let entries = normalized_entries(raw);
         let mut merged = vec![None; entries.len()];
         let mut misses = Vec::new();
@@ -81,8 +83,10 @@ where
 
 impl<T> CachedUnderstanding<T> {
     fn entry_filename(&self, entry: &str, my: &str, target: &str) -> String {
-        let key = format!("{UNDERSTANDING_VERSION}\0{my}\0{target}\0{entry}");
-        format!("{}.json", digest(key.as_str()))
+        format!(
+            "{}.json",
+            digest(&[UNDERSTANDING_VERSION, my, target, entry])
+        )
     }
 
     fn missing(
@@ -163,12 +167,11 @@ impl CardMetaCache {
         understanding: &str,
         pair: &LanguagePair,
     ) -> Result<Option<CardMeta>> {
-        let cache = self.meta_cache(pair);
-        let filename = self.filename(term, understanding, pair);
-        if !cache.exists(filename.as_str()) {
+        let cache = CardCell::new(self.root.clone(), pair, term, understanding).cache();
+        if !cache.exists(META_FILE) {
             return Ok(None);
         }
-        let record: MetaRecord = read_json(&cache, filename.as_str())?;
+        let record: MetaRecord = read_json(&cache, META_FILE)?;
         Ok(Some(record.meta()))
     }
 
@@ -180,31 +183,17 @@ impl CardMetaCache {
         pair: &LanguagePair,
         meta: &CardMeta,
     ) -> Result<(String, PathBuf, bool)> {
-        let cache = self.meta_cache(pair);
-        let filename = self.filename(term, understanding, pair);
-        let cached = cache.exists(filename.as_str());
+        let cache = CardCell::new(self.root.clone(), pair, term, understanding).cache();
+        let cached = cache.exists(META_FILE);
         if !cached {
             write_json(
                 &cache,
-                filename.as_str(),
+                META_FILE,
                 &MetaRecord::from_meta(term, understanding, pair, meta),
             )?;
         }
-        let path = cache.filepath(filename.as_str())?;
-        Ok((filename, path, cached))
-    }
-
-    fn meta_cache(&self, pair: &LanguagePair) -> Cache {
-        Cache::new(format!("meta-{}", pair.target()), self.root.clone())
-    }
-
-    fn filename(&self, term: &str, understanding: &str, pair: &LanguagePair) -> String {
-        let key = format!(
-            "{META_VERSION}\0{}\0{}\0{term}\0{understanding}",
-            pair.target(),
-            pair.support()
-        );
-        format!("{}.json", digest(key.as_str()))
+        let path = cache.filepath(META_FILE)?;
+        Ok((META_FILE.to_string(), path, cached))
     }
 }
 
@@ -252,8 +241,10 @@ impl EntryRecord {
     }
 }
 
+/// Serde shape for one reviewed candidate, shared by the understanding cache and
+/// the persistent session record so both round-trip the same curation state.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct CandidateRecord {
+pub(crate) struct CandidateRecord {
     term: String,
     senses: Vec<SenseRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -264,7 +255,8 @@ struct CandidateRecord {
 }
 
 impl CandidateRecord {
-    fn from_candidate(candidate: &WordCandidate) -> Self {
+    /// Project one reviewed candidate into its serializable record.
+    pub(crate) fn from_candidate(candidate: &WordCandidate) -> Self {
         Self {
             term: candidate.term().to_string(),
             senses: candidate
@@ -278,7 +270,8 @@ impl CandidateRecord {
         }
     }
 
-    fn candidate(self) -> WordCandidate {
+    /// Rebuild the reviewed candidate from its record.
+    pub(crate) fn candidate(self) -> WordCandidate {
         let selected = if self.selected_senses.is_empty() {
             self.selected
                 .map(|index| vec![index])
@@ -292,6 +285,11 @@ impl CandidateRecord {
             selected,
             self.ok,
         )
+    }
+
+    /// Return the term this record carries.
+    pub(crate) fn term(&self) -> &str {
+        self.term.as_str()
     }
 }
 
@@ -422,11 +420,6 @@ fn indexed_missing(
         .map(|(miss, candidate)| (miss.index, candidate))
         .collect();
     (guess, candidates)
-}
-
-fn digest(value: &str) -> String {
-    let full = format!("{:x}", md5::compute(value.as_bytes()));
-    full[..12].to_string()
 }
 
 #[cfg(test)]
@@ -615,9 +608,9 @@ mod tests {
             .expect("verb meta must load")
             .expect("verb meta must exist");
         assert_eq!(
-            (noun.0 == verb.0, loaded.target_sentence()),
+            (noun.1 == verb.1, loaded.target_sentence()),
             (false, "I might wreck the old bike"),
-            "card meta cache no longer separates corrected meanings"
+            "card meta cache no longer separates corrected meanings into distinct folders"
         );
     }
 

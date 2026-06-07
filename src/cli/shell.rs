@@ -1,5 +1,6 @@
 //! Interactive CLI shell that coordinates app state and background jobs.
 
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -10,6 +11,7 @@ use super::card_workflow::{
     ArtifactOutcome, CardWorkflow, DeckPublishMessage, DeckPublishProgress, TextOutcome,
 };
 use super::live_generator::{LiveCardGenerator, default_output};
+use super::session::TuiSession;
 use crate::config::{PreferenceStore, Preferences, default_store};
 use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
@@ -71,14 +73,20 @@ pub(super) struct Shell<P> {
     quit_armed_at: Option<Instant>,
     generator: P,
     store: PreferenceStore,
+    session: Option<TuiSession>,
+    output: PathBuf,
 }
 
 impl Shell<LiveCardGenerator> {
     /// Build a live card shell for an interactive empty session.
-    pub(super) fn new(app: App) -> Result<Self> {
+    pub(super) fn new(app: App, session: Option<TuiSession>) -> Result<Self> {
         let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
         let output = default_output()?;
         crate::report::warm_fonts_async();
+        let session = match session {
+            Some(session) => Some(session),
+            None => Some(TuiSession::fresh()?),
+        };
         Ok(Self {
             app,
             engine: None,
@@ -87,14 +95,20 @@ impl Shell<LiveCardGenerator> {
             publish_job: None,
             started: None,
             quit_armed_at: None,
-            generator: LiveCardGenerator::new(cache, output),
+            generator: LiveCardGenerator::new(cache, output.clone()),
             store: default_store(&SystemContext)?,
+            session,
+            output,
         })
     }
 
     /// Build a live card shell that starts with generation already running.
-    pub(super) fn startup(app: App, drafts: Vec<CardDraft>) -> Result<Self> {
-        let mut shell = Self::new(app)?;
+    pub(super) fn startup(
+        app: App,
+        drafts: Vec<CardDraft>,
+        session: Option<TuiSession>,
+    ) -> Result<Self> {
+        let mut shell = Self::new(app, session)?;
         shell.engine = Some(SessionEngine::start(drafts));
         shell.started = Some(Instant::now());
         Ok(shell)
@@ -108,6 +122,19 @@ where
     /// Borrow the app model for rendering and pointer geometry.
     pub(super) fn app(&self) -> &App {
         &self.app
+    }
+
+    /// Persist the live app to its on-disk session when the durable state has
+    /// changed. While the engine or publish job runs the session is marked
+    /// generating under this process's own pid, so concurrent CLI commands refuse
+    /// to touch it. Persistence failures never abort the interactive run.
+    pub(super) fn persist(&mut self) {
+        let generating = self.engine.is_some() || self.publish_job.is_some();
+        let app = &self.app;
+        let output = self.output.as_path();
+        if let Some(session) = self.session.as_mut() {
+            let _ = session.save(app, output, generating);
+        }
     }
 
     /// Crossterm poll budget for the next loop iteration.
@@ -696,6 +723,8 @@ where
                         .map(|()| String::from("background publish job disconnected"))
                         .unwrap_or_else(|error| error.to_string());
                     self.app = self.app.clone().busy_finished().error_shown(message);
+                    self.engine = None;
+                    self.started = None;
                     return Ok(true);
                 }
             };
@@ -715,6 +744,8 @@ where
                             .clone()
                             .busy_finished()
                             .error_shown(error.to_string());
+                        self.engine = None;
+                        self.started = None;
                         return Ok(true);
                     }
                     self.app = self.app.clone().busy_finished();
@@ -726,6 +757,8 @@ where
                         }
                         Err(error) => {
                             self.app = self.app.clone().error_shown(error.to_string());
+                            self.engine = None;
+                            self.started = None;
                         }
                     }
                     return Ok(true);
@@ -807,22 +840,35 @@ mod tests {
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
     struct TestCardGenerator {
         failure: Option<TestFailure>,
+        publish_fails: bool,
     }
 
     impl TestCardGenerator {
         fn local() -> Self {
-            Self { failure: None }
+            Self {
+                failure: None,
+                publish_fails: false,
+            }
+        }
+
+        fn publish_failing() -> Self {
+            Self {
+                failure: None,
+                publish_fails: true,
+            }
         }
 
         fn failing() -> Self {
             Self {
                 failure: Some(TestFailure::Internal),
+                publish_fails: false,
             }
         }
 
         fn key_rejecting() -> Self {
             Self {
                 failure: Some(TestFailure::Key),
+                publish_fails: false,
             }
         }
 
@@ -959,6 +1005,9 @@ mod tests {
             progress: &DeckPublishProgress,
         ) -> Result<(String, String, String)> {
             self.ready()?;
+            if self.publish_fails {
+                anyhow::bail!("publish boom");
+            }
             progress.report_phase(BusyKind::PublishingReport);
             Ok((
                 format!("local-{}-cards.apkg", drafts.len()),
@@ -1021,6 +1070,8 @@ mod tests {
             store: PreferenceStore::at(
                 std::env::temp_dir().join("kamishibai-shell-test-prefs.json"),
             ),
+            session: None,
+            output: std::env::temp_dir(),
         }
     }
 
@@ -1401,6 +1452,31 @@ mod tests {
         assert!(
             !shell.tick().expect("idle tick must succeed"),
             "idle ticks must not keep repainting the terminal"
+        );
+    }
+
+    #[test]
+    fn a_failed_publish_clears_the_engine_instead_of_relooping() {
+        let mut shell = shell_with(
+            review().understood(vec![candidate("whilst")]),
+            TestCardGenerator::publish_failing(),
+        );
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generate must start generation");
+        let mut settled = false;
+        for _ in 0..300 {
+            shell.tick().expect("tick must succeed");
+            if shell.engine.is_none() && shell.publish_job.is_none() && shell.artifact_job.is_none()
+            {
+                settled = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(
+            settled && shell.engine.is_none(),
+            "a failed publish must clear the engine so it stops instead of auto-relooping publish"
         );
     }
 

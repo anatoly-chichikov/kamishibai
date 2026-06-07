@@ -18,6 +18,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 
 use super::host::open_path;
+use super::session::TuiSession;
 use super::shell::Shell;
 use crate::session::CardDraft;
 use crate::tui::{
@@ -28,8 +29,13 @@ use crate::tui::{
 
 const POINTER_REFRESH: Duration = Duration::from_millis(50);
 
-/// Run the TUI from one initial app state and optional startup generation batch.
-pub(super) fn run_tui(app: App, startup: Option<Vec<CardDraft>>) -> Result<()> {
+/// Run the TUI from one initial app state, optional startup generation batch,
+/// and optional resumed on-disk session.
+pub(super) fn run_tui(
+    app: App,
+    startup: Option<Vec<CardDraft>>,
+    session: Option<TuiSession>,
+) -> Result<()> {
     enable_raw_mode()?;
     let mut out = stdout();
     let enhanced = supports_keyboard_enhancement().unwrap_or(false);
@@ -49,7 +55,7 @@ pub(super) fn run_tui(app: App, startup: Option<Vec<CardDraft>>) -> Result<()> {
     }
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
-    let outcome = loop_forever(&mut terminal, app, startup);
+    let outcome = loop_forever(&mut terminal, app, startup, session);
     if enhanced {
         execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags).ok();
     }
@@ -74,18 +80,20 @@ fn loop_forever<B>(
     terminal: &mut Terminal<B>,
     app: App,
     startup: Option<Vec<CardDraft>>,
+    session: Option<TuiSession>,
 ) -> Result<()>
 where
     B: ratatui::backend::Backend + Write,
     <B as ratatui::backend::Backend>::Error: Send + Sync + 'static,
 {
     let mut shell = match startup {
-        Some(drafts) => Shell::startup(app, drafts)?,
-        None => Shell::new(app)?,
+        Some(drafts) => Shell::startup(app, drafts, session)?,
+        None => Shell::new(app, session)?,
     };
     let mut mouse_position: Option<(u16, u16)> = None;
     let mut dirty = true;
     loop {
+        shell.persist();
         dirty |= shell.refresh_quit_pending();
         let rect = terminal_rect(terminal)?;
         let (viewport, body_width) = scroll_frame(shell.app(), rect);

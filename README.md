@@ -53,6 +53,31 @@ Got the JSON already? Pass it as an argument:
 kamishibai path/to/words.json
 ```
 
+## Console
+
+For scripts and agents, kamishibai also runs headless as a curatable, asynchronous **session**: understand the words, curate which senses become cards, run a background worker that generates and publishes, poll for status, fetch the result.
+
+```bash
+# 1. understand the words and create a session — prints the id
+id=$(kamishibai new --word "you're gonna get yours" --word bank --from ru --to en --out ./deck)
+
+# 2. curate the understanding (optional)
+kamishibai status "$id"                       # the candidates and their senses
+kamishibai select "$id" --card bank --sense 2 # keep only the river-bank sense
+kamishibai exclude "$id" --card bank          # …or drop the card entirely
+
+# 3. generate + publish in the background, then poll
+kamishibai generate "$id"
+kamishibai status "$id"             # phase + per-card progress (no Gemini); -q for just the phase
+kamishibai result "$id"            # the finished cards + deck.apkg / deck.pdf paths
+
+# re-roll a committed card
+kamishibai regenerate "$id" --failed
+kamishibai fix "$id" --card bank --note "make the sentence shorter"
+```
+
+The output is plain text — never JSON: stdout carries the one capturable value (id, or paths), everything else goes to stderr, so `id=$(kamishibai new --word bank)` just works. Sessions are idempotent and cache-backed: the cache holds one folder per card under `kamishibai cache-path`, so a re-run resumes from disk and only fills in what is missing. The TUI shares the same sessions — `kamishibai open "$id"` resumes one interactively. Agents should read [llms.txt](llms.txt) for the full session contract.
+
 ## Languages
 
 Ten languages:

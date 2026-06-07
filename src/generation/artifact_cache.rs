@@ -8,6 +8,15 @@ use std::rc::Rc;
 use anyhow::{Result, anyhow};
 use tempfile::Builder;
 
+/// Canonical filename of the card-meta JSON inside one card's cache folder.
+pub const META_FILE: &str = "meta.json";
+/// Canonical filename of the manga scene JSON inside one card's cache folder.
+pub const SCENE_FILE: &str = "scene.json";
+/// Canonical filename of the native-speaker WAV inside one card's cache folder.
+pub const VOICE_FILE: &str = "voice.wav";
+/// Canonical filename of the manga illustration JPEG inside one card's cache folder.
+pub const ILLUSTRATION_FILE: &str = "illustration.jpg";
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum CommitPlan {
     Failing {

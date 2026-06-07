@@ -58,7 +58,7 @@ fn audio_generation_writes_the_expected_wav_file_and_cache_filename() -> Result<
             sample_rate,
             bits_per_sample
         ),
-        (String::from("1cccf86c1a16.wav"), false, 1, 1, 24_000, 16),
+        (String::from("voice.wav"), false, 1, 1, 24_000, 16),
         "audio generation no longer writes the expected WAV file and cache filename"
     );
     Ok(())

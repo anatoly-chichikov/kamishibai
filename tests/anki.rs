@@ -274,22 +274,19 @@ fn deck_attachment_keeps_insertion_order_while_deduplicating_paths() {
         StableId::new("Kamishibai Deck").value(),
         "Kamishibai Deck",
         VocabularyNote::new(CardModel::new().model()),
-        Vec::<PathBuf>::new(),
+        Vec::<(PathBuf, String)>::new(),
     );
-    deck.attach(first.clone());
-    deck.attach(first);
-    deck.attach(second.clone());
+    deck.attach(first.clone(), "α.wav");
+    deck.attach(first.clone(), "α.wav");
+    deck.attach(second.clone(), "β.jpg");
     assert_eq!(
         deck.media(),
         [
-            second
-                .parent()
-                .expect("media parent must exist")
-                .join("α.wav"),
-            second
+            (first, String::from("α.wav")),
+            (second, String::from("β.jpg")),
         ]
         .as_slice(),
-        "deck attachment no longer keeps insertion order while deduplicating paths"
+        "deck attachment no longer keeps insertion order while deduplicating media names"
     );
 }
 
@@ -313,10 +310,15 @@ fn saved_apkg_archives_keep_the_frozen_structural_snapshot() -> Result<()> {
         StableId::new("Kamishibai Deck").value(),
         "Kamishibai Deck",
         VocabularyNote::new(CardModel::new().model()),
-        Vec::<PathBuf>::new(),
+        Vec::<(PathBuf, String)>::new(),
     );
     for path in &media {
-        deck.attach(path.clone());
+        let name = path
+            .file_name()
+            .expect("media fixture has a filename")
+            .to_string_lossy()
+            .into_owned();
+        deck.attach(path.clone(), name);
     }
     deck.add(
         &entries[0],

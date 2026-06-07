@@ -74,9 +74,7 @@ impl UiLabels {
 pub struct LanguageProfile {
     pub code: &'static str,
     pub prompt: String,
-    pub audio_cache: String,
     pub ocr: String,
-    pub image_cache: String,
     pub naming: DeckNaming,
     pub labels: UiLabels,
 }

@@ -186,6 +186,13 @@ impl WordCandidate {
         self
     }
 
+    /// Return the candidate with its row-level inclusion gate set.
+    #[must_use]
+    pub fn with_ok(mut self, ok: bool) -> Self {
+        self.ok = ok;
+        self
+    }
+
     /// Append non-duplicate senses and select the first appended one.
     pub fn with_added_senses(mut self, senses: Vec<Sense>) -> (Self, Option<usize>) {
         let mut first = None;
