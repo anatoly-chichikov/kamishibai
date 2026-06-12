@@ -8,6 +8,7 @@
 mod batch;
 mod card_workflow;
 mod console;
+mod error;
 mod host;
 mod live_generator;
 mod session;
@@ -38,6 +39,7 @@ EXAMPLES:
   kamishibai result <id>                           the finished cards + deck/pdf paths
   kamishibai result <id> --deck                    only the .apkg path (for scripts)
   kamishibai regenerate <id> --failed              retry the cards that did not finish
+  kamishibai regenerate <id> --card bank --note \"…\"  re-roll one card from an instruction
   kamishibai new --build cards.json --generate     import a cards JSON and start at once
   kamishibai cards.json                            open the TUI on a prebuilt batch
   kamishibai cache-path                            print the cache directory
@@ -50,8 +52,8 @@ EXIT CODES:
   0 ok · 2 usage · 3 no such session · 4 not ready yet · 1 other error
 
 ENVIRONMENT:
-  GEMINI_API_KEY   required for every flow that calls Gemini; it wins over any
-                   key saved through the Welcome screen
+  GEMINI_API_KEY   the Gemini API key; it wins over a key saved through the
+                   Welcome screen, and need not be set when a saved key exists
 
 WORDS_JSON format (for `new --build`; all fields required, unknown fields rejected):
 {
@@ -95,29 +97,27 @@ struct Cli {
 }
 
 /// Parse arguments and execute the selected flow, returning a process exit code.
+///
+/// Every refusal carries its exit code (`error.rs`): 2 — the invocation is
+/// wrong, 3 — no such session, 4 — not ready yet. Any other error is an
+/// operational failure and exits 1; success exits 0.
 pub fn run() -> u8 {
     let cli = Cli::parse();
     match execute(&cli) {
-        Ok(code) => code,
+        Ok(()) => 0,
         Err(error) => {
             eprintln!("kamishibai: {error:#}");
-            1
+            error::exit_code(&error).unwrap_or(1)
         }
     }
 }
 
-fn execute(cli: &Cli) -> Result<u8> {
+fn execute(cli: &Cli) -> Result<()> {
     match &cli.command {
         Some(command) => session::handle(command),
         None => match &cli.input {
-            Some(path) => {
-                start_with_batch(PathBuf::from(path))?;
-                Ok(0)
-            }
-            None => {
-                start()?;
-                Ok(0)
-            }
+            Some(path) => start_with_batch(PathBuf::from(path)),
+            None => start(),
         },
     }
 }
@@ -248,6 +248,26 @@ mod tests {
                 Some(Command::Select(_))
             ),
             "select must parse to the Select command"
+        );
+    }
+
+    #[test]
+    fn regenerate_with_a_note_parses_to_the_regenerate_command() {
+        assert!(
+            matches!(
+                parse(&[
+                    "kamishibai",
+                    "regenerate",
+                    "fr-1",
+                    "--card",
+                    "bank",
+                    "--note",
+                    "use the river sense"
+                ])
+                .command,
+                Some(Command::Regenerate(_))
+            ),
+            "regenerate with a note must parse to the Regenerate command"
         );
     }
 

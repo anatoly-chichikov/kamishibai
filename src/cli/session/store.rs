@@ -4,9 +4,21 @@
 //! the shared cache (see `view`). This record carries only what the cache cannot:
 //! the typed words, the curatable candidates, the committed plan (drafts), the
 //! language pair, the output directory, the lifecycle phase, the published
-//! result, and the background worker's pid. A monotonic `rev` gives saves
-//! optimistic concurrency (compare-and-swap). Each session is a directory
+//! result, and the background worker's pid. Each session is a directory
 //! `<cache>/sessions/<id>/` holding `session.json` (+ `worker.log`).
+//!
+//! Concurrency is two locks. The long-held liveness flock (`lock`, see
+//! `liveness`) decides who may generate: the OS releases it when the worker dies,
+//! so a stale pid can never fake a live worker — `interrupted` is derived from
+//! a recorded worker whose lock is free, while `cancelled` is stored by `cancel`.
+//! The short write flock (`write.lock`) makes every change to `session.json` a
+//! serialized read-modify-write ([`SessionStore::update`]): concurrent commands
+//! all apply, in some order, instead of clobbering or spuriously failing. The
+//! worker additionally writes only while the record still names it (see
+//! `worker`), which is how cancel and a finishing worker resolve their race.
+//! On non-Unix platforms advisory flocks are unavailable and both locks degrade
+//! to best-effort (see `liveness`): single-process use stays correct, but
+//! concurrent processes are not serialized there.
 
 use std::fs;
 use std::path::PathBuf;
@@ -20,7 +32,7 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::generation::artifact_cache::Cache;
 use crate::runtime::locations::{SystemContext, cache_root};
-use crate::session::{CandidateRecord, WordCandidate};
+use crate::session::CandidateRecord;
 
 use super::liveness;
 
@@ -35,15 +47,15 @@ const VERSION: u32 = 2;
 #[serde(rename_all = "lowercase")]
 pub(super) enum Phase {
     /// Created by `new`; words understood and curatable, generation not started.
-    #[serde(alias = "draft")]
     Understood,
     /// A worker is generating (verify liveness before trusting this).
-    #[serde(alias = "running")]
     Generating,
     /// A worker was recorded but its process is gone (crash/kill).
     Interrupted,
     /// Generation finished and the deck + report were written.
     Published,
+    /// The deck was published but some cards failed; the rest are in it.
+    Partial,
     /// Generation ran out of retries or publishing failed.
     Failed,
     /// The worker was cancelled by the user.
@@ -71,12 +83,17 @@ pub(super) struct Progress {
     pub artifact: String,
 }
 
-/// The published artifacts of one session.
+/// The published artifacts of one session, with how many cards made the deck and
+/// how many failed (`failed > 0` marks a `Partial` publish).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct ResultRecord {
     pub deck: String,
     pub report: String,
     pub output: String,
+    #[serde(default)]
+    pub cards: usize,
+    #[serde(default)]
+    pub failed: usize,
 }
 
 /// One persisted generation session.
@@ -87,10 +104,6 @@ pub(super) struct ResultRecord {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct SessionRecord {
     pub version: u32,
-    /// Monotonic mutation counter for optimistic concurrency: every successful
-    /// save bumps it, and a save is refused when the on-disk value has moved.
-    #[serde(default)]
-    pub rev: u64,
     pub id: String,
     pub created: String,
     pub from: String,
@@ -131,7 +144,6 @@ impl SessionRecord {
     ) -> Self {
         Self {
             version: VERSION,
-            rev: 0,
             id,
             created,
             from,
@@ -148,33 +160,6 @@ impl SessionRecord {
             result: None,
             error: None,
         }
-    }
-
-    /// Backfill the candidate-driven shape onto a record read from an older file,
-    /// synthesizing one single-sense candidate per legacy draft.
-    fn backfilled(mut self) -> Self {
-        if self.candidates.is_empty() && !self.drafts.is_empty() {
-            self.candidates = self
-                .drafts
-                .iter()
-                .map(|draft| {
-                    CandidateRecord::from_candidate(&WordCandidate::new(
-                        draft.term.as_str(),
-                        draft.understanding.as_str(),
-                        true,
-                    ))
-                })
-                .collect();
-        }
-        if self.words.is_empty() {
-            self.words = self
-                .candidates
-                .iter()
-                .map(|candidate| candidate.term().to_string())
-                .collect();
-        }
-        self.version = VERSION;
-        self
     }
 }
 
@@ -220,55 +205,68 @@ impl SessionStore {
         self.dir(id).join(SESSION_FILE).is_file()
     }
 
-    /// Read one session record, failing clearly when it is absent or corrupt.
+    /// Read one session record, failing clearly when it is absent, corrupt, or
+    /// written by an incompatible build.
     pub(super) fn open(&self, id: &str) -> Result<SessionRecord> {
         let path = self.dir(id).join(SESSION_FILE);
         let text = fs::read_to_string(&path).with_context(|| format!("no session '{id}'"))?;
         let record: SessionRecord = serde_json::from_str(text.as_str())
             .with_context(|| format!("session '{id}' is corrupt"))?;
-        Ok(record.backfilled())
-    }
-
-    /// Return the on-disk revision of one session, or 0 when it is absent.
-    pub(super) fn current_rev(&self, id: &str) -> u64 {
-        let path = self.dir(id).join(SESSION_FILE);
-        fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<SessionRecord>(text.as_str()).ok())
-            .map(|record| record.rev)
-            .unwrap_or(0)
-    }
-
-    /// Atomically write one session record under optimistic concurrency.
-    ///
-    /// A blocking write lock makes the read-revision/compare/write a single
-    /// critical section across processes, so the compare-and-swap is real: the
-    /// save is refused when the on-disk revision moved since `record` was read
-    /// (a second `generate`, a `fix` racing the worker, …), and concurrent
-    /// writers cannot both pass the check and have the last rename win. On
-    /// success the record's `rev` is bumped to the value now on disk.
-    pub(super) fn save(&self, record: &mut SessionRecord) -> Result<()> {
-        fs::create_dir_all(self.dir(&record.id))?;
-        let _write = liveness::lock_for_write(&self.write_lock_path(&record.id))?;
-        let on_disk = self.current_rev(record.id.as_str());
-        if on_disk != record.rev {
+        if record.version != VERSION {
             bail!(
-                "session '{}' changed concurrently (on-disk rev {on_disk}, expected {}); reload and retry",
-                record.id,
-                record.rev
+                "session '{id}' was written by an older build (version {}); remove it with kamishibai rm",
+                record.version
             );
         }
-        record.rev = on_disk + 1;
+        Ok(record)
+    }
+
+    /// Atomically replace one session's file (stage + rename). Callers hold the
+    /// write lock; this never locks by itself.
+    fn write(&self, record: &SessionRecord) -> Result<()> {
         let cache = Cache::new(format!("sessions/{}", record.id), self.root.clone());
         let staged = cache.stage(".json")?;
         let result = fs::write(&staged, serde_json::to_string_pretty(record)?)
             .map_err(anyhow::Error::from)
             .and_then(|()| cache.commit(&staged, SESSION_FILE));
         if result.is_err() {
-            record.rev = on_disk;
             let _ = fs::remove_file(&staged);
         }
         result
+    }
+
+    /// Persist one freshly created session, refusing to overwrite an existing one.
+    pub(super) fn create(&self, record: &SessionRecord) -> Result<()> {
+        fs::create_dir_all(self.dir(&record.id))?;
+        let _write = liveness::lock_for_write(&self.write_lock_path(&record.id))?;
+        if self.exists(record.id.as_str()) {
+            bail!(
+                "session '{}' already exists; pick another --id or remove it first",
+                record.id
+            );
+        }
+        self.write(record)
+    }
+
+    /// Apply one mutation to a session as a serialized read-modify-write.
+    ///
+    /// The blocking write lock makes read → apply → write one critical section
+    /// across processes, so concurrent mutations all land, in some order, and
+    /// none clobbers another's. A failed closure writes nothing and propagates
+    /// its error. Returns the record as written.
+    pub(super) fn update(
+        &self,
+        id: &str,
+        apply: impl FnOnce(&mut SessionRecord) -> Result<()>,
+    ) -> Result<SessionRecord> {
+        if !self.exists(id) {
+            bail!("no session '{id}'");
+        }
+        let _write = liveness::lock_for_write(&self.write_lock_path(id))?;
+        let mut record = self.open(id)?;
+        apply(&mut record)?;
+        self.write(&record)?;
+        Ok(record)
     }
 
     /// Return every readable session, oldest first.
@@ -282,20 +280,24 @@ impl SessionStore {
             let path = entry?.path().join(SESSION_FILE);
             if let Ok(text) = fs::read_to_string(&path)
                 && let Ok(record) = serde_json::from_str::<SessionRecord>(text.as_str())
+                && record.version == VERSION
             {
-                out.push(record.backfilled());
+                out.push(record);
             }
         }
         out.sort_by(|left, right| left.created.cmp(&right.created));
         Ok(out)
     }
 
-    /// Delete one session's directory and everything in it.
+    /// Delete one session's directory and everything in it, after any in-flight
+    /// update finishes (the write lock serializes the two).
     pub(super) fn remove(&self, id: &str) -> Result<()> {
         let dir = self.dir(id);
-        if dir.is_dir() {
-            fs::remove_dir_all(&dir)?;
+        if !dir.is_dir() {
+            return Ok(());
         }
+        let _write = liveness::lock_for_write(&self.write_lock_path(id))?;
+        fs::remove_dir_all(&dir)?;
         Ok(())
     }
 }
@@ -335,6 +337,7 @@ fn salt() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::WordCandidate;
     use tempfile::TempDir;
 
     fn record(id: &str) -> SessionRecord {
@@ -359,75 +362,81 @@ mod tests {
     }
 
     #[test]
-    fn a_saved_session_reads_back_identically() {
+    fn a_created_session_reads_back_identically() {
         let home = TempDir::new().expect("tempdir must be created");
         let store = SessionStore::new(home.path());
-        let mut saved = record("fr-1");
-        store.save(&mut saved).expect("session must save");
+        let saved = record("fr-1");
+        store.create(&saved).expect("session must save");
         assert_eq!(
             store.open("fr-1").expect("session must reopen"),
             saved,
-            "a saved session no longer reads back identically"
+            "a created session no longer reads back identically"
         );
     }
 
     #[test]
-    fn a_stale_save_is_refused_by_compare_and_swap() {
+    fn creating_over_an_existing_session_is_refused() {
         let home = TempDir::new().expect("tempdir must be created");
         let store = SessionStore::new(home.path());
-        let mut holder = record("fr-1");
-        store
-            .save(&mut holder)
-            .expect("the first save must succeed");
-        let mut stale = record("fr-1");
-        stale.phase = Phase::Published;
+        store.create(&record("fr-1")).expect("first create");
         assert!(
-            store.save(&mut stale).is_err(),
-            "a save built on a superseded revision must be refused, not clobber the newer state"
+            store.create(&record("fr-1")).is_err(),
+            "creating over an existing session must be refused, not overwrite it"
         );
     }
 
     #[test]
-    fn a_legacy_draft_session_backfills_one_candidate_per_draft() {
+    fn an_update_applies_the_closure_to_the_freshly_read_record() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        store.create(&record("fr-1")).expect("create");
+        store
+            .update("fr-1", |record| {
+                record.phase = Phase::Published;
+                Ok(())
+            })
+            .expect("update must apply");
+        assert_eq!(
+            store.open("fr-1").expect("reopen").phase,
+            Phase::Published,
+            "an update must persist the closure's mutation of the freshly read record"
+        );
+    }
+
+    #[test]
+    fn a_failed_closure_leaves_the_record_unwritten() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        store.create(&record("fr-1")).expect("create");
+        let _ = store.update("fr-1", |record| {
+            record.phase = Phase::Published;
+            anyhow::bail!("refused")
+        });
+        assert_eq!(
+            store.open("fr-1").expect("reopen").phase,
+            Phase::Understood,
+            "a failed update closure must leave the on-disk record untouched"
+        );
+    }
+
+    #[test]
+    fn a_record_from_an_older_build_is_refused_with_a_clear_error() {
         let home = TempDir::new().expect("tempdir must be created");
         let store = SessionStore::new(home.path());
         let dir = store.dir("old-1");
         fs::create_dir_all(&dir).expect("session dir must be created");
         fs::write(
             dir.join("session.json"),
-            r#"{"version":1,"id":"old-1","created":"t","from":"en","to":"fr","out":"/out","senses":"primary","source":"words","phase":"draft","drafts":[{"term":"canard","understanding":"a duck"}]}"#,
+            r#"{"version":1,"id":"old-1","created":"t","from":"en","to":"fr","out":"/out","senses":"primary","source":"words","phase":"understood","drafts":[]}"#,
         )
-        .expect("legacy session must be written");
-        let record = store.open("old-1").expect("legacy session must reopen");
-        assert_eq!(
-            (
-                record.phase,
-                record.candidates.len(),
-                record.candidates.first().map(CandidateRecord::term),
-                record.words.clone(),
-            ),
-            (
-                Phase::Understood,
-                1,
-                Some("canard"),
-                vec![String::from("canard")],
-            ),
-            "a legacy draft session must read as understood with one backfilled candidate"
-        );
-    }
-
-    #[test]
-    fn the_latest_save_overwrites_the_previous_one() {
-        let home = TempDir::new().expect("tempdir must be created");
-        let store = SessionStore::new(home.path());
-        let mut record = record("fr-1");
-        store.save(&mut record).expect("first save");
-        record.phase = Phase::Published;
-        store.save(&mut record).expect("second save");
-        assert_eq!(
-            store.open("fr-1").expect("reopen").phase,
-            Phase::Published,
-            "the latest save no longer overwrites the previous session state"
+        .expect("old session must be written");
+        assert!(
+            store
+                .open("old-1")
+                .expect_err("an old version must not open")
+                .to_string()
+                .contains("older build"),
+            "a session from an older build must be refused with a remove-it hint"
         );
     }
 

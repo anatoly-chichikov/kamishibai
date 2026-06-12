@@ -3,9 +3,12 @@
 //!
 //! Both the background worker (`__run`, spawned detached) and the foreground
 //! `generate --wait` path funnel through [`execute`], so they generate
-//! identically; only the streaming reporter differs.
+//! identically; only the streaming reporter differs. Every write is ownership
+//! guarded: the worker mutates the record only while it still names this
+//! process ([`owned_by`]), so a `cancel` that raced in revokes the run instead
+//! of being clobbered, and the worker stops generating at the next step.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -17,47 +20,56 @@ use super::store::{Phase, Progress, ResultRecord, SessionRecord, SessionStore, W
 use crate::cli::console::{Outcome, QuietReporter, Reporter, StepOutcome, generator, produce};
 use crate::session::{Artifact, CardDraft, LanguagePair};
 
+/// Return whether the record still names this process as the generating worker.
+fn owned_by(record: &SessionRecord, pid: i32) -> bool {
+    matches!(record.phase, Phase::Generating)
+        && record
+            .worker
+            .as_ref()
+            .map(|worker| worker.pid == pid)
+            .unwrap_or(false)
+}
+
 /// A reporter that mirrors `produce()` progress into the session file and also
 /// forwards every event to an inner reporter (quiet for the detached worker,
 /// human for `--wait`).
 struct SessionReporter {
     store: SessionStore,
-    record: RefCell<SessionRecord>,
+    id: String,
+    pid: i32,
     inner: Box<dyn Reporter>,
-    final_error: RefCell<Option<String>>,
+    revoked: Cell<bool>,
+    persist_failure: RefCell<Option<String>>,
 }
 
 impl SessionReporter {
-    fn new(store: SessionStore, record: SessionRecord, inner: Box<dyn Reporter>) -> Self {
+    fn new(store: SessionStore, id: String, pid: i32, inner: Box<dyn Reporter>) -> Self {
         Self {
             store,
-            record: RefCell::new(record),
+            id,
+            pid,
             inner,
-            final_error: RefCell::new(None),
+            revoked: Cell::new(false),
+            persist_failure: RefCell::new(None),
         }
     }
 
-    fn persist(&self) {
-        let _ = self.store.save(&mut self.record.borrow_mut());
-    }
-
-    /// Persist a terminal state, surfacing a write failure loudly (to the worker
-    /// log or `--wait` stderr) rather than silently leaving the session stale.
-    fn persist_final(&self) {
-        if let Err(error) = self.store.save(&mut self.record.borrow_mut()) {
+    /// Record a failed run, unless ownership was lost (never write `failed` over
+    /// a phase someone else set, e.g. `cancelled`).
+    fn fail(&self, message: String) {
+        let pid = self.pid;
+        let written = self.store.update(self.id.as_str(), |record| {
+            if owned_by(record, pid) {
+                record.phase = Phase::Failed;
+                record.error = Some(message);
+                record.progress = None;
+                record.worker = None;
+            }
+            Ok(())
+        });
+        if let Err(error) = written {
             eprintln!("worker: failed to persist final session state: {error:#}");
         }
-    }
-
-    fn fail(&self, message: String) {
-        {
-            let mut record = self.record.borrow_mut();
-            record.phase = Phase::Failed;
-            record.error = Some(message);
-            record.progress = None;
-            record.worker = None;
-        }
-        self.persist_final();
     }
 }
 
@@ -67,14 +79,20 @@ impl Reporter for SessionReporter {
     }
 
     fn step(&self, term: &str, artifact: Artifact, outcome: StepOutcome) {
-        {
-            let mut record = self.record.borrow_mut();
-            record.progress = Some(Progress {
-                term: String::from(term),
-                artifact: String::from(artifact.label()),
-            });
+        let pid = self.pid;
+        let progress = Progress {
+            term: String::from(term),
+            artifact: String::from(artifact.label()),
+        };
+        match self.store.update(self.id.as_str(), |record| {
+            if owned_by(record, pid) {
+                record.progress = Some(progress);
+            }
+            Ok(())
+        }) {
+            Ok(fresh) => self.revoked.set(!owned_by(&fresh, pid)),
+            Err(error) => eprintln!("worker: failed to persist progress: {error:#}"),
         }
-        self.persist();
         self.inner.step(term, artifact, outcome);
     }
 
@@ -83,29 +101,64 @@ impl Reporter for SessionReporter {
     }
 
     fn finished(&self, outcome: &Outcome) {
-        {
-            let mut record = self.record.borrow_mut();
-            record.phase = Phase::Published;
-            record.result = Some(ResultRecord {
+        let published = outcome.cards() > 0;
+        let pid = self.pid;
+        let mut owned = false;
+        let written = self.store.update(self.id.as_str(), |record| {
+            owned = owned_by(record, pid);
+            if !owned {
+                return Ok(());
+            }
+            record.phase = terminal_phase(outcome);
+            record.result = published.then(|| ResultRecord {
                 deck: String::from(outcome.deck()),
                 report: String::from(outcome.report()),
                 output: String::from(outcome.output()),
+                cards: outcome.cards(),
+                failed: outcome.failed(),
             });
+            record.error = (!published)
+                .then(|| format!("all {} card(s) failed to generate", outcome.failed()));
             record.progress = None;
             record.worker = None;
-        }
-        if let Err(error) = self.store.save(&mut self.record.borrow_mut()) {
-            *self.final_error.borrow_mut() = Some(format!("{error:#}"));
+            Ok(())
+        });
+        if let Err(error) = written {
+            *self.persist_failure.borrow_mut() = Some(format!("{error:#}"));
             return;
         }
-        self.inner.finished(outcome);
+        if !owned {
+            eprintln!("worker: outcome not recorded: the session no longer names this worker");
+            return;
+        }
+        if published {
+            self.inner.finished(outcome);
+        }
+    }
+
+    fn revoked(&self) -> bool {
+        self.revoked.get()
+    }
+}
+
+/// Map a finished run to its terminal phase: a clean run is `Published`, a run
+/// with surviving cards plus failures is `Partial`, and a run that produced no
+/// card at all is `Failed`.
+fn terminal_phase(outcome: &Outcome) -> Phase {
+    if outcome.failed() == 0 {
+        Phase::Published
+    } else if outcome.cards() == 0 {
+        Phase::Failed
+    } else {
+        Phase::Partial
     }
 }
 
 /// Generate and publish one session, persisting state as it goes.
 ///
 /// On success the published result is recorded by `finished`; on failure the
-/// session is marked failed and the error is returned for the caller's exit code.
+/// session is marked failed — unless the run was revoked by a `cancel`, whose
+/// phase is never overwritten — and the error is returned for the exit code.
 fn execute(store: &SessionStore, id: &str, inner: Box<dyn Reporter>) -> Result<()> {
     let record = store.open(id)?;
     let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
@@ -120,17 +173,32 @@ fn execute(store: &SessionStore, id: &str, inner: Box<dyn Reporter>) -> Result<(
             )
         })
         .collect::<Vec<_>>();
-    let live = generator(PathBuf::from(record.out.clone()))?;
-    let reporter = SessionReporter::new(store.clone(), record, inner);
+    let live = generator(PathBuf::from(record.out))?;
+    let pid = i32::try_from(std::process::id())?;
+    let reporter = SessionReporter::new(store.clone(), String::from(id), pid, inner);
     match produce(&live, drafts, &reporter) {
-        Ok(()) => match reporter.final_error.borrow_mut().take() {
+        Ok(()) => match reporter.persist_failure.borrow_mut().take() {
             Some(message) => {
                 bail!("generated the cards but failed to persist the published state: {message}")
             }
-            None => Ok(()),
+            None => {
+                let saved = store.open(id)?;
+                if matches!(saved.phase, Phase::Failed) {
+                    bail!(
+                        "{}",
+                        saved
+                            .error
+                            .as_deref()
+                            .unwrap_or("generation failed: no cards were produced")
+                    );
+                }
+                Ok(())
+            }
         },
         Err(error) => {
-            reporter.fail(format!("{error:#}"));
+            if !reporter.revoked.get() {
+                reporter.fail(format!("{error:#}"));
+            }
             Err(error)
         }
     }
@@ -139,18 +207,24 @@ fn execute(store: &SessionStore, id: &str, inner: Box<dyn Reporter>) -> Result<(
 /// Claim the session for this process: record our own pid as the worker and
 /// mark it generating. Both worker entrypoints claim from inside their own
 /// process so the pid on disk always belongs to a process that is really running
-/// and no other process writes the record after the worker starts.
+/// and no other process writes the record while the worker owns it. A cancel
+/// that landed before the claim wins: the claim is refused and the worker exits
+/// without generating.
 fn claim_self(store: &SessionStore, id: &str) -> Result<()> {
-    let mut record = store.open(id)?;
-    record.worker = Some(WorkerHandle {
-        pid: i32::try_from(std::process::id())?,
-        started: now()?,
-    });
-    record.phase = Phase::Generating;
-    record.progress = None;
-    record.result = None;
-    record.error = None;
-    store.save(&mut record)
+    let pid = i32::try_from(std::process::id())?;
+    let started = now()?;
+    store.update(id, |record| {
+        if matches!(record.phase, Phase::Cancelled) {
+            bail!("session '{id}' was cancelled before generation started");
+        }
+        record.worker = Some(WorkerHandle { pid, started });
+        record.phase = Phase::Generating;
+        record.progress = None;
+        record.result = None;
+        record.error = None;
+        Ok(())
+    })?;
+    Ok(())
 }
 
 /// The hidden `__run <id>` entrypoint: claim the session under this detached
@@ -199,19 +273,23 @@ pub(super) fn run_foreground(
 /// never writes the record after spawning, so a fast cache-only worker that
 /// finishes and saves `published` first can never be clobbered by a late parent
 /// save reverting it to `generating`.
-pub(super) fn start_background(store: &SessionStore, mut record: SessionRecord) -> Result<()> {
-    let log = File::create(store.log_path(&record.id))?;
+pub(super) fn start_background(store: &SessionStore, id: &str) -> Result<()> {
+    let log = File::create(store.log_path(id))?;
     let exe = std::env::current_exe()?;
-    record.worker = None;
-    record.phase = Phase::Generating;
-    record.progress = None;
-    record.result = None;
-    record.error = None;
-    store.save(&mut record)?;
-    if let Err(error) = spawn_detached(exe, record.id.as_str(), log) {
-        record.phase = Phase::Failed;
-        record.error = Some(format!("failed to start worker: {error:#}"));
-        let _ = store.save(&mut record);
+    store.update(id, |record| {
+        record.worker = None;
+        record.phase = Phase::Generating;
+        record.progress = None;
+        record.result = None;
+        record.error = None;
+        Ok(())
+    })?;
+    if let Err(error) = spawn_detached(exe, id, log) {
+        let _ = store.update(id, |record| {
+            record.phase = Phase::Failed;
+            record.error = Some(format!("failed to start worker: {error:#}"));
+            Ok(())
+        });
         return Err(error);
     }
     Ok(())
@@ -252,7 +330,7 @@ mod tests {
     use super::super::store::DraftRecord;
     use super::*;
 
-    fn session(store: &SessionStore) -> SessionRecord {
+    fn generating_session(store: &SessionStore, pid: i32) -> SessionRecord {
         let mut record = SessionRecord::understood(
             String::from("fr-1"),
             String::from("2026-06-06T00:00:00Z"),
@@ -268,21 +346,30 @@ mod tests {
             term: String::from("canard"),
             understanding: String::from("a duck"),
         }];
-        store.save(&mut record).expect("seed session");
+        record.phase = Phase::Generating;
+        record.worker = Some(WorkerHandle {
+            pid,
+            started: String::from("t"),
+        });
+        store.create(&record).expect("seed session");
         record
+    }
+
+    fn reporter(store: &SessionStore, pid: i32) -> SessionReporter {
+        SessionReporter::new(
+            store.clone(),
+            String::from("fr-1"),
+            pid,
+            Box::new(QuietReporter),
+        )
     }
 
     #[test]
     fn finishing_records_published_and_clears_the_pid() {
         let home = TempDir::new().expect("tempdir");
         let store = SessionStore::new(home.path());
-        let mut record = session(&store);
-        record.worker = Some(WorkerHandle {
-            pid: 1,
-            started: String::from("t"),
-        });
-        let reporter = SessionReporter::new(store.clone(), record, Box::new(QuietReporter));
-        reporter.finished(&Outcome::for_test("/o/d.apkg", "/o/d.pdf", "/o", 1, 0));
+        generating_session(&store, 1);
+        reporter(&store, 1).finished(&Outcome::for_test("/o/d.apkg", "/o/d.pdf", "/o", 1, 0));
         let reopened = store.open("fr-1").expect("reopen");
         assert_eq!(
             (
@@ -296,12 +383,39 @@ mod tests {
     }
 
     #[test]
+    fn a_run_with_some_failures_records_partial_and_keeps_the_deck() {
+        let home = TempDir::new().expect("tempdir");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        reporter(&store, 1).finished(&Outcome::for_test("/o/d.apkg", "/o/d.pdf", "/o", 1, 1));
+        let reopened = store.open("fr-1").expect("reopen");
+        assert_eq!(
+            (reopened.phase, reopened.result.map(|result| result.failed)),
+            (Phase::Partial, Some(1)),
+            "a run that published some cards and failed others must record partial with the failed count"
+        );
+    }
+
+    #[test]
+    fn a_run_with_no_surviving_cards_records_failed_without_a_result() {
+        let home = TempDir::new().expect("tempdir");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        reporter(&store, 1).finished(&Outcome::for_test("/o/d.apkg", "/o/d.pdf", "/o", 0, 2));
+        let reopened = store.open("fr-1").expect("reopen");
+        assert_eq!(
+            (reopened.phase, reopened.result.is_none()),
+            (Phase::Failed, true),
+            "a run where every card failed must record failed and store no published result"
+        );
+    }
+
+    #[test]
     fn each_step_persists_progress_to_the_session_file() {
         let home = TempDir::new().expect("tempdir");
         let store = SessionStore::new(home.path());
-        let record = session(&store);
-        let reporter = SessionReporter::new(store.clone(), record, Box::new(QuietReporter));
-        reporter.step(
+        generating_session(&store, 1);
+        reporter(&store, 1).step(
             "canard",
             Artifact::Scene,
             StepOutcome::Ready { cached: false },
@@ -314,6 +428,61 @@ mod tests {
                 .map(|progress| (progress.term, progress.artifact)),
             Some((String::from("canard"), String::from("scene"))),
             "each artifact step must persist the current term and artifact to disk"
+        );
+    }
+
+    #[test]
+    fn a_step_after_the_session_stops_naming_this_worker_flags_revocation() {
+        let home = TempDir::new().expect("tempdir");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        let revoked = reporter(&store, 2);
+        revoked.step(
+            "canard",
+            Artifact::Scene,
+            StepOutcome::Ready { cached: false },
+        );
+        assert!(
+            revoked.revoked(),
+            "a step against a session naming another worker must flag this run revoked"
+        );
+    }
+
+    #[test]
+    fn claiming_a_cancelled_session_is_refused() {
+        let home = TempDir::new().expect("tempdir");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        store
+            .update("fr-1", |record| {
+                record.phase = Phase::Cancelled;
+                record.worker = None;
+                Ok(())
+            })
+            .expect("cancel the session");
+        assert!(
+            claim_self(&store, "fr-1").is_err(),
+            "a worker claiming a session cancelled before its start must be refused"
+        );
+    }
+
+    #[test]
+    fn a_finish_after_revocation_never_overwrites_the_cancelled_phase() {
+        let home = TempDir::new().expect("tempdir");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        store
+            .update("fr-1", |record| {
+                record.phase = Phase::Cancelled;
+                record.worker = None;
+                Ok(())
+            })
+            .expect("cancel the session");
+        reporter(&store, 1).finished(&Outcome::for_test("/o/d.apkg", "/o/d.pdf", "/o", 1, 0));
+        assert_eq!(
+            store.open("fr-1").expect("reopen").phase,
+            Phase::Cancelled,
+            "a worker finishing after a cancel must not overwrite the cancelled phase"
         );
     }
 }

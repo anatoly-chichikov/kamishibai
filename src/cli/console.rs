@@ -9,7 +9,7 @@
 
 use std::sync::mpsc::channel;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 
 use super::card_workflow::{CardGeneration, DeckPublishProgress, DeckPublishing};
 use super::live_generator::LiveCardGenerator;
@@ -52,6 +52,16 @@ impl Outcome {
     /// Return the output directory holding the deck and report.
     pub(super) fn output(&self) -> &str {
         self.output.as_str()
+    }
+
+    /// Return how many fully generated cards made it into the deck.
+    pub(super) fn cards(&self) -> usize {
+        self.cards
+    }
+
+    /// Return how many cards failed and were left out of the deck.
+    pub(super) fn failed(&self) -> usize {
+        self.failed
     }
 }
 
@@ -97,6 +107,11 @@ pub(super) trait Reporter {
     fn publishing(&self);
     /// Report the final artifacts once the run completes.
     fn finished(&self, outcome: &Outcome);
+    /// Return whether the run lost ownership of its session and must stop
+    /// (a cancel raced in); the default never revokes.
+    fn revoked(&self) -> bool {
+        false
+    }
 }
 
 /// Build a console-flow live generator rooted at the shared cache and output dir.
@@ -121,6 +136,9 @@ where
     reporter.generating(drafts.len());
     let mut engine = SessionEngine::start(drafts);
     while let Some((card, artifact)) = engine.next_target() {
+        if reporter.revoked() {
+            bail!("the session no longer names this worker");
+        }
         let draft = engine.drafts()[card].clone();
         let term = draft.term().to_string();
         advance(generator, &mut engine, card, artifact, &draft);
@@ -129,6 +147,9 @@ where
     let drafts = engine.drafts().to_vec();
     let cards = drafts.iter().filter(|d| d.artifacts().all_ready()).count();
     let failed = drafts.iter().filter(|d| d.artifacts().has_failed()).count();
+    if reporter.revoked() {
+        bail!("the session no longer names this worker");
+    }
     reporter.publishing();
     let (sender, _receiver) = channel();
     let progress = DeckPublishProgress::new(sender);
@@ -202,21 +223,15 @@ fn slot_for(artifacts: &CardArtifacts, artifact: Artifact) -> &ArtifactSlot {
     }
 }
 
-/// Turn reviewed candidates into card drafts per the sense policy, dropping the
-/// rows the model marked not-ok.
-pub(super) fn drafts_for(
-    candidates: &[WordCandidate],
-    pair: &LanguagePair,
-    senses: SensePolicy,
-) -> Vec<CardDraft> {
+/// Turn reviewed candidates into card drafts from their stored sense selection,
+/// dropping the rows the model marked not-ok. The `--senses` policy is applied
+/// once at `new`-time as the initial selection; this only reads the selection.
+pub(super) fn drafts_for(candidates: &[WordCandidate], pair: &LanguagePair) -> Vec<CardDraft> {
     candidates
         .iter()
         .filter(|candidate| candidate.ok())
         .flat_map(|candidate| {
-            let indices: Vec<usize> = match senses {
-                SensePolicy::Primary => candidate.selected_senses().to_vec(),
-                SensePolicy::All => (0..candidate.senses().len()).collect(),
-            };
+            let indices: Vec<usize> = candidate.selected_senses().to_vec();
             indices.into_iter().filter_map(move |index| {
                 candidate.senses().get(index).map(|sense| {
                     CardDraft::new(candidate.term(), sense.understanding(), pair.clone())
@@ -406,34 +421,34 @@ mod tests {
     }
 
     #[test]
-    fn primary_policy_makes_one_card_per_word() {
+    fn only_the_selected_sense_becomes_a_card() {
         let candidate = WordCandidate::with_selected_senses(
             "canard",
             vec![Sense::plain("a duck"), Sense::plain("a false report")],
             vec![0],
             true,
         );
-        let drafts = drafts_for(&[candidate], &pair(), SensePolicy::Primary);
+        let drafts = drafts_for(&[candidate], &pair());
         assert_eq!(
             drafts.len(),
             1,
-            "primary policy must turn one word into exactly one card"
+            "only the selected sense of a word must become a card"
         );
     }
 
     #[test]
-    fn all_policy_makes_one_card_per_sense() {
+    fn each_selected_sense_becomes_one_card() {
         let candidate = WordCandidate::with_selected_senses(
             "canard",
             vec![Sense::plain("a duck"), Sense::plain("a false report")],
-            vec![0],
+            vec![0, 1],
             true,
         );
-        let drafts = drafts_for(&[candidate], &pair(), SensePolicy::All);
+        let drafts = drafts_for(&[candidate], &pair());
         assert_eq!(
             drafts.len(),
             2,
-            "all policy must turn every sense into its own card"
+            "every selected sense must become its own card"
         );
     }
 
@@ -441,7 +456,7 @@ mod tests {
     fn skipped_words_never_become_cards() {
         let kept = WordCandidate::new("canard", "a duck", true);
         let dropped = WordCandidate::new("xyzzy", "not a word", false);
-        let drafts = drafts_for(&[kept, dropped], &pair(), SensePolicy::All);
+        let drafts = drafts_for(&[kept, dropped], &pair());
         assert_eq!(
             drafts.iter().map(CardDraft::term).collect::<Vec<_>>(),
             vec!["canard"],

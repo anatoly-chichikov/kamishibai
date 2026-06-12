@@ -23,6 +23,15 @@ use super::protocol::{
 };
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/// Return the Gemini API base URL, honoring a non-empty `KAMISHIBAI_GEMINI_URL`
+/// override (offline tests point it at a local listener; proxies can too).
+fn base_url() -> String {
+    env::var("KAMISHIBAI_GEMINI_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| String::from(BASE_URL))
+}
 const TEXT_MODEL: &str = "gemini-3.5-flash";
 const META_MODEL: &str = TEXT_MODEL;
 const SCENE_MODEL: &str = TEXT_MODEL;
@@ -199,7 +208,7 @@ where
     /// `api_error`, so the caller can tell a rejected key (`rejects_key`) from a
     /// transport or quota failure and message accordingly.
     pub fn validate_key(&self) -> Result<()> {
-        let url = format!("{BASE_URL}/{TEXT_MODEL}:generateContent");
+        let url = format!("{}/{TEXT_MODEL}:generateContent", base_url());
         let body = serde_json::to_string(&Request::text(String::from("ping"), None, None))?;
         let response = self
             .transport
@@ -321,7 +330,7 @@ where
     }
 
     fn request(&self, model: &str, request: &Request) -> Result<Response> {
-        let url = format!("{BASE_URL}/{model}:generateContent");
+        let url = format!("{}/{model}:generateContent", base_url());
         let body = serde_json::to_string(request)?;
         let response = self
             .transport

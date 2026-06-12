@@ -95,7 +95,7 @@ pub(super) fn phase_word(record: &SessionRecord, cache_root: &Path) -> &'static 
 fn terminal(phase: Phase) -> bool {
     matches!(
         phase,
-        Phase::Published | Phase::Failed | Phase::Interrupted | Phase::Cancelled
+        Phase::Published | Phase::Partial | Phase::Failed | Phase::Interrupted | Phase::Cancelled
     )
 }
 
@@ -106,6 +106,7 @@ pub(super) fn phase_label(phase: Phase) -> &'static str {
         Phase::Generating => "generating",
         Phase::Interrupted => "interrupted",
         Phase::Published => "published",
+        Phase::Partial => "partial",
         Phase::Failed => "failed",
         Phase::Cancelled => "cancelled",
     }
@@ -229,24 +230,27 @@ fn selected_cards(record: &SessionRecord) -> usize {
         .sum()
 }
 
-/// Render one session list line: `<id>  <from> → <to>  <phase>  <ready>/<total>`.
+/// Render one session list line: `<id>  <from> → <to>  <phase>  <progress>`.
+///
+/// Before a plan is committed the trailing column shows `-- / <selected>` (a
+/// curation count, not progress); once generation has a committed plan it shows
+/// `<ready>/<total>`, so the list never reads an understood session as 0-done.
 pub(super) fn summary_line(record: &SessionRecord, cache_root: &Path) -> String {
     let cards = cards(record, cache_root);
     let (phase, _, _) = live_phase(record, cache_root);
-    let ready = cards.iter().filter(|card| card.ready()).count();
-    let total = if record.drafts.is_empty() {
-        selected_cards(record)
+    let progress = if record.drafts.is_empty() {
+        format!("-- / {}", selected_cards(record))
     } else {
-        cards.len()
+        let ready = cards.iter().filter(|card| card.ready()).count();
+        format!("{}/{}", ready, cards.len())
     };
     format!(
-        "{}  {} → {}  {}  {}/{}",
+        "{}  {} → {}  {}  {}",
         record.id,
         record.from,
         record.to,
         phase_label(phase),
-        ready,
-        total
+        progress
     )
 }
 
@@ -331,6 +335,27 @@ mod tests {
         assert!(
             status.contains("meta:ok sound:ok scene:-- picture:--"),
             "status text must show each card's artifact presence read from the cache"
+        );
+    }
+
+    #[test]
+    fn an_understood_list_line_shows_a_selection_count_not_a_progress_fraction() {
+        use crate::session::{CandidateRecord, Sense, WordCandidate};
+        let mut record = record();
+        record.drafts = Vec::new();
+        record.candidates = vec![CandidateRecord::from_candidate(
+            &WordCandidate::with_selected_senses(
+                "canard",
+                vec![Sense::plain("a duck")],
+                vec![0],
+                true,
+            ),
+        )];
+        let home = TempDir::new().expect("tempdir must be created");
+        let line = summary_line(&record, home.path());
+        assert!(
+            line.contains("understood") && line.contains("-- / 1"),
+            "an understood session list line must show a selection count, not a 0-done progress fraction"
         );
     }
 

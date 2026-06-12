@@ -6,11 +6,12 @@
 //! `view`); only the durable subset (language pair, typed words, curated
 //! candidates, committed plan, phase, and published result) crosses over.
 
+use std::fs;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 
 use crate::session::{CandidateRecord, CardDraft, LanguagePair, WordCandidate};
 use crate::tui::{App, Screen};
@@ -76,6 +77,8 @@ pub(super) fn app_to_record(
             deck: done.deck.clone(),
             report: done.report.clone(),
             output: done.output.clone(),
+            cards: record.drafts.len(),
+            failed: 0,
         });
     }
     record
@@ -127,7 +130,10 @@ pub(super) fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraf
     let app = app
         .with_screen(Screen::YourCards)
         .cards_started(drafts.clone());
-    if matches!(record.phase, Phase::Failed | Phase::Cancelled) {
+    if matches!(
+        record.phase,
+        Phase::Failed | Phase::Cancelled | Phase::Partial
+    ) {
         return (app, None);
     }
     (app, Some(drafts))
@@ -138,14 +144,16 @@ pub(super) fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraf
 /// Holds the store and the session identity so the shell can persist the live
 /// app at every meaningful transition without re-minting an id each time. Saves
 /// are debounced on a fingerprint of the durable subset so a busy generation
-/// loop writes once, not once per frame.
+/// loop writes once, not once per frame. `written` remembers the record this
+/// window last wrote (or resumed from), so a save refuses to clobber a session
+/// another process edited meanwhile.
 pub(in crate::cli) struct TuiSession {
     store: SessionStore,
     id: Option<String>,
     created: Option<String>,
     source: String,
     senses: String,
-    rev: u64,
+    written: Option<SessionRecord>,
     fingerprint: Option<u64>,
     lock: Option<File>,
 }
@@ -159,38 +167,46 @@ impl TuiSession {
             created: None,
             source: String::from("tui"),
             senses: String::from("custom"),
-            rev: 0,
+            written: None,
             fingerprint: None,
             lock: None,
         })
     }
 
-    /// Resume an existing on-disk session under its original identity, keeping its
-    /// recorded source, senses label, and revision so a save extends the existing
-    /// compare-and-swap chain rather than re-basing onto whatever is on disk.
-    pub(in crate::cli) fn resuming(
-        id: String,
-        created: String,
-        source: String,
-        senses: String,
-        rev: u64,
-    ) -> Result<Self> {
+    /// Resume an existing on-disk session under its original identity, keeping
+    /// the record as read so a later save detects outside edits.
+    pub(super) fn resuming(record: &SessionRecord) -> Result<Self> {
         Ok(Self {
             store: SessionStore::system()?,
-            id: Some(id),
-            created: Some(created),
-            source,
-            senses,
-            rev,
+            id: Some(record.id.clone()),
+            created: Some(record.created.clone()),
+            source: record.source.clone(),
+            senses: record.senses.clone(),
+            written: Some(record.clone()),
             fingerprint: None,
             lock: None,
         })
+    }
+
+    /// Claim the right to generate this session by taking its liveness lock
+    /// BEFORE any record naming this process as the worker is written. Returns
+    /// false when another live worker already holds it; idempotent while held.
+    pub(in crate::cli) fn claim(&mut self, app: &App) -> Result<bool> {
+        if self.lock.is_some() {
+            return Ok(true);
+        }
+        let id = self.ensure_id(app)?;
+        fs::create_dir_all(self.store.dir(id.as_str()))?;
+        self.lock = liveness::hold(&self.store.lock_path(id.as_str()))?;
+        Ok(self.lock.is_some())
     }
 
     /// Persist the live app if its durable subset changed since the last save.
     ///
     /// A no-op until the run has something to persist (understood candidates or
-    /// a started card batch), so Welcome and Your-words never write a file.
+    /// a started card batch), so Welcome and Your-words never write a file. A
+    /// failed save records the fingerprint anyway, so the event loop surfaces
+    /// the error once instead of hammering the disk; the next edit retries.
     pub(in crate::cli) fn save(
         &mut self,
         app: &App,
@@ -204,28 +220,25 @@ impl TuiSession {
         if self.fingerprint == Some(print) {
             return Ok(());
         }
-        let id = match &self.id {
-            Some(id) => id.clone(),
-            None => {
-                let minted = mint_id(app.pair().target())?;
-                self.id = Some(minted.clone());
-                minted
+        self.fingerprint = Some(print);
+        let id = self.ensure_id(app)?;
+        let created = self.ensure_created()?;
+        if generating && self.lock.is_none() {
+            fs::create_dir_all(self.store.dir(id.as_str()))?;
+            self.lock = liveness::hold(&self.store.lock_path(id.as_str()))?;
+            if self.lock.is_none() {
+                bail!("session '{id}' is being generated by another process");
             }
-        };
-        let created = match &self.created {
-            Some(created) => created.clone(),
-            None => {
-                let stamped = now()?;
-                self.created = Some(stamped.clone());
-                stamped
-            }
-        };
+        }
+        if !generating {
+            self.lock = None;
+        }
         let worker_pid = if generating {
             Some(i32::try_from(std::process::id())?)
         } else {
             None
         };
-        let mut record = app_to_record(
+        let projected = app_to_record(
             app,
             id.clone(),
             created,
@@ -234,24 +247,43 @@ impl TuiSession {
             output.to_string_lossy().as_ref(),
             worker_pid,
         );
-        // Real CAS against our own last-written revision: if another process
-        // changed the session, the save is refused (best-effort here) rather than
-        // re-basing and clobbering that newer state.
-        record.rev = self.rev;
-        self.store.save(&mut record)?;
-        self.rev = record.rev;
-        // Hold the advisory lock while generating so concurrent CLI commands see a
-        // live worker; release it once generation stops. The session dir already
-        // exists (the save above created it), so the lock file can be created.
-        if generating {
-            if self.lock.is_none() {
-                self.lock = liveness::hold(&self.store.lock_path(id.as_str()))?;
+        match &self.written {
+            None => self.store.create(&projected)?,
+            Some(expected) => {
+                let expected = expected.clone();
+                self.store.update(id.as_str(), |on_disk| {
+                    if *on_disk != expected {
+                        bail!("session '{id}' changed outside this window; reopen it to continue");
+                    }
+                    *on_disk = projected.clone();
+                    Ok(())
+                })?;
             }
-        } else {
-            self.lock = None;
         }
-        self.fingerprint = Some(print);
+        self.written = Some(projected);
         Ok(())
+    }
+
+    fn ensure_id(&mut self, app: &App) -> Result<String> {
+        match &self.id {
+            Some(id) => Ok(id.clone()),
+            None => {
+                let minted = mint_id(app.pair().target())?;
+                self.id = Some(minted.clone());
+                Ok(minted)
+            }
+        }
+    }
+
+    fn ensure_created(&mut self) -> Result<String> {
+        match &self.created {
+            Some(created) => Ok(created.clone()),
+            None => {
+                let stamped = now()?;
+                self.created = Some(stamped.clone());
+                Ok(stamped)
+            }
+        }
     }
 }
 

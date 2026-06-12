@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Subcommand};
+use clap::{ArgGroup, Args, Subcommand};
 
 use crate::cli::console::SensePolicy;
 
@@ -25,10 +25,9 @@ pub(in crate::cli) enum Command {
     Generate(GenerateArgs),
     /// Print a session's phase and per-card progress (no Gemini).
     Status(StatusArgs),
-    /// Drop a committed card's cached artifacts so the next generate rebuilds them.
+    /// Drop committed cards' cached artifacts (with --note, Gemini first
+    /// rewrites the card) so the next generate rebuilds them.
     Regenerate(RegenerateArgs),
-    /// Re-roll one committed card from a note (a later curation discards the fix).
-    Fix(FixArgs),
     /// Print a session's published cards and artifact paths.
     Result(ResultArgs),
     /// Stop a session's running worker.
@@ -44,8 +43,10 @@ pub(in crate::cli) enum Command {
     Worker(IdArg),
 }
 
-/// Arguments for `new`.
+/// Arguments for `new`: exactly one input form — repeated `--word`s, a `--words`
+/// file, or a `--build` cards JSON (whose entries carry the language pair).
 #[derive(Debug, Args)]
+#[command(group(ArgGroup::new("input").required(true).args(["word", "words", "build"])))]
 pub(in crate::cli) struct NewArgs {
     /// One word to learn (repeat the flag for more, one card per word).
     #[arg(long = "word", value_name = "WORD")]
@@ -54,7 +55,7 @@ pub(in crate::cli) struct NewArgs {
     #[arg(long, value_name = "FILE")]
     pub(super) words: Option<String>,
     /// Import a strict cards JSON path (or `-` for stdin) and skip understanding.
-    #[arg(long, value_name = "FILE")]
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["from", "to", "senses"])]
     pub(super) build: Option<PathBuf>,
     /// Native language you explain from (defaults to your saved preference).
     #[arg(long, value_name = "LANG")]
@@ -87,7 +88,7 @@ pub(in crate::cli) struct GenerateArgs {
     /// Run in the foreground, streaming progress, instead of detaching.
     #[arg(long)]
     pub(super) wait: bool,
-    /// Suppress progress; print only the final paths.
+    /// Suppress progress; with --wait print only the final paths, else just the id.
     #[arg(short, long)]
     pub(super) quiet: bool,
 }
@@ -101,7 +102,7 @@ pub(in crate::cli) struct SelectArgs {
     #[arg(long, value_name = "TERM")]
     pub(super) card: String,
     /// The 1-based sense numbers to turn into cards (comma-separated).
-    #[arg(long, value_name = "N", value_delimiter = ',', num_args = 1..)]
+    #[arg(long, value_name = "N", value_delimiter = ',', num_args = 1.., required = true)]
     pub(super) sense: Vec<usize>,
 }
 
@@ -128,8 +129,9 @@ pub(in crate::cli) struct StatusArgs {
     pub(super) quiet: bool,
 }
 
-/// Arguments for `result`.
+/// Arguments for `result`: at most one path selector, exclusive with `-q`.
 #[derive(Debug, Args)]
+#[command(group(ArgGroup::new("selector").args(["deck", "pdf", "dir"]).conflicts_with("quiet")))]
 pub(in crate::cli) struct ResultArgs {
     /// The session id.
     pub(super) id: String,
@@ -137,10 +139,10 @@ pub(in crate::cli) struct ResultArgs {
     #[arg(short, long)]
     pub(super) quiet: bool,
     /// Print only the deck path.
-    #[arg(long, conflicts_with_all = ["pdf", "dir"])]
+    #[arg(long)]
     pub(super) deck: bool,
     /// Print only the report PDF path.
-    #[arg(long, conflicts_with = "dir")]
+    #[arg(long)]
     pub(super) pdf: bool,
     /// Print only the output directory path.
     #[arg(long)]
@@ -172,8 +174,10 @@ pub(in crate::cli) struct LsArgs {
     pub(super) quiet: bool,
 }
 
-/// Arguments for `regenerate`.
+/// Arguments for `regenerate`: every unfinished card with `--failed`, or one
+/// card by `--card` — optionally rewritten by Gemini first with `--note`.
 #[derive(Debug, Args)]
+#[command(group(ArgGroup::new("target").required(true).args(["failed", "card"])))]
 pub(in crate::cli) struct RegenerateArgs {
     /// The session id.
     pub(super) id: String,
@@ -183,19 +187,14 @@ pub(in crate::cli) struct RegenerateArgs {
     /// Regenerate one card by its term.
     #[arg(long, value_name = "TERM")]
     pub(super) card: Option<String>,
-}
-
-/// Arguments for `fix`.
-#[derive(Debug, Args)]
-pub(in crate::cli) struct FixArgs {
-    /// The session id.
-    pub(super) id: String,
-    /// The term of the card to re-roll.
-    #[arg(long, value_name = "TERM")]
-    pub(super) card: String,
-    /// The instruction describing what to change.
-    #[arg(long, value_name = "NOTE")]
-    pub(super) note: String,
+    /// Ask Gemini to rewrite the card from this instruction first.
+    #[arg(
+        long,
+        value_name = "NOTE",
+        requires = "card",
+        conflicts_with = "failed"
+    )]
+    pub(super) note: Option<String>,
 }
 
 /// Arguments for `rm`.
