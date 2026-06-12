@@ -59,24 +59,24 @@ For scripts and agents, kamishibai also runs headless as a curatable, asynchrono
 
 ```bash
 # 1. understand the words and create a session — prints the id
-id=$(kamishibai new --word "you're gonna get yours" --word bank --from ru --to en --out ./deck)
+kamishibai new --word "you're gonna get yours" --word bank --from ru --to en --out ./deck
 
-# 2. curate the understanding (optional)
-kamishibai status "$id"                       # the candidates and their senses
-kamishibai select "$id" --card bank --sense 2 # keep only the river-bank sense
-kamishibai exclude "$id" --card bank          # …or drop the card entirely
+# 2. curate the understanding (optional) — with one session in play, no id needed
+kamishibai status                        # the candidates and their senses
+kamishibai select --card bank --sense 2  # keep only the river-bank sense
+kamishibai exclude --card bank           # …or drop the card entirely
 
 # 3. generate + publish in the background, then poll
-kamishibai generate "$id"
-kamishibai status "$id"             # phase + per-card progress (no Gemini); -q for just the phase
-kamishibai result "$id"            # the finished cards + deck.apkg / deck.pdf paths
+kamishibai generate
+kamishibai status                # phase + per-card progress (no Gemini); -q for just the phase
+kamishibai result                # the finished cards + deck.apkg / deck.pdf paths
 
 # re-roll a committed card
-kamishibai regenerate "$id" --failed
-kamishibai regenerate "$id" --card bank --note "make the sentence shorter"
+kamishibai regenerate --failed
+kamishibai regenerate --card bank --note "make the sentence shorter"
 ```
 
-The output is plain text by default: stdout carries the one capturable value (id, or paths), everything else goes to stderr, so `id=$(kamishibai new --word bank)` just works. Every session verb also takes `--json` for exactly one JSON document per call — same exit codes, machine-readable error envelope. Sessions are idempotent and cache-backed: the cache holds one folder per card under `kamishibai cache-path`, so a re-run resumes from disk and only fills in what is missing. The TUI shares the same sessions — `kamishibai open "$id"` resumes one interactively. Agents should read [llms.txt](llms.txt) for the full session contract.
+The output is plain text by default: stdout carries the one capturable value (id, or paths), everything else goes to stderr, so `id=$(kamishibai new --word bank)` just works. The id itself is optional — with one session in play every command finds it on its own. Every session verb also takes `--json` for exactly one JSON document per call — same exit codes, machine-readable error envelope. Sessions are idempotent and cache-backed: the cache holds one folder per card under `kamishibai cache-path`, so a re-run resumes from disk and only fills in what is missing. The TUI shares the same sessions — `kamishibai open "$id"` resumes one interactively. The full console reference with example outputs lives in [docs/console.md](docs/console.md); agents should read [llms.txt](llms.txt) for the machine contract.
 
 ## Languages
 

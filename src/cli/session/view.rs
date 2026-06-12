@@ -98,6 +98,8 @@ pub(super) fn phase_word(record: &SessionRecord, cache_root: &Path) -> &'static 
 }
 
 /// Return whether a phase is terminal: incomplete cards under it read failed.
+/// Includes `Interrupted` — deliberately wider than the resolution-side
+/// `settled` (mod.rs), where an interrupted run still counts as unfinished.
 pub(super) fn terminal(phase: Phase) -> bool {
     matches!(
         phase,

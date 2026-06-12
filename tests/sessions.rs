@@ -894,3 +894,156 @@ fn cache_path_in_json_mode_prints_the_cache_document() {
         "cache-path --json must carry the cache directory as a document field"
     );
 }
+
+#[test]
+fn a_lone_session_resolves_when_the_id_is_omitted() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "solo", CARDS_JSON);
+    let output = cli(cache.path())
+        .args(["status", "--quiet"])
+        .output()
+        .expect("status must run");
+    assert_eq!(
+        (
+            output.status.code(),
+            String::from_utf8(output.stdout).expect("utf8").trim(),
+            String::from_utf8(output.stderr)
+                .expect("utf8")
+                .contains("using session solo"),
+        ),
+        (Some(0), "understood", true),
+        "with one session an omitted id must resolve to it and say so on stderr"
+    );
+}
+
+#[test]
+fn an_unsettled_session_wins_resolution_over_a_published_one() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "older", CARDS_JSON);
+    seed_artifacts(&first_card_dir(cache.path()));
+    cli(cache.path())
+        .args(["generate", "--wait", "older", "--quiet"])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .success();
+    understood_session(cache.path(), out.path(), "fresh", TWO_CARDS_JSON);
+    let phase = cli(cache.path())
+        .args(["status", "--quiet"])
+        .output()
+        .expect("status must run");
+    assert_eq!(
+        (
+            phase.status.code(),
+            String::from_utf8(phase.stderr)
+                .expect("utf8")
+                .contains("using session fresh"),
+        ),
+        (Some(0), true),
+        "the single unfinished session must win resolution over a published one"
+    );
+}
+
+#[test]
+fn two_curatable_sessions_make_an_omitted_id_ambiguous() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "first", CARDS_JSON);
+    understood_session(cache.path(), out.path(), "second", TWO_CARDS_JSON);
+    let output = cli(cache.path())
+        .args(["status"])
+        .output()
+        .expect("status must run");
+    let stdout = String::from_utf8(output.stdout).expect("utf8");
+    assert_eq!(
+        (
+            output.status.code(),
+            stdout.contains("first") && stdout.contains("second"),
+            stdout.contains("and "),
+        ),
+        (Some(5), true, false),
+        "two unfinished sessions must exit 5 listing both, with no and-N-more line"
+    );
+}
+
+#[test]
+fn seven_sessions_print_the_newest_five_and_a_more_line() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    for index in 1..=7 {
+        understood_session(
+            cache.path(),
+            out.path(),
+            format!("s{index}").as_str(),
+            CARDS_JSON,
+        );
+    }
+    let output = cli(cache.path())
+        .args(["generate"])
+        .output()
+        .expect("generate must run");
+    let stdout = String::from_utf8(output.stdout).expect("utf8");
+    let first_line = stdout.lines().next().unwrap_or("");
+    assert_eq!(
+        (
+            output.status.code(),
+            stdout.lines().count(),
+            first_line.starts_with("s7"),
+            stdout.contains("and 2 more — kamishibai ls"),
+        ),
+        (Some(5), 6, true, true),
+        "seven ambiguous sessions must list the newest five, newest first, plus an and-2-more line"
+    );
+}
+
+#[test]
+fn an_omitted_id_with_no_sessions_exits_with_the_not_found_code() {
+    let cache = TempDir::new().expect("cache tempdir");
+    cli(cache.path()).args(["status"]).assert().code(3);
+}
+
+#[test]
+fn an_ambiguous_omitted_id_in_json_mode_carries_the_candidate_sessions() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "left", CARDS_JSON);
+    understood_session(cache.path(), out.path(), "right", TWO_CARDS_JSON);
+    let output = cli(cache.path())
+        .args(["status", "--json"])
+        .output()
+        .expect("status must run");
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout must carry the error envelope");
+    assert_eq!(
+        (
+            output.status.code(),
+            value["error"]["code"].as_str(),
+            value["sessions"][0]["id"].as_str(),
+            value["sessions"][1]["id"].as_str(),
+        ),
+        (Some(5), Some("ambiguous"), Some("right"), Some("left")),
+        "an ambiguous omitted id in JSON mode must carry the candidates newest-first in the envelope"
+    );
+}
+
+#[test]
+fn result_without_an_id_on_an_unpublished_session_exits_not_ready() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "pending", CARDS_JSON);
+    let output = cli(cache.path())
+        .args(["result"])
+        .output()
+        .expect("result must run");
+    assert_eq!(
+        (
+            output.status.code(),
+            String::from_utf8(output.stderr)
+                .expect("utf8")
+                .contains("session 'pending' not ready"),
+        ),
+        (Some(4), true),
+        "result without an id on an unpublished session must exit 4 naming the resolved session"
+    );
+}

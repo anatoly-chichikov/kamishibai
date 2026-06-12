@@ -317,7 +317,7 @@ pub(super) struct LsDoc {
 }
 
 #[derive(Serialize)]
-struct LsItem {
+pub(super) struct LsItem {
     id: String,
     pair: PairDoc,
     created: String,
@@ -335,33 +335,42 @@ struct LsCards {
 }
 
 impl LsDoc {
-    /// Project every record the way `summary_line` does: committed plans carry
-    /// `cards{total,ready}`, curatable sessions carry the `selected` count.
+    /// Wrap every record as one `ls --json` document.
     pub(super) fn of(records: &[SessionRecord], cache_root: &Path) -> Self {
-        let sessions = records
-            .iter()
-            .map(|record| {
-                let (phase, _, _) = view::live_phase(record, cache_root);
-                let cards = view::cards(record, cache_root);
-                let committed = !record.drafts.is_empty();
-                LsItem {
-                    id: record.id.clone(),
-                    pair: PairDoc {
-                        from: record.from.clone(),
-                        to: record.to.clone(),
-                    },
-                    created: record.created.clone(),
-                    phase: view::phase_label(phase),
-                    cards: committed.then(|| LsCards {
-                        total: cards.len(),
-                        ready: cards.iter().filter(|card| card.ready()).count(),
-                    }),
-                    selected: (!committed).then(|| view::selected_cards(record)),
-                }
-            })
-            .collect();
-        Self { ok: true, sessions }
+        Self {
+            ok: true,
+            sessions: ls_items(records, cache_root),
+        }
     }
+}
+
+/// Project records into `ls --json` items, the way `summary_line` does:
+/// committed plans carry `cards{total,ready}`, curatable sessions carry the
+/// `selected` count. The ambiguous-resolution envelope reuses these so its
+/// `sessions` array matches `ls` exactly.
+pub(super) fn ls_items(records: &[SessionRecord], cache_root: &Path) -> Vec<LsItem> {
+    records
+        .iter()
+        .map(|record| {
+            let (phase, _, _) = view::live_phase(record, cache_root);
+            let cards = view::cards(record, cache_root);
+            let committed = !record.drafts.is_empty();
+            LsItem {
+                id: record.id.clone(),
+                pair: PairDoc {
+                    from: record.from.clone(),
+                    to: record.to.clone(),
+                },
+                created: record.created.clone(),
+                phase: view::phase_label(phase),
+                cards: committed.then(|| LsCards {
+                    total: cards.len(),
+                    ready: cards.iter().filter(|card| card.ready()).count(),
+                }),
+                selected: (!committed).then(|| view::selected_cards(record)),
+            }
+        })
+        .collect()
 }
 
 /// The `rm --json` acknowledgement.

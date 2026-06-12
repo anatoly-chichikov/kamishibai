@@ -9,7 +9,7 @@ use crate::session::LanguagePair;
 use super::args::{IdArg, RmArgs};
 use super::liveness;
 use super::store::{Phase, SessionRecord, SessionStore};
-use super::{Render, drop_artifacts, json, open_checked, refuse_if_live};
+use super::{Render, drop_artifacts, json, refuse_if_live, resolve};
 
 /// Stop a session's running worker and mark it cancelled unless already terminal.
 ///
@@ -21,13 +21,13 @@ use super::{Render, drop_artifacts, json, open_checked, refuse_if_live};
 /// cancelled.
 pub(super) fn cancel(args: &IdArg, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
-    let opened = open_checked(&store, args.id.as_str())?;
+    let opened = resolve(&store, args.id.as_deref(), render)?;
     if let Some(worker) = &opened.worker
-        && liveness::is_held(&store.lock_path(args.id.as_str()))
+        && liveness::is_held(&store.lock_path(opened.id.as_str()))
     {
         liveness::terminate(worker.pid);
     }
-    let updated = store.update(args.id.as_str(), |record| {
+    let updated = store.update(opened.id.as_str(), |record| {
         record.worker = None;
         record.progress = None;
         if !matches!(
@@ -41,14 +41,14 @@ pub(super) fn cancel(args: &IdArg, render: Render) -> Result<()> {
     if matches!(render, Render::Json) {
         return json::emit_session(&updated);
     }
-    eprintln!("cancelled session {}", args.id);
+    eprintln!("cancelled session {}", updated.id);
     Ok(())
 }
 
 /// Delete a session, and with `--cache` its cached card folders too.
 pub(super) fn rm(args: &RmArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
-    let record = open_checked(&store, args.id.as_str())?;
+    let record = resolve(&store, args.id.as_deref(), render)?;
     refuse_if_live(&store, &record)?;
     if args.cache {
         let root = cache_root(&SystemContext)?;
@@ -63,11 +63,11 @@ pub(super) fn rm(args: &RmArgs, render: Render) -> Result<()> {
             )?;
         }
     }
-    store.remove(args.id.as_str())?;
+    store.remove(record.id.as_str())?;
     if matches!(render, Render::Json) {
-        return json::emit(&json::RemovedDoc::of(args.id.as_str()));
+        return json::emit(&json::RemovedDoc::of(record.id.as_str()));
     }
-    eprintln!("removed session {}", args.id);
+    eprintln!("removed session {}", record.id);
     Ok(())
 }
 

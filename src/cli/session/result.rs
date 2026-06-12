@@ -11,12 +11,12 @@ use crate::session::{CardMeta, CardMetaCache, LanguagePair};
 
 use super::args::{LsArgs, ResultArgs, StatusArgs};
 use super::store::{DraftRecord, Phase, SessionRecord, SessionStore};
-use super::{Render, json, open_checked, view};
+use super::{Render, json, resolve, view};
 
 /// Print a session's phase and per-card progress; `-q` prints just the phase.
 pub(super) fn status(args: &StatusArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
-    let record = open_checked(&store, args.id.as_str())?;
+    let record = resolve(&store, args.id.as_deref(), render)?;
     if matches!(render, Render::Json) {
         return json::emit_session(&record);
     }
@@ -32,7 +32,7 @@ pub(super) fn status(args: &StatusArgs, render: Render) -> Result<()> {
 /// Print a published (or partial) session's deck/pdf/dir paths and card bodies.
 pub(super) fn result(args: &ResultArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
-    let record = open_checked(&store, args.id.as_str())?;
+    let record = resolve(&store, args.id.as_deref(), render)?;
     let root = cache_root(&SystemContext)?;
     let (phase, _, _) = view::live_phase(&record, root.as_path());
     let Some(paths) = record
@@ -41,7 +41,8 @@ pub(super) fn result(args: &ResultArgs, render: Render) -> Result<()> {
         .filter(|_| matches!(phase, Phase::Published | Phase::Partial))
     else {
         return Err(not_ready(format!(
-            "not ready (phase {})",
+            "session '{}' not ready (phase {})",
+            record.id,
             view::phase_label(phase)
         )));
     };

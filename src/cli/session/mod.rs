@@ -42,10 +42,10 @@ use anyhow::Result;
 
 use crate::config::default_store;
 use crate::generation::artifact_cache::{ILLUSTRATION_FILE, META_FILE, SCENE_FILE, VOICE_FILE};
-use crate::runtime::locations::SystemContext;
+use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardCell, LanguagePair};
 
-use super::error::{not_found, usage};
+use super::error::{self, not_found, usage};
 
 /// Port through which `open` hands a checked session to the interactive
 /// surface; the TUI side implements it, so this layer never links the TUI.
@@ -72,7 +72,7 @@ pub(super) fn handle(command: &Command, render: Render, opener: &dyn SessionOpen
     refuse_json_conflicts(command, render)?;
     match command {
         Command::New(args) => new::new(args, render),
-        Command::Open(args) => open(args, opener),
+        Command::Open(args) => open(args, render, opener),
         Command::Select(args) => curate::select(args, render),
         Command::Exclude(args) => curate::exclude(args, render),
         Command::Correct(args) => curate::correct(args, render),
@@ -121,9 +121,9 @@ fn refuse_json_conflicts(command: &Command, render: Render) -> Result<()> {
 
 /// Check the session exists and is not being generated, then resume it through
 /// the caller's interactive surface.
-fn open(args: &args::IdArg, opener: &dyn SessionOpener) -> Result<()> {
+fn open(args: &args::IdArg, render: Render, opener: &dyn SessionOpener) -> Result<()> {
     let store = SessionStore::system()?;
-    let record = open_checked(&store, args.id.as_str())?;
+    let record = resolve(&store, args.id.as_deref(), render)?;
     refuse_if_live(&store, &record)?;
     opener.open(&record)
 }
@@ -138,6 +138,85 @@ pub(in crate::cli::session) fn open_checked(
         return Err(not_found(format!("no session '{id}'")));
     }
     store.open(id)
+}
+
+/// Return whether a phase is settled — finished for good, so an omitted id
+/// never resolves to it while an unfinished session exists. `Interrupted` is
+/// deliberately NOT settled (unlike in `view::terminal`): it is an unfinished
+/// run awaiting a resume.
+fn settled(phase: Phase) -> bool {
+    matches!(
+        phase,
+        Phase::Published | Phase::Partial | Phase::Failed | Phase::Cancelled
+    )
+}
+
+/// The outcome of resolving an omitted session id against the store.
+enum Picked {
+    /// No sessions exist at all.
+    None,
+    /// Exactly one session answers the cascade.
+    One(Box<SessionRecord>),
+    /// Several candidates; the caller lists them instead of acting.
+    Ambiguous(Vec<SessionRecord>),
+}
+
+/// Decide which session an omitted id means: the only session (settled or
+/// not), else the only unfinished one, else ambiguous.
+fn pick(records: Vec<SessionRecord>, cache_root: &Path) -> Picked {
+    match records.len() {
+        0 => Picked::None,
+        1 => Picked::One(Box::new(
+            records.into_iter().next().expect("invariant: one record"),
+        )),
+        _ => {
+            let mut unsettled = records
+                .iter()
+                .filter(|record| !settled(view::live_phase(record, cache_root).0));
+            match (unsettled.next(), unsettled.next()) {
+                (Some(only), None) => Picked::One(Box::new(only.clone())),
+                _ => Picked::Ambiguous(records),
+            }
+        }
+    }
+}
+
+/// Resolve the session a command acts on. An explicit id behaves exactly as
+/// before (absent → exit 3). An omitted id runs the cascade; on ambiguity the
+/// text render prints the newest five sessions as ls lines on stdout, and the
+/// refusal (exit 5) carries the same five as `ls --json` items for the JSON
+/// envelope.
+fn resolve(store: &SessionStore, explicit: Option<&str>, render: Render) -> Result<SessionRecord> {
+    if let Some(id) = explicit {
+        return open_checked(store, id);
+    }
+    let root = cache_root(&SystemContext)?;
+    match pick(store.list()?, root.as_path()) {
+        Picked::One(record) => {
+            if matches!(render, Render::Text) {
+                eprintln!("using session {}", record.id);
+            }
+            Ok(*record)
+        }
+        Picked::None => Err(not_found("no sessions; create one with kamishibai new")),
+        Picked::Ambiguous(records) => {
+            let total = records.len();
+            let newest: Vec<SessionRecord> = records.into_iter().rev().take(5).collect();
+            if matches!(render, Render::Text) {
+                for record in &newest {
+                    println!("{}", view::summary_line(record, root.as_path()));
+                }
+                if total > newest.len() {
+                    println!("…and {} more — kamishibai ls", total - newest.len());
+                }
+            }
+            let sessions = serde_json::to_value(json::ls_items(&newest, root.as_path()))?;
+            Err(error::ambiguous(
+                format!("{total} sessions; pass an id (kamishibai ls)"),
+                sessions,
+            ))
+        }
+    }
 }
 
 /// Refuse a mutating verb while a worker is provably alive (holds the lock) —
@@ -213,4 +292,89 @@ pub(in crate::cli::session) fn drop_artifacts(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::store::WorkerHandle;
+    use super::*;
+
+    fn record(id: &str, phase: Phase) -> SessionRecord {
+        let mut record = SessionRecord::understood(
+            String::from(id),
+            format!("2026-06-0{}T00:00:00Z", id.len().min(9)),
+            String::from("en"),
+            String::from("fr"),
+            String::from("/out"),
+            String::from("primary"),
+            String::from("words"),
+            vec![String::from("canard")],
+            Vec::new(),
+        );
+        record.phase = phase;
+        record
+    }
+
+    #[test]
+    fn a_lone_session_resolves_even_when_settled() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let picked = pick(vec![record("a", Phase::Published)], home.path());
+        assert!(
+            matches!(picked, Picked::One(one) if one.id == "a"),
+            "a lone session must resolve even when its phase is settled"
+        );
+    }
+
+    #[test]
+    fn the_single_unsettled_session_wins_over_settled_ones() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let picked = pick(
+            vec![
+                record("done", Phase::Published),
+                record("work", Phase::Understood),
+                record("gone", Phase::Cancelled),
+            ],
+            home.path(),
+        );
+        assert!(
+            matches!(picked, Picked::One(one) if one.id == "work"),
+            "the single unfinished session must win resolution over settled ones"
+        );
+    }
+
+    #[test]
+    fn an_interrupted_session_counts_as_unsettled_for_resolution() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let mut interrupted = record("broke", Phase::Generating);
+        interrupted.worker = Some(WorkerHandle {
+            pid: 999_999,
+            started: String::from("t"),
+        });
+        let picked = pick(
+            vec![record("done", Phase::Published), interrupted],
+            home.path(),
+        );
+        assert!(
+            matches!(picked, Picked::One(one) if one.id == "broke"),
+            "an interrupted session must count as unfinished and win resolution"
+        );
+    }
+
+    #[test]
+    fn two_unfinished_sessions_are_ambiguous() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let picked = pick(
+            vec![
+                record("a", Phase::Understood),
+                record("b", Phase::Understood),
+            ],
+            home.path(),
+        );
+        assert!(
+            matches!(picked, Picked::Ambiguous(both) if both.len() == 2),
+            "two unfinished sessions must resolve as ambiguous, never silently pick one"
+        );
+    }
 }

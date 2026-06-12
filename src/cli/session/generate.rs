@@ -17,15 +17,15 @@ use crate::session::{CardCorrection, CardDraft, LanguagePair, WordCandidate};
 use super::args::{GenerateArgs, RegenerateArgs};
 use super::store::{DraftRecord, SessionRecord, SessionStore};
 use super::{
-    Render, drop_artifacts, json, open_checked, preflight_key, refuse_if_live, reset_to_understood,
+    Render, drop_artifacts, json, preflight_key, refuse_if_live, reset_to_understood, resolve,
     view, worker,
 };
 
 /// Commit the curated plan and start the managed worker that generates+publishes.
 pub(super) fn generate(args: &GenerateArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
-    open_checked(&store, args.id.as_str())?;
-    run_session(&store, args.id.as_str(), args.wait, args.quiet, render)
+    let record = resolve(&store, args.id.as_deref(), render)?;
+    run_session(&store, record.id.as_str(), args.wait, args.quiet, render)
 }
 
 /// Commit the plan (deriving it from the curation when none exists) and run the
@@ -89,7 +89,7 @@ fn ensure_plan(record: &mut SessionRecord) {
 /// Gemini first rewrites that card from the instruction (a Gemini call).
 pub(super) fn regenerate(args: &RegenerateArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
-    let record = open_checked(&store, args.id.as_str())?;
+    let record = resolve(&store, args.id.as_deref(), render)?;
     refuse_if_live(&store, &record)?;
     if record.drafts.is_empty() {
         return Err(usage(
@@ -119,7 +119,7 @@ pub(super) fn regenerate(args: &RegenerateArgs, render: Render) -> Result<()> {
     if matches!(render, Render::Json) {
         return json::emit_session(&updated);
     }
-    println!("{}", args.id);
+    println!("{}", updated.id);
     Ok(())
 }
 

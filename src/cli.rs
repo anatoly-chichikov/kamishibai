@@ -25,17 +25,21 @@ const SCHEMA_HELP: &str = "\
 EXAMPLES:
   kamishibai                                       open the interactive TUI
   kamishibai new --word bank --word spring --to en understand words, create a session
-  kamishibai select <id> --card bank --sense 2     keep only the 2nd sense of a card
-  kamishibai exclude <id> --card spring            drop one card from the plan
-  kamishibai generate <id>                         generate + publish in the background
-  kamishibai status <id>                           progress (no Gemini); -q prints just the phase
-  kamishibai result <id>                           the finished cards + deck/pdf paths
-  kamishibai result <id> --deck                    only the .apkg path (for scripts)
-  kamishibai regenerate <id> --failed              retry the cards that did not finish
-  kamishibai regenerate <id> --card bank --note \"…\"  re-roll one card from an instruction
+  kamishibai select --card bank --sense 2          keep only the 2nd sense of a card
+  kamishibai exclude --card spring                 drop one card from the plan
+  kamishibai generate                              generate + publish in the background
+  kamishibai status                                progress (no Gemini); -q prints just the phase
+  kamishibai result                                the finished cards + deck/pdf paths
+  kamishibai result <id> --deck                    only one session's .apkg path (for scripts)
+  kamishibai regenerate --failed                   retry the cards that did not finish
+  kamishibai regenerate --card bank --note \"…\"     re-roll one card from an instruction
   kamishibai new --build cards.json --generate     import a cards JSON and start at once
   kamishibai cards.json                            open the TUI on a prebuilt batch
   kamishibai cache-path                            print the cache directory
+
+  The session id is optional everywhere: an omitted id means the only session,
+  or the only unfinished one; with several candidates the command lists the
+  newest five instead and exits 5.
 
 OUTPUT:
   Plain text by default: stdout carries the one capturable value (a session id,
@@ -45,7 +49,7 @@ OUTPUT:
   any invocation valid in both (--json grammar conflicts exit 2).
 
 EXIT CODES:
-  0 ok · 2 usage · 3 no such session · 4 not ready yet · 1 other error
+  0 ok · 2 usage · 3 no such session · 4 not ready yet · 5 ambiguous session · 1 other error
 
 ENVIRONMENT:
   GEMINI_API_KEY   the Gemini API key; it wins over a key saved through the
@@ -239,6 +243,56 @@ mod tests {
                 Some(Command::Regenerate(_))
             ),
             "regenerate with a note must parse to the Regenerate command"
+        );
+    }
+
+    #[test]
+    fn a_session_verb_with_no_id_parses_with_an_absent_id() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "status"]).command,
+                Some(Command::Status(_))
+            ),
+            "status without an id must parse, not fail on a missing positional"
+        );
+    }
+
+    #[test]
+    fn select_without_an_id_parses_its_flags_only() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "select", "--card", "bank", "--sense", "2"]).command,
+                Some(Command::Select(_))
+            ),
+            "select without an id must parse with its flags intact"
+        );
+    }
+
+    #[test]
+    fn generate_with_only_wait_parses_with_an_absent_id() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "generate", "--wait"]).command,
+                Some(Command::Generate(_))
+            ),
+            "generate --wait without an id must parse, not fail on a missing positional"
+        );
+    }
+
+    #[test]
+    fn the_worker_subcommand_still_requires_an_id() {
+        assert!(
+            Cli::try_parse_from(["kamishibai", "__run"]).is_err(),
+            "the hidden worker entrypoint must keep its id mandatory"
+        );
+    }
+
+    #[test]
+    fn status_with_no_id_routes_to_the_subcommand_not_the_tui_input() {
+        let cli = parse(&["kamishibai", "status"]);
+        assert!(
+            cli.input.is_none() && matches!(cli.command, Some(Command::Status(_))),
+            "a bare status must stay a subcommand, never fall back to the TUI batch positional"
         );
     }
 

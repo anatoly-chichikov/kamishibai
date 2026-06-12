@@ -40,7 +40,7 @@ pub(in crate::cli) enum Command {
     CachePath,
     /// Internal: run the detached generation worker for a session.
     #[command(name = "__run", hide = true)]
-    Worker(IdArg),
+    Worker(WorkerArgs),
 }
 
 /// Arguments for `new`: exactly one input form — repeated `--word`s, a `--words`
@@ -83,8 +83,8 @@ pub(in crate::cli) struct NewArgs {
 /// Arguments for `generate`.
 #[derive(Debug, Args)]
 pub(in crate::cli) struct GenerateArgs {
-    /// The session id.
-    pub(super) id: String,
+    /// The session id (omit it to use the only — or only unfinished — session).
+    pub(super) id: Option<String>,
     /// Run in the foreground, streaming progress, instead of detaching.
     #[arg(long)]
     pub(super) wait: bool,
@@ -96,8 +96,8 @@ pub(in crate::cli) struct GenerateArgs {
 /// Arguments for `select`.
 #[derive(Debug, Args)]
 pub(in crate::cli) struct SelectArgs {
-    /// The session id.
-    pub(super) id: String,
+    /// The session id (omit it to use the only — or only unfinished — session).
+    pub(super) id: Option<String>,
     /// The term of the card to select senses for.
     #[arg(long, value_name = "TERM")]
     pub(super) card: String,
@@ -109,8 +109,8 @@ pub(in crate::cli) struct SelectArgs {
 /// Arguments for `correct`.
 #[derive(Debug, Args)]
 pub(in crate::cli) struct CorrectArgs {
-    /// The session id.
-    pub(super) id: String,
+    /// The session id (omit it to use the only — or only unfinished — session).
+    pub(super) id: Option<String>,
     /// The term of the card to add senses to.
     #[arg(long, value_name = "TERM")]
     pub(super) card: String,
@@ -122,8 +122,8 @@ pub(in crate::cli) struct CorrectArgs {
 /// Arguments for `status`.
 #[derive(Debug, Args)]
 pub(in crate::cli) struct StatusArgs {
-    /// The session id.
-    pub(super) id: String,
+    /// The session id (omit it to use the only — or only unfinished — session).
+    pub(super) id: Option<String>,
     /// Print only the phase word.
     #[arg(short, long)]
     pub(super) quiet: bool,
@@ -133,8 +133,8 @@ pub(in crate::cli) struct StatusArgs {
 #[derive(Debug, Args)]
 #[command(group(ArgGroup::new("selector").args(["deck", "pdf", "dir"]).conflicts_with("quiet")))]
 pub(in crate::cli) struct ResultArgs {
-    /// The session id.
-    pub(super) id: String,
+    /// The session id (omit it to use the only — or only unfinished — session).
+    pub(super) id: Option<String>,
     /// Print only the deck/pdf/dir paths (no card bodies).
     #[arg(short, long)]
     pub(super) quiet: bool,
@@ -152,6 +152,14 @@ pub(in crate::cli) struct ResultArgs {
 /// A bare session id.
 #[derive(Debug, Args)]
 pub(in crate::cli) struct IdArg {
+    /// The session id (omit it to use the only — or only unfinished — session).
+    pub(super) id: Option<String>,
+}
+
+/// Arguments for the hidden `__run` worker entrypoint: the spawning parent
+/// always passes the id, so it never goes through session resolution.
+#[derive(Debug, Args)]
+pub(in crate::cli) struct WorkerArgs {
     /// The session id.
     pub(super) id: String,
 }
@@ -159,8 +167,8 @@ pub(in crate::cli) struct IdArg {
 /// A session id plus the term of one card.
 #[derive(Debug, Args)]
 pub(in crate::cli) struct CardArg {
-    /// The session id.
-    pub(super) id: String,
+    /// The session id (omit it to use the only — or only unfinished — session).
+    pub(super) id: Option<String>,
     /// The term of the card to act on.
     #[arg(long, value_name = "TERM")]
     pub(super) card: String,
@@ -179,8 +187,8 @@ pub(in crate::cli) struct LsArgs {
 #[derive(Debug, Args)]
 #[command(group(ArgGroup::new("target").required(true).args(["failed", "card"])))]
 pub(in crate::cli) struct RegenerateArgs {
-    /// The session id.
-    pub(super) id: String,
+    /// The session id (omit it to use the only — or only unfinished — session).
+    pub(super) id: Option<String>,
     /// Regenerate every card that has not finished.
     #[arg(long)]
     pub(super) failed: bool,
@@ -200,8 +208,8 @@ pub(in crate::cli) struct RegenerateArgs {
 /// Arguments for `rm`.
 #[derive(Debug, Args)]
 pub(in crate::cli) struct RmArgs {
-    /// The session id.
-    pub(super) id: String,
+    /// The session id (omit it to use the only — or only unfinished — session).
+    pub(super) id: Option<String>,
     /// Also delete the session's cached card folders.
     #[arg(long)]
     pub(super) cache: bool,

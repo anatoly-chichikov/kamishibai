@@ -3,10 +3,12 @@
 //! A [`Refusal`] marks an error whose exit code carries meaning for scripts:
 //! `2` — the invocation itself is wrong ([`usage`]), `3` — the named session
 //! does not exist ([`not_found`]), `4` — the session is not in the right
-//! lifecycle state yet ([`not_ready`], the only retryable refusal). Anything
-//! else is an operational failure and exits `1`. The top-level runner maps an
-//! error to its code through [`exit_code`] and, in JSON mode, to its stdout
-//! envelope through [`json_line`], keeping the code↔meaning table in one place.
+//! lifecycle state yet ([`not_ready`], the only retryable refusal), `5` — an
+//! omitted session id matched several sessions ([`ambiguous`], which carries
+//! the candidates for the JSON envelope). Anything else is an operational
+//! failure and exits `1`. The top-level runner maps an error to its code
+//! through [`exit_code`] and, in JSON mode, to its stdout envelope through
+//! [`json_line`], keeping the code↔meaning table in one place.
 
 use std::error::Error;
 use std::fmt;
@@ -14,11 +16,13 @@ use std::fmt;
 use serde::Serialize;
 
 /// A refusal carrying its process exit code: the caller must change the
-/// invocation (2), the session id (3), or wait for the session (4).
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// invocation (2), the session id (3), wait for the session (4), or pick one
+/// of several sessions (5, with the candidates attached for the envelope).
+#[derive(Clone, Debug, PartialEq)]
 pub(in crate::cli) struct Refusal {
     exit: u8,
     message: String,
+    sessions: Option<serde_json::Value>,
 }
 
 impl fmt::Display for Refusal {
@@ -34,6 +38,7 @@ pub(in crate::cli) fn usage(message: impl Into<String>) -> anyhow::Error {
     anyhow::Error::new(Refusal {
         exit: 2,
         message: message.into(),
+        sessions: None,
     })
 }
 
@@ -42,6 +47,7 @@ pub(in crate::cli) fn not_found(message: impl Into<String>) -> anyhow::Error {
     anyhow::Error::new(Refusal {
         exit: 3,
         message: message.into(),
+        sessions: None,
     })
 }
 
@@ -50,6 +56,20 @@ pub(in crate::cli) fn not_ready(message: impl Into<String>) -> anyhow::Error {
     anyhow::Error::new(Refusal {
         exit: 4,
         message: message.into(),
+        sessions: None,
+    })
+}
+
+/// Build an `anyhow` error for an omitted id matching several sessions (exit
+/// 5); `sessions` is the pre-serialized candidate list the JSON envelope shows.
+pub(in crate::cli) fn ambiguous(
+    message: impl Into<String>,
+    sessions: serde_json::Value,
+) -> anyhow::Error {
+    anyhow::Error::new(Refusal {
+        exit: 5,
+        message: message.into(),
+        sessions: Some(sessions),
     })
 }
 
@@ -67,6 +87,7 @@ fn code_word(exit: u8) -> &'static str {
         2 => "usage",
         3 => "not_found",
         4 => "not_ready",
+        5 => "ambiguous",
         _ => "operational",
     }
 }
@@ -75,6 +96,8 @@ fn code_word(exit: u8) -> &'static str {
 struct Envelope {
     ok: bool,
     error: ErrorDoc,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sessions: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -85,7 +108,8 @@ struct ErrorDoc {
 }
 
 /// Render one error as the single-line JSON envelope `--json` mode prints on
-/// stdout: `{"ok":false,"error":{"code":…,"exit":…,"message":…}}`.
+/// stdout: `{"ok":false,"error":{"code":…,"exit":…,"message":…}}`, plus a
+/// top-level `sessions` array on the ambiguous refusal.
 #[must_use]
 pub(in crate::cli) fn json_line(error: &anyhow::Error) -> String {
     let exit = exit_code(error).unwrap_or(1);
@@ -96,6 +120,9 @@ pub(in crate::cli) fn json_line(error: &anyhow::Error) -> String {
             exit,
             message: format!("{error:#}"),
         },
+        sessions: error
+            .downcast_ref::<Refusal>()
+            .and_then(|refusal| refusal.sessions.clone()),
     };
     serde_json::to_string(&envelope).expect("invariant: the error envelope always serializes")
 }
@@ -159,6 +186,43 @@ mod tests {
                 Some("no session 'ghost'")
             ),
             "a refusal must render as the ok:false envelope with its code word and exit"
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_refusal_maps_to_exit_five() {
+        assert_eq!(
+            exit_code(&ambiguous("2 sessions; pass an id", serde_json::json!([]))),
+            Some(5),
+            "an ambiguous refusal must map to exit code 5"
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_envelope_carries_its_sessions_payload() {
+        let payload = serde_json::json!([{"id": "fr-1"}, {"id": "fr-2"}]);
+        let parsed: serde_json::Value =
+            serde_json::from_str(json_line(&ambiguous("2 sessions; pass an id", payload)).as_str())
+                .expect("the envelope must be valid JSON");
+        assert_eq!(
+            (
+                parsed["error"]["code"].as_str(),
+                parsed["sessions"][1]["id"].as_str(),
+            ),
+            (Some("ambiguous"), Some("fr-2")),
+            "an ambiguous envelope must carry the candidate sessions at the top level"
+        );
+    }
+
+    #[test]
+    fn a_non_ambiguous_envelope_omits_the_sessions_key() {
+        let parsed: serde_json::Value =
+            serde_json::from_str(json_line(&not_found("no session 'ghost'")).as_str())
+                .expect("the envelope must be valid JSON");
+        assert_eq!(
+            parsed.get("sessions"),
+            None,
+            "envelopes other than ambiguous must stay byte-identical, without a sessions key"
         );
     }
 
