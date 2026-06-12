@@ -1,4 +1,5 @@
-//! Cache-derived status projection rendered as plain text (no JSON).
+//! Cache-derived status projection: one computation feeding both renders (the
+//! plain-text blocks here, the JSON documents in `json`).
 //!
 //! Readiness is the cache truth — for each draft we check whether its four
 //! artifact files exist in the shared `CardCell` folder. The session record only
@@ -15,16 +16,18 @@ use crate::session::{CardCell, LanguagePair};
 use super::liveness;
 use super::store::{DraftRecord, LOCK_FILE, Phase, SessionRecord};
 
-struct CardView {
-    term: String,
-    meta: bool,
-    sound: bool,
-    scene: bool,
-    picture: bool,
+/// One card's cache-derived readiness, shared by the text and JSON renders.
+pub(super) struct CardView {
+    pub(super) term: String,
+    pub(super) understanding: String,
+    pub(super) meta: bool,
+    pub(super) sound: bool,
+    pub(super) scene: bool,
+    pub(super) picture: bool,
 }
 
 impl CardView {
-    fn ready(&self) -> bool {
+    pub(super) fn ready(&self) -> bool {
         self.meta && self.sound && self.scene && self.picture
     }
 }
@@ -49,7 +52,8 @@ pub(super) fn probe_artifacts(
     ]
 }
 
-fn cards(record: &SessionRecord, cache_root: &Path) -> Vec<CardView> {
+/// Probe every committed draft against the cache, in plan order.
+pub(super) fn cards(record: &SessionRecord, cache_root: &Path) -> Vec<CardView> {
     let pair = pair_of(record);
     record
         .drafts
@@ -59,6 +63,7 @@ fn cards(record: &SessionRecord, cache_root: &Path) -> Vec<CardView> {
                 probe_artifacts(cache_root, &pair, &draft.term, &draft.understanding);
             CardView {
                 term: draft.term.clone(),
+                understanding: draft.understanding.clone(),
                 meta,
                 sound,
                 scene,
@@ -92,7 +97,8 @@ pub(super) fn phase_word(record: &SessionRecord, cache_root: &Path) -> &'static 
     phase_label(live_phase(record, cache_root).0)
 }
 
-fn terminal(phase: Phase) -> bool {
+/// Return whether a phase is terminal: incomplete cards under it read failed.
+pub(super) fn terminal(phase: Phase) -> bool {
     matches!(
         phase,
         Phase::Published | Phase::Partial | Phase::Failed | Phase::Interrupted | Phase::Cancelled
@@ -215,7 +221,7 @@ fn candidate_block(record: &SessionRecord) -> String {
 }
 
 /// Count how many cards the current candidate selection would generate.
-fn selected_cards(record: &SessionRecord) -> usize {
+pub(super) fn selected_cards(record: &SessionRecord) -> usize {
     record
         .candidates
         .iter()
@@ -258,7 +264,8 @@ fn token(present: bool) -> &'static str {
     if present { "ok" } else { "--" }
 }
 
-fn row_label(card: &CardView, phase: Phase) -> &'static str {
+/// Map one card's readiness under a phase to its state word.
+pub(super) fn row_label(card: &CardView, phase: Phase) -> &'static str {
     if card.ready() {
         "ready"
     } else if terminal(phase) {

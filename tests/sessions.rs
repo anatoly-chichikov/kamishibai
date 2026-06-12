@@ -649,3 +649,248 @@ fn a_regenerate_note_without_a_card_is_refused_at_parse() {
         .assert()
         .code(2);
 }
+
+/// Run one command expecting `--json` mode, parsing stdout as the single document.
+fn json_stdout(command: &mut Command) -> serde_json::Value {
+    let output = command.output().expect("the command must run");
+    serde_json::from_slice(&output.stdout).expect("stdout must carry one JSON document")
+}
+
+/// Run `new --build --json` with a fixed id, returning the creation document.
+fn understood_session_json(cache: &Path, out: &Path, id: &str, json: &str) -> serde_json::Value {
+    let cards = cache.join("cards.json");
+    fs::write(&cards, json).expect("the cards JSON must write");
+    json_stdout(cli(cache).args([
+        "new",
+        "--build",
+        cards.to_str().expect("cards path is utf8"),
+        "--id",
+        id,
+        "--out",
+        out.to_str().expect("out path is utf8"),
+        "--json",
+    ]))
+}
+
+#[test]
+fn a_build_session_returns_its_document_in_json_mode() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    let value = understood_session_json(cache.path(), out.path(), "jdoc", CARDS_JSON);
+    assert_eq!(
+        (
+            value["ok"].as_bool(),
+            value["session"].as_str(),
+            value["phase"].as_str(),
+            value["candidates"]["items"][0]["term"].as_str(),
+        ),
+        (Some(true), Some("jdoc"), Some("understood"), Some("canard")),
+        "new --json must print the created session's document instead of the preview"
+    );
+}
+
+#[test]
+fn excluding_a_card_in_json_mode_returns_the_post_mutation_document() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session_json(cache.path(), out.path(), "jmut", CARDS_JSON);
+    let value =
+        json_stdout(cli(cache.path()).args(["exclude", "jmut", "--card", "canard", "--json"]));
+    assert_eq!(
+        (
+            value["candidates"]["items"][0]["included"].as_bool(),
+            value["candidates"]["selected"].as_u64(),
+        ),
+        (Some(false), Some(0)),
+        "exclude --json must return the document as the mutation left it, with no follow-up status needed"
+    );
+}
+
+#[test]
+fn a_detached_generate_in_json_mode_reports_the_generating_phase() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session_json(cache.path(), out.path(), "jbg", CARDS_JSON);
+    seed_artifacts(&first_card_dir(cache.path()));
+    let value = json_stdout(cli(cache.path()).args(["generate", "jbg", "--json"]));
+    let terminal = ["published", "partial", "failed", "interrupted", "cancelled"];
+    poll_quiet_status(cache.path(), "jbg", Duration::from_secs(120), |phase| {
+        terminal.contains(&phase)
+    });
+    assert_eq!(
+        value["phase"].as_str(),
+        Some("generating"),
+        "a detached generate --json must print the session document already in the generating phase"
+    );
+}
+
+#[test]
+fn a_waited_generate_in_json_mode_prints_one_terminal_document_and_event_lines() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session_json(cache.path(), out.path(), "jwait", CARDS_JSON);
+    seed_artifacts(&first_card_dir(cache.path()));
+    let output = cli(cache.path())
+        .args(["generate", "--wait", "jwait", "--json"])
+        .timeout(Duration::from_secs(120))
+        .output()
+        .expect("generate --wait --json must run");
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be UTF-8");
+    let documents: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("every stdout line must be JSON"))
+        .collect();
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be UTF-8");
+    let unnamed_events = stderr
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| event["event"].as_str().is_none())
+        .count();
+    assert_eq!(
+        (
+            documents.len(),
+            documents[0]["phase"].as_str(),
+            documents[0]["cards"]["ready"].as_u64(),
+            unnamed_events,
+        ),
+        (1, Some("published"), Some(1), 0),
+        "generate --wait --json must print exactly one terminal document on stdout and only tagged NDJSON events on stderr"
+    );
+}
+
+#[test]
+fn result_items_in_json_mode_round_trip_into_a_new_build_session() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session_json(cache.path(), out.path(), "jround", CARDS_JSON);
+    seed_artifacts(&first_card_dir(cache.path()));
+    cli(cache.path())
+        .args(["generate", "--wait", "jround", "--quiet"])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .success();
+    let value = json_stdout(cli(cache.path()).args(["result", "jround", "--json"]));
+    let reimport = serde_json::json!({ "entries": value["items"] });
+    let cards = cache.path().join("reimport.json");
+    fs::write(&cards, reimport.to_string()).expect("the reimport JSON must write");
+    cli(cache.path())
+        .args([
+            "new",
+            "--build",
+            cards.to_str().expect("reimport path is utf8"),
+            "--id",
+            "jround2",
+            "--quiet",
+        ])
+        .assert()
+        .success()
+        .stdout("jround2\n");
+}
+
+#[test]
+fn ls_in_json_mode_lists_every_session_as_one_item() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session_json(cache.path(), out.path(), "jls", CARDS_JSON);
+    let value = json_stdout(cli(cache.path()).args(["ls", "--json"]));
+    assert_eq!(
+        (
+            value["sessions"][0]["id"].as_str(),
+            value["sessions"][0]["phase"].as_str(),
+            value["sessions"][0]["selected"].as_u64(),
+        ),
+        (Some("jls"), Some("understood"), Some(1)),
+        "ls --json must list each session with its live phase and curation count"
+    );
+}
+
+#[test]
+fn cancelling_in_json_mode_returns_the_settled_document() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session_json(cache.path(), out.path(), "jcancel", CARDS_JSON);
+    let value = json_stdout(cli(cache.path()).args(["cancel", "jcancel", "--json"]));
+    assert_eq!(
+        value["phase"].as_str(),
+        Some("cancelled"),
+        "cancel --json must return the document with the settled cancelled phase"
+    );
+}
+
+#[test]
+fn removing_in_json_mode_acknowledges_the_removed_id() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session_json(cache.path(), out.path(), "jrm", CARDS_JSON);
+    let value = json_stdout(cli(cache.path()).args(["rm", "jrm", "--json"]));
+    assert_eq!(
+        (value["ok"].as_bool(), value["removed"].as_str()),
+        (Some(true), Some("jrm")),
+        "rm --json must acknowledge the removed session id"
+    );
+}
+
+#[test]
+fn a_missing_session_in_json_mode_prints_the_error_envelope_with_exit_three() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let output = cli(cache.path())
+        .args(["status", "ghost", "--json"])
+        .output()
+        .expect("status must run");
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout must carry the error envelope");
+    assert_eq!(
+        (
+            output.status.code(),
+            value["ok"].as_bool(),
+            value["error"]["code"].as_str(),
+        ),
+        (Some(3), Some(false), Some("not_found")),
+        "a refusal in JSON mode must keep its exit code and put the envelope on stdout"
+    );
+}
+
+#[test]
+fn an_all_failed_waited_run_in_json_mode_prints_the_envelope_not_a_document() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    let gemini = failing_gemini();
+    understood_session_json(cache.path(), out.path(), "jfail", CARDS_JSON);
+    let output = cli_at(cache.path(), gemini.as_str())
+        .args(["generate", "--wait", "jfail", "--json"])
+        .timeout(Duration::from_secs(120))
+        .output()
+        .expect("generate --wait --json must run");
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout must carry the error envelope");
+    assert_eq!(
+        (
+            output.status.code(),
+            value["ok"].as_bool(),
+            value["error"]["exit"].as_u64()
+        ),
+        (Some(1), Some(false), Some(1)),
+        "an all-failed waited run in JSON mode must print the error envelope, never a success document"
+    );
+}
+
+#[test]
+fn combining_json_with_quiet_is_refused_with_the_usage_code() {
+    let cache = TempDir::new().expect("cache tempdir");
+    cli(cache.path())
+        .args(["status", "any", "-q", "--json"])
+        .assert()
+        .failure()
+        .code(2);
+}
+
+#[test]
+fn cache_path_in_json_mode_prints_the_cache_document() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let value = json_stdout(cli(cache.path()).args(["cache-path", "--json"]));
+    assert_eq!(
+        value["cache"].as_str(),
+        cache.path().to_str(),
+        "cache-path --json must carry the cache directory as a document field"
+    );
+}

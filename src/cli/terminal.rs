@@ -1,6 +1,8 @@
-//! Terminal lifecycle and event loop for the CLI.
+//! Terminal lifecycle and event loop for the interactive TUI, plus the
+//! startup flows that decide which screen a fresh run opens on.
 
 use std::io::{Write, stdout};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -17,17 +19,69 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 
+use super::batch::StartupCards;
+use super::bridge::TuiSession;
 use super::host::open_path;
-use super::session::TuiSession;
 use super::shell::Shell;
-use crate::session::CardDraft;
+use crate::config::{Preferences, default_store};
+use crate::runtime::locations::SystemContext;
+use crate::session::{CardDraft, LanguagePair};
 use crate::tui::{
-    App, AppEvent, ModalKind, MousePointer, Side, WelcomeFocus, draw, language_chip_at, link_at,
-    mouse_pointer_at, picker_geometry, reset_mouse_pointer, scroll_body_width, scroll_viewport,
-    to_app, welcome_control_at, write_mouse_pointer,
+    App, AppEvent, KeySource, ModalKind, MousePointer, Side, WelcomeFocus, WelcomeStage, draw,
+    language_chip_at, link_at, mouse_pointer_at, picker_geometry, reset_mouse_pointer,
+    scroll_body_width, scroll_viewport, to_app, welcome_control_at, write_mouse_pointer,
 };
 
 const POINTER_REFRESH: Duration = Duration::from_millis(50);
+
+/// Open the interactive TUI on a fresh app derived from saved preferences.
+pub(super) fn start() -> Result<()> {
+    let store = default_store(&SystemContext)?;
+    let preferences = store.read().unwrap_or_default();
+    let app = startup_app(&preferences);
+    run_tui(app, None, None)
+}
+
+/// Open the interactive TUI on a prebuilt cards JSON batch.
+pub(super) fn start_with_batch(path: PathBuf) -> Result<()> {
+    let (app, drafts) = StartupCards::load(path.as_path())?.into_parts();
+    run_tui(app, Some(drafts), None)
+}
+
+fn startup_app(preferences: &Preferences) -> App {
+    let saved_key = preferences.api_key.clone().filter(|key| !key.is_empty());
+    let pair = LanguagePair::new(
+        String::from("en"),
+        preferences.startup_language().to_string(),
+    );
+    let app = App::new(pair);
+    let needs_language = preferences.requires_language_choice();
+    let needs_key = saved_key.is_none();
+    if needs_language || needs_key {
+        let (source, key) = if let Some(saved) = saved_key.as_deref() {
+            (KeySource::Restored, String::from(saved))
+        } else {
+            (KeySource::Empty, String::new())
+        };
+        let stage = if needs_language {
+            WelcomeStage::PickLanguage
+        } else {
+            WelcomeStage::EnterKey
+        };
+        app.opening_welcome_at(stage, source, key, env_has_gemini_key())
+    } else {
+        app
+    }
+}
+
+/// Return whether `GEMINI_API_KEY` is present and non-empty. The key is never
+/// loaded into the Welcome buffer implicitly — this only decides whether the
+/// key step offers the `load from env` action.
+pub(super) fn env_has_gemini_key() -> bool {
+    std::env::var("GEMINI_API_KEY")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
 
 /// Run the TUI from one initial app state, optional startup generation batch,
 /// and optional resumed on-disk session.
@@ -245,5 +299,83 @@ fn write_pointer_at<B>(
     if let Some((column, row)) = position {
         let next = mouse_pointer_at(app, rect, column, row);
         write_mouse_pointer(terminal.backend_mut(), next);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::Screen;
+
+    #[test]
+    fn env_key_is_not_loaded_at_startup() {
+        let app = startup_app(&Preferences::default());
+        assert_eq!(
+            (
+                app.screen(),
+                app.welcome().stage,
+                app.welcome().source,
+                app.pair().support().to_string(),
+            ),
+            (
+                Screen::Welcome,
+                WelcomeStage::PickLanguage,
+                KeySource::Empty,
+                String::from("en"),
+            ),
+            "GEMINI_API_KEY must not be treated as loaded until the user asks for it"
+        );
+    }
+
+    #[test]
+    fn saved_key_does_not_skip_unconfirmed_language_choice() {
+        let preferences = Preferences::default().with_api_key("123456789012345678901234567890");
+        let app = startup_app(&preferences);
+        assert_eq!(
+            (
+                app.screen(),
+                app.welcome().stage,
+                app.welcome().source,
+                app.pair().support().to_string(),
+            ),
+            (
+                Screen::Welcome,
+                WelcomeStage::PickLanguage,
+                KeySource::Restored,
+                String::from("en"),
+            ),
+            "a saved API key without a confirmed language must still start on language choice"
+        );
+    }
+
+    #[test]
+    fn confirmed_language_and_saved_key_skip_welcome() {
+        let app =
+            startup_app(&Preferences::new("de").with_api_key("123456789012345678901234567890"));
+        assert_eq!(
+            (app.screen(), app.pair().support().to_string()),
+            (Screen::YourWords, String::from("de")),
+            "a confirmed language may skip Welcome only when a saved key exists"
+        );
+    }
+
+    #[test]
+    fn confirmed_language_without_key_starts_on_key_stage() {
+        let app = startup_app(&Preferences::new("ru"));
+        assert_eq!(
+            (
+                app.screen(),
+                app.welcome().stage,
+                app.welcome().source,
+                app.pair().support().to_string(),
+            ),
+            (
+                Screen::Welcome,
+                WelcomeStage::EnterKey,
+                KeySource::Empty,
+                String::from("ru"),
+            ),
+            "a confirmed language with no key must ask only for the missing key"
+        );
     }
 }

@@ -5,13 +5,12 @@
 //! `SessionEngine` artifact queue, and the `DeckPublishing` step — so a console
 //! run produces exactly what the interactive run would. Only the rendering
 //! differs: progress is reported through a [`Reporter`] port with human,
-//! NDJSON, and quiet implementations.
-
-use std::sync::mpsc::channel;
+//! quiet, and NDJSON-on-stderr implementations.
 
 use anyhow::{Result, bail};
+use serde::Serialize;
 
-use super::card_workflow::{CardGeneration, DeckPublishProgress, DeckPublishing};
+use super::card_workflow::{CardGeneration, DeckPublishing, PublishPhase, PublishProgress};
 use super::live_generator::LiveCardGenerator;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
@@ -107,11 +106,24 @@ pub(super) trait Reporter {
     fn publishing(&self);
     /// Report the final artifacts once the run completes.
     fn finished(&self, outcome: &Outcome);
+    /// Surface one out-of-band warning (persistence hiccups, lost ownership);
+    /// the default writes it straight to stderr.
+    fn warn(&self, message: &str) {
+        eprintln!("{message}");
+    }
     /// Return whether the run lost ownership of its session and must stop
     /// (a cancel raced in); the default never revokes.
     fn revoked(&self) -> bool {
         false
     }
+}
+
+/// Publish-progress sink for runs nobody watches phase-by-phase: the console
+/// reporter already announces publishing once, so phase changes are dropped.
+struct Unwatched;
+
+impl PublishProgress for Unwatched {
+    fn advance(&self, _phase: PublishPhase) {}
 }
 
 /// Build a console-flow live generator rooted at the shared cache and output dir.
@@ -151,9 +163,7 @@ where
         bail!("the session no longer names this worker");
     }
     reporter.publishing();
-    let (sender, _receiver) = channel();
-    let progress = DeckPublishProgress::new(sender);
-    let (deck, report, output) = generator.publish_deck(&drafts, &progress)?;
+    let (deck, report, output) = generator.publish_deck(&drafts, &Unwatched)?;
     let outcome = Outcome {
         deck,
         report,
@@ -299,6 +309,72 @@ fn print_paths(outcome: &Outcome) {
     println!("{}", outcome.output);
 }
 
+/// One structured progress event, streamed as a single NDJSON line on stderr.
+#[derive(Serialize)]
+#[serde(tag = "event", rename_all = "lowercase")]
+enum Event<'a> {
+    Generating {
+        cards: usize,
+    },
+    Step {
+        term: &'a str,
+        artifact: &'a str,
+        status: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        attempt: Option<u8>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ceiling: Option<u8>,
+    },
+    Publishing,
+    Warning {
+        message: &'a str,
+    },
+}
+
+fn stream(event: &Event<'_>) {
+    eprintln!(
+        "{}",
+        serde_json::to_string(event).expect("invariant: progress events always serialize")
+    );
+}
+
+/// Reporter for `--wait --json`: progress streams as NDJSON events on stderr,
+/// while stdout stays reserved for the one final session document the caller
+/// prints after the run; `finished` is deliberately silent here.
+pub(super) struct JsonReporter;
+
+impl Reporter for JsonReporter {
+    fn generating(&self, cards: usize) {
+        stream(&Event::Generating { cards });
+    }
+
+    fn step(&self, term: &str, artifact: Artifact, outcome: StepOutcome) {
+        let (status, attempt, ceiling) = match outcome {
+            StepOutcome::Ready { cached: true } => ("cache", None, None),
+            StepOutcome::Ready { cached: false } => ("ok", None, None),
+            StepOutcome::Retry { attempt, ceiling } => ("retry", Some(attempt), Some(ceiling)),
+            StepOutcome::Failed => ("fail", None, None),
+        };
+        stream(&Event::Step {
+            term,
+            artifact: artifact.label(),
+            status,
+            attempt,
+            ceiling,
+        });
+    }
+
+    fn publishing(&self) {
+        stream(&Event::Publishing);
+    }
+
+    fn finished(&self, _outcome: &Outcome) {}
+
+    fn warn(&self, message: &str) {
+        stream(&Event::Warning { message });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
@@ -381,9 +457,9 @@ mod tests {
         fn publish_deck(
             &self,
             drafts: &[CardDraft],
-            progress: &DeckPublishProgress,
+            progress: &dyn PublishProgress,
         ) -> Result<(String, String, String)> {
-            progress.report_phase(crate::tui::BusyKind::PublishingReport);
+            progress.advance(PublishPhase::Report);
             Ok((
                 format!("/out/deck-{}.apkg", drafts.len()),
                 format!("/out/deck-{}.pdf", drafts.len()),

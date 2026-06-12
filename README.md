@@ -73,10 +73,10 @@ kamishibai result "$id"            # the finished cards + deck.apkg / deck.pdf p
 
 # re-roll a committed card
 kamishibai regenerate "$id" --failed
-kamishibai fix "$id" --card bank --note "make the sentence shorter"
+kamishibai regenerate "$id" --card bank --note "make the sentence shorter"
 ```
 
-The output is plain text — never JSON: stdout carries the one capturable value (id, or paths), everything else goes to stderr, so `id=$(kamishibai new --word bank)` just works. Sessions are idempotent and cache-backed: the cache holds one folder per card under `kamishibai cache-path`, so a re-run resumes from disk and only fills in what is missing. The TUI shares the same sessions — `kamishibai open "$id"` resumes one interactively. Agents should read [llms.txt](llms.txt) for the full session contract.
+The output is plain text by default: stdout carries the one capturable value (id, or paths), everything else goes to stderr, so `id=$(kamishibai new --word bank)` just works. Every session verb also takes `--json` for exactly one JSON document per call — same exit codes, machine-readable error envelope. Sessions are idempotent and cache-backed: the cache holds one folder per card under `kamishibai cache-path`, so a re-run resumes from disk and only fills in what is missing. The TUI shares the same sessions — `kamishibai open "$id"` resumes one interactively. Agents should read [llms.txt](llms.txt) for the full session contract.
 
 ## Languages
 

@@ -1,12 +1,15 @@
-//! Projection between the interactive `App` and the persistent `SessionRecord`.
+//! The TUI side of the session contract: projection between the interactive
+//! `App` and the persistent `SessionRecord`, plus the [`SessionOpener`] port
+//! implementation the console hands an `open`ed session to.
 //!
 //! The TUI and the console share one session: the cache holds every card's
 //! artifacts, and this bridge keeps the `session.json` index in step with the
 //! live `App`. Readiness is never projected — it stays cache-derived (see
-//! `view`); only the durable subset (language pair, typed words, curated
-//! candidates, committed plan, phase, and published result) crosses over.
+//! `session::view`); only the durable subset (language pair, typed words,
+//! curated candidates, committed plan, phase, and published result) crosses
+//! over. The dependency is one-way: this file links the TUI to the console's
+//! session model, and nothing under `session/` links back.
 
-use std::fs;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -16,15 +19,28 @@ use anyhow::{Result, bail};
 use crate::session::{CandidateRecord, CardDraft, LanguagePair, WordCandidate};
 use crate::tui::{App, Screen};
 
-use super::liveness;
-use super::store::{
-    DraftRecord, Phase, ResultRecord, SessionRecord, SessionStore, WorkerHandle, mint_id, now,
+use super::session::{
+    DraftRecord, Phase, ResultRecord, SessionOpener, SessionRecord, SessionStore, WorkerHandle,
+    mint_id, now,
 };
+use super::terminal::run_tui;
+
+/// The TUI-side implementation of the console's [`SessionOpener`] port: resume
+/// the stored session in the interactive terminal.
+pub(super) struct TuiOpener;
+
+impl SessionOpener for TuiOpener {
+    fn open(&self, record: &SessionRecord) -> Result<()> {
+        let resume = TuiSession::resuming(record)?;
+        let (app, startup) = record_to_app(record);
+        run_tui(app, startup, Some(resume))
+    }
+}
 
 /// Project the live app into a persistable record under one identity. A live
 /// `worker_pid` marks the session as generating; otherwise a populated Done
 /// screen marks it published and everything else is understood.
-pub(super) fn app_to_record(
+fn app_to_record(
     app: &App,
     id: String,
     created: String,
@@ -87,7 +103,7 @@ pub(super) fn app_to_record(
 /// Rebuild the app and optional startup batch from a stored record. A published
 /// session reopens on its finished cards; a session with a committed plan reopens
 /// generating from cache; a curatable one reopens on the understanding.
-pub(super) fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
+fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
     let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
     let candidates: Vec<WordCandidate> = record
         .candidates
@@ -147,7 +163,7 @@ pub(super) fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraf
 /// loop writes once, not once per frame. `written` remembers the record this
 /// window last wrote (or resumed from), so a save refuses to clobber a session
 /// another process edited meanwhile.
-pub(in crate::cli) struct TuiSession {
+pub(super) struct TuiSession {
     store: SessionStore,
     id: Option<String>,
     created: Option<String>,
@@ -160,7 +176,7 @@ pub(in crate::cli) struct TuiSession {
 
 impl TuiSession {
     /// Begin a fresh session whose id is minted on the first save.
-    pub(in crate::cli) fn fresh() -> Result<Self> {
+    pub(super) fn fresh() -> Result<Self> {
         Ok(Self {
             store: SessionStore::system()?,
             id: None,
@@ -175,7 +191,7 @@ impl TuiSession {
 
     /// Resume an existing on-disk session under its original identity, keeping
     /// the record as read so a later save detects outside edits.
-    pub(super) fn resuming(record: &SessionRecord) -> Result<Self> {
+    fn resuming(record: &SessionRecord) -> Result<Self> {
         Ok(Self {
             store: SessionStore::system()?,
             id: Some(record.id.clone()),
@@ -191,13 +207,12 @@ impl TuiSession {
     /// Claim the right to generate this session by taking its liveness lock
     /// BEFORE any record naming this process as the worker is written. Returns
     /// false when another live worker already holds it; idempotent while held.
-    pub(in crate::cli) fn claim(&mut self, app: &App) -> Result<bool> {
+    pub(super) fn claim(&mut self, app: &App) -> Result<bool> {
         if self.lock.is_some() {
             return Ok(true);
         }
         let id = self.ensure_id(app)?;
-        fs::create_dir_all(self.store.dir(id.as_str()))?;
-        self.lock = liveness::hold(&self.store.lock_path(id.as_str()))?;
+        self.lock = self.store.hold(id.as_str())?;
         Ok(self.lock.is_some())
     }
 
@@ -207,12 +222,7 @@ impl TuiSession {
     /// a started card batch), so Welcome and Your-words never write a file. A
     /// failed save records the fingerprint anyway, so the event loop surfaces
     /// the error once instead of hammering the disk; the next edit retries.
-    pub(in crate::cli) fn save(
-        &mut self,
-        app: &App,
-        output: &Path,
-        generating: bool,
-    ) -> Result<()> {
+    pub(super) fn save(&mut self, app: &App, output: &Path, generating: bool) -> Result<()> {
         if app.candidates().is_empty() && app.cards().is_empty() {
             return Ok(());
         }
@@ -224,8 +234,7 @@ impl TuiSession {
         let id = self.ensure_id(app)?;
         let created = self.ensure_created()?;
         if generating && self.lock.is_none() {
-            fs::create_dir_all(self.store.dir(id.as_str()))?;
-            self.lock = liveness::hold(&self.store.lock_path(id.as_str()))?;
+            self.lock = self.store.hold(id.as_str())?;
             if self.lock.is_none() {
                 bail!("session '{id}' is being generated by another process");
             }

@@ -1,8 +1,6 @@
-//! The session-creation verbs: `new` (understand `--word`s or import a cards
-//! JSON) and `open` (resume an existing session in the interactive TUI).
-//!
-//! Both produce or reopen an `understood` session; the shared preconditions and
-//! the generation verbs live in the parent module and `generate`.
+//! The session-creation verb: `new` (understand `--word`s or import a cards
+//! JSON), producing an `understood` session; the shared preconditions and the
+//! generation verbs live in the parent module and `generate`.
 
 use std::fmt::Write;
 use std::fs;
@@ -11,26 +9,25 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::cli::batch::StartupCards;
 use crate::cli::card_workflow::CardGeneration;
 use crate::cli::console::{self, SensePolicy};
 use crate::cli::error::usage;
 use crate::cli::live_generator::default_output;
-use crate::cli::terminal::run_tui;
 use crate::config::default_store;
 use crate::runtime::locations::SystemContext;
 use crate::session::{
     CandidateRecord, LanguagePair, RawInputBatch, Understanding, Understood, WordCandidate,
+    drafts_from_document,
 };
 use crate::vocabulary::VocabularyDocument;
 
-use super::args::{IdArg, NewArgs};
+use super::args::NewArgs;
 use super::generate::run_session;
 use super::store::{SessionRecord, SessionStore, mint_id, now, valid_id};
-use super::{TuiSession, bridge, open_checked, refuse_if_live};
+use super::{Render, json};
 
 /// Understand the requested words (or import a cards JSON) and create a session.
-pub(super) fn new(args: &NewArgs) -> Result<()> {
+pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
     let support = support_language(args.from.as_deref());
     let out = output_dir(args.out.as_deref())?;
@@ -69,7 +66,10 @@ pub(super) fn new(args: &NewArgs) -> Result<()> {
     );
     store.create(&record)?;
     if args.generate {
-        return run_session(&store, record.id.as_str(), false, args.quiet);
+        return run_session(&store, record.id.as_str(), false, args.quiet, render);
+    }
+    if matches!(render, Render::Json) {
+        return json::emit_session(&record);
     }
     if !args.quiet {
         eprint!("{}", session.preview);
@@ -80,16 +80,6 @@ pub(super) fn new(args: &NewArgs) -> Result<()> {
     }
     println!("{}", record.id);
     Ok(())
-}
-
-/// Reopen an existing session in the interactive TUI, resuming from the cache.
-pub(super) fn open(args: &IdArg) -> Result<()> {
-    let store = SessionStore::system()?;
-    let record = open_checked(&store, args.id.as_str())?;
-    refuse_if_live(&store, &record)?;
-    let resume = TuiSession::resuming(&record)?;
-    let (app, startup) = bridge::record_to_app(&record);
-    run_tui(app, startup, Some(resume))
 }
 
 /// The parts of a freshly understood/imported session shared by `new`.
@@ -143,11 +133,7 @@ fn initial_selection(candidate: &WordCandidate, senses: SensePolicy) -> WordCand
 
 fn build_session(generator: &impl CardGeneration, path: &Path) -> Result<Prepared> {
     let document = read_document(path.to_string_lossy().as_ref())?;
-    let (_, drafts) = StartupCards::from_document(&document)?.into_parts();
-    let pair = drafts
-        .first()
-        .map(|draft| draft.pair().clone())
-        .ok_or_else(|| usage("the cards JSON contains no entries"))?;
+    let (pair, drafts) = drafts_from_document(&document)?;
     let mut candidates = Vec::with_capacity(drafts.len());
     let mut words = Vec::with_capacity(drafts.len());
     let mut preview = String::new();

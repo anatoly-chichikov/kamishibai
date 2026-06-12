@@ -6,6 +6,7 @@
 //! parses arguments and routes them.
 
 mod batch;
+mod bridge;
 mod card_workflow;
 mod console;
 mod error;
@@ -19,14 +20,6 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-
-use batch::StartupCards;
-use terminal::run_tui;
-
-use crate::config::{Preferences, default_store};
-use crate::runtime::locations::SystemContext;
-use crate::session::LanguagePair;
-use crate::tui::{App, KeySource, WelcomeStage};
 
 const SCHEMA_HELP: &str = "\
 EXAMPLES:
@@ -45,8 +38,11 @@ EXAMPLES:
   kamishibai cache-path                            print the cache directory
 
 OUTPUT:
-  Plain text only, never JSON. stdout carries the one capturable value (a session id,
+  Plain text by default: stdout carries the one capturable value (a session id,
   or paths); progress and previews go to stderr — so id=$(kamishibai new --word bank) works.
+  Pass --json after any session verb to print exactly one JSON document on stdout
+  instead (success or error envelope); exit codes are identical in both modes for
+  any invocation valid in both (--json grammar conflicts exit 2).
 
 EXIT CODES:
   0 ok · 2 usage · 3 no such session · 4 not ready yet · 1 other error
@@ -92,6 +88,10 @@ struct Cli {
     /// A prebuilt cards JSON path opens the interactive TUI on those cards.
     #[arg(value_name = "WORDS")]
     input: Option<String>,
+    /// Print one JSON document on stdout instead of plain text (place it after
+    /// the session verb; interactive runs refuse it).
+    #[arg(long, global = true)]
+    json: bool,
     #[command(subcommand)]
     command: Option<session::Command>,
 }
@@ -100,79 +100,50 @@ struct Cli {
 ///
 /// Every refusal carries its exit code (`error.rs`): 2 — the invocation is
 /// wrong, 3 — no such session, 4 — not ready yet. Any other error is an
-/// operational failure and exits 1; success exits 0.
+/// operational failure and exits 1; success exits 0. The codes are identical
+/// in both render modes for any invocation valid in both (`--json` grammar
+/// conflicts are themselves usage refusals): the `kamishibai:` stderr line
+/// always appears, and `--json` additionally prints the machine-readable
+/// envelope on stdout.
 pub fn run() -> u8 {
     let cli = Cli::parse();
     match execute(&cli) {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("kamishibai: {error:#}");
+            if cli.json {
+                println!("{}", error::json_line(&error));
+            }
             error::exit_code(&error).unwrap_or(1)
         }
     }
 }
 
 fn execute(cli: &Cli) -> Result<()> {
-    match &cli.command {
-        Some(command) => session::handle(command),
-        None => match &cli.input {
-            Some(path) => start_with_batch(PathBuf::from(path)),
-            None => start(),
-        },
-    }
-}
-
-fn start() -> Result<()> {
-    let store = default_store(&SystemContext)?;
-    let preferences = store.read().unwrap_or_default();
-    let app = startup_app(&preferences);
-    run_tui(app, None, None)
-}
-
-fn startup_app(preferences: &Preferences) -> App {
-    let saved_key = preferences.api_key.clone().filter(|key| !key.is_empty());
-    let pair = LanguagePair::new(
-        String::from("en"),
-        preferences.startup_language().to_string(),
-    );
-    let app = App::new(pair);
-    let needs_language = preferences.requires_language_choice();
-    let needs_key = saved_key.is_none();
-    if needs_language || needs_key {
-        let (source, key) = if let Some(saved) = saved_key.as_deref() {
-            (KeySource::Restored, String::from(saved))
-        } else {
-            (KeySource::Empty, String::new())
-        };
-        let stage = if needs_language {
-            WelcomeStage::PickLanguage
-        } else {
-            WelcomeStage::EnterKey
-        };
-        app.opening_welcome_at(stage, source, key, env_has_gemini_key())
+    let render = if cli.json {
+        session::Render::Json
     } else {
-        app
+        session::Render::Text
+    };
+    match &cli.command {
+        Some(command) => session::handle(command, render, &bridge::TuiOpener),
+        None => {
+            if cli.json {
+                return Err(error::usage(
+                    "--json applies only to non-interactive session commands",
+                ));
+            }
+            match &cli.input {
+                Some(path) => terminal::start_with_batch(PathBuf::from(path)),
+                None => terminal::start(),
+            }
+        }
     }
-}
-
-/// Return whether `GEMINI_API_KEY` is present and non-empty. The key is never
-/// loaded into the Welcome buffer implicitly — this only decides whether the
-/// key step offers the `load from env` action.
-fn env_has_gemini_key() -> bool {
-    std::env::var("GEMINI_API_KEY")
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false)
-}
-
-fn start_with_batch(path: PathBuf) -> Result<()> {
-    let (app, drafts) = StartupCards::load(path.as_path())?.into_parts();
-    run_tui(app, Some(drafts), None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::Screen;
     use clap::CommandFactory;
     use session::Command;
 
@@ -272,6 +243,22 @@ mod tests {
     }
 
     #[test]
+    fn a_trailing_json_flag_parses_on_a_session_verb() {
+        assert!(
+            parse(&["kamishibai", "status", "fr-1", "--json"]).json,
+            "--json placed after the verb must parse into JSON mode"
+        );
+    }
+
+    #[test]
+    fn a_leading_json_flag_before_the_verb_is_refused_at_parse() {
+        assert!(
+            Cli::try_parse_from(["kamishibai", "--json", "status", "fr-1"]).is_err(),
+            "--json before the verb must stay a parse error, pinning the documented flag position"
+        );
+    }
+
+    #[test]
     fn the_worker_subcommand_parses_yet_stays_hidden() {
         let parsed = matches!(
             parse(&["kamishibai", "__run", "fr-1"]).command,
@@ -304,78 +291,6 @@ mod tests {
             Cli::command().get_version(),
             Some(env!("CARGO_PKG_VERSION")),
             "the CLI must report the current release version"
-        );
-    }
-
-    #[test]
-    fn env_key_is_not_loaded_at_startup() {
-        let app = startup_app(&Preferences::default());
-        assert_eq!(
-            (
-                app.screen(),
-                app.welcome().stage,
-                app.welcome().source,
-                app.pair().support().to_string(),
-            ),
-            (
-                Screen::Welcome,
-                WelcomeStage::PickLanguage,
-                KeySource::Empty,
-                String::from("en"),
-            ),
-            "GEMINI_API_KEY must not be treated as loaded until the user asks for it"
-        );
-    }
-
-    #[test]
-    fn saved_key_does_not_skip_unconfirmed_language_choice() {
-        let preferences = Preferences::default().with_api_key("123456789012345678901234567890");
-        let app = startup_app(&preferences);
-        assert_eq!(
-            (
-                app.screen(),
-                app.welcome().stage,
-                app.welcome().source,
-                app.pair().support().to_string(),
-            ),
-            (
-                Screen::Welcome,
-                WelcomeStage::PickLanguage,
-                KeySource::Restored,
-                String::from("en"),
-            ),
-            "a saved API key without a confirmed language must still start on language choice"
-        );
-    }
-
-    #[test]
-    fn confirmed_language_and_saved_key_skip_welcome() {
-        let app =
-            startup_app(&Preferences::new("de").with_api_key("123456789012345678901234567890"));
-        assert_eq!(
-            (app.screen(), app.pair().support().to_string()),
-            (Screen::YourWords, String::from("de")),
-            "a confirmed language may skip Welcome only when a saved key exists"
-        );
-    }
-
-    #[test]
-    fn confirmed_language_without_key_starts_on_key_stage() {
-        let app = startup_app(&Preferences::new("ru"));
-        assert_eq!(
-            (
-                app.screen(),
-                app.welcome().stage,
-                app.welcome().source,
-                app.pair().support().to_string(),
-            ),
-            (
-                Screen::Welcome,
-                WelcomeStage::EnterKey,
-                KeySource::Empty,
-                String::from("ru"),
-            ),
-            "a confirmed language with no key must ask only for the missing key"
         );
     }
 }

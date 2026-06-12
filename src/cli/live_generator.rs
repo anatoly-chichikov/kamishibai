@@ -1,4 +1,4 @@
-//! Live implementation of the UI-shaped card workflow.
+//! Live implementation of the UI-neutral card workflow.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,9 @@ use anyhow::{Result, anyhow, bail};
 use time::OffsetDateTime;
 use time::format_description::parse as parse_time;
 
-use super::card_workflow::{CardGeneration, DeckPublishProgress, DeckPublishing, KeyValidation};
+use super::card_workflow::{
+    CardGeneration, DeckPublishing, KeyValidation, PublishPhase, PublishProgress,
+};
 use crate::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
 use crate::config::default_store;
 use crate::gemini::{GeminiClient, HttpTransport};
@@ -25,7 +27,6 @@ use crate::session::{
     CardMeta, CardMetaCache, CardMetaGeneration, CardRevision, LanguagePair, RawInputBatch,
     Understanding, Understood, WordCandidate, to_entry,
 };
-use crate::tui::BusyKind;
 use crate::vocabulary::VocabularyEntry;
 
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
@@ -238,8 +239,9 @@ impl DeckPublishing for LiveCardGenerator {
     fn publish_deck(
         &self,
         drafts: &[CardDraft],
-        progress: &DeckPublishProgress,
+        progress: &dyn PublishProgress,
     ) -> Result<(String, String, String)> {
+        progress.advance(PublishPhase::Deck);
         fs::create_dir_all(&self.output)?;
         let entries: Vec<VocabularyEntry> = drafts
             .iter()
@@ -280,7 +282,7 @@ impl DeckPublishing for LiveCardGenerator {
             .output
             .join(format!("{}_{}.apkg", decknaming.prefix, stamp));
         container.save(&apkg)?;
-        progress.report_phase(BusyKind::PublishingReport);
+        progress.advance(PublishPhase::Report);
         let pdf = self
             .output
             .join(format!("{}_{}.pdf", decknaming.prefix, stamp));

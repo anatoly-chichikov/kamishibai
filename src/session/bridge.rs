@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 
 use crate::vocabulary::{
     Importance, LanguageCode, NonEmptyText, VocabularyDocument, VocabularyEntry, VocabularySource,
@@ -42,6 +42,51 @@ pub fn to_document(drafts: &[CardDraft]) -> Result<VocabularyDocument> {
         entries.push(to_entry(draft)?);
     }
     Ok(VocabularyDocument { entries })
+}
+
+/// Bridge a validated vocabulary document into its single language pair plus
+/// generation drafts, one per entry with meta pre-attached, after checking
+/// every entry shares the pair the first entry establishes. The drafts are
+/// never empty: an empty document is refused here (and by the strict
+/// vocabulary schema before that).
+pub fn drafts_from_document(
+    document: &VocabularyDocument,
+) -> Result<(LanguagePair, Vec<CardDraft>)> {
+    let pair = pair_from_document(document)?;
+    let drafts = document
+        .entries
+        .iter()
+        .map(|entry| from_entry(entry, pair.clone()))
+        .collect();
+    Ok((pair, drafts))
+}
+
+fn pair_from_document(document: &VocabularyDocument) -> Result<LanguagePair> {
+    let first = document
+        .entries
+        .first()
+        .ok_or_else(|| anyhow!("vocabulary document contains no entries"))?;
+    let target = first.target.lang.as_str();
+    let support = first.source.lang.as_str();
+    for (index, entry) in document.entries.iter().enumerate().skip(1) {
+        if entry.target.lang.as_str() != target {
+            bail!(
+                "entry {} has target language '{}' but the batch started with '{}'",
+                index,
+                entry.target.lang.as_str(),
+                target
+            );
+        }
+        if entry.source.lang.as_str() != support {
+            bail!(
+                "entry {} has source language '{}' but the batch started with '{}'",
+                index,
+                entry.source.lang.as_str(),
+                support
+            );
+        }
+    }
+    Ok(LanguagePair::new(target, support))
 }
 
 /// Build one card draft from a strict vocabulary entry, with the rich meta

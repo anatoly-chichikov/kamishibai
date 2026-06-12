@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::Result;
 
-use crate::session::{CardDraft, LanguagePair, from_entry};
+use crate::session::{CardDraft, drafts_from_document};
 use crate::tui::{App, Screen};
 use crate::vocabulary::VocabularyDocument;
 
@@ -23,12 +23,7 @@ impl StartupCards {
 
     /// Build startup cards from an already validated vocabulary document.
     pub(super) fn from_document(document: &VocabularyDocument) -> Result<Self> {
-        let pair = pair_from_document(document)?;
-        let drafts: Vec<CardDraft> = document
-            .entries
-            .iter()
-            .map(|entry| from_entry(entry, pair.clone()))
-            .collect();
+        let (pair, drafts) = drafts_from_document(document)?;
         let target = pair.target().to_string();
         let app = App::new(pair)
             .confirmed_target(target)
@@ -41,34 +36,6 @@ impl StartupCards {
     pub(super) fn into_parts(self) -> (App, Vec<CardDraft>) {
         (self.app, self.drafts)
     }
-}
-
-fn pair_from_document(document: &VocabularyDocument) -> Result<LanguagePair> {
-    let first = document
-        .entries
-        .first()
-        .ok_or_else(|| anyhow!("vocabulary document contains no entries"))?;
-    let target = first.target.lang.as_str();
-    let support = first.source.lang.as_str();
-    for (index, entry) in document.entries.iter().enumerate().skip(1) {
-        if entry.target.lang.as_str() != target {
-            bail!(
-                "entry {} has target language '{}' but the batch started with '{}'",
-                index,
-                entry.target.lang.as_str(),
-                target
-            );
-        }
-        if entry.source.lang.as_str() != support {
-            bail!(
-                "entry {} has source language '{}' but the batch started with '{}'",
-                index,
-                entry.source.lang.as_str(),
-                support
-            );
-        }
-    }
-    Ok(LanguagePair::new(target, support))
 }
 
 #[cfg(test)]

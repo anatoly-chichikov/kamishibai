@@ -11,7 +11,7 @@ mod pass;
 mod state;
 mod vault;
 
-pub use bridge::{from_entry, to_document, to_entry};
+pub use bridge::{drafts_from_document, from_entry, to_document, to_entry};
 pub(crate) use cache::CandidateRecord;
 pub use cache::{CachedUnderstanding, CardMetaCache};
 pub use candidate::{RawInputBatch, Sense, WordCandidate};

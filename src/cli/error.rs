@@ -5,11 +5,13 @@
 //! does not exist ([`not_found`]), `4` — the session is not in the right
 //! lifecycle state yet ([`not_ready`], the only retryable refusal). Anything
 //! else is an operational failure and exits `1`. The top-level runner maps an
-//! error to its code through [`exit_code`], keeping the code↔meaning table in
-//! one place.
+//! error to its code through [`exit_code`] and, in JSON mode, to its stdout
+//! envelope through [`json_line`], keeping the code↔meaning table in one place.
 
 use std::error::Error;
 use std::fmt;
+
+use serde::Serialize;
 
 /// A refusal carrying its process exit code: the caller must change the
 /// invocation (2), the session id (3), or wait for the session (4).
@@ -58,6 +60,46 @@ pub(in crate::cli) fn exit_code(error: &anyhow::Error) -> Option<u8> {
     error.downcast_ref::<Refusal>().map(|refusal| refusal.exit)
 }
 
+/// Map one exit code to its stable JSON error-code word.
+#[must_use]
+fn code_word(exit: u8) -> &'static str {
+    match exit {
+        2 => "usage",
+        3 => "not_found",
+        4 => "not_ready",
+        _ => "operational",
+    }
+}
+
+#[derive(Serialize)]
+struct Envelope {
+    ok: bool,
+    error: ErrorDoc,
+}
+
+#[derive(Serialize)]
+struct ErrorDoc {
+    code: &'static str,
+    exit: u8,
+    message: String,
+}
+
+/// Render one error as the single-line JSON envelope `--json` mode prints on
+/// stdout: `{"ok":false,"error":{"code":…,"exit":…,"message":…}}`.
+#[must_use]
+pub(in crate::cli) fn json_line(error: &anyhow::Error) -> String {
+    let exit = exit_code(error).unwrap_or(1);
+    let envelope = Envelope {
+        ok: false,
+        error: ErrorDoc {
+            code: code_word(exit),
+            exit,
+            message: format!("{error:#}"),
+        },
+    };
+    serde_json::to_string(&envelope).expect("invariant: the error envelope always serializes")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +137,43 @@ mod tests {
             exit_code(&anyhow::anyhow!("disk on fire")),
             None,
             "a plain operational error must fall through to the catch-all exit 1"
+        );
+    }
+
+    #[test]
+    fn a_refusal_renders_as_a_machine_readable_envelope() {
+        let parsed: serde_json::Value =
+            serde_json::from_str(json_line(&not_found("no session 'ghost'")).as_str())
+                .expect("the envelope must be valid JSON");
+        assert_eq!(
+            (
+                parsed["ok"].as_bool(),
+                parsed["error"]["code"].as_str(),
+                parsed["error"]["exit"].as_u64(),
+                parsed["error"]["message"].as_str(),
+            ),
+            (
+                Some(false),
+                Some("not_found"),
+                Some(3),
+                Some("no session 'ghost'")
+            ),
+            "a refusal must render as the ok:false envelope with its code word and exit"
+        );
+    }
+
+    #[test]
+    fn an_operational_error_envelope_falls_back_to_exit_one() {
+        let parsed: serde_json::Value =
+            serde_json::from_str(json_line(&anyhow::anyhow!("disk on fire")).as_str())
+                .expect("the envelope must be valid JSON");
+        assert_eq!(
+            (
+                parsed["error"]["code"].as_str(),
+                parsed["error"]["exit"].as_u64()
+            ),
+            (Some("operational"), Some(1)),
+            "an operational error must render code operational with exit 1"
         );
     }
 }

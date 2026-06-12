@@ -10,14 +10,16 @@ use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardMeta, CardMetaCache, LanguagePair};
 
 use super::args::{LsArgs, ResultArgs, StatusArgs};
-use super::open_checked;
 use super::store::{DraftRecord, Phase, SessionRecord, SessionStore};
-use super::view;
+use super::{Render, json, open_checked, view};
 
 /// Print a session's phase and per-card progress; `-q` prints just the phase.
-pub(super) fn status(args: &StatusArgs) -> Result<()> {
+pub(super) fn status(args: &StatusArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
     let record = open_checked(&store, args.id.as_str())?;
+    if matches!(render, Render::Json) {
+        return json::emit_session(&record);
+    }
     let root = cache_root(&SystemContext)?;
     if args.quiet {
         println!("{}", view::phase_word(&record, root.as_path()));
@@ -28,7 +30,7 @@ pub(super) fn status(args: &StatusArgs) -> Result<()> {
 }
 
 /// Print a published (or partial) session's deck/pdf/dir paths and card bodies.
-pub(super) fn result(args: &ResultArgs) -> Result<()> {
+pub(super) fn result(args: &ResultArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
     let record = open_checked(&store, args.id.as_str())?;
     let root = cache_root(&SystemContext)?;
@@ -43,6 +45,14 @@ pub(super) fn result(args: &ResultArgs) -> Result<()> {
             view::phase_label(phase)
         )));
     };
+    if matches!(render, Render::Json) {
+        return json::emit(&json::ResultDoc::of(
+            &record,
+            root.as_path(),
+            phase,
+            &paths,
+        )?);
+    }
     if args.deck {
         println!("{}", paths.deck);
         return Ok(());
@@ -83,11 +93,15 @@ pub(super) fn result(args: &ResultArgs) -> Result<()> {
     Ok(())
 }
 
-/// List every session, one compact line each; `-q` prints just the ids.
-pub(super) fn ls(args: &LsArgs) -> Result<()> {
+/// List every session, one compact line each; `-q` prints just the ids; JSON
+/// mode prints one document whose `sessions` array may be empty.
+pub(super) fn ls(args: &LsArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
     let root = cache_root(&SystemContext)?;
     let sessions = store.list()?;
+    if matches!(render, Render::Json) {
+        return json::emit(&json::LsDoc::of(&sessions, root.as_path()));
+    }
     if sessions.is_empty() {
         eprintln!("no sessions");
         return Ok(());

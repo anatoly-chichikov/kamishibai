@@ -45,7 +45,7 @@ const VERSION: u32 = 2;
 /// The lifecycle phase of one session, projected to JSON in lowercase.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(super) enum Phase {
+pub(in crate::cli) enum Phase {
     /// Created by `new`; words understood and curatable, generation not started.
     Understood,
     /// A worker is generating (verify liveness before trusting this).
@@ -64,21 +64,21 @@ pub(super) enum Phase {
 
 /// The background worker's process handle, present only while one is recorded.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(super) struct WorkerHandle {
+pub(in crate::cli) struct WorkerHandle {
     pub pid: i32,
     pub started: String,
 }
 
 /// One card draft's identity (the cache holds its artifacts and meta).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(super) struct DraftRecord {
+pub(in crate::cli) struct DraftRecord {
     pub term: String,
     pub understanding: String,
 }
 
 /// The last artifact the worker reported working on (advisory heartbeat).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(super) struct Progress {
+pub(in crate::cli) struct Progress {
     pub term: String,
     pub artifact: String,
 }
@@ -86,7 +86,7 @@ pub(super) struct Progress {
 /// The published artifacts of one session, with how many cards made the deck and
 /// how many failed (`failed > 0` marks a `Partial` publish).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(super) struct ResultRecord {
+pub(in crate::cli) struct ResultRecord {
     pub deck: String,
     pub report: String,
     pub output: String,
@@ -102,7 +102,7 @@ pub(super) struct ResultRecord {
 /// `drafts` is the committed generation plan derived from the candidates when
 /// generation starts. An empty `drafts` means no plan is committed yet.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(super) struct SessionRecord {
+pub(in crate::cli) struct SessionRecord {
     pub version: u32,
     pub id: String,
     pub created: String,
@@ -131,7 +131,7 @@ pub(super) struct SessionRecord {
 impl SessionRecord {
     /// Create one freshly understood session with no committed plan or worker.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn understood(
+    pub(in crate::cli) fn understood(
         id: String,
         created: String,
         from: String,
@@ -165,7 +165,7 @@ impl SessionRecord {
 
 /// Persistent home for every session, rooted in the shared cache directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct SessionStore {
+pub(in crate::cli) struct SessionStore {
     root: PathBuf,
 }
 
@@ -176,12 +176,12 @@ impl SessionStore {
     }
 
     /// Create one store rooted at the live cache directory.
-    pub(super) fn system() -> Result<Self> {
+    pub(in crate::cli) fn system() -> Result<Self> {
         Ok(Self::new(cache_root(&SystemContext)?))
     }
 
     /// Return the directory holding one session's files.
-    pub(super) fn dir(&self, id: &str) -> PathBuf {
+    fn dir(&self, id: &str) -> PathBuf {
         self.root.join("sessions").join(id)
     }
 
@@ -203,6 +203,14 @@ impl SessionStore {
     /// Return whether a session with this id already exists on disk.
     pub(super) fn exists(&self, id: &str) -> bool {
         self.dir(id).join(SESSION_FILE).is_file()
+    }
+
+    /// Take one session's long-held liveness lock, creating its directory on the
+    /// way; `None` means a live worker already holds it. The OS releases the lock
+    /// when the holder dies, so callers keep the returned guard for the whole run.
+    pub(in crate::cli) fn hold(&self, id: &str) -> Result<Option<fs::File>> {
+        fs::create_dir_all(self.dir(id))?;
+        liveness::hold(&self.lock_path(id))
     }
 
     /// Read one session record, failing clearly when it is absent, corrupt, or
@@ -236,7 +244,7 @@ impl SessionStore {
     }
 
     /// Persist one freshly created session, refusing to overwrite an existing one.
-    pub(super) fn create(&self, record: &SessionRecord) -> Result<()> {
+    pub(in crate::cli) fn create(&self, record: &SessionRecord) -> Result<()> {
         fs::create_dir_all(self.dir(&record.id))?;
         let _write = liveness::lock_for_write(&self.write_lock_path(&record.id))?;
         if self.exists(record.id.as_str()) {
@@ -254,7 +262,7 @@ impl SessionStore {
     /// across processes, so concurrent mutations all land, in some order, and
     /// none clobbers another's. A failed closure writes nothing and propagates
     /// its error. Returns the record as written.
-    pub(super) fn update(
+    pub(in crate::cli) fn update(
         &self,
         id: &str,
         apply: impl FnOnce(&mut SessionRecord) -> Result<()>,
@@ -313,12 +321,12 @@ pub(super) fn valid_id(id: &str) -> bool {
 }
 
 /// Mint a default session id from the target language and the current time.
-pub(super) fn mint_id(target: &str) -> Result<String> {
+pub(in crate::cli) fn mint_id(target: &str) -> Result<String> {
     Ok(format!("{target}-{}_{}", stamp()?, salt()))
 }
 
 /// Return the current UTC time formatted as RFC 3339.
-pub(super) fn now() -> Result<String> {
+pub(in crate::cli) fn now() -> Result<String> {
     Ok(OffsetDateTime::now_utc().format(&Rfc3339)?)
 }
 

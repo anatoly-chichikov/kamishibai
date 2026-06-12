@@ -19,12 +19,41 @@ Generation is slow (Gemini per artifact, and the first publish parses system fon
 
 ## Output contract
 
-The output is **plain text only — never JSON.** Everything is built so an agent needs only the `kamishibai` binary (no `jq`/`grep`/`sed`):
+Output defaults to **plain text**; pass `--json` (placed after the verb) to get exactly one JSON document on stdout instead. Plain mode still needs no `jq`/`grep`/`sed`; the rules below describe it:
 
 - **stdout carries the one capturable value**, bare: `new`/`select`/`exclude`/`correct`/`generate`/`regenerate` print the session id (but `generate --wait` prints the three deck/pdf/dir paths instead, like `result`); `result --deck|--pdf|--dir` print one path. So `id=$(kamishibai new --word bank)` captures exactly the id.
-- **stderr carries everything else**: the understood-senses preview, progress, hints, errors. Every error is one `kamishibai: …` line.
+- **stderr carries everything else**: the understood-senses preview, progress, hints, errors. Every error is one `kamishibai: …` line (in both modes).
 - `status`/`result`/`ls` print line-oriented text to stdout; `-q`/`--quiet` reduces any command to its bare capturable value and silences the stderr narration (`status -q` → the phase word, `result -q` → the three paths, `ls -q` → ids, mutating verbs → the id).
-- Exit codes are the script signal: `0` ok · `2` usage · `3` no such session · `4` not ready yet · `1` other error.
+- Exit codes are the script signal: `0` ok · `2` usage · `3` no such session · `4` not ready yet · `1` other error. **For any invocation accepted in both modes they are identical — `--json` changes representation, never the signal** (its own grammar conflicts — `-q`, the `result` selectors, `open` — are refused with exit `2` before the session is even looked up), and it does not change locking, idempotency, or session semantics either.
+
+### JSON mode
+
+`--json` prints exactly one document per invocation on stdout — the success document, or on any failure the error envelope `{"ok":false,"error":{"code":"usage|not_found|not_ready|operational","exit":2|3|4|1,"message":"…"}}` (the `kamishibai: …` stderr line still appears). `--json` is mutually exclusive with `-q` and with the `result` selectors `--deck`/`--pdf`/`--dir` (exit `2`); `open` is interactive and refuses it. clap parse errors (unknown flag, `--json` placed before the verb) stay plain text outside the envelope. The schema evolves additively only: keys are never renamed or removed.
+
+Every stateful verb (`new`, `select`, `exclude`, `correct`, `generate`, `regenerate`, `cancel`, `status`) returns the same **session document** — mutating verbs return the post-mutation state, so no follow-up `status` is needed:
+
+```json
+{"ok":true,"session":"fr-20260612_091500_ab3x","created":"2026-06-12T09:15:00Z",
+ "pair":{"from":"en","to":"fr"},"senses":"primary","source":"words",
+ "out":"/abs/out","phase":"generating","words":["canard"],
+ "worker":{"pid":4242,"alive":true},
+ "progress":{"term":"canard","artifact":"scene"},
+ "candidates":{"count":1,"selected":1,"items":[
+   {"term":"canard","included":true,"senses":[
+     {"number":1,"tag":"zool.","understanding":"a duck","selected":true},
+     {"number":2,"understanding":"a hoax","selected":false}]}]},
+ "cards":{"total":1,"ready":0,"failed":0,"items":[
+   {"term":"canard","understanding":"a duck","state":"building",
+    "artifacts":{"meta":true,"sound":true,"scene":false,"picture":false}}]},
+ "result":{"deck":"/o/fr.apkg","pdf":"/o/fr.pdf","dir":"/o","cards":1,"failed":0},
+ "error":"…"}
+```
+
+Presence rules: `phase` is the live reconciliation (`status -q`'s 7-word vocabulary — the terminal-phase warning below applies identically); `candidates` appears while the record holds curatable candidates, `cards` once a plan is committed, and `worker`/`progress`/`result`/`error` only when present — absent fields are omitted, never `null`. `senses[].number` is 1-based and matches `select --sense`; `cards[].state` is `ready|failed|building|pending`.
+
+Other shapes: `result --json` → `{"ok":true,"session":…,"pair":…,"phase":…,"paths":{"deck":…,"pdf":…,"dir":…},"cards":N,"failed":M,"items":[…]}` where `items` are strict cards-JSON entries — the exact `new --build` schema, so they round-trip into a new session. `ls --json` → `{"ok":true,"sessions":[{"id":…,"pair":…,"created":…,"phase":…,"cards":{"total":N,"ready":M}}]}` (`selected: N` instead of `cards` before a plan is committed; the array may be empty). `rm --json` → `{"ok":true,"removed":"<id>"}`. `cache-path --json` → `{"ok":true,"cache":"/…"}`.
+
+`generate --wait --json` streams NDJSON **events on stderr** and prints the one final session document on stdout (`published` or `partial`; a run where every card failed exits `1` with the error envelope instead — `status <id> --json` then shows `"phase":"failed"`; a cancel that raced in yields `ok:true` with `"phase":"cancelled"` and no `result`, so gate on `phase`, not `ok`). Events: `{"event":"generating","cards":N}`, `{"event":"step","term":…,"artifact":"meta|sound|scene|picture","status":"ok|cache|retry|fail","attempt":1,"ceiling":3}` (attempt/ceiling only on retry), `{"event":"publishing"}`, `{"event":"warning","message":…}`. stderr lines that do not parse as JSON are lower-layer narration (model downloads etc.) — ignore them; strictness is guaranteed only for stdout.
 
 ## Requirements
 
@@ -33,19 +62,19 @@ The output is **plain text only — never JSON.** Everything is built so an agen
 
 ## Commands
 
-- `kamishibai new (--word WORD [--word WORD …] | --words FILE | --build FILE) [--to LANG] [--from LANG] [--senses primary|all] [--out DIR] [--id NAME] [--generate] [-q]` — understand the words and create a session in the **understood** stage. Exactly one input form is required: repeated `--word` flags (one card per word), `--words FILE` (one word per line, `-` for stdin), or `--build FILE` (a strict cards JSON path or `-`, skips understanding; its entries carry the language pair, so `--from`/`--to`/`--senses` are rejected with it). `--senses` sets the initial sense selection (`primary` = the top sense; `all` = every sense); `select` overrides it later. `--generate` commits and starts the worker at once. Prints the understood senses to stderr and the bare session id to stdout.
-- `kamishibai select <id> --card TERM --sense 1,3` — choose which 1-based senses of a card become cards (and re-include it). Resets the session to understood.
-- `kamishibai exclude <id> --card TERM` — drop a card from the plan while keeping it visible in the understanding. Resets to understood.
-- `kamishibai correct <id> --card TERM --note "..."` — ask Gemini to add senses to a card from an instruction. Resets to understood.
-- `kamishibai generate <id> [--wait] [-q]` — commit the curated plan (deriving it from the selected senses) and start a managed background worker that generates the missing artifacts then publishes; prints the id and returns at once. `--wait` runs it in the foreground, streaming progress. Fails if nothing is selected.
-- `kamishibai status <id> [-q]` — before a plan is committed: the curatable candidates with their senses and selection; after: per-card artifact progress. Read from the cache (no Gemini). `-q` prints only the phase word (`understood`/`generating`/`published`/`partial`/`failed`/`interrupted`/`cancelled`).
+- `kamishibai new (--word WORD [--word WORD …] | --words FILE | --build FILE) [--to LANG] [--from LANG] [--senses primary|all] [--out DIR] [--id NAME] [--generate] [-q | --json]` — understand the words and create a session in the **understood** stage. Exactly one input form is required: repeated `--word` flags (one card per word), `--words FILE` (one word per line, `-` for stdin), or `--build FILE` (a strict cards JSON path or `-`, skips understanding; its entries carry the language pair, so `--from`/`--to`/`--senses` are rejected with it). `--senses` sets the initial sense selection (`primary` = the top sense; `all` = every sense); `select` overrides it later. `--generate` commits and starts the worker at once. Prints the understood senses to stderr and the bare session id to stdout.
+- `kamishibai select <id> --card TERM --sense 1,3 [--json]` — choose which 1-based senses of a card become cards (and re-include it). Resets the session to understood.
+- `kamishibai exclude <id> --card TERM [--json]` — drop a card from the plan while keeping it visible in the understanding. Resets to understood.
+- `kamishibai correct <id> --card TERM --note "..." [--json]` — ask Gemini to add senses to a card from an instruction. Resets to understood.
+- `kamishibai generate <id> [--wait] [-q | --json]` — commit the curated plan (deriving it from the selected senses) and start a managed background worker that generates the missing artifacts then publishes; prints the id and returns at once. `--wait` runs it in the foreground, streaming progress. Fails if nothing is selected.
+- `kamishibai status <id> [-q | --json]` — before a plan is committed: the curatable candidates with their senses and selection; after: per-card artifact progress. Read from the cache (no Gemini). `-q` prints only the phase word (`understood`/`generating`/`published`/`partial`/`failed`/`interrupted`/`cancelled`).
 - `kamishibai open <id>` — open the session in the interactive TUI, resuming from the cache.
-- `kamishibai result <id> [--deck | --pdf | --dir] [-q]` — the finished cards (term, meaning, both example sentences, pronunciation, hint) plus the deck/pdf/dir paths. The selectors (`--deck`/`--pdf`/`--dir`) are mutually exclusive, cannot combine with `-q`, and print exactly one path; bare `-q` prints the three paths. Works once the session is **published** or **partial** (a partial run prints `cards N in deck · M failed`); exits `4` otherwise.
-- `kamishibai regenerate <id> (--failed | --card TERM [--note "..."])` — drop cached artifacts so the next `generate` rebuilds them: every unfinished card with `--failed`, or one card by `--card`. With `--note`, Gemini first rewrites that card from the instruction (a Gemini call), then its artifacts are dropped; a later curation discards the rewrite. Prints the id.
-- `kamishibai cancel <id>` — stop the running worker (leaves an already-finished session — published/partial/failed — unchanged). Always exits `0` with a correct final phase, even when it races the worker finishing.
-- `kamishibai ls [-q]` — list sessions (id · pair · phase · progress; `-- / N` before a plan is committed, `ready/total` after); `-q` prints only ids.
-- `kamishibai rm <id> [--cache]` — delete the session, and with `--cache` its cached card folders.
-- `kamishibai cache-path` — print the cache directory.
+- `kamishibai result <id> [--deck | --pdf | --dir | -q | --json]` — the finished cards (term, meaning, both example sentences, pronunciation, hint) plus the deck/pdf/dir paths. The selectors (`--deck`/`--pdf`/`--dir`) are mutually exclusive, cannot combine with `-q`, and print exactly one path; bare `-q` prints the three paths. Works once the session is **published** or **partial** (a partial run prints `cards N in deck · M failed`); exits `4` otherwise.
+- `kamishibai regenerate <id> (--failed | --card TERM [--note "..."]) [--json]` — drop cached artifacts so the next `generate` rebuilds them: every unfinished card with `--failed`, or one card by `--card`. With `--note`, Gemini first rewrites that card from the instruction (a Gemini call), then its artifacts are dropped; a later curation discards the rewrite. Prints the id.
+- `kamishibai cancel <id> [--json]` — stop the running worker (leaves an already-finished session — published/partial/failed — unchanged). Always exits `0` with a correct final phase, even when it races the worker finishing.
+- `kamishibai ls [-q | --json]` — list sessions (id · pair · phase · progress; `-- / N` before a plan is committed, `ready/total` after); `-q` prints only ids.
+- `kamishibai rm <id> [--cache] [--json]` — delete the session, and with `--cache` its cached card folders.
+- `kamishibai cache-path [--json]` — print the cache directory.
 
 Supported language codes: `en`, `zh`, `es`, `ja`, `fr`, `de`, `ru`, `it`, `pt`, `el`.
 
@@ -150,6 +179,8 @@ deck=$(kamishibai result "$id" --deck)
 ```
 
 `status -q` can return any of `understood`/`generating`/`published`/`partial`/`failed`/`interrupted`/`cancelled`, so a poll loop must break on every terminal phase (`published`, `partial`, `failed`, `interrupted`, `cancelled`), not just `published`, or it spins forever on a failed run. `partial` means the deck was published but some cards failed.
+
+When `jq` is available, `kamishibai status "$id" --json | jq -r .phase` is the structural alternative, and `status --json` carries everything (phase, per-card artifacts, paths) in one call.
 
 ## Cache
 

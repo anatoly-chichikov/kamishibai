@@ -1,17 +1,17 @@
 //! Interactive CLI shell that coordinates app state and background jobs.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 
+use super::bridge::TuiSession;
 use super::card_workflow::{
-    ArtifactOutcome, CardWorkflow, DeckPublishMessage, DeckPublishProgress, TextOutcome,
+    ArtifactOutcome, CardWorkflow, DeckPublishMessage, PublishPhase, PublishProgress, TextOutcome,
 };
 use super::live_generator::{LiveCardGenerator, default_output};
-use super::session::TuiSession;
 use crate::config::{PreferenceStore, Preferences, default_store};
 use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
@@ -60,6 +60,25 @@ struct PendingArtifactJob {
     job: PendingJob<ArtifactOutcome>,
     card: usize,
     artifact: Artifact,
+}
+
+/// Channel adapter that forwards publish-phase changes into the shell's
+/// publish-job mailbox, implementing the UI-neutral [`PublishProgress`] port.
+struct DeckPublishProgress {
+    sender: Sender<DeckPublishMessage>,
+}
+
+impl DeckPublishProgress {
+    /// Build progress reporting around a publish message sender.
+    fn new(sender: Sender<DeckPublishMessage>) -> Self {
+        Self { sender }
+    }
+}
+
+impl PublishProgress for DeckPublishProgress {
+    fn advance(&self, phase: PublishPhase) {
+        let _ = self.sender.send(DeckPublishMessage::Phase(phase));
+    }
 }
 
 /// Stateful coordinator for TUI app transitions and background card workflow execution.
@@ -665,7 +684,7 @@ where
         clear_saved_key_in(&self.store);
         self.engine = None;
         self.started = None;
-        let env_available = super::env_has_gemini_key();
+        let env_available = super::terminal::env_has_gemini_key();
         self.app = self
             .app
             .clone()
@@ -775,7 +794,11 @@ where
                 }
             };
             match message {
-                DeckPublishMessage::Phase(kind) => {
+                DeckPublishMessage::Phase(phase) => {
+                    let kind = match phase {
+                        PublishPhase::Deck => BusyKind::PublishingDeck,
+                        PublishPhase::Report => BusyKind::PublishingReport,
+                    };
                     self.app = self.app.clone().busy_kind_swapped(kind);
                     changed = true;
                 }
@@ -866,9 +889,7 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use super::super::card_workflow::{
-        CardGeneration, DeckPublishProgress, DeckPublishing, KeyValidation, TextOutcome,
-    };
+    use super::super::card_workflow::{CardGeneration, DeckPublishing, KeyValidation, TextOutcome};
     use super::*;
     use crate::session::{
         ArtifactFile, BulkCorrection, CardCorrection, CardMeta, CardMetaGeneration, CardRevision,
@@ -1048,13 +1069,13 @@ mod tests {
         fn publish_deck(
             &self,
             drafts: &[CardDraft],
-            progress: &DeckPublishProgress,
+            progress: &dyn PublishProgress,
         ) -> Result<(String, String, String)> {
             self.ready()?;
             if self.publish_fails {
                 anyhow::bail!("publish boom");
             }
-            progress.report_phase(BusyKind::PublishingReport);
+            progress.advance(PublishPhase::Report);
             Ok((
                 format!("local-{}-cards.apkg", drafts.len()),
                 format!("local-{}-cards.pdf", drafts.len()),

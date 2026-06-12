@@ -4,21 +4,24 @@
 //! invocations: `new` (understand the `--word`s) → curate the understanding with
 //! `select`/`exclude`/`correct` → `generate` (a managed background worker
 //! generates and publishes) → `status`/`result`, with `regenerate` to push
-//! corrections. Output is plain text only — never JSON. The one machine-relevant
-//! value of each command (a session id, a path) is printed bare on stdout so it
-//! is captured with `$(...)`; everything else goes to stderr.
+//! corrections. Output defaults to plain text — the one machine-relevant value
+//! of each command (a session id, a path) printed bare on stdout so it is
+//! captured with `$(...)`, everything else on stderr — and [`Render::Json`]
+//! switches it to exactly one JSON document per invocation (see `json`).
 //!
 //! This module is the thin router plus the preconditions every verb shares
 //! (`open_checked`, `refuse_if_live`, `preflight_key`, `reset_to_understood`,
-//! `drop_artifacts`). The verbs themselves live one per concern: `new` (create
-//! and open), `generate` (generate/regenerate), `result` (status/result/ls),
+//! `drop_artifacts`). The verbs themselves live one per concern: `new`,
+//! `generate` (generate/regenerate), `result` (status/result/ls),
 //! `maintenance` (cancel/rm/cache-path), and `curate` (select/exclude/correct).
 //! The clap grammar lives in `args`; `cli.rs` only routes a parsed `Command`.
+//! This layer never links the TUI: `open` hands the checked record to the
+//! caller-supplied [`SessionOpener`] port, which the TUI side implements.
 
 mod args;
-mod bridge;
 mod curate;
 mod generate;
+mod json;
 mod liveness;
 mod maintenance;
 mod new;
@@ -28,7 +31,9 @@ mod view;
 mod worker;
 
 pub(super) use args::Command;
-pub(super) use bridge::TuiSession;
+pub(in crate::cli) use store::{
+    DraftRecord, Phase, ResultRecord, SessionRecord, SessionStore, WorkerHandle, mint_id, now,
+};
 
 use std::fs;
 use std::path::Path;
@@ -42,26 +47,85 @@ use crate::session::{CardCell, LanguagePair};
 
 use super::error::{not_found, usage};
 
-use store::{Phase, SessionRecord, SessionStore};
+/// Port through which `open` hands a checked session to the interactive
+/// surface; the TUI side implements it, so this layer never links the TUI.
+pub(super) trait SessionOpener {
+    /// Take over the terminal with this session resumed.
+    fn open(&self, record: &SessionRecord) -> Result<()>;
+}
+
+/// How a session command renders its stdout: the plain-text contract, or one
+/// JSON document per invocation. A representation choice only — exit codes,
+/// locking, and session semantics are identical in both modes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Render {
+    /// Human-readable plain text (the default contract).
+    Text,
+    /// One machine-readable JSON document per invocation.
+    Json,
+}
 
 /// Route one parsed command to its handler; refusals carry their exit code.
-pub(super) fn handle(command: &Command) -> Result<()> {
+/// JSON-mode grammar conflicts are refused here, before any handler runs, so
+/// the verbs never police the flag themselves.
+pub(super) fn handle(command: &Command, render: Render, opener: &dyn SessionOpener) -> Result<()> {
+    refuse_json_conflicts(command, render)?;
     match command {
-        Command::New(args) => new::new(args),
-        Command::Open(args) => new::open(args),
-        Command::Select(args) => curate::select(args),
-        Command::Exclude(args) => curate::exclude(args),
-        Command::Correct(args) => curate::correct(args),
-        Command::Generate(args) => generate::generate(args),
-        Command::Status(args) => result::status(args),
-        Command::Regenerate(args) => generate::regenerate(args),
-        Command::Result(args) => result::result(args),
-        Command::Cancel(args) => maintenance::cancel(args),
-        Command::Ls(args) => result::ls(args),
-        Command::Rm(args) => maintenance::rm(args),
-        Command::CachePath => maintenance::cache_path(),
+        Command::New(args) => new::new(args, render),
+        Command::Open(args) => open(args, opener),
+        Command::Select(args) => curate::select(args, render),
+        Command::Exclude(args) => curate::exclude(args, render),
+        Command::Correct(args) => curate::correct(args, render),
+        Command::Generate(args) => generate::generate(args, render),
+        Command::Status(args) => result::status(args, render),
+        Command::Regenerate(args) => generate::regenerate(args, render),
+        Command::Result(args) => result::result(args, render),
+        Command::Cancel(args) => maintenance::cancel(args, render),
+        Command::Ls(args) => result::ls(args, render),
+        Command::Rm(args) => maintenance::rm(args, render),
+        Command::CachePath => maintenance::cache_path(render),
         Command::Worker(args) => worker::run_detached_entry(args.id.as_str()),
     }
+}
+
+/// Refuse `--json` combinations that would fight over stdout: `-q` (a plain
+/// projection), the `result` path selectors (paths are document fields), and
+/// the interactive `open`.
+fn refuse_json_conflicts(command: &Command, render: Render) -> Result<()> {
+    if matches!(render, Render::Text) {
+        return Ok(());
+    }
+    let quiet = match command {
+        Command::Open(_) => {
+            return Err(usage("open is interactive; --json does not apply"));
+        }
+        Command::Result(args) if args.deck || args.pdf || args.dir => {
+            return Err(usage(
+                "--json carries the paths as fields; drop --deck/--pdf/--dir",
+            ));
+        }
+        Command::New(args) => args.quiet,
+        Command::Generate(args) => args.quiet,
+        Command::Status(args) => args.quiet,
+        Command::Result(args) => args.quiet,
+        Command::Ls(args) => args.quiet,
+        _ => false,
+    };
+    if quiet {
+        return Err(usage(
+            "--json and -q are mutually exclusive; the JSON document is already capturable",
+        ));
+    }
+    Ok(())
+}
+
+/// Check the session exists and is not being generated, then resume it through
+/// the caller's interactive surface.
+fn open(args: &args::IdArg, opener: &dyn SessionOpener) -> Result<()> {
+    let store = SessionStore::system()?;
+    let record = open_checked(&store, args.id.as_str())?;
+    refuse_if_live(&store, &record)?;
+    opener.open(&record)
 }
 
 /// Open one session, refusing with the not-found exit code (3) when it is
