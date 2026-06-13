@@ -58,25 +58,20 @@ kamishibai path/to/words.json
 For scripts and agents, kamishibai also runs headless as a curatable, asynchronous **session**: understand the words, curate which senses become cards, run a background worker that generates and publishes, poll for status, fetch the result.
 
 ```bash
-# 1. understand the words and create a session — prints the id
-kamishibai new --word "you're gonna get yours" --word bank --from ru --to en --out ./deck
+# understand a few words and create a session
+kamishibai new --word flâner --word canard --from en --to fr --out ./deck
 
-# 2. curate the understanding (optional) — with one session in play, no id needed
-kamishibai status                        # the candidates and their senses
-kamishibai select --card bank --sense 2  # keep only the river-bank sense
-kamishibai exclude --card bank           # …or drop the card entirely
+# curate (optional) — with one session in play, no id needed
+kamishibai status                          # the candidates and their senses
+kamishibai select --card canard --sense 2  # keep the "hoax" sense, not "duck"
 
-# 3. generate + publish in the background, then poll
+# generate + publish in the background, then poll for the result
 kamishibai generate
-kamishibai status                # phase + per-card progress (no Gemini); -q for just the phase
-kamishibai result                # the finished cards + deck.apkg / deck.pdf paths
-
-# re-roll a committed card
-kamishibai regenerate --failed
-kamishibai regenerate --card bank --note "make the sentence shorter"
+kamishibai status                          # phase + per-card progress; -q for just the phase
+kamishibai result                          # the finished cards + deck.apkg / deck.pdf paths
 ```
 
-The output is plain text by default: stdout carries the one capturable value (id, or paths), everything else goes to stderr, so `id=$(kamishibai new --word bank)` just works. The id itself is optional — with one session in play every command finds it on its own. Every session verb also takes `--json` for exactly one JSON document per call — same exit codes, machine-readable error envelope. Sessions are idempotent and cache-backed: the cache holds one folder per card under `kamishibai cache-path`, so a re-run resumes from disk and only fills in what is missing. The TUI shares the same sessions — `kamishibai open "$id"` resumes one interactively. The full console reference with example outputs lives in [docs/console.md](docs/console.md); agents should read [llms.txt](llms.txt) for the machine contract.
+Output is plain text by default (`--json` for a machine-readable document); the id is optional when one session is in play. Run `kamishibai --help` for the full verb list and exit codes; agents should read [llms.txt](llms.txt) for the machine contract.
 
 ## Languages
 

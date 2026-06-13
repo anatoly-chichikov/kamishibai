@@ -84,83 +84,83 @@ Supported language codes: `en`, `zh`, `es`, `ja`, `fr`, `de`, `ru`, `it`, `pt`, 
 
 ## Example renderings
 
-`kamishibai new --word "you're gonna get yours" --word bank --from ru --to en` (preview on **stderr**, id on **stdout**):
+`kamishibai new --word flâner --word canard --from en --to fr` (preview on **stderr**, id on **stdout**):
 
 ```
-understanding 2 word(s) · ru → en
-you're gonna get yours
-  card  разг.   Идиом. «ты получишь по заслугам», обещание неизбежного наказания за проступки.
-bank
-  card  фин.    Сущ. «банк», организация для хранения денег.
-  skip          Сущ. «берег» реки, озера, любого природного водоёма.
-session en-…_0cfy · senses=primary · generate: kamishibai generate en-…_0cfy
+understanding 2 word(s) · en → fr
+flâner
+  card  verb    to stroll, to wander idly with no destination in mind.
+canard
+  card  zool.   a duck, the waterfowl.
+  skip  press   a hoax, a fabricated story planted in a newspaper.
+session fr-…_0cfy · senses=primary · generate: kamishibai generate fr-…_0cfy
 ```
 ```
-en-…_0cfy
+fr-…_0cfy
 ```
 
 `kamishibai status <id>` while **understood** (stdout) — the curatable candidates, `*` marks a selected sense:
 
 ```
-session  en-…_0cfy
-pair     ru → en
+session  fr-…_0cfy
+pair     en → fr
 senses   primary
 phase    understood
 words    2 understood · 2 card(s) selected
-word  you're gonna get yours   card
-  *  1  разг.   Идиом. «ты получишь по заслугам», обещание неизбежного наказания за проступки.
-word  bank   card
-  *  1  фин.    Сущ. «банк», организация для хранения денег.
-     2          Сущ. «берег» реки, озера, любого природного водоёма.
+word  flâner   card
+  *  1  verb    to stroll, to wander idly with no destination in mind.
+word  canard   card
+  *  1  zool.   a duck, the waterfowl.
+     2  press   a hoax, a fabricated story planted in a newspaper.
 out   /Users/you/kamishibai-out
 ```
 
-Curate, then commit — e.g. keep only the river-bank sense of `bank`, then start generating:
+Curate, then commit — e.g. keep the `press` sense of `canard` instead of `duck`, then start generating:
 
 ```
-kamishibai select en-…_0cfy --card bank --sense 2   # stderr: selected sense(s) 2 of 'bank'
-kamishibai generate en-…_0cfy
+kamishibai select fr-…_0cfy --card canard --sense 2   # stderr: selected sense(s) 2 of 'canard'
+kamishibai generate fr-…_0cfy
 ```
 
 `kamishibai status <id>` while **generating** (stdout) — `meta:ok scene:--` means present/absent; `status -q` prints just `generating`:
 
 ```
-session  en-…_0cfy
-pair     ru → en
+session  fr-…_0cfy
+pair     en → fr
 senses   primary
 phase    generating
 worker   pid 48213 alive
 cards    2 total · 1 ready · 0 failed
-card  you're gonna get yours   meta:ok sound:ok scene:ok picture:ok   ready
-card  bank                     meta:ok sound:ok scene:-- picture:--   building
+card  flâner   meta:ok sound:ok scene:ok picture:ok   ready
+card  canard   meta:ok sound:ok scene:-- picture:--   building
 out   /Users/you/kamishibai-out
 ```
 
 `kamishibai result <id>` (stdout) — the finished cards plus paths:
 
 ```
-session  en-…_0cfy
-pair     ru → en
-deck     /Users/you/kamishibai-out/en_….apkg
-pdf      /Users/you/kamishibai-out/en_….pdf
+session  fr-…_0cfy
+pair     en → fr
+deck     /Users/you/kamishibai-out/fr_….apkg
+pdf      /Users/you/kamishibai-out/fr_….pdf
 dir      /Users/you/kamishibai-out
 
-card 1/2  you're gonna get yours   importance 4
-  meaning  ты получишь по заслугам, тебе это ещё аукнется
-  say      jʊr ˈɡʌnə ˈɡɛt jʊrz
-  en       Keep acting like a bully, and you're gonna get yours sooner or later.
-  ru       Продолжай вести себя как задира, и «ты получишь по заслугам» рано или поздно.
-  hint     Не официальный судебный вердикт punish, а зловещее обещание уличной мести.
+card 1/2  flâner   importance 6
+  meaning  to stroll, to wander idly with no destination
+  say      flɑ.ne
+  fr       J'aime flâner le long de la Seine le dimanche après-midi.
+  en       I love to «stroll» along the Seine on Sunday afternoons.
+  hint     unhurried, pleasure-led walking, never commuting.
 ```
 
 `generate --wait` streams progress on stderr with stable tokens, then prints the three paths on stdout:
 
 ```
 generating 2 card(s)…
-  cache  you're gonna get yours · meta
-  ok     bank · meta
-  retry  bank · picture (1/3)
-  ok     bank · picture
+  cache  flâner · meta
+  ok     canard · meta
+  retry  canard · picture (1/3)
+  ok     canard · picture
 building deck and report…
 done: 2 card(s) published
 ```
@@ -168,8 +168,8 @@ done: 2 card(s) published
 ## Capturing values (no filtering)
 
 ```
-id=$(kamishibai new --word "you're gonna get yours" --word bank --from ru --to en)
-kamishibai exclude "$id" --card bank          # optional curation, prints "$id" again
+id=$(kamishibai new --word flâner --word canard --from en --to fr)
+kamishibai exclude "$id" --card canard        # optional curation, prints "$id" again
 kamishibai generate "$id"
 while :; do
   case "$(kamishibai status "$id" -q)" in
