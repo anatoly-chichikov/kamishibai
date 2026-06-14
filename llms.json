@@ -1,0 +1,266 @@
+{
+  "contract": "kamishibai console — machine contract for agents",
+  "release": "1.3",
+  "overview": "kamishibai turns a list of words into an illustrated Anki deck (one card per word: a native example sentence, native-speaker audio, and a manga panel) using Google Gemini. This document is the headless console contract. Running `kamishibai` with no arguments opens an interactive TUI, which is out of scope here.",
+  "model": {
+    "calls_are_synchronous": "Each command is one process call that runs to completion, prints exactly one JSON document on stdout, and exits. There is no daemon, socket, or open stream. You drive the flow by calling commands in sequence and reading each document.",
+    "always_json": "Pass --json after the verb on every call. Plain text is for humans, has no stable shape, and prints nothing bare to capture.",
+    "session": "A session is the persistent unit of work, created by `new` and stored on disk. It holds the words, the proposed senses, your curation, the committed plan, the worker, and the result — so you curate and generate across separate calls without re-sending anything. Create one session per batch of words and reuse it; do not call `new` again to re-read or rebuild — use `status`, `result`, or `regenerate`.",
+    "id_is_implicit": "Every verb takes an optional <id> but you normally omit it: a lone session, or the lone unfinished one, is resolved automatically, so a single-batch workflow never captures or passes an id. If several sessions match, the verb refuses with exit 5 and lists candidates in `.sessions`; only then pass an id. Read `.session` from any document when you do need it.",
+    "generation_runs_a_background_worker": "Calls are synchronous, but the worker-backed ones keep working after they return: `generate`, `regenerate`, and `new --generate` start a detached worker and return at once with phase=generating. Poll `status --json` at a relaxed interval (every few seconds — never tight-loop) until `.phase` is terminal (published/partial/failed/interrupted/cancelled). Or pass --wait to hold the process open until it finishes, streaming NDJSON events on stderr. `new` and `correct` also call Gemini and take a few seconds, but they finish before they return.",
+    "lifecycle": "understood -> (curate) -> generating -> published | partial | failed. understood: senses proposed and curatable. generating: a worker is building. published: every card made the deck. partial: some cards failed, the deck holds the rest (use `regenerate --failed`). failed: no card survived. interrupted: a worker died. cancelled: you stopped it.",
+    "idempotent_and_cached": "Generation is cache-backed and idempotent. A killed, interrupted, or partial run resumes and fills only what is missing, so re-running `generate` is cheap and safe."
+  },
+  "invocation": {
+    "json_flag": "--json, placed after the verb. Before the verb it is a parse error.",
+    "stdout": "Exactly one JSON document per call — the success document, or on any failure the error envelope. Nothing else is ever written to stdout; this is the only strict channel.",
+    "stderr": "Human narration, plus the NDJSON event stream under `generate`/`regenerate --wait`. May also carry lower-layer noise (e.g. model downloads). Ignore lines that do not parse as JSON; stderr is not strict.",
+    "error_envelope": "{\"ok\":false,\"error\":{\"code\":\"usage|not_found|not_ready|ambiguous|operational\",\"exit\":2|3|4|5|1,\"message\":\"...\"}}. The ambiguous envelope additionally carries a top-level `sessions` array (newest five, same shape as an ls item).",
+    "exit_codes": {
+      "0": "ok",
+      "2": "usage — the invocation, state, or config is wrong; fix it before retrying",
+      "3": "no such session",
+      "4": "not ready yet — the only retryable refusal (e.g. result before publish)",
+      "5": "ambiguous — an omitted id matched several sessions; pass one",
+      "1": "other / operational error"
+    },
+    "exit_code_is_the_signal": "Branch on the exit code first, then read the document. Codes, locking, idempotency, and session semantics are identical with or without --json; --json changes only representation.",
+    "language_codes_uppercase": "All language codes are uppercase in every document, id, cache path, and deck filename (EN, FR, JA, ...). Input accepts any case and is normalised.",
+    "schema_is_additive": "Future versions only add keys — none are renamed or removed."
+  },
+  "commands": {
+    "new": {
+      "purpose": "Understand each word — Gemini proposes its senses — and create a session in the understood stage. The entry point.",
+      "signature": "new (--word W [--word W ...] | --words FILE | --build FILE) [--learning L] [--known L] [--senses primary|all] [--out DIR] [--id NAME] [--generate]",
+      "input_forms": "Exactly one: repeated --word (one card per word); --words FILE (one word per line, - = stdin); --build FILE (a strict cards JSON path or -, skips understanding, carries the language pair, so --known/--learning/--senses are rejected with it).",
+      "params": "--learning is autodetected from the words; pass it only to force a language. --known resolves from saved config and is required (exit 2) when never set — save it once with `config --known`. --senses sets the initial selection (primary = top sense, all = every sense); `select` overrides later. --out sets the output directory. --generate commits and starts the worker immediately.",
+      "returns": "session document (phase=understood, or generating with --generate)"
+    },
+    "select": {
+      "purpose": "Pick which 1-based senses of a card become cards, and re-include a previously excluded card.",
+      "signature": "select [<id>] --card TERM --sense 1,3",
+      "notes": "Sense numbers are the 1-based positions in the candidate's `senses` array. Resets the session to understood.",
+      "returns": "session document"
+    },
+    "exclude": {
+      "purpose": "Drop a card from the plan while keeping it visible in the understanding.",
+      "signature": "exclude [<id>] --card TERM",
+      "notes": "Resets the session to understood.",
+      "returns": "session document"
+    },
+    "correct": {
+      "purpose": "Ask Gemini to add senses to a card from a free-text instruction.",
+      "signature": "correct [<id>] --card TERM --note \"...\"",
+      "notes": "Resets the session to understood.",
+      "returns": "session document"
+    },
+    "generate": {
+      "purpose": "Commit the curated plan, then generate and publish the deck. The only step that runs in a background worker.",
+      "signature": "generate [<id>] [--wait]",
+      "async": "Detached by default: returns at once with phase=generating; poll `status`. With --wait: blocks, streams NDJSON events on stderr, and returns the terminal document — or, if every card fails, exits 1 with the error envelope.",
+      "fails_when": "nothing is selected (exit 2)",
+      "returns": "session document"
+    },
+    "status": {
+      "purpose": "Read the current state from the cache — no Gemini, instant. Use it to poll generation and to inspect curation.",
+      "signature": "status [<id>]",
+      "returns": "session document — candidates before a plan is committed, per-card artifacts after"
+    },
+    "open": {
+      "purpose": "Open the session in the interactive TUI, resuming from the cache.",
+      "signature": "open [<id>]",
+      "notes": "Interactive; refuses --json (exit 2). Not for agents.",
+      "returns": "(interactive)"
+    },
+    "result": {
+      "purpose": "Read the finished deck: the deck/pdf/dir paths plus full per-card data as round-trippable cards-JSON entries.",
+      "signature": "result [<id>]",
+      "ready_when": "phase is published or partial; otherwise exit 4",
+      "returns": "result document"
+    },
+    "regenerate": {
+      "purpose": "Re-roll committed cards: drop their cached artifacts, then rebuild and republish.",
+      "signature": "regenerate [<id>] (--failed | --card TERM [--note \"...\"]) [--wait]",
+      "notes": "--failed re-rolls every unfinished card; --card re-rolls one; --card --note first rewrites that card via Gemini (synchronously, before the rebuild). Then it runs a worker exactly like `generate` — same detached/--wait behaviour and return.",
+      "returns": "session document"
+    },
+    "cancel": {
+      "purpose": "Stop the running worker. Cached artifacts survive, so a later `generate` resumes.",
+      "signature": "cancel [<id>]",
+      "notes": "Always exits 0 with the correct final phase, even when it races a finishing worker — gate on `phase`, not `ok`.",
+      "returns": "session document"
+    },
+    "ls": {
+      "purpose": "List sessions, one summary each.",
+      "signature": "ls",
+      "returns": "{\"ok\":true,\"sessions\":[ls_item, ...]} (may be empty)"
+    },
+    "rm": {
+      "purpose": "Delete a session; with --cache also delete its cached card folders.",
+      "signature": "rm [<id>] [--cache]",
+      "returns": "{\"ok\":true,\"removed\":\"<id>\"}"
+    },
+    "cache-path": {
+      "purpose": "Print the cache directory.",
+      "signature": "cache-path",
+      "returns": "{\"ok\":true,\"cache\":\"/...\"}"
+    },
+    "config": {
+      "purpose": "Save console defaults (known language, Gemini key) so `new` needs no flags; with no flags, show them.",
+      "signature": "config [--known L] [--key K]",
+      "notes": "--known is validated against the catalog and saved uppercase. --key is verified against Gemini before saving (- reads stdin, \"\" clears it) and is never returned.",
+      "returns": "{\"ok\":true,\"known\":\"EN\",\"key_saved\":true} (known omitted until one is saved)"
+    }
+  },
+  "documents": {
+    "session_document": {
+      "description": "Returned by every stateful verb (new, select, exclude, correct, generate, regenerate, cancel, status). Mutating verbs return the post-mutation state, so no follow-up status is needed.",
+      "presence_rules": [
+        "phase is always present: one of understood/generating/published/partial/failed/interrupted/cancelled (the live reconciliation).",
+        "candidates is present whenever the record holds curatable senses (it persists after commit); cards is present once a plan is committed — so both appear together during and after generation.",
+        "worker, progress, result, error appear only when present — absent fields are omitted, never null.",
+        "progress appears only while generating.",
+        "A sense's 1-based position in its `senses` array is its `select --sense` number.",
+        "A card's state is derived, not given: artifacts meta -> sound -> scene -> picture are strictly sequential; all four true means the card is in the deck, and the first false artifact is where it stands (in progress while generating, where it failed under partial/failed)."
+      ],
+      "example": {
+        "ok": true,
+        "session": "FR-20260614_091500_ab3x",
+        "created": "2026-06-14T09:15:00Z",
+        "pair": { "known": "EN", "learning": "FR" },
+        "senses": "primary",
+        "source": "words",
+        "out": "/abs/out",
+        "phase": "generating",
+        "worker": { "pid": 4242, "alive": true },
+        "progress": { "term": "canard", "artifact": "scene" },
+        "candidates": {
+          "items": [
+            {
+              "term": "canard",
+              "included": true,
+              "senses": [
+                { "tag": "zool.", "understanding": "a duck", "selected": true },
+                { "understanding": "a hoax", "selected": false }
+              ]
+            }
+          ]
+        },
+        "cards": {
+          "items": [
+            {
+              "term": "canard",
+              "understanding": "a duck",
+              "artifacts": { "meta": true, "sound": true, "scene": false, "picture": false }
+            }
+          ]
+        }
+      }
+    },
+    "result_document": {
+      "description": "Returned by `result`. `items` are strict cards-JSON entries (the exact `new --build` schema, with uppercase `lang`), so they round-trip into a new session.",
+      "example": {
+        "ok": true,
+        "session": "FR-20260614_091500_ab3x",
+        "pair": { "known": "EN", "learning": "FR" },
+        "phase": "published",
+        "paths": { "deck": "/o/FR.apkg", "pdf": "/o/FR.pdf", "dir": "/o" },
+        "failed": 0,
+        "items": ["...strict cards-JSON entries..."]
+      }
+    },
+    "ls_item": {
+      "description": "One entry in the `ls` (and ambiguous-envelope) sessions array.",
+      "example": {
+        "id": "FR-20260614_091500_ab3x",
+        "pair": { "known": "EN", "learning": "FR" },
+        "created": "2026-06-14T09:15:00Z",
+        "phase": "published",
+        "cards": { "total": 2, "ready": 2 }
+      },
+      "note": "Before a plan is committed the entry carries `\"selected\":N` instead of `cards`."
+    },
+    "wait_events": {
+      "description": "NDJSON lines on stderr while `generate`/`regenerate --wait` runs (the final session document still goes to stdout). attempt/ceiling appear only on retry/fail.",
+      "examples": [
+        { "event": "generating", "cards": 2 },
+        { "event": "step", "term": "canard", "artifact": "picture", "status": "retry", "attempt": 1, "ceiling": 3 },
+        { "event": "step", "term": "canard", "artifact": "picture", "status": "ok" },
+        { "event": "publishing" },
+        { "event": "warning", "message": "..." }
+      ],
+      "step_status": "ok | cache | retry | fail; artifact is one of meta | sound | scene | picture",
+      "terminal": "On --wait, stdout carries the final document: phase=published or partial. A run where every card failed exits 1 with the error envelope (status then shows phase=failed). A cancel that raced in yields ok:true with phase=cancelled and no result — gate on phase, not ok."
+    }
+  },
+  "requirements": {
+    "gemini_key": "Required only for the commands that call Gemini: new --word/--words, correct, generate, regenerate, and config --key. Offline (no key): status, result, ls, rm, cache-path, select, exclude, cancel, and new --build (its later generation still needs a key). Set GEMINI_API_KEY (it wins) or save one with `config --key`; a saved key means GEMINI_API_KEY need not be set.",
+    "ocr_models": "The first OCR-backed run downloads PP-OCRv5 model files into the cache."
+  },
+  "languages": [
+    { "code": "EN", "name": "English" },
+    { "code": "ZH", "name": "Chinese" },
+    { "code": "ES", "name": "Spanish" },
+    { "code": "JA", "name": "Japanese" },
+    { "code": "FR", "name": "French" },
+    { "code": "DE", "name": "German" },
+    { "code": "RU", "name": "Russian" },
+    { "code": "IT", "name": "Italian" },
+    { "code": "PT", "name": "Portuguese" },
+    { "code": "EL", "name": "Greek" }
+  ],
+  "input_schema": {
+    "purpose": "The strict cards JSON for `new --build FILE` (path or - for stdin). Every field is required; unknown fields are rejected.",
+    "rules": "importance is an integer 1-10; text fields and language codes must be non-empty; language codes accept any case and are normalised to uppercase in the session.",
+    "example": {
+      "entries": [
+        {
+          "term": "lantern",
+          "meaning": "a portable lamp",
+          "pronunciation": "LAN-tern",
+          "transcription": "/lantern/",
+          "importance": 7,
+          "source": {
+            "sentence": "I carried a lantern through the dark hallway.",
+            "lang": "en",
+            "highlight": "lantern",
+            "hint": "portable light",
+            "context": "a simple everyday sentence"
+          },
+          "target": { "sentence": "Ich trug eine Laterne durch den dunklen Flur.", "lang": "de" }
+        }
+      ]
+    }
+  },
+  "cache": {
+    "where": "Printed by `cache-path`. macOS ~/Library/Caches/kamishibai; Linux $XDG_CACHE_HOME/kamishibai or ~/.cache/kamishibai. Override with KAMISHIBAI_CACHE.",
+    "preferences": "Saved language and key live under the data home (macOS ~/Library/Application Support/kamishibai; Linux $XDG_DATA_HOME or ~/.local/share/kamishibai). Override with KAMISHIBAI_DATA.",
+    "layout": {
+      "cards": "<cache>/cards/<KNOWN>-<LEARNING>/<key>/  -> meta.json, scene.json, voice.wav, illustration.jpg",
+      "understanding": "<cache>/understanding/<KNOWN>-<LEARNING>/<key>.json",
+      "sessions": "<cache>/sessions/<id>/  -> session.json, worker.log",
+      "ocr_models": "<cache>/ocr-models/  -> shared OCR model files"
+    },
+    "notes": "<key> is a short content hash. `status` derives a card's readiness from which artifact files exist; deleting a card's folder forces it to regenerate on the next `generate`."
+  },
+  "script_example": {
+    "language": "bash",
+    "note": "A single-batch workflow needs no id — omit it everywhere. Break the poll loop on every terminal phase, not just published, or it spins forever on a failed run.",
+    "lines": [
+      "set -euo pipefail",
+      "kamishibai new --word flâner --word canard --known en --learning fr --json >/dev/null",
+      "kamishibai exclude --card canard --json >/dev/null   # optional curation",
+      "kamishibai generate --json >/dev/null                # detached worker",
+      "while :; do",
+      "  phase=$(kamishibai status --json | jq -r .phase)",
+      "  case \"$phase\" in",
+      "    published) break ;;",
+      "    partial)   echo 'some cards failed; deck is partial' >&2; break ;;",
+      "    failed|interrupted|cancelled) echo 'generation did not finish' >&2; exit 1 ;;",
+      "    *) sleep 5 ;;",
+      "  esac",
+      "done",
+      "deck=$(kamishibai result --json | jq -r .paths.deck)"
+    ]
+  }
+}

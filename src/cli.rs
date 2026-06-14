@@ -24,9 +24,9 @@ use clap::Parser;
 const SCHEMA_HELP: &str = "\
 AGENT CONTRACT:
   Driving this from a script or agent? The full machine-readable contract —
-  every command, flag, JSON shape, and exit code — is llms.txt at the repo root.
-  Fetch and read it before integrating:
-  https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/llms.txt
+  every command, flag, JSON shape, and exit code — is llms.json at the repo
+  root: one parseable JSON document. Fetch and read it before integrating:
+  https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/llms.json
 
 EXAMPLES:
   kamishibai                                       open the interactive TUI
@@ -91,7 +91,7 @@ native-speaker audio, and manga-style illustrations.";
     name = "kamishibai",
     version,
     about = "Turn a list of words into an illustrated Anki deck — sentences, native-speaker audio, manga-style art.",
-    after_help = "Agent or script? Read the machine contract: https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/llms.txt",
+    after_help = "Agent or script? Read the machine contract: https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/llms.json",
     after_long_help = SCHEMA_HELP,
     args_conflicts_with_subcommands = true
 )]

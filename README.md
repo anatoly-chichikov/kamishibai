@@ -55,15 +55,15 @@ kamishibai path/to/words.json
 
 ## Console
 
-Most people just use the TUI above. If you'd rather run it yourself from the terminal, kamishibai also works headless — it understands the words, generates in the background, and writes the deck:
+Prefer the terminal? kamishibai also runs headless — it understands the words, builds the deck in the background, and writes it out:
 
 ```bash
 kamishibai new --word flâner --word canard   # creates a session; the language is autodetected
-kamishibai generate                          # generate + publish in the background
+kamishibai generate --wait                   # generate + publish, blocking until done
 kamishibai result                            # the finished cards + deck.apkg / deck.pdf
 ```
 
-The first run guides you through your language and Gemini key. Building an agent? [llms.txt](llms.txt) is the full machine contract.
+Set your language and Gemini key once — through the TUI's welcome screen or `kamishibai config`. Building an agent? [llms.json](llms.json) is the full machine contract.
 
 ## Languages
 
