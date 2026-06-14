@@ -155,7 +155,7 @@ fn language_row(app: &App) -> Paragraph<'static> {
         label_style,
     ));
     spans.push(chevron(active));
-    let current = app.pair().support().to_ascii_lowercase();
+    let current = app.pair().known().to_ascii_lowercase();
     for code in catalog().codes() {
         let label = code.to_ascii_uppercase();
         let is_active = code == current;

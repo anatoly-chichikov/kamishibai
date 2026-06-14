@@ -27,6 +27,21 @@ impl VocabularyDocument {
         }
         Ok(document)
     }
+
+    /// Parse one strict vocabulary document from a JSON string, for example a
+    /// document piped in on standard input rather than read from a file.
+    pub fn parse(text: &str) -> Result<Self> {
+        let data = serde_json::from_str::<Value>(text)?;
+        if !data.is_object() {
+            bail!("Expected a JSON object but found {}", kind(&data));
+        }
+        let document = serde_json::from_value::<Self>(data)
+            .map_err(|error| anyhow!("Invalid document: {error}"))?;
+        if document.entries.is_empty() {
+            bail!("Expected at least one entry");
+        }
+        Ok(document)
+    }
 }
 
 /// Return the JSON-style type label used in input errors.

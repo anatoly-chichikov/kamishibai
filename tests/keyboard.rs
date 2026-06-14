@@ -77,7 +77,7 @@ fn ctrl_g_on_your_words_advances_to_what_i_understood_with_language_pair_visible
         "Ctrl+G must produce the generation event"
     );
     let (after, _) = transit(state, submit);
-    let next = after.confirmed_target("en");
+    let next = after.confirmed_learning("en");
     assert_eq!(
         (
             next.screen(),

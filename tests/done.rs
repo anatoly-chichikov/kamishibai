@@ -25,7 +25,7 @@ fn flat(app: &App) -> String {
 fn published() -> App {
     App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::Done)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .done_published(
             "en_2026-04-17_183029.apkg",
             "en_2026-04-17_183029.pdf",

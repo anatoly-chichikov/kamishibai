@@ -135,6 +135,9 @@ pub fn data_home<C>(context: &C) -> Result<PathBuf>
 where
     C: Context,
 {
+    if let Some(path) = context.var("KAMISHIBAI_DATA") {
+        return resolve(context, Path::new(path.as_str()));
+    }
     if context.platform() == Platform::Darwin {
         return Ok(normalize(
             context.home()?.join("Library").join("Application Support"),

@@ -72,7 +72,7 @@ fn ctrl_l_on_welcome_language_step_cycles_the_language() {
         (
             after.screen(),
             after.welcome().stage,
-            after.pair().support().to_string(),
+            after.pair().known().to_string(),
             side,
         ),
         (
@@ -230,10 +230,10 @@ fn rejected_key_notice_renders_on_the_key_step() {
 
 #[test]
 fn language_badge_is_consistent_across_every_fullscreen_screen() {
-    let your_words = base().confirmed_target("en");
+    let your_words = base().confirmed_learning("en");
     let what_i_understood = base()
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![WordCandidate::new(
             "whilst",
             "neutral conjunction",
@@ -241,7 +241,7 @@ fn language_badge_is_consistent_across_every_fullscreen_screen() {
         )]);
     let your_cards = base()
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .cards_started(vec![
             CardDraft::new("whilst", "understanding", LanguagePair::new("en", "ru"))
                 .with_meta(meta_for("whilst"), None)
@@ -249,7 +249,7 @@ fn language_badge_is_consistent_across_every_fullscreen_screen() {
         ]);
     let done = base()
         .with_screen(Screen::Done)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .done_published("deck.apkg", "report.pdf", "out/");
     for app in [your_words, what_i_understood, your_cards, done] {
         let rendered = flat(&app);
@@ -274,7 +274,7 @@ fn your_words_shows_detecting_marker_before_target_is_confirmed() {
 fn picking_my_language_on_what_i_understood_persists_the_new_code() {
     let app = base()
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en");
+        .confirmed_learning("en");
     let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
     assert_eq!(
         opened.modal(),
@@ -283,7 +283,7 @@ fn picking_my_language_on_what_i_understood_persists_the_new_code() {
     );
     let (after, side) = transit(opened, AppEvent::SetMyLanguage(String::from("es")));
     assert_eq!(
-        (after.modal(), after.pair().support().to_string(), side,),
+        (after.modal(), after.pair().known().to_string(), side,),
         (
             None,
             String::from("es"),
@@ -297,11 +297,11 @@ fn picking_my_language_on_what_i_understood_persists_the_new_code() {
 fn letter_l_on_done_is_not_a_hidden_language_shortcut() {
     let app = base()
         .with_screen(Screen::Done)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .done_published("deck.apkg", "report.pdf", "out/");
     let (after, side) = transit(app, AppEvent::KeyChar('l'));
     assert_eq!(
-        (after.pair().support().to_string(), side),
+        (after.pair().known().to_string(), side),
         (String::from("ru"), Side::None),
         "letter L on Done must not be a hidden language shortcut"
     );
@@ -309,7 +309,7 @@ fn letter_l_on_done_is_not_a_hidden_language_shortcut() {
 
 #[test]
 fn picker_modal_opens_with_the_active_language_preselected_and_arrows_cycle_through_the_catalog() {
-    let app = base().confirmed_target("en");
+    let app = base().confirmed_learning("en");
     let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
     let codes = kamishibai::languages::catalog().codes();
     let initial = codes
@@ -333,7 +333,7 @@ fn picker_modal_opens_with_the_active_language_preselected_and_arrows_cycle_thro
 #[test]
 fn picker_does_not_open_on_your_cards_or_done_because_the_pair_is_frozen() {
     for screen in [Screen::YourCards, Screen::Done] {
-        let app = base().with_screen(screen).confirmed_target("en");
+        let app = base().with_screen(screen).confirmed_learning("en");
         let (after, side) = transit(app, AppEvent::OpenLanguagePicker);
         assert_eq!(
             (after.modal(), side),
@@ -352,7 +352,7 @@ fn picking_my_language_through_transit_writes_to_the_preference_store() {
         .expect("seed my language");
     let app = base()
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en");
+        .confirmed_learning("en");
     let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
     let (after, side) = transit(opened, AppEvent::SetMyLanguage(String::from("es")));
     if let Side::PersistMyLanguage(code) = side {
@@ -362,7 +362,7 @@ fn picking_my_language_through_transit_writes_to_the_preference_store() {
     }
     let restored = store.read().expect("reload preferences").my_language;
     assert_eq!(
-        (after.pair().support().to_string(), restored),
+        (after.pair().known().to_string(), restored),
         (String::from("es"), String::from("es")),
         "picking a language through the modal must update both the session pair and the persisted preference"
     );
@@ -380,7 +380,7 @@ fn typing_letter_l_inside_your_words_does_not_rotate_the_language() {
         state = transit(state, event).0;
     }
     assert_eq!(
-        state.pair().support().to_string(),
+        state.pair().known().to_string(),
         "ru",
         "letter L inside Your words blob must be treated as user input, not as a global shortcut"
     );

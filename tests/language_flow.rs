@@ -11,7 +11,7 @@
 
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::languages::catalog;
-use kamishibai::session::{LanguagePair, ScriptDetection, TargetDetection, TargetGuess};
+use kamishibai::session::{LanguagePair, LearningDetection, LearningGuess, ScriptDetection};
 use tempfile::tempdir;
 
 struct MockedUnderstanding {
@@ -50,10 +50,10 @@ fn flow_resolves_pair_and_confirms_candidates_without_network_calls() {
             String::from("wreck"),
         ],
     }
-    .pass(raw, pair.target());
+    .pass(raw, pair.learning());
     assert_eq!(
         (guess, pair.label(), candidates.len(),),
-        (TargetGuess::new("en", false), String::from("RU → EN"), 4,),
+        (LearningGuess::new("en", false), String::from("RU → EN"), 4,),
         "flow must detect target, honor persisted support language, and forward confirmed candidates"
     );
 }

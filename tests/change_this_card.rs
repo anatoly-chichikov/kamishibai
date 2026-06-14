@@ -85,7 +85,7 @@ fn draft(term: &str) -> CardDraft {
 fn seeded() -> App {
     App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .cards_started(vec![draft("whilst"), draft("wreck")])
 }
 

@@ -10,7 +10,7 @@ Set TypingSpeed 35ms
 Set WaitTimeout 60s
 
 Hide
-Type "cd /Users/anatoly/Source/kamishibai && clear"
+Type "cd ../.. && clear"
 Enter
 Type "./target/release/examples/tui_states"
 Enter

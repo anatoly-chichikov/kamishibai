@@ -1,270 +1,360 @@
-//! TUI entrypoint for the word-first kamishibai flow.
+//! Command-line entrypoint: the interactive TUI and the session-based console.
 //!
-//! The CLI module owns process arguments and startup decisions. The interactive
-//! shell, live card generator, terminal loop, and startup card loader
-//! live in focused submodules so the entrypoint stays small.
+//! With no arguments kamishibai opens the TUI; a bare JSON path opens the TUI on
+//! a prebuilt batch. Everything non-interactive is a session subcommand
+//! (`new`/`generate`/`status`/…) owned by the `session` module; this file only
+//! parses arguments and routes them.
 
 mod batch;
+mod bridge;
 mod card_workflow;
+mod console;
+mod error;
 mod host;
 mod live_generator;
+mod session;
 mod shell;
 mod terminal;
 
-use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use anyhow::Result;
+use clap::Parser;
 
-use batch::StartupCards;
-use terminal::run_tui;
+const SCHEMA_HELP: &str = "\
+AGENT CONTRACT:
+  Driving this from a script or agent? The full machine-readable contract —
+  every command, flag, JSON shape, and exit code — is llms.json at the repo
+  root: one parseable JSON document. Fetch and read it before integrating:
+  https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/llms.json
 
-use crate::config::{Preferences, default_store};
-use crate::runtime::locations::SystemContext;
-use crate::session::LanguagePair;
-use crate::tui::{App, KeySource, WelcomeStage};
+EXAMPLES:
+  kamishibai                                       open the interactive TUI
+  kamishibai new --word bank --learning en         understand words, create a session
+  kamishibai select --card bank --sense 2          keep only the 2nd sense of a card
+  kamishibai exclude --card spring                 drop one card from the plan
+  kamishibai generate                              generate + publish in the background
+  kamishibai status                                progress (no Gemini)
+  kamishibai result                                the finished cards + deck/pdf paths
+  kamishibai result --json                         the paths/cards as JSON (for scripts)
+  kamishibai regenerate --failed                   retry the cards that did not finish
+  kamishibai regenerate --card bank --note \"…\"     re-roll one card from an instruction
+  kamishibai new --build cards.json --generate     import a cards JSON and start at once
+  kamishibai cards.json                            open the TUI on a prebuilt batch
+  kamishibai cache-path                            print the cache directory
 
-/// Execute the TUI and translate failures into a process exit code.
-///
-/// Without arguments the TUI starts on the empty `Your Words` screen and runs
-/// the full intake to deck generation flow. With one positional argument, a
-/// strict-schema vocabulary JSON document is loaded and generation starts from
-/// the `Your Cards` screen.
-pub fn run() -> u8 {
-    run_with_args(std::env::args_os().skip(1))
+  The session id is optional everywhere: an omitted id means the only session,
+  or the only unfinished one; with several candidates the command lists the
+  newest five instead and exits 5.
+
+OUTPUT:
+  Two modes: plain text (default, for humans) and --json (after any session verb,
+  for machines — exactly one JSON document on stdout, success or error envelope).
+  Agents should use --json; plain text prints nothing bare to capture. Language
+  codes are uppercase in all output, ids, cache paths, and JSON. Exit codes are
+  identical in both modes for any invocation valid in both.
+
+EXIT CODES:
+  0 ok · 2 usage · 3 no such session · 4 not ready yet · 5 ambiguous session · 1 other error
+
+ENVIRONMENT:
+  GEMINI_API_KEY   the Gemini API key; it wins over a key saved through the
+                   Welcome screen, and need not be set when a saved key exists
+
+WORDS_JSON format (for `new --build`; all fields required, unknown fields rejected):
+{
+  \"entries\": [
+    {
+      \"term\": \"lantern\",
+      \"meaning\": \"a portable lamp\",
+      \"pronunciation\": \"LAN-tern\",
+      \"transcription\": \"/lantern/\",
+      \"importance\": 7,
+      \"source\": {
+        \"sentence\": \"I carried a lantern through the dark hallway.\",
+        \"lang\": \"en\",
+        \"highlight\": \"lantern\",
+        \"hint\": \"portable light\",
+        \"context\": \"a simple everyday sentence\"
+      },
+      \"target\": { \"sentence\": \"Ich trug eine Laterne durch den dunklen Flur.\", \"lang\": \"de\" }
+    }
+  ]
+}
+A `new --build` session uses these fields to generate an Anki .apkg, a printable PDF,
+native-speaker audio, and manga-style illustrations.";
+
+/// Turn a list of words into an illustrated Anki deck — sentences,
+/// native-speaker audio, and manga-style art.
+#[derive(Debug, Parser)]
+#[command(
+    name = "kamishibai",
+    version,
+    about = "Turn a list of words into an illustrated Anki deck — sentences, native-speaker audio, manga-style art.",
+    after_help = "Agent or script? Read the machine contract: https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/llms.json",
+    after_long_help = SCHEMA_HELP,
+    args_conflicts_with_subcommands = true
+)]
+struct Cli {
+    /// A prebuilt cards JSON path opens the interactive TUI on those cards.
+    #[arg(value_name = "WORDS")]
+    input: Option<String>,
+    /// Print one JSON document on stdout instead of plain text (place it after
+    /// the session verb; interactive runs refuse it).
+    #[arg(long, global = true)]
+    json: bool,
+    #[command(subcommand)]
+    command: Option<session::Command>,
 }
 
-fn run_with_args<I>(args: I) -> u8
-where
-    I: IntoIterator<Item = OsString>,
-{
-    let mut args = args.into_iter();
-    let first = args.next();
-    if args.next().is_some() {
-        eprintln!(
-            "usage: kamishibai [WORDS_JSON]   # optional; without it kamishibai opens the TUI"
-        );
-        return 2;
-    }
-    let outcome = match first {
-        None => start(),
-        Some(path) if is_flag(path.as_os_str(), "--help") || is_flag(path.as_os_str(), "-h") => {
-            println!("{}", help());
-            return 0;
-        }
-        Some(path) if is_flag(path.as_os_str(), "--version") || is_flag(path.as_os_str(), "-V") => {
-            println!("{}", version());
-            return 0;
-        }
-        Some(path) => start_with_batch(PathBuf::from(path)),
-    };
-    match outcome {
+/// Parse arguments and execute the selected flow, returning a process exit code.
+///
+/// Every refusal carries its exit code (`error.rs`): 2 — the invocation is
+/// wrong, 3 — no such session, 4 — not ready yet. Any other error is an
+/// operational failure and exits 1; success exits 0. The codes are identical
+/// in both render modes for any invocation valid in both (`--json` grammar
+/// conflicts are themselves usage refusals): the `kamishibai:` stderr line
+/// always appears, and `--json` additionally prints the machine-readable
+/// envelope on stdout.
+pub fn run() -> u8 {
+    let cli = Cli::parse();
+    match execute(&cli) {
         Ok(()) => 0,
         Err(error) => {
-            eprintln!("kamishibai: {error}");
-            1
+            eprintln!("kamishibai: {error:#}");
+            if let Some(hint) = error::hint_of(&error) {
+                eprintln!("{hint}");
+            }
+            if cli.json {
+                println!("{}", error::json_line(&error));
+            }
+            error::exit_code(&error).unwrap_or(1)
         }
     }
 }
 
-fn is_flag(value: &OsStr, flag: &str) -> bool {
-    value == OsStr::new(flag)
-}
-
-fn version() -> String {
-    format!("kamishibai {}", env!("CARGO_PKG_VERSION"))
-}
-
-fn help() -> &'static str {
-    concat!(
-        "Turn a list of words into an illustrated Anki deck — sentences, native-speaker audio, manga-style art.\n\n",
-        "Usage: kamishibai [WORDS_JSON]\n\n",
-        "Arguments:\n",
-        "  [WORDS_JSON]  Optional path to a pre-built words JSON. If omitted, kamishibai walks you through the TUI.\n\n",
-        "Options:\n",
-        "  -h, --help     Print help\n",
-        "  -V, --version  Print version\n\n",
-        "With WORDS_JSON:\n",
-        "  Bring your own JSON with the required fields. kamishibai skips word entry,\n",
-        "  then uses its prompts to generate an Anki .apkg, a printable PDF,\n",
-        "  native-speaker audio, and manga-style illustrations.\n\n",
-        "WORDS_JSON format:\n",
-        "{\n",
-        "  \"entries\": [\n",
-        "    {\n",
-        "      \"term\": \"lantern\",\n",
-        "      \"meaning\": \"a portable lamp\",\n",
-        "      \"pronunciation\": \"LAN-tern\",\n",
-        "      \"transcription\": \"/lantern/\",\n",
-        "      \"importance\": 7,\n",
-        "      \"source\": {\n",
-        "        \"sentence\": \"I carried a lantern through the dark hallway.\",\n",
-        "        \"lang\": \"en\",\n",
-        "        \"highlight\": \"lantern\",\n",
-        "        \"hint\": \"portable light\",\n",
-        "        \"context\": \"a simple everyday sentence\"\n",
-        "      },\n",
-        "      \"target\": {\n",
-        "        \"sentence\": \"Ich trug eine Laterne durch den dunklen Flur.\",\n",
-        "        \"lang\": \"de\"\n",
-        "      }\n",
-        "    }\n",
-        "  ]\n",
-        "}\n\n",
-        "JSON rules:\n",
-        "  - entries must contain at least one item\n",
-        "  - all fields are required; unknown fields are rejected\n",
-        "  - text fields and lang values must be non-empty strings\n",
-        "  - importance must be an integer from 1 to 10"
-    )
-}
-
-fn start() -> Result<()> {
-    let store = default_store(&SystemContext)?;
-    let preferences = store.read().unwrap_or_default();
-    let app = startup_app(&preferences);
-    run_tui(app, None)
-}
-
-fn startup_app(preferences: &Preferences) -> App {
-    let saved_key = preferences.api_key.clone().filter(|key| !key.is_empty());
-    let pair = LanguagePair::new(
-        String::from("en"),
-        preferences.startup_language().to_string(),
-    );
-    let app = App::new(pair);
-    let needs_language = preferences.requires_language_choice();
-    let needs_key = saved_key.is_none();
-    if needs_language || needs_key {
-        let (source, key) = if let Some(saved) = saved_key.as_deref() {
-            (KeySource::Restored, String::from(saved))
-        } else {
-            (KeySource::Empty, String::new())
-        };
-        let stage = if needs_language {
-            WelcomeStage::PickLanguage
-        } else {
-            WelcomeStage::EnterKey
-        };
-        app.opening_welcome_at(stage, source, key, env_has_gemini_key())
+fn execute(cli: &Cli) -> Result<()> {
+    let render = if cli.json {
+        session::Render::Json
     } else {
-        app
+        session::Render::Text
+    };
+    match &cli.command {
+        Some(command) => session::handle(command, render, &bridge::TuiOpener),
+        None => {
+            if cli.json {
+                return Err(error::usage(
+                    "--json applies only to non-interactive session commands",
+                ));
+            }
+            match &cli.input {
+                Some(path) => terminal::start_with_batch(PathBuf::from(path)),
+                None => terminal::start(),
+            }
+        }
     }
-}
-
-/// Return whether `GEMINI_API_KEY` is present and non-empty. The key is never
-/// loaded into the Welcome buffer implicitly — this only decides whether the
-/// key step offers the `load from env` action.
-fn env_has_gemini_key() -> bool {
-    std::env::var("GEMINI_API_KEY")
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false)
-}
-
-fn start_with_batch(path: PathBuf) -> Result<()> {
-    let (app, drafts) = StartupCards::load(path.as_path())?.into_parts();
-    run_tui(app, Some(drafts))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::Screen;
+    use clap::CommandFactory;
+    use session::Command;
 
-    #[test]
-    fn env_key_is_not_loaded_at_startup() {
-        let app = startup_app(&Preferences::default());
-        assert_eq!(
-            (
-                app.screen(),
-                app.welcome().stage,
-                app.welcome().source,
-                app.pair().support().to_string(),
-            ),
-            (
-                Screen::Welcome,
-                WelcomeStage::PickLanguage,
-                KeySource::Empty,
-                String::from("en"),
-            ),
-            "GEMINI_API_KEY must not be treated as loaded until the user asks for it"
-        );
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(args).expect("arguments must parse")
     }
 
     #[test]
-    fn saved_key_does_not_skip_unconfirmed_language_choice() {
-        let preferences = Preferences::default().with_api_key("123456789012345678901234567890");
-        let app = startup_app(&preferences);
-        assert_eq!(
-            (
-                app.screen(),
-                app.welcome().stage,
-                app.welcome().source,
-                app.pair().support().to_string(),
-            ),
-            (
-                Screen::Welcome,
-                WelcomeStage::PickLanguage,
-                KeySource::Restored,
-                String::from("en"),
-            ),
-            "a saved API key without a confirmed language must still start on language choice"
-        );
-    }
-
-    #[test]
-    fn confirmed_language_and_saved_key_skip_welcome() {
-        let app =
-            startup_app(&Preferences::new("de").with_api_key("123456789012345678901234567890"));
-        assert_eq!(
-            (app.screen(), app.pair().support().to_string()),
-            (Screen::YourWords, String::from("de")),
-            "a confirmed language may skip Welcome only when a saved key exists"
-        );
-    }
-
-    #[test]
-    fn confirmed_language_without_key_starts_on_key_stage() {
-        let app = startup_app(&Preferences::new("ru"));
-        assert_eq!(
-            (
-                app.screen(),
-                app.welcome().stage,
-                app.welcome().source,
-                app.pair().support().to_string(),
-            ),
-            (
-                Screen::Welcome,
-                WelcomeStage::EnterKey,
-                KeySource::Empty,
-                String::from("ru"),
-            ),
-            "a confirmed language with no key must ask only for the missing key"
-        );
-    }
-
-    #[test]
-    fn version_output_reports_the_release_version() {
-        assert_eq!(
-            version(),
-            String::from("kamishibai 1.2.0"),
-            "version output must report the current release version"
-        );
-    }
-
-    #[test]
-    fn help_output_documents_the_json_bypass_format() {
+    fn bare_invocation_opens_the_tui() {
+        let cli = parse(&["kamishibai"]);
         assert!(
-            help().contains("WORDS_JSON format:"),
-            "help output must not hide the strict JSON bypass format"
+            cli.command.is_none() && cli.input.is_none(),
+            "bare kamishibai must carry no command and no input"
         );
     }
 
     #[test]
-    fn help_output_explains_what_json_bypass_generates() {
+    fn a_bare_json_path_routes_to_the_tui_batch() {
+        let cli = parse(&["kamishibai", "cards.json"]);
         assert!(
-            help().contains("generate an Anki .apkg, a printable PDF"),
-            "help output must not hide the artifacts generated from JSON input"
+            cli.command.is_none() && cli.input.as_deref() == Some("cards.json"),
+            "a bare positional path must stay a positional for the TUI batch"
+        );
+    }
+
+    #[test]
+    fn new_parses_to_the_new_command() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "new", "--word", "wreck", "--learning", "fr"]).command,
+                Some(Command::New(_))
+            ),
+            "new must parse to the New command"
+        );
+    }
+
+    #[test]
+    fn open_parses_to_the_open_command() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "open", "fr-1"]).command,
+                Some(Command::Open(_))
+            ),
+            "open must parse to the Open command"
+        );
+    }
+
+    #[test]
+    fn generate_parses_to_the_generate_command() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "generate", "fr-1"]).command,
+                Some(Command::Generate(_))
+            ),
+            "generate must parse to the Generate command"
+        );
+    }
+
+    #[test]
+    fn select_parses_to_the_select_command() {
+        assert!(
+            matches!(
+                parse(&[
+                    "kamishibai",
+                    "select",
+                    "fr-1",
+                    "--card",
+                    "bank",
+                    "--sense",
+                    "1,2"
+                ])
+                .command,
+                Some(Command::Select(_))
+            ),
+            "select must parse to the Select command"
+        );
+    }
+
+    #[test]
+    fn regenerate_with_a_note_parses_to_the_regenerate_command() {
+        assert!(
+            matches!(
+                parse(&[
+                    "kamishibai",
+                    "regenerate",
+                    "fr-1",
+                    "--card",
+                    "bank",
+                    "--note",
+                    "use the river sense"
+                ])
+                .command,
+                Some(Command::Regenerate(_))
+            ),
+            "regenerate with a note must parse to the Regenerate command"
+        );
+    }
+
+    #[test]
+    fn a_session_verb_with_no_id_parses_with_an_absent_id() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "status"]).command,
+                Some(Command::Status(_))
+            ),
+            "status without an id must parse, not fail on a missing positional"
+        );
+    }
+
+    #[test]
+    fn select_without_an_id_parses_its_flags_only() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "select", "--card", "bank", "--sense", "2"]).command,
+                Some(Command::Select(_))
+            ),
+            "select without an id must parse with its flags intact"
+        );
+    }
+
+    #[test]
+    fn generate_with_only_wait_parses_with_an_absent_id() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "generate", "--wait"]).command,
+                Some(Command::Generate(_))
+            ),
+            "generate --wait without an id must parse, not fail on a missing positional"
+        );
+    }
+
+    #[test]
+    fn the_worker_subcommand_still_requires_an_id() {
+        assert!(
+            Cli::try_parse_from(["kamishibai", "__run"]).is_err(),
+            "the hidden worker entrypoint must keep its id mandatory"
+        );
+    }
+
+    #[test]
+    fn status_with_no_id_routes_to_the_subcommand_not_the_tui_input() {
+        let cli = parse(&["kamishibai", "status"]);
+        assert!(
+            cli.input.is_none() && matches!(cli.command, Some(Command::Status(_))),
+            "a bare status must stay a subcommand, never fall back to the TUI batch positional"
+        );
+    }
+
+    #[test]
+    fn a_trailing_json_flag_parses_on_a_session_verb() {
+        assert!(
+            parse(&["kamishibai", "status", "fr-1", "--json"]).json,
+            "--json placed after the verb must parse into JSON mode"
+        );
+    }
+
+    #[test]
+    fn a_leading_json_flag_before_the_verb_is_refused_at_parse() {
+        assert!(
+            Cli::try_parse_from(["kamishibai", "--json", "status", "fr-1"]).is_err(),
+            "--json before the verb must stay a parse error, pinning the documented flag position"
+        );
+    }
+
+    #[test]
+    fn the_worker_subcommand_parses_yet_stays_hidden() {
+        let parsed = matches!(
+            parse(&["kamishibai", "__run", "fr-1"]).command,
+            Some(Command::Worker(_))
+        );
+        let hidden = !Cli::command()
+            .render_long_help()
+            .to_string()
+            .contains("__run");
+        assert!(
+            parsed && hidden,
+            "__run must parse but never appear in the help"
+        );
+    }
+
+    #[test]
+    fn long_help_documents_the_cards_json_schema() {
+        assert!(
+            Cli::command()
+                .render_long_help()
+                .to_string()
+                .contains("WORDS_JSON format"),
+            "long help must keep documenting the strict cards JSON schema"
+        );
+    }
+
+    #[test]
+    fn version_reports_the_release_version() {
+        assert_eq!(
+            Cli::command().get_version(),
+            Some(env!("CARGO_PKG_VERSION")),
+            "the CLI must report the current release version"
         );
     }
 }

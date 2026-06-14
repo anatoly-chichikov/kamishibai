@@ -133,7 +133,7 @@ fn what_i_understood_multi_meaning_snapshot_locks_the_block() {
     );
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![candidate]);
     insta::assert_snapshot!("what_i_understood_multi_meaning", render(&app));
 }

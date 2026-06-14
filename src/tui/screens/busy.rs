@@ -15,7 +15,7 @@ use crate::tui::app::BusyView;
 use crate::tui::palette;
 
 const WIDTH: u16 = 50;
-const HEIGHT: u16 = 6;
+const HEIGHT: u16 = 5;
 const HORIZONTAL_PADDING: u16 = 2;
 const FRAME_MILLIS: u128 = 250;
 const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
@@ -64,8 +64,7 @@ fn panel(busy: &BusyView) -> Paragraph<'static> {
             palette::base().add_modifier(Modifier::BOLD),
         ),
     ]);
-    let still = Line::from(Span::styled("the request is still running", palette::dim()));
-    Paragraph::new(vec![Line::from(""), line, still, Line::from("")]).style(palette::base())
+    Paragraph::new(vec![Line::from(""), line, Line::from("")]).style(palette::base())
 }
 
 fn spinner(busy: &BusyView) -> &'static str {

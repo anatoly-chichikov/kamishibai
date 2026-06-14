@@ -13,9 +13,10 @@ use std::time::Instant;
 
 use anyhow::{Result, anyhow, bail};
 use kamishibai::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
-use kamishibai::languages::{ReportLabels, catalog, naming};
+use kamishibai::generation::artifact_cache::{ILLUSTRATION_FILE, VOICE_FILE};
+use kamishibai::languages::{ReportLabels, naming};
 use kamishibai::report::{Report, Thumbnail, VocabularyLayout, warm_fonts_async};
-use kamishibai::session::{LanguagePair, from_entry, to_entry};
+use kamishibai::session::{CardCell, LanguagePair, from_entry, to_entry};
 use kamishibai::vocabulary::{VocabularyDocument, VocabularyEntry};
 
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
@@ -44,13 +45,9 @@ fn main() -> Result<()> {
     );
 
     let pair = pair_from_document(&document)?;
-    let target_lang = pair.target().to_string();
-    let support_lang = pair.support().to_string();
+    let target_lang = pair.learning().to_string();
+    let support_lang = pair.known().to_string();
     let entries: Vec<VocabularyEntry> = document.entries.clone();
-
-    let item = catalog().item(target_lang.as_str())?;
-    let manga_dir = cache_root.join(item.image_cache.as_str());
-    let audio_dir = cache_root.join(item.audio_cache.as_str());
 
     let t1 = Instant::now();
     let drafts: Vec<_> = entries
@@ -66,29 +63,33 @@ fn main() -> Result<()> {
         StableId::new(decknaming.name.as_str()).value(),
         decknaming.name.as_str(),
         VocabularyNote::new(model),
-        Vec::<PathBuf>::new(),
+        Vec::<(PathBuf, String)>::new(),
     );
     let mut report = Report::new(VocabularyLayout::new(ReportLabels::default()));
     let mut attached = 0usize;
     let mut missing = 0usize;
-    for (draft, entry) in drafts.iter().zip(entries.iter()) {
-        let target_sentence = entry.target.sentence.as_str();
-        let audio_name = format!("{}.wav", &md5_hex(target_sentence)[..12]);
-        let audio_path = audio_dir.join(&audio_name);
-        let picture_digest = md5_hex(&format!("{}\0{}", target_lang, target_sentence));
-        let picture_name = format!("{}.jpg", &picture_digest[..12]);
-        let picture_path = manga_dir.join(&picture_name);
-        if !audio_path.exists() || !picture_path.exists() {
+    for draft in &drafts {
+        let cell = CardCell::new(
+            cache_root.clone(),
+            draft.pair(),
+            draft.term(),
+            draft.understanding(),
+        );
+        let cache = cell.cache();
+        if !cache.exists(VOICE_FILE) || !cache.exists(ILLUSTRATION_FILE) {
             missing += 1;
             continue;
         }
+        let audio_name = cell.media_name("wav");
+        let picture_name = cell.media_name("jpg");
+        let picture_path = cache.path().join(ILLUSTRATION_FILE);
         let real_entry = to_entry(draft)?;
-        container.attach(audio_path.clone());
-        container.attach(picture_path.clone());
+        container.attach(cache.path().join(VOICE_FILE), audio_name.as_str());
+        container.attach(picture_path.clone(), picture_name.as_str());
         container.add(
             &real_entry,
-            format!("[sound:{}]", audio_name).as_str(),
-            format!("<img src='{}' style='{IMAGE_STYLE}'>", picture_name).as_str(),
+            format!("[sound:{audio_name}]").as_str(),
+            format!("<img src='{picture_name}' style='{IMAGE_STYLE}'>").as_str(),
         );
         report.append(&real_entry, Some(picture_path));
         attached += 1;
@@ -138,10 +139,6 @@ fn pair_from_document(document: &VocabularyDocument) -> Result<LanguagePair> {
         first.target.lang.as_str(),
         first.source.lang.as_str(),
     ))
-}
-
-fn md5_hex(text: &str) -> String {
-    format!("{:x}", md5::compute(text.as_bytes()))
 }
 
 fn home_cache() -> Result<PathBuf> {

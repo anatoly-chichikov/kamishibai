@@ -10,7 +10,7 @@ Set TypingSpeed 35ms
 Set WaitTimeout 60s
 
 Hide
-Type "cd /Users/anatoly/Source/kamishibai && rm -rf kamishibai-out && clear"
+Type "cd ../.. && rm -rf kamishibai-out && clear"
 Enter
 Type "HOME=/tmp/khome ./target/release/kamishibai"
 Enter

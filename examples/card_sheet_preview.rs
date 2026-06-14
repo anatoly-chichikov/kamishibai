@@ -1,11 +1,9 @@
 //! Render a ten-card preview sheet from the local Gemini cache.
 //!
-//! Walks `~/Library/Caches/kamishibai/meta-*/*.json` (the flat card-meta
-//! payload that `LiveCardGenerator::store_card_meta` writes after every Gemini Pro
-//! pass), reconstructs each `VocabularyEntry`, and pairs it with the
-//! matching `manga-{lang}/{digest}.jpg` panel using the same MD5 key the
-//! production flow computes. No network calls. Use it as the visual
-//! regression check after editing `src/report/cards.rs`.
+//! Walks `~/Library/Caches/kamishibai/cards/<pair>/<key>/` folders, reads the
+//! `meta.json` each card stores, reconstructs its `VocabularyEntry`, and pairs it
+//! with the sibling `illustration.jpg` panel. No network calls. Use it as the
+//! visual regression check after editing `src/report/cards.rs`.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -14,6 +12,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow, bail};
 use serde::Deserialize;
 
+use kamishibai::generation::artifact_cache::{ILLUSTRATION_FILE, META_FILE};
 use kamishibai::report::{CardSheet, Thumbnail};
 use kamishibai::runtime::locations::{SystemContext, cache_root};
 use kamishibai::vocabulary::{
@@ -23,7 +22,7 @@ use kamishibai::vocabulary::{
 const CAP: usize = 10;
 const MIN_CARDS: usize = 4;
 
-/// Flat schema persisted to `meta-{lang}/<digest>.json` by the publish flow.
+/// Flat schema persisted to `meta.json` inside each card folder by the publish flow.
 #[derive(Debug, Deserialize)]
 struct MetaRecord {
     term: String,
@@ -72,59 +71,39 @@ struct Candidate {
     picture: PathBuf,
 }
 
-/// Return the first twelve hex chars of `md5(lang + "\0" + target_sentence)`.
-/// Matches `src/generation/picture.rs` and the inline computation in
-/// `LiveCardGenerator::store_card_meta`.
-fn manga_digest(target_lang: &str, target_sentence: &str) -> String {
-    let payload = format!("{}\0{}", target_lang, target_sentence);
-    let full = format!("{:x}", md5::compute(payload));
-    full[..12].to_string()
-}
-
-/// Collect every meta record whose manga panel also exists on disk.
+/// Collect every card folder that holds both a meta record and its panel.
 fn collect_candidates(cache: &Path) -> Result<Vec<Candidate>> {
     let mut out = Vec::new();
-    let meta_dirs = fs::read_dir(cache)
-        .map_err(|err| anyhow!("cache root '{}' is unreadable: {err}", cache.display()))?
+    let cards = cache.join("cards");
+    if !cards.is_dir() {
+        return Ok(out);
+    }
+    let pair_dirs = fs::read_dir(&cards)
+        .map_err(|err| anyhow!("cache '{}' is unreadable: {err}", cards.display()))?
         .filter_map(|entry| entry.ok().map(|item| item.path()))
-        .filter(|path| {
-            path.is_dir()
-                && path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("meta-"))
-        });
-    for meta_dir in meta_dirs {
-        let lang = meta_dir
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.strip_prefix("meta-"))
-            .map(str::to_string)
-            .ok_or_else(|| anyhow!("meta dir '{}' has no language tag", meta_dir.display()))?;
-        let manga_dir = cache.join(format!("manga-{lang}"));
-        if !manga_dir.is_dir() {
-            continue;
-        }
-        for entry in fs::read_dir(&meta_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+        .filter(|path| path.is_dir());
+    for pair_dir in pair_dirs {
+        for entry in fs::read_dir(&pair_dir)? {
+            let card_dir = entry?.path();
+            let meta_path = card_dir.join(META_FILE);
+            let picture = card_dir.join(ILLUSTRATION_FILE);
+            if !meta_path.is_file() || !picture.is_file() {
                 continue;
             }
-            let raw = fs::read_to_string(&path)?;
+            let raw = fs::read_to_string(&meta_path)?;
             let record: MetaRecord = match serde_json::from_str(raw.as_str()) {
                 Ok(value) => value,
                 Err(_) => continue,
             };
-            let digest = manga_digest(record.target_lang.as_str(), record.target_sentence.as_str());
-            let picture = manga_dir.join(format!("{digest}.jpg"));
-            if !picture.is_file() {
-                continue;
-            }
             let entry = match record.into_entry() {
                 Ok(value) => value,
                 Err(_) => continue,
             };
+            let digest = card_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string();
             out.push(Candidate {
                 digest,
                 entry,

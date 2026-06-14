@@ -24,7 +24,7 @@ cargo run --
 
 ## Required Environment
 
-- `GEMINI_API_KEY` must be set before running the application
+- a Gemini API key is required for any flow that calls Gemini — either via `GEMINI_API_KEY` (which wins) or a key previously saved through the Welcome screen; `GEMINI_API_KEY` need not be set when a saved key exists
 - the first OCR-backed run downloads the required `PP-OCRv5` model files into the media cache
 
 ## Input Schema
@@ -46,6 +46,21 @@ Every entry must contain:
 
 The input contract is strict. There are no optional entry fields.
 
+## Sessions (non-interactive)
+
+With no arguments `kamishibai` opens the interactive TUI; a bare JSON path opens the TUI on a prebuilt batch. Everything non-interactive is a **session** subcommand — a persistent, curatable unit of work an agent drives across invocations. A session moves through stages: understood → (curate) → generating → published (or **partial** when some cards fail but the deck still ships the rest, **failed** when no card survives).
+
+- `kamishibai new (--word W [--word W…] | --words FILE | --build FILE) [--learning L] [--known L] [--senses primary|all] [--id NAME] [--generate]`: understand the words (exactly one input form; `--build` imports a cards JSON whose entries carry the pair, so it rejects `--known`/`--learning`/`--senses`) and create a session in the **understood** stage (`--learning` is autodetected from the words when omitted; `--known` is a one-off override that otherwise resolves from your saved preference and **refuses** when neither is set — save it once with `config`)
+- `kamishibai select [<id>] --card T --sense 1,3` / `exclude [<id>] --card T` / `correct [<id>] --card T --note "…"`: curate the understanding before generating — pick senses, drop a card, or ask Gemini to add senses (each resets the session to understood)
+- `kamishibai generate [<id>] [--wait]`: commit the curated plan and start a managed background worker that generates + publishes (`--wait` runs it in the foreground)
+- `kamishibai status [<id>]`: stage + per-candidate senses (understood) or per-card progress (generating/published), read from the cache (no Gemini)
+- `kamishibai open [<id>]`: open the session in the interactive TUI (resumes from the cache)
+- `kamishibai result [<id>]` / `ls` / `cancel [<id>]` / `rm [<id>] [--cache]` / `cache-path`
+- `kamishibai regenerate [<id>] (--failed | --card T [--note "…"]) [--wait]`: re-roll committed cards — drop their cached artifacts and immediately regenerate + republish (runs a worker like `generate`); with `--note`, Gemini first rewrites the card from the instruction
+- `kamishibai config [--known L] [--key K]`: save console defaults to preferences (no flags → show them) — `--known` (validated) so word sessions need no `--known`, and `--key` (verified against Gemini; `-` reads it from stdin, empty clears it) so you need not export `GEMINI_API_KEY`; the key value is never printed back
+
+There are exactly two output modes: **plain text** (default, for humans — line-oriented, not a parsing target) and **`--json`** (placed after the verb, for machines — exactly one JSON document on stdout: the success document, or the `{"ok":false,"error":{"code","exit","message"}}` envelope on failure; `generate --wait --json` additionally streams NDJSON events on stderr). There is no `-q` and no `result` path selectors — an agent uses `--json`. Exit codes, locking, and semantics are identical in both modes for invocations valid in both; the only `--json` grammar conflict left is `open` (interactive), refused with exit 2 before any session lookup. The full schema lives in `llms.json`. Plain output carries no bare capturable value — every single-session command opens with the header `your session <ID> · <KNOWN> → <LEARNING> · <phase>` and the id lives there; errors are one `kamishibai: <message>` line plus a next-step hint line on stderr. **Language codes are the app's canonical UPPERCASE form everywhere** — stored in config and `session.json`, minted into ids (`FR-…`), used in the cache layout (`cards/EN-FR`) and deck names (`FR_….apkg`), and emitted in plain and JSON; input is accepted in any case and normalised to uppercase, and the only lowercase code is the frozen `target_lang` on the Gemini wire (`src/gemini/client.rs`). Exit codes are centralized in `src/cli/error.rs` (`Refusal` carries the exit plus an optional plain-mode `hint`, plus the JSON envelope rendering): `0` ok · `2` usage · `3` no such session · `4` not ready · `5` ambiguous · `1` other. The `<id>` positional is optional on every verb: an omitted id resolves to the only session, else the only unfinished one, else the command lists the newest five sessions and exits 5 (`session::resolve`). The background worker is the same binary re-invoked as the hidden `__run <id>`, detached into a new process group with its stdio redirected to `sessions/<id>/worker.log`. Concurrency is two flocks: the long-held liveness lock (`sessions/<id>/lock`, OS-released on death) decides who may generate — `status` derives `interrupted` from a recorded worker whose lock is free — and the short write lock makes every `session.json` change a serialized read-modify-write (`SessionStore::update`), so concurrent edits all apply. The worker writes only while the record still names it, which is how `cancel` and a finishing worker resolve their race. The TUI shares this same session model — it takes the liveness lock before generating and persists its live state to `session.json`, so `ls`/`status`/`open` see interactive runs too. The full agent-facing contract lives in `llms.json` at the repo root. For offline tests, `KAMISHIBAI_GEMINI_URL` overrides the Gemini base URL (point it at a 127.0.0.1 listener), `KAMISHIBAI_CACHE` overrides the cache root, and `KAMISHIBAI_DATA` overrides the config/preferences home.
+
 ## Architecture
 
 The runtime is split into a few focused modules:
@@ -57,7 +72,21 @@ The runtime is split into a few focused modules:
 - `src/generation`: writes cached WAV audio, composes scenes, routes OCR, validates manga output, and orchestrates the fixed Gemini production pipeline
 - `src/anki`: defines the language-neutral Anki note model and APKG writer
 - `src/report`: builds the PDF report with layout, thumbnails, and font resolution
-- `src/cli.rs`: orchestrates the end-to-end command-line flow
+- `src/cli.rs`: parses arguments (clap, including the global `--json` flag) and routes to the interactive TUI or a `session` subcommand
+- `src/cli/console.rs`: generation primitives shared by the session worker — the `produce` engine loop (meta → sound → scene → picture, then publish) and the `Reporter` port (human / quiet / JSON events on stderr)
+- `src/cli/session`: the console (API) layer — `store` (the `session.json` record + serialized atomic `create`/`update` IO), `worker` (the managed background worker + the `__run` entrypoint, ownership-guarded writes), `liveness` (the two flocks + pid kill via rustix), `view` (the cache-derived status projection both renders share), `json` (the `Serialize` DTOs + the one emit seam), and one handler module per concern (`new`, `curate`, `generate`, `result`, `maintenance`) routed by `mod.rs`. This layer never links the TUI (`tests/separation.rs` enforces it): `open` hands the checked record to the `SessionOpener` port
+- `src/cli/bridge.rs`: the TUI side of the session contract — projects between the live `App` and the persisted record, owns the `TuiSession` the shell claims and writes, and implements `SessionOpener` over `run_tui`
+
+## Cache layout
+
+The cache (printed by `kamishibai cache-path`) groups one folder per card, keyed by a content hash of the card identity:
+
+- `cards/<known>-<learning>/<key>/` holds `meta.json`, `scene.json`, `voice.wav`, and `illustration.jpg` for one card
+- `understanding/<known>-<learning>/<key>.json` holds the understanding-pass result
+- `sessions/<id>/` holds `session.json` (identity, phase, words, curated candidates, committed plan, worker pid, result) and `worker.log`
+- `ocr-models/` holds the shared OCR model files
+
+`CardCell` (`src/session/vault.rs`) owns this layout; deleting a card's folder forces just that card to regenerate. Anki media names are decoupled from disk filenames in `src/anki/deck.rs` so per-card role-named files stay unique inside the `.apkg`.
 
 ## Language Profiles
 
@@ -65,12 +94,16 @@ Language-specific behavior belongs only in `src/languages` profile declarations.
 
 - Gemini prompt display name
 - OCR configuration
-- cache directory naming
 - default deck naming
-- report font family
 - user-facing report labels
 
 If a new language is needed, add a new profile instead of editing the fixed runtime orchestration logic.
+
+## Releasing
+
+The version in `Cargo.toml` is the release trigger; nothing is tagged or published by hand. Merging a version bump into `main` does the rest: a green `Rust` CI run fires `.github/workflows/auto-release-tag.yml`, which tags `v<version>` and dispatches `release-artifacts.yml` — five platform archives (linux x86_64/aarch64, macos arm64/x86_64, windows) plus `SHA256SUMS.txt`, published as a GitHub Release with generated notes. `workflow_dispatch` on either workflow is the manual fallback, and `install.sh` always serves the latest release.
+
+Homebrew is a separate, manual follow-up in the tap repository **`anatoly-chichikov/homebrew-tap`** (https://github.com/anatoly-chichikov/homebrew-tap — a local checkout normally sits beside this repository; search for a `homebrew-tap` directory locally before cloning). In the tap: bump the version and sha256 values in `Formula/kamishibai.rb` (hashes come from the release's `SHA256SUMS.txt`), open a PR, wait for the bottles to build on CI, then publish them with `gh workflow run publish.yml -f pull_request=<PR number>`.
 
 ## Recording the demo GIF and screenshots
 

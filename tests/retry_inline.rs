@@ -75,7 +75,7 @@ fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() -> Resul
     let drafts = engine.drafts().to_vec();
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .cards_started(drafts);
     let rendered = flat(&app);
     assert!(
@@ -89,7 +89,7 @@ fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() -> Resul
 fn retry_does_not_leave_your_cards_state() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .cards_started(vec![draft("in the end")]);
     assert_eq!(
         app.screen(),

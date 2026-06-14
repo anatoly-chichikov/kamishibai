@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use crate::generation::artifact_cache::Cache;
+use crate::generation::artifact_cache::{Cache, VOICE_FILE};
 
 /// Generate raw PCM speech bytes for one prompt.
 pub trait Speaker {
@@ -39,23 +39,22 @@ where
         self.cache.filepath(filename)
     }
 
-    /// Generate one cached WAV file and report its filename and cache state.
+    /// Generate the cached WAV for this card folder and report its cache state.
+    ///
+    /// One voice belongs to one card folder, so the file is always `voice.wav`;
+    /// the cache hit is decided by the folder, not by hashing the text.
     pub fn generate(&self, text: &str) -> Result<(String, bool)> {
         if text.trim().is_empty() {
             bail!("Cannot generate audio for empty text");
         }
-        let filename = format!(
-            "{}.wav",
-            &format!("{:x}", md5::compute(text.as_bytes()))[..12]
-        );
-        if self.cache.exists(&filename) {
-            return Ok((filename, true));
+        if self.cache.exists(VOICE_FILE) {
+            return Ok((VOICE_FILE.to_string(), true));
         }
         let data = self
             .speaker
             .speech(self.prompt.replace("{text}", text).as_str(), text)?;
-        self.commit(&filename, &data)?;
-        Ok((filename, false))
+        self.commit(VOICE_FILE, &data)?;
+        Ok((VOICE_FILE.to_string(), false))
     }
 
     fn commit(&self, filename: &str, data: &[u8]) -> Result<()> {

@@ -218,7 +218,7 @@ pub enum TextFragment {
     Bind(DataPath),
 }
 
-/// A symbolic data source like `App::pair().target()`.
+/// A symbolic data source like `App::pair().learning()`.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DataPath(pub String);
 

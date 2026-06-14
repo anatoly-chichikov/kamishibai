@@ -89,7 +89,7 @@ fn print_scene(title: &str, app: &App, width: u16, height: u16) {
 fn seeded(drafts: Vec<CardDraft>, pair: LanguagePair) -> App {
     App::new(pair)
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .cards_started(drafts)
 }
 

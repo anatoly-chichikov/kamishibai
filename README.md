@@ -53,6 +53,18 @@ Got the JSON already? Pass it as an argument:
 kamishibai path/to/words.json
 ```
 
+## Console
+
+Prefer the terminal? kamishibai also runs headless — it understands the words, builds the deck in the background, and writes it out:
+
+```bash
+kamishibai new --word flâner --word canard   # creates a session; the language is autodetected
+kamishibai generate --wait                   # generate + publish, blocking until done
+kamishibai result                            # the finished cards + deck.apkg / deck.pdf
+```
+
+Set your language and Gemini key once — through the TUI's welcome screen or `kamishibai config`. Building an agent? [llms.json](llms.json) is the full machine contract.
+
 ## Languages
 
 Ten languages:

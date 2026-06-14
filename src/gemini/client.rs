@@ -10,8 +10,8 @@ use serde_json::Value;
 use crate::generation::{manga_template, render_scene_prompt};
 use crate::languages::catalog;
 use crate::session::{
-    CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch, Sense, SenseCorrection,
-    TargetGuess, Understood, WordCandidate,
+    CardDraft, CardMeta, CardRevision, LanguagePair, LearningGuess, RawInputBatch, Sense,
+    SenseCorrection, Understood, WordCandidate,
 };
 
 use super::codec::decode;
@@ -23,6 +23,15 @@ use super::protocol::{
 };
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/// Return the Gemini API base URL, honoring a non-empty `KAMISHIBAI_GEMINI_URL`
+/// override (offline tests point it at a local listener; proxies can too).
+fn base_url() -> String {
+    env::var("KAMISHIBAI_GEMINI_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| String::from(BASE_URL))
+}
 const TEXT_MODEL: &str = "gemini-3.5-flash";
 const META_MODEL: &str = TEXT_MODEL;
 const SCENE_MODEL: &str = TEXT_MODEL;
@@ -141,8 +150,8 @@ impl GeminiClient<HttpTransport> {
             .or_else(|| saved.filter(|value| !value.is_empty()).map(String::from))
             .ok_or_else(|| {
                 anyhow!(
-                    "no Gemini API key found in GEMINI_API_KEY or saved preferences; \
-                     set GEMINI_API_KEY or start the TUI without WORDS_JSON and paste one on Welcome"
+                    "no Gemini API key found — save one with 'kamishibai config --key', \
+                     set GEMINI_API_KEY, or paste one on the TUI Welcome"
                 )
             })?;
         Ok(Self::new(key, HttpTransport::new()))
@@ -179,7 +188,7 @@ where
         scene["manga_panel"]["panels"] = Value::Array(items.clone());
         scene["manga_panel"]["meta"]["title"] = Value::String(sentence.chars().take(60).collect());
         scene["manga_panel"]["meta"]["description"] = Value::String(String::from(sentence));
-        scene["manga_panel"]["meta"]["target_lang"] = Value::String(String::from(target));
+        scene["manga_panel"]["meta"]["target_lang"] = Value::String(target.to_ascii_lowercase());
         enforce(&mut scene);
         validate(&scene)?;
         Ok(scene)
@@ -199,7 +208,7 @@ where
     /// `api_error`, so the caller can tell a rejected key (`rejects_key`) from a
     /// transport or quota failure and message accordingly.
     pub fn validate_key(&self) -> Result<()> {
-        let url = format!("{BASE_URL}/{TEXT_MODEL}:generateContent");
+        let url = format!("{}/{TEXT_MODEL}:generateContent", base_url());
         let body = serde_json::to_string(&Request::text(String::from("ping"), None, None))?;
         let response = self
             .transport
@@ -217,7 +226,7 @@ where
         let decoded: IntakeResponse =
             serde_json::from_str(unfence(self.text(TEXT_MODEL, prompt)?.trim()))?;
         Ok(Understood::new(
-            TargetGuess::new(decoded.target_lang, true),
+            LearningGuess::new(decoded.target_lang, true),
             decoded
                 .items
                 .into_iter()
@@ -321,7 +330,7 @@ where
     }
 
     fn request(&self, model: &str, request: &Request) -> Result<Response> {
-        let url = format!("{BASE_URL}/{model}:generateContent");
+        let url = format!("{}/{model}:generateContent", base_url());
         let body = serde_json::to_string(request)?;
         let response = self
             .transport

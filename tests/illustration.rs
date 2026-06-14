@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use image::{DynamicImage, GrayImage, Luma};
-use kamishibai::generation::artifact_cache::Cache;
+use kamishibai::generation::artifact_cache::{Cache, ILLUSTRATION_FILE, SCENE_FILE};
 use kamishibai::generation::manga::{Illustration, Progress, Renderer, Translator};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -89,12 +89,11 @@ fn illustration_generation_writes_both_the_scene_json_and_the_jpeg_file() -> Res
     let mut progress = Recorder::default();
     let (filename, cached) =
         illustration.generate("The cat is sleeping on the windowsill", "en", &mut progress)?;
-    let digest = "0f7acb8b6e5b";
-    let scene_path = illustration.filepath(&format!("{digest}.json"))?;
-    let image_path = illustration.filepath(&format!("{digest}.jpg"))?;
+    let scene_path = illustration.filepath(SCENE_FILE)?;
+    let image_path = illustration.filepath(ILLUSTRATION_FILE)?;
     assert_eq!(
         (filename, cached, scene_path.exists(), image_path.exists()),
-        (String::from("0f7acb8b6e5b.jpg"), false, true, true),
+        (String::from("illustration.jpg"), false, true, true),
         "illustration generation no longer writes both the scene JSON and the JPEG file"
     );
     Ok(())
@@ -110,9 +109,8 @@ fn cached_scene_files_skip_translator_calls_and_report_cached_progress() -> Resu
         translator.clone(),
         FixedRenderer,
     );
-    let digest = "0f7acb8b6e5b";
     std::fs::write(
-        illustration.filepath(&format!("{digest}.json"))?,
+        illustration.filepath(SCENE_FILE)?,
         serde_json::to_string_pretty(&scene())?,
     )?;
     let mut progress = Recorder::default();
@@ -143,8 +141,7 @@ fn legacy_cached_images_omit_the_missing_scene_path() -> Result<()> {
         translator,
         FixedRenderer,
     );
-    let digest = "0f7acb8b6e5b";
-    let image = illustration.filepath(&format!("{digest}.jpg"))?;
+    let image = illustration.filepath(ILLUSTRATION_FILE)?;
     DynamicImage::ImageLuma8(GrayImage::from_pixel(64, 64, Luma([128]))).save(&image)?;
     let mut progress = Recorder::default();
     let _result =

@@ -1,6 +1,5 @@
-//! UI-shaped card workflow contracts used by the interactive shell.
-
-use std::sync::mpsc::Sender;
+//! UI-neutral card workflow ports shared by the interactive shell and the
+//! console worker.
 
 use anyhow::Result;
 
@@ -8,7 +7,6 @@ use crate::session::{
     ArtifactFile, BulkCorrection, CardCorrection, CardDraft, CardMeta, CardMetaGeneration,
     CardRevision, LanguagePair, SenseCorrection, Understanding, Understood,
 };
-use crate::tui::BusyKind;
 
 /// Capability that turns typed words into understood words.
 pub(super) trait WordUnderstanding:
@@ -34,12 +32,28 @@ pub(super) trait CardGeneration:
     ) -> Result<ArtifactFile>;
 }
 
+/// The two stages a publish job moves through, in order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum PublishPhase {
+    /// The Anki deck is being written.
+    Deck,
+    /// The PDF report is being written.
+    Report,
+}
+
+/// Progress port for one publish job; implementations forward phase changes to
+/// whatever surface is watching (the TUI busy modal, or nothing at all).
+pub(super) trait PublishProgress {
+    /// Announce that the publish job advanced to `phase`.
+    fn advance(&self, phase: PublishPhase);
+}
+
 /// Capability that turns completed cards into deck and report files.
 pub(super) trait DeckPublishing: Clone + Send + 'static {
     fn publish_deck(
         &self,
         drafts: &[CardDraft],
-        progress: &DeckPublishProgress,
+        progress: &dyn PublishProgress,
     ) -> Result<(String, String, String)>;
 }
 
@@ -78,24 +92,6 @@ pub(super) enum ArtifactOutcome {
 
 /// Progress signalled by the background publish job.
 pub(super) enum DeckPublishMessage {
-    Phase(BusyKind),
+    Phase(PublishPhase),
     Done(Result<(String, String, String)>),
-}
-
-/// Progress sender handed to publish implementations.
-#[derive(Clone)]
-pub(super) struct DeckPublishProgress {
-    sender: Sender<DeckPublishMessage>,
-}
-
-impl DeckPublishProgress {
-    /// Build progress reporting around a publish message sender.
-    pub(super) fn new(sender: Sender<DeckPublishMessage>) -> Self {
-        Self { sender }
-    }
-
-    /// Announce the publish job has moved to a new phase.
-    pub(super) fn report_phase(&self, kind: BusyKind) {
-        let _ = self.sender.send(DeckPublishMessage::Phase(kind));
-    }
 }
