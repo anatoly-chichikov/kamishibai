@@ -140,7 +140,7 @@ pub struct AppInput {
     pub blob: String,
     pub modal: String,
     pub failed: usize,
-    pub target_pending: bool,
+    pub learning_pending: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -169,7 +169,7 @@ impl App {
             error: None,
             pair,
             input: AppInput {
-                target_pending: true,
+                learning_pending: true,
                 ..AppInput::default()
             },
             blob_cursor: 0,
@@ -358,9 +358,9 @@ impl App {
         self.input.modal.as_str()
     }
 
-    /// Return whether the detected target language has been confirmed yet.
-    pub fn target_pending(&self) -> bool {
-        self.input.target_pending
+    /// Return whether the detected learning language has been confirmed yet.
+    pub fn learning_pending(&self) -> bool {
+        self.input.learning_pending
     }
 
     /// Return the app with a different fullscreen state.
@@ -559,20 +559,20 @@ impl App {
         self
     }
 
-    /// Return the app with the `my` (support) language replaced by `code`.
-    /// Target stays untouched. Use this from the language picker modal and
-    /// from the Welcome screen — there is no implicit cycle anymore.
-    pub fn set_support(mut self, code: impl Into<String>) -> Self {
-        let pair = LanguagePair::new(self.pair.target().to_string(), code.into());
+    /// Return the app with the known (native) language replaced by `code`.
+    /// The learning language stays untouched. Use this from the language picker
+    /// modal and from the Welcome screen — there is no implicit cycle anymore.
+    pub fn set_known(mut self, code: impl Into<String>) -> Self {
+        let pair = LanguagePair::new(self.pair.learning().to_string(), code.into());
         self.pair = pair;
         self
     }
 
-    /// Return the app with a confirmed target language guess from the LLM pass.
-    pub fn confirmed_target(mut self, code: impl Into<String>) -> Self {
-        let pair = LanguagePair::new(code, self.pair.support().to_string());
+    /// Return the app with a confirmed learning language guess from the LLM pass.
+    pub fn confirmed_learning(mut self, code: impl Into<String>) -> Self {
+        let pair = LanguagePair::new(code, self.pair.known().to_string());
         self.pair = pair;
-        self.input.target_pending = false;
+        self.input.learning_pending = false;
         self
     }
 

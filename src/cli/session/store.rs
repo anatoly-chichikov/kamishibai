@@ -106,8 +106,8 @@ pub(in crate::cli) struct SessionRecord {
     pub version: u32,
     pub id: String,
     pub created: String,
-    pub from: String,
-    pub to: String,
+    pub known: String,
+    pub learning: String,
     pub out: String,
     pub senses: String,
     pub source: String,
@@ -134,8 +134,8 @@ impl SessionRecord {
     pub(in crate::cli) fn understood(
         id: String,
         created: String,
-        from: String,
-        to: String,
+        known: String,
+        learning: String,
         out: String,
         senses: String,
         source: String,
@@ -146,8 +146,8 @@ impl SessionRecord {
             version: VERSION,
             id,
             created,
-            from,
-            to,
+            known,
+            learning,
             out,
             senses,
             source,
@@ -435,7 +435,7 @@ mod tests {
         fs::create_dir_all(&dir).expect("session dir must be created");
         fs::write(
             dir.join("session.json"),
-            r#"{"version":1,"id":"old-1","created":"t","from":"en","to":"fr","out":"/out","senses":"primary","source":"words","phase":"understood","drafts":[]}"#,
+            r#"{"version":1,"id":"old-1","created":"t","known":"en","learning":"fr","out":"/out","senses":"primary","source":"words","phase":"understood","drafts":[]}"#,
         )
         .expect("old session must be written");
         assert!(

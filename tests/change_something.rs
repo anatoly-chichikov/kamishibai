@@ -40,7 +40,7 @@ fn flat(app: &App) -> String {
 fn seeded() -> App {
     App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![
             WordCandidate::new("whilst", "neutral conjunction; while", true),
             WordCandidate::new("wreck", "noun: remains of a destroyed ship", true),

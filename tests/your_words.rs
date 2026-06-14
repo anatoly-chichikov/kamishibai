@@ -10,7 +10,7 @@ use std::time::Duration;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::languages::catalog;
-use kamishibai::session::{LanguagePair, ScriptDetection, TargetDetection};
+use kamishibai::session::{LanguagePair, LearningDetection, ScriptDetection};
 use kamishibai::tui::{App, AppEvent, BusyKind, Screen, Side, draw, to_app, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -54,7 +54,7 @@ fn apply_side(app: App, side: Side) -> App {
             let guess = ScriptDetection
                 .detect(app.blob(), &catalog())
                 .expect("detection must succeed");
-            app.confirmed_target(guess.code())
+            app.confirmed_learning(guess.code())
         }
         _ => app,
     }
@@ -90,7 +90,7 @@ fn repeated_enter_on_your_words_moves_the_editor_scroll() {
 
 #[test]
 fn your_words_renders_placeholder_tagline_and_language_pair() {
-    let app = App::new(LanguagePair::new("en", "ru")).confirmed_target("en");
+    let app = App::new(LanguagePair::new("en", "ru")).confirmed_learning("en");
     let flat = flatten(&app);
     assert!(
         flat.contains("words you want to learn")
@@ -281,8 +281,8 @@ fn typing_and_pressing_ctrl_g_advances_to_what_i_understood_and_locks_target_lan
         (
             resolved.screen(),
             side,
-            resolved.target_pending(),
-            resolved.pair().target().to_string(),
+            resolved.learning_pending(),
+            resolved.pair().learning().to_string(),
         ),
         (
             Screen::WhatIUnderstood,
@@ -304,7 +304,7 @@ fn preference_store_feeds_my_language_into_the_initial_pair() {
     let persisted = store.read().expect("must reload my language").my_language;
     let app = App::new(LanguagePair::new("en", persisted.as_str()));
     assert_eq!(
-        app.pair().support(),
+        app.pair().known(),
         "es",
         "persisted my language must feed into the initial pair at app start"
     );

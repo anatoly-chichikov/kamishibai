@@ -497,7 +497,7 @@ where
                     self.app = self
                         .app
                         .clone()
-                        .confirmed_target(understood.guess().code())
+                        .confirmed_learning(understood.guess().code())
                         .understood_preserving_senses(understood.candidates().to_vec());
                 }
                 Err(error) => {
@@ -550,7 +550,7 @@ where
             },
             TextOutcome::KeyCheck(result) => match result {
                 Ok(()) => {
-                    let language = self.app.pair().support().to_string();
+                    let language = self.app.pair().known().to_string();
                     let key = self.app.welcome().key.clone();
                     self.persist_preferences(move |prefs| prefs.adopt(language).with_api_key(key));
                     self.app = self.app.clone().with_screen(Screen::YourWords);
@@ -571,10 +571,10 @@ where
         match side {
             Side::RunUnderstanding => {
                 let raw = RawInputBatch::new(self.app.blob());
-                let support = self.app.pair().support().to_string();
+                let known = self.app.pair().known().to_string();
                 let generator = self.generator.clone();
                 self.start_text(BusyKind::Understanding, move || {
-                    TextOutcome::Understanding(generator.understand(&raw, support.as_str()))
+                    TextOutcome::Understanding(generator.understand(&raw, known.as_str()))
                 })?;
             }
             Side::StartGeneration => {
@@ -609,10 +609,10 @@ where
             Side::PersistMyLanguageAndRunUnderstanding(code) => {
                 self.persist_preferences(|prefs| prefs.adopt(code));
                 let raw = RawInputBatch::new(self.app.blob());
-                let support = self.app.pair().support().to_string();
+                let known = self.app.pair().known().to_string();
                 let generator = self.generator.clone();
                 self.start_text(BusyKind::Understanding, move || {
-                    TextOutcome::Understanding(generator.understand(&raw, support.as_str()))
+                    TextOutcome::Understanding(generator.understand(&raw, known.as_str()))
                 })?;
             }
             Side::RunCardCorrection(comment) => {
@@ -893,7 +893,7 @@ mod tests {
     use super::*;
     use crate::session::{
         ArtifactFile, BulkCorrection, CardCorrection, CardMeta, CardMetaGeneration, CardRevision,
-        LanguagePair, RawInputBatch, ScriptDetection, Sense, SenseCorrection, TargetDetection,
+        LanguagePair, LearningDetection, RawInputBatch, ScriptDetection, Sense, SenseCorrection,
         Understanding, Understood, WordCandidate, catalog_for_detection,
     };
     use anyhow::Result;
@@ -1157,7 +1157,7 @@ mod tests {
     fn review() -> App {
         App::new(pair())
             .with_screen(Screen::WhatIUnderstood)
-            .confirmed_target("en")
+            .confirmed_learning("en")
             .understood(vec![candidate("whilst")])
     }
 

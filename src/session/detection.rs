@@ -1,15 +1,15 @@
 use crate::languages::LanguageCatalog;
 use anyhow::Result;
 
-/// One guessed target language with a confidence flag.
+/// One guessed learning language with a confidence flag.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TargetGuess {
+pub struct LearningGuess {
     code: String,
     confident: bool,
 }
 
-impl TargetGuess {
-    /// Create one target guess with confidence.
+impl LearningGuess {
+    /// Create one learning guess with confidence.
     pub fn new(code: impl Into<String>, confident: bool) -> Self {
         Self {
             code: code.into(),
@@ -28,19 +28,19 @@ impl TargetGuess {
     }
 }
 
-/// Contract for detecting the target language from raw user input.
-pub trait TargetDetection {
-    /// Detect the most likely target code for one raw blob.
-    fn detect(&self, raw: &str, catalog: &LanguageCatalog) -> Result<TargetGuess>;
+/// Contract for detecting the learning language from raw user input.
+pub trait LearningDetection {
+    /// Detect the most likely learning code for one raw blob.
+    fn detect(&self, raw: &str, catalog: &LanguageCatalog) -> Result<LearningGuess>;
 }
 
 /// Deterministic script-based detector used as a fallback before the LLM pass.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ScriptDetection;
 
-impl TargetDetection for ScriptDetection {
-    /// Detect the target language code from the dominant Unicode script in the input.
-    fn detect(&self, raw: &str, _catalog: &LanguageCatalog) -> Result<TargetGuess> {
+impl LearningDetection for ScriptDetection {
+    /// Detect the learning language code from the dominant Unicode script in the input.
+    fn detect(&self, raw: &str, _catalog: &LanguageCatalog) -> Result<LearningGuess> {
         let mut tally = Tally::default();
         for character in raw.chars() {
             tally.observe(character);
@@ -82,23 +82,23 @@ impl Tally {
         }
     }
 
-    fn finalize(self) -> TargetGuess {
+    fn finalize(self) -> LearningGuess {
         if self.kana > 0 {
-            return TargetGuess::new("ja", true);
+            return LearningGuess::new("ja", true);
         }
         let max = self.cyrillic.max(self.greek).max(self.han).max(self.latin);
         if max == 0 {
-            return TargetGuess::new("en", false);
+            return LearningGuess::new("en", false);
         }
         if self.cyrillic == max {
-            return TargetGuess::new("ru", true);
+            return LearningGuess::new("ru", true);
         }
         if self.greek == max {
-            return TargetGuess::new("el", true);
+            return LearningGuess::new("el", true);
         }
         if self.han == max {
-            return TargetGuess::new("zh", true);
+            return LearningGuess::new("zh", true);
         }
-        TargetGuess::new("en", false)
+        LearningGuess::new("en", false)
     }
 }

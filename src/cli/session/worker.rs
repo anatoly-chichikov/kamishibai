@@ -167,7 +167,7 @@ fn terminal_phase(outcome: &Outcome) -> Phase {
 /// phase is never overwritten — and the error is returned for the exit code.
 fn execute(store: &SessionStore, id: &str, inner: Box<dyn Reporter>) -> Result<SessionRecord> {
     let record = store.open(id)?;
-    let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
+    let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let drafts = record
         .drafts
         .iter()

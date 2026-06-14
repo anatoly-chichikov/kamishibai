@@ -82,7 +82,7 @@ fn draft(term: &str, artifacts: CardArtifacts) -> CardDraft {
 fn seeded(drafts: Vec<CardDraft>) -> App {
     App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .cards_started(drafts)
 }
 

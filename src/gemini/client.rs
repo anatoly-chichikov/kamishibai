@@ -10,8 +10,8 @@ use serde_json::Value;
 use crate::generation::{manga_template, render_scene_prompt};
 use crate::languages::catalog;
 use crate::session::{
-    CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch, Sense, SenseCorrection,
-    TargetGuess, Understood, WordCandidate,
+    CardDraft, CardMeta, CardRevision, LanguagePair, LearningGuess, RawInputBatch, Sense,
+    SenseCorrection, Understood, WordCandidate,
 };
 
 use super::codec::decode;
@@ -150,8 +150,8 @@ impl GeminiClient<HttpTransport> {
             .or_else(|| saved.filter(|value| !value.is_empty()).map(String::from))
             .ok_or_else(|| {
                 anyhow!(
-                    "no Gemini API key found in GEMINI_API_KEY or saved preferences; \
-                     set GEMINI_API_KEY or start the TUI without WORDS_JSON and paste one on Welcome"
+                    "no Gemini API key found — save one with 'kamishibai config --key', \
+                     set GEMINI_API_KEY, or paste one on the TUI Welcome"
                 )
             })?;
         Ok(Self::new(key, HttpTransport::new()))
@@ -226,7 +226,7 @@ where
         let decoded: IntakeResponse =
             serde_json::from_str(unfence(self.text(TEXT_MODEL, prompt)?.trim()))?;
         Ok(Understood::new(
-            TargetGuess::new(decoded.target_lang, true),
+            LearningGuess::new(decoded.target_lang, true),
             decoded
                 .items
                 .into_iter()

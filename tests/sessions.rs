@@ -650,6 +650,48 @@ fn a_regenerate_note_without_a_card_is_refused_at_parse() {
         .code(2);
 }
 
+#[test]
+fn regenerate_json_and_quiet_conflict_is_refused() {
+    let cache = TempDir::new().expect("cache tempdir");
+    cli(cache.path())
+        .args(["regenerate", "x", "--failed", "--json", "-q"])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn regenerate_rebuilds_instead_of_resting_at_understood() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "rebuild", CARDS_JSON);
+    seed_artifacts(&first_card_dir(cache.path()));
+    cli(cache.path())
+        .args(["generate", "--wait", "rebuild", "--quiet"])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .success();
+    let gemini = failing_gemini();
+    cli_at(cache.path(), &gemini)
+        .args([
+            "regenerate",
+            "rebuild",
+            "--card",
+            "canard",
+            "--wait",
+            "--quiet",
+        ])
+        .timeout(Duration::from_secs(120))
+        .output()
+        .expect("regenerate must run to completion");
+    let phase = poll_quiet_status(cache.path(), "rebuild", Duration::from_secs(5), |p| {
+        p != "understood"
+    });
+    assert_ne!(
+        phase, "understood",
+        "regenerate must run a worker to rebuild, never drop the session back to understood"
+    );
+}
+
 /// Run one command expecting `--json` mode, parsing stdout as the single document.
 fn json_stdout(command: &mut Command) -> serde_json::Value {
     let output = command.output().expect("the command must run");

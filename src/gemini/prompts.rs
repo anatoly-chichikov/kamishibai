@@ -40,11 +40,11 @@ pub(super) fn render_bulk_prompt(
     render(
         SENSE_PROMPT,
         &[
-            ("{target_language}", language_label(catalog, pair.target())?),
             (
-                "{support_language}",
-                language_label(catalog, pair.support())?,
+                "{target_language}",
+                language_label(catalog, pair.learning())?,
             ),
+            ("{support_language}", language_label(catalog, pair.known())?),
             ("{term}", String::from(candidate.term())),
             ("{shown_senses}", serde_json::to_string_pretty(&senses)?),
             ("{user_request}", String::from(comment)),
@@ -62,11 +62,11 @@ pub(super) fn render_card_meta_prompt(
     render(
         CARD_META_PROMPT,
         &[
-            ("{target_language}", language_label(catalog, pair.target())?),
             (
-                "{source_language}",
-                language_label(catalog, pair.support())?,
+                "{target_language}",
+                language_label(catalog, pair.learning())?,
             ),
+            ("{source_language}", language_label(catalog, pair.known())?),
             ("{term}", String::from(term)),
             ("{understanding}", String::from(understanding)),
         ],
@@ -95,11 +95,11 @@ pub(super) fn render_card_prompt(
     render(
         CARD_PROMPT,
         &[
-            ("{target_language}", language_label(catalog, pair.target())?),
             (
-                "{source_language}",
-                language_label(catalog, pair.support())?,
+                "{target_language}",
+                language_label(catalog, pair.learning())?,
             ),
+            ("{source_language}", language_label(catalog, pair.known())?),
             ("{term}", String::from(draft.term())),
             ("{understanding}", String::from(draft.understanding())),
             ("{current_meta}", meta_json),

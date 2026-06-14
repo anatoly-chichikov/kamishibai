@@ -64,8 +64,8 @@ fn app_to_record(
     let mut record = SessionRecord::understood(
         id,
         created.clone(),
-        app.pair().support().to_string(),
-        app.pair().target().to_string(),
+        app.pair().known().to_string(),
+        app.pair().learning().to_string(),
         output.to_string(),
         senses.to_string(),
         source.to_string(),
@@ -104,7 +104,7 @@ fn app_to_record(
 /// session reopens on its finished cards; a session with a committed plan reopens
 /// generating from cache; a curatable one reopens on the understanding.
 fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
-    let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
+    let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let candidates: Vec<WordCandidate> = record
         .candidates
         .iter()
@@ -112,7 +112,7 @@ fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
         .collect();
     let mut app = App::new(pair.clone())
         .seeded_blob(record.words.join("\n"))
-        .confirmed_target(record.to.clone());
+        .confirmed_learning(record.learning.clone());
     if !candidates.is_empty() {
         app = app
             .with_screen(Screen::WhatIUnderstood)
@@ -277,7 +277,7 @@ impl TuiSession {
         match &self.id {
             Some(id) => Ok(id.clone()),
             None => {
-                let minted = mint_id(app.pair().target())?;
+                let minted = mint_id(app.pair().learning())?;
                 self.id = Some(minted.clone());
                 Ok(minted)
             }
@@ -304,8 +304,8 @@ fn fingerprint(app: &App, generating: bool) -> u64 {
     generating.hash(&mut hasher);
     screen_tag(app.screen()).hash(&mut hasher);
     app.blob().hash(&mut hasher);
-    app.pair().support().hash(&mut hasher);
-    app.pair().target().hash(&mut hasher);
+    app.pair().known().hash(&mut hasher);
+    app.pair().learning().hash(&mut hasher);
     for candidate in app.candidates() {
         candidate.term().hash(&mut hasher);
         candidate.ok().hash(&mut hasher);
@@ -339,7 +339,7 @@ mod tests {
     fn understood_app() -> App {
         App::new(LanguagePair::new("fr", "en"))
             .seeded_blob("canard\nflaner")
-            .confirmed_target("fr")
+            .confirmed_learning("fr")
             .with_screen(Screen::WhatIUnderstood)
             .understood(vec![
                 WordCandidate::with_selected_senses(
@@ -355,7 +355,7 @@ mod tests {
     fn published_app() -> App {
         let pair = LanguagePair::new("fr", "en");
         App::new(pair.clone())
-            .confirmed_target("fr")
+            .confirmed_learning("fr")
             .with_screen(Screen::YourCards)
             .cards_started(vec![CardDraft::new("canard", "a duck", pair)])
             .done_published("/o/deck.apkg", "/o/deck.pdf", "/o")
@@ -375,8 +375,8 @@ mod tests {
         let (app, startup) = record_to_app(&record);
         assert_eq!(
             (
-                app.pair().support().to_string(),
-                app.pair().target().to_string(),
+                app.pair().known().to_string(),
+                app.pair().learning().to_string(),
                 app.screen(),
                 app.candidates()[0].selected_senses().to_vec(),
                 app.candidates()[1].ok(),

@@ -10,7 +10,7 @@ use anyhow::Result;
 
 use crate::cli::card_workflow::CardGeneration;
 use crate::cli::console::{self, HumanReporter, JsonReporter, QuietReporter, Reporter, drafts_for};
-use crate::cli::error::usage;
+use crate::cli::error::{json_line, usage};
 use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardCorrection, CardDraft, LanguagePair, WordCandidate};
 
@@ -49,11 +49,23 @@ pub(super) fn run_session(
         Ok(())
     })?;
     if wait {
-        let record = worker::run_foreground(store, id, reporter(render, quiet))?;
+        // Foreground generation runs OCR in-process; the native engine printf's
+        // into the libc stdout buffer, which would corrupt the single-document
+        // `--json` contract. Mute fd 1 for the run and write the one document we
+        // owe stdout to the saved real descriptor. The muted fd is never
+        // restored, so the buffered native bytes drain into /dev/null at exit —
+        // as does cli.rs's own json error line printed after we return here,
+        // which is why an error is emitted to the real stdout below first.
+        let stdout = MutedStdout::capture()?;
+        let outcome = worker::run_foreground(store, id, reporter(render, quiet));
         if matches!(render, Render::Json) {
-            return json::emit_session(&record);
+            let line = match &outcome {
+                Ok(record) => json::session_line(record)?,
+                Err(error) => json_line(error),
+            };
+            stdout.emit(line.as_str())?;
         }
-        return Ok(());
+        return outcome.map(|_| ());
     }
     let record = worker::start_background(store, id)?;
     if matches!(render, Render::Json) {
@@ -72,7 +84,7 @@ fn ensure_plan(record: &mut SessionRecord) {
     if !record.drafts.is_empty() {
         return;
     }
-    let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
+    let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let candidates: Vec<WordCandidate> = record
         .candidates
         .iter()
@@ -84,9 +96,10 @@ fn ensure_plan(record: &mut SessionRecord) {
         .collect();
 }
 
-/// Drop committed cards' cached artifacts so the next generate rebuilds them:
-/// every unfinished card with `--failed`, or one card by `--card`. With `--note`
-/// Gemini first rewrites that card from the instruction (a Gemini call).
+/// Re-roll committed cards: drop the cached artifacts of every unfinished card
+/// (`--failed`) or one card (`--card`), optionally rewriting it from `--note`
+/// first, then immediately regenerate and republish the deck. Returns like
+/// `generate`: the id for a detached run, the terminal state after `--wait`.
 pub(super) fn regenerate(args: &RegenerateArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
     let record = resolve(&store, args.id.as_deref(), render)?;
@@ -96,31 +109,25 @@ pub(super) fn regenerate(args: &RegenerateArgs, render: Render) -> Result<()> {
             "no committed plan to regenerate: generate the session first",
         ));
     }
-    let updated = match args.note.as_deref() {
+    match args.note.as_deref() {
         Some(note) => {
             let card = args
                 .card
                 .as_deref()
                 .expect("invariant: clap requires --card with --note");
-            let updated = rewrite(&store, &record, card, note)?;
+            rewrite(&store, &record, card, note)?;
             if matches!(render, Render::Text) {
-                eprintln!("rewrote card '{card}'; generate the session to rebuild it");
+                eprintln!("rewrote card '{card}'; regenerating");
             }
-            updated
         }
         None => {
-            let (updated, dropped) = drop_targets(&store, &record, args)?;
+            let (_record, dropped) = drop_targets(&store, &record, args)?;
             if matches!(render, Render::Text) {
-                eprintln!("dropped {dropped} card(s); generate the session to rebuild them");
+                eprintln!("dropped {dropped} card(s); regenerating");
             }
-            updated
         }
-    };
-    if matches!(render, Render::Json) {
-        return json::emit_session(&updated);
     }
-    println!("{}", updated.id);
-    Ok(())
+    run_session(&store, record.id.as_str(), args.wait, args.quiet, render)
 }
 
 /// Ask Gemini to rewrite one committed card from a note, drop its artifacts, and
@@ -134,7 +141,7 @@ fn rewrite(
 ) -> Result<SessionRecord> {
     preflight_key()?;
     let root = cache_root(&SystemContext)?;
-    let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
+    let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let current = record
         .drafts
         .iter()
@@ -187,7 +194,7 @@ fn drop_targets(
     args: &RegenerateArgs,
 ) -> Result<(SessionRecord, usize)> {
     let root = cache_root(&SystemContext)?;
-    let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
+    let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let targets: Vec<DraftRecord> = match &args.card {
         Some(term) => record
             .drafts
@@ -233,5 +240,59 @@ fn reporter(render: Render, quiet: bool) -> Box<dyn Reporter> {
         Render::Json => Box::new(JsonReporter),
         Render::Text if quiet => Box::new(QuietReporter),
         Render::Text => Box::new(HumanReporter),
+    }
+}
+
+/// A muted process stdout: fd 1 is redirected to `/dev/null` and never restored,
+/// so a foreground generation's native OCR chatter (which printf's into the libc
+/// buffer on fd 1) drains there instead of corrupting the single-document
+/// `--json` stdout. The one document the command owes stdout is written to the
+/// saved real descriptor with `emit`. Only stdout is muted — stderr (live
+/// progress) is untouched.
+#[cfg(unix)]
+struct MutedStdout {
+    real: std::fs::File,
+    _sink: std::fs::File,
+}
+
+#[cfg(unix)]
+impl MutedStdout {
+    /// Flush, dup the real stdout aside, and point fd 1 at `/dev/null`.
+    fn capture() -> Result<Self> {
+        use std::io::Write as _;
+        std::io::stdout().flush()?;
+        let real = std::fs::File::from(rustix::io::dup(std::io::stdout())?);
+        let sink = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .open("/dev/null")?;
+        rustix::stdio::dup2_stdout(&sink)?;
+        Ok(Self { real, _sink: sink })
+    }
+
+    /// Write one line to the saved real stdout, bypassing the muted fd 1.
+    fn emit(&self, line: &str) -> Result<()> {
+        use std::io::Write as _;
+        let mut real = &self.real;
+        writeln!(real, "{line}")?;
+        real.flush()?;
+        Ok(())
+    }
+}
+
+/// On non-Unix the OCR redirect is a no-op, so muting is unnecessary; `emit`
+/// writes straight to stdout.
+#[cfg(not(unix))]
+struct MutedStdout;
+
+#[cfg(not(unix))]
+impl MutedStdout {
+    fn capture() -> Result<Self> {
+        Ok(Self)
+    }
+
+    fn emit(&self, line: &str) -> Result<()> {
+        println!("{line}");
+        Ok(())
     }
 }

@@ -64,7 +64,7 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 .collect::<Vec<_>>();
             return Paragraph::new(lines).style(palette::base());
         }
-        let copy = if app.target_pending() {
+        let copy = if app.learning_pending() {
             "understanding your words…"
         } else {
             "nothing left to review"

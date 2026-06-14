@@ -1,25 +1,25 @@
 use anyhow::Result;
 
 use super::candidate::{RawInputBatch, Sense, WordCandidate};
-use super::detection::TargetGuess;
+use super::detection::LearningGuess;
 use super::draft::{CardDraft, CardMeta};
 use super::pair::LanguagePair;
 
 /// The outcome of the cheap first-pass understanding step.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Understood {
-    guess: TargetGuess,
+    guess: LearningGuess,
     candidates: Vec<WordCandidate>,
 }
 
 impl Understood {
     /// Create one understanding result.
-    pub fn new(guess: TargetGuess, candidates: Vec<WordCandidate>) -> Self {
+    pub fn new(guess: LearningGuess, candidates: Vec<WordCandidate>) -> Self {
         Self { guess, candidates }
     }
 
-    /// Return the detected target guess.
-    pub fn guess(&self) -> &TargetGuess {
+    /// Return the detected learning guess.
+    pub fn guess(&self) -> &LearningGuess {
         &self.guess
     }
 
@@ -31,7 +31,7 @@ impl Understood {
 
 /// Contract for the cheap human-in-the-loop understanding pass. Real implementation lives in `src/gemini/*`.
 pub trait Understanding {
-    /// Normalise a raw blob into reviewed rows plus the detected target language.
+    /// Normalise a raw blob into reviewed rows plus the detected learning language.
     fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood>;
 }
 

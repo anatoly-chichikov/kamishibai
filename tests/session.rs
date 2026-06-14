@@ -1,7 +1,7 @@
 //! Target-language detection and language pair contracts.
 
 use kamishibai::languages::catalog;
-use kamishibai::session::{LanguagePair, ScriptDetection, TargetDetection, TargetGuess};
+use kamishibai::session::{LanguagePair, LearningDetection, LearningGuess, ScriptDetection};
 
 #[test]
 fn script_detection_picks_russian_on_cyrillic_dominant_blob() {
@@ -10,7 +10,7 @@ fn script_detection_picks_russian_on_cyrillic_dominant_blob() {
         .expect("detection must succeed");
     assert_eq!(
         guess,
-        TargetGuess::new("ru", true),
+        LearningGuess::new("ru", true),
         "cyrillic-dominant blob must yield a confident Russian guess"
     );
 }
@@ -22,7 +22,7 @@ fn script_detection_falls_back_to_english_for_latin_input() {
         .expect("detection must succeed");
     assert_eq!(
         guess,
-        TargetGuess::new("en", false),
+        LearningGuess::new("en", false),
         "Latin-script blob must surface an unsure English guess for later LLM confirmation"
     );
 }
@@ -34,7 +34,7 @@ fn script_detection_handles_mixed_chinese() {
         .expect("detection must succeed");
     assert_eq!(
         guess,
-        TargetGuess::new("zh", true),
+        LearningGuess::new("zh", true),
         "Han-script blob must produce a confident Chinese guess"
     );
 }

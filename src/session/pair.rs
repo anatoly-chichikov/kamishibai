@@ -4,48 +4,48 @@ use anyhow::Result;
 /// One explicit language direction for a batch: what is being learned, and what is explained in.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LanguagePair {
-    target: String,
-    support: String,
+    learning: String,
+    known: String,
 }
 
 impl LanguagePair {
-    /// Create one language pair from target and support codes.
-    pub fn new(target: impl Into<String>, support: impl Into<String>) -> Self {
+    /// Create one language pair from the learning and known codes.
+    pub fn new(learning: impl Into<String>, known: impl Into<String>) -> Self {
         Self {
-            target: target.into(),
-            support: support.into(),
+            learning: learning.into(),
+            known: known.into(),
         }
     }
 
-    /// Return the target (learned) language code.
-    pub fn target(&self) -> &str {
-        self.target.as_str()
+    /// Return the learning (studied) language code.
+    pub fn learning(&self) -> &str {
+        self.learning.as_str()
     }
 
-    /// Return the support (my) language code.
-    pub fn support(&self) -> &str {
-        self.support.as_str()
+    /// Return the known (native) language code.
+    pub fn known(&self) -> &str {
+        self.known.as_str()
     }
 
-    /// Return the resolved target profile from the supplied catalog.
-    pub fn target_profile(&self, catalog: &LanguageCatalog) -> Result<LanguageProfile> {
-        catalog.item(self.target.as_str())
+    /// Return the resolved learning profile from the supplied catalog.
+    pub fn learning_profile(&self, catalog: &LanguageCatalog) -> Result<LanguageProfile> {
+        catalog.item(self.learning.as_str())
     }
 
-    /// Return the resolved support profile from the supplied catalog.
-    pub fn support_profile(&self, catalog: &LanguageCatalog) -> Result<LanguageProfile> {
-        catalog.item(self.support.as_str())
+    /// Return the resolved known profile from the supplied catalog.
+    pub fn known_profile(&self, catalog: &LanguageCatalog) -> Result<LanguageProfile> {
+        catalog.item(self.known.as_str())
     }
 
-    /// Return a compact "support → target" label (native first, learning second).
+    /// Return a compact "known → learning" label (native first, studied second).
     ///
     /// Order matches the on-screen chip — the user reads it as "from my
     /// language into the language being learned".
     pub fn label(&self) -> String {
         format!(
             "{} → {}",
-            self.support.to_uppercase(),
-            self.target.to_uppercase()
+            self.known.to_uppercase(),
+            self.learning.to_uppercase()
         )
     }
 }

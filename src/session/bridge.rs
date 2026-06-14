@@ -23,14 +23,14 @@ pub fn to_entry(draft: &CardDraft) -> Result<VocabularyEntry> {
         importance: Importance::new(meta.importance())?,
         source: VocabularySource {
             sentence: NonEmptyText::new(meta.source_sentence())?,
-            lang: LanguageCode::new(draft.pair().support())?,
+            lang: LanguageCode::new(draft.pair().known())?,
             highlight: NonEmptyText::new(meta.source_highlight())?,
             hint: NonEmptyText::new(meta.source_hint())?,
             context: NonEmptyText::new(meta.source_context())?,
         },
         target: VocabularyTarget {
             sentence: NonEmptyText::new(meta.target_sentence())?,
-            lang: LanguageCode::new(draft.pair().target())?,
+            lang: LanguageCode::new(draft.pair().learning())?,
         },
     })
 }

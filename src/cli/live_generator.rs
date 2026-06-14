@@ -99,7 +99,7 @@ impl LiveCardGenerator {
     }
 
     fn audio(&self, draft: &CardDraft) -> Result<Audio<GeminiClient<HttpTransport>>> {
-        let item = self.catalog.item(draft.pair().target())?;
+        let item = self.catalog.item(draft.pair().learning())?;
         Ok(Audio::new(
             self.cell(draft).cache(),
             render_audio_prompt(item.prompt.as_str()),
@@ -108,7 +108,7 @@ impl LiveCardGenerator {
     }
 
     fn illustration(&self, draft: &CardDraft) -> Result<LiveIllustration> {
-        let item = self.catalog.item(draft.pair().target())?;
+        let item = self.catalog.item(draft.pair().learning())?;
         let client = self.client()?;
         Ok(Illustration::new(
             self.cell(draft).cache(),
@@ -134,11 +134,15 @@ impl LiveCardGenerator {
         let meta = draft
             .meta()
             .ok_or_else(|| anyhow!("meta must be ready before {artifact}"))?;
-        let target = draft.pair().target();
+        let learning = draft.pair().learning();
         let illustration = self.illustration(draft)?;
         let mut progress = NoopProgress;
-        let (filename, cached) =
-            render(&illustration, meta.target_sentence(), target, &mut progress)?;
+        let (filename, cached) = render(
+            &illustration,
+            meta.target_sentence(),
+            learning,
+            &mut progress,
+        )?;
         let path = illustration.filepath(filename.as_str())?;
         Ok(artifact_file(filename, path, cached))
     }

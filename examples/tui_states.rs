@@ -308,7 +308,7 @@ fn build_states() -> Vec<(String, App)> {
 
     let review = App::new(pair())
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("fr")
+        .confirmed_learning("fr")
         .understood(candidates.clone());
 
     let change_something = review
@@ -326,7 +326,7 @@ fn build_states() -> Vec<(String, App)> {
 
     let base_cards = App::new(pair())
         .with_screen(Screen::YourCards)
-        .confirmed_target("fr")
+        .confirmed_learning("fr")
         .cards_started(vec![
             card_with_highlight(
                 "dépaysement",
@@ -350,7 +350,7 @@ fn build_states() -> Vec<(String, App)> {
 
     let change_this_card = App::new(pair())
         .with_screen(Screen::YourCards)
-        .confirmed_target("fr")
+        .confirmed_learning("fr")
         .cards_started(vec![
             card("dépaysement", "", "", ready_artifacts()),
             card_with_hint(
@@ -382,7 +382,7 @@ fn build_states() -> Vec<(String, App)> {
 
     let retrying = App::new(pair())
         .with_screen(Screen::YourCards)
-        .confirmed_target("fr")
+        .confirmed_learning("fr")
         .cards_started(vec![
             card("dépaysement", "", "", ready_artifacts()),
             card("flâner", "", "", second_retrying_artifacts()),
@@ -393,7 +393,7 @@ fn build_states() -> Vec<(String, App)> {
 
     let failed = App::new(pair())
         .with_screen(Screen::YourCards)
-        .confirmed_target("fr")
+        .confirmed_learning("fr")
         .cards_started(vec![
             card("dépaysement", "", "", ready_artifacts()),
             card("flâner", "", "", ready_artifacts()),
@@ -404,7 +404,7 @@ fn build_states() -> Vec<(String, App)> {
 
     let done = App::new(pair())
         .with_screen(Screen::Done)
-        .confirmed_target("fr")
+        .confirmed_learning("fr")
         .done_published(
             "fr_2026-06-01_183029.apkg",
             "fr_2026-06-01_183029.pdf",

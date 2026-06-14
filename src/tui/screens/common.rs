@@ -139,17 +139,17 @@ pub fn header(
 /// arrow between them — is rendered in bold bright `palette::base()`,
 /// matching the title block on the opposite side of the header.
 pub fn language_chip(app: &App) -> Vec<Span<'static>> {
-    let support = app.pair().support().to_uppercase();
-    let target_text = if app.target_pending() {
+    let known = app.pair().known().to_uppercase();
+    let learning_text = if app.learning_pending() {
         String::from("…")
     } else {
-        app.pair().target().to_uppercase()
+        app.pair().learning().to_uppercase()
     };
     let style = palette::base().add_modifier(Modifier::BOLD);
     vec![
-        Span::styled(support, style),
+        Span::styled(known, style),
         Span::styled(" → ", style),
-        Span::styled(target_text, style),
+        Span::styled(learning_text, style),
     ]
 }
 

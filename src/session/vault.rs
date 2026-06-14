@@ -32,12 +32,12 @@ impl CardCell {
     ) -> Self {
         let key = digest(&[
             CARD_VERSION,
-            pair.target(),
-            pair.support(),
+            pair.learning(),
+            pair.known(),
             term,
             understanding,
         ]);
-        let folder = format!("cards/{}-{}/{key}", pair.support(), pair.target());
+        let folder = format!("cards/{}-{}/{key}", pair.known(), pair.learning());
         Self {
             cache: Cache::new(folder, root),
             key,

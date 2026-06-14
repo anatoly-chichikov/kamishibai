@@ -192,7 +192,7 @@ mod tests {
     fn artifact_file_labels_get_the_hand_pointer_and_plain_cells_get_the_arrow() {
         let app = App::new(pair())
             .with_screen(Screen::YourCards)
-            .confirmed_target("en")
+            .confirmed_learning("en")
             .cards_started(vec![card("whilst")]);
         assert_eq!(
             (
@@ -313,7 +313,7 @@ mod tests {
         let apps = [
             App::new(pair())
                 .with_screen(Screen::YourCards)
-                .confirmed_target("en")
+                .confirmed_learning("en")
                 .cards_started(vec![card("whilst")]),
             App::new(pair()).with_screen(Screen::Done).done_published(
                 "deck.apkg",

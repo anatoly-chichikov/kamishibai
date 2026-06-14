@@ -52,7 +52,7 @@ pub(super) fn rm(args: &RmArgs, render: Render) -> Result<()> {
     refuse_if_live(&store, &record)?;
     if args.cache {
         let root = cache_root(&SystemContext)?;
-        let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
+        let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
         for (term, understanding) in cached_cells(&record) {
             drop_artifacts(
                 root.as_path(),

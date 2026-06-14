@@ -22,9 +22,15 @@ use anyhow::Result;
 use clap::Parser;
 
 const SCHEMA_HELP: &str = "\
+AGENT CONTRACT:
+  Driving this from a script or agent? The full machine-readable contract —
+  every command, flag, JSON shape, and exit code — is llms.txt at the repo root.
+  Fetch and read it before integrating:
+  https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/llms.txt
+
 EXAMPLES:
   kamishibai                                       open the interactive TUI
-  kamishibai new --word bank --word spring --to en understand words, create a session
+  kamishibai new --word bank --learning en         understand words, create a session
   kamishibai select --card bank --sense 2          keep only the 2nd sense of a card
   kamishibai exclude --card spring                 drop one card from the plan
   kamishibai generate                              generate + publish in the background
@@ -85,6 +91,7 @@ native-speaker audio, and manga-style illustrations.";
     name = "kamishibai",
     version,
     about = "Turn a list of words into an illustrated Anki deck — sentences, native-speaker audio, manga-style art.",
+    after_help = "Agent or script? Read the machine contract: https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/llms.txt",
     after_long_help = SCHEMA_HELP,
     args_conflicts_with_subcommands = true
 )]
@@ -177,7 +184,7 @@ mod tests {
     fn new_parses_to_the_new_command() {
         assert!(
             matches!(
-                parse(&["kamishibai", "new", "--word", "wreck", "--to", "fr"]).command,
+                parse(&["kamishibai", "new", "--word", "wreck", "--learning", "fr"]).command,
                 Some(Command::New(_))
             ),
             "new must parse to the New command"

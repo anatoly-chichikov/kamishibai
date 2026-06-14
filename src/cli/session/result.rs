@@ -73,7 +73,7 @@ pub(super) fn result(args: &ResultArgs, render: Render) -> Result<()> {
         return Ok(());
     }
     println!("session  {}", record.id);
-    println!("pair     {} → {}", record.from, record.to);
+    println!("pair     {} → {}", record.known, record.learning);
     println!("deck     {}", paths.deck);
     println!("pdf      {}", paths.report);
     println!("dir      {}", paths.output);
@@ -82,7 +82,7 @@ pub(super) fn result(args: &ResultArgs, render: Render) -> Result<()> {
         0 => {}
         failed => println!("cards    {} in deck · {failed} failed", paths.cards),
     }
-    let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
+    let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let cache = CardMetaCache::new(root);
     let total = record.drafts.len();
     for (index, draft) in record.drafts.iter().enumerate() {
@@ -132,10 +132,10 @@ fn print_card(
     );
     println!("  {:<8} {}", "meaning", meta.meaning());
     println!("  {:<8} {}", "say", meta.pronunciation());
-    println!("  {:<8} {}", record.to, meta.target_sentence());
+    println!("  {:<8} {}", record.learning, meta.target_sentence());
     println!(
         "  {:<8} {}",
-        record.from,
+        record.known,
         highlighted(meta.source_sentence(), meta.source_highlight())
     );
     println!("  {:<8} {}", "hint", meta.source_hint());

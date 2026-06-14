@@ -45,8 +45,8 @@ fn main() -> Result<()> {
     );
 
     let pair = pair_from_document(&document)?;
-    let target_lang = pair.target().to_string();
-    let support_lang = pair.support().to_string();
+    let target_lang = pair.learning().to_string();
+    let support_lang = pair.known().to_string();
     let entries: Vec<VocabularyEntry> = document.entries.clone();
 
     let t1 = Instant::now();

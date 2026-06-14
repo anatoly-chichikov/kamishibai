@@ -19,6 +19,7 @@
 //! caller-supplied [`SessionOpener`] port, which the TUI side implements.
 
 mod args;
+mod config;
 mod curate;
 mod generate;
 mod json;
@@ -42,6 +43,7 @@ use anyhow::Result;
 
 use crate::config::default_store;
 use crate::generation::artifact_cache::{ILLUSTRATION_FILE, META_FILE, SCENE_FILE, VOICE_FILE};
+use crate::languages::catalog;
 use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardCell, LanguagePair};
 
@@ -84,6 +86,7 @@ pub(super) fn handle(command: &Command, render: Render, opener: &dyn SessionOpen
         Command::Ls(args) => result::ls(args, render),
         Command::Rm(args) => maintenance::rm(args, render),
         Command::CachePath => maintenance::cache_path(render),
+        Command::Config(args) => config::config(args, render),
         Command::Worker(args) => worker::run_detached_entry(args.id.as_str()),
     }
 }
@@ -106,6 +109,7 @@ fn refuse_json_conflicts(command: &Command, render: Render) -> Result<()> {
         }
         Command::New(args) => args.quiet,
         Command::Generate(args) => args.quiet,
+        Command::Regenerate(args) => args.quiet,
         Command::Status(args) => args.quiet,
         Command::Result(args) => args.quiet,
         Command::Ls(args) => args.quiet,
@@ -252,8 +256,16 @@ pub(in crate::cli::session) fn preflight_key() -> Result<()> {
         .filter(|key| !key.trim().is_empty());
     if env.is_none() && saved.is_none() {
         return Err(usage(
-            "no Gemini API key found in GEMINI_API_KEY or saved preferences; set GEMINI_API_KEY",
+            "no Gemini API key found — save one with 'kamishibai config --key', set GEMINI_API_KEY, or paste one on the TUI Welcome",
         ));
+    }
+    Ok(())
+}
+
+/// Refuse an unknown language code before it is used or persisted.
+pub(in crate::cli::session) fn validate_language(code: &str) -> Result<()> {
+    if catalog().item(code).is_err() {
+        return Err(usage(format!("unknown language '{code}'")));
     }
     Ok(())
 }

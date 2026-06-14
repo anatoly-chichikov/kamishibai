@@ -29,8 +29,19 @@ pub(super) fn emit(document: &impl Serialize) -> Result<()> {
 /// Project one record against the live cache and print its session document —
 /// the one emission seam every stateful verb's JSON branch goes through.
 pub(super) fn emit_session(record: &SessionRecord) -> Result<()> {
+    println!("{}", session_line(record)?);
+    Ok(())
+}
+
+/// Serialize one record's session document to a single line (no trailing
+/// newline) — the same string `emit_session` prints, for callers that must
+/// write it to a descriptor other than the global stdout.
+pub(super) fn session_line(record: &SessionRecord) -> Result<String> {
     let root = cache_root(&SystemContext)?;
-    emit(&SessionDoc::of(record, root.as_path()))
+    Ok(serde_json::to_string(&SessionDoc::of(
+        record,
+        root.as_path(),
+    ))?)
 }
 
 /// The one session document every stateful verb returns: identity, the live
@@ -63,8 +74,8 @@ pub(super) struct SessionDoc {
 
 #[derive(Serialize)]
 struct PairDoc {
-    from: String,
-    to: String,
+    known: String,
+    learning: String,
 }
 
 #[derive(Serialize)]
@@ -145,8 +156,8 @@ impl SessionDoc {
             session: record.id.clone(),
             created: record.created.clone(),
             pair: PairDoc {
-                from: record.from.clone(),
-                to: record.to.clone(),
+                known: record.known.clone(),
+                learning: record.learning.clone(),
             },
             senses: record.senses.clone(),
             source: record.source.clone(),
@@ -273,7 +284,7 @@ impl ResultDoc {
         phase: Phase,
         paths: &ResultRecord,
     ) -> Result<Self> {
-        let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
+        let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
         let cache = CardMetaCache::new(cache_root.to_path_buf());
         let mut items = Vec::with_capacity(record.drafts.len());
         for draft in &record.drafts {
@@ -293,8 +304,8 @@ impl ResultDoc {
             ok: true,
             session: record.id.clone(),
             pair: PairDoc {
-                from: record.from.clone(),
-                to: record.to.clone(),
+                known: record.known.clone(),
+                learning: record.learning.clone(),
             },
             phase: view::phase_label(phase),
             paths: PathsDoc {
@@ -358,8 +369,8 @@ pub(super) fn ls_items(records: &[SessionRecord], cache_root: &Path) -> Vec<LsIt
             LsItem {
                 id: record.id.clone(),
                 pair: PairDoc {
-                    from: record.from.clone(),
-                    to: record.to.clone(),
+                    known: record.known.clone(),
+                    learning: record.learning.clone(),
                 },
                 created: record.created.clone(),
                 phase: view::phase_label(phase),

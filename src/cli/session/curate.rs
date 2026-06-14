@@ -123,7 +123,7 @@ pub(super) fn correct(args: &CorrectArgs, render: Render) -> Result<()> {
         .ok_or_else(|| usage(format!("no card '{}' in session '{id}'", args.card)))?
         .clone()
         .candidate();
-    let pair = LanguagePair::new(record.to.as_str(), record.from.as_str());
+    let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let generator = console::generator(PathBuf::from(record.out.clone()))?;
     let correction = generator.correct_bulk(&snapshot, args.note.as_str(), &pair)?;
     let mut appended = 0;

@@ -187,7 +187,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             if can_pick_language(app.screen()) =>
         {
             let screen = app.screen();
-            let next = app.close_modal().set_support(code.clone());
+            let next = app.close_modal().set_known(code.clone());
             if screen == Screen::WhatIUnderstood && !next.candidates().is_empty() {
                 (next, Side::PersistMyLanguageAndRunUnderstanding(code))
             } else {
@@ -241,16 +241,16 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
     let stage = app.welcome().stage;
     match (stage, event) {
         (WelcomeStage::PickLanguage, AppEvent::WelcomeNextLanguage) => {
-            let next = next_support(app.pair().support(), 1);
-            (app.set_support(next), Side::None)
+            let next = next_known(app.pair().known(), 1);
+            (app.set_known(next), Side::None)
         }
         (WelcomeStage::PickLanguage, AppEvent::WelcomePrevLanguage) => {
-            let next = next_support(app.pair().support(), -1);
-            (app.set_support(next), Side::None)
+            let next = next_known(app.pair().known(), -1);
+            (app.set_known(next), Side::None)
         }
         (WelcomeStage::PickLanguage, AppEvent::Submit)
         | (WelcomeStage::PickLanguage, AppEvent::KeyEnter) => {
-            let language = app.pair().support().to_string();
+            let language = app.pair().known().to_string();
             (app.welcome_advance(), Side::PersistMyLanguage(language))
         }
         (WelcomeStage::EnterKey, AppEvent::Cancel) => (app.welcome_step_back(), Side::None),
@@ -372,12 +372,12 @@ fn can_pick_language(screen: Screen) -> bool {
 }
 
 fn open_language_picker(app: App) -> App {
-    let cursor = picker_cursor_for(app.pair().support());
+    let cursor = picker_cursor_for(app.pair().known());
     app.with_modal(ModalKind::PickMyLanguage)
         .with_picker_cursor(cursor)
 }
 
-fn next_support(current: &str, direction: i32) -> String {
+fn next_known(current: &str, direction: i32) -> String {
     let codes = catalog().codes();
     let mut position: i32 = 0;
     for (index, code) in codes.iter().enumerate() {
@@ -470,11 +470,11 @@ mod tests {
     #[test]
     fn horizontal_arrows_move_focus_without_touching_language() {
         let before = enter_key(true);
-        let support_before = before.pair().support().to_string();
+        let known_before = before.pair().known().to_string();
         let after = transit(before, AppEvent::CursorRight).0;
         assert_eq!(
-            (after.pair().support().to_string(), after.welcome().focus),
-            (support_before, WelcomeFocus::LoadEnv),
+            (after.pair().known().to_string(), after.welcome().focus),
+            (known_before, WelcomeFocus::LoadEnv),
             "← → must move control focus and leave the language untouched"
         );
     }

@@ -38,6 +38,8 @@ pub(in crate::cli) enum Command {
     Rm(RmArgs),
     /// Print the cache directory and exit.
     CachePath,
+    /// Save or show persisted preferences: known language and Gemini API key.
+    Config(ConfigArgs),
     /// Internal: run the detached generation worker for a session.
     #[command(name = "__run", hide = true)]
     Worker(WorkerArgs),
@@ -55,14 +57,14 @@ pub(in crate::cli) struct NewArgs {
     #[arg(long, value_name = "FILE")]
     pub(super) words: Option<String>,
     /// Import a strict cards JSON path (or `-` for stdin) and skip understanding.
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["from", "to", "senses"])]
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["known", "learning", "senses"])]
     pub(super) build: Option<PathBuf>,
-    /// Native language you explain from (defaults to your saved preference).
+    /// Language you already know and explain from (defaults to your saved preference).
     #[arg(long, value_name = "LANG")]
-    pub(super) from: Option<String>,
-    /// Target language you are learning (defaults to autodetection).
+    pub(super) known: Option<String>,
+    /// Language you are learning (defaults to autodetection).
     #[arg(long, value_name = "LANG")]
-    pub(super) to: Option<String>,
+    pub(super) learning: Option<String>,
     /// How many senses of each word are selected initially.
     #[arg(long, value_name = "WHICH", default_value = "primary")]
     pub(super) senses: SensePolicy,
@@ -91,6 +93,19 @@ pub(in crate::cli) struct GenerateArgs {
     /// Suppress progress; with --wait print only the final paths, else just the id.
     #[arg(short, long)]
     pub(super) quiet: bool,
+}
+
+/// Arguments for `config`: with no flags it shows the saved preferences; with
+/// `--known`/`--key` it saves them. `--key -` reads the key from stdin; an
+/// empty `--key ""` clears the saved key.
+#[derive(Debug, Args)]
+pub(in crate::cli) struct ConfigArgs {
+    /// Save this as your known (native) language, validated against the catalog.
+    #[arg(long, value_name = "LANG")]
+    pub(super) known: Option<String>,
+    /// Save this Gemini API key (`-` reads it from stdin, empty clears it).
+    #[arg(long, value_name = "KEY")]
+    pub(super) key: Option<String>,
 }
 
 /// Arguments for `select`.
@@ -203,6 +218,12 @@ pub(in crate::cli) struct RegenerateArgs {
         conflicts_with = "failed"
     )]
     pub(super) note: Option<String>,
+    /// Run in the foreground, streaming progress, instead of detaching.
+    #[arg(long)]
+    pub(super) wait: bool,
+    /// Suppress progress; with --wait print only the final paths, else just the id.
+    #[arg(short, long)]
+    pub(super) quiet: bool,
 }
 
 /// Arguments for `rm`.

@@ -4,8 +4,8 @@
 
 use anyhow::Result;
 use kamishibai::session::{
-    Artifact, BulkCorrection, CardArtifacts, CardDraft, CardMeta, LanguagePair, RawInputBatch,
-    ScriptDetection, Sense, SenseCorrection, SessionState, TargetDetection, TargetGuess,
+    Artifact, BulkCorrection, CardArtifacts, CardDraft, CardMeta, LanguagePair, LearningDetection,
+    LearningGuess, RawInputBatch, ScriptDetection, Sense, SenseCorrection, SessionState,
     Understanding, Understood, WordCandidate, to_document, to_entry,
 };
 
@@ -14,7 +14,7 @@ struct FakeUnderstanding;
 impl Understanding for FakeUnderstanding {
     fn understand(&self, _raw: &RawInputBatch, _my: &str) -> Result<Understood> {
         Ok(Understood::new(
-            TargetGuess::new("en", false),
+            LearningGuess::new("en", false),
             vec![
                 WordCandidate::new(
                     "whilst",
@@ -75,7 +75,7 @@ fn your_words_to_what_i_understood_flow_builds_session_with_confirmed_candidates
         .expect("detection must succeed");
     let pair = LanguagePair::new(guess.code(), "ru");
     let understood = FakeUnderstanding
-        .understand(&raw, pair.support())
+        .understand(&raw, pair.known())
         .expect("understanding must succeed");
     let session =
         SessionState::starting(pair.clone(), raw).confirming(understood.candidates().to_vec());
@@ -94,7 +94,7 @@ fn your_words_to_what_i_understood_flow_builds_session_with_confirmed_candidates
 fn bulk_correction_pass_replaces_candidate_metadata_without_touching_pair() {
     let pair = LanguagePair::new("en", "ru");
     let before = FakeUnderstanding
-        .understand(&RawInputBatch::new("whilst\nwreck"), pair.support())
+        .understand(&RawInputBatch::new("whilst\nwreck"), pair.known())
         .expect("understanding must succeed")
         .candidates()
         .to_vec();
@@ -116,7 +116,7 @@ fn bulk_correction_pass_replaces_candidate_metadata_without_touching_pair() {
 fn what_i_understood_to_your_cards_flow_bridges_drafts_into_vocabulary_document() {
     let pair = LanguagePair::new("en", "ru");
     let candidates = FakeUnderstanding
-        .understand(&RawInputBatch::new("whilst\nwreck"), pair.support())
+        .understand(&RawInputBatch::new("whilst\nwreck"), pair.known())
         .expect("understanding must succeed")
         .candidates()
         .to_vec();

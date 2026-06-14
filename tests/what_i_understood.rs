@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use kamishibai::session::TargetGuess;
+use kamishibai::session::LearningGuess;
 use kamishibai::session::{
     LanguagePair, RawInputBatch, Sense, Understanding, Understood, WordCandidate,
 };
@@ -121,7 +121,7 @@ struct FakeUnderstanding;
 impl Understanding for FakeUnderstanding {
     fn understand(&self, _raw: &RawInputBatch, _my: &str) -> Result<Understood> {
         Ok(Understood::new(
-            TargetGuess::new("en", true),
+            LearningGuess::new("en", true),
             vec![
                 WordCandidate::new(
                     "sincerely",
@@ -151,9 +151,9 @@ impl Understanding for FakeUnderstanding {
 
 fn run_understanding(app: App) -> App {
     let result = FakeUnderstanding
-        .understand(&RawInputBatch::new(app.blob()), app.pair().support())
+        .understand(&RawInputBatch::new(app.blob()), app.pair().known())
         .expect("fake understanding must succeed");
-    app.confirmed_target(result.guess().code())
+    app.confirmed_learning(result.guess().code())
         .understood(result.candidates().to_vec())
 }
 
@@ -161,7 +161,7 @@ fn run_understanding(app: App) -> App {
 fn long_what_i_understood_list_scrolls_to_the_selected_candidate() {
     let mut app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(many_candidates(35));
     for _ in 0..29 {
         app = transit(app, AppEvent::NavNext)
@@ -179,7 +179,7 @@ fn long_what_i_understood_list_scrolls_to_the_selected_candidate() {
 fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_count() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(
             FakeUnderstanding
                 .understand(&RawInputBatch::new("whilst"), "ru")
@@ -210,7 +210,7 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
 fn multi_sense_word_renders_collapsed_with_active_index() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let rendered = flat(&app);
     assert!(
@@ -226,7 +226,7 @@ fn multi_sense_word_renders_collapsed_with_active_index() {
 fn multi_meaning_word_lists_only_selected_senses_in_a_collapsed_block() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate().selecting_senses(vec![0, 1])]);
     let rendered = flat(&app);
     assert!(
@@ -244,7 +244,7 @@ fn multi_meaning_word_lists_only_selected_senses_in_a_collapsed_block() {
 fn collapsed_meaning_lines_are_dim_not_selected_highlight() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate().selecting_senses(vec![0, 1])]);
     assert!(
         modifiers(&app, "берег")
@@ -258,7 +258,7 @@ fn collapsed_meaning_lines_are_dim_not_selected_highlight() {
 fn enter_on_multi_sense_word_expands_the_sense_list() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
     let rendered = flat(&opened);
@@ -281,7 +281,7 @@ fn enter_on_multi_sense_word_expands_the_sense_list() {
 fn right_arrow_opens_and_left_arrow_closes_the_sense_list() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, to_app(press(KeyCode::Right)).expect("map")).0;
     let second = transit(opened, AppEvent::NavNext).0;
@@ -300,7 +300,7 @@ fn right_arrow_opens_and_left_arrow_closes_the_sense_list() {
 fn moving_inside_expanded_senses_moves_cursor_without_changing_selection() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
     let second = transit(opened, AppEvent::NavNext).0;
@@ -323,7 +323,7 @@ fn moving_inside_expanded_senses_moves_cursor_without_changing_selection() {
 fn space_toggles_the_focused_sense_and_enter_commits_the_selection() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
     let second = transit(opened, AppEvent::NavNext).0;
@@ -344,7 +344,7 @@ fn space_toggles_the_focused_sense_and_enter_commits_the_selection() {
 fn escape_closes_the_sense_list_without_changing_selection() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
     let second = transit(opened, AppEvent::NavNext).0;
@@ -366,7 +366,7 @@ fn escape_closes_the_sense_list_without_changing_selection() {
 fn dash_hint_orders_the_requested_sense_first() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![WordCandidate::with_senses(
             "set",
             vec![
@@ -390,7 +390,7 @@ fn dash_hint_orders_the_requested_sense_first() {
 fn enter_on_single_sense_word_opens_picker_with_add_more() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![single_candidate()]);
     let (next, side) = transit(app, AppEvent::KeyEnter);
     let rendered = flat(&next);
@@ -407,7 +407,7 @@ fn enter_on_single_sense_word_opens_picker_with_add_more() {
 fn enter_on_add_more_opens_missing_meanings_modal() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
     let second = transit(opened, AppEvent::NavNext).0;
@@ -428,7 +428,7 @@ fn enter_on_add_more_opens_missing_meanings_modal() {
 fn appended_narrow_sense_is_selected_and_the_list_stays_open() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate()])
         .senses_appended_to_selected(
             vec![Sense::tagged(
@@ -450,7 +450,7 @@ fn appended_narrow_sense_is_selected_and_the_list_stays_open() {
 fn duplicate_change_request_shows_a_short_message_without_adding_senses() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate()])
         .senses_appended_to_selected(Vec::new(), Some(String::from("это уже есть в списке")));
     let rendered = flat(&app);
@@ -466,7 +466,7 @@ fn duplicate_change_request_shows_a_short_message_without_adding_senses() {
 fn empty_add_more_result_shows_minimal_notice_without_adding_senses() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate()])
         .senses_expanded()
         .senses_appended_to_selected(Vec::new(), None);
@@ -484,7 +484,7 @@ fn empty_add_more_result_shows_minimal_notice_without_adding_senses() {
 fn off_language_rows_ignore_enter_and_change_but_can_be_dropped() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![WordCandidate::new(
             "сообщение",
             "Слово на русском, не на target-языке.",
@@ -506,7 +506,7 @@ fn dropping_the_last_candidate_returns_to_your_words_with_input_cleared() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .seeded_blob("bittersweet")
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![single_candidate()]);
     let after = transit(app, AppEvent::KeyChar('d')).0;
     assert_eq!(
@@ -520,7 +520,7 @@ fn dropping_the_last_candidate_returns_to_your_words_with_input_cleared() {
 fn support_language_rerun_preserves_selected_sense_by_index() {
     let before = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![bank_candidate().selecting(2)]);
     let after = before.understood_preserving_senses(vec![WordCandidate::with_senses(
         "bank",
@@ -545,7 +545,7 @@ fn support_language_rerun_preserves_selected_sense_by_index() {
 fn what_i_understood_styles_selected_row_distinctly_from_others() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(
             FakeUnderstanding
                 .understand(&RawInputBatch::new("sincerely"), "ru")
@@ -565,7 +565,7 @@ fn what_i_understood_styles_selected_row_distinctly_from_others() {
 fn excluded_candidate_renders_with_strikethrough_and_dim_gloss() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![WordCandidate::new(
             "сообщение",
             "Слово на русском, не на target-языке — карточка не создаётся.",
@@ -636,7 +636,7 @@ fn drop_selected_removes_candidate_and_make_cards_advances_to_your_cards() {
 fn empty_candidate_list_keeps_user_on_what_i_understood() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en");
+        .confirmed_learning("en");
     let (next, side) = transit(app, kamishibai::tui::AppEvent::Generate);
     assert_eq!(
         (next.screen(), side),
@@ -649,7 +649,7 @@ fn empty_candidate_list_keeps_user_on_what_i_understood() {
 fn skipped_candidate_list_keeps_user_on_what_i_understood() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .understood(vec![WordCandidate::new(
             "окно",
             "Слово на русском, не на EN-target — карточка не создаётся.",

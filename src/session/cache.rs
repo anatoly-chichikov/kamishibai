@@ -11,8 +11,8 @@ use crate::languages::catalog;
 
 use super::vault::{CardCell, digest};
 use super::{
-    CardMeta, LanguagePair, RawInputBatch, ScriptDetection, Sense, TargetDetection, TargetGuess,
-    Understanding, Understood, WordCandidate,
+    CardMeta, LanguagePair, LearningDetection, LearningGuess, RawInputBatch, ScriptDetection,
+    Sense, Understanding, Understood, WordCandidate,
 };
 
 const UNDERSTANDING_VERSION: &str = "v3";
@@ -75,7 +75,7 @@ where
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Understood::new(
-            guess.unwrap_or_else(|| TargetGuess::new(target.code(), target.confident())),
+            guess.unwrap_or_else(|| LearningGuess::new(target.code(), target.confident())),
             candidates,
         ))
     }
@@ -97,7 +97,7 @@ impl<T> CachedUnderstanding<T> {
         raw: &RawInputBatch,
         entries: &[String],
         misses: Vec<EntryMiss>,
-    ) -> Result<(TargetGuess, Vec<(usize, WordCandidate)>)>
+    ) -> Result<(LearningGuess, Vec<(usize, WordCandidate)>)>
     where
         T: Understanding,
     {
@@ -224,7 +224,7 @@ struct EntryRecord {
 }
 
 impl EntryRecord {
-    fn from_candidate(guess: &TargetGuess, candidate: &WordCandidate) -> Self {
+    fn from_candidate(guess: &LearningGuess, candidate: &WordCandidate) -> Self {
         Self {
             target_lang: guess.code().to_string(),
             confident: guess.confident(),
@@ -232,8 +232,8 @@ impl EntryRecord {
         }
     }
 
-    fn guess(&self) -> TargetGuess {
-        TargetGuess::new(self.target_lang.clone(), self.confident)
+    fn guess(&self) -> LearningGuess {
+        LearningGuess::new(self.target_lang.clone(), self.confident)
     }
 
     fn candidate(self) -> WordCandidate {
@@ -335,8 +335,8 @@ impl MetaRecord {
         Self {
             term: term.to_string(),
             understanding: understanding.to_string(),
-            target_lang: pair.target().to_string(),
-            source_lang: pair.support().to_string(),
+            target_lang: pair.learning().to_string(),
+            source_lang: pair.known().to_string(),
             pronunciation: meta.pronunciation().to_string(),
             transcription: meta.transcription().to_string(),
             meaning: meta.meaning().to_string(),
@@ -398,7 +398,7 @@ fn normalized_entries(raw: &RawInputBatch) -> Vec<String> {
         .collect()
 }
 
-fn indexed(understood: Understood) -> (TargetGuess, Vec<(usize, WordCandidate)>) {
+fn indexed(understood: Understood) -> (LearningGuess, Vec<(usize, WordCandidate)>) {
     let guess = understood.guess().clone();
     let candidates = understood
         .candidates()
@@ -412,7 +412,7 @@ fn indexed(understood: Understood) -> (TargetGuess, Vec<(usize, WordCandidate)>)
 fn indexed_missing(
     understood: Understood,
     misses: Vec<EntryMiss>,
-) -> (TargetGuess, Vec<(usize, WordCandidate)>) {
+) -> (LearningGuess, Vec<(usize, WordCandidate)>) {
     let guess = understood.guess().clone();
     let candidates = misses
         .into_iter()
@@ -450,7 +450,7 @@ mod tests {
                 .into_iter()
                 .map(|entry| WordCandidate::new(entry, format!("variant {current}"), true))
                 .collect();
-            Ok(Understood::new(TargetGuess::new("en", true), candidates))
+            Ok(Understood::new(LearningGuess::new("en", true), candidates))
         }
     }
 

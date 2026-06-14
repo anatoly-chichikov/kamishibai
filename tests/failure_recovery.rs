@@ -102,7 +102,7 @@ fn seeded_with(artifacts: CardArtifacts) -> App {
     .with_artifacts(artifacts);
     App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::YourCards)
-        .confirmed_target("en")
+        .confirmed_learning("en")
         .cards_started(vec![draft])
 }
 

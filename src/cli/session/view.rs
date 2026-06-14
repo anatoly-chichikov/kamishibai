@@ -33,7 +33,7 @@ impl CardView {
 }
 
 fn pair_of(record: &SessionRecord) -> LanguagePair {
-    LanguagePair::new(record.to.as_str(), record.from.as_str())
+    LanguagePair::new(record.learning.as_str(), record.known.as_str())
 }
 
 /// Probe the shared cache for one card's four artifact files, in display order.
@@ -142,7 +142,7 @@ pub(super) fn render_status(record: &SessionRecord, cache_root: &Path) -> String
     let (phase, pid, live) = live_phase(record, cache_root);
     let mut out = String::new();
     let _ = writeln!(out, "session  {}", record.id);
-    let _ = writeln!(out, "pair     {} → {}", record.from, record.to);
+    let _ = writeln!(out, "pair     {} → {}", record.known, record.learning);
     let _ = writeln!(out, "senses   {}", record.senses);
     let _ = writeln!(out, "phase    {}", phase_label(phase));
     if let Some(pid) = pid {
@@ -255,8 +255,8 @@ pub(super) fn summary_line(record: &SessionRecord, cache_root: &Path) -> String 
     format!(
         "{}  {} → {}  {}  {}",
         record.id,
-        record.from,
-        record.to,
+        record.known,
+        record.learning,
         phase_label(phase),
         progress
     )

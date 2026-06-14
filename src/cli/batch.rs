@@ -24,9 +24,9 @@ impl StartupCards {
     /// Build startup cards from an already validated vocabulary document.
     pub(super) fn from_document(document: &VocabularyDocument) -> Result<Self> {
         let (pair, drafts) = drafts_from_document(document)?;
-        let target = pair.target().to_string();
+        let learning = pair.learning().to_string();
         let app = App::new(pair)
-            .confirmed_target(target)
+            .confirmed_learning(learning)
             .with_screen(Screen::YourCards)
             .cards_started(drafts.clone());
         Ok(Self { app, drafts })
@@ -71,9 +71,9 @@ mod tests {
             .into_parts();
         assert_eq!(
             (
-                app.pair().support().to_string(),
-                app.pair().target().to_string(),
-                app.target_pending(),
+                app.pair().known().to_string(),
+                app.pair().learning().to_string(),
+                app.learning_pending(),
             ),
             (String::from("ru"), String::from("en"), false),
             "loaded batch must seed the chip with file's languages and not leave it pending"

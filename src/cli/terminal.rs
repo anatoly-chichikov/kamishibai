@@ -315,7 +315,7 @@ mod tests {
                 app.screen(),
                 app.welcome().stage,
                 app.welcome().source,
-                app.pair().support().to_string(),
+                app.pair().known().to_string(),
             ),
             (
                 Screen::Welcome,
@@ -336,7 +336,7 @@ mod tests {
                 app.screen(),
                 app.welcome().stage,
                 app.welcome().source,
-                app.pair().support().to_string(),
+                app.pair().known().to_string(),
             ),
             (
                 Screen::Welcome,
@@ -353,7 +353,7 @@ mod tests {
         let app =
             startup_app(&Preferences::new("de").with_api_key("123456789012345678901234567890"));
         assert_eq!(
-            (app.screen(), app.pair().support().to_string()),
+            (app.screen(), app.pair().known().to_string()),
             (Screen::YourWords, String::from("de")),
             "a confirmed language may skip Welcome only when a saved key exists"
         );
@@ -367,7 +367,7 @@ mod tests {
                 app.screen(),
                 app.welcome().stage,
                 app.welcome().source,
-                app.pair().support().to_string(),
+                app.pair().known().to_string(),
             ),
             (
                 Screen::Welcome,
