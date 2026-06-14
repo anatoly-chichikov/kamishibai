@@ -75,8 +75,8 @@ mod tests {
                 app.pair().learning().to_string(),
                 app.learning_pending(),
             ),
-            (String::from("ru"), String::from("en"), false),
-            "loaded batch must seed the chip with file's languages and not leave it pending"
+            (String::from("RU"), String::from("EN"), false),
+            "loaded batch must seed the chip with file's languages (uppercased) and not leave it pending"
         );
     }
 }

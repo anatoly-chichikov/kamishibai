@@ -188,7 +188,7 @@ where
         scene["manga_panel"]["panels"] = Value::Array(items.clone());
         scene["manga_panel"]["meta"]["title"] = Value::String(sentence.chars().take(60).collect());
         scene["manga_panel"]["meta"]["description"] = Value::String(String::from(sentence));
-        scene["manga_panel"]["meta"]["target_lang"] = Value::String(String::from(target));
+        scene["manga_panel"]["meta"]["target_lang"] = Value::String(target.to_ascii_lowercase());
         enforce(&mut scene);
         validate(&scene)?;
         Ok(scene)

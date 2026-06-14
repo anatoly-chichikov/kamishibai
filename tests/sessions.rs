@@ -101,7 +101,6 @@ fn understood_session(cache: &Path, out: &Path, id: &str, json: &str) {
             id,
             "--out",
             out.to_str().expect("out path is utf8"),
-            "--quiet",
         ])
         .assert()
         .success();
@@ -158,8 +157,9 @@ fn seed_artifacts(cell: &Path) {
     fs::copy(fixture_jpeg(), cell.join("illustration.jpg")).expect("seed illustration");
 }
 
-/// Poll `status -q` until the phase satisfies the predicate, panicking with the
-/// last seen phase when the deadline expires (a harness failure, not a verdict).
+/// Poll `status --json` until its `phase` field satisfies the predicate,
+/// panicking with the last seen phase when the deadline expires (a harness
+/// failure, not a verdict).
 fn poll_quiet_status(
     cache: &Path,
     id: &str,
@@ -169,13 +169,12 @@ fn poll_quiet_status(
     let started = Instant::now();
     loop {
         let output = cli(cache)
-            .args(["status", id, "--quiet"])
+            .args(["status", id, "--json"])
             .output()
             .expect("status must run");
-        let phase = String::from_utf8(output.stdout)
-            .expect("status output must be UTF-8")
-            .trim()
-            .to_string();
+        let value: serde_json::Value =
+            serde_json::from_slice(&output.stdout).unwrap_or(serde_json::Value::Null);
+        let phase = value["phase"].as_str().unwrap_or("").to_string();
         if until(phase.as_str()) {
             return phase;
         }
@@ -273,11 +272,11 @@ fn live_worker_session(cache: &Path, out: &Path, id: &str, gemini: &str) {
     fs::write(cell.join("scene.json"), b"{}").expect("seed scene");
     fs::copy(fixture_jpeg(), cell.join("illustration.jpg")).expect("seed illustration");
     cli_at(cache, gemini)
-        .args(["generate", id, "--quiet"])
+        .args(["generate", id])
         .assert()
         .success();
     poll_full_status(cache, id, Duration::from_secs(30), |text| {
-        text.contains(" alive")
+        text.contains("building ")
     });
 }
 
@@ -288,7 +287,7 @@ fn a_fully_cached_build_session_runs_to_published_offline() {
     understood_session(cache.path(), out.path(), "offline", CARDS_JSON);
     seed_artifacts(&first_card_dir(cache.path()));
     cli(cache.path())
-        .args(["generate", "--wait", "offline", "--quiet"])
+        .args(["generate", "--wait", "offline"])
         .timeout(Duration::from_secs(120))
         .assert()
         .success();
@@ -306,7 +305,7 @@ fn a_detached_generate_reaches_published_while_status_polls_it() {
     understood_session(cache.path(), out.path(), "detached", CARDS_JSON);
     seed_artifacts(&first_card_dir(cache.path()));
     cli(cache.path())
-        .args(["generate", "detached", "--quiet"])
+        .args(["generate", "detached"])
         .assert()
         .success();
     let terminal = ["published", "partial", "failed", "interrupted", "cancelled"];
@@ -330,14 +329,14 @@ fn status_reports_a_live_worker_while_a_detached_run_is_in_flight() {
     let gemini = stalled_gemini();
     live_worker_session(cache.path(), out.path(), "live", gemini.as_str());
     let status = poll_full_status(cache.path(), "live", Duration::from_secs(5), |text| {
-        text.contains(" alive")
+        text.contains("building ")
     });
     cli(cache.path())
         .args(["cancel", "live"])
         .assert()
         .success();
     assert!(
-        status.contains("phase    generating") && status.contains(" alive"),
+        status.contains("· generating") && status.contains("building 1 card (pid"),
         "status during a detached run must report the generating phase and a live worker"
     );
 }
@@ -419,7 +418,7 @@ fn a_run_with_one_unbuildable_card_publishes_partial() {
         .expect("the lanterne meta must be dropped");
     let gemini = failing_gemini();
     cli_at(cache.path(), gemini.as_str())
-        .args(["generate", "--wait", "half", "--quiet"])
+        .args(["generate", "--wait", "half"])
         .timeout(Duration::from_secs(120))
         .assert()
         .success();
@@ -456,11 +455,12 @@ fn concurrent_edits_to_different_cards_both_survive() {
     let all_succeeded = racers
         .into_iter()
         .all(|mut racer| racer.wait().expect("a racer must be reapable").success());
-    let status = poll_full_status(cache.path(), "race", Duration::from_secs(5), |_| true);
+    let value = json_stdout(cli(cache.path()).args(["status", "race", "--json"]));
+    let items = &value["candidates"]["items"];
+    let canard_excluded = items[0]["included"].as_bool() == Some(false);
+    let lanterne_selected = items[1]["senses"][0]["selected"].as_bool() == Some(true);
     assert!(
-        all_succeeded
-            && status.contains("word  canard   skip")
-            && status.contains("word  lanterne   card"),
+        all_succeeded && canard_excluded && lanterne_selected,
         "concurrent edits to different cards must both succeed and both land in the record"
     );
 }
@@ -472,7 +472,7 @@ fn cancelling_a_published_session_keeps_it_published() {
     understood_session(cache.path(), out.path(), "keep", CARDS_JSON);
     seed_artifacts(&first_card_dir(cache.path()));
     cli(cache.path())
-        .args(["generate", "--wait", "keep", "--quiet"])
+        .args(["generate", "--wait", "keep"])
         .timeout(Duration::from_secs(120))
         .assert()
         .success();
@@ -502,24 +502,18 @@ fn result_deck_prints_one_existing_apkg_path() {
     understood_session(cache.path(), out.path(), "deck", CARDS_JSON);
     seed_artifacts(&first_card_dir(cache.path()));
     cli(cache.path())
-        .args(["generate", "--wait", "deck", "--quiet"])
+        .args(["generate", "--wait", "deck"])
         .timeout(Duration::from_secs(120))
         .assert()
         .success();
-    let stdout = cli(cache.path())
-        .args(["result", "deck", "--deck"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let path = String::from_utf8(stdout)
-        .expect("result output must be UTF-8")
-        .trim()
+    let value = json_stdout(cli(cache.path()).args(["result", "deck", "--json"]));
+    let path = value["paths"]["deck"]
+        .as_str()
+        .expect("result --json must carry the deck path")
         .to_string();
     assert!(
         path.ends_with(".apkg") && Path::new(path.as_str()).is_file(),
-        "result --deck must print exactly one existing .apkg path"
+        "result --json must carry exactly one existing .apkg deck path"
     );
 }
 
@@ -538,7 +532,7 @@ fn a_corrupt_session_file_exits_with_the_operational_code() {
     )
     .expect("the session file must be overwritten");
     cli(cache.path())
-        .args(["status", "broken", "--quiet"])
+        .args(["status", "broken"])
         .assert()
         .code(1);
 }
@@ -548,22 +542,14 @@ fn regenerate_before_generate_is_refused() {
     let cache = TempDir::new().expect("cache tempdir");
     let out = TempDir::new().expect("output tempdir");
     understood_session(cache.path(), out.path(), "fresh", CARDS_JSON);
-    let understood = cli(cache.path())
-        .args(["status", "fresh", "--quiet"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
     cli(cache.path())
         .args(["regenerate", "fresh", "--failed"])
         .assert()
         .code(2);
+    let value = json_stdout(cli(cache.path()).args(["status", "fresh", "--json"]));
     assert_eq!(
-        String::from_utf8(understood)
-            .expect("status output must be UTF-8")
-            .trim(),
-        "understood",
+        value["phase"].as_str(),
+        Some("understood"),
         "regenerate before any generate must be refused, leaving the session understood"
     );
 }
@@ -577,22 +563,14 @@ fn excluding_every_card_leaves_nothing_to_generate() {
         .args(["exclude", "curate", "--card", "canard"])
         .assert()
         .success();
-    let understood = cli(cache.path())
-        .args(["status", "curate", "--quiet"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
     cli(cache.path())
-        .args(["generate", "--wait", "curate", "--quiet"])
+        .args(["generate", "--wait", "curate"])
         .assert()
         .code(2);
+    let value = json_stdout(cli(cache.path()).args(["status", "curate", "--json"]));
     assert_eq!(
-        String::from_utf8(understood)
-            .expect("status output must be UTF-8")
-            .trim(),
-        "understood",
+        value["phase"].as_str(),
+        Some("understood"),
         "excluding the only card must keep the session understood with nothing to generate"
     );
 }
@@ -600,7 +578,7 @@ fn excluding_every_card_leaves_nothing_to_generate() {
 #[test]
 fn invoking_new_with_no_words_exits_with_the_usage_code() {
     let cache = TempDir::new().expect("cache tempdir");
-    cli(cache.path()).args(["new", "--quiet"]).assert().code(2);
+    cli(cache.path()).args(["new"]).assert().code(2);
 }
 
 #[test]
@@ -617,10 +595,7 @@ fn selecting_a_sense_out_of_range_exits_with_the_usage_code() {
 #[test]
 fn acting_on_a_missing_session_exits_with_the_not_found_code() {
     let cache = TempDir::new().expect("cache tempdir");
-    cli(cache.path())
-        .args(["status", "ghost", "--quiet"])
-        .assert()
-        .code(3);
+    cli(cache.path()).args(["status", "ghost"]).assert().code(3);
 }
 
 #[test]
@@ -666,20 +641,13 @@ fn regenerate_rebuilds_instead_of_resting_at_understood() {
     understood_session(cache.path(), out.path(), "rebuild", CARDS_JSON);
     seed_artifacts(&first_card_dir(cache.path()));
     cli(cache.path())
-        .args(["generate", "--wait", "rebuild", "--quiet"])
+        .args(["generate", "--wait", "rebuild"])
         .timeout(Duration::from_secs(120))
         .assert()
         .success();
     let gemini = failing_gemini();
     cli_at(cache.path(), &gemini)
-        .args([
-            "regenerate",
-            "rebuild",
-            "--card",
-            "canard",
-            "--wait",
-            "--quiet",
-        ])
+        .args(["regenerate", "rebuild", "--card", "canard", "--wait"])
         .timeout(Duration::from_secs(120))
         .output()
         .expect("regenerate must run to completion");
@@ -741,10 +709,10 @@ fn excluding_a_card_in_json_mode_returns_the_post_mutation_document() {
     assert_eq!(
         (
             value["candidates"]["items"][0]["included"].as_bool(),
-            value["candidates"]["selected"].as_u64(),
+            value["candidates"]["items"][0]["senses"][0]["selected"].as_bool(),
         ),
-        (Some(false), Some(0)),
-        "exclude --json must return the document as the mutation left it, with no follow-up status needed"
+        (Some(false), Some(false)),
+        "exclude --json must return the document with the card excluded and its sense deselected"
     );
 }
 
@@ -792,7 +760,9 @@ fn a_waited_generate_in_json_mode_prints_one_terminal_document_and_event_lines()
         (
             documents.len(),
             documents[0]["phase"].as_str(),
-            documents[0]["cards"]["ready"].as_u64(),
+            documents[0]["cards"]["items"]
+                .as_array()
+                .map(|items| items.len()),
             unnamed_events,
         ),
         (1, Some("published"), Some(1), 0),
@@ -807,7 +777,7 @@ fn result_items_in_json_mode_round_trip_into_a_new_build_session() {
     understood_session_json(cache.path(), out.path(), "jround", CARDS_JSON);
     seed_artifacts(&first_card_dir(cache.path()));
     cli(cache.path())
-        .args(["generate", "--wait", "jround", "--quiet"])
+        .args(["generate", "--wait", "jround"])
         .timeout(Duration::from_secs(120))
         .assert()
         .success();
@@ -815,18 +785,23 @@ fn result_items_in_json_mode_round_trip_into_a_new_build_session() {
     let reimport = serde_json::json!({ "entries": value["items"] });
     let cards = cache.path().join("reimport.json");
     fs::write(&cards, reimport.to_string()).expect("the reimport JSON must write");
-    cli(cache.path())
-        .args([
-            "new",
-            "--build",
-            cards.to_str().expect("reimport path is utf8"),
-            "--id",
-            "jround2",
-            "--quiet",
-        ])
-        .assert()
-        .success()
-        .stdout("jround2\n");
+    let reimported = json_stdout(cli(cache.path()).args([
+        "new",
+        "--build",
+        cards.to_str().expect("reimport path is utf8"),
+        "--id",
+        "jround2",
+        "--json",
+    ]));
+    assert_eq!(
+        (
+            reimported["ok"].as_bool(),
+            reimported["session"].as_str(),
+            reimported["candidates"]["items"][0]["term"].as_str(),
+        ),
+        (Some(true), Some("jround2"), Some("canard")),
+        "result items must round-trip back into a fresh build session importing the same card"
+    );
 }
 
 #[test]
@@ -943,19 +918,18 @@ fn a_lone_session_resolves_when_the_id_is_omitted() {
     let out = TempDir::new().expect("output tempdir");
     understood_session(cache.path(), out.path(), "solo", CARDS_JSON);
     let output = cli(cache.path())
-        .args(["status", "--quiet"])
+        .args(["status"])
         .output()
         .expect("status must run");
+    let stdout = String::from_utf8(output.stdout).expect("utf8");
     assert_eq!(
         (
             output.status.code(),
-            String::from_utf8(output.stdout).expect("utf8").trim(),
-            String::from_utf8(output.stderr)
-                .expect("utf8")
-                .contains("using session solo"),
+            stdout.contains("your session solo"),
+            stdout.contains("understood"),
         ),
-        (Some(0), "understood", true),
-        "with one session an omitted id must resolve to it and say so on stderr"
+        (Some(0), true, true),
+        "with one session an omitted id must resolve to it, naming it in the header"
     );
 }
 
@@ -966,21 +940,21 @@ fn an_unsettled_session_wins_resolution_over_a_published_one() {
     understood_session(cache.path(), out.path(), "older", CARDS_JSON);
     seed_artifacts(&first_card_dir(cache.path()));
     cli(cache.path())
-        .args(["generate", "--wait", "older", "--quiet"])
+        .args(["generate", "--wait", "older"])
         .timeout(Duration::from_secs(120))
         .assert()
         .success();
     understood_session(cache.path(), out.path(), "fresh", TWO_CARDS_JSON);
     let phase = cli(cache.path())
-        .args(["status", "--quiet"])
+        .args(["status"])
         .output()
         .expect("status must run");
     assert_eq!(
         (
             phase.status.code(),
-            String::from_utf8(phase.stderr)
+            String::from_utf8(phase.stdout)
                 .expect("utf8")
-                .contains("using session fresh"),
+                .contains("your session fresh"),
         ),
         (Some(0), true),
         "the single unfinished session must win resolution over a published one"
@@ -997,12 +971,12 @@ fn two_curatable_sessions_make_an_omitted_id_ambiguous() {
         .args(["status"])
         .output()
         .expect("status must run");
-    let stdout = String::from_utf8(output.stdout).expect("utf8");
+    let stderr = String::from_utf8(output.stderr).expect("utf8");
     assert_eq!(
         (
             output.status.code(),
-            stdout.contains("first") && stdout.contains("second"),
-            stdout.contains("and "),
+            stderr.contains("first") && stderr.contains("second"),
+            stderr.contains("and "),
         ),
         (Some(5), true, false),
         "two unfinished sessions must exit 5 listing both, with no and-N-more line"
@@ -1025,16 +999,16 @@ fn seven_sessions_print_the_newest_five_and_a_more_line() {
         .args(["generate"])
         .output()
         .expect("generate must run");
-    let stdout = String::from_utf8(output.stdout).expect("utf8");
-    let first_line = stdout.lines().next().unwrap_or("");
+    let stderr = String::from_utf8(output.stderr).expect("utf8");
+    let first_session_line = stderr.lines().nth(1).unwrap_or("");
     assert_eq!(
         (
             output.status.code(),
-            stdout.lines().count(),
-            first_line.starts_with("s7"),
-            stdout.contains("and 2 more — kamishibai ls"),
+            stderr.lines().count(),
+            first_session_line.starts_with("s7"),
+            stderr.contains("and 2 more — kamishibai ls"),
         ),
-        (Some(5), 6, true, true),
+        (Some(5), 7, true, true),
         "seven ambiguous sessions must list the newest five, newest first, plus an and-2-more line"
     );
 }
@@ -1083,7 +1057,7 @@ fn result_without_an_id_on_an_unpublished_session_exits_not_ready() {
             output.status.code(),
             String::from_utf8(output.stderr)
                 .expect("utf8")
-                .contains("session 'pending' not ready"),
+                .contains("kamishibai generate pending"),
         ),
         (Some(4), true),
         "result without an id on an unpublished session must exit 4 naming the resolved session"

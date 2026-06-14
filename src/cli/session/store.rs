@@ -325,7 +325,9 @@ pub(in crate::cli) fn mint_id(target: &str) -> Result<String> {
     Ok(format!("{target}-{}_{}", stamp()?, salt()))
 }
 
-/// Return the current UTC time formatted as RFC 3339.
+/// Return the current UTC time formatted as RFC 3339. The sub-second precision
+/// is kept: it is the tiebreaker that keeps `ls`/ambiguous ordering stable for
+/// sessions created within the same second.
 pub(in crate::cli) fn now() -> Result<String> {
     Ok(OffsetDateTime::now_utc().format(&Rfc3339)?)
 }

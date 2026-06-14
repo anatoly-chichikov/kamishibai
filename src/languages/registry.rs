@@ -8,10 +8,15 @@ pub struct LanguageCatalog;
 
 impl LanguageCatalog {
     /// Return the supported profile for one language code.
+    ///
+    /// The lookup is case-insensitive: codes are canonically UPPERCASE across the
+    /// app (config, session ids, cache layout, deck names, plain and JSON output),
+    /// while the catalog stores the lowercase ISO code, so `item("FR")` and
+    /// `item("fr")` both resolve the French profile.
     pub fn item(&self, code: &str) -> Result<LanguageProfile> {
         profiles()
             .into_iter()
-            .find(|profile| profile.code == code)
+            .find(|profile| profile.code.eq_ignore_ascii_case(code))
             .ok_or_else(|| anyhow!("Unsupported language '{code}'"))
     }
 

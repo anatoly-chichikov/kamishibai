@@ -2,7 +2,6 @@
 //! JSON), producing an `understood` session; the shared preconditions and the
 //! generation verbs live in the parent module and `generate`.
 
-use std::fmt::Write;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -11,12 +10,12 @@ use anyhow::{Context, Result, anyhow};
 
 use crate::cli::card_workflow::CardGeneration;
 use crate::cli::console::{self, SensePolicy};
-use crate::cli::error::usage;
+use crate::cli::error::{usage, usage_hint};
 use crate::cli::live_generator::default_output;
 use crate::config::{PreferenceStore, default_store};
 use crate::runtime::locations::SystemContext;
 use crate::session::{
-    CandidateRecord, LanguagePair, RawInputBatch, Understanding, Understood, WordCandidate,
+    CandidateRecord, LanguagePair, RawInputBatch, Understanding, WordCandidate,
     drafts_from_document,
 };
 use crate::vocabulary::VocabularyDocument;
@@ -24,7 +23,7 @@ use crate::vocabulary::VocabularyDocument;
 use super::args::NewArgs;
 use super::generate::run_session;
 use super::store::{SessionRecord, SessionStore, mint_id, now, valid_id};
-use super::{Render, json, preflight_key, validate_language};
+use super::{Render, json, preflight_key, validate_language, view};
 
 /// Understand the requested words (or import a cards JSON) and create a session.
 pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
@@ -70,19 +69,12 @@ pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
     );
     store.create(&record)?;
     if args.generate {
-        return run_session(&store, record.id.as_str(), false, args.quiet, render);
+        return run_session(&store, record.id.as_str(), false, render, None);
     }
     if matches!(render, Render::Json) {
         return json::emit_session(&record);
     }
-    if !args.quiet {
-        eprint!("{}", session.preview);
-        eprintln!(
-            "session {} · senses={} · generate: kamishibai generate {}",
-            record.id, record.senses, record.id
-        );
-    }
-    println!("{}", record.id);
+    println!("{}", view::render_understood(&record));
     Ok(())
 }
 
@@ -92,7 +84,6 @@ struct Prepared {
     words: Vec<String>,
     candidates: Vec<CandidateRecord>,
     source: &'static str,
-    preview: String,
 }
 
 fn word_session(generator: &impl Understanding, args: &NewArgs, known: &str) -> Result<Prepared> {
@@ -105,8 +96,9 @@ fn word_session(generator: &impl Understanding, args: &NewArgs, known: &str) -> 
     let learning = args
         .learning
         .clone()
-        .unwrap_or_else(|| understood.guess().code().to_string());
-    let pair = LanguagePair::new(learning.as_str(), known);
+        .unwrap_or_else(|| understood.guess().code().to_string())
+        .to_uppercase();
+    let pair = LanguagePair::new(learning.as_str(), known.to_uppercase());
     let candidates = understood
         .candidates()
         .iter()
@@ -114,13 +106,11 @@ fn word_session(generator: &impl Understanding, args: &NewArgs, known: &str) -> 
             CandidateRecord::from_candidate(&initial_selection(candidate, args.senses))
         })
         .collect();
-    let preview = preview_words(&understood, known, learning.as_str(), args.senses);
     Ok(Prepared {
         pair,
         words,
         candidates,
         source: "words",
-        preview,
     })
 }
 
@@ -140,14 +130,6 @@ fn build_session(generator: &impl CardGeneration, path: &Path) -> Result<Prepare
     let (pair, drafts) = drafts_from_document(&document)?;
     let mut candidates = Vec::with_capacity(drafts.len());
     let mut words = Vec::with_capacity(drafts.len());
-    let mut preview = String::new();
-    let _ = writeln!(
-        preview,
-        "imported {} card(s) · {} → {}",
-        drafts.len(),
-        pair.known(),
-        pair.learning()
-    );
     for draft in &drafts {
         let meta = draft
             .meta()
@@ -159,50 +141,13 @@ fn build_session(generator: &impl CardGeneration, path: &Path) -> Result<Prepare
             draft.understanding(),
             true,
         )));
-        let _ = writeln!(
-            preview,
-            "{}\n  card    {}",
-            draft.term(),
-            draft.understanding()
-        );
     }
     Ok(Prepared {
         pair,
         words,
         candidates,
         source: "cards",
-        preview,
     })
-}
-
-fn preview_words(
-    understood: &Understood,
-    known: &str,
-    learning: &str,
-    senses: SensePolicy,
-) -> String {
-    let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "understanding {} word(s) · {known} → {learning}",
-        understood.candidates().len()
-    );
-    for candidate in understood.candidates() {
-        let _ = writeln!(out, "{}", candidate.term());
-        for (index, sense) in candidate.senses().iter().enumerate() {
-            let kept = candidate.ok()
-                && (matches!(senses, SensePolicy::All)
-                    || candidate.selected_senses().contains(&index));
-            let status = if kept { "card" } else { "skip" };
-            let _ = writeln!(
-                out,
-                "  {status}  {:<7} {}",
-                sense.tag().unwrap_or(""),
-                sense.understanding()
-            );
-        }
-    }
-    out
 }
 
 fn words_lines(args: &NewArgs) -> Result<Vec<String>> {
@@ -233,9 +178,9 @@ fn resolve_known(explicit: Option<&str>, store: &PreferenceStore) -> Result<Stri
     }
     let prefs = store.read().unwrap_or_default();
     if prefs.requires_language_choice() {
-        return Err(usage(
-            "your language is not set — run 'kamishibai config --known <LANG>' once, \
-             pass --known <LANG> for this run, or set it on the TUI Welcome",
+        return Err(usage_hint(
+            "no known language set — can't pick which sense of each word you need",
+            "Set it once: kamishibai config --known en (or add --known en just this run)",
         ));
     }
     Ok(prefs.startup_language().to_string())

@@ -11,7 +11,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 use crate::generation::artifact_cache::{ILLUSTRATION_FILE, META_FILE, SCENE_FILE, VOICE_FILE};
-use crate::session::{CardCell, LanguagePair};
+use crate::session::{CardCell, LanguagePair, WordCandidate};
 
 use super::liveness;
 use super::store::{DraftRecord, LOCK_FILE, Phase, SessionRecord};
@@ -92,22 +92,7 @@ fn lock_path(cache_root: &Path, id: &str) -> std::path::PathBuf {
     cache_root.join("sessions").join(id).join(LOCK_FILE)
 }
 
-/// Return the single phase word for `status -q` (e.g. `published`).
-pub(super) fn phase_word(record: &SessionRecord, cache_root: &Path) -> &'static str {
-    phase_label(live_phase(record, cache_root).0)
-}
-
-/// Return whether a phase is terminal: incomplete cards under it read failed.
-/// Includes `Interrupted` — deliberately wider than the resolution-side
-/// `settled` (mod.rs), where an interrupted run still counts as unfinished.
-pub(super) fn terminal(phase: Phase) -> bool {
-    matches!(
-        phase,
-        Phase::Published | Phase::Partial | Phase::Failed | Phase::Interrupted | Phase::Cancelled
-    )
-}
-
-/// Map one phase to its lowercase status word (`status -q` prints this).
+/// Map one phase to its lowercase status word.
 pub(super) fn phase_label(phase: Phase) -> &'static str {
     match phase {
         Phase::Understood => "understood",
@@ -137,89 +122,209 @@ pub(super) fn incomplete_drafts<'a>(
         .collect()
 }
 
-/// Render the full session status as a stable, line-oriented text block.
+/// The shared first line of every single-session command: identity, direction,
+/// and live phase. Language codes are uppercased — the app's canonical form.
+pub(super) fn header(record: &SessionRecord, phase: Phase) -> String {
+    format!(
+        "your session {} · {} → {} · {}",
+        record.id,
+        record.known.to_uppercase(),
+        record.learning.to_uppercase(),
+        phase_label(phase)
+    )
+}
+
+/// Render the full session status: the understood candidate block before a plan
+/// is committed, the per-card artifact matrix once it is.
 pub(super) fn render_status(record: &SessionRecord, cache_root: &Path) -> String {
-    let (phase, pid, live) = live_phase(record, cache_root);
-    let mut out = String::new();
-    let _ = writeln!(out, "session  {}", record.id);
-    let _ = writeln!(out, "pair     {} → {}", record.known, record.learning);
-    let _ = writeln!(out, "senses   {}", record.senses);
-    let _ = writeln!(out, "phase    {}", phase_label(phase));
-    if let Some(pid) = pid {
-        let alive = if live { "alive" } else { "gone" };
-        let _ = writeln!(out, "worker   pid {pid} {alive}");
-    }
     if record.drafts.is_empty() {
-        let _ = write!(out, "{}", candidate_block(record));
+        render_understood(record)
     } else {
-        let _ = write!(out, "{}", card_block(record, cache_root, phase));
+        render_committed(record, cache_root)
     }
-    let _ = write!(out, "out      {}", record.out);
-    out
 }
 
-/// Render the per-card readiness block for a committed plan.
-fn card_block(record: &SessionRecord, cache_root: &Path, phase: Phase) -> String {
-    let cards = cards(record, cache_root);
-    let ready = cards.iter().filter(|card| card.ready()).count();
-    let failed = if terminal(phase) {
-        cards.len() - ready
-    } else {
-        0
-    };
-    let width = cards
+/// Render the understood block both `new` and `status` print: the header, a
+/// one-line summary, the words with their senses (`*` marks the sense that
+/// becomes a card), and the curation guidance. No cache probing — an understood
+/// session has no artifacts yet.
+pub(super) fn render_understood(record: &SessionRecord) -> String {
+    let candidates: Vec<WordCandidate> = record
+        .candidates
         .iter()
-        .map(|card| card.term.chars().count())
-        .max()
-        .unwrap_or(0)
-        .max(4);
+        .map(|stored| stored.clone().candidate())
+        .collect();
     let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "cards    {} total · {ready} ready · {failed} failed",
-        cards.len()
-    );
-    for card in &cards {
-        let _ = writeln!(
-            out,
-            "card  {term:<width$}   meta:{m} sound:{s} scene:{sc} picture:{p}   {label}",
-            term = card.term,
-            m = token(card.meta),
-            s = token(card.sound),
-            sc = token(card.scene),
-            p = token(card.picture),
-            label = row_label(card, phase)
-        );
-    }
-    out
-}
-
-/// Render the curatable candidate block shown before a plan is committed.
-fn candidate_block(record: &SessionRecord) -> String {
-    let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "words    {} understood · {} card(s) selected",
-        record.candidates.len(),
-        selected_cards(record)
-    );
-    for stored in &record.candidates {
-        let candidate = stored.clone().candidate();
-        let gate = if candidate.ok() { "card" } else { "skip" };
-        let _ = writeln!(out, "word  {}   {gate}", candidate.term());
+    let _ = writeln!(out, "{}", header(record, Phase::Understood));
+    let _ = writeln!(out, "{}", understood_intro(record, &candidates));
+    let _ = writeln!(out, "words:");
+    for candidate in &candidates {
+        let _ = writeln!(out, "  {}", candidate.term());
         for (index, sense) in candidate.senses().iter().enumerate() {
             let chosen = candidate.ok() && candidate.selected_senses().contains(&index);
             let mark = if chosen { '*' } else { ' ' };
             let _ = writeln!(
                 out,
-                "  {mark} {number:>2}  {tag:<7} {understanding}",
-                number = index + 1,
-                tag = sense.tag().unwrap_or(""),
-                understanding = sense.understanding()
+                "    {mark} {} {}{}",
+                index + 1,
+                tag_prefix(sense.tag()),
+                sense.understanding()
             );
         }
     }
+    let _ = write!(out, "{}", understood_guidance(record, &candidates));
     out
+}
+
+/// The one-line summary under the header of an understood session.
+fn understood_intro(record: &SessionRecord, candidates: &[WordCandidate]) -> String {
+    let count = candidates.len();
+    if record.source == "cards" {
+        return format!(
+            "Imported {count} {} from your JSON, ready to generate.",
+            cards_word(count)
+        );
+    }
+    if candidates
+        .iter()
+        .any(|candidate| candidate.senses().len() > 1)
+    {
+        format!(
+            "I understood {count} {}. * = the sense that becomes a card.",
+            words_word(count)
+        )
+    } else {
+        format!(
+            "I understood {count} {} — one sense each, so each is a card.",
+            words_word(count)
+        )
+    }
+}
+
+/// The curation guidance lines closing an understood block: how to repick a
+/// sense or drop a card, then how to generate. Commands omit the id — an
+/// omitted id resolves to this session.
+fn understood_guidance(record: &SessionRecord, candidates: &[WordCandidate]) -> String {
+    if record.source == "cards" {
+        return String::from("Generate: kamishibai generate");
+    }
+    if let Some(multi) = candidates
+        .iter()
+        .find(|candidate| candidate.senses().len() > 1)
+    {
+        let sense = first_unselected(multi);
+        return format!(
+            "Change a card: kamishibai select {term} --sense {sense} (or drop it: kamishibai exclude {term})\nGenerate: kamishibai generate",
+            term = multi.term()
+        );
+    }
+    match candidates.first() {
+        Some(first) => format!(
+            "Generate: kamishibai generate (or drop a word: kamishibai exclude {})",
+            first.term()
+        ),
+        None => String::from("Generate: kamishibai generate"),
+    }
+}
+
+/// Return the 1-based number of one card's first not-yet-selected sense, to
+/// suggest in the `select` guidance; defaults to 2 when all are selected.
+fn first_unselected(candidate: &WordCandidate) -> usize {
+    (0..candidate.senses().len())
+        .find(|index| !candidate.selected_senses().contains(index))
+        .map(|index| index + 1)
+        .unwrap_or(2)
+}
+
+/// Render the per-card artifact matrix for a committed plan: the header, the
+/// one-line outcome, one glyph row per card, the output directory, and a single
+/// `next:` step when the run is stuck.
+fn render_committed(record: &SessionRecord, cache_root: &Path) -> String {
+    let (phase, pid, _) = live_phase(record, cache_root);
+    let cards = cards(record, cache_root);
+    let ready = cards.iter().filter(|card| card.ready()).count();
+    let total = cards.len();
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", header(record, phase));
+    let _ = writeln!(
+        out,
+        "{}",
+        committed_summary(phase, total, ready, total - ready, pid)
+    );
+    let mark_fail = matches!(phase, Phase::Failed | Phase::Partial);
+    for card in &cards {
+        let _ = writeln!(
+            out,
+            "  {} {}",
+            card.term,
+            artifact_row([card.meta, card.sound, card.scene, card.picture], mark_fail)
+        );
+    }
+    let _ = write!(out, "out: {}", record.out);
+    if let Some(next) = next_step(phase) {
+        let _ = write!(out, "\n{next}");
+    }
+    out
+}
+
+/// Render one card's four artifacts as labelled glyphs: `✓` present, `✗` the
+/// give-up point (first absent artifact, only under a failed/partial run), `·`
+/// not yet reached or in work.
+fn artifact_row(present: [bool; 4], mark_fail: bool) -> String {
+    let labels = ["meaning", "audio", "scene", "picture"];
+    let mut gave_up = false;
+    let mut parts = Vec::with_capacity(4);
+    for (index, ready) in present.iter().enumerate() {
+        let glyph = if *ready {
+            "✓"
+        } else if mark_fail && !gave_up {
+            gave_up = true;
+            "✗"
+        } else {
+            "·"
+        };
+        parts.push(format!("{} {glyph}", labels[index]));
+    }
+    parts.join(" ")
+}
+
+/// The one-line, plain-language outcome under the header of a committed session.
+pub(super) fn committed_summary(
+    phase: Phase,
+    total: usize,
+    ready: usize,
+    failed: usize,
+    pid: Option<i32>,
+) -> String {
+    match phase {
+        Phase::Generating => format!(
+            "building {total} {} ({})",
+            cards_word(total),
+            pid_label(pid)
+        ),
+        Phase::Published if total == 1 => String::from("the card is in the deck"),
+        Phase::Published => format!("all {total} cards are in the deck"),
+        Phase::Partial => {
+            format!("{ready} of {total} cards in the deck, {failed} couldn't be built")
+        }
+        Phase::Failed => String::from("couldn't build any card — no deck"),
+        Phase::Interrupted => format!(
+            "{ready} {} built, but the worker stopped before publishing ({})",
+            cards_word(ready),
+            gone_label(pid)
+        ),
+        Phase::Cancelled => format!("you stopped the worker, {ready} of {total} cards built"),
+        Phase::Understood => String::new(),
+    }
+}
+
+/// The single `next:` step for a stuck session, or none when it is healthy.
+pub(super) fn next_step(phase: Phase) -> Option<&'static str> {
+    match phase {
+        Phase::Failed | Phase::Partial => Some("next: kamishibai regenerate --failed"),
+        Phase::Cancelled | Phase::Interrupted => Some("next: kamishibai generate"),
+        _ => None,
+    }
 }
 
 /// Count how many cards the current candidate selection would generate.
@@ -238,44 +343,59 @@ pub(super) fn selected_cards(record: &SessionRecord) -> usize {
         .sum()
 }
 
-/// Render one session list line: `<id>  <from> → <to>  <phase>  <progress>`.
-///
-/// Before a plan is committed the trailing column shows `-- / <selected>` (a
-/// curation count, not progress); once generation has a committed plan it shows
-/// `<ready>/<total>`, so the list never reads an understood session as 0-done.
+/// Render one `ls` list line: `<id>  <known> → <learning>  <phase>  <progress>`,
+/// columns separated by two spaces. Before a plan is committed the trailing
+/// column shows `-- / <selected>` (a curation count, not progress); once a plan
+/// is committed it shows `<ready>/<total>`.
 pub(super) fn summary_line(record: &SessionRecord, cache_root: &Path) -> String {
-    let cards = cards(record, cache_root);
     let (phase, _, _) = live_phase(record, cache_root);
     let progress = if record.drafts.is_empty() {
         format!("-- / {}", selected_cards(record))
     } else {
+        let cards = cards(record, cache_root);
         let ready = cards.iter().filter(|card| card.ready()).count();
         format!("{}/{}", ready, cards.len())
     };
     format!(
-        "{}  {} → {}  {}  {}",
+        "{}  {} → {}  {:<10}  {progress}",
         record.id,
-        record.known,
-        record.learning,
+        record.known.to_uppercase(),
+        record.learning.to_uppercase(),
         phase_label(phase),
-        progress
     )
 }
 
-fn token(present: bool) -> &'static str {
-    if present { "ok" } else { "--" }
+/// Pluralise the card noun.
+fn cards_word(count: usize) -> &'static str {
+    if count == 1 { "card" } else { "cards" }
 }
 
-/// Map one card's readiness under a phase to its state word.
-pub(super) fn row_label(card: &CardView, phase: Phase) -> &'static str {
-    if card.ready() {
-        "ready"
-    } else if terminal(phase) {
-        "failed"
-    } else if matches!(phase, Phase::Generating) {
-        "building"
-    } else {
-        "pending"
+/// Pluralise the word noun.
+fn words_word(count: usize) -> &'static str {
+    if count == 1 { "word" } else { "words" }
+}
+
+/// Render one sense's tag as a `(tag) ` prefix, or nothing when untagged.
+fn tag_prefix(tag: Option<&str>) -> String {
+    match tag {
+        Some(tag) => format!("({tag}) "),
+        None => String::new(),
+    }
+}
+
+/// Render a live worker's pid for the generating summary.
+fn pid_label(pid: Option<i32>) -> String {
+    match pid {
+        Some(pid) => format!("pid {pid}"),
+        None => String::from("running"),
+    }
+}
+
+/// Render a gone worker's pid for the interrupted summary.
+fn gone_label(pid: Option<i32>) -> String {
+    match pid {
+        Some(pid) => format!("pid {pid} gone"),
+        None => String::from("the worker is gone"),
     }
 }
 
@@ -342,7 +462,7 @@ mod tests {
         fs::write(cache.path().join(VOICE_FILE), b"x").expect("voice written");
         let status = render_status(&record(), home.path());
         assert!(
-            status.contains("meta:ok sound:ok scene:-- picture:--"),
+            status.contains("canard meaning ✓ audio ✓ scene · picture ·"),
             "status text must show each card's artifact presence read from the cache"
         );
     }
@@ -384,7 +504,9 @@ mod tests {
         let home = TempDir::new().expect("tempdir must be created");
         let status = render_status(&record, home.path());
         assert!(
-            status.contains("word  canard   card") && status.contains("*  2  "),
+            status.contains("words:")
+                && status.contains("  canard")
+                && status.contains("    * 2 a hoax"),
             "an understood session must list candidate senses with the selected one marked"
         );
     }

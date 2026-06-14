@@ -77,9 +77,6 @@ pub(in crate::cli) struct NewArgs {
     /// Start the background worker immediately after creating the session.
     #[arg(long)]
     pub(super) generate: bool,
-    /// Print only the session id (no understood-senses preview).
-    #[arg(short, long)]
-    pub(super) quiet: bool,
 }
 
 /// Arguments for `generate`.
@@ -90,9 +87,6 @@ pub(in crate::cli) struct GenerateArgs {
     /// Run in the foreground, streaming progress, instead of detaching.
     #[arg(long)]
     pub(super) wait: bool,
-    /// Suppress progress; with --wait print only the final paths, else just the id.
-    #[arg(short, long)]
-    pub(super) quiet: bool,
 }
 
 /// Arguments for `config`: with no flags it shows the saved preferences; with
@@ -139,29 +133,13 @@ pub(in crate::cli) struct CorrectArgs {
 pub(in crate::cli) struct StatusArgs {
     /// The session id (omit it to use the only — or only unfinished — session).
     pub(super) id: Option<String>,
-    /// Print only the phase word.
-    #[arg(short, long)]
-    pub(super) quiet: bool,
 }
 
-/// Arguments for `result`: at most one path selector, exclusive with `-q`.
+/// Arguments for `result`.
 #[derive(Debug, Args)]
-#[command(group(ArgGroup::new("selector").args(["deck", "pdf", "dir"]).conflicts_with("quiet")))]
 pub(in crate::cli) struct ResultArgs {
     /// The session id (omit it to use the only — or only unfinished — session).
     pub(super) id: Option<String>,
-    /// Print only the deck/pdf/dir paths (no card bodies).
-    #[arg(short, long)]
-    pub(super) quiet: bool,
-    /// Print only the deck path.
-    #[arg(long)]
-    pub(super) deck: bool,
-    /// Print only the report PDF path.
-    #[arg(long)]
-    pub(super) pdf: bool,
-    /// Print only the output directory path.
-    #[arg(long)]
-    pub(super) dir: bool,
 }
 
 /// A bare session id.
@@ -189,13 +167,9 @@ pub(in crate::cli) struct CardArg {
     pub(super) card: String,
 }
 
-/// Arguments for `ls`.
+/// Arguments for `ls` (no options).
 #[derive(Debug, Args)]
-pub(in crate::cli) struct LsArgs {
-    /// Print only the session ids, one per line.
-    #[arg(short, long)]
-    pub(super) quiet: bool,
-}
+pub(in crate::cli) struct LsArgs {}
 
 /// Arguments for `regenerate`: every unfinished card with `--failed`, or one
 /// card by `--card` — optionally rewritten by Gemini first with `--note`.
@@ -221,9 +195,6 @@ pub(in crate::cli) struct RegenerateArgs {
     /// Run in the foreground, streaming progress, instead of detaching.
     #[arg(long)]
     pub(super) wait: bool,
-    /// Suppress progress; with --wait print only the final paths, else just the id.
-    #[arg(short, long)]
-    pub(super) quiet: bool,
 }
 
 /// Arguments for `rm`.

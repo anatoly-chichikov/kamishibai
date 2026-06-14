@@ -57,7 +57,6 @@ pub(super) struct SessionDoc {
     source: String,
     out: String,
     phase: &'static str,
-    words: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     worker: Option<WorkerDoc>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,6 +77,16 @@ struct PairDoc {
     learning: String,
 }
 
+impl PairDoc {
+    /// Build the canonical uppercase pair document from a record.
+    fn of(record: &SessionRecord) -> Self {
+        Self {
+            known: record.known.to_uppercase(),
+            learning: record.learning.to_uppercase(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct WorkerDoc {
     pid: i32,
@@ -92,8 +101,6 @@ struct ProgressDoc {
 
 #[derive(Serialize)]
 struct CandidatesDoc {
-    count: usize,
-    selected: usize,
     items: Vec<CandidateDoc>,
 }
 
@@ -106,7 +113,6 @@ struct CandidateDoc {
 
 #[derive(Serialize)]
 struct SenseDoc {
-    number: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     tag: Option<String>,
     understanding: String,
@@ -115,9 +121,6 @@ struct SenseDoc {
 
 #[derive(Serialize)]
 struct CardsDoc {
-    total: usize,
-    ready: usize,
-    failed: usize,
     items: Vec<CardDoc>,
 }
 
@@ -125,7 +128,6 @@ struct CardsDoc {
 struct CardDoc {
     term: String,
     understanding: String,
-    state: &'static str,
     artifacts: ArtifactsDoc,
 }
 
@@ -142,41 +144,38 @@ struct ResultPathsDoc {
     deck: String,
     pdf: String,
     dir: String,
-    cards: usize,
-    failed: usize,
 }
 
 impl SessionDoc {
     /// Project one record against the cache: the same live-phase reconciliation
-    /// and per-card artifact probing `status` renders as text.
+    /// and per-card artifact probing `status` renders as text. Only data — no
+    /// derived counts, no card state words; the agent computes those from the
+    /// `artifacts` booleans plus `phase`.
     pub(super) fn of(record: &SessionRecord, cache_root: &Path) -> Self {
         let (phase, pid, live) = view::live_phase(record, cache_root);
         Self {
             ok: true,
             session: record.id.clone(),
             created: record.created.clone(),
-            pair: PairDoc {
-                known: record.known.clone(),
-                learning: record.learning.clone(),
-            },
+            pair: PairDoc::of(record),
             senses: record.senses.clone(),
             source: record.source.clone(),
             out: record.out.clone(),
             phase: view::phase_label(phase),
-            words: record.words.clone(),
             worker: pid.map(|pid| WorkerDoc { pid, alive: live }),
-            progress: record.progress.as_ref().map(|progress| ProgressDoc {
-                term: progress.term.clone(),
-                artifact: progress.artifact.clone(),
-            }),
+            progress: matches!(phase, Phase::Generating)
+                .then(|| record.progress.as_ref())
+                .flatten()
+                .map(|progress| ProgressDoc {
+                    term: progress.term.clone(),
+                    artifact: progress.artifact.clone(),
+                }),
             candidates: candidates_doc(record),
-            cards: cards_doc(record, cache_root, phase),
+            cards: cards_doc(record, cache_root),
             result: record.result.as_ref().map(|result| ResultPathsDoc {
                 deck: result.deck.clone(),
                 pdf: result.report.clone(),
                 dir: result.output.clone(),
-                cards: result.cards,
-                failed: result.failed,
             }),
             error: record.error.clone(),
         }
@@ -197,7 +196,6 @@ fn candidates_doc(record: &SessionRecord) -> Option<CandidatesDoc> {
                 .iter()
                 .enumerate()
                 .map(|(index, sense)| SenseDoc {
-                    number: index + 1,
                     tag: sense.tag().map(String::from),
                     understanding: String::from(sense.understanding()),
                     selected: candidate.ok() && candidate.selected_senses().contains(&index),
@@ -210,30 +208,18 @@ fn candidates_doc(record: &SessionRecord) -> Option<CandidatesDoc> {
             }
         })
         .collect();
-    Some(CandidatesDoc {
-        count: items.len(),
-        selected: view::selected_cards(record),
-        items,
-    })
+    Some(CandidatesDoc { items })
 }
 
-fn cards_doc(record: &SessionRecord, cache_root: &Path, phase: Phase) -> Option<CardsDoc> {
+fn cards_doc(record: &SessionRecord, cache_root: &Path) -> Option<CardsDoc> {
     if record.drafts.is_empty() {
         return None;
     }
-    let cards = view::cards(record, cache_root);
-    let ready = cards.iter().filter(|card| card.ready()).count();
-    let failed = if view::terminal(phase) {
-        cards.len() - ready
-    } else {
-        0
-    };
-    let items = cards
+    let items = view::cards(record, cache_root)
         .iter()
         .map(|card| CardDoc {
             term: card.term.clone(),
             understanding: card.understanding.clone(),
-            state: view::row_label(card, phase),
             artifacts: ArtifactsDoc {
                 meta: card.meta,
                 sound: card.sound,
@@ -242,12 +228,7 @@ fn cards_doc(record: &SessionRecord, cache_root: &Path, phase: Phase) -> Option<
             },
         })
         .collect();
-    Some(CardsDoc {
-        total: cards.len(),
-        ready,
-        failed,
-        items,
-    })
+    Some(CardsDoc { items })
 }
 
 /// The `result --json` document: the published paths plus every card with
@@ -261,7 +242,6 @@ pub(super) struct ResultDoc {
     pair: PairDoc,
     phase: &'static str,
     paths: PathsDoc,
-    cards: usize,
     failed: usize,
     items: Vec<VocabularyEntry>,
 }
@@ -303,17 +283,13 @@ impl ResultDoc {
         Ok(Self {
             ok: true,
             session: record.id.clone(),
-            pair: PairDoc {
-                known: record.known.clone(),
-                learning: record.learning.clone(),
-            },
+            pair: PairDoc::of(record),
             phase: view::phase_label(phase),
             paths: PathsDoc {
                 deck: paths.deck.clone(),
                 pdf: paths.report.clone(),
                 dir: paths.output.clone(),
             },
-            cards: paths.cards,
             failed: paths.failed,
             items,
         })
@@ -368,10 +344,7 @@ pub(super) fn ls_items(records: &[SessionRecord], cache_root: &Path) -> Vec<LsIt
             let committed = !record.drafts.is_empty();
             LsItem {
                 id: record.id.clone(),
-                pair: PairDoc {
-                    known: record.known.clone(),
-                    learning: record.learning.clone(),
-                },
+                pair: PairDoc::of(record),
                 created: record.created.clone(),
                 phase: view::phase_label(phase),
                 cards: committed.then(|| LsCards {
@@ -470,12 +443,13 @@ mod tests {
         assert_eq!(
             (
                 value["phase"].as_str(),
-                value["candidates"]["items"][0]["senses"][1]["number"].as_u64(),
+                value["candidates"]["items"][0]["senses"][1]["understanding"].as_str(),
                 value["candidates"]["items"][0]["senses"][1]["selected"].as_bool(),
                 value.get("cards"),
+                value["candidates"]["items"][0]["senses"][1].get("number"),
             ),
-            (Some("understood"), Some(2), Some(true), None),
-            "an understood document must list 1-based candidate senses and omit the cards block"
+            (Some("understood"), Some("a hoax"), Some(true), None, None),
+            "an understood document must carry candidate senses (no derived number) and omit the cards block"
         );
     }
 
@@ -502,10 +476,10 @@ mod tests {
             (
                 value["cards"]["items"][0]["artifacts"]["meta"].as_bool(),
                 value["cards"]["items"][0]["artifacts"]["scene"].as_bool(),
-                value["cards"]["items"][0]["state"].as_str(),
+                value["cards"]["items"][0].get("state"),
             ),
-            (Some(true), Some(false), Some("pending")),
-            "a committed document must carry per-card artifact booleans probed from the cache"
+            (Some(true), Some(false), None),
+            "a committed document must carry per-card artifact booleans (no derived state) probed from the cache"
         );
     }
 

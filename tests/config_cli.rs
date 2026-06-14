@@ -85,8 +85,8 @@ fn config_saves_the_known_language_as_a_confirmed_choice() {
     let document = String::from_utf8(shown.stdout).expect("stdout must be UTF-8");
     assert_eq!(
         document.trim(),
-        r#"{"ok":true,"known":"ru","confirmed":true,"key_saved":false}"#,
-        "config --json must report the saved language as a confirmed choice"
+        r#"{"ok":true,"known":"RU","key_saved":false}"#,
+        "config --json must report the saved language uppercased, without a derived confirmed flag"
     );
 }
 

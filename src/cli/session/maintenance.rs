@@ -9,7 +9,7 @@ use crate::session::LanguagePair;
 use super::args::{IdArg, RmArgs};
 use super::liveness;
 use super::store::{Phase, SessionRecord, SessionStore};
-use super::{Render, drop_artifacts, json, refuse_if_live, resolve};
+use super::{Render, drop_artifacts, json, refuse_if_live, resolve, view};
 
 /// Stop a session's running worker and mark it cancelled unless already terminal.
 ///
@@ -41,7 +41,18 @@ pub(super) fn cancel(args: &IdArg, render: Render) -> Result<()> {
     if matches!(render, Render::Json) {
         return json::emit_session(&updated);
     }
-    eprintln!("cancelled session {}", updated.id);
+    let phase = updated.phase;
+    println!("{}", view::header(&updated, phase));
+    if matches!(phase, Phase::Cancelled) {
+        println!(
+            "Stopped the worker — nothing published. What built so far stays cached, so a later generate resumes."
+        );
+    } else {
+        println!(
+            "Nothing to stop — the session is already {}.",
+            view::phase_label(phase)
+        );
+    }
     Ok(())
 }
 
@@ -67,7 +78,17 @@ pub(super) fn rm(args: &RmArgs, render: Render) -> Result<()> {
     if matches!(render, Render::Json) {
         return json::emit(&json::RemovedDoc::of(record.id.as_str()));
     }
-    eprintln!("removed session {}", record.id);
+    if args.cache {
+        println!(
+            "Removed session {} and its cached cards — nothing left to reuse.",
+            record.id
+        );
+    } else {
+        println!(
+            "Removed session {}. Its cached cards stay (reused if you recreate it) — add --cache to delete those too.",
+            record.id
+        );
+    }
     Ok(())
 }
 

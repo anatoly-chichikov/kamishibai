@@ -47,7 +47,7 @@ use crate::languages::catalog;
 use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardCell, LanguagePair};
 
-use super::error::{self, not_found, usage};
+use super::error::{self, usage};
 
 /// Port through which `open` hands a checked session to the interactive
 /// surface; the TUI side implements it, so this layer never links the TUI.
@@ -91,34 +91,11 @@ pub(super) fn handle(command: &Command, render: Render, opener: &dyn SessionOpen
     }
 }
 
-/// Refuse `--json` combinations that would fight over stdout: `-q` (a plain
-/// projection), the `result` path selectors (paths are document fields), and
-/// the interactive `open`.
+/// Refuse the one `--json` grammar conflict left: the interactive `open`, which
+/// takes over the terminal and has no document to print.
 fn refuse_json_conflicts(command: &Command, render: Render) -> Result<()> {
-    if matches!(render, Render::Text) {
-        return Ok(());
-    }
-    let quiet = match command {
-        Command::Open(_) => {
-            return Err(usage("open is interactive; --json does not apply"));
-        }
-        Command::Result(args) if args.deck || args.pdf || args.dir => {
-            return Err(usage(
-                "--json carries the paths as fields; drop --deck/--pdf/--dir",
-            ));
-        }
-        Command::New(args) => args.quiet,
-        Command::Generate(args) => args.quiet,
-        Command::Regenerate(args) => args.quiet,
-        Command::Status(args) => args.quiet,
-        Command::Result(args) => args.quiet,
-        Command::Ls(args) => args.quiet,
-        _ => false,
-    };
-    if quiet {
-        return Err(usage(
-            "--json and -q are mutually exclusive; the JSON document is already capturable",
-        ));
+    if matches!(render, Render::Json) && matches!(command, Command::Open(_)) {
+        return Err(usage("open is interactive; --json does not apply"));
     }
     Ok(())
 }
@@ -139,7 +116,10 @@ pub(in crate::cli::session) fn open_checked(
     id: &str,
 ) -> Result<SessionRecord> {
     if !store.exists(id) {
-        return Err(not_found(format!("no session '{id}'")));
+        return Err(error::not_found_hint(
+            format!("no session \"{id}\""),
+            "See what you have: kamishibai ls",
+        ));
     }
     store.open(id)
 }
@@ -195,28 +175,39 @@ fn resolve(store: &SessionStore, explicit: Option<&str>, render: Render) -> Resu
         return open_checked(store, id);
     }
     let root = cache_root(&SystemContext)?;
+    let _ = render;
     match pick(store.list()?, root.as_path()) {
-        Picked::One(record) => {
-            if matches!(render, Render::Text) {
-                eprintln!("using session {}", record.id);
-            }
-            Ok(*record)
-        }
-        Picked::None => Err(not_found("no sessions; create one with kamishibai new")),
+        Picked::One(record) => Ok(*record),
+        Picked::None => Err(error::not_found_hint(
+            "no sessions yet",
+            "Create one: kamishibai new --word <WORD>",
+        )),
         Picked::Ambiguous(records) => {
             let total = records.len();
+            let unfinished = records
+                .iter()
+                .filter(|record| !settled(view::live_phase(record, root.as_path()).0))
+                .count();
             let newest: Vec<SessionRecord> = records.into_iter().rev().take(5).collect();
-            if matches!(render, Render::Text) {
-                for record in &newest {
-                    println!("{}", view::summary_line(record, root.as_path()));
-                }
-                if total > newest.len() {
-                    println!("…and {} more — kamishibai ls", total - newest.len());
-                }
+            let mut listing: Vec<String> = newest
+                .iter()
+                .map(|record| view::summary_line(record, root.as_path()))
+                .collect();
+            if total > newest.len() {
+                listing.push(format!(
+                    "…and {} more — kamishibai ls",
+                    total - newest.len()
+                ));
             }
+            let noun = if unfinished >= 2 {
+                format!("{unfinished} unfinished sessions")
+            } else {
+                format!("{total} sessions")
+            };
             let sessions = serde_json::to_value(json::ls_items(&newest, root.as_path()))?;
             Err(error::ambiguous(
-                format!("{total} sessions; pass an id (kamishibai ls)"),
+                format!("{noun} — pass an id (see kamishibai ls)"),
+                listing.join("\n"),
                 sessions,
             ))
         }

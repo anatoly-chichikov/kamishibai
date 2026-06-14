@@ -9,13 +9,13 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use crate::cli::card_workflow::CardGeneration;
-use crate::cli::console::{self, HumanReporter, JsonReporter, QuietReporter, Reporter, drafts_for};
-use crate::cli::error::{json_line, usage};
+use crate::cli::console::{self, HumanReporter, JsonReporter, Reporter, drafts_for};
+use crate::cli::error::{json_line, operational_hint, usage, usage_hint};
 use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardCorrection, CardDraft, LanguagePair, WordCandidate};
 
 use super::args::{GenerateArgs, RegenerateArgs};
-use super::store::{DraftRecord, SessionRecord, SessionStore};
+use super::store::{DraftRecord, Phase, SessionRecord, SessionStore};
 use super::{
     Render, drop_artifacts, json, preflight_key, refuse_if_live, reset_to_understood, resolve,
     view, worker,
@@ -25,58 +25,77 @@ use super::{
 pub(super) fn generate(args: &GenerateArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
     let record = resolve(&store, args.id.as_deref(), render)?;
-    run_session(&store, record.id.as_str(), args.wait, args.quiet, render)
+    run_session(&store, record.id.as_str(), args.wait, render, None)
 }
 
 /// Commit the plan (deriving it from the curation when none exists) and run the
-/// worker, foreground with `--wait` or detached otherwise. In JSON mode the one
-/// stdout document is the session as the command leaves it: freshly generating
-/// for a detached run, terminal after a `--wait` run.
+/// worker, foreground with `--wait` or detached otherwise. `intro` is an
+/// optional note (regenerate's "re-rolling …") printed under the header in plain
+/// mode. In JSON mode the one stdout document is the session as the command
+/// leaves it: freshly generating for a detached run, terminal after `--wait`.
 pub(super) fn run_session(
     store: &SessionStore,
     id: &str,
     wait: bool,
-    quiet: bool,
     render: Render,
+    intro: Option<String>,
 ) -> Result<()> {
     preflight_key()?;
     store.update(id, |record| {
         refuse_if_live(store, record)?;
         ensure_plan(record);
         if record.drafts.is_empty() {
-            return Err(usage("nothing to generate: select at least one card first"));
+            return Err(usage(
+                "nothing to generate — select at least one card first",
+            ));
         }
         Ok(())
     })?;
     if wait {
-        // Foreground generation runs OCR in-process; the native engine printf's
-        // into the libc stdout buffer, which would corrupt the single-document
-        // `--json` contract. Mute fd 1 for the run and write the one document we
-        // owe stdout to the saved real descriptor. The muted fd is never
-        // restored, so the buffered native bytes drain into /dev/null at exit —
-        // as does cli.rs's own json error line printed after we return here,
-        // which is why an error is emitted to the real stdout below first.
-        let stdout = MutedStdout::capture()?;
-        let outcome = worker::run_foreground(store, id, reporter(render, quiet));
-        if matches!(render, Render::Json) {
-            let line = match &outcome {
-                Ok(record) => json::session_line(record)?,
-                Err(error) => json_line(error),
-            };
-            stdout.emit(line.as_str())?;
-        }
-        return outcome.map(|_| ());
+        return run_wait(store, id, render, intro);
     }
     let record = worker::start_background(store, id)?;
     if matches!(render, Render::Json) {
         return json::emit_session(&record);
     }
-    if !quiet {
-        eprintln!("started session {id} (background)");
-        eprintln!("poll: kamishibai status {id}");
-    }
-    println!("{id}");
+    println!("{}", view::header(&record, Phase::Generating));
+    println!("Building in the background — run status to watch.");
+    println!("out: {}", record.out);
     Ok(())
+}
+
+/// Run the foreground `--wait` generation: print the header (and any intro) on
+/// stderr, stream the steps, then `done:` + paths on success, or one reshaped
+/// operational line + hint on failure. fd 1 is muted for the whole run so the
+/// native OCR engine's libc-buffered chatter never corrupts the one JSON
+/// document, which is written to the saved real descriptor instead.
+fn run_wait(store: &SessionStore, id: &str, render: Render, intro: Option<String>) -> Result<()> {
+    let stdout = MutedStdout::capture()?;
+    if matches!(render, Render::Text) {
+        let record = store.open(id)?;
+        eprintln!("{}", view::header(&record, Phase::Generating));
+        if let Some(intro) = intro.as_deref() {
+            eprintln!("{intro}");
+        }
+    }
+    match worker::run_foreground(store, id, reporter(render)) {
+        Ok(record) => {
+            if matches!(render, Render::Json) {
+                stdout.emit(json::session_line(&record)?.as_str())?;
+            }
+            Ok(())
+        }
+        Err(_) => {
+            let reshaped = operational_hint(
+                "couldn't build any card — nothing published",
+                format!("Check your connection and key, then: kamishibai generate {id}"),
+            );
+            if matches!(render, Render::Json) {
+                stdout.emit(json_line(&reshaped).as_str())?;
+            }
+            Err(reshaped)
+        }
+    }
 }
 
 /// Derive the committed plan from the curated candidates when none is committed.
@@ -105,29 +124,62 @@ pub(super) fn regenerate(args: &RegenerateArgs, render: Render) -> Result<()> {
     let record = resolve(&store, args.id.as_deref(), render)?;
     refuse_if_live(&store, &record)?;
     if record.drafts.is_empty() {
-        return Err(usage(
-            "no committed plan to regenerate: generate the session first",
+        return Err(usage_hint(
+            "no committed plan to regenerate",
+            "Generate it first: kamishibai generate",
         ));
     }
-    match args.note.as_deref() {
+    let intro = match args.note.as_deref() {
         Some(note) => {
             let card = args
                 .card
                 .as_deref()
                 .expect("invariant: clap requires --card with --note");
             rewrite(&store, &record, card, note)?;
-            if matches!(render, Render::Text) {
-                eprintln!("rewrote card '{card}'; regenerating");
-            }
+            rewrite_note(card, &record)
         }
         None => {
-            let (_record, dropped) = drop_targets(&store, &record, args)?;
-            if matches!(render, Render::Text) {
-                eprintln!("dropped {dropped} card(s); regenerating");
-            }
+            let (_record, targets) = drop_targets(&store, &record, args)?;
+            reroll_note(&targets, &record)
         }
+    };
+    run_session(&store, record.id.as_str(), args.wait, render, Some(intro))
+}
+
+/// The terms of the committed cards left untouched by a regenerate target set.
+fn other_terms(record: &SessionRecord, targets: &[String]) -> Vec<String> {
+    record
+        .drafts
+        .iter()
+        .map(|draft| draft.term.clone())
+        .filter(|term| !targets.contains(term))
+        .collect()
+}
+
+/// The intro note for a dropped-and-rebuilt regenerate run.
+fn reroll_note(targets: &[String], record: &SessionRecord) -> String {
+    let kept = other_terms(record, targets);
+    let possessive = if targets.len() == 1 { "its" } else { "their" };
+    let mut note = format!(
+        "Re-rolling {} — dropping {possessive} audio and art",
+        targets.join(", ")
+    );
+    if !kept.is_empty() {
+        note.push_str(&format!(", keeping {}", kept.join(", ")));
     }
-    run_session(&store, record.id.as_str(), args.wait, args.quiet, render)
+    note.push('.');
+    note
+}
+
+/// The intro note for a Gemini-rewritten regenerate run.
+fn rewrite_note(card: &str, record: &SessionRecord) -> String {
+    let kept = other_terms(record, &[String::from(card)]);
+    let mut note = format!("Rewrote {card} from your note — re-rolling it");
+    if !kept.is_empty() {
+        note.push_str(&format!(", keeping {}", kept.join(", ")));
+    }
+    note.push('.');
+    note
 }
 
 /// Ask Gemini to rewrite one committed card from a note, drop its artifacts, and
@@ -187,12 +239,12 @@ fn rewrite(
 
 /// Drop the cached artifacts of the targeted committed cards and reset the
 /// session so the next generate rebuilds them. Returns the record as updated
-/// plus how many cards were dropped.
+/// plus the terms of the dropped cards.
 fn drop_targets(
     store: &SessionStore,
     record: &SessionRecord,
     args: &RegenerateArgs,
-) -> Result<(SessionRecord, usize)> {
+) -> Result<(SessionRecord, Vec<String>)> {
     let root = cache_root(&SystemContext)?;
     let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let targets: Vec<DraftRecord> = match &args.card {
@@ -225,7 +277,8 @@ fn drop_targets(
         reset_to_understood(fresh);
         Ok(())
     })?;
-    Ok((updated, targets.len()))
+    let terms = targets.iter().map(|draft| draft.term.clone()).collect();
+    Ok((updated, terms))
 }
 
 fn record_of(draft: &CardDraft) -> DraftRecord {
@@ -235,10 +288,9 @@ fn record_of(draft: &CardDraft) -> DraftRecord {
     }
 }
 
-fn reporter(render: Render, quiet: bool) -> Box<dyn Reporter> {
+fn reporter(render: Render) -> Box<dyn Reporter> {
     match render {
         Render::Json => Box::new(JsonReporter),
-        Render::Text if quiet => Box::new(QuietReporter),
         Render::Text => Box::new(HumanReporter),
     }
 }

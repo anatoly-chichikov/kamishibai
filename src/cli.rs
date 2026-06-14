@@ -34,9 +34,9 @@ EXAMPLES:
   kamishibai select --card bank --sense 2          keep only the 2nd sense of a card
   kamishibai exclude --card spring                 drop one card from the plan
   kamishibai generate                              generate + publish in the background
-  kamishibai status                                progress (no Gemini); -q prints just the phase
+  kamishibai status                                progress (no Gemini)
   kamishibai result                                the finished cards + deck/pdf paths
-  kamishibai result <id> --deck                    only one session's .apkg path (for scripts)
+  kamishibai result --json                         the paths/cards as JSON (for scripts)
   kamishibai regenerate --failed                   retry the cards that did not finish
   kamishibai regenerate --card bank --note \"…\"     re-roll one card from an instruction
   kamishibai new --build cards.json --generate     import a cards JSON and start at once
@@ -48,11 +48,11 @@ EXAMPLES:
   newest five instead and exits 5.
 
 OUTPUT:
-  Plain text by default: stdout carries the one capturable value (a session id,
-  or paths); progress and previews go to stderr — so id=$(kamishibai new --word bank) works.
-  Pass --json after any session verb to print exactly one JSON document on stdout
-  instead (success or error envelope); exit codes are identical in both modes for
-  any invocation valid in both (--json grammar conflicts exit 2).
+  Two modes: plain text (default, for humans) and --json (after any session verb,
+  for machines — exactly one JSON document on stdout, success or error envelope).
+  Agents should use --json; plain text prints nothing bare to capture. Language
+  codes are uppercase in all output, ids, cache paths, and JSON. Exit codes are
+  identical in both modes for any invocation valid in both.
 
 EXIT CODES:
   0 ok · 2 usage · 3 no such session · 4 not ready yet · 5 ambiguous session · 1 other error
@@ -122,6 +122,9 @@ pub fn run() -> u8 {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("kamishibai: {error:#}");
+            if let Some(hint) = error::hint_of(&error) {
+                eprintln!("{hint}");
+            }
             if cli.json {
                 println!("{}", error::json_line(&error));
             }

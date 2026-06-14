@@ -41,7 +41,7 @@ fn apply(args: &ConfigArgs, store: &PreferenceStore) -> Result<Preferences> {
     let mut prefs = store.read().unwrap_or_default();
     if let Some(code) = args.known.as_deref() {
         validate_language(code)?;
-        prefs = prefs.adopt(code);
+        prefs = prefs.adopt(code.to_uppercase());
     }
     if let Some(key) = args.key.as_deref() {
         prefs = apply_key(prefs, key)?;
@@ -76,47 +76,55 @@ fn read_key(key: &str) -> Result<String> {
     Ok(buffer.trim().to_string())
 }
 
-/// Print a human confirmation of what was saved; the language code also goes to
-/// stdout so it stays capturable, and the key value is never echoed.
+/// Print a plain-language confirmation of what was saved; the key value is never
+/// echoed, and the language is reported in its canonical uppercase form.
 fn report_set(args: &ConfigArgs, prefs: &Preferences) {
-    if let Some(code) = args.known.as_deref() {
-        eprintln!("saved your language: {code}");
+    if args.known.is_some() {
+        println!(
+            "Saved {} as your known language — new won't ask for --known anymore.",
+            prefs.startup_language().to_uppercase()
+        );
     }
     if args.key.is_some() {
         if prefs.api_key.is_some() {
-            eprintln!("saved your Gemini API key");
+            println!(
+                "Checked your key against Gemini and saved it — you won't need to export GEMINI_API_KEY."
+            );
         } else {
-            eprintln!("cleared your Gemini API key");
+            println!("Cleared your saved Gemini API key.");
         }
     }
-    if let Some(code) = args.known.as_deref() {
-        println!("{code}");
+}
+
+/// Print the saved preferences as two plain lines; each unsaved setting carries
+/// the one command that saves it. The key is reported only as present or absent.
+fn report_show(prefs: &Preferences) {
+    if prefs.requires_language_choice() {
+        println!(
+            "Known language: not saved — new keeps asking for --known (kamishibai config --known en)"
+        );
+    } else {
+        println!(
+            "Known language: {}",
+            prefs.startup_language().to_uppercase()
+        );
+    }
+    if prefs.api_key.is_some() {
+        println!("Gemini API key: saved");
+    } else {
+        println!(
+            "Gemini API key: not saved — or export GEMINI_API_KEY (kamishibai config --key -)"
+        );
     }
 }
 
-/// Print the saved preferences as a readable block; the key is reported only as
-/// present or absent.
-fn report_show(prefs: &Preferences) {
-    let hint = if prefs.requires_language_choice() {
-        " (not set; defaulting)"
-    } else {
-        ""
-    };
-    let key = if prefs.api_key.is_some() {
-        "saved"
-    } else {
-        "not saved"
-    };
-    println!("language  {}{hint}", prefs.startup_language());
-    println!("key       {key}");
-}
-
-/// The `--json` projection of the saved preferences; it carries `key_saved`, never the key.
+/// The `--json` projection of the saved preferences: the canonical uppercase
+/// `known` (omitted until one is saved) and `key_saved`, never the key value.
 #[derive(Serialize)]
 struct ConfigDoc {
     ok: bool,
-    known: String,
-    confirmed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    known: Option<String>,
     key_saved: bool,
 }
 
@@ -125,8 +133,8 @@ impl ConfigDoc {
     fn of(prefs: &Preferences) -> Self {
         Self {
             ok: true,
-            known: prefs.startup_language().to_string(),
-            confirmed: !prefs.requires_language_choice(),
+            known: (!prefs.requires_language_choice())
+                .then(|| prefs.startup_language().to_uppercase()),
             key_saved: prefs.api_key.is_some(),
         }
     }
@@ -156,8 +164,8 @@ mod tests {
                 restored.my_language.as_str(),
                 restored.requires_language_choice()
             ),
-            ("ru", false),
-            "saving --known must persist the language as a confirmed choice"
+            ("RU", false),
+            "saving --known must persist the language uppercased as a confirmed choice"
         );
     }
 

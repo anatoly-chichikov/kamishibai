@@ -282,14 +282,11 @@ impl DeckPublishing for LiveCardGenerator {
             report.append(&entry, Some(image_path));
         }
         let stamp = release_stamp()?;
-        let apkg = self
-            .output
-            .join(format!("{}_{}.apkg", decknaming.prefix, stamp));
+        let prefix = decknaming.prefix.to_uppercase();
+        let apkg = self.output.join(format!("{prefix}_{stamp}.apkg"));
         container.save(&apkg)?;
         progress.advance(PublishPhase::Report);
-        let pdf = self
-            .output
-            .join(format!("{}_{}.pdf", decknaming.prefix, stamp));
+        let pdf = self.output.join(format!("{prefix}_{stamp}.pdf"));
         report.save(&pdf, &Thumbnail::new(1024))?;
         Ok((
             apkg.to_string_lossy().into_owned(),

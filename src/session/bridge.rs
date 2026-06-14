@@ -66,10 +66,10 @@ fn pair_from_document(document: &VocabularyDocument) -> Result<LanguagePair> {
         .entries
         .first()
         .ok_or_else(|| anyhow!("vocabulary document contains no entries"))?;
-    let target = first.target.lang.as_str();
-    let support = first.source.lang.as_str();
+    let target = first.target.lang.as_str().to_uppercase();
+    let support = first.source.lang.as_str().to_uppercase();
     for (index, entry) in document.entries.iter().enumerate().skip(1) {
-        if entry.target.lang.as_str() != target {
+        if !entry.target.lang.as_str().eq_ignore_ascii_case(&target) {
             bail!(
                 "entry {} has target language '{}' but the batch started with '{}'",
                 index,
@@ -77,7 +77,7 @@ fn pair_from_document(document: &VocabularyDocument) -> Result<LanguagePair> {
                 target
             );
         }
-        if entry.source.lang.as_str() != support {
+        if !entry.source.lang.as_str().eq_ignore_ascii_case(&support) {
             bail!(
                 "entry {} has source language '{}' but the batch started with '{}'",
                 index,

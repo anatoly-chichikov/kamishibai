@@ -91,8 +91,8 @@ pub(super) enum StepOutcome {
     Ready { cached: bool },
     /// The artifact failed and a retry will follow.
     Retry { attempt: u8, ceiling: u8 },
-    /// The artifact exhausted its retries and was abandoned.
-    Failed,
+    /// The artifact exhausted its retries and was abandoned after `ceiling`.
+    Failed { ceiling: u8 },
 }
 
 /// Progress sink for one console run. The flow is identical to the TUI; only the
@@ -216,7 +216,9 @@ fn outcome_of(engine: &SessionEngine, card: usize, artifact: Artifact) -> StepOu
         };
     }
     if slot.failed_terminally() {
-        return StepOutcome::Failed;
+        return StepOutcome::Failed {
+            ceiling: slot.tally().ceiling(),
+        };
     }
     StepOutcome::Retry {
         attempt: slot.tally().done(),
@@ -255,36 +257,40 @@ pub(super) fn drafts_for(candidates: &[WordCandidate], pair: &LanguagePair) -> V
 pub(super) struct HumanReporter;
 
 impl Reporter for HumanReporter {
-    fn generating(&self, cards: usize) {
-        eprintln!("generating {cards} card(s)…");
-    }
+    fn generating(&self, _cards: usize) {}
 
     fn step(&self, term: &str, artifact: Artifact, outcome: StepOutcome) {
-        let label = artifact.label();
+        let label = human_label(artifact);
         match outcome {
-            StepOutcome::Ready { cached: true } => eprintln!("  cache  {term} · {label}"),
-            StepOutcome::Ready { cached: false } => eprintln!("  ok     {term} · {label}"),
+            StepOutcome::Ready { cached: true } => eprintln!("  {term} · {label} (cached)"),
+            StepOutcome::Ready { cached: false } => eprintln!("  {term} · {label} ✓"),
             StepOutcome::Retry { attempt, ceiling } => {
-                eprintln!("  retry  {term} · {label} ({attempt}/{ceiling})")
+                eprintln!("  {term} · {label} · retry {attempt}/{ceiling}")
             }
-            StepOutcome::Failed => eprintln!("  fail   {term} · {label}"),
+            StepOutcome::Failed { ceiling } => {
+                eprintln!("  {term} · {label} · gave up ({ceiling}/{ceiling})")
+            }
         }
     }
 
-    fn publishing(&self) {
-        eprintln!("building deck and report…");
-    }
+    fn publishing(&self) {}
 
     fn finished(&self, outcome: &Outcome) {
-        if outcome.failed > 0 {
-            eprintln!(
-                "done: {} card(s) published, {} failed",
-                outcome.cards, outcome.failed
-            );
-        } else {
-            eprintln!("done: {} card(s) published", outcome.cards);
-        }
-        print_paths(outcome);
+        eprintln!("done:");
+        eprintln!("{}", outcome.deck());
+        eprintln!("{}", outcome.report());
+        eprintln!("{}", outcome.output());
+    }
+}
+
+/// The user-facing artifact label for the `--wait` stream: meta reads as
+/// "meaning", sound as "audio" (display only — the JSON keys stay meta/sound).
+fn human_label(artifact: Artifact) -> &'static str {
+    match artifact {
+        Artifact::Meta => "meaning",
+        Artifact::Sound => "audio",
+        Artifact::Scene => "scene",
+        Artifact::Picture => "picture",
     }
 }
 
@@ -353,7 +359,7 @@ impl Reporter for JsonReporter {
             StepOutcome::Ready { cached: true } => ("cache", None, None),
             StepOutcome::Ready { cached: false } => ("ok", None, None),
             StepOutcome::Retry { attempt, ceiling } => ("retry", Some(attempt), Some(ceiling)),
-            StepOutcome::Failed => ("fail", None, None),
+            StepOutcome::Failed { ceiling } => ("fail", None, Some(ceiling)),
         };
         stream(&Event::Step {
             term,

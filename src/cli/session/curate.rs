@@ -16,8 +16,8 @@ use crate::cli::error::usage;
 use crate::session::{BulkCorrection, CandidateRecord, LanguagePair, WordCandidate};
 
 use super::args::{CardArg, CorrectArgs, SelectArgs};
-use super::store::{SessionRecord, SessionStore};
-use super::{Render, json, preflight_key, refuse_if_live, reset_to_understood, resolve};
+use super::store::{Phase, SessionRecord, SessionStore};
+use super::{Render, json, preflight_key, refuse_if_live, reset_to_understood, resolve, view};
 
 /// Run one curation edit against a candidate found by term, clearing the
 /// committed plan so the next `generate` re-derives it from the new selection.
@@ -44,14 +44,23 @@ fn curate(
 }
 
 /// Print the post-mutation state: the session document in JSON mode, or the
-/// verb's confirmation note plus the capturable id in text mode.
-fn conclude(render: Render, record: &SessionRecord, note: impl FnOnce()) -> Result<()> {
+/// understood header plus the verb's one-line confirmation note in plain mode.
+fn conclude(render: Render, record: &SessionRecord, note: String) -> Result<()> {
     if matches!(render, Render::Json) {
         return json::emit_session(record);
     }
-    note();
-    println!("{}", record.id);
+    println!("{}", view::header(record, Phase::Understood));
+    println!("{note}");
     Ok(())
+}
+
+/// Find one candidate in a record by its term, rebuilt for reading its senses.
+fn candidate_of(record: &SessionRecord, term: &str) -> Option<WordCandidate> {
+    record
+        .candidates
+        .iter()
+        .find(|candidate| candidate.term() == term)
+        .map(|candidate| candidate.clone().candidate())
 }
 
 /// Pick which 1-based senses of a card become cards, re-including it.
@@ -78,17 +87,34 @@ pub(super) fn select(args: &SelectArgs, render: Render) -> Result<()> {
             Ok(candidate.selecting_senses(zero).with_ok(true))
         },
     )?;
-    conclude(render, &updated, || {
-        eprintln!(
-            "selected sense(s) {} of '{}'",
-            args.sense
-                .iter()
-                .map(usize::to_string)
-                .collect::<Vec<_>>()
-                .join(","),
+    let note = select_note(&updated, args);
+    conclude(render, &updated, note)
+}
+
+/// The confirmation line for a `select`: the kept sense quoted for one pick, the
+/// list of numbers for several.
+fn select_note(record: &SessionRecord, args: &SelectArgs) -> String {
+    if let [number] = args.sense.as_slice() {
+        let understanding = candidate_of(record, args.card.as_str())
+            .and_then(|candidate| {
+                candidate
+                    .senses()
+                    .get(number - 1)
+                    .map(|sense| sense.understanding().to_string())
+            })
+            .unwrap_or_default();
+        return format!(
+            "Kept sense {number} of {} — \"{understanding}\".",
             args.card
         );
-    })
+    }
+    let list = args
+        .sense
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("Kept senses {list} of {}.", args.card)
 }
 
 /// Drop one card from the plan while keeping it visible in the understanding.
@@ -101,9 +127,13 @@ pub(super) fn exclude(args: &CardArg, render: Render) -> Result<()> {
         args.card.as_str(),
         |candidate| Ok(candidate.with_ok(false)),
     )?;
-    conclude(render, &updated, || {
-        eprintln!("excluded '{}'", args.card);
-    })
+    let remaining = view::selected_cards(&updated);
+    let note = format!(
+        "Dropped {} — stays in the understanding, won't become a card. Now {remaining} {}.",
+        args.card,
+        if remaining == 1 { "card" } else { "cards" }
+    );
+    conclude(render, &updated, note)
 }
 
 /// Ask Gemini to add senses to one card from a note, keeping the prior selection.
@@ -148,7 +178,26 @@ pub(super) fn correct(args: &CorrectArgs, render: Render) -> Result<()> {
         record.drafts.clear();
         Ok(())
     })?;
-    conclude(render, &updated, || {
-        eprintln!("added {appended} sense(s) to '{}'", args.card);
-    })
+    let note = correct_note(&updated, args.card.as_str(), appended);
+    conclude(render, &updated, note)
+}
+
+/// The confirmation line for a `correct`: the added sense quoted when exactly
+/// one landed, a count otherwise.
+fn correct_note(record: &SessionRecord, card: &str, appended: usize) -> String {
+    match appended {
+        0 => format!("Gemini added no new sense to {card} — it was already covered."),
+        1 => {
+            let understanding = candidate_of(record, card)
+                .and_then(|candidate| {
+                    candidate
+                        .senses()
+                        .last()
+                        .map(|sense| sense.understanding().to_string())
+                })
+                .unwrap_or_default();
+            format!("Gemini added a sense to {card} — \"{understanding}\". Back in the plan.")
+        }
+        count => format!("Gemini added {count} senses to {card}. Back in the plan."),
+    }
 }
