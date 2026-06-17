@@ -1,4 +1,5 @@
 use std::env;
+use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
 use rand::RngExt;
@@ -23,6 +24,7 @@ use super::protocol::{
 };
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+const HTTP_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Return the Gemini API base URL, honoring a non-empty `KAMISHIBAI_GEMINI_URL`
 /// override (offline tests point it at a local listener; proxies can too).
@@ -84,7 +86,7 @@ pub trait Transport {
 }
 
 /// HTTP transport backed by reqwest.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct HttpTransport {
     client: Client,
 }
@@ -92,9 +94,23 @@ pub struct HttpTransport {
 impl HttpTransport {
     /// Create one HTTP transport.
     pub fn new() -> Self {
+        Self::with_timeout(HTTP_TIMEOUT)
+    }
+
+    fn with_timeout(timeout: Duration) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(timeout)
+                .build()
+                .expect("invariant: reqwest client must build with a fixed timeout"),
         }
+    }
+}
+
+impl Default for HttpTransport {
+    /// Create the default HTTP transport with the production request timeout.
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -500,4 +516,41 @@ fn nonempty(value: &str, fallback: &str) -> String {
         return String::from(fallback);
     }
     String::from(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    #[test]
+    fn http_transport_honors_request_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test listener must bind");
+        let url = format!(
+            "http://{}/slow",
+            listener
+                .local_addr()
+                .expect("test listener must have address")
+        );
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("test listener must accept");
+            let mut buffer = [0; 1024];
+            let _ = stream.read(&mut buffer);
+            thread::sleep(Duration::from_millis(250));
+        });
+        let started = Instant::now();
+        let _error = HttpTransport::with_timeout(Duration::from_millis(25))
+            .post(url.as_str(), "key", "{}")
+            .expect_err("slow server must time out");
+        let elapsed = started.elapsed();
+        server.join().expect("test server must finish");
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "HTTP transport ignored the configured request timeout"
+        );
+    }
 }

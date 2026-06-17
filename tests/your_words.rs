@@ -54,7 +54,8 @@ fn apply_side(app: App, side: Side) -> App {
             let guess = ScriptDetection
                 .detect(app.blob(), &catalog())
                 .expect("detection must succeed");
-            app.confirmed_learning(guess.code())
+            app.with_screen(Screen::WhatIUnderstood)
+                .confirmed_learning(guess.code())
         }
         _ => app,
     }
@@ -149,6 +150,21 @@ fn busy_loader_owns_keyboard_input_until_request_finishes() {
 }
 
 #[test]
+fn understanding_busy_overlay_keeps_the_your_words_background() {
+    let app = App::new(LanguagePair::new("en", "ru")).seeded_blob("deed\nhonor");
+    let (after_submit, side) = transit(app, AppEvent::Generate);
+    let loading = after_submit.busy_started(BusyKind::Understanding);
+    let flat = flatten(&loading);
+    assert!(
+        side == Side::RunUnderstanding
+            && loading.screen() == Screen::YourWords
+            && flat.contains("words you want to learn")
+            && !flat.contains("what i understood"),
+        "understanding loader must keep the previous screen behind it until Gemini returns: {flat}"
+    );
+}
+
+#[test]
 fn recoverable_error_overlay_keeps_the_message_visible() {
     let app = App::new(LanguagePair::new("en", "ru")).error_shown("INTERNAL: boom");
     let flat = flatten(&app);
@@ -157,6 +173,20 @@ fn recoverable_error_overlay_keeps_the_message_visible() {
             && flat.contains("INTERNAL: boom")
             && flat.contains("press any key to dismiss"),
         "recoverable Gemini errors must render as an in-app overlay"
+    );
+}
+
+#[test]
+fn recoverable_error_overlay_wraps_long_timeout_messages() {
+    let app = App::new(LanguagePair::new("en", "ru")).error_shown(
+        "error sending request for url https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent: operation timed out while understanding a large word list",
+    );
+    let flat = flatten(&app);
+    assert!(
+        flat.contains("operation timed out")
+            && flat.contains("large word list")
+            && flat.contains("press any key to dismiss"),
+        "long Gemini timeout messages must remain visible inside the overlay: {flat}"
     );
 }
 
@@ -265,7 +295,7 @@ fn arrows_on_empty_your_words_materialize_the_requested_position() {
 }
 
 #[test]
-fn typing_and_pressing_ctrl_g_advances_to_what_i_understood_and_locks_target_language() {
+fn typing_and_pressing_ctrl_g_waits_then_advances_to_what_i_understood() {
     let app = App::new(LanguagePair::new("en", "ru"));
     let mut state = app;
     for symbol in "окно".chars() {
@@ -276,21 +306,24 @@ fn typing_and_pressing_ctrl_g_advances_to_what_i_understood_and_locks_target_lan
     let submit =
         to_app(modified(KeyCode::Char('g'), KeyModifiers::CONTROL)).expect("Ctrl+G must map");
     let (after_submit, side) = transit(state, submit);
+    let submitted_screen = after_submit.screen();
     let resolved = apply_side(after_submit, side.clone());
     assert_eq!(
         (
+            submitted_screen,
             resolved.screen(),
             side,
             resolved.learning_pending(),
             resolved.pair().learning().to_string(),
         ),
         (
+            Screen::YourWords,
             Screen::WhatIUnderstood,
             Side::RunUnderstanding,
             false,
             String::from("ru"),
         ),
-        "Ctrl+G on non-empty blob must move to What I understood, request understanding, and confirm the detected target language"
+        "Ctrl+G must request understanding without changing screens until the result arrives"
     );
 }
 

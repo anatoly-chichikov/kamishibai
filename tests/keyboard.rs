@@ -63,7 +63,7 @@ fn plain_enter_on_your_words_inserts_newline_without_advancing() {
 }
 
 #[test]
-fn ctrl_g_on_your_words_advances_to_what_i_understood_with_language_pair_visible() {
+fn ctrl_g_on_your_words_advances_after_understanding_with_language_pair_visible() {
     let mut state = App::new(LanguagePair::new("en", "ru"));
     for symbol in "whilst".chars() {
         let event = to_app(press(KeyCode::Char(symbol))).expect("char must map");
@@ -77,15 +77,19 @@ fn ctrl_g_on_your_words_advances_to_what_i_understood_with_language_pair_visible
         "Ctrl+G must produce the generation event"
     );
     let (after, _) = transit(state, submit);
-    let next = after.confirmed_learning("en");
+    let waiting = after.screen();
+    let next = after
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en");
     assert_eq!(
         (
+            waiting,
             next.screen(),
             render_contains(&next, "what i understood"),
             render_contains(&next, "RU → EN"),
         ),
-        (Screen::WhatIUnderstood, true, true),
-        "after typing and pressing Ctrl+G the shell must render What I understood with a visible language pair"
+        (Screen::YourWords, Screen::WhatIUnderstood, true, true),
+        "after typing and pressing Ctrl+G the shell must keep the old screen until understanding finishes"
     );
 }
 

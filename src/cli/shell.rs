@@ -497,6 +497,7 @@ where
                     self.app = self
                         .app
                         .clone()
+                        .with_screen(Screen::WhatIUnderstood)
                         .confirmed_learning(understood.guess().code())
                         .understood_preserving_senses(understood.candidates().to_vec());
                 }
@@ -518,6 +519,7 @@ where
                     self.app = self
                         .app
                         .clone()
+                        .close_modal()
                         .senses_appended_to_selected(senses, message);
                 }
                 Err(error) => {
@@ -537,7 +539,7 @@ where
                         return;
                     };
                     let updated = current.recomposed(term, understanding, meta, file);
-                    self.app = self.app.clone().card_replaced(updated);
+                    self.app = self.app.clone().close_modal().card_replaced(updated);
                     self.start_engine();
                 }
                 Err(error) => {
@@ -896,6 +898,7 @@ mod tests {
         LanguagePair, LearningDetection, RawInputBatch, ScriptDetection, Sense, SenseCorrection,
         Understanding, Understood, WordCandidate, catalog_for_detection,
     };
+    use crate::tui::ModalKind;
     use anyhow::Result;
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1236,6 +1239,69 @@ mod tests {
                 Side::None,
             ),
             "Gemini text errors must keep the TUI alive, preserve the input, and dismiss cleanly"
+        );
+    }
+
+    #[test]
+    fn bulk_correction_keeps_modal_during_request_and_closes_after_success() {
+        let mut shell = shell(review().with_modal(ModalKind::ChangeSomething).typed('x'));
+        shell
+            .handle(AppEvent::Submit)
+            .expect("bulk correction must start");
+        let during = (shell.app.modal(), shell.app.busy().map(|busy| busy.kind()));
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                during,
+                shell.app.modal(),
+                shell.app.busy().is_none(),
+                shell.app.candidates()[0].senses().len(),
+            ),
+            (
+                (
+                    Some(ModalKind::ChangeSomething),
+                    Some(BusyKind::BulkCorrection)
+                ),
+                None,
+                true,
+                2,
+            ),
+            "bulk correction must leave the modal under the loader and close it only after success"
+        );
+    }
+
+    #[test]
+    fn card_correction_keeps_modal_during_request_and_closes_after_success() {
+        let draft = CardDraft::new("whilst", "local understanding", pair());
+        let mut shell = shell(
+            App::new(pair())
+                .with_screen(Screen::YourCards)
+                .cards_started(vec![draft])
+                .with_modal(ModalKind::ChangeThisCard)
+                .typed('x'),
+        );
+        shell
+            .handle(AppEvent::Submit)
+            .expect("card correction must start");
+        let during = (shell.app.modal(), shell.app.busy().map(|busy| busy.kind()));
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                during,
+                shell.app.modal(),
+                shell.app.busy().is_none(),
+                shell.app.cards()[0].understanding().contains("change: x"),
+            ),
+            (
+                (
+                    Some(ModalKind::ChangeThisCard),
+                    Some(BusyKind::CardCorrection)
+                ),
+                None,
+                true,
+                true,
+            ),
+            "card correction must leave the modal under the loader and close it only after success"
         );
     }
 

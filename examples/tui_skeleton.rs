@@ -11,7 +11,7 @@
 use std::io::{self, Read, Write, stdin, stdout};
 
 use anyhow::Result;
-use kamishibai::session::LanguagePair;
+use kamishibai::session::{LanguagePair, WordCandidate};
 use kamishibai::tui::{App, AppEvent, Screen, Side, transit};
 
 fn main() -> Result<()> {
@@ -37,6 +37,13 @@ fn main() -> Result<()> {
         let (next, side) = transit(app.clone(), promote(event, &app));
         app = next;
         render(&app)?;
+        if matches!(side, Side::RunUnderstanding) {
+            app = app
+                .with_screen(Screen::WhatIUnderstood)
+                .confirmed_learning("en")
+                .understood(vec![WordCandidate::new("a", "letter A", true)]);
+            render(&app)?;
+        }
         if matches!(side, Side::ExitApp) {
             break;
         }
