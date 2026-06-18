@@ -523,7 +523,7 @@ mod tests {
     use std::io::Read;
     use std::net::TcpListener;
     use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use super::*;
 
@@ -542,14 +542,14 @@ mod tests {
             let _ = stream.read(&mut buffer);
             thread::sleep(Duration::from_millis(250));
         });
-        let started = Instant::now();
-        let _error = HttpTransport::with_timeout(Duration::from_millis(25))
+        let error = HttpTransport::with_timeout(Duration::from_millis(25))
             .post(url.as_str(), "key", "{}")
             .expect_err("slow server must time out");
-        let elapsed = started.elapsed();
         server.join().expect("test server must finish");
         assert!(
-            elapsed < Duration::from_secs(1),
+            error.chain().any(|cause| cause
+                .downcast_ref::<reqwest::Error>()
+                .is_some_and(reqwest::Error::is_timeout)),
             "HTTP transport ignored the configured request timeout"
         );
     }
