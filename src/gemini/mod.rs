@@ -2,6 +2,7 @@
 
 mod client;
 mod codec;
+mod cost;
 mod prompts;
 mod protocol;
 

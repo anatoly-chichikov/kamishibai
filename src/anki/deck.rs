@@ -243,7 +243,7 @@ where
     /// Attach one media file under the package-unique name notes reference it by.
     ///
     /// Anki keys media by name, not by the on-disk path, so two cards whose disk
-    /// files share a basename (`voice.wav`) stay distinct as long as they attach
+    /// files share a basename (`audio.wav`) stay distinct as long as they attach
     /// under different names. Re-attaching the same name is ignored.
     pub fn attach(&mut self, path: impl Into<PathBuf>, name: impl Into<String>) {
         let name = name.into();

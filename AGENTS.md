@@ -81,7 +81,7 @@ The runtime is split into a few focused modules:
 
 The cache (printed by `kamishibai cache-path`) groups one folder per card, keyed by a content hash of the card identity:
 
-- `cards/<known>-<learning>/<key>/` holds `meta.json`, `scene.json`, `voice.wav`, and `illustration.jpg` for one card
+- `cards/<known>-<learning>/<key>/` holds `meta.json`, `scene.json`, `audio.wav`, and `picture.jpg` for one card
 - `understanding/<known>-<learning>/<key>.json` holds the understanding-pass result
 - `sessions/<id>/` holds `session.json` (identity, phase, words, curated candidates, committed plan, worker pid, result) and `worker.log`
 - `ocr-models/` holds the shared OCR model files

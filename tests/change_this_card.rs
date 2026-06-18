@@ -123,7 +123,7 @@ fn submit_on_per_card_modal_emits_card_correction_and_keeps_overlay_until_result
 }
 
 #[test]
-fn card_correction_loader_keeps_the_change_card_modal_background() {
+fn card_correction_loader_hides_the_change_card_modal_body() {
     let app = seeded()
         .with_modal(ModalKind::ChangeThisCard)
         .typed('v')
@@ -132,13 +132,16 @@ fn card_correction_loader_keeps_the_change_card_modal_background() {
         .typed('b');
     let (after, side) = transit(app, AppEvent::Submit);
     let loading = after.busy_started(BusyKind::CardCorrection);
-    assert_eq!(
-        (loading.modal(), side),
-        (
-            Some(ModalKind::ChangeThisCard),
-            Side::RunCardCorrection(String::from("verb")),
-        ),
-        "card-correction loader must not erase the modal underneath it"
+    let rendered = flat(&loading);
+    assert!(
+        loading.modal() == Some(ModalKind::ChangeThisCard)
+            && side == Side::RunCardCorrection(String::from("verb"))
+            && rendered.contains("working")
+            && rendered.contains("updating this card")
+            && !rendered.contains("change · this card")
+            && !rendered.contains("tell me what to change")
+            && !rendered.contains("verb"),
+        "card-correction loader must hide the modal body while preserving the pending state"
     );
 }
 

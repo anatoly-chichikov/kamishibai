@@ -1,7 +1,9 @@
 //! Live implementation of the UI-neutral card workflow.
 
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use anyhow::{Result, anyhow, bail};
 use time::OffsetDateTime;
@@ -13,26 +15,30 @@ use super::card_workflow::{
 use crate::anki::{CardModel, StableId, VocabularyDeck, VocabularyNote};
 use crate::config::default_store;
 use crate::gemini::{GeminiClient, HttpTransport};
-use crate::generation::artifact_cache::{ILLUSTRATION_FILE, VOICE_FILE};
+use crate::generation::artifact_cache::{
+    Cache, ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, META_COST_FILE, SCENE_COST_FILE,
+    VOICE_COST_FILE, VOICE_FILE,
+};
 use crate::generation::manga::{
-    BorderDetector, Illustration, MangaRenderer, Progress as SceneProgress, TextDetector,
+    BorderDetector, Illustration, ImageSource, MangaRenderer, Progress as SceneProgress,
+    TextDetector,
 };
 use crate::generation::speech::Audio;
-use crate::generation::{SceneComposer, render_audio_prompt};
+use crate::generation::{SceneComposer, SceneSource, Speaker, render_audio_prompt};
 use crate::languages::{LanguageCatalog, catalog, naming};
 use crate::report::{CardSheet, Thumbnail};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    ArtifactFile, BulkCorrection, CachedUnderstanding, CardCell, CardCorrection, CardDraft,
-    CardMeta, CardMetaCache, CardMetaGeneration, CardRevision, LanguagePair, RawInputBatch,
-    Understanding, Understood, WordCandidate, to_entry,
+    Artifact, ArtifactFile, BulkCorrection, CachedUnderstanding, CardCell, CardCorrection,
+    CardDraft, CardMeta, CardMetaCache, CardMetaGeneration, CardRevision, CostRecord,
+    GenerationCost, LanguagePair, RawInputBatch, Understanding, Understood, WordCandidate,
+    to_entry,
 };
 use crate::vocabulary::VocabularyEntry;
 
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
 
-type LiveIllustration =
-    Illustration<SceneComposer<GeminiClient<HttpTransport>>, MangaRenderer<TextDetector>>;
+type LiveIllustration = Illustration<SceneComposer<MeteredGemini>, MangaRenderer<TextDetector>>;
 
 /// Where the live generator looks for the Gemini API key.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -98,23 +104,24 @@ impl LiveCardGenerator {
         )
     }
 
-    fn audio(&self, draft: &CardDraft) -> Result<Audio<GeminiClient<HttpTransport>>> {
+    fn audio(&self, draft: &CardDraft, costs: CostRecorder) -> Result<Audio<MeteredGemini>> {
         let item = self.catalog.item(draft.pair().learning())?;
         Ok(Audio::new(
             self.cell(draft).cache(),
             render_audio_prompt(item.prompt.as_str()),
-            self.client()?,
+            MeteredGemini::new(self.client()?, costs),
         ))
     }
 
-    fn illustration(&self, draft: &CardDraft) -> Result<LiveIllustration> {
+    fn illustration(&self, draft: &CardDraft, costs: CostRecorder) -> Result<LiveIllustration> {
         let item = self.catalog.item(draft.pair().learning())?;
         let client = self.client()?;
+        let metered = MeteredGemini::new(client, costs);
         Ok(Illustration::new(
             self.cell(draft).cache(),
-            SceneComposer::new(client.clone(), item.prompt.as_str()),
+            SceneComposer::new(metered.clone(), item.prompt.as_str()),
             MangaRenderer::new(
-                client,
+                metered,
                 3,
                 TextDetector::cached(60, item.ocr.as_str(), self.cache.clone()),
                 BorderDetector::new(6, 240, 10),
@@ -125,7 +132,7 @@ impl LiveCardGenerator {
     fn generate_visual<F>(
         &self,
         draft: &CardDraft,
-        artifact: &str,
+        artifact: Artifact,
         render: F,
     ) -> Result<ArtifactFile>
     where
@@ -133,18 +140,33 @@ impl LiveCardGenerator {
     {
         let meta = draft
             .meta()
-            .ok_or_else(|| anyhow!("meta must be ready before {artifact}"))?;
+            .ok_or_else(|| anyhow!("meta must be ready before {}", artifact.label()))?;
         let learning = draft.pair().learning();
-        let illustration = self.illustration(draft)?;
+        let costs = CostRecorder::default();
+        let cache = self.cell(draft).cache();
+        let illustration = self.illustration(draft, costs.clone())?;
         let mut progress = NoopProgress;
-        let (filename, cached) = render(
+        let result = render(
             &illustration,
             meta.target_sentence(),
             learning,
             &mut progress,
-        )?;
-        let path = illustration.filepath(filename.as_str())?;
-        Ok(artifact_file(filename, path, cached))
+        )
+        .and_then(|(filename, cached)| {
+            let path = illustration.filepath(filename.as_str())?;
+            Ok((filename, path, cached))
+        });
+        let record = costs.aggregate();
+        match result {
+            Ok((filename, path, cached)) => {
+                let cost = cost_for(&cache, artifact, cached, record);
+                Ok(artifact_file(filename, path, cached, cost))
+            }
+            Err(error) => {
+                store_retry_cost(&cache, artifact, record);
+                Err(error)
+            }
+        }
     }
 }
 
@@ -175,7 +197,11 @@ impl CardMetaGeneration for LiveCardGenerator {
         if let Some(meta) = self.meta_cache().load(term, understanding, pair)? {
             return Ok(meta);
         }
-        self.client()?.generate_card_meta(term, understanding, pair)
+        let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
+        self.client()?
+            .generate_card_meta_observed(term, understanding, pair, |cost| {
+                store_cost(&cache, Artifact::Meta, &cost);
+            })
     }
 }
 
@@ -186,7 +212,16 @@ impl CardCorrection for LiveCardGenerator {
         comment: &str,
         pair: &LanguagePair,
     ) -> Result<CardRevision> {
-        self.client()?.correct_card(draft, comment, pair)
+        let (revision, cost) = self.client()?.correct_card_metered(draft, comment, pair)?;
+        let cache = CardCell::new(
+            self.cache.clone(),
+            pair,
+            revision.term(),
+            revision.understanding(),
+        )
+        .cache();
+        store_cost(&cache, Artifact::Meta, &cost);
+        Ok(revision)
     }
 }
 
@@ -200,7 +235,7 @@ impl CardGeneration for LiveCardGenerator {
     fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
         self.generate_visual(
             draft,
-            "scene",
+            Artifact::Scene,
             |illustration, sentence, target, progress| {
                 illustration.scene_only(sentence, target, progress)
             },
@@ -210,7 +245,7 @@ impl CardGeneration for LiveCardGenerator {
     fn generate_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
         self.generate_visual(
             draft,
-            "picture",
+            Artifact::Picture,
             |illustration, sentence, target, progress| {
                 illustration.picture_only(sentence, target, progress)
             },
@@ -221,10 +256,26 @@ impl CardGeneration for LiveCardGenerator {
         let meta = draft
             .meta()
             .ok_or_else(|| anyhow!("meta must be ready before sound"))?;
-        let audio = self.audio(draft)?;
-        let (filename, cached) = audio.generate(meta.target_sentence())?;
-        let path = audio.filepath(filename.as_str())?;
-        Ok(artifact_file(filename, path, cached))
+        let costs = CostRecorder::default();
+        let cache = self.cell(draft).cache();
+        let audio = self.audio(draft, costs.clone())?;
+        let result = audio
+            .generate(meta.target_sentence())
+            .and_then(|(filename, cached)| {
+                let path = audio.filepath(filename.as_str())?;
+                Ok((filename, path, cached))
+            });
+        let record = costs.aggregate();
+        match result {
+            Ok((filename, path, cached)) => {
+                let cost = cost_for(&cache, Artifact::Sound, cached, record);
+                Ok(artifact_file(filename, path, cached, cost))
+            }
+            Err(error) => {
+                store_retry_cost(&cache, Artifact::Sound, record);
+                Err(error)
+            }
+        }
     }
 
     fn store_card_meta(
@@ -235,7 +286,13 @@ impl CardGeneration for LiveCardGenerator {
         meta: &CardMeta,
     ) -> Result<ArtifactFile> {
         let (filename, path, cached) = self.meta_cache().store(term, understanding, pair, meta)?;
-        Ok(artifact_file(filename, path, cached))
+        let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
+        let cost = if cached {
+            None
+        } else {
+            load_cost(&cache, Artifact::Meta)
+        };
+        Ok(artifact_file(filename, path, cached, cost))
     }
 }
 
@@ -304,6 +361,57 @@ impl SceneProgress for NoopProgress {
     fn done(&mut self, _name: &str, _label: &str, _path: Option<&Path>) {}
 }
 
+#[derive(Clone, Debug, Default)]
+struct CostRecorder {
+    records: Rc<RefCell<Vec<CostRecord>>>,
+}
+
+impl CostRecorder {
+    fn push(&self, record: CostRecord) {
+        if record.requests() == 0 {
+            return;
+        }
+        self.records.borrow_mut().push(record);
+    }
+
+    fn aggregate(&self) -> Option<CostRecord> {
+        CostRecord::aggregate(self.records.borrow().as_slice())
+    }
+}
+
+#[derive(Clone, Debug)]
+struct MeteredGemini {
+    client: GeminiClient<HttpTransport>,
+    costs: CostRecorder,
+}
+
+impl MeteredGemini {
+    fn new(client: GeminiClient<HttpTransport>, costs: CostRecorder) -> Self {
+        Self { client, costs }
+    }
+}
+
+impl SceneSource for MeteredGemini {
+    fn scene(&self, language: &str, sentence: &str, target: &str) -> Result<serde_json::Value> {
+        self.client
+            .scene_observed(language, sentence, target, |cost| self.costs.push(cost))
+    }
+}
+
+impl ImageSource for MeteredGemini {
+    fn image(&self, scene: &serde_json::Value) -> Result<Vec<u8>> {
+        self.client
+            .image_observed(scene, |cost| self.costs.push(cost))
+    }
+}
+
+impl Speaker for MeteredGemini {
+    fn speech(&self, prompt: &str, text: &str) -> Result<Vec<u8>> {
+        self.client
+            .speech_observed(prompt, text, |cost| self.costs.push(cost))
+    }
+}
+
 pub(super) fn default_output() -> Result<PathBuf> {
     Locations::new(LocationArgs::default(), SystemContext).output()
 }
@@ -318,11 +426,87 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-fn artifact_file(filename: String, path: PathBuf, cached: bool) -> ArtifactFile {
+fn artifact_file(
+    filename: String,
+    path: PathBuf,
+    cached: bool,
+    cost: Option<GenerationCost>,
+) -> ArtifactFile {
     let size = fs::metadata(&path)
         .map(|metadata| metadata.len())
         .unwrap_or(0);
-    ArtifactFile::new(filename, path, format_size(size), cached)
+    let file = ArtifactFile::new(filename, path, format_size(size), cached);
+    match cost {
+        Some(cost) => file.with_cost(cost),
+        None => file,
+    }
+}
+
+fn cost_for(
+    cache: &Cache,
+    artifact: Artifact,
+    cached: bool,
+    record: Option<CostRecord>,
+) -> Option<GenerationCost> {
+    if cached {
+        return None;
+    }
+    if let Some(record) = record {
+        if record.requests() == 0 {
+            return load_cost(cache, artifact);
+        }
+        return Some(store_cost(cache, artifact, &record).cost());
+    }
+    load_cost(cache, artifact)
+}
+
+fn load_cost(cache: &Cache, artifact: Artifact) -> Option<GenerationCost> {
+    load_cost_record(cache, artifact).map(|record| record.cost())
+}
+
+fn load_cost_record(cache: &Cache, artifact: Artifact) -> Option<CostRecord> {
+    let filename = cost_filename(artifact);
+    if !cache.exists(filename) {
+        return None;
+    }
+    let path = cache.filepath(filename).ok()?;
+    let text = fs::read_to_string(path).ok()?;
+    serde_json::from_str::<CostRecord>(text.as_str()).ok()
+}
+
+fn store_cost(cache: &Cache, artifact: Artifact, record: &CostRecord) -> CostRecord {
+    if record.requests() == 0 {
+        return load_cost_record(cache, artifact).unwrap_or_else(|| record.clone());
+    }
+    let merged = load_cost_record(cache, artifact)
+        .map(|existing| existing.merged(record))
+        .unwrap_or_else(|| record.clone());
+    let Ok(staged) = cache.stage(".cost.json") else {
+        return merged;
+    };
+    let result = serde_json::to_string_pretty(&merged)
+        .map_err(anyhow::Error::from)
+        .and_then(|json| fs::write(&staged, json).map_err(anyhow::Error::from))
+        .and_then(|()| cache.commit(&staged, cost_filename(artifact)));
+    if result.is_err() {
+        let _ = fs::remove_file(&staged);
+    }
+    merged
+}
+
+fn store_retry_cost(cache: &Cache, artifact: Artifact, record: Option<CostRecord>) {
+    if let Some(record) = record {
+        store_cost(cache, artifact, &record);
+    }
+}
+
+fn cost_filename(artifact: Artifact) -> &'static str {
+    match artifact {
+        Artifact::Meta => META_COST_FILE,
+        Artifact::Scene => SCENE_COST_FILE,
+        Artifact::Picture => ILLUSTRATION_COST_FILE,
+        Artifact::Sound => VOICE_COST_FILE,
+    }
 }
 
 fn format_unit(bytes: u64, unit: u64, suffix: &str) -> String {
@@ -334,4 +518,90 @@ fn format_unit(bytes: u64, unit: u64, suffix: &str) -> String {
 fn release_stamp() -> Result<String> {
     Ok(OffsetDateTime::now_utc()
         .format(parse_time("[year]-[month]-[day]_[hour][minute][second]")?.as_slice())?)
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn cached_artifacts_do_not_report_historical_cost() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("cards/test", home.path());
+        let record = CostRecord::new(
+            "gemini-3.5-flash",
+            1,
+            100,
+            20,
+            120,
+            GenerationCost::from_nanos(330_000),
+        );
+        store_cost(&cache, Artifact::Sound, &record);
+        assert_eq!(
+            cost_for(&cache, Artifact::Sound, true, None),
+            None,
+            "cache hits must not count historical Gemini cost as current spend"
+        );
+    }
+
+    #[test]
+    fn fresh_artifacts_report_current_request_cost() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("cards/test", home.path());
+        let record = CostRecord::new(
+            "gemini-3.5-flash",
+            1,
+            100,
+            20,
+            120,
+            GenerationCost::from_nanos(330_000),
+        );
+        assert_eq!(
+            cost_for(&cache, Artifact::Sound, false, Some(record)),
+            Some(GenerationCost::from_nanos(330_000)),
+            "fresh Gemini requests must report their current spend"
+        );
+    }
+
+    #[test]
+    fn fresh_artifacts_report_accumulated_retry_cost() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("cards/test", home.path());
+        let first = CostRecord::new(
+            "gemini-3.5-flash",
+            1,
+            100,
+            20,
+            120,
+            GenerationCost::from_nanos(330_000),
+        );
+        let second = CostRecord::new(
+            "gemini-3.5-flash",
+            1,
+            40,
+            10,
+            50,
+            GenerationCost::from_nanos(150_000),
+        );
+        store_cost(&cache, Artifact::Sound, &first);
+        assert_eq!(
+            cost_for(&cache, Artifact::Sound, false, Some(second)),
+            Some(GenerationCost::from_nanos(480_000)),
+            "fresh retry success must report all successful Gemini requests for the artifact"
+        );
+    }
+
+    #[test]
+    fn missing_usage_records_do_not_report_zero_costs() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("cards/test", home.path());
+        let record = CostRecord::new("gemini-3.5-flash", 0, 0, 0, 0, GenerationCost::zero());
+        assert_eq!(
+            cost_for(&cache, Artifact::Sound, false, Some(record)),
+            None,
+            "missing Gemini usage metadata must leave the request cost absent"
+        );
+    }
 }

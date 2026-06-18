@@ -152,9 +152,9 @@ fn fixture_jpeg() -> PathBuf {
 
 /// Seed everything but the meta (which `new --build` wrote) into one cell.
 fn seed_artifacts(cell: &Path) {
-    fs::write(cell.join("voice.wav"), b"RIFFxxxxWAVE").expect("seed voice");
+    fs::write(cell.join("audio.wav"), b"RIFFxxxxWAVE").expect("seed voice");
     fs::write(cell.join("scene.json"), b"{}").expect("seed scene");
-    fs::copy(fixture_jpeg(), cell.join("illustration.jpg")).expect("seed illustration");
+    fs::copy(fixture_jpeg(), cell.join("picture.jpg")).expect("seed picture");
 }
 
 /// Poll `status --json` until its `phase` field satisfies the predicate,
@@ -270,7 +270,7 @@ fn live_worker_session(cache: &Path, out: &Path, id: &str, gemini: &str) {
     understood_session(cache, out, id, CARDS_JSON);
     let cell = first_card_dir(cache);
     fs::write(cell.join("scene.json"), b"{}").expect("seed scene");
-    fs::copy(fixture_jpeg(), cell.join("illustration.jpg")).expect("seed illustration");
+    fs::copy(fixture_jpeg(), cell.join("picture.jpg")).expect("seed picture");
     cli_at(cache, gemini)
         .args(["generate", id])
         .assert()

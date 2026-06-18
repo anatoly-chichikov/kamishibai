@@ -41,7 +41,7 @@ where
     /// Generate this card's cached illustration and report its cache state.
     ///
     /// One illustration belongs to one card folder, so the file is always
-    /// `illustration.jpg`; the cache hit is decided by the folder.
+    /// `picture.jpg`; the cache hit is decided by the folder.
     pub fn generate(
         &self,
         sentence: &str,
@@ -87,7 +87,7 @@ where
         Ok((SCENE_FILE.to_string(), false))
     }
 
-    /// Stage two: render `illustration.jpg` from this card's cached `scene.json`.
+    /// Stage two: render `picture.jpg` from this card's cached `scene.json`.
     /// Requires `scene_only` to have run for this card so the scene JSON exists.
     pub fn picture_only(
         &self,

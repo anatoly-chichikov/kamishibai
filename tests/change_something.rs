@@ -92,20 +92,23 @@ fn submit_on_modal_runs_bulk_correction_and_keeps_modal_until_result() {
 }
 
 #[test]
-fn bulk_correction_loader_keeps_the_add_more_modal_background() {
+fn bulk_correction_loader_hides_the_add_more_modal_body() {
     let app = seeded()
         .with_modal(ModalKind::ChangeSomething)
         .typed('#')
         .typed('2');
     let (after, side) = transit(app, AppEvent::Submit);
     let loading = after.busy_started(BusyKind::BulkCorrection);
-    assert_eq!(
-        (loading.modal(), side),
-        (
-            Some(ModalKind::ChangeSomething),
-            Side::RunBulkCorrection(String::from("#2")),
-        ),
-        "bulk-correction loader must not erase the modal underneath it"
+    let rendered = flat(&loading);
+    assert!(
+        loading.modal() == Some(ModalKind::ChangeSomething)
+            && side == Side::RunBulkCorrection(String::from("#2"))
+            && rendered.contains("working")
+            && rendered.contains("adding missing meanings")
+            && !rendered.contains("what meanings did we miss?")
+            && !rendered.contains("domain, slang")
+            && !rendered.contains("#2"),
+        "bulk-correction loader must hide the modal body while preserving the pending state"
     );
 }
 

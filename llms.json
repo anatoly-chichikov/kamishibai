@@ -236,7 +236,7 @@
     "where": "Printed by `cache-path`. macOS ~/Library/Caches/kamishibai; Linux $XDG_CACHE_HOME/kamishibai or ~/.cache/kamishibai. Override with KAMISHIBAI_CACHE.",
     "preferences": "Saved language and key live under the data home (macOS ~/Library/Application Support/kamishibai; Linux $XDG_DATA_HOME or ~/.local/share/kamishibai). Override with KAMISHIBAI_DATA.",
     "layout": {
-      "cards": "<cache>/cards/<KNOWN>-<LEARNING>/<key>/  -> meta.json, scene.json, voice.wav, illustration.jpg",
+      "cards": "<cache>/cards/<KNOWN>-<LEARNING>/<key>/  -> meta.json, scene.json, audio.wav, picture.jpg",
       "understanding": "<cache>/understanding/<KNOWN>-<LEARNING>/<key>.json",
       "sessions": "<cache>/sessions/<id>/  -> session.json, worker.log",
       "ocr_models": "<cache>/ocr-models/  -> shared OCR model files"

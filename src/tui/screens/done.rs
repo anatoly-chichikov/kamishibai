@@ -82,11 +82,18 @@ fn card_summary(app: &App) -> Paragraph<'_> {
             } else {
                 "✓"
             };
-            lines.push(Line::from(vec![
+            let mut spans = vec![
                 Span::styled(format!(" {glyph} "), palette::base()),
                 Span::styled(format!("{:0>2}  ", index + 1), palette::dim2()),
                 Span::styled(String::from(draft.term()), palette::base()),
-            ]));
+            ];
+            if let Some(cost) = super::your_cards::card_cost(draft) {
+                spans.push(Span::styled(
+                    format!("  {}", cost.dollars()),
+                    palette::dim2(),
+                ));
+            }
+            lines.push(Line::from(spans));
         }
     }
     Paragraph::new(lines).style(palette::base())
@@ -104,6 +111,13 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         left.push(super::common::status_sep());
         left.push(Span::styled(
             format!("{} gave up", app.cards_failed()),
+            palette::dim(),
+        ));
+    }
+    if let Some(cost) = super::your_cards::total_cost(app) {
+        left.push(super::common::status_sep());
+        left.push(Span::styled(
+            format!("total cost {}", cost.dollars()),
             palette::dim(),
         ));
     }

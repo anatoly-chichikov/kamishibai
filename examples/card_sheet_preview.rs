@@ -2,7 +2,7 @@
 //!
 //! Walks `~/Library/Caches/kamishibai/cards/<pair>/<key>/` folders, reads the
 //! `meta.json` each card stores, reconstructs its `VocabularyEntry`, and pairs it
-//! with the sibling `illustration.jpg` panel. No network calls. Use it as the
+//! with the sibling `picture.jpg` panel. No network calls. Use it as the
 //! visual regression check after editing `src/report/cards.rs`.
 
 use std::collections::BTreeSet;

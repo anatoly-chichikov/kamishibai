@@ -16,7 +16,9 @@ use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
 use crate::markdown::{parse_markdown, to_ratatui};
-use crate::session::{Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta};
+use crate::session::{
+    Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, GenerationCost,
+};
 use crate::tui::app::App;
 use crate::tui::palette;
 
@@ -26,6 +28,8 @@ const HINT_WORKING: &str = "drawing each card one by one";
 const HINT_DONE: &str = "all done";
 const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
+const STEP_LABEL_COL_CHARS: usize = 14;
+const STEP_SIZE_COL_CHARS: usize = 8;
 const STEPS: [(&str, Artifact); 4] = [
     ("meta", Artifact::Meta),
     ("audio", Artifact::Sound),
@@ -132,12 +136,12 @@ fn card_block<'a>(
     let mut lines: Vec<Line<'a>> = Vec::new();
     lines.extend(card_head(draft, idx, focused, expanded, progressed, width));
     if progressed {
-        for &(name, kind) in &STEPS {
+        for &(_, kind) in &STEPS {
             let slot = slot_for(artifacts, kind);
             if !slot_visible(slot, kind, running) {
                 continue;
             }
-            lines.push(step_line(name, kind, slot, running, spinner_frame));
+            lines.push(step_line(kind, slot, running, spinner_frame));
         }
     }
     if expanded {
@@ -210,13 +214,26 @@ fn card_head<'a>(
         return vec![Line::from(head_spans)];
     };
     let row1_used = head_used + HEAD_ARROW_CHARS;
-    let avail_first = width.saturating_sub(row1_used);
+    let cost_label = visible_card_cost_label(draft, row1_used, width);
+    let cost_chars = cost_label
+        .as_ref()
+        .map(|label| label.chars().count())
+        .unwrap_or(0);
+    let avail_first = width.saturating_sub(row1_used + cost_chars);
     let chunks = wrap_sentence(meta.target_sentence(), avail_first, avail_first);
     let first = chunks.first().cloned().unwrap_or_default();
     head_spans.push(Span::styled(HEAD_ARROW, sentence_style));
     let first_len = first.chars().count();
     head_spans.push(Span::styled(first, sentence_style));
-    let pad = width.saturating_sub(row1_used + first_len);
+    if let Some(label) = cost_label {
+        let cost_style = if focused {
+            palette::highlight_dim()
+        } else {
+            palette::dim2()
+        };
+        head_spans.push(Span::styled(label, cost_style));
+    }
+    let pad = width.saturating_sub(row1_used + first_len + cost_chars);
     if pad > 0 {
         head_spans.push(Span::styled(" ".repeat(pad), row_style));
     }
@@ -295,10 +312,23 @@ fn head_rows(draft: &CardDraft, width: usize) -> usize {
     };
     let term_chars = draft.term().chars().count();
     let row1_used = HEAD_PREFIX_CHARS + term_chars + HEAD_ARROW_CHARS;
-    let avail = width.saturating_sub(row1_used);
+    let cost_chars = visible_card_cost_label(draft, row1_used, width)
+        .as_ref()
+        .map(|label| label.chars().count())
+        .unwrap_or(0);
+    let avail = width.saturating_sub(row1_used + cost_chars);
     wrap_sentence(meta.target_sentence(), avail, avail)
         .len()
         .max(1)
+}
+
+fn visible_card_cost_label(draft: &CardDraft, row_used: usize, width: usize) -> Option<String> {
+    let label = card_cost(draft).map(|cost| format!("  {}", cost.dollars()))?;
+    let label_len = label.chars().count();
+    if width.saturating_sub(row_used) < label_len + 8 {
+        return None;
+    }
+    Some(label)
 }
 
 fn card_finished(draft: &CardDraft) -> bool {
@@ -333,20 +363,28 @@ fn card_progressed(artifacts: &CardArtifacts, running: Option<Artifact>) -> bool
 }
 
 fn step_line<'a>(
-    name: &'a str,
     kind: Artifact,
     slot: &'a ArtifactSlot,
     running: Option<Artifact>,
     spinner_frame: usize,
 ) -> Line<'a> {
     let active = running == Some(kind);
-    let (glyph, status_style, name_style, note_spans) = step_state(slot, active, spinner_frame);
+    let label = step_label(kind, slot);
+    let (glyph, status_style, label_style, note_spans) = step_state(slot, active, spinner_frame);
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled("    ", palette::base()));
     spans.push(Span::styled(format!("{glyph} "), status_style));
-    spans.push(Span::styled(super::common::pad_right(name, 9), name_style));
+    spans.push(Span::styled(label.clone(), label_style));
+    spans.push(Span::styled(" ".repeat(label_gap(&label)), palette::dim()));
     spans.extend(note_spans);
     Line::from(spans)
+}
+
+fn step_label(kind: Artifact, slot: &ArtifactSlot) -> String {
+    match slot.file() {
+        Some(file) => artifact_file_label(kind, file),
+        None => String::from(step_name(kind)),
+    }
 }
 
 fn step_state<'a>(
@@ -365,10 +403,16 @@ fn step_state<'a>(
     if slot.ready() {
         let mut note: Vec<Span<'a>> = Vec::new();
         if let Some(file) = slot.file() {
-            note.push(Span::styled(String::from(file.name()), palette::link()));
-            note.push(Span::styled(format!(" · {}", file.size()), palette::dim()));
+            note.push(Span::styled(
+                pad_left(file.size(), STEP_SIZE_COL_CHARS),
+                palette::dim(),
+            ));
+            if let Some(cost) = file.cost() {
+                note.push(Span::styled("  ", palette::dim()));
+                note.push(Span::styled(cost.dollars(), palette::dim2()));
+            }
         }
-        return (String::from("✓"), row_fg, row_fg, note);
+        return (String::from("✓"), row_fg, palette::link(), note);
     }
     if slot.discarded() {
         return (
@@ -422,6 +466,43 @@ fn step_state<'a>(
         row_dim2,
         vec![Span::styled(String::from("queued"), palette::dim())],
     )
+}
+
+fn step_name(kind: Artifact) -> &'static str {
+    match kind {
+        Artifact::Meta => "meta",
+        Artifact::Sound => "audio",
+        Artifact::Scene => "scene",
+        Artifact::Picture => "picture",
+    }
+}
+
+pub(crate) fn artifact_file_label(kind: Artifact, file: &ArtifactFile) -> String {
+    match file_extension(file.name()) {
+        Some(extension) => format!("{}.{}", step_name(kind), extension),
+        None => String::from(step_name(kind)),
+    }
+}
+
+fn file_extension(filename: &str) -> Option<&str> {
+    filename
+        .rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .filter(|extension| !extension.is_empty())
+}
+
+fn label_gap(label: &str) -> usize {
+    STEP_LABEL_COL_CHARS
+        .saturating_sub(label.chars().count())
+        .max(2)
+}
+
+fn pad_left(text: &str, width: usize) -> String {
+    let len = text.chars().count();
+    if len >= width {
+        return String::from(text);
+    }
+    format!("{}{}", " ".repeat(width - len), text)
 }
 
 fn detail_pane(draft: &CardDraft, width: usize) -> Vec<Line<'_>> {
@@ -739,6 +820,20 @@ pub(crate) fn detail_pane_height(draft: &CardDraft, width: usize) -> usize {
     h
 }
 
+/// Return one card's known Gemini cost across generated artifacts.
+pub(crate) fn card_cost(draft: &CardDraft) -> Option<GenerationCost> {
+    draft.artifacts().cost()
+}
+
+/// Return the known Gemini cost across every card in the current batch.
+pub(crate) fn total_cost(app: &App) -> Option<GenerationCost> {
+    let costs = app.cards().iter().filter_map(card_cost).collect::<Vec<_>>();
+    if costs.is_empty() {
+        return None;
+    }
+    Some(costs.into_iter().sum())
+}
+
 fn footer(app: &App, width: u16) -> Paragraph<'static> {
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 3/3", palette::dim2()));
@@ -758,6 +853,16 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             palette::base().add_modifier(Modifier::BOLD),
         ));
         left.push(Span::styled(" gave up", palette::dim()));
+    }
+    if all_finished(app)
+        && let Some(cost) = total_cost(app)
+    {
+        left.push(super::common::status_sep());
+        left.push(Span::styled("total cost ", palette::dim()));
+        left.push(Span::styled(
+            cost.dollars(),
+            palette::base().add_modifier(Modifier::BOLD),
+        ));
     }
     left.push(super::common::status_sep());
     left.push(Span::styled(elapsed(app), palette::dim2()));

@@ -120,7 +120,7 @@ fn pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells() {
         .expect("must jump to the Your cards state (index 6)");
     std::thread::sleep(Duration::from_millis(300));
     session
-        .send("\x1b[<35;20;6M")
+        .send("\x1b[<35;11;6M")
         .expect("must send mouse move over artifact file name");
     session
         .expect(b"\x1b]22;hand2\x1b\\".as_slice())

@@ -23,7 +23,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Screen::Done => &screens::done::Done,
     };
     screens::common::render_screen(frame, area, app, view);
-    if let Some(kind) = app.modal() {
+    if app.busy().is_none()
+        && let Some(kind) = app.modal()
+    {
         screens::modals::draw(frame, area, kind, app);
     }
     if let Some(busy) = app.busy() {

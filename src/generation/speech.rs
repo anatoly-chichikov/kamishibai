@@ -41,7 +41,7 @@ where
 
     /// Generate the cached WAV for this card folder and report its cache state.
     ///
-    /// One voice belongs to one card folder, so the file is always `voice.wav`;
+    /// One audio file belongs to one card folder, so the file is always `audio.wav`;
     /// the cache hit is decided by the folder, not by hashing the text.
     pub fn generate(&self, text: &str) -> Result<(String, bool)> {
         if text.trim().is_empty() {

@@ -1,12 +1,16 @@
 //! Integration render tests for the `Your cards` screen (04-your-cards.png)
 //! and its two inline variants (retry, failure).
 
+use std::path::PathBuf;
+
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
+    Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, GenerationCost,
+    LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::style::Color;
 
 fn flat(app: &App) -> String {
     let backend = TestBackend::new(120, 50);
@@ -23,12 +27,47 @@ fn flat(app: &App) -> String {
     rendered
 }
 
+fn selected_label_highlighted(app: &App, needle: &str) -> bool {
+    let backend = TestBackend::new(120, 50);
+    let mut terminal = Terminal::new(backend).expect("backend");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    for row in 0..buffer.area.height {
+        let mut rendered = String::new();
+        for column in 0..buffer.area.width {
+            rendered.push_str(buffer[(column, row)].symbol());
+        }
+        if let Some(start) = rendered.find(needle) {
+            let column = rendered[..start].chars().count() as u16;
+            return (0..needle.chars().count()).all(|offset| {
+                buffer[(column + offset as u16, row)].bg == Color::Rgb(0x1c, 0x1c, 0x1f)
+            });
+        }
+    }
+    false
+}
+
 fn ready_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    )
+}
+
+fn priced_file(name: &str, nanos: u64) -> ArtifactFile {
+    ArtifactFile::new(name, PathBuf::from(format!("/tmp/{name}")), "1 B", false)
+        .with_cost(GenerationCost::from_nanos(nanos))
+}
+
+fn priced_artifacts() -> CardArtifacts {
+    CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded_with(priced_file("meta.json", 1_500_000)),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded_with(priced_file("scene.json", 2_000_000)),
+        ArtifactSlot::fresh(Artifact::Picture)
+            .succeeded_with(priced_file("picture.jpg", 67_300_000)),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded_with(priced_file("audio.wav", 10_000_000)),
     )
 }
 
@@ -136,6 +175,30 @@ fn your_cards_done_footer_carries_expand_change_and_regenerate_hints() {
             && !rendered.contains("[D] drop")
             && !rendered.contains("working…"),
         "all-done footer must offer expand/change/regenerate hints and no new-batch or drop hooks: {rendered}"
+    );
+}
+
+#[test]
+fn your_cards_shows_card_asset_and_total_costs_when_finished() {
+    let app = seeded(vec![draft("whilst", priced_artifacts())]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("whilst → Example with whilst.  $.0808")
+            && rendered.contains("meta.json          1 B  $.0015")
+            && rendered.contains("audio.wav          1 B  $.0100")
+            && rendered.contains("scene.json         1 B  $.0020")
+            && rendered.contains("picture.jpg        1 B  $.0673")
+            && rendered.contains("total cost $.0808"),
+        "finished cards must show per-card, per-asset, and total Gemini costs: {rendered}"
+    );
+}
+
+#[test]
+fn selected_card_cost_keeps_the_row_highlight_background() {
+    let app = seeded(vec![draft("whilst", priced_artifacts())]);
+    assert!(
+        selected_label_highlighted(&app, "  $.0808"),
+        "selected card cost must not punch a dark gap through the row highlight"
     );
 }
 

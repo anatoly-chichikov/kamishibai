@@ -42,7 +42,10 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::config::default_store;
-use crate::generation::artifact_cache::{ILLUSTRATION_FILE, META_FILE, SCENE_FILE, VOICE_FILE};
+use crate::generation::artifact_cache::{
+    ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, META_COST_FILE, META_FILE, SCENE_COST_FILE,
+    SCENE_FILE, VOICE_COST_FILE, VOICE_FILE,
+};
 use crate::languages::catalog;
 use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardCell, LanguagePair};
@@ -282,16 +285,25 @@ pub(in crate::cli::session) fn drop_artifacts(
 ) -> Result<()> {
     let cache = CardCell::new(root.to_path_buf(), pair, term, understanding).cache();
     let folder = cache.path();
-    for file in [VOICE_FILE, SCENE_FILE, ILLUSTRATION_FILE] {
+    for file in [
+        VOICE_FILE,
+        VOICE_COST_FILE,
+        SCENE_FILE,
+        SCENE_COST_FILE,
+        ILLUSTRATION_FILE,
+        ILLUSTRATION_COST_FILE,
+    ] {
         let path = folder.join(file);
         if path.exists() {
             fs::remove_file(&path)?;
         }
     }
     if !keep_meta {
-        let path = folder.join(META_FILE);
-        if path.exists() {
-            fs::remove_file(&path)?;
+        for file in [META_FILE, META_COST_FILE] {
+            let path = folder.join(file);
+            if path.exists() {
+                fs::remove_file(&path)?;
+            }
         }
     }
     Ok(())
@@ -378,6 +390,43 @@ mod tests {
         assert!(
             matches!(picked, Picked::Ambiguous(both) if both.len() == 2),
             "two unfinished sessions must resolve as ambiguous, never silently pick one"
+        );
+    }
+
+    #[test]
+    fn dropped_artifacts_forget_request_costs() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let pair = LanguagePair::new("fr", "en");
+        let cache = CardCell::new(home.path().to_path_buf(), &pair, "canard", "a duck").cache();
+        for file in [
+            META_FILE,
+            META_COST_FILE,
+            VOICE_FILE,
+            VOICE_COST_FILE,
+            SCENE_FILE,
+            SCENE_COST_FILE,
+            ILLUSTRATION_FILE,
+            ILLUSTRATION_COST_FILE,
+        ] {
+            fs::write(cache.filepath(file).expect("cache path must resolve"), b"x")
+                .expect("cache fixture must be written");
+        }
+        drop_artifacts(home.path(), &pair, "canard", "a duck", false)
+            .expect("artifacts must be dropped");
+        assert!(
+            ![
+                META_FILE,
+                META_COST_FILE,
+                VOICE_FILE,
+                VOICE_COST_FILE,
+                SCENE_FILE,
+                SCENE_COST_FILE,
+                ILLUSTRATION_FILE,
+                ILLUSTRATION_COST_FILE,
+            ]
+            .iter()
+            .any(|file| cache.path().join(file).exists()),
+            "regeneration must not inherit stale artifact request costs"
         );
     }
 }
