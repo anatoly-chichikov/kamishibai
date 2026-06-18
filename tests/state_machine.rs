@@ -19,7 +19,10 @@ fn fake_candidates() -> Vec<WordCandidate> {
 fn skeleton_flow_publishes_done_inline_on_your_cards() {
     let start = App::new(LanguagePair::new("en", "ru")).seeded_blob("a");
     let (after_words, understanding) = transit(start, AppEvent::Generate);
-    let reviewing = after_words.clone().understood(fake_candidates());
+    let reviewing = after_words
+        .clone()
+        .with_screen(Screen::WhatIUnderstood)
+        .understood(fake_candidates());
     let (after_understood, generation) = transit(reviewing, AppEvent::Generate);
     let (after_batch, publish) = transit(after_understood.clone(), AppEvent::BatchReady);
     assert_eq!(
@@ -32,7 +35,7 @@ fn skeleton_flow_publishes_done_inline_on_your_cards() {
             publish,
         ),
         (
-            Screen::WhatIUnderstood,
+            Screen::YourWords,
             Side::RunUnderstanding,
             Screen::YourCards,
             Side::StartGeneration,
@@ -47,7 +50,9 @@ fn skeleton_flow_publishes_done_inline_on_your_cards() {
 fn language_pair_travels_untouched_through_the_full_flow() {
     let start = App::new(LanguagePair::new("en", "ru")).seeded_blob("x");
     let (a, _) = transit(start, AppEvent::Generate);
-    let reviewing = a.understood(fake_candidates());
+    let reviewing = a
+        .with_screen(Screen::WhatIUnderstood)
+        .understood(fake_candidates());
     let (b, _) = transit(reviewing, AppEvent::Generate);
     let (c, _) = transit(b, AppEvent::BatchDone { failed: 0 });
     assert_eq!(
@@ -58,44 +63,44 @@ fn language_pair_travels_untouched_through_the_full_flow() {
 }
 
 #[test]
-fn add_more_modal_returns_bulk_correction_and_closes_modal() {
+fn add_more_modal_returns_bulk_correction_and_stays_open_while_running() {
     let start = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .understood(fake_candidates());
     let expanded = transit(start, AppEvent::KeyEnter).0;
     let add_more = transit(expanded, AppEvent::NavNext).0;
     let (opened, _) = transit(add_more, AppEvent::KeyEnter);
-    let (closed, side) = transit(
+    let (running, side) = transit(
         opened.clone(),
         AppEvent::SendCorrection(String::from("#4 — глагол")),
     );
     assert_eq!(
-        (opened.modal(), closed.modal(), side),
+        (opened.modal(), running.modal(), side),
         (
             Some(ModalKind::ChangeSomething),
-            None,
+            Some(ModalKind::ChangeSomething),
             Side::RunBulkCorrection(String::from("#4 — глагол")),
         ),
-        "add more modal must open, request bulk correction, and close cleanly"
+        "add more modal must open, request bulk correction, and stay visible while the request runs"
     );
 }
 
 #[test]
-fn change_this_card_modal_returns_card_correction_and_closes_modal() {
+fn change_this_card_modal_returns_card_correction_and_stays_open_while_running() {
     let start = App::new(LanguagePair::new("en", "ru")).with_screen(Screen::YourCards);
     let (opened, _) = transit(start, AppEvent::RequestChange);
-    let (closed, side) = transit(
+    let (running, side) = transit(
         opened.clone(),
         AppEvent::SendCorrection(String::from("другое значение")),
     );
     assert_eq!(
-        (opened.modal(), closed.modal(), side),
+        (opened.modal(), running.modal(), side),
         (
             Some(ModalKind::ChangeThisCard),
-            None,
+            Some(ModalKind::ChangeThisCard),
             Side::RunCardCorrection(String::from("другое значение")),
         ),
-        "Change this card modal must open, request per-card correction, and close cleanly"
+        "Change this card modal must open, request per-card correction, and stay visible while the request runs"
     );
 }
 

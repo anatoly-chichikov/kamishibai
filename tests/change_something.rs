@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use kamishibai::session::{BulkCorrection, LanguagePair, Sense, SenseCorrection, WordCandidate};
-use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, draw, transit};
+use kamishibai::tui::{App, AppEvent, BusyKind, ModalKind, Screen, Side, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -72,7 +72,7 @@ fn modal_renders_prompt_dashes_textarea_and_send_cancel_footer() {
 }
 
 #[test]
-fn submit_on_modal_runs_bulk_correction_and_closes_modal() {
+fn submit_on_modal_runs_bulk_correction_and_keeps_modal_until_result() {
     let app = seeded()
         .with_modal(ModalKind::ChangeSomething)
         .typed('#')
@@ -86,8 +86,26 @@ fn submit_on_modal_runs_bulk_correction_and_closes_modal() {
     let expected = Side::RunBulkCorrection(String::from("#2 verb"));
     assert_eq!(
         (after.modal(), side),
-        (None, expected),
-        "Enter inside add more must emit RunBulkCorrection with the typed comment and close the modal"
+        (Some(ModalKind::ChangeSomething), expected),
+        "Enter inside add more must emit RunBulkCorrection while keeping the modal visible until Gemini returns"
+    );
+}
+
+#[test]
+fn bulk_correction_loader_keeps_the_add_more_modal_background() {
+    let app = seeded()
+        .with_modal(ModalKind::ChangeSomething)
+        .typed('#')
+        .typed('2');
+    let (after, side) = transit(app, AppEvent::Submit);
+    let loading = after.busy_started(BusyKind::BulkCorrection);
+    assert_eq!(
+        (loading.modal(), side),
+        (
+            Some(ModalKind::ChangeSomething),
+            Side::RunBulkCorrection(String::from("#2")),
+        ),
+        "bulk-correction loader must not erase the modal underneath it"
     );
 }
 

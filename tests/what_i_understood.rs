@@ -153,7 +153,8 @@ fn run_understanding(app: App) -> App {
     let result = FakeUnderstanding
         .understand(&RawInputBatch::new(app.blob()), app.pair().known())
         .expect("fake understanding must succeed");
-    app.confirmed_learning(result.guess().code())
+    app.with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning(result.guess().code())
         .understood(result.candidates().to_vec())
 }
 

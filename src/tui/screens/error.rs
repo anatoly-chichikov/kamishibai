@@ -4,20 +4,23 @@
 //! style — solid border, dim message, single key hint to dismiss.
 
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::tui::app::App;
 use crate::tui::palette;
 
-const WIDTH: u16 = 60;
-const HEIGHT: u16 = 5;
+const MIN_WIDTH: u16 = 60;
+const MIN_HEIGHT: u16 = 8;
+const HORIZONTAL_MARGIN: u16 = 8;
+const HORIZONTAL_PADDING: u16 = 2;
+const VERTICAL_MARGIN: u16 = 4;
 
 /// Draw one recoverable request error over the current screen.
 pub fn draw(frame: &mut Frame, area: Rect, _app: &App, message: &str) {
-    let inset = centered(area, WIDTH, HEIGHT);
+    let inset = panel_rect(area);
     super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
     let block = Block::default()
@@ -26,7 +29,16 @@ pub fn draw(frame: &mut Frame, area: Rect, _app: &App, message: &str) {
         .style(palette::base());
     let inner = block.inner(inset);
     frame.render_widget(block, inset);
-    frame.render_widget(panel(message), inner);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    frame.render_widget(message_panel(message), padded(chunks[1]));
+    frame.render_widget(hint_panel(), padded(chunks[2]));
     let title = Span::styled(" can't reach gemini ", palette::base());
     let title_rect = Rect {
         x: inset.x + 2,
@@ -40,16 +52,36 @@ pub fn draw(frame: &mut Frame, area: Rect, _app: &App, message: &str) {
     );
 }
 
-fn panel(message: &str) -> Paragraph<'_> {
-    Paragraph::new(vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            String::from(message),
-            palette::base().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled("press any key to dismiss", palette::dim())),
-    ])
+fn message_panel(message: &str) -> Paragraph<'_> {
+    Paragraph::new(Span::styled(
+        String::from(message),
+        palette::base().add_modifier(Modifier::BOLD),
+    ))
+    .wrap(Wrap { trim: false })
     .style(palette::base())
+}
+
+fn hint_panel() -> Paragraph<'static> {
+    Paragraph::new(Line::from(Span::styled(
+        "press any key to dismiss",
+        palette::dim(),
+    )))
+    .style(palette::base())
+}
+
+fn panel_rect(area: Rect) -> Rect {
+    let width = area.width.saturating_sub(HORIZONTAL_MARGIN).max(MIN_WIDTH);
+    let height = area.height.saturating_sub(VERTICAL_MARGIN).max(MIN_HEIGHT);
+    centered(area, width, height)
+}
+
+fn padded(area: Rect) -> Rect {
+    Rect {
+        x: area.x + HORIZONTAL_PADDING,
+        y: area.y,
+        width: area.width.saturating_sub(HORIZONTAL_PADDING * 2),
+        height: area.height,
+    }
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {

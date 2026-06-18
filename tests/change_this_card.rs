@@ -5,7 +5,7 @@ use kamishibai::session::{
     Artifact, ArtifactSlot, CardArtifacts, CardCorrection, CardDraft, CardMeta, CardRevision,
     LanguagePair,
 };
-use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, draw, transit};
+use kamishibai::tui::{App, AppEvent, BusyKind, ModalKind, Screen, Side, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -104,7 +104,7 @@ fn request_change_on_your_cards_opens_per_card_modal() {
 }
 
 #[test]
-fn submit_on_per_card_modal_emits_card_correction_and_closes_overlay() {
+fn submit_on_per_card_modal_emits_card_correction_and_keeps_overlay_until_result() {
     let app = seeded()
         .with_modal(ModalKind::ChangeThisCard)
         .typed('v')
@@ -114,8 +114,31 @@ fn submit_on_per_card_modal_emits_card_correction_and_closes_overlay() {
     let (after, side) = transit(app, AppEvent::Submit);
     assert_eq!(
         (after.modal(), side),
-        (None, Side::RunCardCorrection(String::from("verb"))),
-        "Enter on Change this card must emit RunCardCorrection with the typed buffer"
+        (
+            Some(ModalKind::ChangeThisCard),
+            Side::RunCardCorrection(String::from("verb")),
+        ),
+        "Enter on Change this card must emit RunCardCorrection while keeping the modal visible until Gemini returns"
+    );
+}
+
+#[test]
+fn card_correction_loader_keeps_the_change_card_modal_background() {
+    let app = seeded()
+        .with_modal(ModalKind::ChangeThisCard)
+        .typed('v')
+        .typed('e')
+        .typed('r')
+        .typed('b');
+    let (after, side) = transit(app, AppEvent::Submit);
+    let loading = after.busy_started(BusyKind::CardCorrection);
+    assert_eq!(
+        (loading.modal(), side),
+        (
+            Some(ModalKind::ChangeThisCard),
+            Side::RunCardCorrection(String::from("verb")),
+        ),
+        "card-correction loader must not erase the modal underneath it"
     );
 }
 

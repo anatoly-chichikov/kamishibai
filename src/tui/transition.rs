@@ -47,10 +47,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 .chars()
                 .any(|character| !character.is_whitespace())
             {
-                (
-                    app.with_screen(Screen::WhatIUnderstood),
-                    Side::RunUnderstanding,
-                )
+                (app, Side::RunUnderstanding)
             } else {
                 (app, Side::None)
             }
@@ -158,12 +155,12 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             Screen::WhatIUnderstood,
             Some(ModalKind::ChangeSomething),
             AppEvent::SendCorrection(text),
-        ) => (app.close_modal(), Side::RunBulkCorrection(text)),
+        ) => (app, Side::RunBulkCorrection(text)),
         (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::Submit)
         | (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::KeyEnter) => {
             let text = app.modal_buffer().to_string();
             if text.chars().any(|c| !c.is_whitespace()) {
-                (app.close_modal(), Side::RunBulkCorrection(text))
+                (app, Side::RunBulkCorrection(text))
             } else {
                 (app, Side::None)
             }
@@ -206,13 +203,13 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (app, Side::RegenerateCurrent)
         }
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::SendCorrection(text)) => {
-            (app.close_modal(), Side::RunCardCorrection(text))
+            (app, Side::RunCardCorrection(text))
         }
         (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::Submit)
         | (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::KeyEnter) => {
             let text = app.modal_buffer().to_string();
             if text.chars().any(|c| !c.is_whitespace()) {
-                (app.close_modal(), Side::RunCardCorrection(text))
+                (app, Side::RunCardCorrection(text))
             } else {
                 (app, Side::None)
             }
