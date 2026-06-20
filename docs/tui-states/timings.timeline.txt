@@ -5,10 +5,12 @@
 action                 kind     out_start    out_end   out_dur   source
 ---------------------- ------- ---------- ---------- ---------   ----------------------
 type_words             window       0.00s      2.20s     2.20s   raw 1.56s → 5.00s  (3.44s @ 15.9884fps)
-understanding          window       2.20s      3.20s     1.00s   raw 5.00s → 19.56s  (14.56s @ 1.71703fps)
-select                 window       3.20s      7.20s     4.00s   raw 19.56s → 25.72s  (6.16s @ 16.2338fps)
-generating             window       7.20s     10.40s     3.20s   raw 25.72s → 184.72s  (159s @ 0.503145fps)
-card_open              window      10.40s     16.40s     6.00s   raw 184.72s → 189.00s  (4.28s @ 35.0467fps)
-finale                 fade        16.40s     20.00s     3.60s   fade live/10-card-scroll-end.png  (split y=310, hold 0.6s, fade 0.8s, hold-black 2.2s, caption)
+understanding          window       2.20s      3.00s     0.80s   raw 5.00s → 5.80s  (0.8s @ 25fps)
+select                 window       3.00s      7.00s     4.00s   raw 19.56s → 25.72s  (6.16s @ 16.2338fps)
+generating             window       7.00s     10.20s     3.20s   raw 25.72s → 184.72s  (159s @ 0.503145fps)
+card_open              window      10.20s     14.20s     4.00s   raw 184.72s → 187.52s  (2.8s @ 35.7143fps)
+card_read              splice      14.20s     15.60s     1.40s   splice live/09-card-open.png
+card_close             window      15.60s     16.80s     1.20s   raw 187.52s → 189.00s  (1.48s @ 20.2703fps)
+finale                 fade        16.80s     20.40s     3.60s   fade live/10-card-scroll-end.png  (split y=310, hold 0.6s, fade 0.8s, hold-black 2.2s, caption)
 
-# total: 500 frames = 20.00s
+# total: 510 frames = 20.40s
