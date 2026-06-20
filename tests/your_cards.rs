@@ -188,8 +188,9 @@ fn your_cards_shows_card_asset_and_total_costs_when_finished() {
             && rendered.contains("audio.wav          1 B  $.0100")
             && rendered.contains("scene.json         1 B  $.0020")
             && rendered.contains("picture.jpg        1 B  $.0673")
-            && rendered.contains("total cost $.0808"),
-        "finished cards must show per-card, per-asset, and total Gemini costs: {rendered}"
+            && rendered.contains("$0.08")
+            && !rendered.contains("total cost"),
+        "finished cards must show detailed costs and a simplified total in dollars: {rendered}"
     );
 }
 

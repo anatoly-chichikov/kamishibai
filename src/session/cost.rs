@@ -6,6 +6,7 @@ use std::ops::Add;
 use serde::{Deserialize, Serialize};
 
 const NANOS_PER_DISPLAY_UNIT: u64 = 100_000;
+const NANOS_PER_CENT: u64 = 10_000_000;
 
 /// Estimated Gemini request cost in nanodollars.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -46,6 +47,15 @@ impl GenerationCost {
             return format!("$.{fraction:04}");
         }
         format!("${whole}.{fraction:04}")
+    }
+
+    /// Return a USD label rounded to cents for summary totals.
+    #[must_use]
+    pub fn dollars_cents(&self) -> String {
+        let rounded = self.nanos.saturating_add(NANOS_PER_CENT / 2) / NANOS_PER_CENT;
+        let whole = rounded / 100;
+        let cents = rounded % 100;
+        format!("${whole}.{cents:02}")
     }
 }
 
@@ -139,5 +149,28 @@ impl CostRecord {
         let mut iter = records.iter();
         let first = iter.next()?.clone();
         Some(iter.fold(first, |total, item| total.merged(item)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GenerationCost;
+
+    #[test]
+    fn dollars_cents_keeps_the_zero_before_subdollar_totals() {
+        assert_eq!(
+            GenerationCost::from_nanos(80_800_000).dollars_cents(),
+            "$0.08",
+            "subdollar summary totals must keep the leading zero"
+        );
+    }
+
+    #[test]
+    fn dollars_cents_rounds_to_the_nearest_cent() {
+        assert_eq!(
+            GenerationCost::from_nanos(1_015_000_000).dollars_cents(),
+            "$1.02",
+            "summary totals must round to ordinary cent precision"
+        );
     }
 }

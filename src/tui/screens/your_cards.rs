@@ -850,9 +850,8 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         && let Some(cost) = total_cost(app)
     {
         left.push(super::common::status_sep());
-        left.push(Span::styled("total cost ", palette::dim()));
         left.push(Span::styled(
-            cost.dollars(),
+            cost.dollars_cents(),
             palette::base().add_modifier(Modifier::BOLD),
         ));
     }

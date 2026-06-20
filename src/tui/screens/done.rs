@@ -116,10 +116,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     }
     if let Some(cost) = super::your_cards::total_cost(app) {
         left.push(super::common::status_sep());
-        left.push(Span::styled(
-            format!("total cost {}", cost.dollars()),
-            palette::dim(),
-        ));
+        left.push(Span::styled(cost.dollars_cents(), palette::dim()));
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if app.cards_failed() > 0 {
