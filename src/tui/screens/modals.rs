@@ -26,10 +26,12 @@ use crate::tui::screen::ModalKind;
 
 const TEXT_MODAL_WIDTH: u16 = 64;
 const TEXT_MODAL_HEIGHT: u16 = 9;
+const SIMPLE_TEXT_MODAL_HEIGHT: u16 = 7;
 const PICKER_MODAL_WIDTH: u16 = 66;
 const PICKER_MODAL_HEIGHT: u16 = 7;
 const HORIZONTAL_PADDING: u16 = 2;
 const INPUT_LINE_OFFSET: u16 = 3;
+const SIMPLE_INPUT_LINE_OFFSET: u16 = 1;
 
 /// Draw the modal of the requested kind.
 pub fn draw(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
@@ -42,7 +44,7 @@ pub fn draw(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
 }
 
 fn draw_text_modal(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
-    let inset = centered(area, TEXT_MODAL_WIDTH, TEXT_MODAL_HEIGHT);
+    let inset = centered(area, TEXT_MODAL_WIDTH, text_modal_height(kind));
     super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
     let block = surround();
@@ -53,7 +55,7 @@ fn draw_text_modal(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
     paint_title(frame, inset, text_title(kind));
     let buffer_width = app.modal_buffer().chars().count() as u16;
     let cursor_x = (content.x + buffer_width).min(content.x + content.width.saturating_sub(1));
-    let cursor_y = content.y + INPUT_LINE_OFFSET;
+    let cursor_y = content.y + input_line_offset(kind);
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
@@ -102,8 +104,24 @@ fn padded(inner: Rect) -> Rect {
 fn text_title(kind: ModalKind) -> &'static str {
     match kind {
         ModalKind::ChangeSomething => "what meanings did we miss?",
-        ModalKind::ChangeThisCard => "change · this card",
+        ModalKind::ChangeThisCard => "make this sentence different",
         ModalKind::PickMyLanguage => "your language",
+    }
+}
+
+fn text_modal_height(kind: ModalKind) -> u16 {
+    match kind {
+        ModalKind::ChangeSomething => TEXT_MODAL_HEIGHT,
+        ModalKind::ChangeThisCard => SIMPLE_TEXT_MODAL_HEIGHT,
+        ModalKind::PickMyLanguage => PICKER_MODAL_HEIGHT,
+    }
+}
+
+fn input_line_offset(kind: ModalKind) -> u16 {
+    match kind {
+        ModalKind::ChangeSomething => INPUT_LINE_OFFSET,
+        ModalKind::ChangeThisCard => SIMPLE_INPUT_LINE_OFFSET,
+        ModalKind::PickMyLanguage => SIMPLE_INPUT_LINE_OFFSET,
     }
 }
 
@@ -116,13 +134,7 @@ fn text_panel<'a>(kind: ModalKind, app: &'a App, width: usize) -> Paragraph<'a> 
                 .map(|candidate| candidate.term())
                 .unwrap_or("")
         ),
-        ModalKind::ChangeThisCard => format!(
-            "tell me what to change · {}",
-            app.cards()
-                .get(app.card_selected())
-                .map(|draft| draft.term())
-                .unwrap_or("")
-        ),
+        ModalKind::ChangeThisCard => String::new(),
         ModalKind::PickMyLanguage => String::new(),
     };
     let input = if app.modal_buffer().is_empty() {
@@ -138,15 +150,24 @@ fn text_panel<'a>(kind: ModalKind, app: &'a App, width: usize) -> Paragraph<'a> 
     action_spans.push(Span::styled(String::from("    "), palette::base()));
     action_spans.extend(super::common::FooterHint::primary("Enter", "send").spans());
     let actions = Line::from(action_spans);
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(prompt, palette::dim())),
-        Line::from(""),
-        input,
-        Line::from(Span::styled(dashes, palette::rule())),
-        Line::from(""),
-        actions,
-    ];
+    let lines = match kind {
+        ModalKind::ChangeSomething => vec![
+            Line::from(""),
+            Line::from(Span::styled(prompt, palette::dim())),
+            Line::from(""),
+            input,
+            Line::from(Span::styled(dashes, palette::rule())),
+            Line::from(""),
+            actions,
+        ],
+        ModalKind::ChangeThisCard | ModalKind::PickMyLanguage => vec![
+            Line::from(""),
+            input,
+            Line::from(Span::styled(dashes, palette::rule())),
+            Line::from(""),
+            actions,
+        ],
+    };
     Paragraph::new(lines).style(palette::base())
 }
 
