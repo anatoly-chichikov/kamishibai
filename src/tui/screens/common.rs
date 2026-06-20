@@ -425,6 +425,100 @@ pub fn pad_right(value: &str, width: usize) -> String {
     text
 }
 
+/// Return the display width of `text` in terminal cells.
+pub fn display_width(text: &str) -> usize {
+    text.chars().map(char_width).sum()
+}
+
+/// Return the display width of one character in terminal cells.
+pub fn char_width(ch: char) -> usize {
+    let code = u32::from(ch);
+    let wide = matches!(
+        code,
+        0x1100..=0x115F
+            | 0x2E80..=0x303E
+            | 0x3041..=0x33FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xA000..=0xA4CF
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFE30..=0xFE4F
+            | 0xFF00..=0xFF60
+            | 0xFFE0..=0xFFE6
+            | 0x20000..=0x2FFFD
+            | 0x30000..=0x3FFFD
+    );
+    if wide { 2 } else { 1 }
+}
+
+/// Wrap plain text by terminal cells without leaving leading spaces on wrapped rows.
+pub fn wrap_words(text: &str, first_width: usize, continuation_width: usize) -> Vec<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    if first_width == 0 || continuation_width == 0 {
+        return vec![String::from(text)];
+    }
+    let mut rows: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    let mut limit = first_width;
+    for word in text.split_whitespace() {
+        let word_width = display_width(word);
+        let separator = usize::from(!current.is_empty());
+        if current_width + separator + word_width <= limit {
+            if separator == 1 {
+                current.push(' ');
+            }
+            current.push_str(word);
+            current_width += separator + word_width;
+            continue;
+        }
+        if !current.is_empty() {
+            rows.push(std::mem::take(&mut current));
+            limit = continuation_width;
+        }
+        let mut tail = word;
+        while display_width(tail) > limit {
+            let (head, rest) = split_display_prefix(tail, limit);
+            rows.push(String::from(head));
+            tail = rest;
+            limit = continuation_width;
+        }
+        current.push_str(tail);
+        current_width = display_width(tail);
+    }
+    if !current.is_empty() {
+        rows.push(current);
+    }
+    if rows.is_empty() {
+        rows.push(String::new());
+    }
+    rows
+}
+
+fn split_display_prefix(text: &str, width: usize) -> (&str, &str) {
+    let mut used = 0usize;
+    let mut end = 0usize;
+    for (index, ch) in text.char_indices() {
+        let char_width = char_width(ch);
+        if used > 0 && used + char_width > width {
+            break;
+        }
+        end = index + ch.len_utf8();
+        used += char_width;
+        if used >= width {
+            break;
+        }
+    }
+    if end == 0 {
+        return text.split_at(text.chars().next().map(char::len_utf8).unwrap_or(0));
+    }
+    text.split_at(end)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,6 +612,15 @@ mod tests {
         assert!(
             line.contains("↑↓"),
             "a wide footer must not drop ghost hints it has room for, got: {line}"
+        );
+    }
+
+    #[test]
+    fn wrap_words_does_not_start_continuation_with_space() {
+        let rows = wrap_words("alpha beta gamma delta", 12, 8);
+        assert!(
+            rows.iter().skip(1).all(|row| !row.starts_with(' ')),
+            "wrapped rows must not keep leading whitespace, got: {rows:?}"
         );
     }
 

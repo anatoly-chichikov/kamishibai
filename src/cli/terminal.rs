@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{
-    Event, KeyboardEnhancementFlags, MouseButton, MouseEventKind, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags, poll, read,
+    Event, KeyCode, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, MouseButton,
+    MouseEventKind, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags, poll, read,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -27,8 +27,8 @@ use crate::config::{Preferences, default_store};
 use crate::runtime::locations::SystemContext;
 use crate::session::{CardDraft, LanguagePair};
 use crate::tui::{
-    App, AppEvent, KeySource, ModalKind, MousePointer, Side, WelcomeFocus, WelcomeStage, draw,
-    language_chip_at, link_at, mouse_pointer_at, picker_geometry, reset_mouse_pointer,
+    App, AppEvent, KeySource, ModalKind, MousePointer, Screen, Side, WelcomeFocus, WelcomeStage,
+    draw, language_chip_at, link_at, mouse_pointer_at, picker_geometry, reset_mouse_pointer,
     scroll_body_width, scroll_viewport, to_app, welcome_control_at, write_mouse_pointer,
 };
 
@@ -169,6 +169,32 @@ where
         let event = read()?;
         match event {
             Event::Key(key) => {
+                if key.kind != KeyEventKind::Release && shell.app().modal().is_none() {
+                    let page = i32::from(viewport.saturating_sub(1).max(1));
+                    let delta = match key.code {
+                        KeyCode::PageUp => Some(-page),
+                        KeyCode::PageDown => Some(page),
+                        KeyCode::Char('n' | 'N')
+                            if key.modifiers.contains(KeyModifiers::CONTROL)
+                                && scroll_hotkey_screen(shell.app().screen()) =>
+                        {
+                            Some(1)
+                        }
+                        KeyCode::Char('p' | 'P')
+                            if key.modifiers.contains(KeyModifiers::CONTROL)
+                                && scroll_hotkey_screen(shell.app().screen()) =>
+                        {
+                            Some(-1)
+                        }
+                        _ => None,
+                    };
+                    if let Some(delta) = delta {
+                        shell.disarm_quit();
+                        dirty |= shell.scroll(delta, viewport, body_width);
+                        dirty |= shell.tick()?;
+                        continue;
+                    }
+                }
                 let Some(event) = to_app(key) else { continue };
                 if matches!(event, AppEvent::Quit) {
                     if shell.arm_quit() {
@@ -286,6 +312,10 @@ where
 
 fn scroll_frame(app: &App, rect: Rect) -> (u16, u16) {
     (scroll_viewport(app, rect), scroll_body_width(rect))
+}
+
+fn scroll_hotkey_screen(screen: Screen) -> bool {
+    matches!(screen, Screen::YourCards | Screen::Done)
 }
 
 fn write_pointer_at<B>(

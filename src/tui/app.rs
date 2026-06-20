@@ -449,18 +449,7 @@ impl App {
                 Some((u16::try_from(row).unwrap_or(u16::MAX), 1))
             }
             Screen::WhatIUnderstood if !self.review.candidates.is_empty() => {
-                let selected = self.review.selected.min(self.review.candidates.len() - 1);
-                let expanded = self.review.expanded.as_ref().map(|item| item.row) == Some(selected);
-                let height = if expanded {
-                    1
-                } else {
-                    u16::try_from(crate::tui::screens::what_i_understood::candidate_rows(
-                        &self.review.candidates[selected],
-                        false,
-                    ))
-                    .unwrap_or(u16::MAX)
-                };
-                Some((self.review_focus_top(), height))
+                crate::tui::screens::what_i_understood::focused_range(self, usize::from(body_width))
             }
             Screen::YourCards => {
                 crate::tui::screens::your_cards::focused_card_range(self, usize::from(body_width))
@@ -474,7 +463,9 @@ impl App {
         match self.screen {
             Screen::YourCards => crate::tui::screens::your_cards::content_height(self, width),
             Screen::Done => crate::tui::screens::done::content_height(self),
-            Screen::WhatIUnderstood => crate::tui::screens::what_i_understood::content_height(self),
+            Screen::WhatIUnderstood => {
+                crate::tui::screens::what_i_understood::content_height(self, width)
+            }
             Screen::YourWords => crate::tui::screens::your_words::content_height(self),
             Screen::Welcome => 0,
         }
@@ -1014,27 +1005,6 @@ impl App {
             self.review.selected = 0;
         }
         self
-    }
-
-    fn review_focus_top(&self) -> u16 {
-        let selected = self.review.selected.min(self.review.candidates.len() - 1);
-        let expanded_row = self.review.expanded.as_ref().map(|item| item.row);
-        let mut offset: usize = 0;
-        for (index, candidate) in self.review.candidates.iter().enumerate() {
-            if index == selected {
-                if let Some(expanded) = &self.review.expanded
-                    && expanded.row == selected
-                {
-                    offset = offset.saturating_add(1).saturating_add(expanded.cursor);
-                }
-                return u16::try_from(offset).unwrap_or(u16::MAX);
-            }
-            offset = offset.saturating_add(crate::tui::screens::what_i_understood::candidate_rows(
-                candidate,
-                expanded_row == Some(index),
-            ));
-        }
-        u16::try_from(offset).unwrap_or(u16::MAX)
     }
 
     /// Return the app with a different number of failed cards recorded.

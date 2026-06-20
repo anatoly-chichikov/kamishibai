@@ -7,6 +7,7 @@ use kamishibai::session::{LanguagePair, Sense, WordCandidate};
 use kamishibai::tui::{App, AppEvent, KeySource, Screen, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::style::Color;
 
 fn render(app: &App) -> String {
     render_sized(app, 80, 12)
@@ -27,6 +28,22 @@ fn render_sized(app: &App, width: u16, height: u16) -> String {
         buffer.push('\n');
     }
     buffer
+}
+
+#[test]
+fn header_title_is_inverted_in_the_render_buffer() {
+    let backend = TestBackend::new(96, 16);
+    let mut terminal = Terminal::new(backend).expect("test backend must boot");
+    let app = App::new(LanguagePair::new("en", "ru")).with_screen(Screen::YourCards);
+    terminal
+        .draw(|frame| draw(frame, &app))
+        .expect("draw must succeed");
+    let cell = &terminal.backend().buffer()[(5, 1)];
+    assert_eq!(
+        (cell.fg, cell.bg),
+        (Color::Rgb(0x0e, 0x0e, 0x10), Color::Rgb(0xe6, 0xe3, 0xda)),
+        "header title must render black ink on a cream block"
+    );
 }
 
 #[test]

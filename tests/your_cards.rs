@@ -274,6 +274,30 @@ fn arrows_and_enter_navigate_and_toggle_expansion_of_the_focused_card() {
 }
 
 #[test]
+fn expanding_a_card_keeps_the_existing_scroll_position() {
+    let start = seeded(
+        ["one", "two", "three", "four", "five", "six"]
+            .into_iter()
+            .map(|term| draft(term, ready_artifacts()))
+            .collect(),
+    );
+    let selected = (0..5).fold(start, |app, _| {
+        transit(app, AppEvent::NavNext)
+            .0
+            .body_scroll_to_selection(8, 120)
+    });
+    let before = selected.body_scroll();
+    let expanded = transit(selected, AppEvent::KeyEnter)
+        .0
+        .body_scroll_to_selection(8, 120);
+    assert_eq!(
+        expanded.body_scroll(),
+        before,
+        "expanding a visible card must not jump the scroll to the bottom of the detail pane"
+    );
+}
+
+#[test]
 fn expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane() {
     let start = seeded(vec![draft("whilst", ready_artifacts())]);
     let expanded = transit(start, AppEvent::KeyEnter).0;

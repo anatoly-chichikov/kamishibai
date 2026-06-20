@@ -171,7 +171,8 @@ From the repo root:
 
    Writes `live/01-your-words.png`, `live/01b-busy.png`, `live/02-what-i-understood.png`,
    `live/02a-nav.png`, `live/03-senses.png`, `live/03b-senses-toggled.png`,
-   `live/04-your-cards.png`, `live/08-done.png`, `live/09-card-open.png`, and a raw
+  `live/04-your-cards.png`, `live/08-done.png`, `live/09-card-open.png`,
+  `live/10-card-scroll-end.png`, and a raw
    `live/capture.gif` that is roughly two minutes long.
 
 5. **Stash the raw recording** before any post-processing — keep it around as `/tmp/raw.gif`
