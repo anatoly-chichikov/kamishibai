@@ -36,7 +36,7 @@ BOT_SAT="${BOT_SAT:-0.0}"             # eq saturation of the list
 # Caption overlaid on the blacked-out area at the end (same VHS JetBrains Mono as the TUI).
 CAPTION="${CAPTION:-live/caption.png}" # tight "↑ click and open" still; empty to disable
 CAP_X="${CAP_X:-175}"                   # caption left edge in RAW (2x) pixels
-CAP_Y="${CAP_Y:-460}"                  # caption top edge in RAW (2x) pixels
+CAP_Y="${CAP_Y:-350}"                  # caption top edge in RAW (2x) pixels
 # Per-step subtitle badge (6th conf field on a window section): centered horizontally
 # at STEP_CAP_Y, sits in the empty lower area without covering the TUI headers.
 STEP_CAP_Y="${STEP_CAP_Y:-1460}"       # default step caption top edge in RAW (2x) pixels
@@ -168,7 +168,7 @@ while IFS='|' read -r id kind a b out_s cap; do
         cp "$a" "$(printf '%s/%05d.png' "$SEQ" "$seq_i")"; seq_i=$((seq_i+1))
       done
     fi
-    ffmpeg -nostdin -y -loglevel error -loop 1 -t "$fs" -i "$a" -loop 1 -t "$fs" -i "$tmp/endc.png" \
+    ffmpeg -nostdin -y -loglevel error -loop 1 -t "$fs" -i "$a" -loop 1 -t "$fs" -i "$tmp/end.png" \
       -filter_complex "[0:v]fps=$FPS,format=rgb24[x];[1:v]fps=$FPS,format=rgb24[y];[x][y]xfade=transition=fade:duration=${fs}:offset=0,fps=$FPS" \
       "$tmp/x-%04d.png"
     xframes=()
