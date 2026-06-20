@@ -250,16 +250,24 @@ fn failing_gemini() -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-/// Read the recorded worker pid out of one session's file.
+/// Wait for the detached worker to claim one session and record its pid.
 #[cfg(unix)]
 fn worker_pid(cache: &Path, id: &str) -> i64 {
     let path = cache.join("sessions").join(id).join("session.json");
-    let text = fs::read_to_string(&path).expect("the session file must exist");
-    let record: serde_json::Value =
-        serde_json::from_str(text.as_str()).expect("the session file must be valid JSON");
-    record["worker"]["pid"]
-        .as_i64()
-        .expect("the session must record a worker pid")
+    let started = Instant::now();
+    loop {
+        let text = fs::read_to_string(&path).expect("the session file must exist");
+        let record: serde_json::Value =
+            serde_json::from_str(text.as_str()).expect("the session file must be valid JSON");
+        if let Some(pid) = record["worker"]["pid"].as_i64() {
+            return pid;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the session must record a worker pid"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
 
 /// Seed a session whose detached worker provably stays alive: every artifact
