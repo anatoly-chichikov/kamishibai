@@ -47,11 +47,19 @@ The TUI walks you from raw words through review to finished cards, and writes th
 
 ![demo](docs/tui-states/live/capture.gif)
 
-After you import the deck into Anki, you get cards roughly like this on your device:
+### What You Get
+
+kamishibai writes:
+
+- an `.apkg` deck for Anki ([example](docs/samples/fr-en.apkg))
+- a printable `.pdf` review sheet ([example](docs/samples/fr-en.pdf))
+
+Import the deck into Anki, and the cards look roughly like this on your phone:
 
 <p align="center">
-  <img src="docs/previews/anki-card-front.jpg" alt="Anki card front preview" width="320">
-  <img src="docs/previews/anki-card-back.jpg" alt="Anki card back preview" width="320">
+  <img src="docs/previews/anki-card-front.jpg" alt="Anki card front preview" width="260">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/previews/anki-card-back.jpg" alt="Anki card back preview" width="260">
 </p>
 
 Got the JSON already? Pass it as an argument:
