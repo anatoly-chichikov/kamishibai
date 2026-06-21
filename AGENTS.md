@@ -81,7 +81,7 @@ The runtime is split into a few focused modules:
 
 The cache (printed by `kamishibai cache-path`) groups one folder per card, keyed by a content hash of the card identity:
 
-- `cards/<known>-<learning>/<key>/` holds `meta.json`, `scene.json`, `voice.wav`, and `illustration.jpg` for one card
+- `cards/<known>-<learning>/<key>/` holds `meta.json`, `scene.json`, `audio.wav`, and `picture.jpg` for one card
 - `understanding/<known>-<learning>/<key>.json` holds the understanding-pass result
 - `sessions/<id>/` holds `session.json` (identity, phase, words, curated candidates, committed plan, worker pid, result) and `worker.log`
 - `ocr-models/` holds the shared OCR model files
@@ -171,7 +171,8 @@ From the repo root:
 
    Writes `live/01-your-words.png`, `live/01b-busy.png`, `live/02-what-i-understood.png`,
    `live/02a-nav.png`, `live/03-senses.png`, `live/03b-senses-toggled.png`,
-   `live/04-your-cards.png`, `live/08-done.png`, `live/09-card-open.png`, and a raw
+  `live/04-your-cards.png`, `live/08-done.png`, `live/09-card-open.png`,
+  `live/10-card-scroll-end.png`, and a raw
    `live/capture.gif` that is roughly two minutes long.
 
 5. **Stash the raw recording** before any post-processing — keep it around as `/tmp/raw.gif`

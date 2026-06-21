@@ -22,6 +22,7 @@ use crate::languages::catalog;
 use crate::tui::app::App;
 use crate::tui::palette;
 use crate::tui::screen::{WelcomeFocus, WelcomeStage};
+use crate::tui::text_field::TextField;
 
 const INTRO: &str = "kamishibai turns a list of words you want to learn into an anki deck plus a printable pdf. for each word it writes a natural example sentence, illustrates the scene as a manga panel, and reads it aloud in a natural, native-speaker voice.";
 const HEADLINE: &str = "kamishibai";
@@ -35,6 +36,7 @@ const TRAILING_GAP: u16 = 3;
 const FIELD_INDENT: u16 = 4 + 16 + 2;
 /// Fixed width of the underlined key input field, matching the mask cap.
 const KEY_FIELD_WIDTH: u16 = 39;
+const KEY_PLACEHOLDER: &str = "paste your key [Cmd+V]";
 
 /// `ScreenView` handle for the first-run Welcome screen. Skips the language
 /// chip — the language pair is not yet locked in at this point.
@@ -66,6 +68,7 @@ impl ScreenView for Welcome {
         frame.render_widget(key_underline_row(app), rows[5]);
         frame.render_widget(notice_line, rows[6]);
         frame.render_widget(buttons_line(app), rows[7]);
+        place_key_cursor(frame, app, rows[4]);
     }
 }
 
@@ -170,7 +173,7 @@ fn language_row(app: &App) -> Paragraph<'static> {
     Paragraph::new(Line::from(spans)).style(palette::base())
 }
 
-/// Build the `02 gemini api key` row spans and the visual width of its value.
+/// Build the `02 gemini api key` row spans and the visual width of its field.
 fn input_row(app: &App) -> (Vec<Span<'static>>, u16) {
     let welcome = app.welcome();
     let active = welcome.stage == WelcomeStage::EnterKey;
@@ -197,19 +200,10 @@ fn input_row(app: &App) -> (Vec<Span<'static>>, u16) {
         }
         return (spans, 0);
     }
-    if welcome.key.is_empty() {
-        let placeholder = "paste your key [Cmd+V]";
-        spans.push(Span::styled(String::from(placeholder), palette::dim2()));
-        (
-            spans,
-            u16::try_from(placeholder.chars().count()).unwrap_or(u16::MAX),
-        )
-    } else {
-        let value = masked(welcome.key.as_str());
-        let width = u16::try_from(value.chars().count()).unwrap_or(u16::MAX);
-        spans.push(Span::styled(value, palette::base()));
-        (spans, width)
-    }
+    let field = key_field(app);
+    let width = field.display_width();
+    spans.extend(field.spans());
+    (spans, width)
 }
 
 /// Build the input row (02) and the row under it. The submit notice (`key
@@ -311,6 +305,23 @@ fn key_underline_row(app: &App) -> Paragraph<'static> {
 
 fn masked(key: &str) -> String {
     "•".repeat(key.chars().count().min(39))
+}
+
+fn key_field(app: &App) -> TextField<'static> {
+    if app.welcome().key.is_empty() {
+        TextField::new("", KEY_PLACEHOLDER)
+    } else {
+        TextField::new(masked(app.welcome().key.as_str()), KEY_PLACEHOLDER)
+    }
+}
+
+fn place_key_cursor(frame: &mut Frame, app: &App, row: Rect) {
+    if app.welcome().stage != WelcomeStage::EnterKey {
+        return;
+    }
+    let cursor = key_field(app).cursor_offset();
+    let cursor_x = row.x + FIELD_INDENT + cursor.min(KEY_FIELD_WIDTH.saturating_sub(1));
+    frame.set_cursor_position((cursor_x, row.y));
 }
 
 fn footer(app: &App, width: u16) -> Paragraph<'static> {

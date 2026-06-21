@@ -1,3 +1,4 @@
+use super::GenerationCost;
 use super::pair::LanguagePair;
 
 /// Artifact type produced for each card.
@@ -32,6 +33,7 @@ pub struct ArtifactFile {
     path: std::path::PathBuf,
     size: String,
     cached: bool,
+    cost: Option<GenerationCost>,
 }
 
 impl ArtifactFile {
@@ -47,6 +49,7 @@ impl ArtifactFile {
             path: path.into(),
             size: size.into(),
             cached,
+            cost: None,
         }
     }
 
@@ -69,6 +72,17 @@ impl ArtifactFile {
     /// Return whether this artifact came from cache.
     pub fn cached(&self) -> bool {
         self.cached
+    }
+
+    /// Return the estimated Gemini cost attached to this artifact.
+    pub fn cost(&self) -> Option<GenerationCost> {
+        self.cost
+    }
+
+    /// Return the file with an estimated Gemini cost attached.
+    pub fn with_cost(mut self, cost: GenerationCost) -> Self {
+        self.cost = Some(cost);
+        self
     }
 }
 
@@ -160,6 +174,11 @@ impl ArtifactSlot {
     /// Return completed artifact file metadata, if available.
     pub fn file(&self) -> Option<&ArtifactFile> {
         self.file.as_ref()
+    }
+
+    /// Return the estimated Gemini cost for this artifact slot.
+    pub fn cost(&self) -> Option<GenerationCost> {
+        self.file.as_ref().and_then(ArtifactFile::cost)
     }
 
     /// Return the slot as ready.
@@ -265,6 +284,18 @@ impl CardArtifacts {
             || self.scene.failed_terminally()
             || self.picture.failed_terminally()
             || self.sound.failed_terminally()
+    }
+
+    /// Return the known Gemini cost across all artifact slots.
+    pub fn cost(&self) -> Option<GenerationCost> {
+        let costs = [self.meta(), self.scene(), self.picture(), self.sound()]
+            .into_iter()
+            .filter_map(ArtifactSlot::cost)
+            .collect::<Vec<_>>();
+        if costs.is_empty() {
+            return None;
+        }
+        Some(costs.into_iter().sum())
     }
 }
 

@@ -32,7 +32,7 @@ pub fn draw(frame: &mut Frame, area: Rect, busy: &BusyView) {
     let inner = block.inner(inset);
     frame.render_widget(block, inset);
     frame.render_widget(panel(busy), padded(inner));
-    let title = Span::styled(" working ", palette::base());
+    let title = Span::styled(" ai is working ", palette::base());
     let title_rect = Rect {
         x: inset.x + 2,
         y: inset.y,

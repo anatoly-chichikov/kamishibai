@@ -10,7 +10,7 @@ const CARD_VERSION: &str = "v3";
 
 /// The single cache folder that holds every artifact for one card.
 ///
-/// `meta.json`, `scene.json`, `voice.wav`, and `illustration.jpg` for one card
+/// `meta.json`, `scene.json`, `audio.wav`, and `picture.jpg` for one card
 /// live together under `cards/<support>-<target>/<key>`, where `key` is a short
 /// digest of the card identity (language pair, term, understanding). Browsing
 /// the cache root therefore shows one folder per card instead of the older
@@ -51,7 +51,7 @@ impl CardCell {
 
     /// Return the package-unique media name this card contributes to a deck.
     ///
-    /// Disk files are role-named (`voice.wav`), but Anki keys media by basename,
+    /// Disk files are role-named (`audio.wav`), but Anki keys media by basename,
     /// so each card renames its files to `<key>.<extension>` inside the package.
     pub fn media_name(&self, extension: &str) -> String {
         format!("{}.{extension}", self.key)

@@ -96,10 +96,11 @@ fn request_change_on_your_cards_opens_per_card_modal() {
     let rendered = flat(&opened);
     assert!(
         opened.modal() == Some(ModalKind::ChangeThisCard)
-            && rendered.contains("change · this card")
-            && rendered.contains("tell me what to change")
-            && rendered.contains("whilst"),
-        "R on Your cards must open the per-card modal with the right prompt and card preview"
+            && rendered.contains("make this sentence different")
+            && rendered.contains("write what to change, any way you like")
+            && rendered.contains("[Enter] send")
+            && !rendered.contains("tell me what to change"),
+        "R on Your cards must open a simple per-card rewrite modal"
     );
 }
 
@@ -123,7 +124,7 @@ fn submit_on_per_card_modal_emits_card_correction_and_keeps_overlay_until_result
 }
 
 #[test]
-fn card_correction_loader_keeps_the_change_card_modal_background() {
+fn card_correction_loader_hides_the_change_card_modal_body() {
     let app = seeded()
         .with_modal(ModalKind::ChangeThisCard)
         .typed('v')
@@ -132,13 +133,17 @@ fn card_correction_loader_keeps_the_change_card_modal_background() {
         .typed('b');
     let (after, side) = transit(app, AppEvent::Submit);
     let loading = after.busy_started(BusyKind::CardCorrection);
-    assert_eq!(
-        (loading.modal(), side),
-        (
-            Some(ModalKind::ChangeThisCard),
-            Side::RunCardCorrection(String::from("verb")),
-        ),
-        "card-correction loader must not erase the modal underneath it"
+    let rendered = flat(&loading);
+    assert!(
+        loading.modal() == Some(ModalKind::ChangeThisCard)
+            && side == Side::RunCardCorrection(String::from("verb"))
+            && rendered.contains("ai is working")
+            && rendered.contains("updating this card")
+            && !rendered.contains("make this sentence different")
+            && !rendered.contains("write what to change, any way you like")
+            && !rendered.contains("tell me what to change")
+            && !rendered.contains("verb"),
+        "card-correction loader must hide the modal body while preserving the pending state"
     );
 }
 

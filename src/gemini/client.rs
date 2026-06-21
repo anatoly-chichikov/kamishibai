@@ -11,11 +11,12 @@ use serde_json::Value;
 use crate::generation::{manga_template, render_scene_prompt};
 use crate::languages::catalog;
 use crate::session::{
-    CardDraft, CardMeta, CardRevision, LanguagePair, LearningGuess, RawInputBatch, Sense,
-    SenseCorrection, Understood, WordCandidate,
+    CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair, LearningGuess, RawInputBatch,
+    Sense, SenseCorrection, Understood, WordCandidate,
 };
 
 use super::codec::decode;
+use super::cost::priced;
 use super::prompts::{
     render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
 };
@@ -193,21 +194,36 @@ where
 
     /// Translate one sentence into the enforced manga scene JSON shape.
     pub fn scene(&self, language: &str, sentence: &str, target: &str) -> Result<Value> {
-        let prompt = render_scene_prompt(language).replace("{sentence}", sentence);
-        let raw = self.text(SCENE_MODEL, prompt)?;
-        let cleaned = unfence(raw.trim());
-        let panels = serde_json::from_str::<Value>(cleaned)?;
-        let Some(items) = panels.as_array() else {
-            bail!("Expected a JSON array of panels");
-        };
-        let mut scene = serde_json::from_str::<Value>(manga_template())?;
-        scene["manga_panel"]["panels"] = Value::Array(items.clone());
-        scene["manga_panel"]["meta"]["title"] = Value::String(sentence.chars().take(60).collect());
-        scene["manga_panel"]["meta"]["description"] = Value::String(String::from(sentence));
-        scene["manga_panel"]["meta"]["target_lang"] = Value::String(target.to_ascii_lowercase());
-        enforce(&mut scene);
-        validate(&scene)?;
+        let (scene, _) = self.scene_metered(language, sentence, target)?;
         Ok(scene)
+    }
+
+    /// Translate one sentence and return the request cost record.
+    pub(crate) fn scene_metered(
+        &self,
+        language: &str,
+        sentence: &str,
+        target: &str,
+    ) -> Result<(Value, CostRecord)> {
+        let prompt = render_scene_prompt(language).replace("{sentence}", sentence);
+        let (raw, cost) = self.text_metered(SCENE_MODEL, prompt)?;
+        Ok((scene_from_raw(raw.as_str(), sentence, target)?, cost))
+    }
+
+    /// Translate one sentence and report usage before local scene validation.
+    pub(crate) fn scene_observed<F>(
+        &self,
+        language: &str,
+        sentence: &str,
+        target: &str,
+        mut observe: F,
+    ) -> Result<Value>
+    where
+        F: FnMut(CostRecord),
+    {
+        let prompt = render_scene_prompt(language).replace("{sentence}", sentence);
+        let raw = self.text_observed(SCENE_MODEL, prompt, &mut observe)?;
+        scene_from_raw(raw.as_str(), sentence, target)
     }
 
     /// Send one free-form prompt to a text model and return the raw textual
@@ -272,11 +288,38 @@ where
         understanding: &str,
         pair: &LanguagePair,
     ) -> Result<CardMeta> {
+        let (meta, _) = self.generate_card_meta_metered(term, understanding, pair)?;
+        Ok(meta)
+    }
+
+    /// Build rich card meta and return the request cost record.
+    pub(crate) fn generate_card_meta_metered(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+    ) -> Result<(CardMeta, CostRecord)> {
         let catalog = catalog();
         let prompt = render_card_meta_prompt(term, understanding, pair, &catalog)?;
-        let decoded: CardMetaResponse =
-            serde_json::from_str(unfence(self.text(META_MODEL, prompt)?.trim()))?;
-        Ok(decoded.into_meta())
+        let (raw, cost) = self.text_metered(META_MODEL, prompt)?;
+        Ok((card_meta_from_raw(raw.as_str())?, cost))
+    }
+
+    /// Build rich card meta and report usage before local JSON decoding.
+    pub(crate) fn generate_card_meta_observed<F>(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+        mut observe: F,
+    ) -> Result<CardMeta>
+    where
+        F: FnMut(CostRecord),
+    {
+        let catalog = catalog();
+        let prompt = render_card_meta_prompt(term, understanding, pair, &catalog)?;
+        let raw = self.text_observed(META_MODEL, prompt, &mut observe)?;
+        card_meta_from_raw(raw.as_str())
     }
 
     /// Recompose one card draft after a per-card refinement.
@@ -286,18 +329,38 @@ where
         comment: &str,
         pair: &LanguagePair,
     ) -> Result<CardRevision> {
+        let (revision, _) = self.correct_card_metered(draft, comment, pair)?;
+        Ok(revision)
+    }
+
+    /// Recompose one card draft and return the request cost record.
+    pub(crate) fn correct_card_metered(
+        &self,
+        draft: &CardDraft,
+        comment: &str,
+        pair: &LanguagePair,
+    ) -> Result<(CardRevision, CostRecord)> {
         let catalog = catalog();
         let prompt = render_card_prompt(draft, comment, pair, &catalog)?;
-        let decoded: CardCorrectionResponse =
-            serde_json::from_str(unfence(self.text(META_MODEL, prompt)?.trim()))?;
+        let (raw, cost) = self.text_metered(META_MODEL, prompt)?;
+        let decoded: CardCorrectionResponse = serde_json::from_str(unfence(raw.trim()))?;
         let term = decoded.term.clone();
         let understanding = decoded.understanding.clone();
-        Ok(CardRevision::new(term, understanding, decoded.into_meta()))
+        Ok((
+            CardRevision::new(term, understanding, decoded.into_meta()),
+            cost,
+        ))
     }
 
     /// Render one scene JSON payload into raw image bytes.
     pub fn image(&self, scene: &Value) -> Result<Vec<u8>> {
-        let response = self.request(
+        let (bytes, _) = self.image_metered(scene)?;
+        Ok(bytes)
+    }
+
+    /// Render one scene JSON payload and return the request cost record.
+    pub(crate) fn image_metered(&self, scene: &Value) -> Result<(Vec<u8>, CostRecord)> {
+        let metered = self.request_metered(
             IMAGE_MODEL,
             &Request::text(
                 serde_json::to_string_pretty(scene)?,
@@ -305,23 +368,35 @@ where
                 Some(GenerationConfig::image_safety()),
             ),
         )?;
-        if response.candidates.is_empty() {
-            bail!("No candidates in image response: {}", diagnosis(&response));
-        }
-        let Some(content) = response.candidates[0].content.as_ref() else {
-            bail!("No content in image response");
-        };
-        for part in &content.parts {
-            if let Some(data) = part.inline_data.as_ref() {
-                return decode(&data.data);
-            }
-        }
-        bail!("No image data found in response");
+        Ok((image_from_response(&metered.response)?, metered.cost))
+    }
+
+    /// Render one scene JSON payload and report usage before local image decoding.
+    pub(crate) fn image_observed<F>(&self, scene: &Value, mut observe: F) -> Result<Vec<u8>>
+    where
+        F: FnMut(CostRecord),
+    {
+        let metered = self.request_metered(
+            IMAGE_MODEL,
+            &Request::text(
+                serde_json::to_string_pretty(scene)?,
+                Some(GenerationConfig::image()),
+                Some(GenerationConfig::image_safety()),
+            ),
+        )?;
+        observe(metered.cost.clone());
+        image_from_response(&metered.response)
     }
 
     /// Generate one PCM audio payload from the configured TTS model.
     pub fn speech(&self, prompt: &str, text: &str) -> Result<Vec<u8>> {
-        let response = self.request(
+        let (data, _) = self.speech_metered(prompt, text)?;
+        Ok(data)
+    }
+
+    /// Generate one PCM audio payload and return the request cost record.
+    pub(crate) fn speech_metered(&self, prompt: &str, text: &str) -> Result<(Vec<u8>, CostRecord)> {
+        let metered = self.request_metered(
             TTS_MODEL,
             &Request::text(
                 String::from(prompt),
@@ -329,23 +404,32 @@ where
                 None,
             ),
         )?;
-        if response.candidates.is_empty() {
-            bail!("No candidates in audio response for '{}'", text);
-        }
-        let Some(content) = response.candidates[0].content.as_ref() else {
-            bail!("No content in audio response for '{}'", text);
-        };
-        let Some(data) = content
-            .parts
-            .iter()
-            .find_map(|part| part.inline_data.as_ref())
-        else {
-            bail!("No content in audio response for '{}'", text);
-        };
-        decode(&data.data)
+        Ok((speech_from_response(&metered.response, text)?, metered.cost))
     }
 
-    fn request(&self, model: &str, request: &Request) -> Result<Response> {
+    /// Generate one PCM audio payload and report usage before local audio decoding.
+    pub(crate) fn speech_observed<F>(
+        &self,
+        prompt: &str,
+        text: &str,
+        mut observe: F,
+    ) -> Result<Vec<u8>>
+    where
+        F: FnMut(CostRecord),
+    {
+        let metered = self.request_metered(
+            TTS_MODEL,
+            &Request::text(
+                String::from(prompt),
+                Some(GenerationConfig::audio(voice())),
+                None,
+            ),
+        )?;
+        observe(metered.cost.clone());
+        speech_from_response(&metered.response, text)
+    }
+
+    fn request_metered(&self, model: &str, request: &Request) -> Result<MeteredResponse> {
         let url = format!("{}/{model}:generateContent", base_url());
         let body = serde_json::to_string(request)?;
         let response = self
@@ -354,24 +438,108 @@ where
         if !(200..300).contains(&response.status) {
             return Err(api_error(response.body.as_str()));
         }
-        Ok(serde_json::from_str(&response.body)?)
+        let parsed: Response = serde_json::from_str(&response.body)?;
+        let cost = priced(model, parsed.usage_metadata.as_ref());
+        Ok(MeteredResponse {
+            response: parsed,
+            cost,
+        })
     }
 
     fn text(&self, model: &str, prompt: String) -> Result<String> {
-        let response = self.request(model, &Request::text(prompt, None, None))?;
-        let raw = response
-            .candidates
-            .iter()
-            .flat_map(|candidate| candidate.content.as_ref().into_iter())
-            .flat_map(|content| content.parts.iter())
-            .filter_map(|part| part.text.as_ref())
-            .cloned()
-            .collect::<String>();
+        Ok(self.text_metered(model, prompt)?.0)
+    }
+
+    fn text_metered(&self, model: &str, prompt: String) -> Result<(String, CostRecord)> {
+        let metered = self.request_metered(model, &Request::text(prompt, None, None))?;
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!("No text content in Gemini response");
+        }
+        Ok((raw, metered.cost))
+    }
+
+    fn text_observed<F>(&self, model: &str, prompt: String, observe: &mut F) -> Result<String>
+    where
+        F: FnMut(CostRecord),
+    {
+        let metered = self.request_metered(model, &Request::text(prompt, None, None))?;
+        observe(metered.cost.clone());
+        let raw = response_text(&metered.response);
         if raw.trim().is_empty() {
             bail!("No text content in Gemini response");
         }
         Ok(raw)
     }
+}
+
+struct MeteredResponse {
+    response: Response,
+    cost: CostRecord,
+}
+
+fn response_text(response: &Response) -> String {
+    response
+        .candidates
+        .iter()
+        .flat_map(|candidate| candidate.content.as_ref().into_iter())
+        .flat_map(|content| content.parts.iter())
+        .filter_map(|part| part.text.as_ref())
+        .cloned()
+        .collect::<String>()
+}
+
+fn scene_from_raw(raw: &str, sentence: &str, target: &str) -> Result<Value> {
+    let cleaned = unfence(raw.trim());
+    let panels = serde_json::from_str::<Value>(cleaned)?;
+    let Some(items) = panels.as_array() else {
+        bail!("Expected a JSON array of panels");
+    };
+    let mut scene = serde_json::from_str::<Value>(manga_template())?;
+    scene["manga_panel"]["panels"] = Value::Array(items.clone());
+    scene["manga_panel"]["meta"]["title"] = Value::String(sentence.chars().take(60).collect());
+    scene["manga_panel"]["meta"]["description"] = Value::String(String::from(sentence));
+    scene["manga_panel"]["meta"]["target_lang"] = Value::String(target.to_ascii_lowercase());
+    enforce(&mut scene);
+    validate(&scene)?;
+    Ok(scene)
+}
+
+fn card_meta_from_raw(raw: &str) -> Result<CardMeta> {
+    let decoded: CardMetaResponse = serde_json::from_str(unfence(raw.trim()))?;
+    Ok(decoded.into_meta())
+}
+
+fn image_from_response(response: &Response) -> Result<Vec<u8>> {
+    if response.candidates.is_empty() {
+        bail!("No candidates in image response: {}", diagnosis(response));
+    }
+    let Some(content) = response.candidates[0].content.as_ref() else {
+        bail!("No content in image response");
+    };
+    for part in &content.parts {
+        if let Some(data) = part.inline_data.as_ref() {
+            return decode(&data.data);
+        }
+    }
+    bail!("No image data found in response");
+}
+
+fn speech_from_response(response: &Response, text: &str) -> Result<Vec<u8>> {
+    if response.candidates.is_empty() {
+        bail!("No candidates in audio response for '{}'", text);
+    }
+    let Some(content) = response.candidates[0].content.as_ref() else {
+        bail!("No content in audio response for '{}'", text);
+    };
+    let Some(data) = content
+        .parts
+        .iter()
+        .find_map(|part| part.inline_data.as_ref())
+    else {
+        bail!("No content in audio response for '{}'", text);
+    };
+    decode(&data.data)
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -520,12 +688,42 @@ fn nonempty(value: &str, fallback: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::io::Read;
     use std::net::TcpListener;
+    use std::rc::Rc;
     use std::thread;
     use std::time::Duration;
 
+    use serde_json::json;
+
     use super::*;
+
+    #[derive(Clone, Debug)]
+    struct FakeTransport {
+        responses: Rc<RefCell<Vec<Result<TransportResponse>>>>,
+    }
+
+    impl FakeTransport {
+        fn new(responses: Vec<Result<TransportResponse>>) -> Self {
+            Self {
+                responses: Rc::new(RefCell::new(responses)),
+            }
+        }
+    }
+
+    impl Transport for FakeTransport {
+        fn post(&self, _url: &str, _key: &str, _body: &str) -> Result<TransportResponse> {
+            self.responses.borrow_mut().remove(0)
+        }
+    }
+
+    fn body(value: serde_json::Value) -> Result<TransportResponse> {
+        Ok(TransportResponse {
+            status: 200,
+            body: serde_json::to_string(&value)?,
+        })
+    }
 
     #[test]
     fn http_transport_honors_request_timeout() {
@@ -551,6 +749,34 @@ mod tests {
                 .downcast_ref::<reqwest::Error>()
                 .is_some_and(reqwest::Error::is_timeout)),
             "HTTP transport ignored the configured request timeout"
+        );
+    }
+
+    #[test]
+    fn card_correction_returns_request_cost() {
+        let transport = FakeTransport::new(vec![body(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": "{\"term\":\"wound\",\"understanding\":\"verb sense\",\"pronunciation\":\"waʊnd\",\"transcription\":\"aɪ waʊnd ðə klɒk\",\"meaning\":\"завести\",\"importance\":6,\"source_sentence\":\"Я завел часы.\",\"source_highlight\":\"завел\",\"source_hint\":\"Поворачивал что-то круглое.\",\"source_context\":\"Глагол про часы.\",\"target_sentence\":\"I wound the clock.\"}"
+                    }]
+                }
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "candidatesTokenCount": 20,
+                "totalTokenCount": 120
+            }
+        }))]);
+        let client = GeminiClient::new("key", transport);
+        let draft = CardDraft::new("wound", "noun sense", LanguagePair::new("en", "ru"));
+        let (_revision, cost) = client
+            .correct_card_metered(&draft, "make it a verb", &LanguagePair::new("en", "ru"))
+            .expect("card correction must decode");
+        assert_eq!(
+            cost.cost().nanos(),
+            330_000,
+            "card correction must preserve Gemini usage cost for the regenerated meta"
         );
     }
 }

@@ -13,4 +13,4 @@ expression: render(&app)
                                                                                 
                                                                                 
                                                                                 
-    step 2/3  2 cards         [Ctrl+G] generate  [Enter] pick  [Ctrl+C] quit
+    step 2/3  2 cards     [Ctrl+G] generate  [Enter/→] toggle  [Ctrl+C] quit

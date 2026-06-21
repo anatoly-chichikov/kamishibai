@@ -1,6 +1,7 @@
 use crate::languages::catalog;
 
 use super::app::App;
+use super::disclosure::{DisclosureControls, DisclosureIntent};
 use super::event::AppEvent;
 use super::screen::{ModalKind, Screen, WelcomeFocus, WelcomeStage};
 
@@ -62,28 +63,26 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourWords, None, AppEvent::OpenLanguagePicker) => {
             (open_language_picker(app), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::Generate) => {
-            if !app.candidates().iter().any(|candidate| candidate.ok()) {
-                (app, Side::None)
-            } else {
-                (app.with_screen(Screen::YourCards), Side::StartGeneration)
-            }
-        }
+        (Screen::WhatIUnderstood, None, AppEvent::Generate) => start_generation(app),
         (Screen::WhatIUnderstood, None, AppEvent::Cancel) if app.expanded_sense().is_some() => {
             (app.senses_cancelled(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) if app.expanded_sense().is_some() => {
+        (Screen::WhatIUnderstood, None, event)
+            if matches!(sense_controls(&app).intent(&event), DisclosureIntent::Close) =>
+        {
+            (app.senses_confirmed(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, event)
+            if sense_controls(&app).intent(&event) == DisclosureIntent::Action =>
+        {
             if app.expanded_add_more_focused() {
                 (app.with_modal(ModalKind::ChangeSomething), Side::None)
             } else {
-                (app.senses_confirmed(), Side::None)
+                (app.sense_toggled(), Side::None)
             }
         }
-        (Screen::WhatIUnderstood, None, AppEvent::CursorLeft) if app.expanded_sense().is_some() => {
-            (app.senses_confirmed(), Side::None)
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::CursorRight)
-            if app.expanded_sense().is_none() && !app.candidates().is_empty() =>
+        (Screen::WhatIUnderstood, None, event)
+            if sense_controls(&app).intent(&event) == DisclosureIntent::Open =>
         {
             if app.selected_can_expand_senses() {
                 (app.senses_expanded(), Side::None)
@@ -99,11 +98,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, None, AppEvent::NavNext) if app.expanded_sense().is_some() => {
             (app.sense_next(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar(' '))
-            if app.expanded_sense().is_some() =>
-        {
-            (app.sense_toggled(), Side::None)
-        }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K'))
             if app.expanded_sense().is_some() =>
@@ -115,13 +109,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             if app.expanded_sense().is_some() =>
         {
             (app.sense_next(), Side::None)
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) if !app.candidates().is_empty() => {
-            if app.selected_can_expand_senses() {
-                (app.senses_expanded(), Side::None)
-            } else {
-                (app, Side::None)
-            }
         }
         (Screen::WhatIUnderstood, None, AppEvent::RequestChange) => (app, Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('d'))
@@ -198,7 +185,14 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_selected_previous(), Side::None),
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
-        (Screen::YourCards, None, AppEvent::KeyEnter) => (app.card_toggle_expanded(), Side::None),
+        (Screen::YourCards, None, event)
+            if matches!(
+                DisclosureControls::new(app.card_expanded()).intent(&event),
+                DisclosureIntent::Open | DisclosureIntent::Close
+            ) =>
+        {
+            (app.card_toggle_expanded(), Side::None)
+        }
         (Screen::YourCards, None, AppEvent::Generate) if !app.cards().is_empty() => {
             (app, Side::RegenerateCurrent)
         }
@@ -232,6 +226,23 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (_, _, AppEvent::Redraw) => (app, Side::None),
         (_, _, _) => (app, Side::None),
     }
+}
+
+fn sense_controls(app: &App) -> DisclosureControls {
+    let controls = DisclosureControls::new(app.expanded_sense().is_some());
+    if app.expanded_sense().is_some() {
+        controls.with_action("select")
+    } else {
+        controls
+    }
+}
+
+fn start_generation(app: App) -> (App, Side) {
+    let app = app.senses_confirmed();
+    if !app.candidates().iter().any(|candidate| candidate.ok()) {
+        return (app, Side::None);
+    }
+    (app.with_screen(Screen::YourCards), Side::StartGeneration)
 }
 
 fn welcome(app: App, event: AppEvent) -> (App, Side) {
@@ -323,8 +334,6 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         | (Screen::WhatIUnderstood, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
         (Screen::YourCards, AppEvent::KeyChar('R'))
         | (Screen::YourCards, AppEvent::KeyChar('r')) => AppEvent::RequestChange,
-        (Screen::YourCards, AppEvent::CursorLeft) => AppEvent::NavPrev,
-        (Screen::YourCards, AppEvent::CursorRight) => AppEvent::NavNext,
         _ => event,
     }
 }

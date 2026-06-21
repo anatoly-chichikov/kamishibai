@@ -9,13 +9,14 @@ use std::borrow::Cow;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
 use crate::session::{Sense, WordCandidate};
 use crate::tui::app::App;
+use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
 
 const HEADLINE: &str = "what i understood";
@@ -77,7 +78,7 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
     for (index, candidate) in app.candidates().iter().enumerate() {
         let expanded = app.expanded_sense();
         if expanded.as_ref().map(|item| item.row) == Some(index) {
-            lines.push(candidate_line(
+            lines.extend(candidate_line(
                 index,
                 candidate,
                 app.selected(),
@@ -90,7 +91,7 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 .as_ref()
                 .expect("invariant: row is the expanded one");
             for (sense_index, sense) in candidate.senses().iter().enumerate() {
-                lines.push(sense_line(
+                lines.extend(sense_line(
                     sense_index,
                     sense,
                     expanded.cursor,
@@ -113,7 +114,7 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 width,
             ));
         } else {
-            lines.push(candidate_line(
+            lines.extend(candidate_line(
                 index,
                 candidate,
                 app.selected(),
@@ -130,14 +131,17 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
 /// Total number of lines `body` will render for the current state of `app`.
 /// One row per confirmed candidate (or per typed-but-not-yet-understood line),
 /// zero when neither set is populated. Used by the scroll clamp in `tui::app`.
-pub(crate) fn content_height(app: &App) -> u16 {
+pub(crate) fn content_height(app: &App, width: usize) -> u16 {
     if !app.candidates().is_empty() {
         let expanded_row = app.expanded_sense().map(|item| item.row);
+        let term_width = candidate_label_width(app.candidates(), 12);
         let total: usize = app
             .candidates()
             .iter()
             .enumerate()
-            .map(|(index, candidate)| candidate_rows(candidate, expanded_row == Some(index)))
+            .map(|(index, candidate)| {
+                candidate_rows(candidate, expanded_row == Some(index), term_width, width)
+            })
             .sum();
         return u16::try_from(total).unwrap_or(u16::MAX);
     }
@@ -182,7 +186,7 @@ fn candidate_line<'a>(
     gloss: Gloss,
     term_width: usize,
     width: u16,
-) -> Line<'a> {
+) -> Vec<Line<'a>> {
     let is_selected = index == selected && !expanded;
     let is_dimmed_parent = index == selected && expanded;
     let row_style = if is_selected {
@@ -234,14 +238,31 @@ fn candidate_line<'a>(
         Gloss::Sentence(text) => ("  —  ", text),
         Gloss::Heading(text) => ("  ", text),
     };
-    let used = 4 + term_width + separator.chars().count() + gloss.chars().count();
+    let gloss_start = 4 + term_width + separator.chars().count();
+    let available = (width as usize).saturating_sub(gloss_start).max(1);
+    let chunks = super::common::wrap_words(gloss.as_str(), available, available);
+    let first = chunks.first().cloned().unwrap_or_default();
     spans.push(Span::styled(separator, dash_style));
-    spans.push(Span::styled(gloss, gloss_style));
+    spans.push(Span::styled(first.clone(), gloss_style));
+    let used = gloss_start + super::common::display_width(first.as_str());
     let pad = (width as usize).saturating_sub(used);
     if pad > 0 {
         spans.push(Span::styled(" ".repeat(pad), row_style));
     }
-    Line::from(spans)
+    let mut lines = vec![Line::from(spans)];
+    for chunk in chunks.into_iter().skip(1) {
+        let used = gloss_start + super::common::display_width(chunk.as_str());
+        let pad = (width as usize).saturating_sub(used);
+        let mut spans = vec![
+            Span::styled(" ".repeat(gloss_start), row_style),
+            Span::styled(chunk, gloss_style),
+        ];
+        if pad > 0 {
+            spans.push(Span::styled(" ".repeat(pad), row_style));
+        }
+        lines.push(Line::from(spans));
+    }
+    lines
 }
 
 fn sense_line<'a>(
@@ -251,7 +272,7 @@ fn sense_line<'a>(
     selected: &[usize],
     term_width: usize,
     width: u16,
-) -> Line<'a> {
+) -> Vec<Line<'a>> {
     let focused = index == cursor;
     let marker = if selected.contains(&index) {
         "  ✓ "
@@ -265,22 +286,12 @@ fn sense_line<'a>(
     };
     let text = sense_text(sense);
     let indent = 4 + term_width + 5;
-    let used = indent + marker.chars().count() + text.chars().count();
     let pad_style = if focused {
         palette::highlight()
     } else {
         palette::base()
     };
-    let mut spans = vec![
-        Span::styled(" ".repeat(indent), palette::base()),
-        Span::styled(marker, style),
-        Span::styled(text, style),
-    ];
-    let pad = (width as usize).saturating_sub(used);
-    if pad > 0 {
-        spans.push(Span::styled(" ".repeat(pad), pad_style));
-    }
-    Line::from(spans)
+    marked_lines(marker, text.as_str(), indent, style, pad_style, width)
 }
 
 fn sense_text(sense: &Sense) -> String {
@@ -298,14 +309,136 @@ const MEANINGS_LABEL: &str = "multiple meanings:";
 /// scroll clamp agree with `body`. Expanded → header + one row per sense +
 /// add-more; a collapsed word with several selected meanings → header + one row
 /// per selected meaning; otherwise a single line.
-pub(crate) fn candidate_rows(candidate: &WordCandidate, expanded: bool) -> usize {
+pub(crate) fn candidate_rows(
+    candidate: &WordCandidate,
+    expanded: bool,
+    term_width: usize,
+    width: usize,
+) -> usize {
     if expanded {
-        candidate.senses().len().saturating_add(2)
+        let parent = candidate_line_rows(
+            candidate,
+            GlossKind::Sentence,
+            sense_text(candidate.sense()).as_str(),
+            term_width,
+            width,
+        );
+        let senses = candidate
+            .senses()
+            .iter()
+            .map(|sense| sense_rows(sense, term_width, width))
+            .sum::<usize>();
+        parent.saturating_add(senses).saturating_add(1)
     } else if candidate.ok() && candidate.selected_count() > 1 {
-        candidate.selected_count().saturating_add(1)
+        let header = candidate_line_rows(
+            candidate,
+            GlossKind::Heading,
+            MEANINGS_LABEL,
+            term_width,
+            width,
+        );
+        let selected = candidate
+            .selected_senses()
+            .iter()
+            .map(|index| selected_meaning_rows(&candidate.senses()[*index], term_width, width))
+            .sum::<usize>();
+        header.saturating_add(selected)
     } else {
-        1
+        candidate_line_rows(
+            candidate,
+            GlossKind::Sentence,
+            sense_text(candidate.sense()).as_str(),
+            term_width,
+            width,
+        )
     }
+}
+
+enum GlossKind {
+    Sentence,
+    Heading,
+}
+
+fn candidate_line_rows(
+    candidate: &WordCandidate,
+    kind: GlossKind,
+    gloss: &str,
+    term_width: usize,
+    width: usize,
+) -> usize {
+    let separator_width = match kind {
+        GlossKind::Sentence => 5,
+        GlossKind::Heading => 2,
+    };
+    let label_width = candidate_label_len(candidate);
+    let gloss_start = 4 + term_width.max(label_width) + separator_width;
+    let available = width.saturating_sub(gloss_start).max(1);
+    super::common::wrap_words(gloss, available, available).len()
+}
+
+fn sense_rows(sense: &Sense, term_width: usize, width: usize) -> usize {
+    marked_line_rows(sense_text(sense).as_str(), 4 + term_width + 5, 4, width)
+}
+
+fn selected_meaning_rows(sense: &Sense, term_width: usize, width: usize) -> usize {
+    marked_line_rows(sense_text(sense).as_str(), 4 + term_width + 5, 3, width)
+}
+
+fn marked_line_rows(text: &str, indent: usize, marker_width: usize, width: usize) -> usize {
+    let start = indent + marker_width;
+    let available = width.saturating_sub(start).max(1);
+    super::common::wrap_words(text, available, available).len()
+}
+
+/// Return the focused review block range for scroll snapping.
+pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
+    if app.candidates().is_empty() {
+        return None;
+    }
+    let selected = app.selected().min(app.candidates().len() - 1);
+    let expanded_row = app.expanded_sense().map(|item| item.row);
+    let term_width = candidate_label_width(app.candidates(), 12);
+    let mut offset = 0usize;
+    for (index, candidate) in app.candidates().iter().enumerate() {
+        if index != selected {
+            offset = offset.saturating_add(candidate_rows(
+                candidate,
+                expanded_row == Some(index),
+                term_width,
+                width,
+            ));
+            continue;
+        }
+        if let Some(expanded) = app.expanded_sense()
+            && expanded.row == selected
+        {
+            offset = offset.saturating_add(candidate_line_rows(
+                candidate,
+                GlossKind::Sentence,
+                sense_text(candidate.sense()).as_str(),
+                term_width,
+                width,
+            ));
+            for sense in candidate.senses().iter().take(expanded.cursor) {
+                offset = offset.saturating_add(sense_rows(sense, term_width, width));
+            }
+            let height = if expanded.cursor == candidate.senses().len() {
+                1
+            } else {
+                sense_rows(&candidate.senses()[expanded.cursor], term_width, width)
+            };
+            return Some((
+                u16::try_from(offset).unwrap_or(u16::MAX),
+                u16::try_from(height).unwrap_or(u16::MAX),
+            ));
+        }
+        let height = candidate_rows(candidate, false, term_width, width);
+        return Some((
+            u16::try_from(offset).unwrap_or(u16::MAX),
+            u16::try_from(height).unwrap_or(u16::MAX),
+        ));
+    }
+    Some((u16::try_from(offset).unwrap_or(u16::MAX), 1))
 }
 
 /// Render a collapsed word that has several selected meanings: a header row
@@ -319,7 +452,7 @@ fn candidate_block<'a>(
     width: u16,
 ) -> Vec<Line<'a>> {
     let mut lines = Vec::with_capacity(candidate.selected_count().saturating_add(1));
-    lines.push(candidate_line(
+    lines.extend(candidate_line(
         index,
         candidate,
         selected,
@@ -329,7 +462,7 @@ fn candidate_block<'a>(
         width,
     ));
     for sense_index in candidate.selected_senses() {
-        lines.push(selected_meaning_line(
+        lines.extend(selected_meaning_line(
             &candidate.senses()[*sense_index],
             term_width,
             width,
@@ -341,21 +474,49 @@ fn candidate_block<'a>(
 /// One dimmed, read-only meaning line under a multi-meaning header. Led by an
 /// em-dash indented one gloss column past the top-level dash, so the meanings
 /// read as nested under the word rather than as peers of the other rows.
-fn selected_meaning_line<'a>(sense: &'a Sense, term_width: usize, width: u16) -> Line<'a> {
+fn selected_meaning_line<'a>(sense: &'a Sense, term_width: usize, width: u16) -> Vec<Line<'a>> {
     let indent = 4 + term_width + 5;
     let marker = "—  ";
     let text = sense_text(sense);
-    let used = indent + marker.chars().count() + text.chars().count();
-    let mut spans = vec![
-        Span::styled(" ".repeat(indent), palette::base()),
-        Span::styled(String::from(marker), palette::dim2()),
-        Span::styled(text, palette::dim()),
-    ];
-    let pad = (width as usize).saturating_sub(used);
-    if pad > 0 {
-        spans.push(Span::styled(" ".repeat(pad), palette::base()));
+    marked_lines(
+        marker,
+        text.as_str(),
+        indent,
+        palette::dim(),
+        palette::base(),
+        width,
+    )
+}
+
+fn marked_lines<'a>(
+    marker: &'static str,
+    text: &str,
+    indent: usize,
+    style: Style,
+    pad_style: Style,
+    width: u16,
+) -> Vec<Line<'a>> {
+    let start = indent + marker.chars().count();
+    let available = (width as usize).saturating_sub(start).max(1);
+    let chunks = super::common::wrap_words(text, available, available);
+    let mut lines = Vec::with_capacity(chunks.len());
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        let row_marker = if index == 0 { marker } else { "" };
+        let row_indent = if index == 0 { indent } else { start };
+        let row_start = row_indent + row_marker.chars().count();
+        let used = row_start + super::common::display_width(chunk.as_str());
+        let pad = (width as usize).saturating_sub(used);
+        let mut spans = vec![
+            Span::styled(" ".repeat(row_indent), pad_style),
+            Span::styled(String::from(row_marker), style),
+            Span::styled(chunk, style),
+        ];
+        if pad > 0 {
+            spans.push(Span::styled(" ".repeat(pad), pad_style));
+        }
+        lines.push(Line::from(spans));
     }
-    Line::from(spans)
+    lines
 }
 
 fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
@@ -438,19 +599,24 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if app.expanded_sense().is_some() {
-        let enter_label = if app.expanded_add_more_focused() {
-            "add"
+        let controls = if app.expanded_add_more_focused() {
+            DisclosureControls::new(true).with_action("add")
         } else {
-            "done"
+            DisclosureControls::new(true).with_action("select")
         };
-        hints.push(super::common::FooterHint::primary("Space", "select"));
-        hints.push(super::common::FooterHint::secondary("Enter", enter_label));
+        if let Some(hint) = controls.primary_action() {
+            hints.push(hint);
+        }
+        if count > 0 {
+            hints.push(super::common::FooterHint::secondary("Ctrl+G", "generate"));
+        }
+        hints.push(controls.secondary_toggle());
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     } else {
         if count > 0 {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
-        hints.push(super::common::FooterHint::secondary("Enter", "pick"));
+        hints.push(DisclosureControls::new(false).secondary_toggle());
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     }

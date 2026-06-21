@@ -13,9 +13,17 @@ pub const META_FILE: &str = "meta.json";
 /// Canonical filename of the manga scene JSON inside one card's cache folder.
 pub const SCENE_FILE: &str = "scene.json";
 /// Canonical filename of the native-speaker WAV inside one card's cache folder.
-pub const VOICE_FILE: &str = "voice.wav";
-/// Canonical filename of the manga illustration JPEG inside one card's cache folder.
-pub const ILLUSTRATION_FILE: &str = "illustration.jpg";
+pub const VOICE_FILE: &str = "audio.wav";
+/// Canonical filename of the manga picture JPEG inside one card's cache folder.
+pub const ILLUSTRATION_FILE: &str = "picture.jpg";
+/// Canonical filename of the card-meta request cost sidecar.
+pub const META_COST_FILE: &str = "meta.cost.json";
+/// Canonical filename of the native-speaker request cost sidecar.
+pub const VOICE_COST_FILE: &str = "audio.cost.json";
+/// Canonical filename of the manga scene request cost sidecar.
+pub const SCENE_COST_FILE: &str = "scene.cost.json";
+/// Canonical filename of the manga picture request cost sidecar.
+pub const ILLUSTRATION_COST_FILE: &str = "picture.cost.json";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum CommitPlan {

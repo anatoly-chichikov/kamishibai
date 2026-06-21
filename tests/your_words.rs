@@ -95,8 +95,9 @@ fn your_words_renders_placeholder_tagline_and_language_pair() {
     let flat = flatten(&app);
     assert!(
         flat.contains("words you want to learn")
+            && flat.contains("each word becomes a small learning scene")
             && flat.contains("step 1/3")
-            && flat.contains("→ EN"),
+            && (flat.contains("RU→EN") || flat.contains("RU → EN")),
         "your words screen must render the PDF labels and a language chip on the right: {flat}"
     );
 }
@@ -128,7 +129,7 @@ fn busy_loader_covers_the_current_screen_with_request_status() {
         .busy_elapsed(Duration::from_millis(320));
     let flat = flatten(&app);
     assert!(
-        flat.contains("working") && flat.contains("understanding your words"),
+        flat.contains("ai is working") && flat.contains("understanding your words"),
         "busy loader must cover the current screen with a visible request status"
     );
 }

@@ -1,7 +1,10 @@
 //! Integration flow for the `Done` screen (08-done.png).
 
+use std::path::PathBuf;
+
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
+    Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, GenerationCost,
+    LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
@@ -61,6 +64,36 @@ fn failed_published() -> App {
     published().cards_started(vec![draft])
 }
 
+fn priced_file(name: &str, nanos: u64) -> ArtifactFile {
+    ArtifactFile::new(name, PathBuf::from(format!("/tmp/{name}")), "1 B", false)
+        .with_cost(GenerationCost::from_nanos(nanos))
+}
+
+fn priced_published() -> App {
+    let artifacts = CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded_with(priced_file("meta.json", 1_500_000)),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded_with(priced_file("scene.json", 2_000_000)),
+        ArtifactSlot::fresh(Artifact::Picture)
+            .succeeded_with(priced_file("picture.jpg", 67_300_000)),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded_with(priced_file("audio.wav", 10_000_000)),
+    );
+    let meta = CardMeta::new(
+        "/wreck/",
+        "/wreck sentence/",
+        "meaning of wreck",
+        5,
+        "source for wreck",
+        "wreck",
+        "hint for wreck",
+        "context for wreck",
+        "Example with wreck.",
+    );
+    let draft = CardDraft::new("wreck", "verb sense", LanguagePair::new("en", "ru"))
+        .with_meta(meta, None)
+        .with_artifacts(artifacts);
+    published().cards_started(vec![draft])
+}
+
 #[test]
 fn done_screen_lists_short_artifact_labels_and_quit_hint() {
     let rendered = flat(&published());
@@ -73,6 +106,15 @@ fn done_screen_lists_short_artifact_labels_and_quit_hint() {
             && rendered.contains("RU → EN")
             && !rendered.contains("new batch"),
         "Done must show APKG/PDF labels, quit hint, and the language chip — no new-batch hook"
+    );
+}
+
+#[test]
+fn done_footer_shows_simplified_subdollar_total() {
+    let rendered = flat(&priced_published());
+    assert!(
+        rendered.contains("$0.08") && !rendered.contains("total cost"),
+        "Done footer must show only a cent-rounded dollar total: {rendered}"
     );
 }
 

@@ -47,6 +47,21 @@ The TUI walks you from raw words through review to finished cards, and writes th
 
 ![demo](docs/tui-states/live/capture.gif)
 
+### What You Get
+
+kamishibai writes:
+
+- an `.apkg` deck for Anki ([example](docs/samples/fr-en.apkg))
+- a printable `.pdf` review sheet ([example](docs/samples/fr-en.pdf))
+
+Import the deck into Anki, and the cards look roughly like this on your phone:
+
+<p align="center">
+  <img src="docs/previews/anki-card-front.jpg" alt="Anki card front preview" width="260">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/previews/anki-card-back.jpg" alt="Anki card back preview" width="260">
+</p>
+
 Got the JSON already? Pass it as an argument:
 
 ```bash
@@ -69,6 +84,15 @@ Set your language and Gemini key once — through the TUI's welcome screen or `k
 
 Ten languages:
 
-`en` English · `zh` Chinese · `es` Spanish · `ja` Japanese · `fr` French · `de` German · `ru` Russian · `it` Italian · `pt` Portuguese · `el` Greek
+- `en` English
+- `zh` Chinese
+- `es` Spanish
+- `ja` Japanese
+- `fr` French
+- `de` German
+- `ru` Russian
+- `it` Italian
+- `pt` Portuguese
+- `el` Greek
 
-You pick your own language once — that's what the card labels are in. The language you're learning is detected from the words you type, so it changes from batch to batch: paste French words, you get a French deck; Japanese words, a Japanese one. All ten work either way, each with native-speaker voice.
+Choose your language once. The app uses it for card labels, then detects what you're learning from each batch: paste French words for a French deck, Japanese words for a Japanese deck.

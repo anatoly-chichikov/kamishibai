@@ -93,7 +93,7 @@ fn illustration_generation_writes_both_the_scene_json_and_the_jpeg_file() -> Res
     let image_path = illustration.filepath(ILLUSTRATION_FILE)?;
     assert_eq!(
         (filename, cached, scene_path.exists(), image_path.exists()),
-        (String::from("illustration.jpg"), false, true, true),
+        (String::from("picture.jpg"), false, true, true),
         "illustration generation no longer writes both the scene JSON and the JPEG file"
     );
     Ok(())

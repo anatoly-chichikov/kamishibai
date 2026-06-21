@@ -16,8 +16,11 @@ use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
 use crate::markdown::{parse_markdown, to_ratatui};
-use crate::session::{Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta};
+use crate::session::{
+    Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, GenerationCost,
+};
 use crate::tui::app::App;
+use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
 
 const HEADLINE_WORKING: &str = "building your cards";
@@ -26,6 +29,8 @@ const HINT_WORKING: &str = "drawing each card one by one";
 const HINT_DONE: &str = "all done";
 const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
+const STEP_LABEL_COL_CHARS: usize = 14;
+const STEP_SIZE_COL_CHARS: usize = 8;
 const STEPS: [(&str, Artifact); 4] = [
     ("meta", Artifact::Meta),
     ("audio", Artifact::Sound),
@@ -132,12 +137,12 @@ fn card_block<'a>(
     let mut lines: Vec<Line<'a>> = Vec::new();
     lines.extend(card_head(draft, idx, focused, expanded, progressed, width));
     if progressed {
-        for &(name, kind) in &STEPS {
+        for &(_, kind) in &STEPS {
             let slot = slot_for(artifacts, kind);
             if !slot_visible(slot, kind, running) {
                 continue;
             }
-            lines.push(step_line(name, kind, slot, running, spinner_frame));
+            lines.push(step_line(kind, slot, running, spinner_frame));
         }
     }
     if expanded {
@@ -210,13 +215,26 @@ fn card_head<'a>(
         return vec![Line::from(head_spans)];
     };
     let row1_used = head_used + HEAD_ARROW_CHARS;
-    let avail_first = width.saturating_sub(row1_used);
+    let cost_label = visible_card_cost_label(draft, row1_used, width);
+    let cost_chars = cost_label
+        .as_ref()
+        .map(|label| label.chars().count())
+        .unwrap_or(0);
+    let avail_first = width.saturating_sub(row1_used + cost_chars);
     let chunks = wrap_sentence(meta.target_sentence(), avail_first, avail_first);
     let first = chunks.first().cloned().unwrap_or_default();
     head_spans.push(Span::styled(HEAD_ARROW, sentence_style));
     let first_len = first.chars().count();
     head_spans.push(Span::styled(first, sentence_style));
-    let pad = width.saturating_sub(row1_used + first_len);
+    if let Some(label) = cost_label {
+        let cost_style = if focused {
+            palette::highlight_dim()
+        } else {
+            palette::dim2()
+        };
+        head_spans.push(Span::styled(label, cost_style));
+    }
+    let pad = width.saturating_sub(row1_used + first_len + cost_chars);
     if pad > 0 {
         head_spans.push(Span::styled(" ".repeat(pad), row_style));
     }
@@ -238,55 +256,7 @@ fn card_head<'a>(
 }
 
 fn wrap_sentence(sentence: &str, first_avail: usize, cont_avail: usize) -> Vec<String> {
-    if first_avail == 0 || cont_avail == 0 {
-        return vec![String::from(sentence)];
-    }
-    let mut chunks: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut current_len: usize = 0;
-    let mut limit = first_avail;
-    for word in sentence.split_whitespace() {
-        let word_len = word.chars().count();
-        let separator = usize::from(!current.is_empty());
-        if current_len + separator + word_len <= limit {
-            if separator == 1 {
-                current.push(' ');
-            }
-            current.push_str(word);
-            current_len += separator + word_len;
-            continue;
-        }
-        if !current.is_empty() {
-            chunks.push(std::mem::take(&mut current));
-            limit = cont_avail;
-        }
-        let mut tail = word;
-        loop {
-            let tail_len = tail.chars().count();
-            if tail_len <= limit {
-                current.push_str(tail);
-                current_len = tail_len;
-                break;
-            }
-            let mut byte_idx = tail.len();
-            for (i, (pos, _)) in tail.char_indices().enumerate() {
-                if i == limit {
-                    byte_idx = pos;
-                    break;
-                }
-            }
-            chunks.push(String::from(&tail[..byte_idx]));
-            tail = &tail[byte_idx..];
-            limit = cont_avail;
-        }
-    }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-    if chunks.is_empty() {
-        chunks.push(String::new());
-    }
-    chunks
+    super::common::wrap_words(sentence, first_avail, cont_avail)
 }
 
 fn head_rows(draft: &CardDraft, width: usize) -> usize {
@@ -295,10 +265,23 @@ fn head_rows(draft: &CardDraft, width: usize) -> usize {
     };
     let term_chars = draft.term().chars().count();
     let row1_used = HEAD_PREFIX_CHARS + term_chars + HEAD_ARROW_CHARS;
-    let avail = width.saturating_sub(row1_used);
+    let cost_chars = visible_card_cost_label(draft, row1_used, width)
+        .as_ref()
+        .map(|label| label.chars().count())
+        .unwrap_or(0);
+    let avail = width.saturating_sub(row1_used + cost_chars);
     wrap_sentence(meta.target_sentence(), avail, avail)
         .len()
         .max(1)
+}
+
+fn visible_card_cost_label(draft: &CardDraft, row_used: usize, width: usize) -> Option<String> {
+    let label = card_cost(draft).map(|cost| format!("  {}", cost.dollars()))?;
+    let label_len = label.chars().count();
+    if width.saturating_sub(row_used) < label_len + 8 {
+        return None;
+    }
+    Some(label)
 }
 
 fn card_finished(draft: &CardDraft) -> bool {
@@ -333,20 +316,28 @@ fn card_progressed(artifacts: &CardArtifacts, running: Option<Artifact>) -> bool
 }
 
 fn step_line<'a>(
-    name: &'a str,
     kind: Artifact,
     slot: &'a ArtifactSlot,
     running: Option<Artifact>,
     spinner_frame: usize,
 ) -> Line<'a> {
     let active = running == Some(kind);
-    let (glyph, status_style, name_style, note_spans) = step_state(slot, active, spinner_frame);
+    let label = step_label(kind, slot);
+    let (glyph, status_style, label_style, note_spans) = step_state(slot, active, spinner_frame);
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled("    ", palette::base()));
     spans.push(Span::styled(format!("{glyph} "), status_style));
-    spans.push(Span::styled(super::common::pad_right(name, 9), name_style));
+    spans.push(Span::styled(label.clone(), label_style));
+    spans.push(Span::styled(" ".repeat(label_gap(&label)), palette::dim()));
     spans.extend(note_spans);
     Line::from(spans)
+}
+
+fn step_label(kind: Artifact, slot: &ArtifactSlot) -> String {
+    match slot.file() {
+        Some(file) => artifact_file_label(kind, file),
+        None => String::from(step_name(kind)),
+    }
 }
 
 fn step_state<'a>(
@@ -365,10 +356,20 @@ fn step_state<'a>(
     if slot.ready() {
         let mut note: Vec<Span<'a>> = Vec::new();
         if let Some(file) = slot.file() {
-            note.push(Span::styled(String::from(file.name()), palette::link()));
-            note.push(Span::styled(format!(" · {}", file.size()), palette::dim()));
+            note.push(Span::styled(
+                pad_left(file.size(), STEP_SIZE_COL_CHARS),
+                palette::dim(),
+            ));
+            if let Some(cost) = file.cost() {
+                note.push(Span::styled("  ", palette::dim()));
+                note.push(Span::styled(cost.dollars(), palette::dim2()));
+            }
+            if file.cached() {
+                note.push(Span::styled("  ", palette::dim()));
+                note.push(Span::styled("cached", palette::dim2()));
+            }
         }
-        return (String::from("✓"), row_fg, row_fg, note);
+        return (String::from("✓"), row_fg, palette::link(), note);
     }
     if slot.discarded() {
         return (
@@ -413,7 +414,7 @@ fn step_state<'a>(
             String::from(SPINNER_FRAMES[spinner_frame]),
             row_fg,
             row_fg,
-            vec![Span::styled(String::from("working…"), palette::dim())],
+            vec![Span::styled(String::from("ai is working…"), palette::dim())],
         );
     }
     (
@@ -422,6 +423,43 @@ fn step_state<'a>(
         row_dim2,
         vec![Span::styled(String::from("queued"), palette::dim())],
     )
+}
+
+fn step_name(kind: Artifact) -> &'static str {
+    match kind {
+        Artifact::Meta => "meta",
+        Artifact::Sound => "audio",
+        Artifact::Scene => "scene",
+        Artifact::Picture => "picture",
+    }
+}
+
+pub(crate) fn artifact_file_label(kind: Artifact, file: &ArtifactFile) -> String {
+    match file_extension(file.name()) {
+        Some(extension) => format!("{}.{}", step_name(kind), extension),
+        None => String::from(step_name(kind)),
+    }
+}
+
+fn file_extension(filename: &str) -> Option<&str> {
+    filename
+        .rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .filter(|extension| !extension.is_empty())
+}
+
+fn label_gap(label: &str) -> usize {
+    STEP_LABEL_COL_CHARS
+        .saturating_sub(label.chars().count())
+        .max(2)
+}
+
+fn pad_left(text: &str, width: usize) -> String {
+    let len = text.chars().count();
+    if len >= width {
+        return String::from(text);
+    }
+    format!("{}{}", " ".repeat(width - len), text)
 }
 
 fn detail_pane(draft: &CardDraft, width: usize) -> Vec<Line<'_>> {
@@ -447,35 +485,45 @@ fn meta_preview<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -> V
             Span::styled(text, palette::dim2()),
         ])
     };
-    let value = |text: String| {
-        Line::from(vec![
-            Span::styled(indent, palette::base()),
-            Span::styled(text, palette::base()),
-        ])
-    };
     lines.push(label("target"));
-    lines.push(value(meta.target_sentence().to_string()));
+    lines.extend(value_lines(
+        meta.target_sentence(),
+        indent,
+        width,
+        palette::base(),
+    ));
     lines.push(Line::from(""));
     lines.push(label("source"));
-    lines.push(highlight_line(meta, indent));
+    lines.extend(highlight_lines(meta, indent, width));
     lines.push(Line::from(""));
     lines.push(label("hint"));
-    lines.push(value(meta.source_hint().to_string()));
+    lines.extend(value_lines(
+        meta.source_hint(),
+        indent,
+        width,
+        palette::base(),
+    ));
     lines.push(Line::from(""));
     lines.push(label(
         "meaning · pronunciation · transcription · importance",
     ));
-    lines.push(value(format!(
-        "{} · /{}/ · /{}/ · {}/10",
-        meta.meaning(),
-        meta.pronunciation(),
-        meta.transcription(),
-        meta.importance(),
-    )));
+    lines.extend(value_lines(
+        format!(
+            "{} · /{}/ · /{}/ · {}/10",
+            meta.meaning(),
+            meta.pronunciation(),
+            meta.transcription(),
+            meta.importance(),
+        )
+        .as_str(),
+        indent,
+        width,
+        palette::base(),
+    ));
     if !meta.source_context().trim().is_empty() {
         lines.push(Line::from(""));
         lines.push(label("context"));
-        let indent_w = display_width(indent);
+        let indent_w = super::common::display_width(indent);
         let inner = width.saturating_sub(indent_w).max(20);
         for line in to_ratatui(&parse_markdown(meta.source_context())) {
             for wrapped in softwrap_line(line, inner) {
@@ -486,6 +534,25 @@ fn meta_preview<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -> V
     lines
 }
 
+fn value_lines<'a>(
+    text: &str,
+    indent: &'static str,
+    width: usize,
+    style: ratatui::style::Style,
+) -> Vec<Line<'a>> {
+    let indent_w = super::common::display_width(indent);
+    let inner = width.saturating_sub(indent_w).max(20);
+    super::common::wrap_words(text, inner, inner)
+        .into_iter()
+        .map(|chunk| {
+            Line::from(vec![
+                Span::styled(indent, palette::base()),
+                Span::styled(chunk, style),
+            ])
+        })
+        .collect()
+}
+
 /// Soft-wrap one markdown-rendered line into chunks that each fit `width`
 /// display columns. Preserves per-span style + modifiers across wrap points.
 /// CJK code points count as two cells, others as one — close enough to the
@@ -494,48 +561,51 @@ fn softwrap_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
     if width == 0 {
         return vec![line];
     }
-    let total: usize = line
-        .spans
-        .iter()
-        .map(|span| display_width(span.content.as_ref()))
-        .sum();
-    if total <= width {
-        return vec![line];
-    }
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut current_spans: Vec<Span<'static>> = Vec::new();
     let mut current_width = 0usize;
-    let mut current_text = String::new();
-    let mut current_style = line
-        .spans
-        .first()
-        .map(|span| span.style)
-        .unwrap_or_default();
-    let flush_span =
-        |spans: &mut Vec<Span<'static>>, text: &mut String, style: ratatui::style::Style| {
-            if !text.is_empty() {
-                spans.push(Span::styled(std::mem::take(text), style));
-            }
-        };
+    let mut pending_space: Option<ratatui::style::Style> = None;
     for span in line.spans {
-        if span.style != current_style {
-            flush_span(&mut current_spans, &mut current_text, current_style);
-            current_style = span.style;
-        }
-        for ch in span.content.chars() {
-            let cw = char_width(ch);
-            if current_width + cw > width && (current_width > 0 || !current_text.is_empty()) {
-                flush_span(&mut current_spans, &mut current_text, current_style);
-                if !current_spans.is_empty() {
-                    out.push(Line::from(std::mem::take(&mut current_spans)));
+        for (token, whitespace) in styled_tokens(span.content.as_ref()) {
+            if whitespace {
+                if current_width > 0 {
+                    pending_space = Some(span.style);
                 }
-                current_width = 0;
+                continue;
             }
-            current_text.push(ch);
-            current_width += cw;
+            let token_width = super::common::display_width(token.as_str());
+            let gap = usize::from(current_width > 0 && pending_space.is_some());
+            if current_width + gap + token_width <= width {
+                if let Some(style) = pending_space.take() {
+                    current_spans.push(Span::styled(String::from(" "), style));
+                    current_width += 1;
+                }
+                current_spans.push(Span::styled(token, span.style));
+                current_width += token_width;
+                continue;
+            }
+            if !current_spans.is_empty() {
+                out.push(Line::from(std::mem::take(&mut current_spans)));
+                current_width = 0;
+                pending_space = None;
+            }
+            if token_width <= width {
+                current_spans.push(Span::styled(token, span.style));
+                current_width = token_width;
+                continue;
+            }
+            let parts = split_token(token.as_str(), width);
+            let last = parts.len().saturating_sub(1);
+            for (index, part) in parts.into_iter().enumerate() {
+                current_spans.push(Span::styled(part.clone(), span.style));
+                current_width = super::common::display_width(part.as_str());
+                if index < last {
+                    out.push(Line::from(std::mem::take(&mut current_spans)));
+                    current_width = 0;
+                }
+            }
         }
     }
-    flush_span(&mut current_spans, &mut current_text, current_style);
     if !current_spans.is_empty() {
         out.push(Line::from(current_spans));
     }
@@ -545,33 +615,48 @@ fn softwrap_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
     out
 }
 
-/// Display width of one string in terminal cells — sum of `char_width` per
-/// codepoint.
-fn display_width(text: &str) -> usize {
-    text.chars().map(char_width).sum()
+fn styled_tokens(text: &str) -> Vec<(String, bool)> {
+    let mut tokens: Vec<(String, bool)> = Vec::new();
+    let mut current = String::new();
+    let mut current_space: Option<bool> = None;
+    for ch in text.chars() {
+        let space = ch.is_whitespace();
+        if current_space == Some(space) {
+            current.push(ch);
+            continue;
+        }
+        if !current.is_empty() {
+            tokens.push((std::mem::take(&mut current), current_space.unwrap_or(false)));
+        }
+        current.push(ch);
+        current_space = Some(space);
+    }
+    if !current.is_empty() {
+        tokens.push((current, current_space.unwrap_or(false)));
+    }
+    tokens
 }
 
-/// Display width of one codepoint in terminal cells. Two cells for the CJK
-/// ranges + fullwidth forms, one cell for everything else.
-fn char_width(ch: char) -> usize {
-    let code = ch as u32;
-    let wide = matches!(
-        code,
-        0x1100..=0x115F
-            | 0x2E80..=0x303E
-            | 0x3041..=0x33FF
-            | 0x3400..=0x4DBF
-            | 0x4E00..=0x9FFF
-            | 0xA000..=0xA4CF
-            | 0xAC00..=0xD7A3
-            | 0xF900..=0xFAFF
-            | 0xFE30..=0xFE4F
-            | 0xFF00..=0xFF60
-            | 0xFFE0..=0xFFE6
-            | 0x20000..=0x2FFFD
-            | 0x30000..=0x3FFFD
-    );
-    if wide { 2 } else { 1 }
+fn split_token(text: &str, width: usize) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    for ch in text.chars() {
+        let char_width = super::common::char_width(ch);
+        if current_width > 0 && current_width + char_width > width {
+            parts.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += char_width;
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    if parts.is_empty() {
+        parts.push(String::new());
+    }
+    parts
 }
 
 /// Repaint one markdown-rendered line with the preview palette and prepend the
@@ -588,33 +673,33 @@ fn restyle_with_indent(line: Line<'static>, indent: &'static str) -> Line<'stati
     Line::from(spans)
 }
 
-fn highlight_line<'a>(meta: &'a CardMeta, indent: &'static str) -> Line<'a> {
+fn highlight_lines<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -> Vec<Line<'a>> {
     let sentence = meta.source_sentence();
     let highlight = meta.source_highlight();
     if highlight.is_empty() {
-        return Line::from(vec![
-            Span::styled(indent, palette::base()),
-            Span::styled(sentence.to_string(), palette::base()),
-        ]);
+        return value_lines(sentence, indent, width, palette::base());
     }
-    if let Some(pos) = sentence.find(highlight) {
+    let line = if let Some(pos) = sentence.find(highlight) {
         let head = &sentence[..pos];
         let middle = &sentence[pos..pos + highlight.len()];
         let tail = &sentence[pos + highlight.len()..];
-        return Line::from(vec![
-            Span::styled(indent, palette::base()),
+        Line::from(vec![
             Span::styled(head.to_string(), palette::base()),
             Span::styled(
                 middle.to_string(),
                 palette::base().add_modifier(Modifier::BOLD),
             ),
             Span::styled(tail.to_string(), palette::base()),
-        ]);
-    }
-    Line::from(vec![
-        Span::styled(indent, palette::base()),
-        Span::styled(sentence.to_string(), palette::base()),
-    ])
+        ])
+    } else {
+        Line::from(vec![Span::styled(sentence.to_string(), palette::base())])
+    };
+    let indent_w = super::common::display_width(indent);
+    let inner = width.saturating_sub(indent_w).max(20);
+    softwrap_line(line, inner)
+        .into_iter()
+        .map(|line| restyle_with_indent(line, indent))
+        .collect()
 }
 
 fn all_finished(app: &App) -> bool {
@@ -641,9 +726,16 @@ pub(crate) fn focused_card_range(app: &App, width: usize) -> Option<(u16, u16)> 
         let expanded = idx == app.card_selected() && app.card_expanded();
         let (rows, trailing) = card_layout(draft, running_for_card, expanded, width);
         if idx == app.card_selected() {
+            let focus_rows = if expanded {
+                head_rows(draft, width)
+                    .saturating_add(step_rows_for(draft, running_for_card).len())
+                    .max(1)
+            } else {
+                rows
+            };
             return Some((
                 u16::try_from(offset).unwrap_or(u16::MAX),
-                u16::try_from(rows).unwrap_or(u16::MAX),
+                u16::try_from(focus_rows).unwrap_or(u16::MAX),
             ));
         }
         offset = offset.saturating_add(rows + trailing);
@@ -719,24 +811,28 @@ fn card_layout(
 /// card. Verbatim mirror of `detail_pane` / `meta_preview` so callers can keep
 /// scroll offsets and click hit-tests aligned with the rendered output.
 pub(crate) fn detail_pane_height(draft: &CardDraft, width: usize) -> usize {
-    let mut h = 1;
     let Some(meta) = draft.meta() else {
-        return h + 1;
+        return 2;
     };
-    h += 2;
-    h += 1 + 2;
-    h += 1 + 2;
-    h += 1 + 2;
-    if !meta.source_context().trim().is_empty() {
-        h += 1 + 1;
-        let indent_w = display_width("      ");
-        let inner = width.saturating_sub(indent_w).max(20);
-        h += to_ratatui(&parse_markdown(meta.source_context()))
-            .into_iter()
-            .map(|line| softwrap_line(line, inner).len())
-            .sum::<usize>();
+    1 + meta_preview(meta, "      ", width).len()
+}
+
+/// Return one card's known Gemini cost across generated artifacts.
+pub(crate) fn card_cost(draft: &CardDraft) -> Option<GenerationCost> {
+    draft.artifacts().cost()
+}
+
+/// Return the known Gemini cost across every card in the current batch.
+pub(crate) fn total_cost(app: &App) -> Option<GenerationCost> {
+    let cost = app
+        .cards()
+        .iter()
+        .filter_map(card_cost)
+        .sum::<GenerationCost>();
+    if cost.nanos() == 0 {
+        return None;
     }
-    h
+    Some(cost)
 }
 
 fn footer(app: &App, width: u16) -> Paragraph<'static> {
@@ -759,10 +855,18 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         ));
         left.push(Span::styled(" gave up", palette::dim()));
     }
+    if let Some(cost) = total_cost(app) {
+        left.push(super::common::status_sep());
+        left.push(Span::styled(
+            cost.dollars_cents(),
+            palette::base().add_modifier(Modifier::BOLD),
+        ));
+    }
     left.push(super::common::status_sep());
     left.push(Span::styled(elapsed(app), palette::dim2()));
+    let controls = DisclosureControls::new(app.card_expanded());
     let hints = vec![
-        super::common::FooterHint::primary("Enter", "expand"),
+        controls.primary_toggle(),
         super::common::FooterHint::secondary("R", "change"),
         super::common::FooterHint::secondary("Ctrl+G", "regenerate"),
         super::common::FooterHint::ghost("↑↓", "nav"),
@@ -776,4 +880,29 @@ fn elapsed(app: &App) -> String {
     let minutes = seconds / 60;
     let remainder = seconds % 60;
     format!("{minutes:02}:{remainder:02}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plain(line: &Line<'static>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn markdown_softwrap_moves_whole_words_to_the_next_row() {
+        let rows = softwrap_line(Line::from("alpha beta gamma"), 10)
+            .iter()
+            .map(plain)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            vec![String::from("alpha beta"), String::from("gamma")],
+            "markdown preview wrap must move whole words instead of splitting them"
+        );
+    }
 }

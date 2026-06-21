@@ -36,16 +36,16 @@ BOT_SAT="${BOT_SAT:-0.0}"             # eq saturation of the list
 # Caption overlaid on the blacked-out area at the end (same VHS JetBrains Mono as the TUI).
 CAPTION="${CAPTION:-live/caption.png}" # tight "↑ click and open" still; empty to disable
 CAP_X="${CAP_X:-175}"                   # caption left edge in RAW (2x) pixels
-CAP_Y="${CAP_Y:-295}"                  # caption top edge in RAW (2x) pixels
+CAP_Y="${CAP_Y:-350}"                  # caption top edge in RAW (2x) pixels
 # Per-step subtitle badge (6th conf field on a window section): centered horizontally
 # at STEP_CAP_Y, sits in the empty lower area without covering the TUI headers.
 STEP_CAP_Y="${STEP_CAP_Y:-1460}"       # default step caption top edge in RAW (2x) pixels
 FADE_S="${FADE_S:-0.3}"                # step caption fade in/out duration, output seconds
 # Output knobs. The raw is recorded at 2x for crisp text; the gif is supersampled
 # down to SCALE_W with lanczos (sharp small text), the hi-res original is kept full size.
-COLORS="${COLORS:-64}"             # gif palette size — higher = smoother tone, bigger file
+COLORS="${COLORS:-256}"            # gif palette size — higher = smoother tone, bigger file
 DITHER="${DITHER:-none}"           # gif dithering — none keeps letter edges crisp
-SCALE_W="${SCALE_W:-1000}"         # gif output width (height auto, aspect kept); 0 = native
+SCALE_W="${SCALE_W:-1200}"         # gif output width (height auto, aspect kept); 0 = native
 HIRES="${HIRES:-live/capture.hires.mp4}"  # opt-in hi-res master path (MAKE_HIRES=1); local-only, not committed
 HIRES_CRF="${HIRES_CRF:-8}"        # x264 quality for the hi-res original — lower = sharper/bigger
 # Loop-wrap fades: the gif loops, so the last finale frame would otherwise hard-cut
@@ -168,7 +168,7 @@ while IFS='|' read -r id kind a b out_s cap; do
         cp "$a" "$(printf '%s/%05d.png' "$SEQ" "$seq_i")"; seq_i=$((seq_i+1))
       done
     fi
-    ffmpeg -nostdin -y -loglevel error -loop 1 -t "$fs" -i "$a" -loop 1 -t "$fs" -i "$tmp/endc.png" \
+    ffmpeg -nostdin -y -loglevel error -loop 1 -t "$fs" -i "$a" -loop 1 -t "$fs" -i "$tmp/end.png" \
       -filter_complex "[0:v]fps=$FPS,format=rgb24[x];[1:v]fps=$FPS,format=rgb24[y];[x][y]xfade=transition=fade:duration=${fs}:offset=0,fps=$FPS" \
       "$tmp/x-%04d.png"
     xframes=()

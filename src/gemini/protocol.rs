@@ -136,8 +136,21 @@ impl SafetySetting {
 pub(super) struct Response {
     #[serde(default)]
     pub(super) candidates: Vec<Candidate>,
+    #[serde(rename = "usageMetadata")]
+    pub(super) usage_metadata: Option<UsageMetadata>,
     #[serde(rename = "promptFeedback")]
     prompt_feedback: Option<PromptFeedback>,
+}
+
+/// Token usage returned by one Gemini response.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+pub(super) struct UsageMetadata {
+    #[serde(rename = "promptTokenCount", default)]
+    pub(super) prompt_token_count: u64,
+    #[serde(rename = "candidatesTokenCount", default)]
+    pub(super) candidates_token_count: u64,
+    #[serde(rename = "totalTokenCount", default)]
+    pub(super) total_token_count: u64,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -48,7 +48,7 @@ fn seeded() -> App {
 }
 
 #[test]
-fn modal_renders_prompt_dashes_textarea_and_send_cancel_footer() {
+fn modal_renders_placeholder_dashes_and_send_cancel_footer() {
     let app = seeded()
         .with_modal(ModalKind::ChangeSomething)
         .typed('#')
@@ -63,11 +63,23 @@ fn modal_renders_prompt_dashes_textarea_and_send_cancel_footer() {
     let rendered = flat(&app);
     assert!(
         rendered.contains("what meanings did we miss?")
-            && rendered.contains("domain, slang")
+            && !rendered.contains("write the missing meaning however you want")
             && rendered.contains("#2 - verb")
             && rendered.contains("[Esc] cancel")
             && rendered.contains("[Enter] send"),
-        "add more modal must render its prompt, the typed buffer, and send/cancel footer"
+        "add more modal must render typed input and send/cancel footer without helper prose"
+    );
+}
+
+#[test]
+fn empty_modal_renders_the_input_placeholder() {
+    let app = seeded().with_modal(ModalKind::ChangeSomething);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("what meanings did we miss?")
+            && rendered.contains("write the missing meaning however you want")
+            && !rendered.contains("domain, slang"),
+        "empty add more modal must show only the placeholder inside the input: {rendered}"
     );
 }
 
@@ -92,20 +104,23 @@ fn submit_on_modal_runs_bulk_correction_and_keeps_modal_until_result() {
 }
 
 #[test]
-fn bulk_correction_loader_keeps_the_add_more_modal_background() {
+fn bulk_correction_loader_hides_the_add_more_modal_body() {
     let app = seeded()
         .with_modal(ModalKind::ChangeSomething)
         .typed('#')
         .typed('2');
     let (after, side) = transit(app, AppEvent::Submit);
     let loading = after.busy_started(BusyKind::BulkCorrection);
-    assert_eq!(
-        (loading.modal(), side),
-        (
-            Some(ModalKind::ChangeSomething),
-            Side::RunBulkCorrection(String::from("#2")),
-        ),
-        "bulk-correction loader must not erase the modal underneath it"
+    let rendered = flat(&loading);
+    assert!(
+        loading.modal() == Some(ModalKind::ChangeSomething)
+            && side == Side::RunBulkCorrection(String::from("#2"))
+            && rendered.contains("ai is working")
+            && rendered.contains("adding missing meanings")
+            && !rendered.contains("what meanings did we miss?")
+            && !rendered.contains("write the missing meaning however you want")
+            && !rendered.contains("#2"),
+        "bulk-correction loader must hide the modal body while preserving the pending state"
     );
 }
 

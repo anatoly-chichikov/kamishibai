@@ -197,12 +197,12 @@ mod tests {
         assert_eq!(
             (
                 mouse_pointer_at(&app, terminal(), 9, 4),
+                mouse_pointer_at(&app, terminal(), 10, 4),
+                mouse_pointer_at(&app, terminal(), 18, 4),
                 mouse_pointer_at(&app, terminal(), 19, 4),
                 mouse_pointer_at(&app, terminal(), 33, 4),
-                mouse_pointer_at(&app, terminal(), 34, 4),
-                mouse_pointer_at(&app, terminal(), 37, 4),
                 mouse_pointer_at(&app, terminal(), 7, 4),
-                mouse_pointer_at(&app, terminal(), 19, 3),
+                mouse_pointer_at(&app, terminal(), 10, 3),
             ),
             (
                 MousePointer::Arrow,

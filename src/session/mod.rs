@@ -3,6 +3,7 @@
 mod bridge;
 mod cache;
 mod candidate;
+mod cost;
 mod detection;
 mod draft;
 mod engine;
@@ -15,6 +16,7 @@ pub use bridge::{drafts_from_document, from_entry, to_document, to_entry};
 pub(crate) use cache::CandidateRecord;
 pub use cache::{CachedUnderstanding, CardMetaCache};
 pub use candidate::{RawInputBatch, Sense, WordCandidate};
+pub use cost::{CostRecord, GenerationCost};
 pub use detection::{LearningDetection, LearningGuess, ScriptDetection};
 pub use draft::{
     Artifact, ArtifactFile, ArtifactSlot, AttemptTally, CardArtifacts, CardDraft, CardMeta,

@@ -152,9 +152,9 @@ fn fixture_jpeg() -> PathBuf {
 
 /// Seed everything but the meta (which `new --build` wrote) into one cell.
 fn seed_artifacts(cell: &Path) {
-    fs::write(cell.join("voice.wav"), b"RIFFxxxxWAVE").expect("seed voice");
+    fs::write(cell.join("audio.wav"), b"RIFFxxxxWAVE").expect("seed voice");
     fs::write(cell.join("scene.json"), b"{}").expect("seed scene");
-    fs::copy(fixture_jpeg(), cell.join("illustration.jpg")).expect("seed illustration");
+    fs::copy(fixture_jpeg(), cell.join("picture.jpg")).expect("seed picture");
 }
 
 /// Poll `status --json` until its `phase` field satisfies the predicate,
@@ -250,16 +250,24 @@ fn failing_gemini() -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-/// Read the recorded worker pid out of one session's file.
+/// Wait for the detached worker to claim one session and record its pid.
 #[cfg(unix)]
 fn worker_pid(cache: &Path, id: &str) -> i64 {
     let path = cache.join("sessions").join(id).join("session.json");
-    let text = fs::read_to_string(&path).expect("the session file must exist");
-    let record: serde_json::Value =
-        serde_json::from_str(text.as_str()).expect("the session file must be valid JSON");
-    record["worker"]["pid"]
-        .as_i64()
-        .expect("the session must record a worker pid")
+    let started = Instant::now();
+    loop {
+        let text = fs::read_to_string(&path).expect("the session file must exist");
+        let record: serde_json::Value =
+            serde_json::from_str(text.as_str()).expect("the session file must be valid JSON");
+        if let Some(pid) = record["worker"]["pid"].as_i64() {
+            return pid;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the session must record a worker pid"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
 
 /// Seed a session whose detached worker provably stays alive: every artifact
@@ -270,7 +278,7 @@ fn live_worker_session(cache: &Path, out: &Path, id: &str, gemini: &str) {
     understood_session(cache, out, id, CARDS_JSON);
     let cell = first_card_dir(cache);
     fs::write(cell.join("scene.json"), b"{}").expect("seed scene");
-    fs::copy(fixture_jpeg(), cell.join("illustration.jpg")).expect("seed illustration");
+    fs::copy(fixture_jpeg(), cell.join("picture.jpg")).expect("seed picture");
     cli_at(cache, gemini)
         .args(["generate", id])
         .assert()

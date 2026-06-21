@@ -13,9 +13,11 @@ use super::screen::{Screen, WelcomeFocus, WelcomeStage};
 use super::screens::banner;
 use super::screens::common::{GUTTER, HEADER_GAP, TOP_MARGIN, language_chip};
 use super::screens::welcome;
-use super::screens::your_cards::{detail_pane_height, head_rows_for, step_rows_for};
+use super::screens::your_cards::{
+    artifact_file_label, detail_pane_height, head_rows_for, step_rows_for,
+};
 
-const STEP_FILE_LABEL_START: u16 = 15;
+const STEP_FILE_LABEL_START: u16 = 6;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct LinkRegion {
@@ -146,9 +148,10 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
             let Some(file) = slot.file() else {
                 continue;
             };
+            let label = artifact_file_label(*artifact, file);
             let label_start = body_x + STEP_FILE_LABEL_START;
             let label_end = label_start
-                .saturating_add(u16::try_from(file.name().chars().count()).unwrap_or(u16::MAX));
+                .saturating_add(u16::try_from(label.chars().count()).unwrap_or(u16::MAX));
             links.push(LinkRegion {
                 row: screen_row,
                 hit_start: label_start,
