@@ -117,8 +117,7 @@ it are produced by two VHS tapes in `docs/tui-states/`:
 
 The README gif itself is then assembled deterministically by `encode.sh` from `timings.conf`
 (the single source of truth for section windows/durations); it emits `timings.timeline.txt`
-and splices the caption label PNGs (`live/cap-type.png`, `live/cap-pick.png`,
-`live/cap-generate.png`, `live/caption.png`). Only `live/capture.gif` is committed; pass
+and splices the finale caption PNG (`live/caption.png`). Only `live/capture.gif` is committed; pass
 `MAKE_HIRES=1` to `encode.sh` if you want a local-only hi-res `capture.hires.mp4` master. The
 generation keyboard contract is `Ctrl+G`.
 
