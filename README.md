@@ -78,7 +78,7 @@ kamishibai generate --wait                   # generate + publish, blocking unti
 kamishibai result                            # the finished cards + deck.apkg / deck.pdf
 ```
 
-Set your language and Gemini key once — through the TUI's welcome screen or `kamishibai config`. Building an agent? [llms.json](llms.json) is the full machine contract.
+Set your language and Gemini key once — through the TUI's welcome screen or `kamishibai config`. Building an agent? [llms.txt](llms.txt) is the full console contract.
 
 ## Languages
 
