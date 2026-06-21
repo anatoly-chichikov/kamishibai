@@ -91,82 +91,83 @@ Sleep 650ms
 Down
 Sleep 750ms
 Enter
-Sleep 600ms
+Sleep 800ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 600ms
+Sleep 1400ms
 Screenshot "live/09-card-open.png"
+Sleep 800ms
 Enter
-Sleep 500ms
+Sleep 700ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 120ms
+Sleep 180ms
 Ctrl+N
-Sleep 900ms
+Sleep 1200ms
 Screenshot "live/10-card-scroll-end.png"
 Sleep 600ms
 
