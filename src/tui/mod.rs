@@ -7,6 +7,7 @@
 //! The full state map lives in `docs/tui-states/state-map.md`.
 
 mod app;
+mod disclosure;
 mod event;
 mod input;
 mod links;
@@ -15,6 +16,7 @@ mod pointer;
 mod render;
 mod screen;
 mod screens;
+mod text_field;
 mod transition;
 
 pub use app::{App, BusyKind, BusyView, WelcomeView};

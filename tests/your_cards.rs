@@ -61,6 +61,10 @@ fn priced_file(name: &str, nanos: u64) -> ArtifactFile {
         .with_cost(GenerationCost::from_nanos(nanos))
 }
 
+fn cached_file(name: &str) -> ArtifactFile {
+    ArtifactFile::new(name, PathBuf::from(format!("/tmp/{name}")), "1 B", true)
+}
+
 fn priced_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded_with(priced_file("meta.json", 1_500_000)),
@@ -68,6 +72,24 @@ fn priced_artifacts() -> CardArtifacts {
         ArtifactSlot::fresh(Artifact::Picture)
             .succeeded_with(priced_file("picture.jpg", 67_300_000)),
         ArtifactSlot::fresh(Artifact::Sound).succeeded_with(priced_file("audio.wav", 10_000_000)),
+    )
+}
+
+fn partial_priced_artifacts() -> CardArtifacts {
+    CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded_with(priced_file("meta.json", 10_000_000)),
+        ArtifactSlot::fresh(Artifact::Scene),
+        ArtifactSlot::fresh(Artifact::Picture),
+        ArtifactSlot::fresh(Artifact::Sound),
+    )
+}
+
+fn cached_artifacts() -> CardArtifacts {
+    CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded_with(cached_file("meta.json")),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        ArtifactSlot::fresh(Artifact::Picture).succeeded(),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
     )
 }
 
@@ -145,11 +167,11 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
             && rendered.contains("✓ picture")
             && rendered.contains("RU → EN")
             && rendered.contains("[↑↓] nav")
-            && rendered.contains("[Enter] expand")
+            && rendered.contains("[Enter/→] toggle")
             && rendered.contains("[R] change")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[D] drop")
-            && !rendered.contains("working…")
+            && !rendered.contains("ai is working…")
             && !rendered.contains("queued"),
         "each generated card must reveal its meta sentence on the head row right after the term: {rendered}"
     );
@@ -168,13 +190,13 @@ fn your_cards_done_footer_carries_expand_change_and_regenerate_hints() {
         rendered.contains("your cards")
             && rendered.contains("all done")
             && rendered.contains("[↑↓] nav")
-            && rendered.contains("[Enter] expand")
+            && rendered.contains("[Enter/→] toggle")
             && rendered.contains("[R] change")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("new batch")
             && !rendered.contains("[D] drop")
-            && !rendered.contains("working…"),
-        "all-done footer must offer expand/change/regenerate hints and no new-batch or drop hooks: {rendered}"
+            && !rendered.contains("ai is working…"),
+        "all-done footer must offer toggle/change/regenerate hints and no new-batch or drop hooks: {rendered}"
     );
 }
 
@@ -191,6 +213,42 @@ fn your_cards_shows_card_asset_and_total_costs_when_finished() {
             && rendered.contains("$0.08")
             && !rendered.contains("total cost"),
         "finished cards must show detailed costs and a simplified total in dollars: {rendered}"
+    );
+}
+
+#[test]
+fn your_cards_footer_shows_total_cost_before_every_card_finishes() {
+    let app = seeded(vec![
+        draft("whilst", partial_priced_artifacts()),
+        draft("wreck", CardArtifacts::default()),
+    ]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("building your cards")
+            && rendered.contains("0/2 ready")
+            && rendered.contains("$0.01")
+            && !rendered.contains("all done"),
+        "generation footer must increment the dollar total as soon as fresh artifact costs arrive: {rendered}"
+    );
+}
+
+#[test]
+fn your_cards_footer_hides_total_cost_until_money_is_spent() {
+    let app = seeded(vec![draft("whilst", cached_artifacts())]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("your cards") && !rendered.contains("$0.00"),
+        "zero-cost or fully cached cards must not render a footer dollar total: {rendered}"
+    );
+}
+
+#[test]
+fn your_cards_marks_cached_artifacts_next_to_the_file_metadata() {
+    let app = seeded(vec![draft("whilst", cached_artifacts())]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("meta.json          1 B  cached"),
+        "cached artifact rows must say cached in the same dim metadata slot as prices: {rendered}"
     );
 }
 
@@ -255,22 +313,26 @@ fn failure_banner_appears_when_any_card_exhausts_its_retries() {
 }
 
 #[test]
-fn arrows_and_enter_navigate_and_toggle_expansion_of_the_focused_card() {
+fn vertical_arrows_navigate_and_horizontal_arrows_or_enter_toggle_the_focused_card() {
     let start = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("at the end", ready_artifacts()),
     ]);
     let after_down = transit(start.clone(), AppEvent::NavNext).0;
-    let expanded = transit(after_down.clone(), AppEvent::KeyEnter).0;
+    let expanded = transit(after_down.clone(), AppEvent::CursorRight).0;
+    let closed = transit(expanded.clone(), AppEvent::CursorLeft).0;
+    let entered = transit(after_down.clone(), AppEvent::KeyEnter).0;
     assert_eq!(
         (
             start.card_selected(),
             after_down.card_selected(),
             start.card_expanded(),
             expanded.card_expanded(),
+            closed.card_expanded(),
+            entered.card_expanded(),
         ),
-        (0, 1, false, true),
-        "arrows must move the cursor and Enter must toggle expansion on the focused card"
+        (0, 1, false, true, false, true),
+        "vertical arrows must move the cursor while horizontal arrows and Enter toggle the focused card"
     );
 }
 

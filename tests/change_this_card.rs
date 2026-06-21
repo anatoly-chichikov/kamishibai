@@ -97,6 +97,7 @@ fn request_change_on_your_cards_opens_per_card_modal() {
     assert!(
         opened.modal() == Some(ModalKind::ChangeThisCard)
             && rendered.contains("make this sentence different")
+            && rendered.contains("write what to change, any way you like")
             && rendered.contains("[Enter] send")
             && !rendered.contains("tell me what to change"),
         "R on Your cards must open a simple per-card rewrite modal"
@@ -136,9 +137,10 @@ fn card_correction_loader_hides_the_change_card_modal_body() {
     assert!(
         loading.modal() == Some(ModalKind::ChangeThisCard)
             && side == Side::RunCardCorrection(String::from("verb"))
-            && rendered.contains("working")
+            && rendered.contains("ai is working")
             && rendered.contains("updating this card")
             && !rendered.contains("make this sentence different")
+            && !rendered.contains("write what to change, any way you like")
             && !rendered.contains("tell me what to change")
             && !rendered.contains("verb"),
         "card-correction loader must hide the modal body while preserving the pending state"

@@ -105,31 +105,68 @@ pub fn header(
     width: u16,
 ) -> Paragraph<'static> {
     let title = String::from(title);
-    let hint = String::from(hint);
+    let mut hint = String::from(hint);
     let title_block = format!(" {title} ");
     let title_visible = title_block.chars().count();
-    let hint_visible = hint.chars().count();
-    let hint_lead = if hint.is_empty() { 0 } else { 2 };
-    let chip = lang_chip.unwrap_or_default();
-    let chip_visible: usize = chip.iter().map(|span| span.content.chars().count()).sum();
-    let chip_lead = if chip.is_empty() { 0 } else { 2 };
-    let used = title_visible + hint_lead + hint_visible + chip_visible + chip_lead;
-    let gap = (width as usize).saturating_sub(used);
+    let mut hint_lead = if hint.is_empty() { 0 } else { 2 };
+    let mut chip = lang_chip.unwrap_or_default();
+    let mut chip_visible = spans_width(&chip);
+    let mut chip_lead = if chip.is_empty() { 0 } else { 2 };
+    let mut used = header_width(title_visible, hint_lead, &hint, chip_visible, chip_lead);
+    let width = usize::from(width);
+    if used > width && !chip.is_empty() {
+        chip = compact_chip(chip);
+        chip_visible = spans_width(&chip);
+        hint_lead = if hint.is_empty() { 0 } else { 1 };
+        chip_lead = 1;
+        used = header_width(title_visible, hint_lead, &hint, chip_visible, chip_lead);
+    }
+    if used > width && !hint.is_empty() {
+        let reserved = title_visible + hint_lead + chip_visible + chip_lead;
+        hint = take_chars(&hint, width.saturating_sub(reserved));
+        hint_lead = if hint.is_empty() { 0 } else { hint_lead };
+        used = header_width(title_visible, hint_lead, &hint, chip_visible, chip_lead);
+    }
+    let gap = width.saturating_sub(used);
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::styled(
         title_block,
         palette::invert().add_modifier(Modifier::BOLD),
     ));
     if !hint.is_empty() {
-        spans.push(Span::styled("  ", palette::base()));
+        spans.push(Span::styled(" ".repeat(hint_lead), palette::base()));
         spans.push(Span::styled(hint, palette::dim()));
     }
     spans.push(Span::styled(" ".repeat(gap), palette::base()));
     if !chip.is_empty() {
-        spans.push(Span::styled("  ", palette::base()));
+        spans.push(Span::styled(" ".repeat(chip_lead), palette::base()));
         spans.extend(chip);
     }
     Paragraph::new(Line::from(spans)).style(palette::base())
+}
+
+fn header_width(
+    title_visible: usize,
+    hint_lead: usize,
+    hint: &str,
+    chip_visible: usize,
+    chip_lead: usize,
+) -> usize {
+    title_visible + hint_lead + hint.chars().count() + chip_visible + chip_lead
+}
+
+fn spans_width(spans: &[Span<'static>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
+}
+
+fn compact_chip(chip: Vec<Span<'static>>) -> Vec<Span<'static>> {
+    chip.into_iter()
+        .map(|span| Span::styled(span.content.replace(" → ", "→"), span.style))
+        .collect()
+}
+
+fn take_chars(text: &str, limit: usize) -> String {
+    text.chars().take(limit).collect()
 }
 
 /// Build the language chip — bold bright `support → target`.
@@ -541,7 +578,7 @@ mod tests {
     fn crowded_hints() -> Vec<FooterHint> {
         vec![
             FooterHint::primary("Ctrl+G", "generate"),
-            FooterHint::secondary("Enter", "pick"),
+            FooterHint::secondary("Enter/→", "toggle"),
             FooterHint::secondary("D", "drop"),
             FooterHint::ghost("↑↓", "nav"),
             quit_hint(false),

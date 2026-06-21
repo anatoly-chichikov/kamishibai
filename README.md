@@ -69,6 +69,15 @@ Set your language and Gemini key once — through the TUI's welcome screen or `k
 
 Ten languages:
 
-`en` English · `zh` Chinese · `es` Spanish · `ja` Japanese · `fr` French · `de` German · `ru` Russian · `it` Italian · `pt` Portuguese · `el` Greek
+- `en` English
+- `zh` Chinese
+- `es` Spanish
+- `ja` Japanese
+- `fr` French
+- `de` German
+- `ru` Russian
+- `it` Italian
+- `pt` Portuguese
+- `el` Greek
 
-You pick your own language once — that's what the card labels are in. The language you're learning is detected from the words you type, so it changes from batch to batch: paste French words, you get a French deck; Japanese words, a Japanese one. All ten work either way, each with native-speaker voice.
+Choose your language once. The app uses it for card labels, then detects what you're learning from each batch: paste French words for a French deck, Japanese words for a Japanese deck.

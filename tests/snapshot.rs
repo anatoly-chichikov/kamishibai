@@ -111,7 +111,10 @@ fn pick_my_language_modal_snapshot_locks_picker_layout() {
 fn header_hint_sits_left_of_language_chip_on_every_screen() {
     let pair = LanguagePair::new("en", "ru");
     let cases = [
-        (Screen::YourWords, "each line becomes one anki card"),
+        (
+            Screen::YourWords,
+            "each word becomes a small learning scene",
+        ),
         (
             Screen::WhatIUnderstood,
             "quick check before i build the cards",

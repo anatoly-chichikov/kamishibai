@@ -69,7 +69,7 @@ fn add_more_modal_returns_bulk_correction_and_stays_open_while_running() {
         .understood(fake_candidates());
     let expanded = transit(start, AppEvent::KeyEnter).0;
     let add_more = transit(expanded, AppEvent::NavNext).0;
-    let (opened, _) = transit(add_more, AppEvent::KeyEnter);
+    let (opened, _) = transit(add_more, AppEvent::KeyChar(' '));
     let (running, side) = transit(
         opened.clone(),
         AppEvent::SendCorrection(String::from("#4 — глагол")),

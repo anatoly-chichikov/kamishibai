@@ -3,7 +3,7 @@ source: tests/snapshot.rs
 expression: render(&app)
 ---
                                                                                 
-     words you want to learn   each line becomes one anki card        RU → …    
+     words you want to learn  each word becomes a small learning scene  RU→…    
                                                                                 
     01                                                                          
     02                                                                          

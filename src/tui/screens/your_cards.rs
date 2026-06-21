@@ -20,6 +20,7 @@ use crate::session::{
     Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, GenerationCost,
 };
 use crate::tui::app::App;
+use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
 
 const HEADLINE_WORKING: &str = "building your cards";
@@ -363,6 +364,10 @@ fn step_state<'a>(
                 note.push(Span::styled("  ", palette::dim()));
                 note.push(Span::styled(cost.dollars(), palette::dim2()));
             }
+            if file.cached() {
+                note.push(Span::styled("  ", palette::dim()));
+                note.push(Span::styled("cached", palette::dim2()));
+            }
         }
         return (String::from("✓"), row_fg, palette::link(), note);
     }
@@ -409,7 +414,7 @@ fn step_state<'a>(
             String::from(SPINNER_FRAMES[spinner_frame]),
             row_fg,
             row_fg,
-            vec![Span::styled(String::from("working…"), palette::dim())],
+            vec![Span::styled(String::from("ai is working…"), palette::dim())],
         );
     }
     (
@@ -819,11 +824,15 @@ pub(crate) fn card_cost(draft: &CardDraft) -> Option<GenerationCost> {
 
 /// Return the known Gemini cost across every card in the current batch.
 pub(crate) fn total_cost(app: &App) -> Option<GenerationCost> {
-    let costs = app.cards().iter().filter_map(card_cost).collect::<Vec<_>>();
-    if costs.is_empty() {
+    let cost = app
+        .cards()
+        .iter()
+        .filter_map(card_cost)
+        .sum::<GenerationCost>();
+    if cost.nanos() == 0 {
         return None;
     }
-    Some(costs.into_iter().sum())
+    Some(cost)
 }
 
 fn footer(app: &App, width: u16) -> Paragraph<'static> {
@@ -846,9 +855,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         ));
         left.push(Span::styled(" gave up", palette::dim()));
     }
-    if all_finished(app)
-        && let Some(cost) = total_cost(app)
-    {
+    if let Some(cost) = total_cost(app) {
         left.push(super::common::status_sep());
         left.push(Span::styled(
             cost.dollars_cents(),
@@ -857,8 +864,9 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     }
     left.push(super::common::status_sep());
     left.push(Span::styled(elapsed(app), palette::dim2()));
+    let controls = DisclosureControls::new(app.card_expanded());
     let hints = vec![
-        super::common::FooterHint::primary("Enter", "expand"),
+        controls.primary_toggle(),
         super::common::FooterHint::secondary("R", "change"),
         super::common::FooterHint::secondary("Ctrl+G", "regenerate"),
         super::common::FooterHint::ghost("↑↓", "nav"),

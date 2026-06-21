@@ -199,7 +199,7 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
             && rendered.contains("expel")
             && rendered.contains("at the end")
             && rendered.contains("[↑↓]")
-            && rendered.contains("[Enter] pick")
+            && rendered.contains("[Enter/→] toggle")
             && rendered.contains("[Ctrl+G]")
             && rendered.contains("generate")
             && !rendered.contains("[R] change"),
@@ -265,6 +265,8 @@ fn enter_on_multi_sense_word_expands_the_sense_list() {
     let rendered = flat(&opened);
     assert!(
         opened.expanded_sense().is_some()
+            && rendered.contains("[Space] select")
+            && rendered.contains("[Ctrl+G] generate")
             && rendered.contains("✓ [фин.] Сущ. «банк»")
             && rendered.contains("[авиац.] Гл.")
             && rendered.contains("+ add more"),
@@ -342,6 +344,29 @@ fn space_toggles_the_focused_sense_and_enter_commits_the_selection() {
 }
 
 #[test]
+fn ctrl_g_from_expanded_senses_commits_selection_and_starts_generation() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let second = transit(opened, AppEvent::NavNext).0;
+    let third = transit(second, AppEvent::NavNext).0;
+    let toggled = transit(third, AppEvent::KeyChar(' ')).0;
+    let (next, side) = transit(toggled, AppEvent::Generate);
+    assert_eq!(
+        (
+            next.screen(),
+            next.expanded_sense(),
+            next.candidates()[0].selected_senses().to_vec(),
+            side,
+        ),
+        (Screen::YourCards, None, vec![0, 2], Side::StartGeneration,),
+        "Ctrl+G from an expanded sense picker must commit current choices and start generation"
+    );
+}
+
+#[test]
 fn escape_closes_the_sense_list_without_changing_selection() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
@@ -405,7 +430,7 @@ fn enter_on_single_sense_word_opens_picker_with_add_more() {
 }
 
 #[test]
-fn enter_on_add_more_opens_missing_meanings_modal() {
+fn space_on_add_more_opens_missing_meanings_modal() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
@@ -414,14 +439,14 @@ fn enter_on_add_more_opens_missing_meanings_modal() {
     let second = transit(opened, AppEvent::NavNext).0;
     let third = transit(second, AppEvent::NavNext).0;
     let add_more = transit(third, AppEvent::NavNext).0;
-    let (modal, side) = transit(add_more, AppEvent::KeyEnter);
+    let (modal, side) = transit(add_more, AppEvent::KeyChar(' '));
     let rendered = flat(&modal);
     assert!(
         modal.modal() == Some(ModalKind::ChangeSomething)
             && modal.expanded_sense().is_some()
             && side == Side::None
             && rendered.contains("what meanings did we miss?"),
-        "Enter on add more must open the missing-meanings modal without closing the picker: {rendered}"
+        "Space on add more must open the missing-meanings modal without closing the picker: {rendered}"
     );
 }
 
@@ -629,7 +654,7 @@ fn drop_selected_removes_candidate_and_make_cards_advances_to_your_cards() {
                 String::from("debuted"),
             ],
         ),
-        "flow must drop the highlighted row, then Enter must pick meanings and Ctrl+G must advance to Your Cards with StartGeneration"
+        "flow must drop the highlighted row, then Enter must toggle meanings and Ctrl+G must advance to Your Cards with StartGeneration"
     );
 }
 

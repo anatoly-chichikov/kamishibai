@@ -23,15 +23,14 @@ use crate::languages::catalog;
 use crate::tui::app::App;
 use crate::tui::palette;
 use crate::tui::screen::ModalKind;
+use crate::tui::text_field::TextField;
 
 const TEXT_MODAL_WIDTH: u16 = 64;
-const TEXT_MODAL_HEIGHT: u16 = 9;
-const SIMPLE_TEXT_MODAL_HEIGHT: u16 = 7;
+const TEXT_MODAL_HEIGHT: u16 = 7;
 const PICKER_MODAL_WIDTH: u16 = 66;
 const PICKER_MODAL_HEIGHT: u16 = 7;
 const HORIZONTAL_PADDING: u16 = 2;
-const INPUT_LINE_OFFSET: u16 = 3;
-const SIMPLE_INPUT_LINE_OFFSET: u16 = 1;
+const INPUT_LINE_OFFSET: u16 = 1;
 
 /// Draw the modal of the requested kind.
 pub fn draw(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
@@ -44,7 +43,7 @@ pub fn draw(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
 }
 
 fn draw_text_modal(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
-    let inset = centered(area, TEXT_MODAL_WIDTH, text_modal_height(kind));
+    let inset = centered(area, TEXT_MODAL_WIDTH, TEXT_MODAL_HEIGHT);
     super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
     let block = surround();
@@ -53,9 +52,9 @@ fn draw_text_modal(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
     let content = padded(inner);
     frame.render_widget(text_panel(kind, app, content.width as usize), content);
     paint_title(frame, inset, text_title(kind));
-    let buffer_width = app.modal_buffer().chars().count() as u16;
+    let buffer_width = text_field(kind, app).cursor_offset();
     let cursor_x = (content.x + buffer_width).min(content.x + content.width.saturating_sub(1));
-    let cursor_y = content.y + input_line_offset(kind);
+    let cursor_y = content.y + INPUT_LINE_OFFSET;
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
@@ -109,65 +108,31 @@ fn text_title(kind: ModalKind) -> &'static str {
     }
 }
 
-fn text_modal_height(kind: ModalKind) -> u16 {
+fn text_field<'a>(kind: ModalKind, app: &'a App) -> TextField<'a> {
+    TextField::new(app.modal_buffer(), text_placeholder(kind))
+}
+
+fn text_placeholder(kind: ModalKind) -> &'static str {
     match kind {
-        ModalKind::ChangeSomething => TEXT_MODAL_HEIGHT,
-        ModalKind::ChangeThisCard => SIMPLE_TEXT_MODAL_HEIGHT,
-        ModalKind::PickMyLanguage => PICKER_MODAL_HEIGHT,
+        ModalKind::ChangeSomething => "write the missing meaning however you want",
+        ModalKind::ChangeThisCard => "write what to change, any way you like",
+        ModalKind::PickMyLanguage => "",
     }
 }
 
-fn input_line_offset(kind: ModalKind) -> u16 {
-    match kind {
-        ModalKind::ChangeSomething => INPUT_LINE_OFFSET,
-        ModalKind::ChangeThisCard => SIMPLE_INPUT_LINE_OFFSET,
-        ModalKind::PickMyLanguage => SIMPLE_INPUT_LINE_OFFSET,
-    }
-}
-
-fn text_panel<'a>(kind: ModalKind, app: &'a App, width: usize) -> Paragraph<'a> {
-    let prompt = match kind {
-        ModalKind::ChangeSomething => format!(
-            "domain, slang, idiom, region, or rare use · {}",
-            app.candidates()
-                .get(app.selected())
-                .map(|candidate| candidate.term())
-                .unwrap_or("")
-        ),
-        ModalKind::ChangeThisCard => String::new(),
-        ModalKind::PickMyLanguage => String::new(),
-    };
-    let input = if app.modal_buffer().is_empty() {
-        Line::from("")
-    } else {
-        Line::from(Span::styled(
-            String::from(app.modal_buffer()),
-            palette::base(),
-        ))
-    };
+fn text_panel(kind: ModalKind, app: &App, width: usize) -> Paragraph<'static> {
     let dashes = "─".repeat(width);
     let mut action_spans = super::common::FooterHint::ghost("Esc", "cancel").spans();
     action_spans.push(Span::styled(String::from("    "), palette::base()));
     action_spans.extend(super::common::FooterHint::primary("Enter", "send").spans());
     let actions = Line::from(action_spans);
-    let lines = match kind {
-        ModalKind::ChangeSomething => vec![
-            Line::from(""),
-            Line::from(Span::styled(prompt, palette::dim())),
-            Line::from(""),
-            input,
-            Line::from(Span::styled(dashes, palette::rule())),
-            Line::from(""),
-            actions,
-        ],
-        ModalKind::ChangeThisCard | ModalKind::PickMyLanguage => vec![
-            Line::from(""),
-            input,
-            Line::from(Span::styled(dashes, palette::rule())),
-            Line::from(""),
-            actions,
-        ],
-    };
+    let lines = vec![
+        Line::from(""),
+        text_field(kind, app).line(),
+        Line::from(Span::styled(dashes, palette::rule())),
+        Line::from(""),
+        actions,
+    ];
     Paragraph::new(lines).style(palette::base())
 }
 

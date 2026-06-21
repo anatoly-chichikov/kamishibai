@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
     Event, KeyCode, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, MouseButton,
     MouseEventKind, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags, poll, read,
@@ -33,6 +34,9 @@ use crate::tui::{
 };
 
 const POINTER_REFRESH: Duration = Duration::from_millis(50);
+const CURSOR_COLOR_WHITE: &[u8] = b"\x1b]12;#ffffff\x07";
+const CURSOR_COLOR_RESET: &[u8] = b"\x1b]112\x07";
+const CURSOR_BLINK_ON: &[u8] = b"\x1b[?12h";
 
 /// Open the interactive TUI on a fresh app derived from saved preferences.
 pub(super) fn start() -> Result<()> {
@@ -94,6 +98,7 @@ pub(super) fn run_tui(
     let mut out = stdout();
     let enhanced = supports_keyboard_enhancement().unwrap_or(false);
     execute!(out, EnterAlternateScreen)?;
+    apply_text_cursor(&mut out);
     enable_hover_mouse_capture(&mut out);
     write_mouse_pointer(&mut out, MousePointer::Arrow);
     if enhanced {
@@ -115,9 +120,23 @@ pub(super) fn run_tui(
     }
     reset_mouse_pointer(terminal.backend_mut());
     disable_hover_mouse_capture(terminal.backend_mut());
+    reset_text_cursor(terminal.backend_mut());
     disable_raw_mode().ok();
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     outcome
+}
+
+fn apply_text_cursor<W: Write>(out: &mut W) {
+    execute!(out, SetCursorStyle::BlinkingBlock).ok();
+    let _ = out.write_all(CURSOR_BLINK_ON);
+    let _ = out.write_all(CURSOR_COLOR_WHITE);
+    let _ = out.flush();
+}
+
+fn reset_text_cursor<W: Write>(out: &mut W) {
+    let _ = out.write_all(CURSOR_COLOR_RESET);
+    execute!(out, SetCursorStyle::DefaultUserShape).ok();
+    let _ = out.flush();
 }
 
 fn enable_hover_mouse_capture<W: Write>(out: &mut W) {

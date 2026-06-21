@@ -16,6 +16,7 @@ use ratatui::widgets::Paragraph;
 use super::ScreenView;
 use crate::session::{Sense, WordCandidate};
 use crate::tui::app::App;
+use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
 
 const HEADLINE: &str = "what i understood";
@@ -598,19 +599,24 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if app.expanded_sense().is_some() {
-        let enter_label = if app.expanded_add_more_focused() {
-            "add"
+        let controls = if app.expanded_add_more_focused() {
+            DisclosureControls::new(true).with_action("add")
         } else {
-            "done"
+            DisclosureControls::new(true).with_action("select")
         };
-        hints.push(super::common::FooterHint::primary("Space", "select"));
-        hints.push(super::common::FooterHint::secondary("Enter", enter_label));
+        if let Some(hint) = controls.primary_action() {
+            hints.push(hint);
+        }
+        if count > 0 {
+            hints.push(super::common::FooterHint::secondary("Ctrl+G", "generate"));
+        }
+        hints.push(controls.secondary_toggle());
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     } else {
         if count > 0 {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
-        hints.push(super::common::FooterHint::secondary("Enter", "pick"));
+        hints.push(DisclosureControls::new(false).secondary_toggle());
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     }
