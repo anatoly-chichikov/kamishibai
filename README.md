@@ -58,7 +58,6 @@ Import the deck into Anki, and the cards look roughly like this on your phone:
 
 <p align="center">
   <img src="docs/previews/anki-card-front.jpg" alt="Anki card front preview" width="260">
-  &nbsp;&nbsp;&nbsp;&nbsp;
   <img src="docs/previews/anki-card-back.jpg" alt="Anki card back preview" width="260">
 </p>
 
