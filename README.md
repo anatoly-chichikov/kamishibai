@@ -16,7 +16,7 @@ Built for people who actually do the reps: kamishibai multiplies your effort, it
 
 - **[By hand](#run)** — the TUI walks you from raw words to a finished deck.
 - **[Headless](#console)** — a console API for scripts and agents that build decks on the fly; the contract is [llms.txt](llms.txt).
-- **[Your own JSON](#bring-your-own-json)** — you write every sentence, kamishibai adds the voice and the picture; the contract is [docs/cards-json.md](docs/cards-json.md).
+- **[Your own JSON](#bring-your-own-json)** — you write every sentence, kamishibai adds the voice and the picture; [the contract](docs/cards-json.md) covers every field.
 
 ## Why kamishibai
 
@@ -90,7 +90,7 @@ kamishibai cards.json                # review and build in the TUI
 kamishibai new --build cards.json    # or headless, as usual
 ```
 
-Decks round-trip, too: `kamishibai result --json` returns the finished cards in the same schema, ready to edit and feed back in. The per-field contract lives in [docs/cards-json.md](docs/cards-json.md).
+Decks round-trip, too: `kamishibai result --json` returns the finished cards in the same schema, ready to edit and feed back in. See [the contract](docs/cards-json.md) for what each field is and where it lands on the card.
 
 ## Languages
 
