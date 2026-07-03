@@ -2,7 +2,7 @@
 
 <img src="docs/hero/hero.jpg" alt="kamishibai hero" width="40%" align="left">
 
-You have a list of words from a language you're learning. **kamishibai** writes a sentence around each one — a context aimed at that exact word — and turns it into a card: the sentence in your language, the same sentence in the foreign one, native-speaker audio, and an illustration that makes the word stick. You memorize phrases in context, not flashcards.
+You have a list of words from a language you're learning. **kamishibai** writes a sentence around each word and turns the list into a deck where every card has that sentence in your language, the same sentence in the foreign one, native-speaker audio, and an illustration that makes the word stick. You memorize phrases, not flashcards.
 
 Drop the deck into Anki. That's it.
 
