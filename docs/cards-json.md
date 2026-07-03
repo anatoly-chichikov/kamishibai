@@ -59,6 +59,8 @@ The front asks, the back answers:
 
 The contract is strict: every field is required, unknown fields are rejected, and every text value must be non-empty.
 
+One field outranks the rest: `target.sentence`. The voice reads it, the illustration is drawn from it, and every other field describes or translates it. Write it first.
+
 | Field | What it is |
 | --- | --- |
 | `term` | The word being learned, in the exact surface form you want taught — an inflected form stays inflected. Anki lowercases it on the card back; the PDF keeps the exact form. |
@@ -71,7 +73,7 @@ The contract is strict: every field is required, unknown fields are rejected, an
 | `source.highlight` | The exact substring of `source.sentence` that corresponds to the term. Bolded on the front, so it must appear in the sentence verbatim. |
 | `source.hint` | One short line under the front sentence that points at the sense without giving the term away. |
 | `source.context` | A usage note in markdown, revealed on the back: where the word lives, where it's out of place. |
-| `target.sentence` | The example sentence in the learning language. The heart of the card: it lands on the back, the voice reads it, and the illustration is drawn from it. |
+| `target.sentence` | The example sentence in the learning language; it lands on the back of the card. |
 | `target.lang` | The learning language code. |
 
 ## House style
