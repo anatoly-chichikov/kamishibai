@@ -8,6 +8,8 @@ Drop the deck into Anki. That's it.
 
 Built for people who actually do the reps: kamishibai multiplies your effort, it doesn't replace it. The rest is discipline — sadly, that part doesn't ship in the .apkg.
 
+<sub>AI may be wrong. Please verify results.</sub>
+
 > Example Deck (EN→FR): [**PDF**](docs/samples/fr-en.pdf) · [**Anki APKG**](docs/samples/fr-en.apkg)
 
 <br clear="left">
@@ -52,8 +54,6 @@ kamishibai asks once — your language and your Gemini key, on the welcome scree
 The TUI walks you from raw words through review to finished cards, and writes the `.apkg` plus a printable PDF into `./kamishibai-out`.
 
 ![demo](docs/tui-states/live/capture.gif)
-
-> **AI may be wrong. Please verify results.**
 
 ### What You Get
 
