@@ -72,7 +72,7 @@ fn hint_panel() -> Paragraph<'static> {
 fn panel_rect(area: Rect) -> Rect {
     let width = area.width.saturating_sub(HORIZONTAL_MARGIN).max(MIN_WIDTH);
     let height = area.height.saturating_sub(VERTICAL_MARGIN).max(MIN_HEIGHT);
-    centered(area, width, height)
+    super::common::overlay_rect(area, width, height)
 }
 
 fn padded(area: Rect) -> Rect {
@@ -81,16 +81,5 @@ fn padded(area: Rect) -> Rect {
         y: area.y,
         width: area.width.saturating_sub(HORIZONTAL_PADDING * 2),
         height: area.height,
-    }
-}
-
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let actual_width = width.min(area.width);
-    let actual_height = height.min(area.height);
-    Rect {
-        x: area.x + area.width.saturating_sub(actual_width) / 2,
-        y: area.y + area.height.saturating_sub(actual_height) / 2,
-        width: actual_width,
-        height: actual_height,
     }
 }

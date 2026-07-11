@@ -180,7 +180,10 @@ not forwarded to card generation.
 ## App shell and ratatui mapping
 
 - Root widget: a single full-terminal area split vertically into
-  `header · body · footer` using `Layout::default().constraints([Length(1), Min(1), Length(1)])`.
+  `header · body · AI disclaimer · dashed divider · footer`. The lowercase
+  `ai may be wrong, please verify results` reminder sits right-aligned in a
+  fixed `DIM2` row immediately above the divider, so screen content, inputs,
+  and overlays cannot scroll or paint over it.
 - `header` always renders the language pair chip as `my → target` (`pair.label()` is
   `"{support} → {target}"`, e.g. `EN → FR`).
 - `body` renders the active screen. Modals are rendered last by drawing into a

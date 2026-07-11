@@ -43,7 +43,7 @@ pub fn draw(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
 }
 
 fn draw_text_modal(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
-    let inset = centered(area, TEXT_MODAL_WIDTH, TEXT_MODAL_HEIGHT);
+    let inset = super::common::overlay_rect(area, TEXT_MODAL_WIDTH, TEXT_MODAL_HEIGHT);
     super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
     let block = surround();
@@ -52,14 +52,17 @@ fn draw_text_modal(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
     let content = padded(inner);
     frame.render_widget(text_panel(kind, app, content.width as usize), content);
     paint_title(frame, inset, text_title(kind));
+    if content.width == 0 || content.height == 0 {
+        return;
+    }
     let buffer_width = text_field(kind, app).cursor_offset();
     let cursor_x = (content.x + buffer_width).min(content.x + content.width.saturating_sub(1));
-    let cursor_y = content.y + INPUT_LINE_OFFSET;
+    let cursor_y = content.y + INPUT_LINE_OFFSET.min(content.height.saturating_sub(1));
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
 fn draw_picker(frame: &mut Frame, area: Rect, app: &App) {
-    let inset = centered(area, PICKER_MODAL_WIDTH, PICKER_MODAL_HEIGHT);
+    let inset = super::common::overlay_rect(area, PICKER_MODAL_WIDTH, PICKER_MODAL_HEIGHT);
     super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
     let block = surround();
@@ -167,28 +170,18 @@ fn picker_panel(app: &App, _width: usize) -> Paragraph<'static> {
     Paragraph::new(lines).style(palette::base())
 }
 
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let actual_width = width.min(area.width);
-    let actual_height = height.min(area.height);
-    Rect {
-        x: area.x + area.width.saturating_sub(actual_width) / 2,
-        y: area.y + area.height.saturating_sub(actual_height) / 2,
-        width: actual_width,
-        height: actual_height,
-    }
-}
-
 /// Geometry helpers exported so the input layer can mouse-hit-test the chip
 /// row inside the picker modal.
 pub mod picker_geometry {
-    use super::{HORIZONTAL_PADDING, PICKER_MODAL_HEIGHT, PICKER_MODAL_WIDTH, centered};
+    use super::{HORIZONTAL_PADDING, PICKER_MODAL_HEIGHT, PICKER_MODAL_WIDTH};
     use crate::languages::catalog;
+    use crate::tui::screens::common::overlay_rect;
     use ratatui::layout::Rect;
 
     /// Return the chip index that landed under `(x, y)` inside `area`, or
     /// `None` if the click missed every chip.
     pub fn chip_at(area: Rect, x: u16, y: u16) -> Option<usize> {
-        let inset = centered(area, PICKER_MODAL_WIDTH, PICKER_MODAL_HEIGHT);
+        let inset = overlay_rect(area, PICKER_MODAL_WIDTH, PICKER_MODAL_HEIGHT);
         let inner_x = inset.x + 1 + HORIZONTAL_PADDING;
         let inner_y = inset.y + 1; // top border
         let chip_row = inner_y + 1; // one blank line, then chip row

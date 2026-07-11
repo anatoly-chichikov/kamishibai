@@ -10,9 +10,9 @@ use super::screens::ScreenView;
 /// Fullscreen screens go through exactly one path: pick a `&dyn ScreenView`
 /// from the active `Screen` enum variant and hand it to
 /// `screens::common::render_screen`, which owns the chrome (background,
-/// header, dashed rule, footer). Overlays (modals, busy spinner, error toast)
-/// are layered on top afterwards — they are not screens and do not
-/// participate in the chrome contract.
+/// header, AI disclaimer, divider, footer). Overlays (modals, busy
+/// spinner, error toast) are layered on top afterwards — they are not screens
+/// and do not participate in the chrome contract.
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let view: &dyn ScreenView = match app.screen() {

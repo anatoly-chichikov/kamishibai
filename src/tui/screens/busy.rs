@@ -22,7 +22,7 @@ const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
 
 /// Draw the universal blocking loader over the full terminal area.
 pub fn draw(frame: &mut Frame, area: Rect, busy: &BusyView) {
-    let inset = centered(area, WIDTH, HEIGHT);
+    let inset = super::common::overlay_rect(area, WIDTH, HEIGHT);
     super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
     let block = Block::default()
@@ -70,15 +70,4 @@ fn panel(busy: &BusyView) -> Paragraph<'static> {
 fn spinner(busy: &BusyView) -> &'static str {
     let index = (busy.elapsed().as_millis() / FRAME_MILLIS) as usize % FRAMES.len();
     FRAMES[index]
-}
-
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let actual_width = width.min(area.width);
-    let actual_height = height.min(area.height);
-    Rect {
-        x: area.x + area.width.saturating_sub(actual_width) / 2,
-        y: area.y + area.height.saturating_sub(actual_height) / 2,
-        width: actual_width,
-        height: actual_height,
-    }
 }
