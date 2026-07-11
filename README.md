@@ -8,8 +8,6 @@ Drop the deck into Anki. That's it.
 
 Built for people who actually do the reps: kamishibai multiplies your effort, it doesn't replace it. The rest is discipline — sadly, that part doesn't ship in the .apkg.
 
-<sub>AI may be wrong. Please verify results.</sub>
-
 > Example Deck (EN→FR): [**PDF**](docs/samples/fr-en.pdf) · [**Anki APKG**](docs/samples/fr-en.apkg)
 
 <br clear="left">
