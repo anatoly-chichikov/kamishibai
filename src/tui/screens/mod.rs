@@ -26,9 +26,9 @@ pub mod your_words;
 ///
 /// `tui::render` builds a `&dyn ScreenView` from the active `Screen` enum and
 /// hands it to `common::render_screen`, which is the one and only entry point
-/// for drawing the chrome (header, dashed rule, footer) and delegating to the
-/// body. `body` only receives the inner body rectangle, so a screen cannot
-/// paint over the header or status regions even if it tries.
+/// for drawing the chrome (header, AI disclaimer, divider, footer) and
+/// delegating to the body. `body` only receives the inner body rectangle, so a
+/// screen cannot paint over the header or status regions even if it tries.
 pub trait ScreenView {
     /// Title for the inverted block at the top-left of the header. Takes
     /// `app` so screens whose label switches with state (`building your cards`
@@ -47,7 +47,8 @@ pub trait ScreenView {
     /// Status bar pinned to the bottom row of the frame.
     fn footer(&self, app: &App, width: u16) -> Paragraph<'static>;
     /// Draw the body content into the inner body rectangle. The dispatcher
-    /// already painted the background, header and rule, and will paint the
-    /// footer afterwards — body code must stay inside `area`.
+    /// already painted the background and header, and will paint the AI
+    /// disclaimer, divider, and footer afterwards — body code must stay inside
+    /// `area`.
     fn body(&self, frame: &mut Frame, area: Rect, app: &App);
 }

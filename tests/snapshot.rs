@@ -4,10 +4,12 @@
 //! terminal, no Gemini calls, no background threads.
 
 use kamishibai::session::{LanguagePair, Sense, WordCandidate};
-use kamishibai::tui::{App, AppEvent, KeySource, Screen, draw, transit};
+use kamishibai::tui::{App, AppEvent, BusyKind, KeySource, ModalKind, Screen, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier};
+
+const AI_DISCLAIMER: &str = "ai may be wrong, please verify results";
 
 fn render(app: &App) -> String {
     render_sized(app, 80, 12)
@@ -30,6 +32,29 @@ fn render_sized(app: &App, width: u16, height: u16) -> String {
     buffer
 }
 
+fn has_fixed_ai_disclaimer(app: &App, width: u16, height: u16) -> bool {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("test backend must boot");
+    terminal
+        .draw(|frame| draw(frame, app))
+        .expect("draw must succeed");
+    let expected_row = height - 3;
+    let disclaimer_width =
+        u16::try_from(AI_DISCLAIMER.chars().count()).expect("disclaimer must fit in u16");
+    let gutter = if width >= disclaimer_width + 8 { 4 } else { 0 };
+    let expected_column = width - disclaimer_width - gutter;
+    let buffer = terminal.backend().buffer();
+    let visible = AI_DISCLAIMER.chars().enumerate().all(|(index, character)| {
+        let offset = u16::try_from(index).expect("disclaimer offset must fit in u16");
+        buffer[(expected_column + offset, expected_row)].symbol() == character.to_string()
+    });
+    let muted = (0..disclaimer_width).all(|offset| {
+        let cell = &buffer[(expected_column + offset, expected_row)];
+        cell.fg == Color::Rgb(0x5a, 0x59, 0x53) && cell.bg == Color::Rgb(0x0e, 0x0e, 0x10)
+    });
+    visible && muted
+}
+
 #[test]
 fn header_title_is_inverted_in_the_render_buffer() {
     let backend = TestBackend::new(96, 16);
@@ -43,6 +68,99 @@ fn header_title_is_inverted_in_the_render_buffer() {
         (cell.fg, cell.bg),
         (Color::Rgb(0x0e, 0x0e, 0x10), Color::Rgb(0xe6, 0xe3, 0xda)),
         "header title must render black ink on a cream block"
+    );
+}
+
+#[test]
+fn ai_disclaimer_stays_right_aligned_above_the_divider_on_every_screen() {
+    let width = 96;
+    let height = 16;
+    let pair = LanguagePair::new("en", "ru");
+    let apps = [
+        App::new(pair.clone()).opening_welcome(KeySource::Empty, String::new(), false),
+        App::new(pair.clone()).with_screen(Screen::YourWords),
+        App::new(pair.clone()).with_screen(Screen::WhatIUnderstood),
+        App::new(pair.clone()).with_screen(Screen::YourCards),
+        App::new(pair).with_screen(Screen::Done),
+    ];
+    let mut failures = Vec::new();
+    for app in apps {
+        if !has_fixed_ai_disclaimer(&app, width, height) {
+            failures.push(app.screen());
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "AI disclaimer must stay right-aligned in muted ink above the divider on every screen, failed on {failures:?}"
+    );
+}
+
+#[test]
+fn ai_disclaimer_remains_visible_while_overlays_are_open() {
+    let width = 96;
+    let height = 16;
+    let pair = LanguagePair::new("en", "ru");
+    let apps = [
+        App::new(pair.clone())
+            .with_screen(Screen::WhatIUnderstood)
+            .with_modal(ModalKind::ChangeSomething),
+        App::new(pair.clone()).busy_started(BusyKind::Understanding),
+        App::new(pair).error_shown("INTERNAL: boom"),
+    ];
+    let visible = apps
+        .iter()
+        .all(|app| has_fixed_ai_disclaimer(app, width, height));
+    assert!(
+        visible,
+        "AI disclaimer must remain visible while modal, busy, and error overlays are open"
+    );
+}
+
+#[test]
+fn ai_disclaimer_uses_the_full_terminal_width_when_the_copy_fits() {
+    let app = App::new(LanguagePair::new("en", "ru"));
+    assert!(
+        has_fixed_ai_disclaimer(&app, 38, 8),
+        "AI disclaimer must not be clipped by the content gutter when the terminal can fit it"
+    );
+}
+
+#[test]
+fn ai_disclaimer_leaves_the_divider_uninterrupted_below_it() {
+    let width = 96;
+    let height = 16;
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("test backend must boot");
+    let app = App::new(LanguagePair::new("en", "ru"));
+    terminal
+        .draw(|frame| draw(frame, &app))
+        .expect("draw must succeed");
+    let buffer = terminal.backend().buffer();
+    let row = height - 2;
+    let ruled = buffer[(0, row)].modifier.contains(Modifier::CROSSED_OUT)
+        && buffer[(94, row)].modifier.contains(Modifier::CROSSED_OUT);
+    assert!(
+        ruled,
+        "AI disclaimer must leave the dashed divider uninterrupted on the row below it"
+    );
+}
+
+#[test]
+fn modal_input_cursor_stays_inside_an_extremely_short_terminal() {
+    let backend = TestBackend::new(10, 2);
+    let mut terminal = Terminal::new(backend).expect("test backend must boot");
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .with_modal(ModalKind::ChangeSomething);
+    terminal
+        .draw(|frame| draw(frame, &app))
+        .expect("draw must succeed");
+    let cursor = terminal
+        .get_cursor_position()
+        .expect("cursor position must remain readable");
+    assert!(
+        cursor.x < 10 && cursor.y < 2,
+        "modal input cursor must not escape an extremely short terminal, got {cursor:?}"
     );
 }
 

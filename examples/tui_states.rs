@@ -67,7 +67,12 @@ fn run(
     let mut index = 0usize;
     let mut pending = String::new();
     let mut mouse_position: Option<(u16, u16)> = None;
+    let mut force_redraw = true;
     loop {
+        if force_redraw {
+            terminal.clear()?;
+            force_redraw = false;
+        }
         let (label, app) = &states[index];
         terminal.draw(|frame| {
             draw(frame, app);
@@ -103,6 +108,7 @@ fn run(
                             index = (index + 1) % states.len();
                         }
                         pending.clear();
+                        force_redraw = true;
                     }
                     KeyCode::Enter => pending.clear(),
                     KeyCode::Left | KeyCode::Char('p') => {
@@ -112,10 +118,12 @@ fn run(
                         } else {
                             index -= 1;
                         }
+                        force_redraw = true;
                     }
                     _ => {
                         pending.clear();
                         index = (index + 1) % states.len();
+                        force_redraw = true;
                     }
                 },
                 Event::Mouse(mouse)

@@ -11,9 +11,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::languages::catalog;
 use kamishibai::session::{LanguagePair, LearningDetection, ScriptDetection};
-use kamishibai::tui::{App, AppEvent, BusyKind, Screen, Side, draw, to_app, transit};
+use kamishibai::tui::{
+    App, AppEvent, BusyKind, Screen, Side, draw, scroll_body_width, scroll_viewport, to_app,
+    transit,
+};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::layout::Rect;
 use tempfile::tempdir;
 
 fn press(code: KeyCode) -> KeyEvent {
@@ -63,9 +67,11 @@ fn apply_side(app: App, side: Side) -> App {
 
 #[test]
 fn long_pasted_your_words_scrolls_to_the_cursor_line() {
-    let app = App::new(LanguagePair::new("en", "ru"))
-        .seeded_blob(long_blob(60))
-        .body_scroll_to_selection(7, 72);
+    let area = Rect::new(0, 0, 80, 12);
+    let app = App::new(LanguagePair::new("en", "ru")).seeded_blob(long_blob(60));
+    let viewport = scroll_viewport(&app, area);
+    let width = scroll_body_width(area);
+    let app = app.body_scroll_to_selection(viewport, width);
     let flat = flatten(&app);
     assert!(
         flat.contains("word-60") && !flat.contains("word-01"),

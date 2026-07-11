@@ -5,7 +5,7 @@
 //! tokens come from the static palette — no accent hue is allowed.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -20,20 +20,22 @@ pub const GUTTER: u16 = 4;
 pub const TOP_MARGIN: u16 = 1;
 /// Breathing room between the header and the body content.
 pub const HEADER_GAP: u16 = 1;
+const AI_DISCLAIMER: &str = "ai may be wrong, please verify results";
 
-/// Describes the rows of a fullscreen screen: top margin, header, rule lines,
-/// body, dashed status separator, status bar.
+/// Describes the rows of a fullscreen screen: header, body, AI disclaimer,
+/// divider, and status bar.
 pub struct ScreenFrame {
     pub header: Rect,
     pub body: Rect,
+    pub disclaimer: Rect,
     pub status_rule: Rect,
     pub status: Rect,
 }
 
 /// Split the available area into the common screen frame.
 ///
-/// Order top-down: top margin, header, breathing row, body, dashed rule above
-/// status, status bar pinned to the last row.
+/// Order top-down: top margin, header, breathing row, body, right-aligned AI
+/// disclaimer, divider, status bar pinned to the last row.
 pub fn frame_rects(area: Rect) -> ScreenFrame {
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -44,34 +46,55 @@ pub fn frame_rects(area: Rect) -> ScreenFrame {
             Constraint::Min(1),
             Constraint::Length(1),
             Constraint::Length(1),
+            Constraint::Length(1),
         ])
         .split(area);
     ScreenFrame {
         header: inset_horizontal(rows[1], GUTTER),
         body: inset_horizontal(rows[3], GUTTER),
-        status_rule: rows[4],
-        status: inset_horizontal(rows[5], GUTTER),
+        disclaimer: disclaimer_rect(rows[4]),
+        status_rule: rows[5],
+        status: inset_horizontal(rows[6], GUTTER),
     }
 }
 
-/// Render the chrome rule above the status bar. The header rule slot has
-/// zero height now, so nothing is drawn at the top of the body.
+/// Render the status divider below the persistent AI disclaimer.
 pub fn paint_rules(frame: &mut Frame, rects: &ScreenFrame) {
     frame.render_widget(dashed_rule(rects.status_rule.width), rects.status_rule);
 }
 
-/// Render a dashed full-width rule line in `--rule` color.
-pub fn dashed_rule(width: u16) -> Paragraph<'static> {
-    let mut spans: Vec<Span<'static>> = Vec::with_capacity(width as usize);
+fn ai_disclaimer() -> Paragraph<'static> {
+    Paragraph::new(AI_DISCLAIMER)
+        .alignment(Alignment::Right)
+        .style(palette::dim2())
+}
+
+fn disclaimer_rect(area: Rect) -> Rect {
+    let width = u16::try_from(AI_DISCLAIMER.chars().count())
+        .expect("invariant: AI disclaimer width must fit in u16");
+    let gutter = if area.width >= width + GUTTER * 2 {
+        GUTTER
+    } else {
+        0
+    };
+    inset_horizontal(area, gutter)
+}
+
+fn dashed_rule(width: u16) -> Paragraph<'static> {
+    Paragraph::new(Line::from(dashed_spans(0, usize::from(width)))).style(palette::base())
+}
+
+fn dashed_spans(start: usize, width: usize) -> Vec<Span<'static>> {
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(width);
     let dash_style = palette::rule().add_modifier(Modifier::CROSSED_OUT);
-    for column in 0..width as usize {
+    for column in start..start + width {
         if column % 2 == 0 {
             spans.push(Span::styled(String::from(" "), dash_style));
         } else {
             spans.push(Span::styled(String::from(" "), palette::base()));
         }
     }
-    Paragraph::new(Line::from(spans)).style(palette::base())
+    spans
 }
 
 /// Return the rectangle shrunk by `gutter` columns on each side.
@@ -82,6 +105,22 @@ pub fn inset_horizontal(area: Rect, gutter: u16) -> Rect {
         y: area.y,
         width: area.width.saturating_sub(clamp * 2),
         height: area.height,
+    }
+}
+
+/// Return a centered overlay rectangle that cannot cover the persistent AI
+/// disclaimer or the chrome rows below it.
+pub fn overlay_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let disclaimer_y = frame_rects(area).disclaimer.y;
+    let actual_width = width.min(area.width);
+    let actual_height = height.min(disclaimer_y.saturating_sub(area.y));
+    let centered_y = area.y + area.height.saturating_sub(actual_height) / 2;
+    let latest_y = disclaimer_y.saturating_sub(actual_height);
+    Rect {
+        x: area.x + area.width.saturating_sub(actual_width) / 2,
+        y: centered_y.min(latest_y),
+        width: actual_width,
+        height: actual_height,
     }
 }
 
@@ -375,11 +414,11 @@ pub fn quit_hint(pending: bool) -> FooterHint {
 /// One and only entry point for drawing a fullscreen screen.
 ///
 /// Paints the background, computes the standard chrome layout, draws the
-/// header and dashed status rule, hands the inner body rectangle to
-/// `view.body`, and finishes by drawing the screen's footer pinned to the
-/// bottom row. Screens cannot bypass this function — `render::draw` only
-/// dispatches through it, and the dispatcher hands `view.body` the body Rect
-/// only, so a screen has no handle on the chrome regions.
+/// header, hands the inner body rectangle to `view.body`, and finishes with
+/// the fixed AI disclaimer, divider, and footer. Screens cannot
+/// bypass this function — `render::draw` only dispatches through it, and the
+/// dispatcher hands `view.body` the body Rect only, so a screen has no handle
+/// on the chrome regions.
 pub fn render_screen(frame: &mut Frame, area: Rect, app: &App, view: &dyn ScreenView) {
     paint_background(frame, area);
     let rects = frame_rects(area);
@@ -394,8 +433,9 @@ pub fn render_screen(frame: &mut Frame, area: Rect, app: &App, view: &dyn Screen
         ),
         rects.header,
     );
-    paint_rules(frame, &rects);
     view.body(frame, rects.body, app);
+    frame.render_widget(ai_disclaimer(), rects.disclaimer);
+    paint_rules(frame, &rects);
     frame.render_widget(view.footer(app, rects.status.width), rects.status);
 }
 

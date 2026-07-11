@@ -201,7 +201,7 @@ printf '\n# total: %s frames = %ss\n' "$out_frame" "$total_s" >> "$TIMELINE"
 
 # Loop-wrap fade chain (in from black at the head, out to black at the tail).
 fout="$(awk -v t="$total_s" -v e="$END_FADE_S" 'BEGIN{printf "%.4f", t-e}')"
-loopfade="fade=t=in:st=0:d=${START_FADE_S}:color=black,fade=t=out:st=${fout}:d=${END_FADE_S}:color=black"
+loopfade="format=rgb24,fade=t=in:st=0:d=${START_FADE_S}:color=black,fade=t=out:st=${fout}:d=${END_FADE_S}:color=black"
 
 # ffmpeg 8.1's image2 demuxer + paletteuse hits an "Internal bug" on long PNG
 # sequences, so stage the frames through a lossless intermediate video first.
@@ -221,7 +221,7 @@ fi
 scale_chain=""
 [ "$SCALE_W" != "0" ] && scale_chain="scale=${SCALE_W}:-2:flags=lanczos,"
 [ "${SKIP_GIF:-0}" = "1" ] || ffmpeg -nostdin -y -loglevel error -i "$SEQ/inter.mkv" \
-  -filter_complex "[0:v]${scale_chain}split[a][b];[a]palettegen=max_colors=${COLORS}:stats_mode=full[p];[b][p]paletteuse=dither=${DITHER}" \
+  -filter_complex "[0:v]${scale_chain}format=rgb24,split[a][b];[a]palettegen=max_colors=${COLORS}:stats_mode=full:reserve_transparent=0[p];[b][p]paletteuse=dither=${DITHER}" \
   -loop 0 "$OUT"
 
 echo "encode.sh: wrote $OUT ($out_frame frames, ${total_s}s) and $TIMELINE"

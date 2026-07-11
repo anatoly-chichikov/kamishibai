@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 use super::App;
 use super::screen::{Screen, WelcomeFocus, WelcomeStage};
 use super::screens::banner;
-use super::screens::common::{GUTTER, HEADER_GAP, TOP_MARGIN, language_chip};
+use super::screens::common::{GUTTER, TOP_MARGIN, frame_rects, language_chip};
 use super::screens::welcome;
 use super::screens::your_cards::{
     artifact_file_label, detail_pane_height, head_rows_for, step_rows_for,
@@ -95,9 +95,10 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
     if !matches!(app.screen(), Screen::YourCards | Screen::Done) {
         return links;
     }
-    let body_y = terminal.y + TOP_MARGIN + 1 + HEADER_GAP;
-    let body_x = terminal.x + GUTTER;
-    let body_width = terminal.width.saturating_sub(GUTTER * 2);
+    let frame = frame_rects(terminal);
+    let body_y = frame.body.y;
+    let body_x = frame.body.x;
+    let body_width = frame.body.width;
     let banner_rows = if banner_visible(app) {
         banner::height(app)
     } else {
@@ -109,11 +110,7 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
     if app.screen() != Screen::YourCards {
         return links;
     }
-    let body_height = terminal
-        .height
-        .saturating_sub(TOP_MARGIN + 1 + HEADER_GAP)
-        .saturating_sub(2)
-        .saturating_sub(banner_rows);
+    let body_height = frame.body.height.saturating_sub(banner_rows);
     let mut content_row = 0usize;
     let width = usize::from(body_width);
     for (idx, draft) in app.cards().iter().enumerate() {

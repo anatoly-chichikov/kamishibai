@@ -4,13 +4,12 @@
 
 action                 kind     out_start    out_end   out_dur   source
 ---------------------- ------- ---------- ---------- ---------   ----------------------
-type_words             window       0.00s      2.20s     2.20s   raw 1.56s → 5.00s  (3.44s @ 15.9884fps)
-understanding          window       2.20s      3.00s     0.80s   raw 5.00s → 5.80s  (0.8s @ 25fps)
-select                 window       3.00s      7.20s     4.20s   raw 15.88s → 22.00s  (6.12s @ 17.1569fps)
-generating             window       7.20s     10.40s     3.20s   raw 22.00s → 270.52s  (248.52s @ 0.321906fps)
-card_open              window      10.40s     16.60s     6.20s   raw 270.52s → 277.36s  (6.84s @ 22.6608fps)
-card_read              splice      16.60s     18.60s     2.00s   splice live/09-card-open.png
-card_close             window      18.60s     19.40s     0.80s   raw 278.80s → 279.55s  (0.75s @ 26.6667fps)
-finale                 fade        19.40s     22.52s     3.12s   fade live/10-card-scroll-end.png  (split y=310, hold 0.10s, fade 0.8s, hold-black 2.2s, caption)
+type_words             window       0.00s      2.20s     2.20s   raw 1.24s → 4.80s  (3.56s @ 15.4494fps)
+understanding          window       2.20s      4.00s     1.80s   raw 4.80s → 6.60s  (1.8s @ 25fps)
+review                 window       4.00s      6.60s     2.60s   raw 12.08s → 17.84s  (5.76s @ 11.2847fps)
+review_selected        window       6.60s      7.60s     1.00s   raw 17.84s → 18.40s  (0.56s @ 44.6429fps)
+generating             window       7.60s     10.80s     3.20s   raw 18.48s → 251.48s  (233s @ 0.343348fps)
+card_flow              window      10.80s     14.64s     3.84s   raw 251.48s → 258.40s  (6.92s @ 13.8728fps)
+open_card_finale       fade        14.64s     17.96s     3.32s   fade live/09-card-open.png  (split y=310, hold 1.10s, fade 0.8s, hold-black 1.4s, caption)
 
-# total: 563 frames = 22.52s
+# total: 449 frames = 17.96s

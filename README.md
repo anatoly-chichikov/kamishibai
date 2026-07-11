@@ -53,6 +53,8 @@ The TUI walks you from raw words through review to finished cards, and writes th
 
 ![demo](docs/tui-states/live/capture.gif)
 
+> **AI may be wrong. Please verify results.**
+
 ### What You Get
 
 kamishibai writes:
