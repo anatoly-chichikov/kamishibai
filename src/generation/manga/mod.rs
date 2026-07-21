@@ -17,7 +17,7 @@ pub use border::BorderDetector;
 pub use contracts::{ImageSource, ImageText, Progress, Renderer, SceneText, Translator};
 pub use illustration::Illustration;
 pub use render::MangaRenderer;
-pub use text::{TextDetector, TextDetectors};
+pub use text::{TextDetector, TextDetectors, TextEnsemble};
 
 impl<T> ImageSource for GeminiClient<T>
 where

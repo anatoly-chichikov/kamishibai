@@ -168,7 +168,6 @@ fn language_row(app: &App) -> Paragraph<'static> {
             Span::styled(format!(" {label} "), palette::dim())
         };
         spans.push(chip);
-        spans.push(Span::raw(" "));
     }
     Paragraph::new(Line::from(spans)).style(palette::base())
 }

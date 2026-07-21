@@ -1,6 +1,7 @@
 use std::env;
 use std::time::Duration;
 
+use anyhow::Context;
 use anyhow::{Result, anyhow, bail};
 use rand::RngExt;
 use reqwest::blocking::Client;
@@ -8,7 +9,10 @@ use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::generation::{manga_template, render_scene_prompt};
+use crate::generation::layout::{LayoutRegistry, feature_prompt_data, render_feature_prompt};
+use crate::generation::prompts::{
+    layout_scene_prompt, layout_scene_schema, layout_selector_prompt,
+};
 use crate::languages::catalog;
 use crate::session::{
     CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair, LearningGuess, RawInputBatch,
@@ -20,9 +24,8 @@ use super::cost::priced;
 use super::prompts::{
     render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
 };
-use super::protocol::{
-    GenerationConfig, Request, Response, api_error, diagnosis, enforce, unfence, validate,
-};
+use super::protocol::{GenerationConfig, Request, Response, api_error, diagnosis, unfence};
+use super::scene::compose;
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(300);
@@ -192,28 +195,16 @@ where
         &VOICES
     }
 
-    /// Translate one sentence into the enforced manga scene JSON shape.
-    pub fn scene(&self, language: &str, sentence: &str, target: &str) -> Result<Value> {
-        let (scene, _) = self.scene_metered(language, sentence, target)?;
-        Ok(scene)
+    /// Translate one term and sentence through the production registry scene pipeline.
+    pub fn scene(&self, language: &str, term: &str, sentence: &str, target: &str) -> Result<Value> {
+        self.scene_observed(language, term, sentence, target, |_| {})
     }
 
-    /// Translate one sentence and return the request cost record.
-    pub(crate) fn scene_metered(
-        &self,
-        language: &str,
-        sentence: &str,
-        target: &str,
-    ) -> Result<(Value, CostRecord)> {
-        let prompt = render_scene_prompt(language).replace("{sentence}", sentence);
-        let (raw, cost) = self.text_metered(SCENE_MODEL, prompt)?;
-        Ok((scene_from_raw(raw.as_str(), sentence, target)?, cost))
-    }
-
-    /// Translate one sentence and report usage before local scene validation.
+    /// Compose one registry-selected scene and report every structured request cost.
     pub(crate) fn scene_observed<F>(
         &self,
         language: &str,
+        term: &str,
         sentence: &str,
         target: &str,
         mut observe: F,
@@ -221,9 +212,36 @@ where
     where
         F: FnMut(CostRecord),
     {
-        let prompt = render_scene_prompt(language).replace("{sentence}", sentence);
-        let raw = self.text_observed(SCENE_MODEL, prompt, &mut observe)?;
-        scene_from_raw(raw.as_str(), sentence, target)
+        let registry = LayoutRegistry::embedded()?;
+        let feature_data = feature_prompt_data(language, term, sentence)?;
+        let feature_prompt = render_feature_prompt(&feature_data)?;
+        let feature_schema = registry.feature_schema()?;
+        let feature_raw = self
+            .structured_text_observed(SCENE_MODEL, feature_prompt, &feature_schema, &mut observe)
+            .context("scene feature extraction request failed")?;
+        let features = registry.decode_features(unfence(feature_raw.trim()))?;
+        let eligible = registry.eligible(&features)?;
+        let selector = render_layout_selector(
+            language,
+            term,
+            sentence,
+            features.json(),
+            &eligible.selector_cards()?,
+        )?;
+        let selector_schema = eligible.selector_schema()?;
+        let selector_raw = self
+            .structured_text_observed(SCENE_MODEL, selector, &selector_schema, &mut observe)
+            .context("scene layout selection request failed")?;
+        let ranking = eligible.decode_ranking(unfence(selector_raw.trim()))?;
+        let selection = ranking.select(term)?;
+        let composer_card = selection.composer_card()?;
+        let composer =
+            render_layout_scene(language, term, sentence, selection.json(), &composer_card)?;
+        let composer_schema = build_composer_schema(&composer_card)?;
+        let composer_raw = self
+            .structured_text_observed(SCENE_MODEL, composer, &composer_schema, &mut observe)
+            .context("scene composition request failed")?;
+        compose(composer_raw.as_str(), sentence, target, &selection)
     }
 
     /// Send one free-form prompt to a text model and return the raw textual
@@ -231,6 +249,35 @@ where
     /// through the typed `understand` / `generate_card_meta` paths.
     pub fn complete(&self, model: &str, prompt: String) -> Result<String> {
         self.text(model, prompt)
+    }
+
+    /// Send one prompt with a JSON response schema and return the raw JSON text.
+    pub fn complete_json(&self, model: &str, prompt: String, schema: &Value) -> Result<String> {
+        if !schema.is_object() {
+            bail!("Gemini response schema must be a JSON object");
+        }
+        let metered = self.request_metered(
+            model,
+            &Request::text(prompt, Some(GenerationConfig::json(schema.clone())), None),
+        )?;
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!("No text content in Gemini response");
+        }
+        Ok(raw)
+    }
+
+    /// Send one prompt in JSON mode without constraining its nested schema.
+    pub fn complete_json_mode(&self, model: &str, prompt: String) -> Result<String> {
+        let metered = self.request_metered(
+            model,
+            &Request::text(prompt, Some(GenerationConfig::json_mode()), None),
+        )?;
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!("No text content in Gemini response");
+        }
+        Ok(raw)
     }
 
     /// Probe the API with one tiny request to confirm the key is accepted.
@@ -471,6 +518,109 @@ where
         }
         Ok(raw)
     }
+
+    fn structured_text_observed<F>(
+        &self,
+        model: &str,
+        prompt: String,
+        schema: &Value,
+        observe: &mut F,
+    ) -> Result<String>
+    where
+        F: FnMut(CostRecord),
+    {
+        let metered = self.request_metered(
+            model,
+            &Request::text(prompt, Some(GenerationConfig::json(schema.clone())), None),
+        )?;
+        observe(metered.cost.clone());
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!("No text content in Gemini response");
+        }
+        Ok(raw)
+    }
+}
+
+fn render_layout_selector(
+    language: &str,
+    term: &str,
+    sentence: &str,
+    features: &Value,
+    registry: &Value,
+) -> Result<String> {
+    Ok(layout_selector_prompt()
+        .replace("{language}", language)
+        .replace("{term}", term)
+        .replace("{sentence}", sentence)
+        .replace("{scene_features}", &serde_json::to_string_pretty(features)?)
+        .replace(
+            "{layout_registry}",
+            &serde_json::to_string_pretty(registry)?,
+        ))
+}
+
+fn render_layout_scene(
+    language: &str,
+    term: &str,
+    sentence: &str,
+    selection: &Value,
+    layout: &Value,
+) -> Result<String> {
+    Ok(layout_scene_prompt()
+        .replace("{language}", language)
+        .replace("{term}", term)
+        .replace("{sentence}", sentence)
+        .replace(
+            "{layout_selection}",
+            &serde_json::to_string_pretty(selection)?,
+        )
+        .replace("{selected_layout}", &serde_json::to_string_pretty(layout)?))
+}
+
+fn build_composer_schema(layout: &Value) -> Result<Value> {
+    let mut schema = serde_json::from_str::<Value>(layout_scene_schema())
+        .context("cannot decode registry scene schema")?;
+    let panel_count = layout
+        .get("panel_count")
+        .and_then(Value::as_u64)
+        .filter(|count| (1..=4).contains(count))
+        .ok_or_else(|| anyhow!("selected layout has an invalid composer panel count"))?;
+    let panels = schema
+        .pointer_mut("/properties/panels")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| anyhow!("registry scene schema lacks its panels contract"))?;
+    panels.insert(String::from("minItems"), Value::Number(panel_count.into()));
+    panels.insert(String::from("maxItems"), Value::Number(panel_count.into()));
+    let candidates = layout
+        .get("device_candidates")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("selected layout lacks composer device candidates"))?;
+    let mut kinds = candidates
+        .iter()
+        .map(|candidate| {
+            candidate
+                .get("scene_kind")
+                .and_then(Value::as_str)
+                .filter(|kind| !kind.trim().is_empty())
+                .map(String::from)
+                .ok_or_else(|| anyhow!("composer device candidate lacks its scene kind"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    kinds.sort();
+    kinds.dedup();
+    if kinds.is_empty() {
+        bail!("selected layout leaves composer without a device candidate");
+    }
+    let kind = schema
+        .pointer_mut("/properties/page_design/properties/special_device/properties/kind")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| anyhow!("registry scene schema lacks its special-device contract"))?;
+    kind.insert(
+        String::from("enum"),
+        Value::Array(kinds.into_iter().map(Value::String).collect()),
+    );
+    Ok(schema)
 }
 
 struct MeteredResponse {
@@ -487,22 +637,6 @@ fn response_text(response: &Response) -> String {
         .filter_map(|part| part.text.as_ref())
         .cloned()
         .collect::<String>()
-}
-
-fn scene_from_raw(raw: &str, sentence: &str, target: &str) -> Result<Value> {
-    let cleaned = unfence(raw.trim());
-    let panels = serde_json::from_str::<Value>(cleaned)?;
-    let Some(items) = panels.as_array() else {
-        bail!("Expected a JSON array of panels");
-    };
-    let mut scene = serde_json::from_str::<Value>(manga_template())?;
-    scene["manga_panel"]["panels"] = Value::Array(items.clone());
-    scene["manga_panel"]["meta"]["title"] = Value::String(sentence.chars().take(60).collect());
-    scene["manga_panel"]["meta"]["description"] = Value::String(String::from(sentence));
-    scene["manga_panel"]["meta"]["target_lang"] = Value::String(target.to_ascii_lowercase());
-    enforce(&mut scene);
-    validate(&scene)?;
-    Ok(scene)
 }
 
 fn card_meta_from_raw(raw: &str) -> Result<CardMeta> {
@@ -702,18 +836,21 @@ mod tests {
     #[derive(Clone, Debug)]
     struct FakeTransport {
         responses: Rc<RefCell<Vec<Result<TransportResponse>>>>,
+        requests: Rc<RefCell<Vec<String>>>,
     }
 
     impl FakeTransport {
         fn new(responses: Vec<Result<TransportResponse>>) -> Self {
             Self {
                 responses: Rc::new(RefCell::new(responses)),
+                requests: Rc::new(RefCell::new(Vec::new())),
             }
         }
     }
 
     impl Transport for FakeTransport {
-        fn post(&self, _url: &str, _key: &str, _body: &str) -> Result<TransportResponse> {
+        fn post(&self, _url: &str, _key: &str, body: &str) -> Result<TransportResponse> {
+            self.requests.borrow_mut().push(String::from(body));
             self.responses.borrow_mut().remove(0)
         }
     }
@@ -722,6 +859,146 @@ mod tests {
         Ok(TransportResponse {
             status: 200,
             body: serde_json::to_string(&value)?,
+        })
+    }
+
+    fn text_body(value: &Value) -> Result<TransportResponse> {
+        body(json!({
+            "candidates": [{"content": {"parts": [{"text": serde_json::to_string(value)?}]}}],
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "candidatesTokenCount": 20,
+                "totalTokenCount": 120
+            }
+        }))
+    }
+
+    fn coverage_audit(panel_count: usize) -> Value {
+        Value::Array(
+            (1..=4)
+                .map(|count| {
+                    let verdict = match count.cmp(&panel_count) {
+                        std::cmp::Ordering::Less => "insufficient",
+                        std::cmp::Ordering::Equal => "selected",
+                        std::cmp::Ordering::Greater => "redundant_or_unsupported",
+                    };
+                    json!({
+                        "panel_count": count,
+                        "added_view": format!("candidate view {count}"),
+                        "source_support": format!("source support audit {count}"),
+                        "verdict": verdict,
+                        "reason": format!("coverage decision {count}")
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    fn camera_arc() -> Value {
+        json!({
+            "strategy": "single_view",
+            "progression": "one stable wide objective view",
+            "motivation": "the uninterrupted state is strongest in one continuous setup",
+            "continuity": {
+                "axis_mode": "not_applicable",
+                "axis": "",
+                "screen_direction": "stationary",
+                "eyeline_policy": "not_applicable"
+            }
+        })
+    }
+
+    fn planned_shot(id: &str, beat: usize, anchor: &str, support: &str) -> Value {
+        json!({
+            "id": id,
+            "semantic_beat_index": beat,
+            "role": "action",
+            "visible_anchor": anchor,
+            "source_support": support,
+            "shot_scale": "wide",
+            "viewpoint": "objective",
+            "viewpoint_anchor": "",
+            "framing": "single",
+            "angle": "low",
+            "depth_plan": "layered",
+            "camera_motivation": "the complete mechanism makes continued operation visible",
+            "information_gain": format!("supported machine state {id}"),
+            "transition_trigger": if id == "s1" { "scene_open" } else { "new_action" }
+        })
+    }
+
+    fn semantic_scene() -> Value {
+        json!({
+            "semantic_spine": {
+                "literal_event": "A system runs without interruption",
+                "semantic_focus": "reliability",
+                "emotional_relation": "confidence",
+                "intensity": 2,
+                "visual_relation": "balance",
+                "memory_hook": "one stable machine under a steady indicator light",
+                "metaphor": {"mode": "none", "mapping": "", "literal_anchor": "stable machine"}
+            },
+            "page_design": {
+                "rhythm": "single_tableau",
+                "special_device": {
+                    "kind": "none",
+                    "reason": "one continuous tableau communicates the whole sentence",
+                    "source_panel": "",
+                    "target_panel": "",
+                    "subject_id": ""
+                },
+                "eye_flow_summary": "the machine silhouette leads toward its steady light"
+            },
+            "panels": [{
+                "shot_id": "s1",
+                "narrative_role": "peak",
+                "semantic_job": "show the system operating steadily",
+                "attentional_frame": "mono",
+                "narrative_weight": "primary",
+                "transition_from_previous": "none",
+                "continuity": {
+                    "shared_environment_id": "",
+                    "subject_phase": "",
+                    "axis_relation_from_previous": "not_applicable",
+                    "screen_direction": "stationary",
+                    "eyeline_enabled": false,
+                    "eyeline_looker_id": "",
+                    "eyeline_target_anchor": "",
+                    "eyeline_direction": "none",
+                    "match_on_action_enabled": false,
+                    "match_on_action_subject_id": "",
+                    "match_on_action_action": ""
+                },
+                "scene": {
+                    "description": "A complete machine runs steadily in one continuous room",
+                    "subjects": [{
+                        "id": "machine",
+                        "figure": "a compact industrial machine",
+                        "pose": "fully visible and operating without vibration",
+                        "expression": "mechanically steady",
+                        "blocking": "centered with open space around every edge"
+                    }],
+                    "environment": {
+                        "setting": "quiet equipment room",
+                        "foreground": ["clean floor rails"],
+                        "midground": ["the complete machine"],
+                        "background": ["blank equipment cabinets"]
+                    },
+                    "camera": {
+                        "shot_scale": "wide",
+                        "viewpoint": "objective",
+                        "viewpoint_subject_id": "",
+                        "framing": "single",
+                        "angle": "low",
+                        "focus": "the stable machine and indicator light",
+                        "depth_plan": "layered",
+                        "eye_flow_exit": "toward the steady light"
+                    },
+                    "motion_treatment": "pose_only",
+                    "lighting": "even maintenance lighting",
+                    "mood": "assured"
+                }
+            }]
         })
     }
 
@@ -777,6 +1054,262 @@ mod tests {
             cost.cost().nanos(),
             330_000,
             "card correction must preserve Gemini usage cost for the regenerated meta"
+        );
+    }
+
+    #[test]
+    fn registry_scene_uses_one_typed_schema_per_stage() {
+        let features = json!({
+            "semantic_beat_count": 1,
+            "semantic_relation": "single_moment",
+            "coverage_audit": coverage_audit(1),
+            "panel_count": 1,
+            "panel_relation": "single_moment",
+            "panel_emphasis": "equal",
+            "decomposition_mode": "single_tableau",
+            "motion_vector": "still",
+            "intensity": "quiet",
+            "spatial_relation": "same_space",
+            "transition_type": "none",
+            "reading_direction": "left_to_right_top_to_bottom",
+            "literal_anchor": "one stable machine",
+            "camera_arc": camera_arc(),
+            "shots": [planned_shot("s1", 1, "one stable machine in its complete room", "the system has high reliability")],
+            "selection_logic": "one indivisible state carries the sentence"
+        });
+        let ranking = json!({
+            "ranked_candidates": [{
+                "template_id": "splash-1-v1",
+                "adaptation": "exact",
+                "reason": "one indivisible quiet state needs one continuous tableau"
+            }]
+        });
+        let transport = FakeTransport::new(vec![
+            text_body(&features),
+            text_body(&ranking),
+            text_body(&semantic_scene()),
+        ]);
+        let requests = transport.requests.clone();
+        let client = GeminiClient::new("key", transport);
+        let mut costs = Vec::new();
+        let scene = client
+            .scene_observed(
+                "English",
+                "reliability",
+                "The reliability of this system is very high",
+                "en",
+                |cost| costs.push(cost),
+            )
+            .expect("registry scene pipeline must compose one valid splash");
+        let bodies = requests
+            .borrow()
+            .iter()
+            .map(|body| serde_json::from_str::<Value>(body))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("recorded requests must stay valid JSON");
+        let prompts = bodies
+            .iter()
+            .map(|body| {
+                body.pointer("/contents/0/parts/0/text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        let registry = LayoutRegistry::embedded().expect("embedded registry must decode");
+        let feature_schema = registry
+            .feature_schema()
+            .expect("feature response schema must build");
+        let decoded = registry
+            .decode_features(
+                serde_json::to_string(&features)
+                    .expect("feature fixture must encode")
+                    .as_str(),
+            )
+            .expect("feature fixture must decode through production validation");
+        let eligible = registry
+            .eligible(&decoded)
+            .expect("feature fixture must have eligible layouts");
+        let selector_schema = eligible
+            .selector_schema()
+            .expect("selector response schema must build");
+        let selection = eligible
+            .decode_ranking(
+                serde_json::to_string(&ranking)
+                    .expect("ranking fixture must encode")
+                    .as_str(),
+            )
+            .expect("ranking fixture must decode")
+            .select("reliability")
+            .expect("ranking fixture must select");
+        let composer_schema =
+            build_composer_schema(&selection.composer_card().expect("composer card must build"))
+                .expect("specialized composer response schema must build");
+        assert_eq!(
+            (
+                costs.len(),
+                bodies.len(),
+                (
+                    bodies.iter().all(|body| {
+                        body.pointer("/generationConfig/responseFormat/text/mimeType")
+                            .and_then(Value::as_str)
+                            == Some("APPLICATION_JSON")
+                    }),
+                    bodies.iter().all(|body| {
+                        body.pointer("/generationConfig/responseMimeType").is_none()
+                    }),
+                    bodies[0].pointer("/generationConfig/responseFormat/text/schema")
+                        == Some(&feature_schema),
+                    bodies[1].pointer("/generationConfig/responseFormat/text/schema")
+                        == Some(&selector_schema),
+                    bodies[2].pointer("/generationConfig/responseFormat/text/schema")
+                        == Some(&composer_schema),
+                ),
+                composer_schema
+                    .pointer("/properties/panels/minItems")
+                    .and_then(Value::as_u64),
+                composer_schema
+                    .pointer("/properties/panels/maxItems")
+                    .and_then(Value::as_u64),
+                composer_schema
+                    .pointer(
+                        "/properties/page_design/properties/special_device/properties/kind/enum"
+                    )
+                    .cloned(),
+                prompts[0].contains("reliability")
+                    && !prompts[0].contains("splash-1-v1")
+                    && !prompts[0].contains("LAYOUT REGISTRY"),
+                prompts[1].contains("splash-1-v1"),
+                prompts[2].contains("\"chosen_template_id\": \"splash-1-v1\""),
+                !prompts[2].contains("\"bounds\"") && !prompts[2].contains("\"polygon\""),
+                scene
+                    .pointer("/manga_panel/meta/layout_selection/chosen_template_id")
+                    .and_then(Value::as_str),
+                scene
+                    .pointer("/manga_panel/page_design/layout/template_id")
+                    .and_then(Value::as_str),
+            ),
+            (
+                3,
+                3,
+                (true, true, true, true, true),
+                Some(1),
+                Some(1),
+                Some(json!(["none", "open_frame"])),
+                true,
+                true,
+                true,
+                true,
+                Some("splash-1-v1"),
+                Some("splash-1-v1"),
+            ),
+            "registry scene pipeline lost one stage's exact typed wire schema or selection provenance"
+        );
+    }
+
+    #[test]
+    fn registry_scene_preserves_costs_from_every_completed_stage_on_failure() {
+        let valid = json!({
+            "semantic_beat_count": 1,
+            "semantic_relation": "single_moment",
+            "coverage_audit": coverage_audit(1),
+            "panel_count": 1,
+            "panel_relation": "single_moment",
+            "panel_emphasis": "equal",
+            "decomposition_mode": "single_tableau",
+            "motion_vector": "still",
+            "intensity": "quiet",
+            "spatial_relation": "same_space",
+            "transition_type": "none",
+            "reading_direction": "left_to_right_top_to_bottom",
+            "literal_anchor": "one stable machine",
+            "camera_arc": camera_arc(),
+            "shots": [planned_shot("s1", 1, "one stable machine", "the system has high reliability")],
+            "selection_logic": "one indivisible state carries the sentence"
+        });
+        let invalid = json!({
+            "semantic_beat_count": 2,
+            "semantic_relation": "single_moment",
+            "coverage_audit": coverage_audit(2),
+            "panel_count": 2,
+            "panel_relation": "single_moment",
+            "panel_emphasis": "equal",
+            "decomposition_mode": "one_to_one",
+            "motion_vector": "still",
+            "intensity": "quiet",
+            "spatial_relation": "same_space",
+            "transition_type": "none",
+            "reading_direction": "left_to_right_top_to_bottom",
+            "literal_anchor": "contradictory beats",
+            "camera_arc": {
+                "strategy": "push_in",
+                "progression": "wide to close",
+                "motivation": "the second unsupported beat would intensify",
+                "continuity": {"axis_mode": "not_applicable", "axis": "", "screen_direction": "stationary", "eyeline_policy": "not_applicable"}
+            },
+            "shots": [
+                planned_shot("s1", 1, "first", "first fact"),
+                {
+                    "id": "s2",
+                    "semantic_beat_index": 2,
+                    "role": "action",
+                    "visible_anchor": "second",
+                    "source_support": "second fact",
+                    "shot_scale": "close",
+                    "viewpoint": "objective",
+                    "viewpoint_anchor": "",
+                    "framing": "single",
+                    "angle": "low",
+                    "depth_plan": "layered",
+                    "camera_motivation": "the unsupported beat would intensify",
+                    "information_gain": "unsupported second state",
+                    "transition_trigger": "new_action"
+                }
+            ],
+            "selection_logic": "invalid on purpose"
+        });
+        let ranking = json!({
+            "ranked_candidates": [{
+                "template_id": "splash-1-v1",
+                "adaptation": "exact",
+                "reason": "one indivisible quiet state"
+            }]
+        });
+        let cases = vec![
+            vec![text_body(&invalid)],
+            vec![
+                text_body(&valid),
+                text_body(&json!({"ranked_candidates": []})),
+            ],
+            vec![
+                text_body(&valid),
+                text_body(&ranking),
+                text_body(&json!({})),
+            ],
+        ];
+        let observed = cases
+            .into_iter()
+            .enumerate()
+            .map(|(index, responses)| {
+                let transport = FakeTransport::new(responses);
+                let requests = transport.requests.clone();
+                let client = GeminiClient::new("key", transport);
+                let mut costs = Vec::new();
+                let failed = client
+                    .scene_observed(
+                        "English",
+                        "reliability",
+                        "The reliability of this system is very high",
+                        "en",
+                        |cost| costs.push(cost),
+                    )
+                    .is_err();
+                (index + 1, failed, costs.len(), requests.borrow().len())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observed,
+            [(1, true, 1, 1), (2, true, 2, 2), (3, true, 3, 3)],
+            "registry scene failures discarded completed-stage costs or called a later stage"
         );
     }
 }

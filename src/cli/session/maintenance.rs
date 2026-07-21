@@ -1,15 +1,22 @@
 //! The lifecycle-maintenance verbs: `cancel` (stop a running worker), `rm`
 //! (delete a session, optionally its cached cards), and `cache-path`.
 
-use anyhow::Result;
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::Path;
 
+use anyhow::{Context, Result};
+use tempfile::Builder;
+
+use crate::generation::artifact_cache::{Cache, VISUAL_DIRECTORY, VISUAL_LOCK_TIMEOUT};
+use crate::generation::visual_revision;
 use crate::runtime::locations::{SystemContext, cache_root};
-use crate::session::LanguagePair;
+use crate::session::{CardCell, LanguagePair};
 
 use super::args::{IdArg, RmArgs};
 use super::liveness;
 use super::store::{Phase, SessionRecord, SessionStore};
-use super::{Render, drop_artifacts, json, refuse_if_live, resolve, view};
+use super::{Render, json, refuse_if_live, resolve, view};
 
 /// Stop a session's running worker and mark it cancelled unless already terminal.
 ///
@@ -65,13 +72,7 @@ pub(super) fn rm(args: &RmArgs, render: Render) -> Result<()> {
         let root = cache_root(&SystemContext)?;
         let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
         for (term, understanding) in cached_cells(&record) {
-            drop_artifacts(
-                root.as_path(),
-                &pair,
-                term.as_str(),
-                understanding.as_str(),
-                false,
-            )?;
+            purge_artifacts(root.as_path(), &pair, term.as_str(), understanding.as_str())?;
         }
     }
     store.remove(record.id.as_str())?;
@@ -130,4 +131,84 @@ fn cached_cells(record: &SessionRecord) -> Vec<(String, String)> {
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+/// Delete one card's entire cache folder after leasing every visual revision.
+fn purge_artifacts(
+    root: &Path,
+    pair: &LanguagePair,
+    term: &str,
+    understanding: &str,
+) -> Result<()> {
+    let cache = CardCell::new(root.to_path_buf(), pair, term, understanding).cache();
+    let folder = cache.path();
+    if !folder.exists() {
+        return Ok(());
+    }
+    let mut revisions = visual_revisions(folder.as_path())?;
+    revisions.insert(visual_revision().to_string());
+    let mut guards = Vec::with_capacity(revisions.len());
+    for revision in &revisions {
+        guards.push(
+            cache
+                .visual(revision.as_str())?
+                .hold_visual(VISUAL_LOCK_TIMEOUT)?,
+        );
+    }
+    if !folder.exists() {
+        return Ok(());
+    }
+    let parent = folder
+        .parent()
+        .context("card cache folder has no parent directory")?;
+    let tomb = Builder::new()
+        .prefix(".kamishibai-purge-")
+        .tempdir_in(parent)?;
+    let discarded = tomb.path().to_path_buf();
+    tomb.close()?;
+    fs::rename(&folder, &discarded)?;
+    let moved = Cache::new(
+        discarded
+            .file_name()
+            .and_then(|name| name.to_str())
+            .context("purged cache folder name is not UTF-8")?,
+        parent,
+    );
+    let unseen = visual_revisions(discarded.as_path())?
+        .difference(&revisions)
+        .cloned()
+        .collect::<Vec<_>>();
+    for revision in unseen {
+        guards.push(
+            moved
+                .visual(revision.as_str())?
+                .hold_visual(VISUAL_LOCK_TIMEOUT)?,
+        );
+    }
+    drop(guards);
+    fs::remove_dir_all(discarded)?;
+    Ok(())
+}
+
+/// Return valid visual revision directory names in deterministic lock order.
+fn visual_revisions(folder: &Path) -> Result<BTreeSet<String>> {
+    let visual = folder.join(VISUAL_DIRECTORY);
+    if !visual.exists() {
+        return Ok(BTreeSet::new());
+    }
+    let mut revisions = BTreeSet::new();
+    for entry in fs::read_dir(visual)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(revision) = name.to_str() else {
+            continue;
+        };
+        if entry.file_type()?.is_dir()
+            && revision.len() == 64
+            && revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            revisions.insert(revision.to_string());
+        }
+    }
+    Ok(revisions)
 }

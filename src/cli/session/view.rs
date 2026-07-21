@@ -1,16 +1,18 @@
 //! Cache-derived status projection: one computation feeding both renders (the
 //! plain-text blocks here, the JSON documents in `json`).
 //!
-//! Readiness is the cache truth — for each draft we check whether its four
-//! artifact files exist in the shared `CardCell` folder. The session record only
-//! supplies phase and liveness. A card incomplete under a terminal phase is a
-//! failed card; under `generating` it is still building. Before a plan is
-//! committed (no drafts) the projection lists the curatable candidates instead.
+//! Readiness is the cache truth — for each draft we check meta and audio in the
+//! shared `CardCell` folder plus scene and picture in the current visual-policy
+//! revision. The session record only supplies phase and liveness. A card
+//! incomplete under a terminal phase is a failed card; under `generating` it is
+//! still building. Before a plan is committed (no drafts) the projection lists
+//! the curatable candidates instead.
 
 use std::fmt::Write;
 use std::path::Path;
 
-use crate::generation::artifact_cache::{ILLUSTRATION_FILE, META_FILE, SCENE_FILE, VOICE_FILE};
+use crate::generation::artifact_cache::{ILLUSTRATION_FILE, VOICE_FILE};
+use crate::generation::visual_revision;
 use crate::session::{CardCell, LanguagePair, WordCandidate};
 
 use super::liveness;
@@ -44,11 +46,14 @@ pub(super) fn probe_artifacts(
     understanding: &str,
 ) -> [bool; 4] {
     let cache = CardCell::new(cache_root, pair, term, understanding).cache();
+    let visual = cache
+        .visual(visual_revision())
+        .expect("invariant: production visual revision must be one SHA-256 digest");
     [
-        cache.exists(META_FILE),
+        super::cached_meta_is_valid(cache_root, pair, term, understanding),
         cache.exists(VOICE_FILE),
-        cache.exists(SCENE_FILE),
-        cache.exists(ILLUSTRATION_FILE),
+        super::cached_scene_is_valid(&visual),
+        visual.exists(ILLUSTRATION_FILE),
     ]
 }
 
@@ -406,7 +411,25 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::session::CardCell;
+    use crate::generation::artifact_cache::{META_FILE, SCENE_FILE};
+    use crate::session::{CardCell, CardMeta, CardMetaCache};
+
+    fn store_meta(home: &TempDir) {
+        let meta = CardMeta::new(
+            "/ka.naʁ/",
+            "/lə ka.naʁ naʒ/",
+            "a duck",
+            5,
+            "The duck swims",
+            "duck",
+            "Think of a pond",
+            "A common concrete noun",
+            "Le canard nage",
+        );
+        CardMetaCache::new(home.path())
+            .store("canard", "a duck", &LanguagePair::new("fr", "en"), &meta)
+            .expect("valid meta fixture must be stored");
+    }
 
     fn record() -> SessionRecord {
         let mut record = SessionRecord::understood(
@@ -450,6 +473,7 @@ mod tests {
     #[test]
     fn status_text_shows_artifact_presence_from_the_cache() {
         let home = TempDir::new().expect("tempdir must be created");
+        store_meta(&home);
         let cell = CardCell::new(
             home.path(),
             &LanguagePair::new("fr", "en"),
@@ -457,13 +481,118 @@ mod tests {
             "a duck",
         );
         let cache = cell.cache();
-        fs::create_dir_all(cache.path()).expect("cell dir must be created");
-        fs::write(cache.path().join(META_FILE), b"{}").expect("meta written");
         fs::write(cache.path().join(VOICE_FILE), b"x").expect("voice written");
         let status = render_status(&record(), home.path());
         assert!(
             status.contains("canard meaning ✓ audio ✓ scene · picture ·"),
             "status text must show each card's artifact presence read from the cache"
+        );
+    }
+
+    #[test]
+    fn status_text_hides_visuals_from_an_outdated_policy_revision() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = CardCell::new(
+            home.path(),
+            &LanguagePair::new("fr", "en"),
+            "canard",
+            "a duck",
+        )
+        .cache();
+        let outdated = cache
+            .visual("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .expect("outdated revision must be valid");
+        for file in [SCENE_FILE, ILLUSTRATION_FILE] {
+            fs::write(
+                outdated.filepath(file).expect("visual path must resolve"),
+                b"x",
+            )
+            .expect("visual written");
+        }
+        let status = render_status(&record(), home.path());
+        assert!(
+            status.contains("canard meaning · audio · scene · picture ·"),
+            "status must not advertise visual artifacts from an outdated policy revision"
+        );
+    }
+
+    #[test]
+    fn status_text_shows_visuals_from_the_current_policy_revision() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = CardCell::new(
+            home.path(),
+            &LanguagePair::new("fr", "en"),
+            "canard",
+            "a duck",
+        )
+        .cache();
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        fs::write(
+            visual
+                .filepath(SCENE_FILE)
+                .expect("visual path must resolve"),
+            include_bytes!("../../../tests/fixtures/production-scene.json"),
+        )
+        .expect("valid scene written");
+        fs::write(
+            visual
+                .filepath(ILLUSTRATION_FILE)
+                .expect("visual path must resolve"),
+            b"x",
+        )
+        .expect("picture written");
+        let status = render_status(&record(), home.path());
+        assert!(
+            status.contains("canard meaning · audio · scene ✓ picture ✓"),
+            "status must advertise visual artifacts from the current policy revision"
+        );
+    }
+
+    #[test]
+    fn structurally_invalid_meta_is_reported_missing() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let pair = LanguagePair::new("fr", "en");
+        let cache = CardCell::new(home.path(), &pair, "canard", "a duck").cache();
+        fs::write(
+            cache.filepath(META_FILE).expect("meta path must resolve"),
+            br#"{"manga_panel":{"panels":[{}]}}"#,
+        )
+        .expect("invalid meta written");
+        assert_eq!(
+            probe_artifacts(home.path(), &pair, "canard", "a duck"),
+            [false, false, false, false],
+            "status must not report a structurally invalid meta as ready"
+        );
+    }
+
+    #[test]
+    fn structurally_invalid_scene_is_reported_missing() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let pair = LanguagePair::new("fr", "en");
+        let cache = CardCell::new(home.path(), &pair, "canard", "a duck").cache();
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        fs::write(
+            visual
+                .filepath(SCENE_FILE)
+                .expect("scene path must resolve"),
+            b"{}",
+        )
+        .expect("invalid scene written");
+        fs::write(
+            visual
+                .filepath(ILLUSTRATION_FILE)
+                .expect("picture path must resolve"),
+            b"x",
+        )
+        .expect("picture written");
+        assert_eq!(
+            probe_artifacts(home.path(), &pair, "canard", "a duck"),
+            [false, false, false, true],
+            "status must not report a structurally invalid scene as ready"
         );
     }
 

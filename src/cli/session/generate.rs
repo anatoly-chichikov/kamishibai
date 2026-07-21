@@ -1,6 +1,6 @@
 //! The generation verbs: `generate` (commit the plan and run the worker) and
-//! `regenerate` (drop cached artifacts so the next generate rebuilds them; with
-//! `--note`, Gemini first rewrites the card from the instruction).
+//! `regenerate` (retry only missing stages with `--failed`, or fully re-roll one
+//! card with `--card`; with `--note`, Gemini first rewrites that card).
 //!
 //! `run_session` is the shared commit-and-run step `new --generate` reuses.
 
@@ -17,8 +17,8 @@ use crate::session::{CardCorrection, CardDraft, LanguagePair, WordCandidate};
 use super::args::{GenerateArgs, RegenerateArgs};
 use super::store::{DraftRecord, Phase, SessionRecord, SessionStore};
 use super::{
-    Render, drop_artifacts, json, preflight_key, refuse_if_live, reset_to_understood, resolve,
-    view, worker,
+    Render, drop_artifacts, drop_incomplete_artifacts, json, preflight_key, refuse_if_live,
+    reset_to_understood, resolve, view, worker,
 };
 
 /// Commit the curated plan and start the managed worker that generates+publishes.
@@ -115,8 +115,8 @@ fn ensure_plan(record: &mut SessionRecord) {
         .collect();
 }
 
-/// Re-roll committed cards: drop the cached artifacts of every unfinished card
-/// (`--failed`) or one card (`--card`), optionally rewriting it from `--note`
+/// Retry unfinished committed cards from their first missing stage (`--failed`)
+/// or fully re-roll one card (`--card`), optionally rewriting it from `--note`
 /// first, then immediately regenerate and republish the deck. Returns like
 /// `generate`: the id for a detached run, the terminal state after `--wait`.
 pub(super) fn regenerate(args: &RegenerateArgs, render: Render) -> Result<()> {
@@ -140,7 +140,7 @@ pub(super) fn regenerate(args: &RegenerateArgs, render: Render) -> Result<()> {
         }
         None => {
             let (_record, targets) = drop_targets(&store, &record, args)?;
-            reroll_note(&targets, &record)
+            reroll_note(&targets, &record, args.failed)
         }
     };
     run_session(&store, record.id.as_str(), args.wait, render, Some(intro))
@@ -156,9 +156,17 @@ fn other_terms(record: &SessionRecord, targets: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The intro note for a dropped-and-rebuilt regenerate run.
-fn reroll_note(targets: &[String], record: &SessionRecord) -> String {
+/// The intro note for a stage retry or full dropped-and-rebuilt reroll.
+fn reroll_note(targets: &[String], record: &SessionRecord, failed_only: bool) -> String {
     let kept = other_terms(record, targets);
+    if failed_only {
+        let mut note = format!("Retrying only missing stages for {}", targets.join(", "));
+        if !kept.is_empty() {
+            note.push_str(&format!(", keeping {}", kept.join(", ")));
+        }
+        note.push('.');
+        return note;
+    }
     let possessive = if targets.len() == 1 { "its" } else { "their" };
     let mut note = format!(
         "Re-rolling {} — dropping {possessive} audio and art",
@@ -237,9 +245,9 @@ fn rewrite(
     })
 }
 
-/// Drop the cached artifacts of the targeted committed cards and reset the
-/// session so the next generate rebuilds them. Returns the record as updated
-/// plus the terms of the dropped cards.
+/// Drop only missing stages for `--failed`, or every generated artifact for an
+/// explicit `--card`, and reset the session so generation resumes immediately.
+/// Returns the updated record plus the terms of the targeted cards.
 fn drop_targets(
     store: &SessionStore,
     record: &SessionRecord,
@@ -264,13 +272,21 @@ fn drop_targets(
     }
     let keep_meta = record.source.as_str() == "cards";
     for draft in &targets {
-        drop_artifacts(
-            root.as_path(),
-            &pair,
-            draft.term.as_str(),
-            draft.understanding.as_str(),
-            keep_meta,
-        )?;
+        match args.card {
+            Some(_) => drop_artifacts(
+                root.as_path(),
+                &pair,
+                draft.term.as_str(),
+                draft.understanding.as_str(),
+                keep_meta,
+            )?,
+            None => drop_incomplete_artifacts(
+                root.as_path(),
+                &pair,
+                draft.term.as_str(),
+                draft.understanding.as_str(),
+            )?,
+        }
     }
     let updated = store.update(record.id.as_str(), |fresh| {
         refuse_if_live(store, fresh)?;

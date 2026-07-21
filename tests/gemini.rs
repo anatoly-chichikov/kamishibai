@@ -54,6 +54,213 @@ fn recorded_prompt(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Result<Stri
     ))
 }
 
+/// Return one production feature plan for a single motivated camera view.
+fn scene_features() -> Value {
+    json!({
+        "semantic_beat_count": 1,
+        "semantic_relation": "single_moment",
+        "coverage_audit": [
+            {"panel_count": 1, "added_view": "the complete sleeping cat", "source_support": "the cat is sleeping on the windowsill", "verdict": "selected", "reason": "one continuous view carries the event"},
+            {"panel_count": 2, "added_view": "a second angle", "source_support": "no second fact supports it", "verdict": "redundant_or_unsupported", "reason": "it repeats the same state"},
+            {"panel_count": 3, "added_view": "a reaction", "source_support": "no reaction is stated", "verdict": "redundant_or_unsupported", "reason": "it invents a reaction"},
+            {"panel_count": 4, "added_view": "a consequence", "source_support": "no consequence is stated", "verdict": "redundant_or_unsupported", "reason": "it invents a consequence"}
+        ],
+        "panel_count": 1,
+        "panel_relation": "single_moment",
+        "panel_emphasis": "equal",
+        "decomposition_mode": "single_tableau",
+        "motion_vector": "still",
+        "intensity": "quiet",
+        "spatial_relation": "same_space",
+        "transition_type": "none",
+        "reading_direction": "left_to_right_top_to_bottom",
+        "literal_anchor": "a cat sleeping on the windowsill",
+        "camera_arc": {
+            "strategy": "single_view",
+            "progression": "one held wide objective view",
+            "motivation": "the quiet uninterrupted state is strongest without a cut",
+            "continuity": {"axis_mode": "not_applicable", "axis": "", "screen_direction": "stationary", "eyeline_policy": "not_applicable"}
+        },
+        "shots": [{
+            "id": "s1",
+            "semantic_beat_index": 1,
+            "role": "action",
+            "visible_anchor": "the complete sleeping cat on the sill",
+            "source_support": "the cat is sleeping on the windowsill",
+            "shot_scale": "wide",
+            "viewpoint": "objective",
+            "viewpoint_anchor": "",
+            "framing": "single",
+            "angle": "eye_level",
+            "depth_plan": "deep",
+            "camera_motivation": "the wide view proves both sleep and location",
+            "information_gain": "the cat and windowsill relation are visible together",
+            "transition_trigger": "scene_open"
+        }],
+        "selection_logic": "one quiet continuous view preserves the literal sentence"
+    })
+}
+
+/// Return the one eligible canonical layout chosen for the feature plan.
+fn scene_ranking() -> Value {
+    json!({"ranked_candidates": [{
+        "template_id": "splash-1-v1",
+        "adaptation": "exact",
+        "reason": "one continuous quiet tableau fits the immutable single view"
+    }]})
+}
+
+/// Return one geometry-free production scene response with no special device.
+fn dynamic_scene() -> Value {
+    json!({
+        "semantic_spine": {
+            "literal_event": "A cat sleeps on the windowsill",
+            "semantic_focus": "sleep",
+            "emotional_relation": "calm",
+            "intensity": 1,
+            "visual_relation": "containment",
+            "memory_hook": "one paw hanging over the sill",
+            "metaphor": {"mode": "none", "mapping": "", "literal_anchor": "sleeping cat"}
+        },
+        "page_design": {
+            "rhythm": "single_tableau",
+            "special_device": {
+                "kind": "none",
+                "reason": "ordinary geometry preserves the calm",
+                "source_panel": "",
+                "target_panel": "",
+                "subject_id": ""
+            },
+            "eye_flow_summary": "the sill leads directly to the sleeping cat"
+        },
+        "panels": [{
+                "shot_id": "s1",
+                "narrative_role": "peak",
+                "semantic_job": "show the complete sleeping cat on the sill",
+                "attentional_frame": "mono",
+                "narrative_weight": "primary",
+                "transition_from_previous": "none",
+                "continuity": {
+                    "shared_environment_id": "",
+                    "subject_phase": "",
+                    "axis_relation_from_previous": "not_applicable",
+                    "screen_direction": "stationary",
+                    "eyeline_enabled": false,
+                    "eyeline_looker_id": "",
+                    "eyeline_target_anchor": "",
+                    "eyeline_direction": "none",
+                    "match_on_action_enabled": false,
+                    "match_on_action_subject_id": "",
+                    "match_on_action_action": ""
+                },
+                "scene": {
+                    "description": "The complete cat sleeps quietly on the windowsill",
+                    "subjects": [{
+                        "id": "cat",
+                        "figure": "small tabby cat",
+                        "pose": "curled on the windowsill",
+                        "expression": "eyes peacefully closed",
+                        "blocking": "fully visible against the broad window"
+                    }],
+                    "environment": {
+                        "setting": "sunlit apartment room",
+                        "foreground": ["chair edge"],
+                        "midground": ["windowsill"],
+                        "background": ["blank skyline silhouettes"]
+                    },
+                    "camera": {
+                        "shot_scale": "wide",
+                        "viewpoint": "objective",
+                        "viewpoint_subject_id": "",
+                        "framing": "single",
+                        "angle": "eye_level",
+                        "focus": "room and windowsill",
+                        "depth_plan": "deep",
+                        "eye_flow_exit": "toward the cat on the right"
+                    },
+                    "motion_treatment": "none",
+                    "lighting": "soft window light",
+                    "mood": "calm"
+                }
+            }]
+    })
+}
+
+/// Wrap one structured value as a successful Gemini text response.
+fn scene_body(value: &Value) -> Result<TransportResponse> {
+    body(json!({"candidates": [{"content": {"parts": [{"text": serde_json::to_string(value)?}]}}]}))
+}
+
+/// Return the three responses consumed by the production scene pipeline.
+fn scene_responses(scene: &Value) -> Result<Vec<Result<TransportResponse>>> {
+    Ok(vec![
+        Ok(scene_body(&scene_features())?),
+        Ok(scene_body(&scene_ranking())?),
+        Ok(scene_body(scene)?),
+    ])
+}
+
+/// Free-form completion keeps the legacy request bytes without a generation config.
+#[test]
+fn free_form_completion_keeps_the_legacy_request_bytes() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{"content": {"parts": [{"text": "ok"}]}}]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let response = client.complete("gemini-3.5-flash", String::from("compose"))?;
+    assert_eq!(
+        (response.as_str(), requests.borrow()[0].1.as_str()),
+        ("ok", r#"{"contents":[{"parts":[{"text":"compose"}]}]}"#,),
+        "free-form completion request bytes drifted from the legacy contract"
+    );
+    Ok(())
+}
+
+/// Structured completion sends the JSON schema through responseFormat.text.
+#[test]
+fn structured_completion_uses_the_json_response_format() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{"content": {"parts": [{"text": "{\"panels\":[]}"}]}}]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let response = client.complete_json(
+        "gemini-3.5-flash",
+        String::from("compose"),
+        &json!({"type":"object","required":["panels"]}),
+    )?;
+    assert_eq!(
+        (response.as_str(), requests.borrow()[0].1.as_str()),
+        (
+            r#"{"panels":[]}"#,
+            r#"{"contents":[{"parts":[{"text":"compose"}]}],"generationConfig":{"responseFormat":{"text":{"mimeType":"APPLICATION_JSON","schema":{"required":["panels"],"type":"object"}}}}}"#,
+        ),
+        "structured completion request does not preserve the documented responseFormat.text shape"
+    );
+    Ok(())
+}
+
+/// JSON mode requests valid JSON without imposing a response schema.
+#[test]
+fn json_mode_uses_the_legacy_response_mime_type() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{"content": {"parts": [{"text": "{\"panels\":[]}"}]}}]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let response = client.complete_json_mode("gemini-3.5-flash", String::from("compose"))?;
+    assert_eq!(
+        (response.as_str(), requests.borrow()[0].1.as_str()),
+        (
+            r#"{"panels":[]}"#,
+            r#"{"contents":[{"parts":[{"text":"compose"}]}],"generationConfig":{"responseMimeType":"application/json","maxOutputTokens":8192}}"#,
+        ),
+        "JSON mode request does not preserve the documented responseMimeType shape"
+    );
+    Ok(())
+}
+
 /// Understanding uses Flash and returns the multi-sense row shape.
 #[test]
 fn understanding_uses_flash_and_returns_sense_rows() -> Result<()> {
@@ -281,50 +488,181 @@ fn validate_key_accepts_2xx_and_flags_rejected_keys() {
     );
 }
 
-/// Scene generation keeps the merged scene contract.
+/// Scene generation keeps typed analysis and typed semantic composition.
 #[test]
-fn scene_generation_keeps_the_merged_scene_contract() -> Result<()> {
-    let transport = FakeTransport::new(vec![Ok(body(
-        json!({"candidates":[{"content":{"parts":[{"text":"```json\n[{\"bounds\":{\"x\":0,\"y\":1,\"width\":2000,\"height\":2000},\"scene\":{\"description\":\"A cat\"},\"narrative_weight\":\"primary\",\"bleed\":true}]\n```"}]}}]}),
-    )?)]);
+fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()> {
+    let transport = FakeTransport::new(scene_responses(&dynamic_scene())?);
+    let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let scene = client.scene("English", "The cat is sleeping on the windowsill", "en")?;
+    let scene = client.scene(
+        "English",
+        "sleep",
+        "The cat is sleeping on the windowsill",
+        "en",
+    )?;
+    let requests = requests
+        .borrow()
+        .iter()
+        .map(|request| serde_json::from_str::<Value>(&request.1))
+        .collect::<Result<Vec<_>, _>>()?;
     assert_eq!(
         (
+            requests.len(),
+            requests.iter().all(|request| {
+                request
+                    .pointer("/generationConfig/responseFormat/text/mimeType")
+                    .and_then(Value::as_str)
+                    == Some("APPLICATION_JSON")
+            }),
+            requests.iter().all(|request| request
+                .pointer("/generationConfig/responseMimeType")
+                .is_none()),
+            requests[2]
+                .pointer("/generationConfig/responseFormat/text/schema/properties/panels/maxItems")
+                .and_then(Value::as_u64),
             scene["manga_panel"]["meta"]["title"].as_str(),
             scene["manga_panel"]["meta"]["target_lang"].as_str(),
             scene["manga_panel"]["panels"][0]["bounds"]["x"].as_i64(),
             scene["manga_panel"]["panels"][0]["bounds"]["width"].as_i64(),
-            scene["manga_panel"]["panels"][0]["scene"]["text_in_frame"].as_str()
+            scene["manga_panel"]["panels"][0]["scene"]["text_in_frame"].as_str(),
+            scene["manga_panel"]["page_design"]["layout"]["template_id"].as_str(),
+            scene["manga_panel"]["page_design"]["camera_arc"]["strategy"].as_str(),
         ),
         (
+            3,
+            true,
+            true,
+            Some(1),
             Some("The cat is sleeping on the windowsill"),
             Some("en"),
             Some(16),
             Some(992),
-            Some("none")
+            Some("none"),
+            Some("splash-1-v1"),
+            Some("single_view"),
         ),
-        "scene generation no longer keeps the merged scene contract"
+        "public scene generation bypassed the typed-analysis and JSON-composition registry"
     );
     Ok(())
 }
 
-/// Scene generation rejects non-array responses.
+/// JSON composition repairs only structurally unambiguous missing closers.
 #[test]
-fn scene_generation_rejects_non_array_responses() {
-    let transport = FakeTransport::new(vec![Ok(body(
-        json!({"candidates":[{"content":{"parts":[{"text":"{\"panels\":[]}"}]}}]}),
-    )
-    .expect("response meta must serialize"))]);
-    let client = GeminiClient::new("key", transport);
+fn scene_generation_repairs_one_truncated_json_closer() -> Result<()> {
+    let scene = dynamic_scene();
+    let mut raw = serde_json::to_string(&scene)?;
+    raw.pop()
+        .expect("invariant: scene fixture must contain one object closer");
+    let mut responses = scene_responses(&scene)?;
+    responses[2] = body(json!({
+        "candidates": [{"content": {"parts": [{"text": raw}]}}]
+    }));
+    let client = GeminiClient::new("key", FakeTransport::new(responses));
+    let output = client.scene(
+        "English",
+        "sleep",
+        "The cat is sleeping on the windowsill",
+        "en",
+    )?;
     assert_eq!(
-        client
-            .scene("English", "demo", "en")
-            .unwrap_err()
-            .to_string(),
-        "Expected a JSON array of panels",
-        "scene generation no longer rejects non-array responses with the frozen error wording"
+        output["manga_panel"]["meta"]["title"].as_str(),
+        Some("The cat is sleeping on the windowsill"),
+        "one unambiguous missing JSON closer discarded an otherwise valid scene"
     );
+    Ok(())
+}
+
+/// Dynamic scenes preserve narrative fields while static template roots stay authoritative.
+#[test]
+fn dynamic_scene_generation_preserves_narrative_fields_and_static_roots() -> Result<()> {
+    let mut output = dynamic_scene();
+    output["meta"] = json!({"spec_version": "agent-override"});
+    output["art_style"] = json!({"medium": {"base": "agent-override"}});
+    output["panel_layout"] = json!({"special_device_budget": 0});
+    let transport = FakeTransport::new(scene_responses(&output)?);
+    let client = GeminiClient::new("key", transport);
+    let scene = client.scene(
+        "English",
+        "sleep",
+        "The cat is sleeping on the windowsill",
+        "en",
+    )?;
+    assert_eq!(
+        (
+            scene["manga_panel"]["semantic_spine"]["memory_hook"].as_str(),
+            scene["manga_panel"]["page_design"]["dominant_panel"].as_str(),
+            scene["manga_panel"]["panels"][0]["id"].as_str(),
+            scene["manga_panel"]["meta"]["spec_version"].as_str(),
+            scene["manga_panel"]["art_style"]["medium"]["base"].as_str(),
+            scene["manga_panel"]["panel_layout"]["special_device_budget"].as_i64(),
+            scene["manga_panel"]["panel_layout"]["active_permissions"]["inset"].as_bool(),
+            scene["manga_panel"]["panels"][0]["continuity"]["eyeline"]["enabled"].as_bool(),
+            scene["manga_panel"]["panels"][0]["continuity"]["match_on_action"]["enabled"].as_bool(),
+            scene["manga_panel"]["panels"][0]["continuity"]
+                .get("eyeline_enabled")
+                .is_none(),
+        ),
+        (
+            Some("one paw hanging over the sill"),
+            Some("p1"),
+            Some("p1"),
+            Some("2.0.0"),
+            Some("indian_ink"),
+            Some(1),
+            Some(false),
+            Some(false),
+            Some(false),
+            true,
+        ),
+        "dynamic scene fields were lost or agent output replaced static production policy"
+    );
+    Ok(())
+}
+
+/// Composer camera drift is locally canonicalized from the motivated shot plan.
+#[test]
+fn dynamic_scene_generation_canonicalizes_camera_plan_drift() -> Result<()> {
+    let mut output = dynamic_scene();
+    output["panels"][0]["scene"]["camera"]["shot_scale"] = json!("close");
+    output["panels"][0]["scene"]["camera"]["viewpoint"] = json!("over_the_shoulder");
+    output["panels"][0]["scene"]["camera"]["viewpoint_subject_id"] = json!("cat");
+    output["panels"][0]["scene"]["camera"]["framing"] = json!("group");
+    output["panels"][0]["scene"]["camera"]["angle"] = json!("dutch");
+    output["panels"][0]["scene"]["camera"]["depth_plan"] = json!("flat");
+    let transport = FakeTransport::new(scene_responses(&output)?);
+    let client = GeminiClient::new("key", transport);
+    let scene = client.scene(
+        "English",
+        "sleep",
+        "The cat is sleeping on the windowsill",
+        "en",
+    )?;
+    assert_eq!(
+        (
+            scene.pointer("/manga_panel/panels/0/scene/camera/shot_scale"),
+            scene.pointer("/manga_panel/panels/0/scene/camera/viewpoint"),
+            scene.pointer("/manga_panel/panels/0/scene/camera/viewpoint_subject_id"),
+            scene.pointer("/manga_panel/panels/0/scene/camera/framing"),
+            scene.pointer("/manga_panel/panels/0/scene/camera/angle"),
+            scene.pointer("/manga_panel/panels/0/scene/camera/depth_plan"),
+            scene.pointer("/manga_panel/panels/0/scene/description"),
+            scene.pointer("/manga_panel/panels/0/scene/subjects/0/pose"),
+            scene.pointer("/manga_panel/panels/0/scene/subjects/0/blocking"),
+        ),
+        (
+            Some(&json!("wide")),
+            Some(&json!("objective")),
+            Some(&json!("")),
+            Some(&json!("single")),
+            Some(&json!("eye_level")),
+            Some(&json!("deep")),
+            Some(&json!("The complete cat sleeps quietly on the windowsill")),
+            Some(&json!("curled on the windowsill")),
+            Some(&json!("fully visible against the broad window")),
+        ),
+        "camera canonicalization changed the planned setup or semantic scene"
+    );
+    Ok(())
 }
 
 /// Image generation keeps the IMAGE modality and square aspect ratio.

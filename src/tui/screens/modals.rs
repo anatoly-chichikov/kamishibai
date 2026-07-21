@@ -27,7 +27,7 @@ use crate::tui::text_field::TextField;
 
 const TEXT_MODAL_WIDTH: u16 = 64;
 const TEXT_MODAL_HEIGHT: u16 = 7;
-const PICKER_MODAL_WIDTH: u16 = 66;
+const PICKER_MODAL_WIDTH: u16 = 72;
 const PICKER_MODAL_HEIGHT: u16 = 7;
 const HORIZONTAL_PADDING: u16 = 2;
 const INPUT_LINE_OFFSET: u16 = 1;

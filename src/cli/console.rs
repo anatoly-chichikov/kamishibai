@@ -153,7 +153,9 @@ where
         }
         let draft = engine.drafts()[card].clone();
         let term = draft.term().to_string();
-        advance(generator, &mut engine, card, artifact, &draft);
+        if let Some(error) = advance(generator, &mut engine, card, artifact, &draft) {
+            reporter.warn(format!("{term} · {}: {error}", artifact.label()).as_str());
+        }
         reporter.step(term.as_str(), artifact, outcome_of(&engine, card, artifact));
     }
     let drafts = engine.drafts().to_vec();
@@ -181,7 +183,8 @@ fn advance<G>(
     card: usize,
     artifact: Artifact,
     draft: &CardDraft,
-) where
+) -> Option<String>
+where
     G: CardGeneration + DeckPublishing,
 {
     match artifact {
@@ -194,16 +197,27 @@ fn advance<G>(
                         .ok();
                     (meta, file)
                 });
+            let error = result.as_ref().err().map(|error| format!("{error:#}"));
             engine.applied_meta(card, result);
+            error
         }
         Artifact::Scene => {
-            engine.applied_media(card, artifact, generator.generate_scene(draft));
+            let result = generator.generate_scene(draft);
+            let error = result.as_ref().err().map(|error| format!("{error:#}"));
+            engine.applied_media(card, artifact, result);
+            error
         }
         Artifact::Picture => {
-            engine.applied_media(card, artifact, generator.generate_picture(draft));
+            let result = generator.generate_picture(draft);
+            let error = result.as_ref().err().map(|error| format!("{error:#}"));
+            engine.applied_media(card, artifact, result);
+            error
         }
         Artifact::Sound => {
-            engine.applied_media(card, artifact, generator.generate_sound(draft));
+            let result = generator.generate_sound(draft);
+            let error = result.as_ref().err().map(|error| format!("{error:#}"));
+            engine.applied_media(card, artifact, result);
+            error
         }
     }
 }
@@ -383,7 +397,7 @@ impl Reporter for JsonReporter {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     use anyhow::Result;
 
@@ -395,6 +409,11 @@ mod tests {
 
     #[derive(Clone, Default)]
     struct LocalGenerator;
+
+    #[derive(Clone, Default)]
+    struct FailingPictureGenerator {
+        pictures: Cell<usize>,
+    }
 
     impl CardMetaGeneration for LocalGenerator {
         fn generate_card_meta(
@@ -474,6 +493,63 @@ mod tests {
         }
     }
 
+    impl CardMetaGeneration for FailingPictureGenerator {
+        fn generate_card_meta(
+            &self,
+            term: &str,
+            understanding: &str,
+            pair: &LanguagePair,
+        ) -> Result<CardMeta> {
+            LocalGenerator.generate_card_meta(term, understanding, pair)
+        }
+    }
+
+    impl CardCorrection for FailingPictureGenerator {
+        fn correct_card(
+            &self,
+            draft: &CardDraft,
+            comment: &str,
+            pair: &LanguagePair,
+        ) -> Result<CardRevision> {
+            LocalGenerator.correct_card(draft, comment, pair)
+        }
+    }
+
+    impl CardGeneration for FailingPictureGenerator {
+        fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+            LocalGenerator.generate_scene(draft)
+        }
+
+        fn generate_picture(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
+            self.pictures.set(self.pictures.get().saturating_add(1));
+            bail!("picture rejected")
+        }
+
+        fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+            LocalGenerator.generate_sound(draft)
+        }
+
+        fn store_card_meta(
+            &self,
+            term: &str,
+            understanding: &str,
+            pair: &LanguagePair,
+            meta: &CardMeta,
+        ) -> Result<ArtifactFile> {
+            LocalGenerator.store_card_meta(term, understanding, pair, meta)
+        }
+    }
+
+    impl DeckPublishing for FailingPictureGenerator {
+        fn publish_deck(
+            &self,
+            drafts: &[CardDraft],
+            progress: &dyn PublishProgress,
+        ) -> Result<(String, String, String)> {
+            LocalGenerator.publish_deck(drafts, progress)
+        }
+    }
+
     fn local_file(term: &str, kind: &str) -> ArtifactFile {
         let name = format!("{term}-{kind}");
         ArtifactFile::new(name.clone(), std::env::temp_dir().join(&name), "1 B", false)
@@ -483,6 +559,7 @@ mod tests {
     struct RecordingReporter {
         steps: RefCell<Vec<String>>,
         published: RefCell<Option<(usize, usize)>>,
+        warnings: RefCell<Vec<String>>,
     }
 
     impl Reporter for RecordingReporter {
@@ -495,6 +572,9 @@ mod tests {
         fn publishing(&self) {}
         fn finished(&self, outcome: &Outcome) {
             *self.published.borrow_mut() = Some((outcome.cards, outcome.failed));
+        }
+        fn warn(&self, message: &str) {
+            self.warnings.borrow_mut().push(String::from(message));
         }
     }
 
@@ -575,6 +655,32 @@ mod tests {
                 String::from("canard:picture"),
             ],
             "produce must visit artifacts in the engine's meta→sound→scene→picture order"
+        );
+    }
+
+    #[test]
+    fn produce_stops_picture_generation_at_three_failed_calls() {
+        let generator = FailingPictureGenerator::default();
+        let drafts = vec![CardDraft::new("canard", "a duck", pair())];
+        let reporter = RecordingReporter::default();
+        produce(&generator, drafts, &reporter).expect("produce must publish surviving cards");
+        assert_eq!(
+            (generator.pictures.get(), *reporter.published.borrow()),
+            (3, Some((0, 1))),
+            "produce exceeded the three-call picture ceiling for one failed card"
+        );
+    }
+
+    #[test]
+    fn produce_reports_each_picture_failure_reason() {
+        let generator = FailingPictureGenerator::default();
+        let drafts = vec![CardDraft::new("canard", "a duck", pair())];
+        let reporter = RecordingReporter::default();
+        produce(&generator, drafts, &reporter).expect("produce must publish surviving cards");
+        assert_eq!(
+            *reporter.warnings.borrow(),
+            vec![String::from("canard · picture: picture rejected"); 3],
+            "produce hid one or more picture failure reasons"
         );
     }
 }

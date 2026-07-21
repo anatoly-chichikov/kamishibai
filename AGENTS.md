@@ -81,12 +81,12 @@ The runtime is split into a few focused modules:
 
 The cache (printed by `kamishibai cache-path`) groups one folder per card, keyed by a content hash of the card identity:
 
-- `cards/<known>-<learning>/<key>/` holds `meta.json`, `scene.json`, `audio.wav`, and `picture.jpg` for one card
+- `cards/<known>-<learning>/<key>/` holds `meta.json` and `audio.wav`; `visual/<revision>/` beneath it holds `scene.json` and `picture.jpg` for one visual-policy revision
 - `understanding/<known>-<learning>/<key>.json` holds the understanding-pass result
 - `sessions/<id>/` holds `session.json` (identity, phase, words, curated candidates, committed plan, worker pid, result) and `worker.log`
 - `ocr-models/` holds the shared OCR model files
 
-`CardCell` (`src/session/vault.rs`) owns this layout; deleting a card's folder forces just that card to regenerate. Anki media names are decoupled from disk filenames in `src/anki/deck.rs` so per-card role-named files stay unique inside the `.apkg`.
+`CardCell` (`src/session/vault.rs`) owns this layout; deleting a card's folder forces just that card to regenerate. Visual revisions hash the three production scene-planning prompts, the composer schema, both layout/device registries, and the manga template together with the manual `LAYOUT_POLICY_VERSION`, so concurrent application versions never overwrite one another. Bump that version whenever a scene model/configuration, local scene specialization/validation rule, or renderer acceptance policy changes without changing an embedded asset. Anki media names are decoupled from disk filenames in `src/anki/deck.rs` so per-card role-named files stay unique inside the `.apkg`.
 
 ## Language Profiles
 

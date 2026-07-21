@@ -51,6 +51,12 @@ pub(super) struct GenerationConfig {
     image_config: Option<ImageConfig>,
     #[serde(rename = "speechConfig", skip_serializing_if = "Option::is_none")]
     speech_config: Option<SpeechConfig>,
+    #[serde(rename = "responseFormat", skip_serializing_if = "Option::is_none")]
+    response_format: Option<ResponseFormat>,
+    #[serde(rename = "responseMimeType", skip_serializing_if = "Option::is_none")]
+    response_mime_type: Option<String>,
+    #[serde(rename = "maxOutputTokens", skip_serializing_if = "Option::is_none")]
+    max_output_tokens: Option<u32>,
 }
 
 impl GenerationConfig {
@@ -62,6 +68,9 @@ impl GenerationConfig {
                 aspect_ratio: String::from("1:1"),
             }),
             speech_config: None,
+            response_format: None,
+            response_mime_type: None,
+            max_output_tokens: None,
         }
     }
 
@@ -87,8 +96,52 @@ impl GenerationConfig {
                     },
                 },
             }),
+            response_format: None,
+            response_mime_type: None,
+            max_output_tokens: None,
         }
     }
+
+    /// Return the structured JSON response configuration.
+    pub(super) fn json(schema: Value) -> Self {
+        Self {
+            response_modalities: None,
+            image_config: None,
+            speech_config: None,
+            response_format: Some(ResponseFormat {
+                text: TextResponseFormat {
+                    mime_type: String::from("APPLICATION_JSON"),
+                    schema,
+                },
+            }),
+            response_mime_type: None,
+            max_output_tokens: None,
+        }
+    }
+
+    /// Return JSON mode without a response schema.
+    pub(super) fn json_mode() -> Self {
+        Self {
+            response_modalities: None,
+            image_config: None,
+            speech_config: None,
+            response_format: None,
+            response_mime_type: Some(String::from("application/json")),
+            max_output_tokens: Some(8_192),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct ResponseFormat {
+    text: TextResponseFormat,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct TextResponseFormat {
+    #[serde(rename = "mimeType")]
+    mime_type: String,
+    schema: Value,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -410,4 +463,36 @@ pub(super) fn api_error(body: &str) -> anyhow::Error {
 
 fn number(value: i64) -> Value {
     Value::Number(value.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_text_image_and_audio_requests_keep_their_exact_bytes() {
+        let text = serde_json::to_string(&Request::text(String::from("compose"), None, None))
+            .expect("text request must serialize");
+        let image = serde_json::to_string(&Request::text(
+            String::from("scene"),
+            Some(GenerationConfig::image()),
+            Some(GenerationConfig::image_safety()),
+        ))
+        .expect("image request must serialize");
+        let audio = serde_json::to_string(&Request::text(
+            String::from("speak"),
+            Some(GenerationConfig::audio("Aoede")),
+            None,
+        ))
+        .expect("audio request must serialize");
+        assert_eq!(
+            (text.as_str(), image.as_str(), audio.as_str()),
+            (
+                r#"{"contents":[{"parts":[{"text":"compose"}]}]}"#,
+                r#"{"contents":[{"parts":[{"text":"scene"}]}],"generationConfig":{"responseModalities":["IMAGE"],"imageConfig":{"aspectRatio":"1:1"}},"safetySettings":[{"category":"HARM_CATEGORY_HARASSMENT","threshold":"BLOCK_NONE"},{"category":"HARM_CATEGORY_HATE_SPEECH","threshold":"BLOCK_NONE"},{"category":"HARM_CATEGORY_SEXUALLY_EXPLICIT","threshold":"BLOCK_NONE"},{"category":"HARM_CATEGORY_DANGEROUS_CONTENT","threshold":"BLOCK_NONE"}]}"#,
+                r#"{"contents":[{"parts":[{"text":"speak"}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Aoede"}}}}}"#,
+            ),
+            "a legacy Gemini request changed while structured output was added"
+        );
+    }
 }

@@ -5,9 +5,11 @@ mod codec;
 mod cost;
 mod prompts;
 mod protocol;
+mod scene;
 
 pub use client::{GeminiClient, HttpTransport, Transport, TransportResponse};
 pub use protocol::GeminiApiError;
+pub(crate) use scene::validate_cached as validate_cached_scene;
 
 use anyhow::Result;
 
@@ -32,8 +34,14 @@ where
     T: Transport,
 {
     /// Return one translated scene JSON document.
-    fn scene(&self, language: &str, sentence: &str, target: &str) -> Result<serde_json::Value> {
-        GeminiClient::<T>::scene(self, language, sentence, target)
+    fn scene(
+        &self,
+        language: &str,
+        term: &str,
+        sentence: &str,
+        target: &str,
+    ) -> Result<serde_json::Value> {
+        GeminiClient::<T>::scene(self, language, term, sentence, target)
     }
 }
 

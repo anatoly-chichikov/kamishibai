@@ -74,7 +74,7 @@ pub(crate) fn engine(selection: &str, root: &Path) -> Result<OcrEngine> {
 
 /// Route one legacy OCR selection string to one OCR bundle.
 fn bundle(selection: &str) -> Bundle {
-    if matches(selection, &["chi_sim", "chi_tra", "chi", "zh", "jpn"]) {
+    if matches(selection, &["chi_sim", "chi_tra", "chi", "zh"]) {
         return Bundle::Default;
     }
     if matches(selection, &["ell", "el"]) {
@@ -88,9 +88,14 @@ fn bundle(selection: &str) -> Bundle {
     }
     if matches(
         selection,
-        &["deu", "spa", "fra", "ita", "por", "lat", "de", "es"],
+        &[
+            "deu", "spa", "fra", "ita", "por", "nld", "dut", "lat", "de", "es", "nl",
+        ],
     ) {
         return Bundle::Latin;
+    }
+    if matches(selection, &["jpn"]) {
+        return Bundle::Default;
     }
     Bundle::En
 }
@@ -185,6 +190,16 @@ mod tests {
         );
     }
 
+    /// Dutch legacy OCR tokens route to the Latin PP-OCRv5 recognizer.
+    #[test]
+    fn dutch_legacy_ocr_tokens_route_to_the_latin_pp_ocrv5_recognizer() {
+        assert_eq!(
+            bundle("eng+nld"),
+            Bundle::Latin,
+            "dutch legacy ocr tokens no longer route to the latin pp ocrv5 recognizer"
+        );
+    }
+
     /// Greek legacy OCR tokens route to the Greek PP-OCRv5 recognizer.
     #[test]
     fn greek_legacy_ocr_tokens_route_to_the_greek_pp_ocrv5_recognizer() {
@@ -202,6 +217,16 @@ mod tests {
             bundle("eng+rus"),
             Bundle::Cyrillic,
             "russian legacy ocr tokens no longer route to the cyrillic pp ocrv5 recognizer"
+        );
+    }
+
+    /// Auxiliary Japanese detection cannot replace the target script recognizer.
+    #[test]
+    fn auxiliary_japanese_detection_cannot_replace_the_target_script_recognizer() {
+        assert_eq!(
+            (bundle("eng+deu+jpn"), bundle("eng+rus+jpn")),
+            (Bundle::Latin, Bundle::Cyrillic),
+            "auxiliary Japanese detection replaced a target script recognizer"
         );
     }
 

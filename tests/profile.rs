@@ -59,6 +59,38 @@ fn english_profile_keeps_the_frozen_runtime_values() -> Result<()> {
     Ok(())
 }
 
+/// Dutch resolves to its production language, OCR, deck, and report contract.
+#[test]
+fn dutch_profile_exposes_the_complete_production_contract() -> Result<()> {
+    let item = language("nl")?;
+    assert_eq!(
+        (
+            item.code,
+            item.prompt,
+            item.ocr,
+            item.naming.name,
+            item.naming.prefix,
+            item.labels.sentence,
+            item.labels.context,
+            item.labels.hint,
+            item.labels.importance,
+        ),
+        (
+            "nl",
+            String::from("Dutch"),
+            String::from("eng+nld"),
+            String::from("Dutch Vocabulary"),
+            String::from("nl"),
+            String::from("Vertaling"),
+            String::from("Context"),
+            String::from("Hint"),
+            String::from("Belang"),
+        ),
+        "dutch profile is incomplete or inconsistent"
+    );
+    Ok(())
+}
+
 /// Unknown profiles fail with the frozen error wording.
 #[test]
 fn unknown_profiles_raise_the_frozen_error_message() {
@@ -74,7 +106,9 @@ fn unknown_profiles_raise_the_frozen_error_message() {
 fn registry_keeps_the_supported_codes_in_stable_order() {
     assert_eq!(
         catalog().codes(),
-        ["en", "zh", "es", "ja", "fr", "de", "ru", "it", "pt", "el"],
+        [
+            "en", "zh", "es", "ja", "fr", "de", "ru", "it", "pt", "el", "nl",
+        ],
         "profile registry codes no longer match the frozen order"
     );
 }

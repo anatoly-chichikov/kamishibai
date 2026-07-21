@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
 use time::OffsetDateTime;
@@ -17,14 +18,17 @@ use crate::config::default_store;
 use crate::gemini::{GeminiClient, HttpTransport};
 use crate::generation::artifact_cache::{
     Cache, ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, META_COST_FILE, SCENE_COST_FILE,
-    VOICE_COST_FILE, VOICE_FILE,
+    VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE, VisualGuard,
 };
+use crate::generation::manga::TextEnsemble;
 use crate::generation::manga::{
     BorderDetector, Illustration, ImageSource, MangaRenderer, Progress as SceneProgress,
     TextDetector,
 };
 use crate::generation::speech::Audio;
-use crate::generation::{SceneComposer, SceneSource, Speaker, render_audio_prompt};
+use crate::generation::{
+    SceneComposer, SceneSource, Speaker, render_audio_prompt, visual_revision,
+};
 use crate::languages::{LanguageCatalog, catalog, naming};
 use crate::report::{CardSheet, Thumbnail};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
@@ -37,8 +41,10 @@ use crate::session::{
 use crate::vocabulary::VocabularyEntry;
 
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
+const IMAGE_ATTEMPTS_PER_ARTIFACT: usize = 1;
 
-type LiveIllustration = Illustration<SceneComposer<MeteredGemini>, MangaRenderer<TextDetector>>;
+type LiveText = TextEnsemble<TextDetector>;
+type LiveIllustration = Illustration<SceneComposer<MeteredGemini>, MangaRenderer<LiveText>>;
 
 /// Where the live generator looks for the Gemini API key.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -113,19 +119,23 @@ impl LiveCardGenerator {
         ))
     }
 
-    fn illustration(&self, draft: &CardDraft, costs: CostRecorder) -> Result<LiveIllustration> {
+    fn illustration(
+        &self,
+        draft: &CardDraft,
+        cache: Cache,
+        costs: CostRecorder,
+    ) -> Result<LiveIllustration> {
         let item = self.catalog.item(draft.pair().learning())?;
         let client = self.client()?;
         let metered = MeteredGemini::new(client, costs);
+        let text = manga_text(item.ocr.as_str(), self.cache.as_path());
+        let renderer =
+            production_renderer(metered.clone(), text, BorderDetector::new(6, 24, 240, 10));
+        let renderer = renderer.with_attempt_archive(cache.filepath("attempts")?);
         Ok(Illustration::new(
-            self.cell(draft).cache(),
-            SceneComposer::new(metered.clone(), item.prompt.as_str()),
-            MangaRenderer::new(
-                metered,
-                3,
-                TextDetector::cached(60, item.ocr.as_str(), self.cache.clone()),
-                BorderDetector::new(6, 240, 10),
-            ),
+            cache,
+            SceneComposer::new(metered.clone(), item.prompt.as_str(), draft.term()),
+            renderer,
         ))
     }
 
@@ -143,8 +153,9 @@ impl LiveCardGenerator {
             .ok_or_else(|| anyhow!("meta must be ready before {}", artifact.label()))?;
         let learning = draft.pair().learning();
         let costs = CostRecorder::default();
-        let cache = self.cell(draft).cache();
-        let illustration = self.illustration(draft, costs.clone())?;
+        let cache = self.cell(draft).cache().visual(visual_revision())?;
+        let illustration = self.illustration(draft, cache.clone(), costs.clone())?;
+        let _guard = cache.hold_visual(VISUAL_LOCK_TIMEOUT)?;
         let mut progress = NoopProgress;
         let result = render(
             &illustration,
@@ -304,9 +315,13 @@ impl DeckPublishing for LiveCardGenerator {
     ) -> Result<(String, String, String)> {
         progress.advance(PublishPhase::Deck);
         fs::create_dir_all(&self.output)?;
-        let entries: Vec<VocabularyEntry> = drafts
+        let completed = drafts
             .iter()
             .filter(|draft| draft.artifacts().all_ready())
+            .collect::<Vec<_>>();
+        let entries: Vec<VocabularyEntry> = completed
+            .iter()
+            .copied()
             .map(to_entry)
             .collect::<Result<Vec<_>>>()?;
         if entries.is_empty() {
@@ -321,14 +336,21 @@ impl DeckPublishing for LiveCardGenerator {
             Vec::<(PathBuf, String)>::new(),
         );
         let mut report = CardSheet::new();
-        for draft in drafts.iter().filter(|draft| draft.artifacts().all_ready()) {
+        let visuals = completed
+            .iter()
+            .copied()
+            .map(|draft| self.cell(draft).cache().visual(visual_revision()))
+            .collect::<Result<Vec<_>>>()?;
+        let _guards = hold_visuals(visuals, VISUAL_LOCK_TIMEOUT)?;
+        for draft in completed.iter().copied() {
             let entry = to_entry(draft)?;
             let cell = self.cell(draft);
             let cache = cell.cache();
+            let visual = cache.visual(visual_revision())?;
             let voice = cell.media_name("wav");
             let image = cell.media_name("jpg");
             let voice_path = cache.filepath(VOICE_FILE)?;
-            let image_path = cache.filepath(ILLUSTRATION_FILE)?;
+            let image_path = visual.filepath(ILLUSTRATION_FILE)?;
             container.attach(voice_path, voice.as_str());
             container.attach(image_path.clone(), image.as_str());
             container.add(
@@ -351,6 +373,15 @@ impl DeckPublishing for LiveCardGenerator {
             self.output.to_string_lossy().into_owned(),
         ))
     }
+}
+
+fn hold_visuals(mut visuals: Vec<Cache>, timeout: Duration) -> Result<Vec<VisualGuard>> {
+    visuals.sort_by_key(Cache::path);
+    visuals.dedup_by(|left, right| left.path() == right.path());
+    visuals
+        .iter()
+        .map(|visual| visual.hold_visual(timeout))
+        .collect()
 }
 
 struct NoopProgress;
@@ -392,9 +423,17 @@ impl MeteredGemini {
 }
 
 impl SceneSource for MeteredGemini {
-    fn scene(&self, language: &str, sentence: &str, target: &str) -> Result<serde_json::Value> {
+    fn scene(
+        &self,
+        language: &str,
+        term: &str,
+        sentence: &str,
+        target: &str,
+    ) -> Result<serde_json::Value> {
         self.client
-            .scene_observed(language, sentence, target, |cost| self.costs.push(cost))
+            .scene_observed(language, term, sentence, target, |cost| {
+                self.costs.push(cost)
+            })
     }
 }
 
@@ -520,11 +559,105 @@ fn release_stamp() -> Result<String> {
         .format(parse_time("[year]-[month]-[day]_[hour][minute][second]")?.as_slice())?)
 }
 
+fn manga_text(value: &str, cache: &Path) -> TextEnsemble<TextDetector> {
+    let mut detectors = vec![TextDetector::cached(60, value, cache)];
+    if !value.split('+').any(|language| language == "jpn") {
+        detectors.push(TextDetector::cached(60, "jpn", cache));
+    }
+    TextEnsemble::new(detectors)
+}
+
+fn production_renderer<C, D>(client: C, text: D, border: BorderDetector) -> MangaRenderer<D>
+where
+    C: ImageSource + 'static,
+{
+    MangaRenderer::new(client, IMAGE_ATTEMPTS_PER_ARTIFACT, text, border)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::io::Cursor;
+
+    use image::{DynamicImage, GrayImage, ImageFormat, Luma};
+    use serde_json::Value;
     use tempfile::TempDir;
 
     use super::*;
+    use crate::generation::manga::{Renderer, SceneText};
+
+    #[derive(Clone, Debug)]
+    struct CountingImageSource {
+        calls: Rc<Cell<usize>>,
+        image: Vec<u8>,
+    }
+
+    impl CountingImageSource {
+        fn new() -> Self {
+            let mut image = Cursor::new(Vec::new());
+            DynamicImage::ImageLuma8(GrayImage::from_pixel(16, 16, Luma([0])))
+                .write_to(&mut image, ImageFormat::Png)
+                .expect("test image must encode");
+            Self {
+                calls: Rc::new(Cell::new(0)),
+                image: image.into_inner(),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.get()
+        }
+    }
+
+    impl ImageSource for CountingImageSource {
+        fn image(&self, _scene: &Value) -> Result<Vec<u8>> {
+            self.calls.set(self.calls.get() + 1);
+            Ok(self.image.clone())
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct RejectingText;
+
+    impl SceneText for RejectingText {
+        fn detected(&self, _scene: &Value, _image: &GrayImage) -> Result<String> {
+            Ok(String::from("detected text"))
+        }
+    }
+
+    #[test]
+    fn production_renderer_spends_one_image_call_per_artifact_attempt() {
+        let source = CountingImageSource::new();
+        let renderer = production_renderer(
+            source.clone(),
+            RejectingText,
+            BorderDetector::new(2, 6, 240, 2),
+        );
+        let result = renderer.render(
+            &serde_json::json!({"manga_panel": {"panels": []}}),
+            &mut NoopProgress,
+        );
+        assert_eq!(
+            (result.is_err(), source.calls()),
+            (true, 1),
+            "one outer artifact attempt multiplied into multiple image calls"
+        );
+    }
+
+    #[test]
+    fn duplicate_visual_paths_hold_one_lock_without_deadlocking() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("cards/test", home.path())
+            .visual("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .expect("visual cache must resolve");
+        let guards = hold_visuals(vec![cache.clone(), cache], Duration::ZERO)
+            .expect("duplicate visual paths must acquire one lock");
+        assert_eq!(
+            guards.len(),
+            1,
+            "duplicate visual paths acquired the same non-reentrant lock twice"
+        );
+    }
 
     #[test]
     fn cached_artifacts_do_not_report_historical_cost() {

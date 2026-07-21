@@ -182,6 +182,19 @@ fn welcome_key_step_with_env_locks_load_from_env_chip() {
 }
 
 #[test]
+fn welcome_language_row_keeps_the_dutch_chip_visible_at_standard_width() {
+    let app = App::new(LanguagePair::new("fr", "en")).opening_welcome(
+        KeySource::Empty,
+        String::new(),
+        false,
+    );
+    assert!(
+        render_sized(&app, 80, 16).contains(" NL "),
+        "welcome language row clipped the Dutch chip at standard width"
+    );
+}
+
+#[test]
 fn your_words_snapshot_locks_initial_layout() {
     let app = App::new(LanguagePair::new("en", "ru"));
     insta::assert_snapshot!("your_words", render(&app));
@@ -223,6 +236,16 @@ fn pick_my_language_modal_snapshot_locks_picker_layout() {
         buffer.push('\n');
     }
     insta::assert_snapshot!("pick_my_language_modal", buffer);
+}
+
+#[test]
+fn pick_my_language_modal_keeps_the_dutch_chip_visible() {
+    let app = App::new(LanguagePair::new("en", "ru")).with_screen(Screen::WhatIUnderstood);
+    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
+    assert!(
+        render_sized(&opened, 80, 16).contains(" NL "),
+        "language picker clipped the Dutch chip"
+    );
 }
 
 #[test]

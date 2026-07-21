@@ -1,0 +1,151 @@
+{
+  "manga_panel": {
+    "meta": {
+      "spec_version": "2.0.0"
+    },
+    "panel_layout": {
+      "special_device_budget": 1
+    },
+    "semantic_spine": {
+      "literal_event": "A traveler waits at a station",
+      "semantic_focus": "waiting",
+      "emotional_relation": "calm",
+      "intensity": 1,
+      "visual_relation": "containment",
+      "memory_hook": "one suitcase beside the traveler",
+      "metaphor": {
+        "mode": "none",
+        "mapping": "",
+        "literal_anchor": "waiting traveler"
+      }
+    },
+    "page_design": {
+      "rhythm": "single_tableau",
+      "archetype": "single-splash-test-v1",
+      "dominant_panel": "p1",
+      "reading_path": [
+        "p1"
+      ],
+      "eye_flow_summary": "the platform edge leads to the waiting traveler",
+      "layout_rendering_directive": "use one clear establishing panel",
+      "layout": {
+        "template_id": "single-splash-test-v1"
+      },
+      "camera_arc": {
+        "strategy": "single_view",
+        "progression": "hold one complete view",
+        "motivation": "one view contains the complete literal event",
+        "continuity": {
+          "axis_mode": "not_applicable",
+          "axis": "",
+          "screen_direction": "stationary",
+          "eyeline_policy": "not_applicable"
+        }
+      },
+      "special_device": {
+        "kind": "none",
+        "reason": "ordinary framing preserves the calm scene",
+        "source_panel": "",
+        "target_panel": "",
+        "subject_id": ""
+      }
+    },
+    "panels": [
+      {
+        "id": "p1",
+        "bounds": {
+          "x": 16,
+          "y": 16,
+          "width": 992,
+          "height": 992
+        },
+        "bleed": false,
+        "frame": {
+          "shape": "rectangle",
+          "polygon": [],
+          "border": "solid",
+          "parent_panel": "",
+          "overlaps_panel": "",
+          "z_index": 0,
+          "geometry_intent": "one calm establishing view"
+        },
+        "narrative_role": "peak",
+        "semantic_job": "show the complete waiting traveler",
+        "attentional_frame": "mono",
+        "narrative_weight": "primary",
+        "transition_from_previous": "none",
+        "continuity": {
+          "breakout": {
+            "enabled": false,
+            "subject_id": "",
+            "edge": "empty",
+            "destination_panel": ""
+          },
+          "shared_environment_id": "",
+          "subject_phase": "",
+          "axis_relation_from_previous": "not_applicable",
+          "screen_direction": "stationary",
+          "eyeline": {
+            "enabled": false,
+            "looker_id": "",
+            "target_anchor": "",
+            "direction": "none"
+          },
+          "match_on_action": {
+            "enabled": false,
+            "subject_id": "",
+            "action": ""
+          }
+        },
+        "shot_contract": {
+          "role": "establishing",
+          "shot_scale": "wide",
+          "viewpoint": "objective",
+          "framing": "single",
+          "angle": "eye_level",
+          "depth_plan": "deep",
+          "camera_motivation": "the wide view establishes traveler and station",
+          "information_gain": "the complete spatial relation is visible"
+        },
+        "scene": {
+          "description": "A traveler waits beside a suitcase on an empty platform",
+          "subjects": [
+            {
+              "id": "traveler",
+              "figure": "adult traveler",
+              "pose": "standing beside one suitcase",
+              "expression": "patient and attentive",
+              "blocking": "fully visible against the platform"
+            }
+          ],
+          "environment": {
+            "setting": "quiet railway station",
+            "foreground": [
+              "platform edge"
+            ],
+            "midground": [
+              "traveler and suitcase"
+            ],
+            "background": [
+              "blank station columns"
+            ]
+          },
+          "camera": {
+            "shot_scale": "wide",
+            "viewpoint": "objective",
+            "viewpoint_subject_id": "",
+            "framing": "single",
+            "angle": "eye_level",
+            "focus": "traveler and platform",
+            "depth_plan": "deep",
+            "eye_flow_exit": "toward the traveler"
+          },
+          "motion_treatment": "none",
+          "lighting": "soft daylight",
+          "mood": "calm",
+          "text_in_frame": "none"
+        }
+      }
+    ]
+  }
+}

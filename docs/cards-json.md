@@ -86,4 +86,4 @@ Validation checks structure, not taste. What makes the fields good is the style 
 
 ## Languages
 
-Ten codes, accepted in any case and normalized to uppercase: `EN`, `ZH`, `ES`, `JA`, `FR`, `DE`, `RU`, `IT`, `PT`, `EL`.
+Eleven codes, accepted in any case and normalized to uppercase: `EN`, `ZH`, `ES`, `JA`, `FR`, `DE`, `RU`, `IT`, `PT`, `EL`, `NL`.

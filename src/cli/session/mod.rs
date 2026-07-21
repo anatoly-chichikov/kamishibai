@@ -43,12 +43,13 @@ use anyhow::Result;
 
 use crate::config::default_store;
 use crate::generation::artifact_cache::{
-    ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, META_COST_FILE, META_FILE, SCENE_COST_FILE,
-    SCENE_FILE, VOICE_COST_FILE, VOICE_FILE,
+    Cache, ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, LEGACY_VISUAL_REVISION_FILE, META_COST_FILE,
+    META_FILE, SCENE_COST_FILE, SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE,
 };
+use crate::generation::visual_revision;
 use crate::languages::catalog;
 use crate::runtime::locations::{SystemContext, cache_root};
-use crate::session::{CardCell, LanguagePair};
+use crate::session::{CardCell, CardMetaCache, LanguagePair};
 
 use super::error::{self, usage};
 
@@ -284,26 +285,118 @@ pub(in crate::cli::session) fn drop_artifacts(
     keep_meta: bool,
 ) -> Result<()> {
     let cache = CardCell::new(root.to_path_buf(), pair, term, understanding).cache();
-    let folder = cache.path();
-    for file in [
-        VOICE_FILE,
-        VOICE_COST_FILE,
-        SCENE_FILE,
-        SCENE_COST_FILE,
-        ILLUSTRATION_FILE,
-        ILLUSTRATION_COST_FILE,
-    ] {
-        let path = folder.join(file);
+    let visual = cache.visual(visual_revision())?;
+    let _guard = visual.hold_visual(VISUAL_LOCK_TIMEOUT)?;
+    remove_cached_files(
+        &visual,
+        &[
+            SCENE_FILE,
+            SCENE_COST_FILE,
+            ILLUSTRATION_FILE,
+            ILLUSTRATION_COST_FILE,
+        ],
+    )?;
+    remove_cached_files(
+        &cache,
+        &[
+            VOICE_FILE,
+            VOICE_COST_FILE,
+            SCENE_FILE,
+            SCENE_COST_FILE,
+            ILLUSTRATION_FILE,
+            ILLUSTRATION_COST_FILE,
+            LEGACY_VISUAL_REVISION_FILE,
+        ],
+    )?;
+    if !keep_meta {
+        remove_cached_files(&cache, &[META_FILE, META_COST_FILE])?;
+    }
+    Ok(())
+}
+
+/// Delete only missing stages and their dependants, retaining every valid
+/// upstream or independent artifact for a failed-card retry.
+pub(in crate::cli::session) fn drop_incomplete_artifacts(
+    root: &Path,
+    pair: &LanguagePair,
+    term: &str,
+    understanding: &str,
+) -> Result<()> {
+    let cache = CardCell::new(root.to_path_buf(), pair, term, understanding).cache();
+    let visual = cache.visual(visual_revision())?;
+    let _guard = visual.hold_visual(VISUAL_LOCK_TIMEOUT)?;
+    if !cached_meta_is_valid(root, pair, term, understanding) {
+        remove_cached_files(
+            &visual,
+            &[
+                SCENE_FILE,
+                SCENE_COST_FILE,
+                ILLUSTRATION_FILE,
+                ILLUSTRATION_COST_FILE,
+            ],
+        )?;
+        remove_cached_files(
+            &cache,
+            &[
+                META_FILE,
+                META_COST_FILE,
+                VOICE_FILE,
+                VOICE_COST_FILE,
+                SCENE_FILE,
+                SCENE_COST_FILE,
+                ILLUSTRATION_FILE,
+                ILLUSTRATION_COST_FILE,
+                LEGACY_VISUAL_REVISION_FILE,
+            ],
+        )?;
+        return Ok(());
+    }
+    if !cache.exists(VOICE_FILE) {
+        remove_cached_files(&cache, &[VOICE_FILE, VOICE_COST_FILE])?;
+    }
+    if !cached_scene_is_valid(&visual) {
+        remove_cached_files(
+            &visual,
+            &[
+                SCENE_FILE,
+                SCENE_COST_FILE,
+                ILLUSTRATION_FILE,
+                ILLUSTRATION_COST_FILE,
+            ],
+        )?;
+    } else if !visual.exists(ILLUSTRATION_FILE) {
+        remove_cached_files(&visual, &[ILLUSTRATION_FILE, ILLUSTRATION_COST_FILE])?;
+    }
+    Ok(())
+}
+
+/// Return whether the cached card metadata can be decoded for this exact card.
+pub(in crate::cli::session) fn cached_meta_is_valid(
+    root: &Path,
+    pair: &LanguagePair,
+    term: &str,
+    understanding: &str,
+) -> bool {
+    matches!(
+        CardMetaCache::new(root).load(term, understanding, pair),
+        Ok(Some(_))
+    )
+}
+
+/// Return whether the cached scene satisfies the minimum production structure.
+pub(in crate::cli::session) fn cached_scene_is_valid(cache: &Cache) -> bool {
+    fs::read(cache.path().join(SCENE_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|scene| crate::gemini::validate_cached_scene(&scene).is_ok())
+}
+
+/// Remove named files from one cache without treating absence as an error.
+fn remove_cached_files(cache: &Cache, files: &[&str]) -> Result<()> {
+    for file in files {
+        let path = cache.path().join(file);
         if path.exists() {
             fs::remove_file(&path)?;
-        }
-    }
-    if !keep_meta {
-        for file in [META_FILE, META_COST_FILE] {
-            let path = folder.join(file);
-            if path.exists() {
-                fs::remove_file(&path)?;
-            }
         }
     }
     Ok(())
@@ -315,6 +408,7 @@ mod tests {
 
     use super::store::WorkerHandle;
     use super::*;
+    use crate::session::{CardMeta, CardMetaCache};
 
     fn record(id: &str, phase: Phase) -> SessionRecord {
         let mut record = SessionRecord::understood(
@@ -398,6 +492,12 @@ mod tests {
         let home = TempDir::new().expect("tempdir must be created");
         let pair = LanguagePair::new("fr", "en");
         let cache = CardCell::new(home.path().to_path_buf(), &pair, "canard", "a duck").cache();
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        let sibling = cache
+            .visual("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .expect("sibling revision must be valid");
         for file in [
             META_FILE,
             META_COST_FILE,
@@ -407,26 +507,307 @@ mod tests {
             SCENE_COST_FILE,
             ILLUSTRATION_FILE,
             ILLUSTRATION_COST_FILE,
+            LEGACY_VISUAL_REVISION_FILE,
         ] {
             fs::write(cache.filepath(file).expect("cache path must resolve"), b"x")
                 .expect("cache fixture must be written");
         }
+        for file in [
+            SCENE_FILE,
+            SCENE_COST_FILE,
+            ILLUSTRATION_FILE,
+            ILLUSTRATION_COST_FILE,
+        ] {
+            fs::write(
+                visual.filepath(file).expect("visual path must resolve"),
+                b"x",
+            )
+            .expect("current visual fixture must be written");
+            fs::write(
+                sibling.filepath(file).expect("sibling path must resolve"),
+                b"x",
+            )
+            .expect("sibling visual fixture must be written");
+        }
         drop_artifacts(home.path(), &pair, "canard", "a duck", false)
             .expect("artifacts must be dropped");
-        assert!(
-            ![
-                META_FILE,
-                META_COST_FILE,
-                VOICE_FILE,
-                VOICE_COST_FILE,
-                SCENE_FILE,
-                SCENE_COST_FILE,
-                ILLUSTRATION_FILE,
-                ILLUSTRATION_COST_FILE,
-            ]
-            .iter()
-            .any(|file| cache.path().join(file).exists()),
-            "regeneration must not inherit stale artifact request costs"
+        assert_eq!(
+            (
+                [
+                    META_FILE,
+                    META_COST_FILE,
+                    VOICE_FILE,
+                    VOICE_COST_FILE,
+                    SCENE_FILE,
+                    SCENE_COST_FILE,
+                    ILLUSTRATION_FILE,
+                    ILLUSTRATION_COST_FILE,
+                    LEGACY_VISUAL_REVISION_FILE,
+                ]
+                .iter()
+                .any(|file| cache.path().join(file).exists()),
+                [
+                    SCENE_FILE,
+                    SCENE_COST_FILE,
+                    ILLUSTRATION_FILE,
+                    ILLUSTRATION_COST_FILE,
+                ]
+                .iter()
+                .any(|file| visual.path().join(file).exists()),
+                [
+                    SCENE_FILE,
+                    SCENE_COST_FILE,
+                    ILLUSTRATION_FILE,
+                    ILLUSTRATION_COST_FILE,
+                ]
+                .iter()
+                .all(|file| sibling.path().join(file).exists()),
+            ),
+            (false, false, true),
+            "regeneration must drop current and legacy artifacts without touching sibling revisions"
+        );
+    }
+
+    fn fixture_meta() -> CardMeta {
+        CardMeta::new(
+            "/ka.naʁ/",
+            "/lə ka.naʁ naʒ/",
+            "a duck",
+            5,
+            "The duck swims",
+            "duck",
+            "Think of a pond",
+            "A common concrete noun",
+            "Le canard nage",
+        )
+    }
+
+    fn seed_current_artifacts(
+        home: &TempDir,
+        pair: &LanguagePair,
+        cache: &crate::generation::artifact_cache::Cache,
+    ) {
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        CardMetaCache::new(home.path())
+            .store("canard", "a duck", pair, &fixture_meta())
+            .expect("valid meta fixture must be stored");
+        for file in [META_COST_FILE, VOICE_FILE, VOICE_COST_FILE] {
+            fs::write(cache.filepath(file).expect("cache path must resolve"), b"x")
+                .expect("cache fixture must be written");
+        }
+        fs::write(
+            visual
+                .filepath(SCENE_FILE)
+                .expect("visual path must resolve"),
+            include_bytes!("../../../tests/fixtures/production-scene.json"),
+        )
+        .expect("valid scene fixture must be written");
+        for file in [SCENE_COST_FILE, ILLUSTRATION_FILE, ILLUSTRATION_COST_FILE] {
+            fs::write(
+                visual.filepath(file).expect("visual path must resolve"),
+                b"x",
+            )
+            .expect("visual fixture must be written");
+        }
+    }
+
+    fn current_cache(home: &TempDir) -> (LanguagePair, crate::generation::artifact_cache::Cache) {
+        let pair = LanguagePair::new("fr", "en");
+        let cache = CardCell::new(home.path().to_path_buf(), &pair, "canard", "a duck").cache();
+        seed_current_artifacts(home, &pair, &cache);
+        (pair, cache)
+    }
+
+    #[test]
+    fn failed_picture_retry_drops_only_picture_cost() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let (pair, cache) = current_cache(&home);
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        fs::remove_file(visual.path().join(ILLUSTRATION_FILE))
+            .expect("picture fixture must be removed");
+        drop_incomplete_artifacts(home.path(), &pair, "canard", "a duck")
+            .expect("incomplete artifacts must be dropped");
+        assert_eq!(
+            (
+                cache.exists(META_FILE),
+                cache.exists(VOICE_FILE),
+                visual.exists(SCENE_FILE),
+                visual.exists(ILLUSTRATION_COST_FILE),
+            ),
+            (true, true, true, false),
+            "picture retry must preserve every valid upstream artifact and forget only its cost"
+        );
+    }
+
+    #[test]
+    fn failed_scene_retry_drops_scene_and_picture_only() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let (pair, cache) = current_cache(&home);
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        fs::remove_file(visual.path().join(SCENE_FILE)).expect("scene fixture must be removed");
+        drop_incomplete_artifacts(home.path(), &pair, "canard", "a duck")
+            .expect("incomplete artifacts must be dropped");
+        assert_eq!(
+            (
+                cache.exists(META_FILE),
+                cache.exists(VOICE_FILE),
+                [SCENE_COST_FILE, ILLUSTRATION_FILE, ILLUSTRATION_COST_FILE,]
+                    .iter()
+                    .any(|file| visual.exists(file)),
+            ),
+            (true, true, false),
+            "scene retry must preserve meta and audio while clearing the visual dependency chain"
+        );
+    }
+
+    #[test]
+    fn corrupt_scene_retry_drops_scene_and_picture_only() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let (pair, cache) = current_cache(&home);
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        fs::write(
+            visual.path().join(SCENE_FILE),
+            br#"{"manga_panel":{"panels":[{}]}}"#,
+        )
+        .expect("scene fixture must be corrupted");
+        drop_incomplete_artifacts(home.path(), &pair, "canard", "a duck")
+            .expect("incomplete artifacts must be dropped");
+        assert_eq!(
+            (
+                cache.exists(META_FILE),
+                cache.exists(VOICE_FILE),
+                [
+                    SCENE_FILE,
+                    SCENE_COST_FILE,
+                    ILLUSTRATION_FILE,
+                    ILLUSTRATION_COST_FILE,
+                ]
+                .iter()
+                .any(|file| visual.exists(file)),
+            ),
+            (true, true, false),
+            "a corrupt scene must be removed with its picture while meta and audio survive"
+        );
+    }
+
+    #[test]
+    fn failed_sound_retry_keeps_valid_visuals() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let (pair, cache) = current_cache(&home);
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        fs::remove_file(cache.path().join(VOICE_FILE)).expect("sound fixture must be removed");
+        drop_incomplete_artifacts(home.path(), &pair, "canard", "a duck")
+            .expect("incomplete artifacts must be dropped");
+        assert_eq!(
+            (
+                cache.exists(META_FILE),
+                cache.exists(VOICE_COST_FILE),
+                visual.exists(SCENE_FILE),
+                visual.exists(ILLUSTRATION_FILE),
+            ),
+            (true, false, true, true),
+            "sound retry must clear only its stale cost and keep valid visual artifacts"
+        );
+    }
+
+    #[test]
+    fn failed_meta_retry_drops_every_dependent_artifact() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let (pair, cache) = current_cache(&home);
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        fs::remove_file(cache.path().join(META_FILE)).expect("meta fixture must be removed");
+        drop_incomplete_artifacts(home.path(), &pair, "canard", "a duck")
+            .expect("incomplete artifacts must be dropped");
+        assert_eq!(
+            (
+                [
+                    META_COST_FILE,
+                    VOICE_FILE,
+                    VOICE_COST_FILE,
+                    LEGACY_VISUAL_REVISION_FILE,
+                ]
+                .iter()
+                .any(|file| cache.exists(file)),
+                [
+                    SCENE_FILE,
+                    SCENE_COST_FILE,
+                    ILLUSTRATION_FILE,
+                    ILLUSTRATION_COST_FILE,
+                ]
+                .iter()
+                .any(|file| visual.exists(file)),
+            ),
+            (false, false),
+            "meta retry must clear its cost and every downstream artifact"
+        );
+    }
+
+    #[test]
+    fn corrupt_meta_retry_drops_every_dependent_artifact() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let (pair, cache) = current_cache(&home);
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        fs::write(cache.path().join(META_FILE), b"{}").expect("meta fixture must be corrupted");
+        drop_incomplete_artifacts(home.path(), &pair, "canard", "a duck")
+            .expect("incomplete artifacts must be dropped");
+        assert_eq!(
+            (
+                [
+                    META_FILE,
+                    META_COST_FILE,
+                    VOICE_FILE,
+                    VOICE_COST_FILE,
+                    LEGACY_VISUAL_REVISION_FILE,
+                ]
+                .iter()
+                .any(|file| cache.exists(file)),
+                [
+                    SCENE_FILE,
+                    SCENE_COST_FILE,
+                    ILLUSTRATION_FILE,
+                    ILLUSTRATION_COST_FILE,
+                ]
+                .iter()
+                .any(|file| visual.exists(file)),
+            ),
+            (false, false),
+            "a corrupt meta must be removed with every dependent artifact"
+        );
+    }
+
+    #[test]
+    fn imported_full_reroll_keeps_supplied_meta() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let (pair, cache) = current_cache(&home);
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        drop_artifacts(home.path(), &pair, "canard", "a duck", true)
+            .expect("artifacts must be dropped");
+        assert_eq!(
+            (
+                cache.exists(META_FILE),
+                cache.exists(META_COST_FILE),
+                cache.exists(VOICE_FILE),
+                visual.exists(SCENE_FILE),
+                visual.exists(ILLUSTRATION_FILE),
+            ),
+            (true, true, false, false, false),
+            "an imported card reroll must preserve its supplied meta and rebuild only media"
         );
     }
 }

@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use assert_cmd::Command;
+use kamishibai::generation::artifact_cache::{Cache, VISUAL_DIRECTORY};
+use kamishibai::generation::visual_revision;
 use tempfile::TempDir;
 
 const CARDS_JSON: &str = r#"{
@@ -153,8 +155,19 @@ fn fixture_jpeg() -> PathBuf {
 /// Seed everything but the meta (which `new --build` wrote) into one cell.
 fn seed_artifacts(cell: &Path) {
     fs::write(cell.join("audio.wav"), b"RIFFxxxxWAVE").expect("seed voice");
-    fs::write(cell.join("scene.json"), b"{}").expect("seed scene");
-    fs::copy(fixture_jpeg(), cell.join("picture.jpg")).expect("seed picture");
+    seed_visual_artifacts(cell);
+}
+
+/// Seed the current visual-policy artifacts into one card cell.
+fn seed_visual_artifacts(cell: &Path) {
+    let visual = cell.join(VISUAL_DIRECTORY).join(visual_revision());
+    fs::create_dir_all(&visual).expect("seed visual directory");
+    fs::write(
+        visual.join("scene.json"),
+        include_bytes!("fixtures/production-scene.json"),
+    )
+    .expect("seed scene");
+    fs::copy(fixture_jpeg(), visual.join("picture.jpg")).expect("seed picture");
 }
 
 /// Poll `status --json` until its `phase` field satisfies the predicate,
@@ -277,8 +290,7 @@ fn worker_pid(cache: &Path, id: &str) -> i64 {
 fn live_worker_session(cache: &Path, out: &Path, id: &str, gemini: &str) {
     understood_session(cache, out, id, CARDS_JSON);
     let cell = first_card_dir(cache);
-    fs::write(cell.join("scene.json"), b"{}").expect("seed scene");
-    fs::copy(fixture_jpeg(), cell.join("picture.jpg")).expect("seed picture");
+    seed_visual_artifacts(&cell);
     cli_at(cache, gemini)
         .args(["generate", id])
         .assert()
@@ -759,9 +771,15 @@ fn a_waited_generate_in_json_mode_prints_one_terminal_document_and_event_lines()
         .map(|line| serde_json::from_str(line).expect("every stdout line must be JSON"))
         .collect();
     let stderr = String::from_utf8(output.stderr).expect("stderr must be UTF-8");
-    let unnamed_events = stderr
+    let events: Vec<serde_json::Value> = stderr
         .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .map(|line| {
+            serde_json::from_str(line)
+                .unwrap_or_else(|error| panic!("stderr line is not JSON: {line:?}: {error}"))
+        })
+        .collect();
+    let unnamed_events = events
+        .iter()
         .filter(|event| event["event"].as_str().is_none())
         .count();
     assert_eq!(
@@ -856,6 +874,70 @@ fn removing_in_json_mode_acknowledges_the_removed_id() {
 }
 
 #[test]
+fn removing_with_cache_deletes_every_visual_revision_for_the_card() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session_json(cache.path(), out.path(), "jpurge", CARDS_JSON);
+    let cell = first_card_dir(cache.path());
+    seed_artifacts(cell.as_path());
+    let revision = "0000000000000000000000000000000000000000000000000000000000000000";
+    let sibling = cell.join(VISUAL_DIRECTORY).join(revision);
+    fs::create_dir_all(&sibling).expect("sibling visual directory must be seeded");
+    fs::write(sibling.join("scene.json"), b"{}").expect("sibling scene must be seeded");
+    fs::copy(fixture_jpeg(), sibling.join("picture.jpg")).expect("sibling picture must be seeded");
+    let card = Cache::new(
+        cell.file_name()
+            .and_then(|name| name.to_str())
+            .expect("card folder name must be UTF-8"),
+        cell.parent().expect("card folder must have a parent"),
+    );
+    let guard = card
+        .visual(revision)
+        .expect("sibling revision must be valid")
+        .hold_visual(Duration::ZERO)
+        .expect("sibling revision must be leased");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_kamishibai"))
+        .args(["rm", "jpurge", "--cache", "--json"])
+        .env("KAMISHIBAI_CACHE", cache.path())
+        .env("GEMINI_API_KEY", "offline-dummy-key")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("rm --cache must spawn");
+    let started = Instant::now();
+    let blocked = loop {
+        if child
+            .try_wait()
+            .expect("rm --cache must remain observable")
+            .is_some()
+        {
+            break false;
+        }
+        if started.elapsed() >= Duration::from_millis(100) {
+            break true;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    drop(guard);
+    let output = child
+        .wait_with_output()
+        .expect("rm --cache must finish after the visual lease is released");
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("rm --cache must return JSON");
+    assert_eq!(
+        (
+            output.status.success(),
+            blocked,
+            value["removed"].as_str(),
+            cell.exists(),
+            cache.path().join("sessions/jpurge").exists(),
+        ),
+        (true, true, Some("jpurge"), false, false),
+        "rm --cache must wait for sibling visual work before deleting every card revision"
+    );
+}
+
+#[test]
 fn a_missing_session_in_json_mode_prints_the_error_envelope_with_exit_three() {
     let cache = TempDir::new().expect("cache tempdir");
     let output = cli(cache.path())
@@ -888,14 +970,29 @@ fn an_all_failed_waited_run_in_json_mode_prints_the_envelope_not_a_document() {
         .expect("generate --wait --json must run");
     let value: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout must carry the error envelope");
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be UTF-8");
+    let events: Vec<serde_json::Value> = stderr
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    let warnings = events
+        .iter()
+        .filter(|event| event["event"].as_str() == Some("warning"))
+        .count();
+    let unnamed_events = events
+        .iter()
+        .filter(|event| event["event"].as_str().is_none())
+        .count();
     assert_eq!(
         (
             output.status.code(),
             value["ok"].as_bool(),
-            value["error"]["exit"].as_u64()
+            value["error"]["exit"].as_u64(),
+            warnings > 0,
+            unnamed_events,
         ),
-        (Some(1), Some(false), Some(1)),
-        "an all-failed waited run in JSON mode must print the error envelope, never a success document"
+        (Some(1), Some(false), Some(1), true, 0),
+        "an all-failed waited run in JSON mode must print one error envelope and tagged warning events"
     );
 }
 

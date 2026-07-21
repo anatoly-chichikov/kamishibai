@@ -1,0 +1,154 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "semantic_spine": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "literal_event": {"type": "string"},
+        "semantic_focus": {"type": "string"},
+        "emotional_relation": {"type": "string"},
+        "intensity": {"type": "integer", "minimum": 1, "maximum": 5},
+        "visual_relation": {
+          "type": "string",
+          "enum": ["containment", "distance", "opposition", "burden", "repetition", "threshold", "balance", "cause_effect", "approach", "avoidance", "other"]
+        },
+        "memory_hook": {"type": "string"},
+        "metaphor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {"type": "string", "enum": ["none", "juxtaposition", "fusion"]},
+            "mapping": {"type": "string"},
+            "literal_anchor": {"type": "string"}
+          },
+          "required": ["mode", "mapping", "literal_anchor"]
+        }
+      },
+      "required": ["literal_event", "semantic_focus", "emotional_relation", "intensity", "visual_relation", "memory_hook", "metaphor"]
+    },
+    "page_design": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rhythm": {
+          "type": "string",
+          "enum": ["single_tableau", "regular", "compression_to_release", "expansion", "contraction"]
+        },
+        "special_device": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"type": "string", "enum": ["none", "crossing", "overlap", "inset", "open_frame", "master_view", "diagonal_release"]},
+            "reason": {"type": "string"},
+            "source_panel": {"type": "string", "enum": ["", "s1", "s2", "s3", "s4"]},
+            "target_panel": {"type": "string", "enum": ["", "s1", "s2", "s3", "s4"]},
+            "subject_id": {"type": "string"}
+          },
+          "required": ["kind", "reason", "source_panel", "target_panel", "subject_id"]
+        },
+        "eye_flow_summary": {"type": "string"}
+      },
+      "required": ["rhythm", "special_device", "eye_flow_summary"]
+    },
+    "panels": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "shot_id": {"type": "string", "enum": ["s1", "s2", "s3", "s4"]},
+          "narrative_role": {"type": "string", "enum": ["establisher", "initial", "peak", "release"]},
+          "semantic_job": {"type": "string"},
+          "attentional_frame": {"type": "string", "enum": ["macro", "mono", "micro", "amorphic"]},
+          "narrative_weight": {"type": "string", "enum": ["primary", "secondary", "transition"]},
+          "transition_from_previous": {
+            "type": "string",
+            "enum": ["none", "moment_to_moment", "action_to_action", "subject_to_subject", "scene_to_scene", "aspect_to_aspect"]
+          },
+          "continuity": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "shared_environment_id": {"type": "string"},
+              "subject_phase": {"type": "string"},
+              "axis_relation_from_previous": {
+                "type": "string",
+                "enum": ["not_applicable", "establish", "preserve", "reestablish", "deliberate_break"]
+              },
+              "screen_direction": {
+                "type": "string",
+                "enum": ["not_applicable", "stationary", "left_to_right", "right_to_left", "toward_camera", "away_from_camera", "converging", "diverging"]
+              },
+              "eyeline_enabled": {"type": "boolean"},
+              "eyeline_looker_id": {"type": "string"},
+              "eyeline_target_anchor": {"type": "string"},
+              "eyeline_direction": {"type": "string", "enum": ["none", "screen_left", "screen_right", "up", "down", "toward_camera", "away_from_camera"]},
+              "match_on_action_enabled": {"type": "boolean"},
+              "match_on_action_subject_id": {"type": "string"},
+              "match_on_action_action": {"type": "string"}
+            },
+            "required": ["shared_environment_id", "subject_phase", "axis_relation_from_previous", "screen_direction", "eyeline_enabled", "eyeline_looker_id", "eyeline_target_anchor", "eyeline_direction", "match_on_action_enabled", "match_on_action_subject_id", "match_on_action_action"]
+          },
+          "scene": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "description": {"type": "string"},
+              "subjects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {"type": "string"},
+                    "figure": {"type": "string"},
+                    "pose": {"type": "string"},
+                    "expression": {"type": "string", "minLength": 1},
+                    "blocking": {"type": "string"}
+                  },
+                  "required": ["id", "figure", "pose", "expression", "blocking"]
+                }
+              },
+              "environment": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "setting": {"type": "string"},
+                  "foreground": {"type": "array", "items": {"type": "string"}},
+                  "midground": {"type": "array", "items": {"type": "string"}},
+                  "background": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["setting", "foreground", "midground", "background"]
+              },
+              "camera": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "shot_scale": {"type": "string", "enum": ["extreme_wide", "wide", "full", "medium", "medium_close", "close", "extreme_close"]},
+                  "viewpoint": {"type": "string", "enum": ["objective", "over_the_shoulder", "point_of_view", "subjective"]},
+                  "viewpoint_subject_id": {"type": "string"},
+                  "framing": {"type": "string", "enum": ["environment", "single", "two_shot", "group", "insert", "cutaway"]},
+                  "angle": {"type": "string", "enum": ["eye_level", "high", "low", "overhead", "dutch"]},
+                  "focus": {"type": "string"},
+                  "depth_plan": {"type": "string", "enum": ["deep", "layered", "shallow", "flat"]},
+                  "eye_flow_exit": {"type": "string"}
+                },
+                "required": ["shot_scale", "viewpoint", "viewpoint_subject_id", "framing", "angle", "focus", "depth_plan", "eye_flow_exit"]
+              },
+              "motion_treatment": {"type": "string", "enum": ["none", "pose_only", "speed_lines", "blur"]},
+              "lighting": {"type": "string"},
+              "mood": {"type": "string"}
+            },
+            "required": ["description", "subjects", "environment", "camera", "motion_treatment", "lighting", "mood"]
+          }
+        },
+        "required": ["shot_id", "narrative_role", "semantic_job", "attentional_frame", "narrative_weight", "transition_from_previous", "continuity", "scene"]
+      }
+    }
+  },
+  "required": ["semantic_spine", "page_design", "panels"]
+}

@@ -140,6 +140,10 @@ impl Reporter for SessionReporter {
         }
     }
 
+    fn warn(&self, message: &str) {
+        self.inner.warn(message);
+    }
+
     fn revoked(&self) -> bool {
         self.revoked.get()
     }
