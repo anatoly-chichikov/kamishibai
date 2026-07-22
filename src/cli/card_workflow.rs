@@ -4,8 +4,8 @@
 use anyhow::Result;
 
 use crate::session::{
-    ArtifactFile, BulkCorrection, CardCorrection, CardDraft, CardMeta, CardMetaGeneration,
-    CardRevision, LanguagePair, SenseCorrection, Understanding, Understood,
+    ArtifactAttempt, ArtifactFile, BulkCorrection, CardCorrection, CardDraft, CardMeta,
+    CardMetaGeneration, CardRevision, LanguagePair, SenseCorrection, Understanding, Understood,
 };
 
 /// Capability that turns typed words into understood words.
@@ -20,9 +20,25 @@ impl<T> WordUnderstanding for T where T: Understanding + BulkCorrection + Clone 
 pub(super) trait CardGeneration:
     CardMetaGeneration + CardCorrection + Clone + Send + 'static
 {
-    fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile>;
-    fn generate_picture(&self, draft: &CardDraft) -> Result<ArtifactFile>;
-    fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile>;
+    /// Generate and persist one card meta operation with known spend.
+    fn generate_meta(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+    ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
+        let result = self
+            .generate_card_meta(term, understanding, pair)
+            .map(|meta| {
+                let file = self.store_card_meta(term, understanding, pair, &meta).ok();
+                (meta, file)
+            });
+        ArtifactAttempt::unmetered(result)
+    }
+
+    fn generate_scene(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile>;
+    fn generate_picture(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile>;
+    fn generate_sound(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile>;
     fn store_card_meta(
         &self,
         term: &str,
@@ -86,8 +102,8 @@ pub(super) enum TextOutcome {
 
 /// Result produced by one background artifact pass.
 pub(super) enum ArtifactOutcome {
-    Meta(Result<(CardMeta, Option<ArtifactFile>)>),
-    Media(Result<ArtifactFile>),
+    Meta(ArtifactAttempt<(CardMeta, Option<ArtifactFile>)>),
+    Media(ArtifactAttempt<ArtifactFile>),
 }
 
 /// Progress signalled by the background publish job.

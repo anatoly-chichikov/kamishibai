@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use kamishibai::session::{
-    Artifact, ArtifactFile, CardDraft, CardMeta, EngineEvent, LanguagePair, SessionEngine,
+    Artifact, ArtifactAttempt, ArtifactFile, CardDraft, CardMeta, EngineEvent, GenerationCost,
+    LanguagePair, SessionEngine,
 };
 
 fn draft(term: &str) -> CardDraft {
@@ -179,5 +180,83 @@ fn terminal_scene_failure_discards_picture_and_completes_remaining() {
             Some(&EngineEvent::BatchDone { failed_cards: 1 })
         ),
         "terminal scene failure must discard picture and emit BatchDone with the failed card counted"
+    );
+}
+
+#[test]
+fn metered_media_retries_keep_cumulative_cost_and_success_does_not_double_count_it() {
+    let mut engine = SessionEngine::start(vec![draft("whilst")]);
+    engine.applied_media_attempt(
+        0,
+        Artifact::Picture,
+        ArtifactAttempt::new(
+            Err(anyhow!("first failure")),
+            Some(GenerationCost::from_nanos(120_000_000)),
+        ),
+    );
+    let first = engine.drafts()[0].artifacts().picture().cost();
+    engine.applied_media_attempt(
+        0,
+        Artifact::Picture,
+        ArtifactAttempt::unmetered(Err(anyhow!("unmetered failure"))),
+    );
+    let second = engine.drafts()[0].artifacts().picture().cost();
+    let file = file_for(&engine.drafts()[0], Artifact::Picture)
+        .with_cost(GenerationCost::from_nanos(340_000_000));
+    engine.applied_media_attempt(
+        0,
+        Artifact::Picture,
+        ArtifactAttempt::new(Ok(file), Some(GenerationCost::from_nanos(340_000_000))),
+    );
+    assert_eq!(
+        (
+            first,
+            second,
+            engine.drafts()[0].artifacts().picture().cost(),
+        ),
+        (
+            Some(GenerationCost::from_nanos(120_000_000)),
+            Some(GenerationCost::from_nanos(120_000_000)),
+            Some(GenerationCost::from_nanos(340_000_000)),
+        ),
+        "media retry accounting lost, reset, or double-counted cumulative spend"
+    );
+}
+
+#[test]
+fn terminal_media_failure_keeps_the_last_cumulative_cost() {
+    let mut engine = SessionEngine::start(vec![draft("whilst")]);
+    for nanos in [90_000_000, 210_000_000, 390_000_000] {
+        engine.applied_media_attempt(
+            0,
+            Artifact::Picture,
+            ArtifactAttempt::new(
+                Err(anyhow!("picture rejected")),
+                Some(GenerationCost::from_nanos(nanos)),
+            ),
+        );
+    }
+    let picture = engine.drafts()[0].artifacts().picture();
+    assert_eq!(
+        (picture.failed_terminally(), picture.cost()),
+        (true, Some(GenerationCost::from_nanos(390_000_000)),),
+        "terminal media failure discarded its metered Gemini spend"
+    );
+}
+
+#[test]
+fn metered_meta_failure_keeps_its_cumulative_cost() {
+    let mut engine = SessionEngine::start(vec![draft("whilst")]);
+    engine.applied_meta_attempt(
+        0,
+        ArtifactAttempt::new(
+            Err(anyhow!("meta rejected")),
+            Some(GenerationCost::from_nanos(8_000_000)),
+        ),
+    );
+    assert_eq!(
+        engine.drafts()[0].artifacts().meta().cost(),
+        Some(GenerationCost::from_nanos(8_000_000)),
+        "meta retry accounting vanished at the engine boundary"
     );
 }

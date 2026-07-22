@@ -19,7 +19,8 @@ pub use candidate::{RawInputBatch, Sense, WordCandidate};
 pub use cost::{CostRecord, GenerationCost};
 pub use detection::{LearningDetection, LearningGuess, ScriptDetection};
 pub use draft::{
-    Artifact, ArtifactFile, ArtifactSlot, AttemptTally, CardArtifacts, CardDraft, CardMeta,
+    Artifact, ArtifactAttempt, ArtifactFile, ArtifactSlot, AttemptTally, CardArtifacts, CardDraft,
+    CardMeta,
 };
 pub use engine::{EngineEvent, SessionEngine};
 pub use pair::LanguagePair;

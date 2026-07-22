@@ -1,7 +1,7 @@
 //! Recovery flow for failed cards (`07-your-cards-couldnt-finish.png`).
 
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
+    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, GenerationCost, LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
@@ -24,8 +24,8 @@ fn flat(app: &App) -> String {
 
 fn failed_picture() -> CardArtifacts {
     let mut picture = ArtifactSlot::fresh(Artifact::Picture);
-    for _ in 0..3 {
-        picture = picture.attempted();
+    for nanos in [90_000_000, 210_000_000, 321_000_000] {
+        picture = picture.attempted_with(GenerationCost::from_nanos(nanos));
     }
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
@@ -159,10 +159,17 @@ fn regenerate_failed_resets_only_the_failed_slots_and_keeps_ready_slots() {
             card.artifacts().scene().ready(),
             card.artifacts().picture().failed_terminally(),
             card.artifacts().picture().tally().done(),
+            card.artifacts().picture().cost(),
             card.artifacts().sound().ready(),
         ),
-        (true, false, 0, false),
-        "regenerating failed cards must reset only the failed artifact and keep the rest untouched"
+        (
+            true,
+            false,
+            0,
+            Some(GenerationCost::from_nanos(321_000_000)),
+            false,
+        ),
+        "regenerating failed cards must reset retry state without erasing already billed spend"
     );
 }
 

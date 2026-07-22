@@ -38,8 +38,8 @@ fn published() -> App {
 
 fn failed_published() -> App {
     let mut picture = ArtifactSlot::fresh(Artifact::Picture);
-    for _ in 0..3 {
-        picture = picture.attempted();
+    for nanos in [90_000_000, 210_000_000, 321_000_000] {
+        picture = picture.attempted_with(GenerationCost::from_nanos(nanos));
     }
     let artifacts = CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
@@ -135,6 +135,15 @@ fn done_with_failed_cards_offers_regenerate() {
     assert!(
         rendered.contains("[Ctrl+G] Regenerate"),
         "Done with failed cards must expose Ctrl+G Regenerate: {rendered}"
+    );
+}
+
+#[test]
+fn done_footer_includes_terminal_failure_spend() {
+    let rendered = flat(&failed_published());
+    assert!(
+        rendered.contains("$0.32"),
+        "Done footer omitted the Gemini spend from a terminally failed artifact: {rendered}"
     );
 }
 

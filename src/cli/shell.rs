@@ -15,7 +15,7 @@ use super::live_generator::{LiveCardGenerator, default_output};
 use crate::config::{PreferenceStore, Preferences, default_store};
 use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
-use crate::session::{Artifact, CardDraft, RawInputBatch, SessionEngine};
+use crate::session::{Artifact, ArtifactAttempt, CardDraft, RawInputBatch, SessionEngine};
 use crate::tui::{App, AppEvent, BusyKind, KeySource, Screen, Side, WelcomeStage, transit};
 
 const ANIMATION_FRAME_MILLIS: u64 = 250;
@@ -381,16 +381,9 @@ where
         let understanding = draft.understanding().to_string();
         let generator = self.generator.clone();
         let job = PendingJob::spawn(move || match artifact {
-            Artifact::Meta => ArtifactOutcome::Meta(
-                generator
-                    .generate_card_meta(&term, &understanding, &pair)
-                    .map(|meta| {
-                        let file = generator
-                            .store_card_meta(&term, &understanding, &pair, &meta)
-                            .ok();
-                        (meta, file)
-                    }),
-            ),
+            Artifact::Meta => {
+                ArtifactOutcome::Meta(generator.generate_meta(&term, &understanding, &pair))
+            }
             Artifact::Scene => ArtifactOutcome::Media(generator.generate_scene(&draft)),
             Artifact::Picture => ArtifactOutcome::Media(generator.generate_picture(&draft)),
             Artifact::Sound => ArtifactOutcome::Media(generator.generate_sound(&draft)),
@@ -427,8 +420,10 @@ where
                 let _ = join_thread(job.job.handle);
                 let synthetic = anyhow!("background artifact task disconnected");
                 let outcome = match job.artifact {
-                    Artifact::Meta => ArtifactOutcome::Meta(Err(synthetic)),
-                    _ => ArtifactOutcome::Media(Err(synthetic)),
+                    Artifact::Meta => {
+                        ArtifactOutcome::Meta(ArtifactAttempt::unmetered(Err(synthetic)))
+                    }
+                    _ => ArtifactOutcome::Media(ArtifactAttempt::unmetered(Err(synthetic))),
                 };
                 self.apply_artifact_outcome(job.card, job.artifact, outcome);
                 Ok(true)
@@ -451,8 +446,10 @@ where
             return;
         };
         let _event = match outcome {
-            ArtifactOutcome::Meta(result) => engine.applied_meta(card, result),
-            ArtifactOutcome::Media(result) => engine.applied_media(card, artifact, result),
+            ArtifactOutcome::Meta(attempt) => engine.applied_meta_attempt(card, attempt),
+            ArtifactOutcome::Media(attempt) => {
+                engine.applied_media_attempt(card, artifact, attempt)
+            }
         };
         let drafts = engine.drafts().to_vec();
         self.app = self.app.clone().cards_replaced(drafts).cards_running(None);
@@ -873,10 +870,8 @@ fn drafts_from(app: &App) -> Vec<CardDraft> {
 
 fn artifact_rejects_key(outcome: &ArtifactOutcome) -> bool {
     match outcome {
-        ArtifactOutcome::Meta(Err(error)) | ArtifactOutcome::Media(Err(error)) => {
-            rejects_key(error)
-        }
-        _ => false,
+        ArtifactOutcome::Meta(attempt) => attempt.error().is_some_and(rejects_key),
+        ArtifactOutcome::Media(attempt) => attempt.error().is_some_and(rejects_key),
     }
 }
 
@@ -1039,19 +1034,25 @@ mod tests {
     }
 
     impl CardGeneration for TestCardGenerator {
-        fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-            self.ready()?;
-            local_artifact(draft, Artifact::Scene)
+        fn generate_scene(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+            ArtifactAttempt::unmetered(
+                self.ready()
+                    .and_then(|()| local_artifact(draft, Artifact::Scene)),
+            )
         }
 
-        fn generate_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-            self.ready()?;
-            local_artifact(draft, Artifact::Picture)
+        fn generate_picture(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+            ArtifactAttempt::unmetered(
+                self.ready()
+                    .and_then(|()| local_artifact(draft, Artifact::Picture)),
+            )
         }
 
-        fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-            self.ready()?;
-            local_artifact(draft, Artifact::Sound)
+        fn generate_sound(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+            ArtifactAttempt::unmetered(
+                self.ready()
+                    .and_then(|()| local_artifact(draft, Artifact::Sound)),
+            )
         }
 
         fn store_card_meta(

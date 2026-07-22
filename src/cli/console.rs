@@ -189,34 +189,28 @@ where
 {
     match artifact {
         Artifact::Meta => {
-            let result = generator
-                .generate_card_meta(draft.term(), draft.understanding(), draft.pair())
-                .map(|meta| {
-                    let file = generator
-                        .store_card_meta(draft.term(), draft.understanding(), draft.pair(), &meta)
-                        .ok();
-                    (meta, file)
-                });
-            let error = result.as_ref().err().map(|error| format!("{error:#}"));
-            engine.applied_meta(card, result);
+            let attempt =
+                generator.generate_meta(draft.term(), draft.understanding(), draft.pair());
+            let error = attempt.error().map(|error| format!("{error:#}"));
+            engine.applied_meta_attempt(card, attempt);
             error
         }
         Artifact::Scene => {
-            let result = generator.generate_scene(draft);
-            let error = result.as_ref().err().map(|error| format!("{error:#}"));
-            engine.applied_media(card, artifact, result);
+            let attempt = generator.generate_scene(draft);
+            let error = attempt.error().map(|error| format!("{error:#}"));
+            engine.applied_media_attempt(card, artifact, attempt);
             error
         }
         Artifact::Picture => {
-            let result = generator.generate_picture(draft);
-            let error = result.as_ref().err().map(|error| format!("{error:#}"));
-            engine.applied_media(card, artifact, result);
+            let attempt = generator.generate_picture(draft);
+            let error = attempt.error().map(|error| format!("{error:#}"));
+            engine.applied_media_attempt(card, artifact, attempt);
             error
         }
         Artifact::Sound => {
-            let result = generator.generate_sound(draft);
-            let error = result.as_ref().err().map(|error| format!("{error:#}"));
-            engine.applied_media(card, artifact, result);
+            let attempt = generator.generate_sound(draft);
+            let error = attempt.error().map(|error| format!("{error:#}"));
+            engine.applied_media_attempt(card, artifact, attempt);
             error
         }
     }
@@ -403,8 +397,8 @@ mod tests {
 
     use super::*;
     use crate::session::{
-        ArtifactFile, CardCorrection, CardMeta, CardMetaGeneration, CardRevision, Sense,
-        WordCandidate,
+        ArtifactAttempt, ArtifactFile, CardCorrection, CardMeta, CardMetaGeneration, CardRevision,
+        Sense, WordCandidate,
     };
 
     #[derive(Clone, Default)]
@@ -450,16 +444,16 @@ mod tests {
     }
 
     impl CardGeneration for LocalGenerator {
-        fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-            Ok(local_file(draft.term(), "scene"))
+        fn generate_scene(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+            ArtifactAttempt::unmetered(Ok(local_file(draft.term(), "scene")))
         }
 
-        fn generate_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-            Ok(local_file(draft.term(), "picture"))
+        fn generate_picture(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+            ArtifactAttempt::unmetered(Ok(local_file(draft.term(), "picture")))
         }
 
-        fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-            Ok(local_file(draft.term(), "sound"))
+        fn generate_sound(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+            ArtifactAttempt::unmetered(Ok(local_file(draft.term(), "sound")))
         }
 
         fn store_card_meta(
@@ -516,16 +510,16 @@ mod tests {
     }
 
     impl CardGeneration for FailingPictureGenerator {
-        fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+        fn generate_scene(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
             LocalGenerator.generate_scene(draft)
         }
 
-        fn generate_picture(&self, _draft: &CardDraft) -> Result<ArtifactFile> {
+        fn generate_picture(&self, _draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
             self.pictures.set(self.pictures.get().saturating_add(1));
-            bail!("picture rejected")
+            ArtifactAttempt::unmetered(Err(anyhow::anyhow!("picture rejected")))
         }
 
-        fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+        fn generate_sound(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
             LocalGenerator.generate_sound(draft)
         }
 

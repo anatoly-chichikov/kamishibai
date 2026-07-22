@@ -33,10 +33,10 @@ use crate::languages::{LanguageCatalog, catalog, naming};
 use crate::report::{CardSheet, Thumbnail};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    Artifact, ArtifactFile, BulkCorrection, CachedUnderstanding, CardCell, CardCorrection,
-    CardDraft, CardMeta, CardMetaCache, CardMetaGeneration, CardRevision, CostRecord,
-    GenerationCost, LanguagePair, RawInputBatch, Understanding, Understood, WordCandidate,
-    to_entry,
+    Artifact, ArtifactAttempt, ArtifactFile, BulkCorrection, CachedUnderstanding, CardCell,
+    CardCorrection, CardDraft, CardMeta, CardMetaCache, CardMetaGeneration, CardRevision,
+    CostRecord, GenerationCost, LanguagePair, RawInputBatch, Understanding, Understood,
+    WordCandidate, to_entry,
 };
 use crate::vocabulary::VocabularyEntry;
 
@@ -101,6 +101,29 @@ impl LiveCardGenerator {
         CardMetaCache::new(self.cache.clone())
     }
 
+    fn meta_attempt(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+    ) -> ArtifactAttempt<CardMeta> {
+        match self.meta_cache().load(term, understanding, pair) {
+            Ok(Some(meta)) => return ArtifactAttempt::unmetered(Ok(meta)),
+            Ok(None) => {}
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        }
+        let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
+        let client = match self.client() {
+            Ok(client) => client,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
+        let mut cost = None;
+        let result = client.generate_card_meta_observed(term, understanding, pair, |record| {
+            cost = Some(store_cost(&cache, Artifact::Meta, &record).cost());
+        });
+        ArtifactAttempt::new(result, cost)
+    }
+
     fn cell(&self, draft: &CardDraft) -> CardCell {
         CardCell::new(
             self.cache.clone(),
@@ -144,18 +167,30 @@ impl LiveCardGenerator {
         draft: &CardDraft,
         artifact: Artifact,
         render: F,
-    ) -> Result<ArtifactFile>
+    ) -> ArtifactAttempt<ArtifactFile>
     where
         F: FnOnce(&LiveIllustration, &str, &str, &mut NoopProgress) -> Result<(String, bool)>,
     {
-        let meta = draft
-            .meta()
-            .ok_or_else(|| anyhow!("meta must be ready before {}", artifact.label()))?;
+        let Some(meta) = draft.meta() else {
+            return ArtifactAttempt::unmetered(Err(anyhow!(
+                "meta must be ready before {}",
+                artifact.label()
+            )));
+        };
         let learning = draft.pair().learning();
         let costs = CostRecorder::default();
-        let cache = self.cell(draft).cache().visual(visual_revision())?;
-        let illustration = self.illustration(draft, cache.clone(), costs.clone())?;
-        let _guard = cache.hold_visual(VISUAL_LOCK_TIMEOUT)?;
+        let cache = match self.cell(draft).cache().visual(visual_revision()) {
+            Ok(cache) => cache,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
+        let illustration = match self.illustration(draft, cache.clone(), costs.clone()) {
+            Ok(illustration) => illustration,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
+        let _guard = match cache.hold_visual(VISUAL_LOCK_TIMEOUT) {
+            Ok(guard) => guard,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
         let mut progress = NoopProgress;
         let result = render(
             &illustration,
@@ -171,11 +206,11 @@ impl LiveCardGenerator {
         match result {
             Ok((filename, path, cached)) => {
                 let cost = cost_for(&cache, artifact, cached, record);
-                Ok(artifact_file(filename, path, cached, cost))
+                ArtifactAttempt::new(Ok(artifact_file(filename, path, cached, cost)), cost)
             }
             Err(error) => {
-                store_retry_cost(&cache, artifact, record);
-                Err(error)
+                let cost = store_retry_cost(&cache, artifact, record);
+                ArtifactAttempt::new(Err(error), cost)
             }
         }
     }
@@ -205,14 +240,7 @@ impl CardMetaGeneration for LiveCardGenerator {
         understanding: &str,
         pair: &LanguagePair,
     ) -> Result<CardMeta> {
-        if let Some(meta) = self.meta_cache().load(term, understanding, pair)? {
-            return Ok(meta);
-        }
-        let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
-        self.client()?
-            .generate_card_meta_observed(term, understanding, pair, |cost| {
-                store_cost(&cache, Artifact::Meta, &cost);
-            })
+        self.meta_attempt(term, understanding, pair).into_result()
     }
 }
 
@@ -243,7 +271,21 @@ impl KeyValidation for LiveCardGenerator {
 }
 
 impl CardGeneration for LiveCardGenerator {
-    fn generate_scene(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+    fn generate_meta(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+    ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
+        let (result, cost) = self.meta_attempt(term, understanding, pair).into_parts();
+        let result = result.map(|meta| {
+            let file = self.store_card_meta(term, understanding, pair, &meta).ok();
+            (meta, file)
+        });
+        ArtifactAttempt::new(result, cost)
+    }
+
+    fn generate_scene(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
         self.generate_visual(
             draft,
             Artifact::Scene,
@@ -253,7 +295,7 @@ impl CardGeneration for LiveCardGenerator {
         )
     }
 
-    fn generate_picture(&self, draft: &CardDraft) -> Result<ArtifactFile> {
+    fn generate_picture(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
         self.generate_visual(
             draft,
             Artifact::Picture,
@@ -263,28 +305,30 @@ impl CardGeneration for LiveCardGenerator {
         )
     }
 
-    fn generate_sound(&self, draft: &CardDraft) -> Result<ArtifactFile> {
-        let meta = draft
-            .meta()
-            .ok_or_else(|| anyhow!("meta must be ready before sound"))?;
+    fn generate_sound(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+        let Some(meta) = draft.meta() else {
+            return ArtifactAttempt::unmetered(Err(anyhow!("meta must be ready before sound")));
+        };
         let costs = CostRecorder::default();
         let cache = self.cell(draft).cache();
-        let audio = self.audio(draft, costs.clone())?;
-        let result = audio
-            .generate(meta.target_sentence())
-            .and_then(|(filename, cached)| {
-                let path = audio.filepath(filename.as_str())?;
-                Ok((filename, path, cached))
-            });
+        let result = (|| {
+            let audio = self.audio(draft, costs.clone())?;
+            audio
+                .generate(meta.target_sentence())
+                .and_then(|(filename, cached)| {
+                    let path = audio.filepath(filename.as_str())?;
+                    Ok((filename, path, cached))
+                })
+        })();
         let record = costs.aggregate();
         match result {
             Ok((filename, path, cached)) => {
                 let cost = cost_for(&cache, Artifact::Sound, cached, record);
-                Ok(artifact_file(filename, path, cached, cost))
+                ArtifactAttempt::new(Ok(artifact_file(filename, path, cached, cost)), cost)
             }
             Err(error) => {
-                store_retry_cost(&cache, Artifact::Sound, record);
-                Err(error)
+                let cost = store_retry_cost(&cache, Artifact::Sound, record);
+                ArtifactAttempt::new(Err(error), cost)
             }
         }
     }
@@ -533,10 +577,12 @@ fn store_cost(cache: &Cache, artifact: Artifact, record: &CostRecord) -> CostRec
     merged
 }
 
-fn store_retry_cost(cache: &Cache, artifact: Artifact, record: Option<CostRecord>) {
-    if let Some(record) = record {
-        store_cost(cache, artifact, &record);
-    }
+fn store_retry_cost(
+    cache: &Cache,
+    artifact: Artifact,
+    record: Option<CostRecord>,
+) -> Option<GenerationCost> {
+    cost_for(cache, artifact, false, record)
 }
 
 fn cost_filename(artifact: Artifact) -> &'static str {
@@ -727,13 +773,50 @@ mod tests {
     }
 
     #[test]
+    fn failed_artifacts_report_accumulated_retry_cost() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("cards/test", home.path());
+        let first = CostRecord::new(
+            "gemini-3.5-flash",
+            1,
+            100,
+            20,
+            120,
+            GenerationCost::from_nanos(330_000),
+        );
+        let second = CostRecord::new(
+            "gemini-3.5-flash",
+            1,
+            40,
+            10,
+            50,
+            GenerationCost::from_nanos(150_000),
+        );
+        let first_cost = store_retry_cost(&cache, Artifact::Sound, Some(first));
+        let unmetered = store_retry_cost(&cache, Artifact::Sound, None);
+        let second_cost = store_retry_cost(&cache, Artifact::Sound, Some(second));
+        assert_eq!(
+            (first_cost, unmetered, second_cost),
+            (
+                Some(GenerationCost::from_nanos(330_000)),
+                Some(GenerationCost::from_nanos(330_000)),
+                Some(GenerationCost::from_nanos(480_000)),
+            ),
+            "failed retry accounting did not return the cumulative persisted spend"
+        );
+    }
+
+    #[test]
     fn missing_usage_records_do_not_report_zero_costs() {
         let home = TempDir::new().expect("tempdir must be created");
         let cache = Cache::new("cards/test", home.path());
         let record = CostRecord::new("gemini-3.5-flash", 0, 0, 0, 0, GenerationCost::zero());
         assert_eq!(
-            cost_for(&cache, Artifact::Sound, false, Some(record)),
-            None,
+            (
+                cost_for(&cache, Artifact::Sound, false, Some(record.clone())),
+                store_retry_cost(&cache, Artifact::Sound, Some(record)),
+            ),
+            (None, None),
             "missing Gemini usage metadata must leave the request cost absent"
         );
     }

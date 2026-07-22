@@ -1,3 +1,5 @@
+use anyhow::Result;
+
 use super::GenerationCost;
 use super::pair::LanguagePair;
 
@@ -23,6 +25,43 @@ impl Artifact {
             Artifact::Picture => "picture",
             Artifact::Sound => "sound",
         }
+    }
+}
+
+/// One artifact operation together with the cumulative Gemini spend known
+/// after that operation.
+pub struct ArtifactAttempt<T> {
+    result: Result<T>,
+    cost: Option<GenerationCost>,
+}
+
+impl<T> ArtifactAttempt<T> {
+    /// Create one operation outcome with its cumulative known spend.
+    #[must_use]
+    pub fn new(result: Result<T>, cost: Option<GenerationCost>) -> Self {
+        Self { result, cost }
+    }
+
+    /// Create one operation outcome for which Gemini reported no spend.
+    #[must_use]
+    pub fn unmetered(result: Result<T>) -> Self {
+        Self::new(result, None)
+    }
+
+    /// Return the operation error when the artifact was not produced.
+    #[must_use]
+    pub fn error(&self) -> Option<&anyhow::Error> {
+        self.result.as_ref().err()
+    }
+
+    /// Consume the operation into its result and cumulative known spend.
+    pub fn into_parts(self) -> (Result<T>, Option<GenerationCost>) {
+        (self.result, self.cost)
+    }
+
+    /// Consume the operation and discard its accounting metadata.
+    pub fn into_result(self) -> Result<T> {
+        self.result
     }
 }
 
@@ -132,6 +171,7 @@ pub struct ArtifactSlot {
     discarded: bool,
     tally: AttemptTally,
     file: Option<ArtifactFile>,
+    cost: Option<GenerationCost>,
 }
 
 impl ArtifactSlot {
@@ -143,6 +183,7 @@ impl ArtifactSlot {
             discarded: false,
             tally: AttemptTally::new(3),
             file: None,
+            cost: None,
         }
     }
 
@@ -178,7 +219,8 @@ impl ArtifactSlot {
 
     /// Return the estimated Gemini cost for this artifact slot.
     pub fn cost(&self) -> Option<GenerationCost> {
-        self.file.as_ref().and_then(ArtifactFile::cost)
+        self.cost
+            .or_else(|| self.file.as_ref().and_then(ArtifactFile::cost))
     }
 
     /// Return the slot as ready.
@@ -192,6 +234,9 @@ impl ArtifactSlot {
     pub fn succeeded_with(mut self, file: ArtifactFile) -> Self {
         self.ready = true;
         self.discarded = false;
+        if let Some(cost) = file.cost() {
+            self.cost = Some(cost);
+        }
         self.file = Some(file);
         self
     }
@@ -202,11 +247,35 @@ impl ArtifactSlot {
         self
     }
 
+    /// Return the slot after a failed attempt with cumulative known spend.
+    pub fn attempted_with(self, cost: GenerationCost) -> Self {
+        self.attempted().accounted(cost)
+    }
+
+    /// Return a fresh retry slot while retaining already billed spend.
+    pub fn retry(self) -> Self {
+        let kind = self.kind;
+        let cost = self.cost();
+        let slot = Self::fresh(kind);
+        match cost {
+            Some(cost) => slot.accounted(cost),
+            None => slot,
+        }
+    }
+
+    /// Return the slot with its latest cumulative known spend.
+    pub(crate) fn accounted(mut self, cost: GenerationCost) -> Self {
+        self.cost = Some(cost);
+        self
+    }
+
     /// Return the slot as explicitly discarded by the user.
     pub fn discard(mut self) -> Self {
+        let cost = self.cost();
         self.ready = false;
         self.discarded = true;
         self.file = None;
+        self.cost = cost;
         self
     }
 

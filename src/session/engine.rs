@@ -8,7 +8,10 @@
 
 use anyhow::Result;
 
-use super::draft::{Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta};
+use super::GenerationCost;
+use super::draft::{
+    Artifact, ArtifactAttempt, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta,
+};
 
 /// One step emitted by the engine for the outer shell to consume.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -71,20 +74,33 @@ impl SessionEngine {
         card: usize,
         result: Result<(CardMeta, Option<ArtifactFile>)>,
     ) -> EngineEvent {
+        self.applied_meta_attempt(card, ArtifactAttempt::unmetered(result))
+    }
+
+    /// Apply a meta-generation operation together with cumulative known spend.
+    pub fn applied_meta_attempt(
+        &mut self,
+        card: usize,
+        attempt: ArtifactAttempt<(CardMeta, Option<ArtifactFile>)>,
+    ) -> EngineEvent {
         let attempt_before = slot(self.drafts[card].artifacts(), Artifact::Meta)
             .tally()
             .done()
             .saturating_add(1);
+        let (result, cost) = attempt.into_parts();
         match result {
             Ok((meta, file)) => {
-                self.drafts[card] = self.drafts[card].clone().with_meta(meta, file);
+                let updated = self.drafts[card].clone().with_meta(meta, file);
+                let artifacts = mark_cost(updated.artifacts().clone(), Artifact::Meta, cost);
+                self.drafts[card] = updated.with_artifacts(artifacts);
                 EngineEvent::ArtifactReady {
                     card,
                     artifact: Artifact::Meta,
                 }
             }
             Err(_) => {
-                let bumped = mark_attempted(self.drafts[card].artifacts().clone(), Artifact::Meta);
+                let bumped =
+                    mark_attempted(self.drafts[card].artifacts().clone(), Artifact::Meta, cost);
                 let cascaded = if slot(&bumped, Artifact::Meta).failed_terminally() {
                     discard_dependents_of_meta(bumped)
                 } else {
@@ -115,6 +131,16 @@ impl SessionEngine {
         artifact: Artifact,
         result: Result<ArtifactFile>,
     ) -> EngineEvent {
+        self.applied_media_attempt(card, artifact, ArtifactAttempt::unmetered(result))
+    }
+
+    /// Apply one media operation together with cumulative known spend.
+    pub fn applied_media_attempt(
+        &mut self,
+        card: usize,
+        artifact: Artifact,
+        attempt: ArtifactAttempt<ArtifactFile>,
+    ) -> EngineEvent {
         debug_assert!(
             !matches!(artifact, Artifact::Meta),
             "applied_media must not be called with Artifact::Meta"
@@ -123,17 +149,19 @@ impl SessionEngine {
             .tally()
             .done()
             .saturating_add(1);
+        let (result, cost) = attempt.into_parts();
         match result {
             Ok(file) => {
                 self.drafts[card] = self.drafts[card].clone().with_artifacts(mark_ready(
                     self.drafts[card].artifacts().clone(),
                     artifact,
                     file,
+                    cost,
                 ));
                 EngineEvent::ArtifactReady { card, artifact }
             }
             Err(_) => {
-                let bumped = mark_attempted(self.drafts[card].artifacts().clone(), artifact);
+                let bumped = mark_attempted(self.drafts[card].artifacts().clone(), artifact, cost);
                 let cascaded = if slot(&bumped, artifact).failed_terminally()
                     && matches!(artifact, Artifact::Scene)
                 {
@@ -207,12 +235,40 @@ fn slot(artifacts: &CardArtifacts, kind: Artifact) -> &ArtifactSlot {
     }
 }
 
-fn mark_ready(artifacts: CardArtifacts, kind: Artifact, file: ArtifactFile) -> CardArtifacts {
-    reshape(artifacts, kind, |slot| slot.succeeded_with(file.clone()))
+fn mark_ready(
+    artifacts: CardArtifacts,
+    kind: Artifact,
+    file: ArtifactFile,
+    cost: Option<GenerationCost>,
+) -> CardArtifacts {
+    reshape(artifacts, kind, |slot| {
+        mark_slot_cost(slot.succeeded_with(file.clone()), cost)
+    })
 }
 
-fn mark_attempted(artifacts: CardArtifacts, kind: Artifact) -> CardArtifacts {
-    reshape(artifacts, kind, |slot| slot.attempted())
+fn mark_attempted(
+    artifacts: CardArtifacts,
+    kind: Artifact,
+    cost: Option<GenerationCost>,
+) -> CardArtifacts {
+    reshape(artifacts, kind, |slot| {
+        mark_slot_cost(slot.attempted(), cost)
+    })
+}
+
+fn mark_cost(
+    artifacts: CardArtifacts,
+    kind: Artifact,
+    cost: Option<GenerationCost>,
+) -> CardArtifacts {
+    reshape(artifacts, kind, |slot| mark_slot_cost(slot, cost))
+}
+
+fn mark_slot_cost(slot: ArtifactSlot, cost: Option<GenerationCost>) -> ArtifactSlot {
+    match cost {
+        Some(cost) => slot.accounted(cost),
+        None => slot,
+    }
 }
 
 fn discard_dependents_of_meta(artifacts: CardArtifacts) -> CardArtifacts {

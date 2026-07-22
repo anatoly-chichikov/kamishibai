@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use crate::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, Sense, WordCandidate,
-};
+use crate::session::{Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, WordCandidate};
 
 use super::screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
 
@@ -920,22 +918,22 @@ impl App {
             let picture_failed = artifacts.picture().failed_terminally();
             let sound_failed = artifacts.sound().failed_terminally();
             let meta = if meta_failed {
-                ArtifactSlot::fresh(Artifact::Meta)
+                artifacts.meta().clone().retry()
             } else {
                 artifacts.meta().clone()
             };
             let scene = if meta_failed || scene_failed {
-                ArtifactSlot::fresh(Artifact::Scene)
+                artifacts.scene().clone().retry()
             } else {
                 artifacts.scene().clone()
             };
             let picture = if meta_failed || scene_failed || picture_failed {
-                ArtifactSlot::fresh(Artifact::Picture)
+                artifacts.picture().clone().retry()
             } else {
                 artifacts.picture().clone()
             };
             let sound = if meta_failed || sound_failed {
-                ArtifactSlot::fresh(Artifact::Sound)
+                artifacts.sound().clone().retry()
             } else {
                 artifacts.sound().clone()
             };
