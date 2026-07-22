@@ -208,7 +208,7 @@ fn free_form_completion_keeps_the_legacy_request_bytes() -> Result<()> {
     }))?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let response = client.complete("gemini-3.5-flash", String::from("compose"))?;
+    let response = client.complete("gemini-3.6-flash", String::from("compose"))?;
     assert_eq!(
         (response.as_str(), requests.borrow()[0].1.as_str()),
         ("ok", r#"{"contents":[{"parts":[{"text":"compose"}]}]}"#,),
@@ -226,7 +226,7 @@ fn structured_completion_uses_the_json_response_format() -> Result<()> {
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
     let response = client.complete_json(
-        "gemini-3.5-flash",
+        "gemini-3.6-flash",
         String::from("compose"),
         &json!({"type":"object","required":["panels"]}),
     )?;
@@ -249,7 +249,7 @@ fn json_mode_uses_the_legacy_response_mime_type() -> Result<()> {
     }))?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let response = client.complete_json_mode("gemini-3.5-flash", String::from("compose"))?;
+    let response = client.complete_json_mode("gemini-3.6-flash", String::from("compose"))?;
     assert_eq!(
         (response.as_str(), requests.borrow()[0].1.as_str()),
         (
@@ -290,7 +290,7 @@ fn understanding_uses_flash_and_returns_sense_rows() -> Result<()> {
             understood.candidates()[1].ok(),
         ),
         (
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
             true,
             "en",
             "wrecked",
@@ -363,7 +363,7 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
             meta_out.importance(),
         ),
         (
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
             "ˈbɒrəʊ",
             "Can I borrow your pen?",
             "одолжить",
@@ -471,6 +471,7 @@ fn validate_key_accepts_2xx_and_flags_rejected_keys() {
         status: 200,
         body: String::from("{}"),
     })]);
+    let requests = valid.requests.clone();
     let rejected = FakeTransport::new(vec![Ok(TransportResponse {
         status: 400,
         body: String::from(
@@ -482,8 +483,16 @@ fn validate_key_accepts_2xx_and_flags_rejected_keys() {
         .validate_key()
         .unwrap_err();
     assert_eq!(
-        (valid_ok, rejects_key(&rejected_error)),
-        (true, true),
+        (
+            valid_ok,
+            rejects_key(&rejected_error),
+            requests.borrow()[0].0.as_str(),
+        ),
+        (
+            true,
+            true,
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+        ),
         "key validation must pass on any 2xx and flag an invalid-key response as a rejected key"
     );
 }
@@ -500,6 +509,11 @@ fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()
         "The cat is sleeping on the windowsill",
         "en",
     )?;
+    let endpoints = requests
+        .borrow()
+        .iter()
+        .map(|request| request.0.clone())
+        .collect::<Vec<_>>();
     let requests = requests
         .borrow()
         .iter()
@@ -508,6 +522,7 @@ fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()
     assert_eq!(
         (
             requests.len(),
+            endpoints,
             requests.iter().all(|request| {
                 request
                     .pointer("/generationConfig/responseFormat/text/mimeType")
@@ -530,6 +545,17 @@ fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()
         ),
         (
             3,
+            vec![
+                String::from(
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+                ),
+                String::from(
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+                ),
+                String::from(
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+                ),
+            ],
             true,
             true,
             Some(1),
@@ -678,13 +704,21 @@ fn image_generation_keeps_the_image_modality_and_square_aspect_ratio() -> Result
     let request = serde_json::from_str::<Value>(&requests.borrow()[0].1)?;
     assert_eq!(
         (
+            requests.borrow()[0].0.clone(),
             request["generationConfig"]["responseModalities"][0].as_str(),
             request["generationConfig"]["imageConfig"]["aspectRatio"].as_str(),
             request["safetySettings"]
                 .as_array()
                 .map(|items| items.len())
         ),
-        (Some("IMAGE"), Some("1:1"), Some(4)),
+        (
+            String::from(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent"
+            ),
+            Some("IMAGE"),
+            Some("1:1"),
+            Some(4),
+        ),
         "image generation request no longer keeps the frozen modality and aspect-ratio contract"
     );
     Ok(())

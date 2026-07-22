@@ -80,4 +80,19 @@ mod tests {
             "two senses of one term must not share a card folder"
         );
     }
+
+    #[test]
+    fn model_refresh_preserves_the_existing_card_identity() {
+        let cell = CardCell::new(
+            "/tmp/kamishibai-cell-version-test",
+            &LanguagePair::new("fr", "en"),
+            "canard",
+            "a duck",
+        );
+        assert_eq!(
+            cell.media_name("jpg"),
+            "3dfcb9807a67.jpg",
+            "model refreshes must not orphan artifacts from existing published sessions"
+        );
+    }
 }

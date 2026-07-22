@@ -202,6 +202,8 @@ pub(super) struct UsageMetadata {
     pub(super) prompt_token_count: u64,
     #[serde(rename = "candidatesTokenCount", default)]
     pub(super) candidates_token_count: u64,
+    #[serde(rename = "thoughtsTokenCount", default)]
+    pub(super) thoughts_token_count: u64,
     #[serde(rename = "totalTokenCount", default)]
     pub(super) total_token_count: u64,
 }

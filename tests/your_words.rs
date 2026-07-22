@@ -186,7 +186,7 @@ fn recoverable_error_overlay_keeps_the_message_visible() {
 #[test]
 fn recoverable_error_overlay_wraps_long_timeout_messages() {
     let app = App::new(LanguagePair::new("en", "ru")).error_shown(
-        "error sending request for url https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent: operation timed out while understanding a large word list",
+        "error sending request for url https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent: operation timed out while understanding a large word list",
     );
     let flat = flatten(&app);
     assert!(

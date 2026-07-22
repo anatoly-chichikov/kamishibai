@@ -38,10 +38,10 @@ fn base_url() -> String {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| String::from(BASE_URL))
 }
-const TEXT_MODEL: &str = "gemini-3.5-flash";
+const TEXT_MODEL: &str = "gemini-3.6-flash";
 const META_MODEL: &str = TEXT_MODEL;
 const SCENE_MODEL: &str = TEXT_MODEL;
-const IMAGE_MODEL: &str = "gemini-3.1-flash-image-preview";
+const IMAGE_MODEL: &str = "gemini-3.1-flash-image";
 const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
 const VOICES: [&str; 30] = [
     "Achernar",
@@ -868,7 +868,8 @@ mod tests {
             "usageMetadata": {
                 "promptTokenCount": 100,
                 "candidatesTokenCount": 20,
-                "totalTokenCount": 120
+                "thoughtsTokenCount": 30,
+                "totalTokenCount": 150
             }
         }))
     }
@@ -1042,7 +1043,8 @@ mod tests {
             "usageMetadata": {
                 "promptTokenCount": 100,
                 "candidatesTokenCount": 20,
-                "totalTokenCount": 120
+                "thoughtsTokenCount": 30,
+                "totalTokenCount": 150
             }
         }))]);
         let client = GeminiClient::new("key", transport);
@@ -1052,7 +1054,7 @@ mod tests {
             .expect("card correction must decode");
         assert_eq!(
             cost.cost().nanos(),
-            330_000,
+            525_000,
             "card correction must preserve Gemini usage cost for the regenerated meta"
         );
     }

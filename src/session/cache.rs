@@ -15,7 +15,7 @@ use super::{
     Sense, Understanding, Understood, WordCandidate,
 };
 
-const UNDERSTANDING_VERSION: &str = "v3";
+const UNDERSTANDING_VERSION: &str = "v4";
 
 /// Caching decorator for the first-pass understanding contract.
 #[derive(Clone, Debug)]
@@ -488,6 +488,19 @@ mod tests {
             ),
             (1, "variant 0", "variant 0"),
             "understanding cache no longer reuses normalized duplicate input"
+        );
+    }
+
+    #[test]
+    fn current_text_model_uses_the_version_four_understanding_identity() {
+        let cache = CachedUnderstanding::new(
+            ChangingUnderstanding::new(Rc::new(RefCell::new(0))),
+            "/tmp/kamishibai-understanding-version-test",
+        );
+        assert_eq!(
+            cache.entry_filename("lantern", "ru", "en"),
+            "3020fb5446c5.json",
+            "Gemini 3.6 understanding must not reuse an earlier model's cache entry"
         );
     }
 

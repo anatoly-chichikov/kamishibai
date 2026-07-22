@@ -710,12 +710,12 @@ mod tests {
         let home = TempDir::new().expect("tempdir must be created");
         let cache = Cache::new("cards/test", home.path());
         let record = CostRecord::new(
-            "gemini-3.5-flash",
+            "gemini-3.6-flash",
             1,
             100,
             20,
             120,
-            GenerationCost::from_nanos(330_000),
+            GenerationCost::from_nanos(300_000),
         );
         store_cost(&cache, Artifact::Sound, &record);
         assert_eq!(
@@ -730,16 +730,16 @@ mod tests {
         let home = TempDir::new().expect("tempdir must be created");
         let cache = Cache::new("cards/test", home.path());
         let record = CostRecord::new(
-            "gemini-3.5-flash",
+            "gemini-3.6-flash",
             1,
             100,
             20,
             120,
-            GenerationCost::from_nanos(330_000),
+            GenerationCost::from_nanos(300_000),
         );
         assert_eq!(
             cost_for(&cache, Artifact::Sound, false, Some(record)),
-            Some(GenerationCost::from_nanos(330_000)),
+            Some(GenerationCost::from_nanos(300_000)),
             "fresh Gemini requests must report their current spend"
         );
     }
@@ -749,25 +749,25 @@ mod tests {
         let home = TempDir::new().expect("tempdir must be created");
         let cache = Cache::new("cards/test", home.path());
         let first = CostRecord::new(
-            "gemini-3.5-flash",
+            "gemini-3.6-flash",
             1,
             100,
             20,
             120,
-            GenerationCost::from_nanos(330_000),
+            GenerationCost::from_nanos(300_000),
         );
         let second = CostRecord::new(
-            "gemini-3.5-flash",
+            "gemini-3.6-flash",
             1,
             40,
             10,
             50,
-            GenerationCost::from_nanos(150_000),
+            GenerationCost::from_nanos(135_000),
         );
         store_cost(&cache, Artifact::Sound, &first);
         assert_eq!(
             cost_for(&cache, Artifact::Sound, false, Some(second)),
-            Some(GenerationCost::from_nanos(480_000)),
+            Some(GenerationCost::from_nanos(435_000)),
             "fresh retry success must report all successful Gemini requests for the artifact"
         );
     }
@@ -777,20 +777,20 @@ mod tests {
         let home = TempDir::new().expect("tempdir must be created");
         let cache = Cache::new("cards/test", home.path());
         let first = CostRecord::new(
-            "gemini-3.5-flash",
+            "gemini-3.6-flash",
             1,
             100,
             20,
             120,
-            GenerationCost::from_nanos(330_000),
+            GenerationCost::from_nanos(300_000),
         );
         let second = CostRecord::new(
-            "gemini-3.5-flash",
+            "gemini-3.6-flash",
             1,
             40,
             10,
             50,
-            GenerationCost::from_nanos(150_000),
+            GenerationCost::from_nanos(135_000),
         );
         let first_cost = store_retry_cost(&cache, Artifact::Sound, Some(first));
         let unmetered = store_retry_cost(&cache, Artifact::Sound, None);
@@ -798,9 +798,9 @@ mod tests {
         assert_eq!(
             (first_cost, unmetered, second_cost),
             (
-                Some(GenerationCost::from_nanos(330_000)),
-                Some(GenerationCost::from_nanos(330_000)),
-                Some(GenerationCost::from_nanos(480_000)),
+                Some(GenerationCost::from_nanos(300_000)),
+                Some(GenerationCost::from_nanos(300_000)),
+                Some(GenerationCost::from_nanos(435_000)),
             ),
             "failed retry accounting did not return the cumulative persisted spend"
         );
@@ -810,7 +810,7 @@ mod tests {
     fn missing_usage_records_do_not_report_zero_costs() {
         let home = TempDir::new().expect("tempdir must be created");
         let cache = Cache::new("cards/test", home.path());
-        let record = CostRecord::new("gemini-3.5-flash", 0, 0, 0, 0, GenerationCost::zero());
+        let record = CostRecord::new("gemini-3.6-flash", 0, 0, 0, 0, GenerationCost::zero());
         assert_eq!(
             (
                 cost_for(&cache, Artifact::Sound, false, Some(record.clone())),

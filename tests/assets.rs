@@ -139,12 +139,12 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
     Ok(())
 }
 
-/// Production registry builds use the reviewed version-fifteen visual revision.
+/// Production registry builds use the Gemini 3.6 version-sixteen visual revision.
 #[test]
-fn production_registry_uses_the_version_fifteen_visual_revision() {
+fn production_registry_uses_the_version_sixteen_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "022cd97ad91cae1b502d61851ec759bf5132ef479f2587db60372cdd2d142b8f",
+        "f9470cb741b5a94a8a9592dcdfaea96d6879829d975b0106076ee3bf541f0b8a",
         "production registry visual revision drifted without a policy-version change"
     );
 }
