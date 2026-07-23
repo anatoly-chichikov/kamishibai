@@ -453,8 +453,44 @@ fn strict_topology_matches(
             let distinct = assignments.into_iter().collect::<BTreeSet<_>>();
             regions == expected && distinct.len() == expected
         })
-    }) || staggered_grid_layout(scene)
-        && staggered_grid_topology_matches(border, scene, panels, image, expected)
+    }) || none_slanted_topology_matches(border, scene, panels, image, expected)
+        || staggered_grid_layout(scene)
+            && staggered_grid_topology_matches(border, scene, panels, image, expected)
+}
+
+fn none_slanted_topology_matches(
+    border: &BorderDetector,
+    scene: &Value,
+    panels: &[Value],
+    image: &image::GrayImage,
+    expected: usize,
+) -> bool {
+    if scene
+        .pointer("/manga_panel/page_design/special_device/kind")
+        .and_then(Value::as_str)
+        != Some("none")
+        || staggered_grid_layout(scene)
+    {
+        return false;
+    }
+    let Some((regions, assignments)) = registry_assignments(border, scene, panels, image) else {
+        return false;
+    };
+    let distinct = assignments.iter().copied().collect::<BTreeSet<_>>();
+    if regions != expected || distinct.len() != expected {
+        return false;
+    }
+    let Some(proofs) = slant_proofs(scene, panels) else {
+        return false;
+    };
+    !proofs.is_empty()
+        && registry_slants_match(
+            border,
+            scene,
+            image,
+            assignments.as_slice(),
+            proofs.as_slice(),
+        )
 }
 
 fn staggered_grid_layout(scene: &Value) -> bool {

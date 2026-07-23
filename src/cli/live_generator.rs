@@ -123,13 +123,22 @@ impl LiveCardGenerator {
     }
 
     fn cost_recorder(&self, cache: Cache, artifact: Artifact) -> CostRecorder {
+        self.cost_recorder_with_accounting(cache, artifact, AccountingHealth::default())
+    }
+
+    fn cost_recorder_with_accounting(
+        &self,
+        cache: Cache,
+        artifact: Artifact,
+        accounting: AccountingHealth,
+    ) -> CostRecorder {
         let session = self
             .state
             .costs
             .clone()
             .zip(self.state.slot)
             .map(|(scope, slot)| SessionCostAttribution::new(scope, slot));
-        CostRecorder::attributed(cache, artifact, session)
+        CostRecorder::guarded(cache, artifact, session, accounting)
     }
 
     fn client(&self) -> Result<GeminiClient<HttpTransport>> {
@@ -247,12 +256,16 @@ impl LiveCardGenerator {
         scene_costs: CostRecorder,
         picture_costs: CostRecorder,
         scene_attempt: u8,
+        accounting: AccountingHealth,
     ) -> Result<LiveIllustration> {
         let item = self.catalog.item(draft.pair().learning())?;
         let client = self.client()?;
         let scene_client = MeteredGemini::new(client.clone(), scene_costs);
-        let picture_client =
-            RequestCountingImage::new(MeteredGemini::new(client, picture_costs), cache.clone());
+        let picture_client = RequestCountingImage::guarded(
+            MeteredGemini::new(client, picture_costs),
+            cache.clone(),
+            accounting,
+        );
         let text = manga_text(item.ocr.as_str(), self.cache.as_path());
         let renderer =
             production_renderer(picture_client, text, BorderDetector::new(6, 24, 240, 10));
@@ -278,7 +291,13 @@ impl LiveCardGenerator {
         render: F,
     ) -> ArtifactAttempt<ArtifactFile>
     where
-        F: FnOnce(&LiveIllustration, &str, &str, &mut NoopProgress) -> Result<(String, bool)>,
+        F: FnOnce(
+            &LiveIllustration,
+            &str,
+            &str,
+            &mut NoopProgress,
+            &AccountingHealth,
+        ) -> Result<(String, bool)>,
     {
         let Some(meta) = draft.meta() else {
             return ArtifactAttempt::unmetered(Err(anyhow!(
@@ -291,8 +310,14 @@ impl LiveCardGenerator {
             Ok(cache) => cache,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        let scene_costs = self.cost_recorder(cache.clone(), Artifact::Scene);
-        let picture_costs = self.cost_recorder(cache.clone(), Artifact::Picture);
+        let accounting = AccountingHealth::default();
+        let scene_costs =
+            self.cost_recorder_with_accounting(cache.clone(), Artifact::Scene, accounting.clone());
+        let picture_costs = self.cost_recorder_with_accounting(
+            cache.clone(),
+            Artifact::Picture,
+            accounting.clone(),
+        );
         let _guard = match cache.hold_visual(VISUAL_LOCK_TIMEOUT) {
             Ok(guard) => guard,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
@@ -307,6 +332,7 @@ impl LiveCardGenerator {
             scene_costs.clone(),
             picture_costs.clone(),
             scene_attempt,
+            accounting.clone(),
         ) {
             Ok(illustration) => illustration,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
@@ -317,6 +343,7 @@ impl LiveCardGenerator {
             meta.target_sentence(),
             learning,
             &mut progress,
+            &accounting,
         )
         .and_then(|(filename, cached)| {
             let path = illustration.filepath(filename.as_str())?;
@@ -429,7 +456,7 @@ impl CardGeneration for LiveCardGenerator {
             Artifact::Scene,
             draft.artifacts().scene().tally().done(),
             false,
-            |illustration, sentence, target, progress| {
+            |illustration, sentence, target, progress, _accounting| {
                 illustration.scene_only(sentence, target, progress)
             },
         )
@@ -456,13 +483,22 @@ impl CardGeneration for LiveCardGenerator {
         };
         let recover = cursor.recompose(recover);
         let attempt = if recover {
+            let fallback_cache = cache.clone();
             self.generate_visual(
                 draft,
                 Artifact::Picture,
                 draft.artifacts().scene().tally().done(),
                 true,
-                |illustration, sentence, target, progress| {
-                    illustration.picture_with_recomposed_scene(sentence, target, progress)
+                move |illustration, sentence, target, progress, accounting| {
+                    render_recomposition_with_fallback(
+                        &fallback_cache,
+                        accounting,
+                        progress,
+                        |progress| {
+                            illustration.picture_with_recomposed_scene(sentence, target, progress)
+                        },
+                        |progress| illustration.picture_only(sentence, target, progress),
+                    )
                 },
             )
         } else {
@@ -471,7 +507,7 @@ impl CardGeneration for LiveCardGenerator {
                 Artifact::Picture,
                 draft.artifacts().scene().tally().done(),
                 false,
-                |illustration, sentence, target, progress| {
+                |illustration, sentence, target, progress, _accounting| {
                     illustration.picture_only(sentence, target, progress)
                 },
             )
@@ -655,6 +691,49 @@ impl SceneProgress for NoopProgress {
     fn done(&mut self, _name: &str, _label: &str, _path: Option<&Path>) {}
 }
 
+fn render_recomposition_with_fallback<T, P, R, F, E>(
+    cache: &Cache,
+    accounting: &AccountingHealth,
+    progress: &mut P,
+    recompose: R,
+    fallback: F,
+) -> std::result::Result<T, E>
+where
+    R: FnOnce(&mut P) -> std::result::Result<T, E>,
+    F: FnOnce(&mut P) -> std::result::Result<T, E>,
+    E: From<anyhow::Error>,
+{
+    let before = accounting
+        .record(picture_request_total(cache))
+        .map_err(E::from)?;
+    let original = match recompose(progress) {
+        Ok(rendered) => return Ok(rendered),
+        Err(error) => error,
+    };
+    if accounting.failed() {
+        return Err(original);
+    }
+    let after = accounting
+        .record(picture_request_total(cache))
+        .map_err(E::from)?;
+    if after != before {
+        return Err(original);
+    }
+    match fallback(progress) {
+        Ok(rendered) => Ok(rendered),
+        Err(error) if accounting.failed() => Err(error),
+        Err(error)
+            if accounting
+                .record(picture_request_total(cache))
+                .map_err(E::from)?
+                != after =>
+        {
+            Err(error)
+        }
+        Err(_) => Err(original),
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct PictureRecovery {
     states: Arc<Mutex<BTreeMap<PathBuf, PictureRecoveryState>>>,
@@ -807,15 +886,13 @@ impl LocalImageRejections {
     }
 
     fn recompose(&self) -> bool {
-        match self.recent {
-            [_, Some(LocalImageRejection::Topology)] => true,
+        matches!(
+            self.recent,
             [
-                Some(LocalImageRejection::Border),
-                Some(LocalImageRejection::Border),
-            ] => false,
-            [Some(_), Some(_)] => true,
-            _ => false,
-        }
+                Some(LocalImageRejection::Topology),
+                Some(LocalImageRejection::Topology)
+            ]
+        )
     }
 
     fn synchronized(self, persisted: Self) -> Self {
@@ -999,10 +1076,53 @@ impl SessionCostAttribution {
 }
 
 #[derive(Clone, Debug)]
+struct AccountingHealth {
+    failed: Rc<std::cell::Cell<bool>>,
+}
+
+impl AccountingHealth {
+    fn new(failed: Rc<std::cell::Cell<bool>>) -> Self {
+        Self { failed }
+    }
+
+    fn record<T>(&self, result: Result<T>) -> Result<T> {
+        if result.is_err() {
+            self.failed.set(true);
+        }
+        result
+    }
+
+    fn failed(&self) -> bool {
+        self.failed.get()
+    }
+}
+
+impl Default for AccountingHealth {
+    fn default() -> Self {
+        Self::new(Rc::new(std::cell::Cell::new(false)))
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CostState {
+    observed: Rc<RefCell<Option<CostRecord>>>,
+    accounting: AccountingHealth,
+}
+
+impl CostState {
+    fn new(accounting: AccountingHealth) -> Self {
+        Self {
+            observed: Rc::new(RefCell::new(None)),
+            accounting,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct CostRecorder {
     cache: Cache,
     artifact: Artifact,
-    observed: Rc<RefCell<Option<CostRecord>>>,
+    state: CostState,
     session: Option<SessionCostAttribution>,
 }
 
@@ -1012,15 +1132,25 @@ impl CostRecorder {
         Self::attributed(cache, artifact, None)
     }
 
+    #[cfg(test)]
     fn attributed(
         cache: Cache,
         artifact: Artifact,
         session: Option<SessionCostAttribution>,
     ) -> Self {
+        Self::guarded(cache, artifact, session, AccountingHealth::default())
+    }
+
+    fn guarded(
+        cache: Cache,
+        artifact: Artifact,
+        session: Option<SessionCostAttribution>,
+        accounting: AccountingHealth,
+    ) -> Self {
         Self {
             cache,
             artifact,
-            observed: Rc::new(RefCell::new(None)),
+            state: CostState::new(accounting),
             session,
         }
     }
@@ -1029,17 +1159,20 @@ impl CostRecorder {
         if record.requests() == 0 {
             return Ok(());
         }
-        self.observe(&record)?;
-        store_cost(&self.cache, self.artifact, &record)?;
-        Ok(())
+        let result = self
+            .observe(&record)
+            .and_then(|()| store_cost(&self.cache, self.artifact, &record).map(|_| ()));
+        self.state.accounting.record(result)
     }
 
     fn push_correction(&self, record: CostRecord) -> Result<()> {
         if record.requests() == 0 {
             return Ok(());
         }
-        self.observe(&record)?;
-        persist_correction_cost(&self.cache, &record)
+        let result = self
+            .observe(&record)
+            .and_then(|()| persist_correction_cost(&self.cache, &record));
+        self.state.accounting.record(result)
     }
 
     fn observe(&self, record: &CostRecord) -> Result<()> {
@@ -1047,12 +1180,13 @@ impl CostRecorder {
             session.charge(self.artifact, record.cost())?;
         }
         let aggregate = self
+            .state
             .observed
             .borrow()
             .as_ref()
             .map(|current| current.merged(record))
             .unwrap_or_else(|| record.clone());
-        *self.observed.borrow_mut() = Some(aggregate);
+        *self.state.observed.borrow_mut() = Some(aggregate);
         Ok(())
     }
 
@@ -1060,12 +1194,16 @@ impl CostRecorder {
         if cached {
             return Ok(None);
         }
-        Ok(self.observed.borrow().as_ref().map(CostRecord::cost))
+        Ok(self.state.observed.borrow().as_ref().map(CostRecord::cost))
     }
 
     fn cumulative(&self, cached: bool) -> Result<Option<GenerationCost>> {
         self.current(cached)
     }
+}
+
+fn picture_request_total(cache: &Cache) -> Result<u32> {
+    load_picture_request_counter(cache).map(|counter| counter.requests)
 }
 
 const PICTURE_REQUEST_COUNTER_SCHEMA: &str = "kamishibai.picture-request-counter";
@@ -1156,11 +1294,21 @@ pub(in crate::cli) fn restart_picture_request_series(cache: &Cache) -> Result<()
 struct RequestCountingImage<C> {
     client: C,
     cache: Cache,
+    accounting: AccountingHealth,
 }
 
 impl<C> RequestCountingImage<C> {
+    #[cfg(test)]
     fn new(client: C, cache: Cache) -> Self {
-        Self { client, cache }
+        Self::guarded(client, cache, AccountingHealth::default())
+    }
+
+    fn guarded(client: C, cache: Cache, accounting: AccountingHealth) -> Self {
+        Self {
+            client,
+            cache,
+            accounting,
+        }
     }
 }
 
@@ -1169,7 +1317,8 @@ where
     C: ImageSource,
 {
     fn image(&self, prompt: &str) -> Result<Vec<u8>> {
-        reserve_picture_request(&self.cache)?;
+        self.accounting
+            .record(reserve_picture_request(&self.cache))?;
         self.client.image(prompt)
     }
 }
@@ -1467,6 +1616,24 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+    enum RecoveryFailure {
+        #[error("recomposition failed")]
+        Recomposition,
+        #[error("fallback failed")]
+        Fallback,
+        #[error("image provider failed")]
+        Provider,
+        #[error("accounting failed")]
+        Accounting,
+    }
+
+    impl From<anyhow::Error> for RecoveryFailure {
+        fn from(_error: anyhow::Error) -> Self {
+            Self::Accounting
+        }
+    }
+
     fn image_bytes(image: GrayImage) -> Vec<u8> {
         let mut bytes = Cursor::new(Vec::new());
         DynamicImage::ImageLuma8(image)
@@ -1625,6 +1792,188 @@ mod tests {
             ),
             (true, true, true, 0, 0, 0, 0, 0, 0),
             "a pre-provider failure consumed or recorded an image request"
+        );
+    }
+
+    #[test]
+    fn pre_provider_recomposition_failure_falls_back_once_to_the_committed_scene() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("visual", home.path());
+        let accounting = AccountingHealth::default();
+        let fallback = Cell::new(0_u8);
+        let mut progress = ();
+        let result: std::result::Result<&str, RecoveryFailure> = render_recomposition_with_fallback(
+            &cache,
+            &accounting,
+            &mut progress,
+            |_| Err(RecoveryFailure::Recomposition),
+            |_| {
+                fallback.set(fallback.get().saturating_add(1));
+                reserve_picture_request(&cache)?;
+                Ok("committed")
+            },
+        );
+        assert_eq!(
+            (result.ok(), fallback.get(), picture_requests(&cache)),
+            (Some("committed"), 1, 1),
+            "pre-provider recomposition failure did not produce exactly one committed-scene image"
+        );
+    }
+
+    #[test]
+    fn recomposition_image_failure_never_falls_back_to_the_committed_scene() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("visual", home.path());
+        let accounting = AccountingHealth::default();
+        let fallback = Cell::new(0_u8);
+        let mut progress = ();
+        let result: std::result::Result<&str, RecoveryFailure> = render_recomposition_with_fallback(
+            &cache,
+            &accounting,
+            &mut progress,
+            |_| {
+                reserve_picture_request(&cache)?;
+                Err(RecoveryFailure::Provider)
+            },
+            |_| {
+                fallback.set(fallback.get().saturating_add(1));
+                Ok("committed")
+            },
+        );
+        assert_eq!(
+            (result.err(), fallback.get(), picture_requests(&cache),),
+            (Some(RecoveryFailure::Provider), 0, 1),
+            "an image failure triggered an extra fallback provider call"
+        );
+    }
+
+    #[test]
+    fn fallback_failure_before_the_provider_returns_the_recomposition_error() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("visual", home.path());
+        let accounting = AccountingHealth::default();
+        let fallback = Cell::new(0_u8);
+        let mut progress = ();
+        let result: std::result::Result<&str, RecoveryFailure> = render_recomposition_with_fallback(
+            &cache,
+            &accounting,
+            &mut progress,
+            |_| Err(RecoveryFailure::Recomposition),
+            |_| {
+                fallback.set(fallback.get().saturating_add(1));
+                Err(RecoveryFailure::Fallback)
+            },
+        );
+        assert_eq!(
+            (result.err(), fallback.get(), picture_requests(&cache)),
+            (Some(RecoveryFailure::Recomposition), 1, 0),
+            "a pre-provider fallback failure hid the original recomposition diagnosis"
+        );
+    }
+
+    #[test]
+    fn fallback_image_failure_returns_the_fallback_provider_error() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("visual", home.path());
+        let accounting = AccountingHealth::default();
+        let mut progress = ();
+        let result: std::result::Result<&str, RecoveryFailure> = render_recomposition_with_fallback(
+            &cache,
+            &accounting,
+            &mut progress,
+            |_| Err(RecoveryFailure::Recomposition),
+            |_| {
+                reserve_picture_request(&cache)?;
+                Err(RecoveryFailure::Provider)
+            },
+        );
+        assert_eq!(
+            (result.err(), picture_requests(&cache)),
+            (Some(RecoveryFailure::Provider), 1),
+            "a fallback image failure was replaced by a stale scene diagnosis"
+        );
+    }
+
+    #[test]
+    fn cost_recording_failure_prevents_committed_scene_fallback() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("visual", home.path());
+        let accounting = AccountingHealth::default();
+        let costs = CostRecorder::guarded(
+            Cache::failing("costs", home.path(), 0),
+            Artifact::Scene,
+            None,
+            accounting.clone(),
+        );
+        let fallback = Cell::new(0_u8);
+        let mut progress = ();
+        let result: Result<&str> = render_recomposition_with_fallback(
+            &cache,
+            &accounting,
+            &mut progress,
+            |_| {
+                costs
+                    .push(CostRecord::new(
+                        "gemini-3.6-flash",
+                        1,
+                        100,
+                        20,
+                        120,
+                        GenerationCost::from_nanos(300_000),
+                    ))
+                    .map_err(|error| error.context("scene composition request failed"))?;
+                Ok("recomposed")
+            },
+            |_| {
+                fallback.set(fallback.get().saturating_add(1));
+                Ok("committed")
+            },
+        );
+        assert_eq!(
+            (
+                result.is_err(),
+                fallback.get(),
+                picture_requests(&cache),
+                accounting.failed(),
+            ),
+            (true, 0, 0, true),
+            "durable cost failure was hidden by a committed-scene fallback"
+        );
+    }
+
+    #[test]
+    fn request_recording_failure_prevents_committed_scene_fallback() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::failing("visual", home.path(), 0);
+        let accounting = AccountingHealth::default();
+        let fallback = Cell::new(0_u8);
+        let source = CountingImageSource::new(valid_image());
+        let image =
+            RequestCountingImage::guarded(source.clone(), cache.clone(), accounting.clone());
+        let mut progress = ();
+        let result: Result<&str> = render_recomposition_with_fallback(
+            &cache,
+            &accounting,
+            &mut progress,
+            |_| {
+                image.image("compiled image prompt")?;
+                Ok("recomposed")
+            },
+            |_| {
+                fallback.set(fallback.get().saturating_add(1));
+                Ok("committed")
+            },
+        );
+        assert_eq!(
+            (
+                result.is_err(),
+                source.calls(),
+                fallback.get(),
+                picture_requests(&cache),
+                accounting.failed(),
+            ),
+            (true, 0, 0, 0, true),
+            "durable picture reservation failure was hidden by a committed-scene fallback"
         );
     }
 
@@ -1801,7 +2150,7 @@ mod tests {
     }
 
     #[test]
-    fn two_ocr_rejections_enable_third_attempt_recomposition() {
+    fn two_ocr_rejections_keep_the_third_attempt_on_the_current_scene() {
         let recovery = PictureRecovery::default();
         let path = Path::new("cards/local-rejections");
         let first = recovery
@@ -1821,8 +2170,8 @@ mod tests {
             .expect("third attempt must prepare");
         assert_eq!(
             (first, second, third),
-            (false, false, true),
-            "two OCR rejections did not isolate recomposition to the third attempt"
+            (false, false, false),
+            "OCR failures discarded a scene that could still render without text"
         );
     }
 
@@ -1849,28 +2198,50 @@ mod tests {
     }
 
     #[test]
-    fn mixed_border_then_ocr_rejections_enable_third_attempt_recomposition() {
-        let temporary = TempDir::new().expect("tempdir must be created");
-        write_rejection(temporary.path(), 1, "border");
-        write_rejection(temporary.path(), 2, "ocr");
+    fn two_color_rejections_keep_the_third_attempt_on_the_current_scene() {
+        let recovery = PictureRecovery::default();
+        let path = Path::new("cards/repeated-color");
+        recovery
+            .prepare(path, 0)
+            .expect("first attempt must prepare");
+        recovery
+            .observe(path, 0, Some(LocalImageRejection::Color))
+            .expect("first color rejection must record");
+        recovery.prepare(path, 1).expect("retry must prepare");
+        recovery
+            .observe(path, 1, Some(LocalImageRejection::Color))
+            .expect("second color rejection must record");
         assert!(
-            PictureRecovery::default()
-                .prepare(temporary.path(), 2)
-                .expect("mixed local verdicts must decode"),
-            "border then OCR did not recompose the third picture attempt"
+            !recovery
+                .prepare(path, 2)
+                .expect("third attempt must prepare"),
+            "repeated color failures discarded a scene whose composition was not implicated"
         );
     }
 
     #[test]
-    fn mixed_topology_then_ocr_rejections_enable_third_attempt_recomposition() {
+    fn mixed_border_then_ocr_rejections_keep_the_third_attempt_on_the_current_scene() {
+        let temporary = TempDir::new().expect("tempdir must be created");
+        write_rejection(temporary.path(), 1, "border");
+        write_rejection(temporary.path(), 2, "ocr");
+        assert!(
+            !PictureRecovery::default()
+                .prepare(temporary.path(), 2)
+                .expect("mixed local verdicts must decode"),
+            "border then OCR discarded a scene that could still render cleanly"
+        );
+    }
+
+    #[test]
+    fn mixed_topology_then_ocr_rejections_keep_the_third_attempt_on_the_current_scene() {
         let temporary = TempDir::new().expect("tempdir must be created");
         write_rejection(temporary.path(), 1, "topology");
         write_rejection(temporary.path(), 2, "ocr");
         assert!(
-            PictureRecovery::default()
+            !PictureRecovery::default()
                 .prepare(temporary.path(), 2)
                 .expect("mixed local verdicts must decode"),
-            "topology then OCR did not recompose the third picture attempt"
+            "one topology failure plus OCR discarded the scene without repeated structural evidence"
         );
     }
 
@@ -1888,19 +2259,19 @@ mod tests {
     }
 
     #[test]
-    fn one_topology_rejection_enables_second_attempt_recomposition() {
+    fn one_topology_rejection_keeps_the_second_attempt_on_the_current_scene() {
         let temporary = TempDir::new().expect("tempdir must be created");
         write_rejection(temporary.path(), 1, "topology");
         assert!(
-            PictureRecovery::default()
+            !PictureRecovery::default()
                 .prepare(temporary.path(), 1)
                 .expect("topology verdict must decode"),
-            "one topology rejection reused structurally incompatible scene geometry"
+            "one noisy topology verdict discarded the scene before an image retry"
         );
     }
 
     #[test]
-    fn persisted_topology_rejection_advances_the_second_picture_to_the_next_scene_slot() {
+    fn persisted_topology_rejection_keeps_the_second_picture_on_the_committed_scene_slot() {
         let temporary = TempDir::new().expect("tempdir must be created");
         let cache = Cache::new("visual", temporary.path());
         let scene = serde_json::json!({
@@ -1923,15 +2294,15 @@ mod tests {
             .prepare(cache.path().as_path(), 1)
             .expect("persisted topology verdict must decode");
         let selected = reserve_scene_attempt(&cache, Artifact::Picture, 0, recover)
-            .expect("second picture must reserve an alternate scene");
+            .expect("second picture must retain the committed scene");
         assert_eq!(
             (
                 recover,
                 selected,
                 load_scene_attempt(&cache).expect("cursor must decode")
             ),
-            (true, 1, Some(1)),
-            "a restarted second picture reused the topology-rejected scene slot"
+            (false, 0, Some(0)),
+            "a restarted second picture advanced after only one topology verdict"
         );
     }
 
@@ -1973,15 +2344,15 @@ mod tests {
     }
 
     #[test]
-    fn mixed_local_recovery_survives_a_fresh_generator_process() {
+    fn mixed_local_rejections_keep_the_scene_after_a_fresh_generator_process() {
         let temporary = TempDir::new().expect("tempdir must be created");
         write_rejection(temporary.path(), 1, "border");
         write_rejection(temporary.path(), 2, "ocr");
         assert!(
-            PictureRecovery::default()
+            !PictureRecovery::default()
                 .prepare(temporary.path(), 2)
                 .expect("persisted local verdicts must decode"),
-            "a restarted generator forgot two persisted local image rejections"
+            "a restarted generator treated unrelated local failures as repeated topology evidence"
         );
     }
 
@@ -2139,19 +2510,19 @@ mod tests {
         let second = Path::new("cards/second");
         recovery.prepare(first, 0).expect("first card must prepare");
         recovery
-            .observe(first, 0, Some(LocalImageRejection::Ocr))
+            .observe(first, 0, Some(LocalImageRejection::Topology))
             .expect("first card outcome must record");
         recovery
             .prepare(first, 1)
             .expect("first retry must prepare");
         recovery
-            .observe(first, 1, Some(LocalImageRejection::Ocr))
+            .observe(first, 1, Some(LocalImageRejection::Topology))
             .expect("first retry outcome must record");
         recovery
             .prepare(second, 0)
             .expect("second card must prepare");
         recovery
-            .observe(second, 0, Some(LocalImageRejection::Ocr))
+            .observe(second, 0, Some(LocalImageRejection::Topology))
             .expect("second card outcome must record");
         assert_eq!(
             (

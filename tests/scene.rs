@@ -593,6 +593,44 @@ fn declared_diagonal_panels() -> GrayImage {
     image
 }
 
+/// Create two inset regions with a shifted separator in one chosen diagonal direction.
+fn inset_diagonal_panels(mirrored: bool) -> GrayImage {
+    let mut image = GrayImage::from_pixel(128, 128, Luma([255]));
+    for y in 8u32..120 {
+        let progress = y.saturating_sub(8).saturating_mul(12) / 111;
+        let separator = if mirrored {
+            72u32.saturating_sub(progress)
+        } else {
+            60u32.saturating_add(progress)
+        };
+        for x in 8..separator {
+            image.put_pixel(x, y, Luma([0]));
+        }
+        for x in separator.saturating_add(2)..120 {
+            image.put_pixel(x, y, Luma([0]));
+        }
+    }
+    image
+}
+
+/// Create two vertical panels plus one isolated center region of the requested width.
+fn split_panels_with_center_region(width: u32) -> GrayImage {
+    let mut image = GrayImage::from_pixel(128, 128, Luma([255]));
+    let start = 64u32.saturating_sub(width / 2);
+    for y in 1..127 {
+        for x in 1..55 {
+            image.put_pixel(x, y, Luma([0]));
+        }
+        for x in 73..127 {
+            image.put_pixel(x, y, Luma([0]));
+        }
+        for x in start..start.saturating_add(width) {
+            image.put_pixel(x, y, Luma([0]));
+        }
+    }
+    image
+}
+
 /// Create an undeclared third region inside the first declared diagonal panel.
 fn extra_diagonal_panel() -> GrayImage {
     let mut image = declared_diagonal_panels();
@@ -1618,6 +1656,100 @@ fn renderer_rejects_extra_panel_and_straight_split_for_declared_diagonal() {
         (regions, rejected),
         (3, [true, true, false]),
         "registry renderer accepts an extra panel or straightens a declared diagonal"
+    );
+}
+
+/// A shifted inset diagonal keeps its registered direction despite coordinate drift.
+#[test]
+fn renderer_accepts_shifted_inset_diagonal_with_declared_direction() {
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![inset_diagonal_panels(false)]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    );
+    assert!(
+        renderer
+            .render(&diagonal_layout_scene("en"), &mut Recorder::default())
+            .is_ok(),
+        "registry renderer still rejects a shifted inset diagonal with the declared direction"
+    );
+}
+
+/// A shifted inset diagonal cannot reverse the registered separator direction.
+#[test]
+fn renderer_rejects_shifted_inset_diagonal_with_mirrored_direction() {
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![inset_diagonal_panels(true)]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    );
+    assert!(
+        renderer
+            .render(&diagonal_layout_scene("en"), &mut Recorder::default())
+            .is_err(),
+        "registry renderer accepts a shifted inset diagonal with a mirrored direction"
+    );
+}
+
+/// A sub-two-percent isolated separator strip cannot become a semantic panel.
+#[test]
+fn renderer_ignores_sub_two_percent_separator_region() {
+    let image = split_panels_with_center_region(2);
+    let regions = BorderDetector::new(2, 6, 240, 1).regions(&image);
+    let accepted = MangaRenderer::new(
+        QueueSource::new(vec![image]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .render(&active_layout_scene(2, "en"), &mut Recorder::default())
+    .is_ok();
+    assert_eq!(
+        (regions, accepted),
+        (2, true),
+        "sub-two-percent separator strip still counts as an extra semantic panel"
+    );
+}
+
+/// A registry-sized isolated region remains an undeclared semantic panel.
+#[test]
+fn renderer_rejects_registry_sized_extra_region() {
+    let image = split_panels_with_center_region(11);
+    let regions = BorderDetector::new(2, 6, 240, 1).regions(&image);
+    let rejected = MangaRenderer::new(
+        QueueSource::new(vec![image]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .render(&active_layout_scene(2, "en"), &mut Recorder::default())
+    .is_err();
+    assert_eq!(
+        (regions, rejected),
+        (3, true),
+        "registry renderer ignores an undeclared registry-sized semantic region"
+    );
+}
+
+/// The ordinary-layout fallback cannot satisfy a declared crossing device.
+#[test]
+fn renderer_rejects_shifted_diagonal_without_declared_crossing() {
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![inset_diagonal_panels(false)]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    );
+    assert!(
+        renderer
+            .render(
+                &active_device_scene(diagonal_layout_scene("en"), "crossing"),
+                &mut Recorder::default(),
+            )
+            .is_err(),
+        "ordinary-layout fallback accepts two closed regions as a declared crossing"
     );
 }
 

@@ -139,12 +139,12 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
     Ok(())
 }
 
-/// Production registry builds use the bounded two-call version-thirty-three visual revision.
+/// Production registry builds use the stable picture-recovery visual revision.
 #[test]
-fn production_registry_uses_the_version_thirty_three_visual_revision() {
+fn production_registry_uses_the_version_thirty_four_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "2648ec14b2aa15f84519adffa873d21a9b67e51679567b8afec4a707b05582e5",
+        "78a3daa17035bd163e72ca62b15ad3bca1bb205963789d5f0918e8c92c9331db",
         "production registry visual revision drifted without a policy-version change"
     );
 }
