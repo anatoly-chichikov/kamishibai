@@ -117,6 +117,12 @@ const DEVICE_KINDS: [&str; 7] = [
     "master_view",
     "diagonal_release",
 ];
+const SOFT_FEATURE_FIELDS: [&str; 4] = [
+    "motion_vector",
+    "intensity",
+    "spatial_relation",
+    "transition_type",
+];
 
 /// Owns one decoded and validated version-two layout registry.
 #[derive(Clone, Debug)]
@@ -130,7 +136,7 @@ pub(crate) struct SceneFeatures {
     value: Value,
 }
 
-/// Owns the deterministic hard-filter result used to build the selector request.
+/// Owns the deterministic hard-filter result used for local layout ranking.
 #[derive(Clone, Debug)]
 pub(crate) struct EligibleLayouts {
     features: SceneFeatures,
@@ -141,7 +147,7 @@ pub(crate) struct EligibleLayouts {
     fallback: Option<Value>,
 }
 
-/// Owns one validated, unpadded selector ranking over eligible canonical layouts.
+/// Owns one validated, unpadded ranking over eligible canonical layouts.
 #[derive(Clone, Debug)]
 pub(crate) struct LayoutRanking {
     features: SceneFeatures,
@@ -392,10 +398,13 @@ impl LayoutRegistry {
         } else {
             None
         };
-        let retry_template = if templates.len() == 1
-            && usize_field(root_object(&features.value)?, "panel_count")? > 1
-        {
-            nearest_same_count_alternative(available, &features.value, &templates[0])?.cloned()
+        let feature = root_object(&features.value)?;
+        let rankable = templates
+            .iter()
+            .filter(|template| ranking_template_allowed(template, feature))
+            .collect::<Vec<_>>();
+        let retry_template = if rankable.len() == 1 && usize_field(feature, "panel_count")? > 1 {
+            nearest_same_count_alternative(available, &features.value, rankable[0])?.cloned()
         } else {
             None
         };
@@ -418,113 +427,111 @@ impl LayoutRegistry {
     }
 }
 
-impl SceneFeatures {
-    /// Return the exact flat feature JSON passed from the analyst to later stages.
-    pub(crate) fn json(&self) -> &Value {
-        &self.value
-    }
-}
-
 impl EligibleLayouts {
-    /// Build the closed selector input with hard-filtered cards and product policy.
-    pub(crate) fn selector_cards(&self) -> Result<Value> {
+    /// Rank the eligible layouts locally by exact soft fit and product policy.
+    pub(crate) fn rank(&self) -> Result<LayoutRanking> {
         let policy = self
             .policy
             .as_object()
             .ok_or_else(|| anyhow!("layout policy must be an object"))?;
-        let cards = self
+        let features = root_object(&self.features.value)?;
+        let mut templates = self
             .templates
             .iter()
-            .map(|template| selector_card(template, policy))
-            .collect::<Result<Vec<_>>>()?;
-        Ok(json!({
-            "selection_contract": self.contract,
-            "templates": cards
-        }))
-    }
-
-    /// Build the selector's closed JSON schema without requiring three padded choices.
-    pub(crate) fn selector_schema(&self) -> Result<Value> {
-        let ids = self
-            .templates
+            .filter(|template| ranking_template_allowed(template, features))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut ranked = templates
             .iter()
-            .map(template_id)
+            .enumerate()
+            .map(|(index, template)| {
+                let score = soft_match_score(template, features)?;
+                let id = template_id(template)?;
+                let (priority, label) = layout_priority(policy, id)?;
+                Ok((
+                    score,
+                    priority,
+                    index,
+                    template,
+                    local_candidate(id, score, label),
+                ))
+            })
             .collect::<Result<Vec<_>>>()?;
-        let minimum = usize_field(root_object(&self.contract)?, "minimum_ranked_candidates")?;
-        let maximum =
-            usize_field(root_object(&self.contract)?, "maximum_ranked_candidates")?.min(ids.len());
-        Ok(json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "ranked_candidates": {
-                    "type": "array",
-                    "minItems": minimum,
-                    "maxItems": maximum,
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "properties": {
-                            "template_id": {"type": "string", "enum": ids},
-                            "adaptation": {"type": "string", "enum": ["exact"]},
-                            "reason": {"type": "string"}
-                        },
-                        "required": ["template_id", "adaptation", "reason"]
-                    }
+        ranked.sort_by(|left, right| {
+            right
+                .0
+                .cmp(&left.0)
+                .then_with(|| left.1.cmp(&right.1))
+                .then_with(|| left.2.cmp(&right.2))
+        });
+        let best_score = ranked
+            .first()
+            .map(|candidate| candidate.0)
+            .ok_or_else(|| anyhow!("local layout ranking has no eligible template"))?;
+        let dynamic_primary = ranked
+            .iter()
+            .any(|(score, _, _, template, _)| *score == best_score && dynamic_only(template));
+        let maximum = usize_field(root_object(&self.contract)?, "maximum_ranked_candidates")?;
+        let mut geometries = BTreeSet::new();
+        let mut candidates = Vec::new();
+        for (score, _, _, template, candidate) in &ranked {
+            if *score == best_score
+                && dynamic_only(template) == dynamic_primary
+                && geometries.insert(geometry_signature(template)?)
+            {
+                candidates.push(candidate.clone());
+                if candidates.len() == maximum {
+                    break;
                 }
-            },
-            "required": ["ranked_candidates"]
-        }))
-    }
-
-    /// Decode one bounded ranking and restore a required dynamic candidate when omitted.
-    pub(crate) fn decode_ranking(&self, raw: &str) -> Result<LayoutRanking> {
-        let value =
-            serde_json::from_str::<Value>(raw).context("layout selector returned invalid JSON")?;
-        let root = root_object(&value)?;
-        exact_keys(root, &["ranked_candidates"], "layout selector response")?;
-        let mut candidates = array_field(root, "ranked_candidates")?.clone();
-        let minimum = usize_field(root_object(&self.contract)?, "minimum_ranked_candidates")?;
-        let maximum = usize_field(root_object(&self.contract)?, "maximum_ranked_candidates")?
-            .min(self.templates.len());
-        if !(minimum..=maximum).contains(&candidates.len()) {
-            bail!("layout selector returned an invalid candidate count");
-        }
-        validate_candidates(&candidates, &self.templates)?;
-        if self.templates.iter().any(dynamic_only)
-            && dynamic_candidate_slots(&candidates, &self.templates)?.is_empty()
-        {
-            let template = self
-                .templates
-                .iter()
-                .find(|template| dynamic_only(template))
-                .ok_or_else(|| anyhow!("eligible layouts lost their required dynamic candidate"))?;
-            if candidates.len() == maximum {
-                candidates.pop();
             }
-            candidates.push(json!({
-                "template_id": template_id(template)?,
-                "adaptation": "exact",
-                "reason": "automatic registry safeguard restored the required dynamic emphasis"
-            }));
-            validate_candidates(&candidates, &self.templates)?;
+        }
+        if candidates.is_empty() {
+            bail!("local layout ranking has no distinct primary geometry");
         }
         let primary_count = candidates.len();
-        let eligible_count = self.templates.len();
-        let mut templates = self.templates.clone();
-        if let Some(template) = &self.retry_template {
+        for (_, _, _, template, candidate) in &ranked {
+            if candidates.len() == maximum {
+                break;
+            }
+            if dynamic_only(template) == dynamic_primary
+                && geometries.insert(geometry_signature(template)?)
+            {
+                candidates.push(candidate.clone());
+            }
+        }
+        if candidates.len() == 1 {
+            for (_, _, _, template, candidate) in &ranked {
+                if candidates.len() == maximum {
+                    break;
+                }
+                if dynamic_only(template) != dynamic_primary
+                    && geometries.insert(geometry_signature(template)?)
+                {
+                    candidates.push(candidate.clone());
+                    break;
+                }
+            }
+        }
+        let eligible_count = templates.len();
+        if let Some(template) = self
+            .retry_template
+            .as_ref()
+            .filter(|template| ranking_template_allowed(template, features))
+        {
             templates.push(template.clone());
         }
-        if candidates.len() == 1 && templates.len() > 1 {
+        if candidates.len() == 1 && candidates.len() < maximum && templates.len() > 1 {
             for template in &templates {
-                let mut expanded = candidates.clone();
-                expanded.push(json!({
-                    "template_id": template_id(template)?,
-                    "adaptation": "exact",
-                    "reason": "automatic registry safeguard restored one deterministic retry alternative"
-                }));
-                if validate_candidates(&expanded, &templates).is_ok() {
-                    candidates = expanded;
+                let id = template_id(template)?;
+                let geometry = geometry_signature(template)?;
+                let duplicate =
+                    candidate_geometry_slot(&candidates, &templates, &geometry)?.is_some();
+                if !duplicate {
+                    candidates.push(json!({
+                        "template_id": id,
+                        "adaptation": "exact",
+                        "reason": "local deterministic safeguard restored one distinct retry geometry"
+                    }));
                     break;
                 }
             }
@@ -551,25 +558,8 @@ impl LayoutRanking {
             .get(..self.primary_count)
             .filter(|candidates| !candidates.is_empty())
             .ok_or_else(|| anyhow!("layout ranking has an invalid primary candidate count"))?;
-        let dynamic = dynamic_candidate_slots(primary, &self.templates)?;
-        let base = if dynamic.is_empty() {
-            selection_slot(term, primary.len())
-        } else {
-            let index = selection_slot(term, dynamic.len());
-            dynamic
-                .get(index)
-                .copied()
-                .ok_or_else(|| anyhow!("dynamic layout slot leaves the ranking"))?
-        };
-        let slot = if dynamic.len() > 1 {
-            let index = dynamic
-                .iter()
-                .position(|slot| *slot == base)
-                .ok_or_else(|| anyhow!("dynamic layout base leaves the retry subset"))?;
-            dynamic[(index + usize::from(attempt)) % dynamic.len()]
-        } else {
-            (base + usize::from(attempt)) % self.candidates.len()
-        };
+        let base = selection_slot(term, primary.len());
+        let slot = (base + usize::from(attempt)) % self.candidates.len();
         let chosen = self
             .candidates
             .get(slot)
@@ -2660,6 +2650,7 @@ fn nearest_same_count_template_excluding<'a>(
             )
             || usize_field(root, "panel_count")? != panel_count
             || !dynamic_constraint_matches(root, feature)
+            || !ranking_template_allowed(template, feature)
         {
             continue;
         }
@@ -2738,54 +2729,89 @@ fn profile_includes(
         .is_some_and(|values| values.iter().any(|value| value.as_str() == expected))
 }
 
-fn selector_card(template: &Value, policy: &Map<String, Value>) -> Result<Value> {
-    let root = root_object(template)?;
-    let id = template_id(template)?;
-    Ok(json!({
-        "template_id": id,
-        "family": field_clone(root, "family")?,
-        "variant": field_clone(root, "variant")?,
-        "evidence_level": field_clone(root, "evidence_level")?,
-        "capability_status": field_clone(root, "capability_status")?,
-        "panel_count": field_clone(root, "panel_count")?,
-        "reading_direction": field_clone(root, "reading_direction")?,
-        "dominant_index": field_clone(root, "dominant_index")?,
-        "reading_strategy": field_clone(root, "reading_strategy")?,
-        "best_for": field_clone(root, "best_for")?,
-        "avoid_when": field_clone(root, "avoid_when")?,
-        "feature_profile": field_clone(root, "feature_profile")?,
-        "compatible_devices": field_clone(root, "compatible_devices")?,
-        "dynamic_only": root.get("dynamic_only").cloned().unwrap_or(Value::Bool(false)),
-        "layout_policy": policy.get(id).cloned().unwrap_or(Value::Null),
-        "risk": field_clone(root, "risk")?
-    }))
+fn ranking_template_allowed(template: &Value, features: &Map<String, Value>) -> bool {
+    let calm = features.get("intensity").and_then(Value::as_str) == Some("quiet")
+        || features.get("motion_vector").and_then(Value::as_str) == Some("still");
+    (!calm || template.get("family").and_then(Value::as_str) != Some("diagonal_sequence"))
+        && shot_hierarchy_matches(template, features)
 }
 
-fn validate_candidates(candidates: &[Value], templates: &[Value]) -> Result<()> {
-    let mut ids = BTreeSet::new();
-    let mut geometries = BTreeSet::new();
-    for candidate in candidates {
-        let root = root_object(candidate)?;
-        exact_keys(
-            root,
-            &["template_id", "adaptation", "reason"],
-            "layout candidate",
-        )?;
-        let id = nonempty_string_field(root, "template_id")?;
-        if string_field(root, "adaptation")? != "exact" || !ids.insert(id.to_owned()) {
-            bail!("layout selector candidates must be unique exact adaptations");
+fn shot_hierarchy_matches(template: &Value, features: &Map<String, Value>) -> bool {
+    let Some(id) = template.get("template_id").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(shots) = features.get("shots").and_then(Value::as_array) else {
+        return false;
+    };
+    let roles = shots
+        .iter()
+        .filter_map(|shot| shot.get("role").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    match id {
+        "diagonal-split-2-end-strong-v1" => {
+            roles.len() == 2 && roles[0] != "payoff" && roles[1] == "payoff"
         }
-        nonempty_string_field(root, "reason")?;
-        let template = templates
-            .iter()
-            .find(|template| template_id(template).is_ok_and(|value| value == id))
-            .ok_or_else(|| anyhow!("layout selector chose ineligible template '{id}'"))?;
-        let geometry = serde_json::to_string(array_field(root_object(template)?, "panels")?)?;
-        if !geometries.insert(geometry) {
-            bail!("layout selector candidates must use distinct canonical geometry");
+        "slanted-t-bottom-3-p2-v1" | "slanted-dominant-rail-3-p2-v1" => {
+            roles.len() == 3
+                && matches!(roles[0], "establishing" | "aspect")
+                && matches!(roles[1], "action" | "detail" | "reaction")
+                && roles[2] == "payoff"
+        }
+        _ => true,
+    }
+}
+
+fn soft_match_score(template: &Value, features: &Map<String, Value>) -> Result<usize> {
+    let root = root_object(template)?;
+    Ok(SOFT_FEATURE_FIELDS
+        .iter()
+        .filter(|field| profile_includes(root, field, features, field))
+        .count())
+}
+
+fn layout_priority(
+    policy: &Map<String, Value>,
+    template_id: &str,
+) -> Result<(usize, &'static str)> {
+    let Some(value) = policy.get(template_id) else {
+        return Ok((1, "neutral"));
+    };
+    match string_field(root_object(value)?, "priority")? {
+        "preferred" => Ok((0, "preferred")),
+        "conditional" => Ok((2, "conditional")),
+        "deprioritized" => Ok((3, "deprioritized")),
+        priority => bail!("layout policy priority '{priority}' is unsupported"),
+    }
+}
+
+fn local_candidate(template_id: &str, score: usize, priority: &str) -> Value {
+    json!({
+        "template_id": template_id,
+        "adaptation": "exact",
+        "reason": format!(
+            "local deterministic fit matched {score} of {} soft features with {priority} policy",
+            SOFT_FEATURE_FIELDS.len()
+        )
+    })
+}
+
+fn geometry_signature(template: &Value) -> Result<String> {
+    serde_json::to_string(array_field(root_object(template)?, "panels")?)
+        .context("cannot encode canonical layout geometry")
+}
+
+fn candidate_geometry_slot(
+    candidates: &[Value],
+    templates: &[Value],
+    geometry: &str,
+) -> Result<Option<usize>> {
+    for (index, candidate) in candidates.iter().enumerate() {
+        let template = ranked_template(candidate, templates)?;
+        if geometry_signature(template)? == geometry {
+            return Ok(Some(index));
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 fn validate_selected_template(value: &Value) -> Result<()> {
@@ -2917,16 +2943,6 @@ fn ranked_template<'a>(candidate: &Value, templates: &'a [Value]) -> Result<&'a 
         .iter()
         .find(|template| template_id(template).is_ok_and(|value| value == id))
         .ok_or_else(|| anyhow!("selected layout template '{id}' is unavailable"))
-}
-
-fn dynamic_candidate_slots(candidates: &[Value], templates: &[Value]) -> Result<Vec<usize>> {
-    let mut slots = Vec::new();
-    for (index, candidate) in candidates.iter().enumerate() {
-        if dynamic_only(ranked_template(candidate, templates)?) {
-            slots.push(index);
-        }
-    }
-    Ok(slots)
 }
 
 fn dynamic_only(template: &Value) -> bool {
@@ -3229,7 +3245,7 @@ mod tests {
         registry.value["templates"]
             .as_array_mut()
             .expect("invariant: templates must be an array")
-            .retain(|template| !template_matches(template, features.json()));
+            .retain(|template| !template_matches(template, &features.value));
         let first = registry
             .eligible(&features)
             .expect("missing exact tuple must retain one same-count fallback");
@@ -3247,13 +3263,8 @@ mod tests {
             .filter_map(|template| template["template_id"].as_str())
             .collect::<Vec<_>>();
         let selection = first
-            .decode_ranking(
-                &json!({
-                    "ranked_candidates": [candidate("orthogonal-grid-3-v1", 3)]
-                })
-                .to_string(),
-            )
-            .expect("fallback ranking must decode")
+            .rank()
+            .expect("fallback ranking must build locally")
             .select("fallback-term", 0)
             .expect("fallback ranking must select");
         assert_eq!(
@@ -3407,6 +3418,299 @@ mod tests {
     }
 
     #[test]
+    fn local_ranking_selects_the_same_layout_for_the_same_seed_and_attempt() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let raw = feature_json(2, "sequence", "equal", LEFT_TO_RIGHT);
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("deterministic ranking fixture must be valid");
+        let eligible = registry
+            .eligible(&features)
+            .expect("deterministic ranking fixture must retain coverage");
+        let first = eligible
+            .rank()
+            .expect("first local ranking must build")
+            .select("stable-term", 1)
+            .expect("first local ranking must select");
+        let second = eligible
+            .rank()
+            .expect("second local ranking must build")
+            .select("stable-term", 1)
+            .expect("second local ranking must select");
+        assert_eq!(
+            (
+                first.json()["chosen_template_id"].clone(),
+                first.json()["ranked_candidates"].clone(),
+            ),
+            (
+                second.json()["chosen_template_id"].clone(),
+                second.json()["ranked_candidates"].clone(),
+            ),
+            "local ranking changed its choice or order for identical input"
+        );
+    }
+
+    #[test]
+    fn first_attempt_cannot_hash_away_from_the_best_two_panel_diagonal_fit() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut raw = feature_json(2, "sequence", "dominant_start", LEFT_TO_RIGHT);
+        raw["motion_vector"] = json!("diagonal");
+        raw["intensity"] = json!("high");
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("two-panel best-fit fixture must be valid");
+        let ranking = registry
+            .eligible(&features)
+            .expect("two-panel best-fit fixture must retain coverage")
+            .rank()
+            .expect("two-panel best-fit fixture must rank locally");
+        let choices = ["term-0", "term-1", "term-2"].map(|term| {
+            ranking
+                .select(term, 0)
+                .expect("two-panel best fit must select")
+                .summary["chosen_template_id"]
+                .clone()
+        });
+        assert_eq!(
+            (
+                ranking.primary_count,
+                ranking.candidates.len() > ranking.primary_count,
+                choices,
+            ),
+            (
+                1,
+                true,
+                [
+                    json!("diagonal-split-2-v1"),
+                    json!("diagonal-split-2-v1"),
+                    json!("diagonal-split-2-v1"),
+                ],
+            ),
+            "first-attempt hashing selected a weaker two-panel geometry"
+        );
+    }
+
+    #[test]
+    fn first_attempt_cannot_hash_away_from_the_best_calm_four_panel_fit() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut raw = feature_json(4, "sequence", "equal", LEFT_TO_RIGHT);
+        raw["intensity"] = json!("quiet");
+        raw["transition_type"] = json!("scene_to_scene");
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("calm four-panel best-fit fixture must be valid");
+        let ranking = registry
+            .eligible(&features)
+            .expect("calm four-panel best-fit fixture must retain coverage")
+            .rank()
+            .expect("calm four-panel best-fit fixture must rank locally");
+        let choices = ["term-0", "term-1", "term-2"].map(|term| {
+            ranking
+                .select(term, 0)
+                .expect("calm four-panel best fit must select")
+                .summary["chosen_template_id"]
+                .clone()
+        });
+        assert_eq!(
+            (
+                ranking.primary_count,
+                ranking.candidates.len() > ranking.primary_count,
+                choices,
+            ),
+            (
+                1,
+                true,
+                [
+                    json!("vertical-strip-4-v1"),
+                    json!("vertical-strip-4-v1"),
+                    json!("vertical-strip-4-v1"),
+                ],
+            ),
+            "first-attempt hashing selected a weaker calm four-panel geometry"
+        );
+    }
+
+    #[test]
+    fn strong_two_panel_layout_requires_a_setup_then_payoff_hierarchy() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut invalid = feature_json(2, "sequence", "dominant_end", LEFT_TO_RIGHT);
+        invalid["motion_vector"] = json!("diagonal");
+        invalid["intensity"] = json!("high");
+        let invalid_features = registry
+            .decode_features(&invalid.to_string())
+            .expect("invalid strong hierarchy fixture must remain structurally valid");
+        let invalid = registry
+            .eligible(&invalid_features)
+            .expect("invalid strong hierarchy fixture must retain ordinary coverage");
+        let hard_filter_kept = invalid
+            .templates
+            .iter()
+            .any(|template| template["template_id"] == "diagonal-split-2-end-strong-v1");
+        let invalid_ranking = invalid
+            .rank()
+            .expect("invalid strong hierarchy fixture must rank safely");
+        let mut valid = invalid_features.value.clone();
+        dynamic_hierarchy(&mut valid);
+        let valid_features = registry
+            .decode_features(&valid.to_string())
+            .expect("valid strong hierarchy fixture must decode");
+        let valid_ranking = registry
+            .eligible(&valid_features)
+            .expect("valid strong hierarchy fixture must retain coverage")
+            .rank()
+            .expect("valid strong hierarchy fixture must rank");
+        assert_eq!(
+            (
+                hard_filter_kept,
+                invalid_ranking.templates.iter().any(|template| {
+                    template["template_id"] == "diagonal-split-2-end-strong-v1"
+                }),
+                valid_ranking.templates.iter().any(|template| {
+                    template["template_id"] == "diagonal-split-2-end-strong-v1"
+                }),
+                valid_ranking
+                    .select("strong-hierarchy", 0)
+                    .expect("valid strong hierarchy must select")
+                    .summary["chosen_template_id"]
+                    .clone(),
+            ),
+            (true, false, true, json!("diagonal-split-2-end-strong-v1")),
+            "strong two-panel geometry ignored its locally testable shot hierarchy"
+        );
+    }
+
+    #[test]
+    fn p2_three_panel_layouts_require_establish_action_payoff_hierarchy() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut invalid = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
+        invalid["motion_vector"] = json!("mixed");
+        invalid["intensity"] = json!("high");
+        let invalid_features = registry
+            .decode_features(&invalid.to_string())
+            .expect("invalid p2 hierarchy fixture must remain structurally valid");
+        let invalid_ranking = registry
+            .eligible(&invalid_features)
+            .expect("invalid p2 hierarchy fixture must retain ordinary coverage")
+            .rank()
+            .expect("invalid p2 hierarchy fixture must rank safely");
+        let mut valid = invalid_features.value.clone();
+        dynamic_hierarchy(&mut valid);
+        let valid_features = registry
+            .decode_features(&valid.to_string())
+            .expect("valid p2 hierarchy fixture must decode");
+        let valid_ranking = registry
+            .eligible(&valid_features)
+            .expect("valid p2 hierarchy fixture must retain coverage")
+            .rank()
+            .expect("valid p2 hierarchy fixture must rank");
+        let p2 = |ranking: &LayoutRanking| {
+            ranking
+                .templates
+                .iter()
+                .filter_map(|template| template["template_id"].as_str())
+                .filter(|id| {
+                    matches!(
+                        *id,
+                        "slanted-t-bottom-3-p2-v1" | "slanted-dominant-rail-3-p2-v1"
+                    )
+                })
+                .count()
+        };
+        assert_eq!(
+            (p2(&invalid_ranking), p2(&valid_ranking)),
+            (0, 2),
+            "three-panel p2 geometry ignored its locally testable shot hierarchy"
+        );
+    }
+
+    #[test]
+    fn local_ranking_gives_a_multi_panel_retry_distinct_geometry() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let raw = feature_json(2, "simultaneous", "equal", LEFT_TO_RIGHT);
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("retry geometry fixture must be valid");
+        let ranking = registry
+            .eligible(&features)
+            .expect("retry geometry fixture must retain coverage")
+            .rank()
+            .expect("retry geometry fixture must rank locally");
+        let first = ranking
+            .select("retry-geometry", 0)
+            .expect("first retry geometry attempt must select");
+        let retry = ranking
+            .select("retry-geometry", 1)
+            .expect("second retry geometry attempt must select");
+        assert!(
+            first.template["panels"] != retry.template["panels"],
+            "local ranking repeated identical geometry on the first retry"
+        );
+    }
+
+    #[test]
+    fn local_ranking_preserves_and_selects_dynamic_candidates() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut raw = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
+        raw["motion_vector"] = Value::String(String::from("diagonal"));
+        raw["intensity"] = Value::String(String::from("high"));
+        dynamic_hierarchy(&mut raw);
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("dynamic local ranking fixture must be valid");
+        let ranking = registry
+            .eligible(&features)
+            .expect("dynamic local ranking fixture must retain coverage")
+            .rank()
+            .expect("dynamic local ranking fixture must rank");
+        let preserved = ranking.candidates.iter().any(|candidate| {
+            ranked_template(candidate, &ranking.templates).is_ok_and(dynamic_only)
+        });
+        let selection = ranking
+            .select("dynamic-local-ranking", 0)
+            .expect("dynamic local ranking must select");
+        assert!(
+            preserved && dynamic_only(&selection.template),
+            "local ranking dropped or failed to select a required dynamic candidate"
+        );
+    }
+
+    #[test]
+    fn local_ranking_never_selects_a_diagonal_family_for_calm_scenes() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut raw = feature_json(2, "sequence", "dominant_end", LEFT_TO_RIGHT);
+        raw["motion_vector"] = Value::String(String::from("horizontal"));
+        raw["intensity"] = Value::String(String::from("quiet"));
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("calm local ranking fixture must be valid");
+        let eligible = registry
+            .eligible(&features)
+            .expect("calm local ranking fixture must retain coverage");
+        let hard_filter_preserved = eligible
+            .templates
+            .iter()
+            .any(|template| template["family"] == "diagonal_sequence");
+        let ranking = eligible
+            .rank()
+            .expect("calm local ranking fixture must rank");
+        let choices = [0, 1].map(|attempt| {
+            ranking
+                .select("calm-local-ranking", attempt)
+                .expect("calm local ranking must select")
+                .template
+                .clone()
+        });
+        assert!(
+            hard_filter_preserved
+                && choices
+                    .iter()
+                    .all(|template| template["family"] != "diagonal_sequence")
+                && choices[0]["panels"] != choices[1]["panels"],
+            "calm ranking changed hard eligibility, selected a diagonal, or repeated retry geometry"
+        );
+    }
+
+    #[test]
     fn approved_asymmetric_templates_preserve_the_reference_geometry() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let panels = |id: &str| {
@@ -3481,19 +3785,15 @@ mod tests {
         let mut raw = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
         raw["motion_vector"] = Value::String(String::from("diagonal"));
         raw["intensity"] = Value::String(String::from("high"));
+        dynamic_hierarchy(&mut raw);
         let features = registry
             .decode_features(&raw.to_string())
             .expect("dynamic directive fixture must be valid");
         let selection = registry
             .eligible(&features)
             .expect("dynamic directive layout must be eligible")
-            .decode_ranking(
-                &json!({
-                    "ranked_candidates": [candidate("slanted-t-bottom-3-p2-v1", 3)]
-                })
-                .to_string(),
-            )
-            .expect("dynamic directive layout must rank")
+            .rank()
+            .expect("dynamic directive layout must rank locally")
             .select("dynamic-directive", 0)
             .expect("dynamic directive layout must select");
         let mut scene = composer_scene(3);
@@ -3526,22 +3826,15 @@ mod tests {
         let mut raw = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
         raw["motion_vector"] = Value::String(String::from("diagonal"));
         raw["intensity"] = Value::String(String::from("high"));
+        dynamic_hierarchy(&mut raw);
         let features = registry
             .decode_features(&raw.to_string())
             .expect("dynamic ranking fixture must be valid");
         let ranking = registry
             .eligible(&features)
             .expect("dynamic ranking fixture must retain coverage")
-            .decode_ranking(
-                &json!({
-                    "ranked_candidates": [
-                        candidate("diagonal-strip-3-v1", 3),
-                        candidate("slanted-t-bottom-3-p2-v1", 3)
-                    ]
-                })
-                .to_string(),
-            )
-            .expect("dynamic ranking must decode");
+            .rank()
+            .expect("dynamic ranking must build locally");
         let selection = ranking
             .select("get my brother to help", 0)
             .expect("dynamic ranking must select");
@@ -3550,35 +3843,55 @@ mod tests {
                 selection.json()["chosen_template_id"].as_str(),
                 selection.json()["deterministic_slot"].as_u64(),
             ),
-            (Some("slanted-t-bottom-3-p2-v1"), Some(1)),
+            (Some("slanted-t-bottom-3-p2-v1"), Some(0)),
             "ordinary rank order displaced a required dynamic emphasis candidate"
         );
     }
 
     #[test]
-    fn ranking_restores_one_required_dynamic_candidate_after_model_omission() {
+    fn local_ranking_does_not_force_dynamic_below_the_best_soft_fit() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let mut raw = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
         raw["motion_vector"] = Value::String(String::from("diagonal"));
         raw["intensity"] = Value::String(String::from("high"));
+        dynamic_hierarchy(&mut raw);
         let features = registry
             .decode_features(&raw.to_string())
             .expect("dynamic omission fixture must be valid");
-        let eligible = registry
+        let mut eligible = registry
             .eligible(&features)
-            .expect("dynamic omission fixture must retain coverage");
-        let ranking = json!({
-            "ranked_candidates": [candidate("diagonal-strip-3-v1", 3)]
-        });
-        let selection = eligible
-            .decode_ranking(&ranking.to_string())
-            .expect("registry must restore one required dynamic candidate")
-            .select("dynamic-omission", 0)
-            .expect("restored dynamic ranking must select");
-        assert_eq!(
-            selection.json()["chosen_template_id"].as_str(),
-            Some("slanted-t-bottom-3-p2-v1"),
-            "model omission displaced every required dynamic-only layout"
+            .expect("dynamic restoration fixture must retain coverage");
+        for template in eligible
+            .templates
+            .iter_mut()
+            .filter(|template| dynamic_only(template))
+        {
+            template["feature_profile"]["motion_vector"] = json!(["vertical"]);
+            template["feature_profile"]["intensity"] = json!(["medium"]);
+            template["feature_profile"]["spatial_relation"] = json!(["parallel_spaces"]);
+            template["feature_profile"]["transition_type"] = json!(["subject_to_subject"]);
+        }
+        let ranking = eligible
+            .rank()
+            .expect("weak dynamic fixture must rank locally");
+        let selection = ranking
+            .select("weak-dynamic", 0)
+            .expect("weak dynamic fixture must select");
+        let primary = ranking
+            .candidates
+            .get(..ranking.primary_count)
+            .expect("invariant: primary shortlist must remain bounded");
+        assert!(
+            !dynamic_only(&selection.template)
+                && primary.iter().all(|candidate| {
+                    ranked_template(candidate, &ranking.templates).is_ok_and(|template| {
+                        !dynamic_only(template)
+                            && candidate["reason"]
+                                .as_str()
+                                .is_some_and(|reason| reason.contains("matched 4 of 4"))
+                    })
+                }),
+            "a weak dynamic layout displaced the best ordinary soft fit"
         );
     }
 
@@ -3586,25 +3899,17 @@ mod tests {
     fn multiple_dynamic_candidates_retain_diversity_inside_dynamic_subset() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let mut raw = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
-        raw["motion_vector"] = Value::String(String::from("diagonal"));
+        raw["motion_vector"] = Value::String(String::from("mixed"));
         raw["intensity"] = Value::String(String::from("high"));
+        dynamic_hierarchy(&mut raw);
         let features = registry
             .decode_features(&raw.to_string())
             .expect("dynamic subset fixture must be valid");
         let ranking = registry
             .eligible(&features)
             .expect("dynamic subset fixture must retain coverage")
-            .decode_ranking(
-                &json!({
-                    "ranked_candidates": [
-                        candidate("diagonal-strip-3-v1", 3),
-                        candidate("slanted-t-bottom-3-p2-v1", 3),
-                        candidate("slanted-dominant-rail-3-p2-v1", 3)
-                    ]
-                })
-                .to_string(),
-            )
-            .expect("dynamic subset ranking must decode");
+            .rank()
+            .expect("dynamic subset ranking must build locally");
         let choices = ["term-0", "term-1"].map(|term| {
             ranking
                 .select(term, 0)
@@ -3633,16 +3938,8 @@ mod tests {
         let ranking = registry
             .eligible(&features)
             .expect("ordinary ranking fixture must retain coverage")
-            .decode_ranking(
-                &json!({
-                    "ranked_candidates": [
-                        candidate("equal-split-vertical-2-v1", 2),
-                        candidate("equal-split-horizontal-2-v1", 2)
-                    ]
-                })
-                .to_string(),
-            )
-            .expect("ordinary ranking must decode");
+            .rank()
+            .expect("ordinary ranking must build locally");
         let choices = ["term-0", "term-1"].map(|term| {
             ranking
                 .select(term, 0)
@@ -3671,16 +3968,8 @@ mod tests {
         let ranking = registry
             .eligible(&features)
             .expect("retry ranking fixture must retain coverage")
-            .decode_ranking(
-                &json!({
-                    "ranked_candidates": [
-                        candidate("equal-split-vertical-2-v1", 2),
-                        candidate("equal-split-horizontal-2-v1", 2)
-                    ]
-                })
-                .to_string(),
-            )
-            .expect("retry ranking must decode");
+            .rank()
+            .expect("retry ranking must build locally");
         let first = ranking
             .select("term-0", 0)
             .expect("first scene attempt must select");
@@ -3711,25 +4000,17 @@ mod tests {
     fn scene_retries_stay_inside_a_required_dynamic_subset() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let mut raw = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
-        raw["motion_vector"] = Value::String(String::from("diagonal"));
+        raw["motion_vector"] = Value::String(String::from("mixed"));
         raw["intensity"] = Value::String(String::from("high"));
+        dynamic_hierarchy(&mut raw);
         let features = registry
             .decode_features(&raw.to_string())
             .expect("dynamic retry fixture must be valid");
         let ranking = registry
             .eligible(&features)
             .expect("dynamic retry fixture must retain coverage")
-            .decode_ranking(
-                &json!({
-                    "ranked_candidates": [
-                        candidate("diagonal-strip-3-v1", 3),
-                        candidate("slanted-t-bottom-3-p2-v1", 3),
-                        candidate("slanted-dominant-rail-3-p2-v1", 3)
-                    ]
-                })
-                .to_string(),
-            )
-            .expect("dynamic retry ranking must decode");
+            .rank()
+            .expect("dynamic retry ranking must build locally");
         let first = ranking
             .select("dynamic-retry", 0)
             .expect("first dynamic attempt must select");
@@ -3751,24 +4032,20 @@ mod tests {
     }
 
     #[test]
-    fn scene_retry_escapes_a_single_candidate_shortlist_deterministically() {
+    fn scene_retry_escapes_a_single_dynamic_primary_deterministically() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let mut raw = feature_json(2, "sequence", "dominant_end", LEFT_TO_RIGHT);
         raw["motion_vector"] = Value::String(String::from("diagonal"));
         raw["intensity"] = Value::String(String::from("high"));
+        dynamic_hierarchy(&mut raw);
         let features = registry
             .decode_features(&raw.to_string())
             .expect("single-candidate retry fixture must be valid");
         let ranking = registry
             .eligible(&features)
             .expect("single-candidate retry fixture must retain coverage")
-            .decode_ranking(
-                &json!({
-                    "ranked_candidates": [candidate("diagonal-split-2-end-strong-v1", 2)]
-                })
-                .to_string(),
-            )
-            .expect("single-candidate ranking must decode");
+            .rank()
+            .expect("single dynamic primary must rank locally");
         let choices = [0, 1, 1].map(|attempt| {
             ranking
                 .select("single-dynamic-retry", attempt)
@@ -3781,7 +4058,7 @@ mod tests {
             choices[0] == Some(String::from("diagonal-split-2-end-strong-v1"))
                 && choices[0] != choices[1]
                 && choices[1] == choices[2],
-            "a one-item model shortlist defeated deterministic retry variation"
+            "a single dynamic primary defeated deterministic retry variation"
         );
     }
 
@@ -3795,13 +4072,8 @@ mod tests {
         let ranking = registry
             .eligible(&features)
             .expect("singleton tuple must retain its canonical layout")
-            .decode_ranking(
-                &json!({
-                    "ranked_candidates": [candidate("equal-split-vertical-2-v1", 2)]
-                })
-                .to_string(),
-            )
-            .expect("singleton tuple ranking must decode");
+            .rank()
+            .expect("singleton tuple ranking must build locally");
         let choices = [0, 1].map(|attempt| {
             ranking
                 .select("singleton-tuple", attempt)
@@ -3985,7 +4257,7 @@ mod tests {
             .decode_features(&features.to_string())
             .expect("a motivated detail return must remain usable");
         assert_eq!(
-            decoded.json()["camera_arc"]["strategy"].as_str(),
+            decoded.value["camera_arc"]["strategy"].as_str(),
             Some("wide_detail_return"),
             "a useful detail-return setup was discarded because Gemini mislabeled it as push-in"
         );
@@ -4008,7 +4280,7 @@ mod tests {
         let decoded = registry
             .decode_features(&features.to_string())
             .expect("cosmetic coverage audit drift must normalize locally");
-        let audit = decoded.json()["coverage_audit"]
+        let audit = decoded.value["coverage_audit"]
             .as_array()
             .expect("invariant: normalized audit must be an array")
             .iter()
@@ -4060,7 +4332,7 @@ mod tests {
     }
 
     #[test]
-    fn request_contracts_keep_features_blind_and_selector_geometry_closed() {
+    fn feature_contract_stays_registry_blind_and_local_ranking_has_reasons() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let data = feature_prompt_data("English", "outlier", "This point is an outlier")
             .expect("feature prompt data must validate");
@@ -4075,33 +4347,22 @@ mod tests {
         let eligible = registry
             .eligible(&features)
             .expect("equal two-beat layouts must be eligible");
-        let cards = eligible
-            .selector_cards()
-            .expect("selector cards must build");
-        let selector = eligible
-            .selector_schema()
-            .expect("selector schema must build");
+        let ranking = eligible.rank().expect("local ranking must build");
         assert_eq!(
             (
                 schema.pointer("/properties/scene_features").is_none(),
                 prompt.contains("template_id"),
                 prompt.contains("diagonal-split-2-v1"),
-                cards.pointer("/templates/0/panels").is_none(),
-                cards
-                    .pointer("/templates")
-                    .and_then(Value::as_array)
-                    .map(Vec::len),
-                selector
-                    .pointer("/properties/ranked_candidates/items/properties/template_id/enum")
-                    .and_then(Value::as_array)
-                    .map(Vec::len),
-                selector
-                    .pointer("/properties/ranked_candidates/items/properties/panel_plan")
-                    .is_none(),
-                features.json()["semantic_beat_count"].as_u64(),
+                ranking.candidates.len(),
+                ranking.candidates.iter().all(|candidate| {
+                    candidate["reason"]
+                        .as_str()
+                        .is_some_and(|reason| !reason.trim().is_empty())
+                }),
+                features.value["semantic_beat_count"].as_u64(),
             ),
-            (true, false, false, true, Some(2), Some(2), true, Some(2)),
-            "feature or selector request crossed its registry isolation boundary"
+            (true, false, false, 2, true, Some(2)),
+            "feature extraction or local ranking crossed its registry isolation boundary"
         );
     }
 
@@ -4115,12 +4376,9 @@ mod tests {
         let eligible = registry
             .eligible(&features)
             .expect("equal two-beat layouts must be eligible");
-        let ranking = json!({
-            "ranked_candidates": [candidate("equal-split-vertical-2-v1", 2)]
-        });
         let selection = eligible
-            .decode_ranking(&ranking.to_string())
-            .expect("canonical ranking must decode")
+            .rank()
+            .expect("canonical ranking must build locally")
             .select("geometry-blind", 0)
             .expect("canonical ranking must select");
         let card = selection
@@ -4140,21 +4398,30 @@ mod tests {
     }
 
     #[test]
-    fn ranking_rejects_distinct_ids_with_identical_geometry() {
+    fn ranking_deduplicates_geometry_before_taking_the_top_three() {
         let mut source = serde_json::from_str::<Value>(REGISTRY_SOURCE)
             .expect("invariant: registry test fixture must decode");
-        let mut alias = source["templates"]
+        let alias = source["templates"]
             .as_array()
             .expect("invariant: templates must be an array")
             .iter()
             .find(|value| value["template_id"] == "equal-split-vertical-2-v1")
             .expect("invariant: equal split layout must exist")
             .clone();
-        alias["template_id"] = Value::String(String::from("equal-split-vertical-2-alias-v1"));
-        source["templates"]
-            .as_array_mut()
-            .expect("invariant: templates must be an array")
-            .push(alias);
+        for (index, id) in [
+            "equal-split-vertical-2-alias-a-v1",
+            "equal-split-vertical-2-alias-b-v1",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let mut alias = alias.clone();
+            alias["template_id"] = Value::String(String::from(*id));
+            source["templates"]
+                .as_array_mut()
+                .expect("invariant: templates must be an array")
+                .insert(index + 2, alias);
+        }
         let registry = LayoutRegistry::decode(&source.to_string())
             .expect("geometry alias registry must remain structurally valid");
         let raw = feature_json(2, "sequence", "equal", LEFT_TO_RIGHT);
@@ -4164,34 +4431,32 @@ mod tests {
         let eligible = registry
             .eligible(&features)
             .expect("equal two-beat layouts must be eligible");
-        let ranking = json!({
-            "ranked_candidates": [
-                candidate("equal-split-vertical-2-v1", 2),
-                candidate("equal-split-vertical-2-alias-v1", 2)
-            ]
-        });
-        assert!(
-            eligible.decode_ranking(&ranking.to_string()).is_err(),
-            "selector ranking accepted two ids with identical canonical geometry"
+        let ranking = eligible.rank().expect("geometry aliases must rank locally");
+        let ids = ranking
+            .candidates
+            .iter()
+            .filter_map(|candidate| candidate["template_id"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec!["equal-split-vertical-2-v1", "equal-split-horizontal-2-v1"],
+            "duplicate geometry consumed the local top-three shortlist"
         );
     }
 
     #[test]
     fn ranking_extends_one_viable_candidate_with_one_distinct_retry() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
-        let raw = feature_json(2, "sequence", "equal", LEFT_TO_RIGHT);
+        let raw = feature_json(2, "simultaneous", "equal", LEFT_TO_RIGHT);
         let features = registry
             .decode_features(&raw.to_string())
-            .expect("two-beat feature fixture must be valid");
+            .expect("singleton feature fixture must be valid");
         let eligible = registry
             .eligible(&features)
-            .expect("equal two-beat layouts must be eligible");
-        let ranking = json!({
-            "ranked_candidates": [candidate("equal-split-vertical-2-v1", 2)]
-        });
+            .expect("singleton layout must be eligible");
         let selection = eligible
-            .decode_ranking(&ranking.to_string())
-            .expect("one genuinely viable candidate must be accepted")
+            .rank()
+            .expect("singleton layout must rank locally")
             .select("unusual-term", 0)
             .expect("one candidate must be selectable");
         assert_eq!(
@@ -4213,12 +4478,9 @@ mod tests {
         let eligible = registry
             .eligible(&features)
             .expect("equal two-beat layouts must be eligible");
-        let ranking = json!({
-            "ranked_candidates": [candidate("equal-split-vertical-2-v1", 2)]
-        });
         let selection = eligible
-            .decode_ranking(&ranking.to_string())
-            .expect("canonical ranking must decode")
+            .rank()
+            .expect("canonical ranking must build locally")
             .select("materialize", 0)
             .expect("canonical ranking must select");
         let mut scene = composer_scene(2);
@@ -4893,12 +5155,9 @@ mod tests {
         let eligible = registry
             .eligible(&features)
             .expect("equal two-beat layouts must be eligible");
-        let ranking = json!({
-            "ranked_candidates": [candidate("equal-split-vertical-2-v1", 2)]
-        });
         let selection = eligible
-            .decode_ranking(&ranking.to_string())
-            .expect("canonical ranking must decode")
+            .rank()
+            .expect("canonical ranking must build locally")
             .select("textless", 0)
             .expect("canonical ranking must select");
         let mut scene = composer_scene(2);
@@ -4957,12 +5216,9 @@ mod tests {
         let eligible = registry
             .eligible(&features)
             .expect("equal two-beat layouts must be eligible");
-        let ranking = json!({
-            "ranked_candidates": [candidate("equal-split-vertical-2-v1", 2)]
-        });
         let selection = eligible
-            .decode_ranking(&ranking.to_string())
-            .expect("canonical ranking must decode")
+            .rank()
+            .expect("canonical ranking must build locally")
             .select("reordered", 0)
             .expect("canonical ranking must select");
         let mut scene = composer_scene(2);
@@ -5065,20 +5321,19 @@ mod tests {
     #[test]
     fn corrected_diagonal_split_keeps_dominance_at_the_start() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
-        let raw = feature_json(2, "sequence", "dominant_start", LEFT_TO_RIGHT);
+        let mut raw = feature_json(2, "sequence", "dominant_start", LEFT_TO_RIGHT);
+        raw["motion_vector"] = Value::String(String::from("diagonal"));
+        raw["intensity"] = Value::String(String::from("high"));
         let features = registry
             .decode_features(&raw.to_string())
             .expect("dominant-start feature fixture must be valid");
         let eligible = registry
             .eligible(&features)
             .expect("dominant-start layouts must be eligible");
-        let ranking = json!({
-            "ranked_candidates": [candidate("diagonal-split-2-v1", 2)]
-        });
         let selection = eligible
-            .decode_ranking(&ranking.to_string())
-            .expect("corrected diagonal split must rank")
-            .select("diagonal", 0)
+            .rank()
+            .expect("corrected diagonal split must rank locally")
+            .select("term-0", 0)
             .expect("corrected diagonal split must select");
         let mut scene = composer_scene(2);
         materialize(&mut scene, &selection).expect("corrected diagonal split must materialize");
@@ -5279,18 +5534,28 @@ mod tests {
         }
     }
 
-    fn candidate(template_id: &str, _panels: usize) -> Value {
-        json!({
-            "template_id": template_id,
-            "adaptation": "exact",
-            "reason": "the canonical route matches the locked semantic beats"
-        })
+    fn dynamic_hierarchy(value: &mut Value) {
+        let shots = value["shots"]
+            .as_array_mut()
+            .expect("invariant: dynamic hierarchy fixture must contain shots");
+        match shots.len() {
+            2 => {
+                shots[0]["role"] = json!("action");
+                shots[1]["role"] = json!("payoff");
+            }
+            3 => {
+                shots[0]["role"] = json!("establishing");
+                shots[1]["role"] = json!("action");
+                shots[2]["role"] = json!("payoff");
+            }
+            _ => panic!("invariant: dynamic hierarchy fixture must have two or three shots"),
+        }
     }
 
     /// Select one exact automatic layout fixture for device materialization tests.
     fn selected_layout(template_id: &str, emphasis: &str) -> LayoutSelection {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
-        let raw = feature_json(
+        let mut raw = feature_json(
             if template_id == "splash-1-v1" { 1 } else { 2 },
             if template_id == "splash-1-v1" {
                 "single_moment"
@@ -5300,16 +5565,26 @@ mod tests {
             emphasis,
             LEFT_TO_RIGHT,
         );
+        if template_id.starts_with("diagonal-") {
+            raw["motion_vector"] = Value::String(String::from("diagonal"));
+            raw["intensity"] = Value::String(String::from("high"));
+        }
         let features = registry
             .decode_features(&raw.to_string())
             .expect("device feature fixture must be valid");
-        registry
+        let ranking = registry
             .eligible(&features)
             .expect("device layout must be eligible")
-            .decode_ranking(&json!({"ranked_candidates": [candidate(template_id, 2)]}).to_string())
-            .expect("device layout must rank")
-            .select("device-test", 0)
-            .expect("device layout must select")
+            .rank()
+            .expect("device layout must rank locally");
+        (0..256)
+            .find_map(|index| {
+                let term = format!("device-test-{index}");
+                let selection = ranking.select(&term, 0).ok()?;
+                (selection.summary["chosen_template_id"].as_str() == Some(template_id))
+                    .then_some(selection)
+            })
+            .expect("invariant: requested device layout must remain locally selectable")
     }
 
     /// Add one explicitly qualified device to a selection for isolated materializer tests.

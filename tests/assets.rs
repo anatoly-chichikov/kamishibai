@@ -139,12 +139,12 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
     Ok(())
 }
 
-/// Production registry builds use the reviewed image-prose version-thirty visual revision.
+/// Production registry builds use the bounded two-call version-thirty-three visual revision.
 #[test]
-fn production_registry_uses_the_version_thirty_visual_revision() {
+fn production_registry_uses_the_version_thirty_three_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "5ed3d50cca94699f06d9391d2f950acd9fa1383ca4bd0e6ba69b109da35bf8d8",
+        "2648ec14b2aa15f84519adffa873d21a9b67e51679567b8afec4a707b05582e5",
         "production registry visual revision drifted without a policy-version change"
     );
 }
@@ -253,25 +253,6 @@ fn production_registry_prompt_audits_compound_and_non_textual_coverage() {
     );
 }
 
-/// Production layout ranking preserves usable topology alternatives for deterministic diversity.
-#[test]
-fn production_registry_selector_keeps_acceptable_hard_compatible_alternatives() {
-    let prompt = include_str!("../assets/layout_selector_prompt.txt");
-    assert!(
-        prompt
-            .contains("Return two or three candidates whenever that many hard-compatible options")
-            && prompt.contains("A weaker-but-acceptable soft fit is a penalty to explain")
-            && prompt.contains(
-                "Return exactly one candidate only when every other hard-compatible option"
-            )
-            && prompt
-                .contains("shot order, semantic weight, or the intended geometric reading route")
-            && prompt.contains("The single candidate's reason must name why all alternatives fail")
-            && prompt.contains("Do not force a weak candidate, a diagonal candidate"),
-        "registry selector still collapses a usable hard-compatible shortlist or forces weak diversity"
-    );
-}
-
 /// Production planning compares support-shot weight before dynamic geometry becomes eligible.
 #[test]
 fn production_registry_feature_prompt_compares_local_support_weight() {
@@ -281,19 +262,6 @@ fn production_registry_feature_prompt_compares_local_support_weight() {
             && prompt.contains("compact context or baseline")
             && prompt.contains("heavier action, mechanism, or evidence"),
         "registry feature planning never exposes the support-shot hierarchy needed by asymmetric routing"
-    );
-}
-
-/// Production ranking applies the reviewed hierarchy instead of equating motion with asymmetry.
-#[test]
-fn production_registry_selector_requires_supported_asymmetric_hierarchy() {
-    let prompt = include_str!("../assets/layout_selector_prompt.txt");
-    assert!(
-        prompt.contains("compact s1 context or baseline")
-            && prompt.contains("heavier s2 action, mechanism, or evidence")
-            && prompt.contains("If s1 and s2 have comparable narrative weight")
-            && prompt.contains("compressible setup and an explicitly more important s2 payoff"),
-        "registry selector can still use reviewed asymmetry as decorative motion"
     );
 }
 

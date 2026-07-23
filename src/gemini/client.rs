@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::generation::layout::{LayoutRegistry, feature_prompt_data, render_feature_prompt};
-use crate::generation::prompts::{layout_scene_prompt, layout_selector_prompt};
+use crate::generation::prompts::layout_scene_prompt;
 use crate::languages::catalog;
 use crate::session::{
     CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair, LearningGuess, RawInputBatch,
@@ -23,7 +23,8 @@ use super::prompts::{
     render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
 };
 use super::protocol::{
-    GeminiApiError, GenerationConfig, Request, Response, api_error, diagnosis, unfence,
+    GeminiApiError, GenerationConfig, Request, Response, ThinkingLevel, api_error, diagnosis,
+    unfence,
 };
 use super::scene::compose;
 
@@ -40,9 +41,12 @@ fn base_url() -> String {
 }
 const TEXT_MODEL: &str = "gemini-3.6-flash";
 const META_MODEL: &str = TEXT_MODEL;
+const FEATURE_MODEL: &str = "gemini-3.5-flash-lite";
 const SCENE_MODEL: &str = TEXT_MODEL;
 const IMAGE_MODEL: &str = "gemini-3.1-flash-image";
 const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
+const FEATURE_MAX_OUTPUT_TOKENS: u32 = 4_096;
+const COMPOSER_MAX_OUTPUT_TOKENS: u32 = 8_192;
 const VOICES: [&str; 30] = [
     "Achernar",
     "Achird",
@@ -218,28 +222,31 @@ where
         let feature_prompt = render_feature_prompt(&feature_data)?;
         let feature_schema = registry.feature_schema()?;
         let feature_raw = self
-            .structured_text_observed(SCENE_MODEL, feature_prompt, &feature_schema, &mut observe)
+            .structured_text_observed(
+                FEATURE_MODEL,
+                feature_prompt,
+                &feature_schema,
+                ThinkingLevel::Minimal,
+                FEATURE_MAX_OUTPUT_TOKENS,
+                &mut observe,
+            )
             .context("scene feature extraction request failed")?;
         let features = registry.decode_features(unfence(feature_raw.trim()))?;
-        let eligible = registry.eligible(&features)?;
-        let selector = render_layout_selector(
-            language,
-            term,
-            sentence,
-            features.json(),
-            &eligible.selector_cards()?,
-        )?;
-        let selector_schema = eligible.selector_schema()?;
-        let selector_raw = self
-            .structured_text_observed(SCENE_MODEL, selector, &selector_schema, &mut observe)
-            .context("scene layout selection request failed")?;
-        let ranking = eligible.decode_ranking(unfence(selector_raw.trim()))?;
-        let selection = ranking.select(term, attempt)?;
+        let selection = registry
+            .eligible(&features)?
+            .rank()?
+            .select(term, attempt)?;
         let composer_card = selection.composer_card()?;
         let composer =
             render_layout_scene(language, term, sentence, selection.json(), &composer_card)?;
         let composer_raw = self
-            .json_text_observed(SCENE_MODEL, composer, &mut observe)
+            .json_text_observed(
+                SCENE_MODEL,
+                composer,
+                ThinkingLevel::Low,
+                COMPOSER_MAX_OUTPUT_TOKENS,
+                &mut observe,
+            )
             .context("scene composition request failed")?;
         compose(composer_raw.as_str(), sentence, target, &selection)
     }
@@ -544,18 +551,30 @@ where
         model: &str,
         prompt: String,
         schema: &Value,
+        thinking: ThinkingLevel,
+        max_output_tokens: u32,
         observe: &mut F,
     ) -> Result<String>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let config = GenerationConfig::json(schema.clone())?;
+        let config = GenerationConfig::json(schema.clone())?
+            .with_thinking_level(thinking)
+            .with_max_output_tokens(max_output_tokens);
         let request = Request::text(prompt.clone(), Some(config), None);
         let metered = match self.request_metered(model, &request) {
             Ok(metered) => metered,
             Err(error) if schema_rejected(&error) => self.request_metered(
                 model,
-                &Request::text(prompt, Some(GenerationConfig::json_mode()), None),
+                &Request::text(
+                    prompt,
+                    Some(
+                        GenerationConfig::json_mode()
+                            .with_thinking_level(thinking)
+                            .with_max_output_tokens(max_output_tokens),
+                    ),
+                    None,
+                ),
             )?,
             Err(error) => return Err(error),
         };
@@ -567,13 +586,28 @@ where
         Ok(raw)
     }
 
-    fn json_text_observed<F>(&self, model: &str, prompt: String, observe: &mut F) -> Result<String>
+    fn json_text_observed<F>(
+        &self,
+        model: &str,
+        prompt: String,
+        thinking: ThinkingLevel,
+        max_output_tokens: u32,
+        observe: &mut F,
+    ) -> Result<String>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
         let metered = self.request_metered(
             model,
-            &Request::text(prompt, Some(GenerationConfig::json_mode()), None),
+            &Request::text(
+                prompt,
+                Some(
+                    GenerationConfig::json_mode()
+                        .with_thinking_level(thinking)
+                        .with_max_output_tokens(max_output_tokens),
+                ),
+                None,
+            ),
         )?;
         observe(metered.cost.clone())?;
         let raw = response_text(&metered.response);
@@ -588,24 +622,6 @@ fn schema_rejected(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<GeminiApiError>()
         .is_some_and(GeminiApiError::rejects_schema)
-}
-
-fn render_layout_selector(
-    language: &str,
-    term: &str,
-    sentence: &str,
-    features: &Value,
-    registry: &Value,
-) -> Result<String> {
-    Ok(layout_selector_prompt()
-        .replace("{language}", language)
-        .replace("{term}", term)
-        .replace("{sentence}", sentence)
-        .replace("{scene_features}", &serde_json::to_string_pretty(features)?)
-        .replace(
-            "{layout_registry}",
-            &serde_json::to_string_pretty(registry)?,
-        ))
 }
 
 fn render_layout_scene(
@@ -1128,6 +1144,8 @@ mod tests {
                     "properties": {"ok": {"type": "boolean"}},
                     "required": ["ok"]
                 }),
+                ThinkingLevel::Minimal,
+                FEATURE_MAX_OUTPUT_TOKENS,
                 &mut |cost| {
                     costs.push(cost);
                     Ok(())
@@ -1191,18 +1209,8 @@ mod tests {
             "shots": [planned_shot("s1", 1, "one stable machine in its complete room", "the system has high reliability")],
             "selection_logic": "one indivisible state carries the sentence"
         });
-        let ranking = json!({
-            "ranked_candidates": [{
-                "template_id": "splash-1-v1",
-                "adaptation": "exact",
-                "reason": "one indivisible quiet state needs one continuous tableau"
-            }]
-        });
-        let transport = FakeTransport::new(vec![
-            text_body(&features),
-            text_body(&ranking),
-            text_body(&semantic_scene()),
-        ]);
+        let transport =
+            FakeTransport::new(vec![text_body(&features), text_body(&semantic_scene())]);
         let requests = transport.requests.clone();
         let client = GeminiClient::new("key", transport);
         let mut costs = Vec::new();
@@ -1237,52 +1245,43 @@ mod tests {
         let feature_schema = registry
             .feature_schema()
             .expect("feature response schema must build");
-        let decoded = registry
-            .decode_features(
-                serde_json::to_string(&features)
-                    .expect("feature fixture must encode")
-                    .as_str(),
-            )
-            .expect("feature fixture must decode through production validation");
-        let eligible = registry
-            .eligible(&decoded)
-            .expect("feature fixture must have eligible layouts");
-        let selector_schema = eligible
-            .selector_schema()
-            .expect("selector response schema must build");
         assert_eq!(
             (
                 costs.len(),
                 bodies.len(),
                 (
-                    bodies[..2].iter().all(|body| {
-                        body.pointer("/generationConfig/responseFormat/text/mimeType")
-                            .and_then(Value::as_str)
-                            == Some("APPLICATION_JSON")
-                    }),
-                    bodies[..2].iter().all(|body| {
-                        body.pointer("/generationConfig/responseMimeType").is_none()
-                    }),
+                    bodies[0]
+                        .pointer("/generationConfig/responseFormat/text/mimeType")
+                        .and_then(Value::as_str),
+                    bodies[0]
+                        .pointer("/generationConfig/responseMimeType")
+                        .is_none(),
                     bodies[0].pointer("/generationConfig/responseFormat/text/schema")
                         == Some(&feature_schema),
-                    bodies[1].pointer("/generationConfig/responseFormat/text/schema")
-                        == Some(&selector_schema),
-                    bodies[2]
+                    bodies[0]
+                        .pointer("/generationConfig/thinkingConfig/thinkingLevel")
+                        .and_then(Value::as_str),
+                    bodies[0]
+                        .pointer("/generationConfig/maxOutputTokens")
+                        .and_then(Value::as_u64),
+                    bodies[1]
                         .pointer("/generationConfig/responseMimeType")
                         .and_then(Value::as_str),
-                    bodies[2]
+                    bodies[1]
                         .pointer("/generationConfig/responseFormat")
                         .is_none(),
-                    bodies[2]
+                    bodies[1]
+                        .pointer("/generationConfig/thinkingConfig/thinkingLevel")
+                        .and_then(Value::as_str),
+                    bodies[1]
                         .pointer("/generationConfig/maxOutputTokens")
-                        .is_none(),
+                        .and_then(Value::as_u64),
                 ),
                 prompts[0].contains("reliability")
                     && !prompts[0].contains("splash-1-v1")
                     && !prompts[0].contains("LAYOUT REGISTRY"),
-                prompts[1].contains("splash-1-v1"),
-                prompts[2].contains("\"chosen_template_id\": \"splash-1-v1\""),
-                !prompts[2].contains("\"bounds\"") && !prompts[2].contains("\"polygon\""),
+                prompts[1].contains("\"chosen_template_id\": \"splash-1-v1\""),
+                !prompts[1].contains("\"bounds\"") && !prompts[1].contains("\"polygon\""),
                 scene
                     .pointer("/manga_panel/meta/layout_selection/chosen_template_id")
                     .and_then(Value::as_str),
@@ -1291,10 +1290,19 @@ mod tests {
                     .and_then(Value::as_str),
             ),
             (
-                3,
-                3,
-                (true, true, true, true, Some("application/json"), true, true,),
-                true,
+                2,
+                2,
+                (
+                    Some("APPLICATION_JSON"),
+                    true,
+                    true,
+                    Some("MINIMAL"),
+                    Some(u64::from(FEATURE_MAX_OUTPUT_TOKENS)),
+                    Some("application/json"),
+                    true,
+                    Some("LOW"),
+                    Some(u64::from(COMPOSER_MAX_OUTPUT_TOKENS)),
+                ),
                 true,
                 true,
                 true,
@@ -1366,24 +1374,9 @@ mod tests {
             ],
             "selection_logic": "invalid on purpose"
         });
-        let ranking = json!({
-            "ranked_candidates": [{
-                "template_id": "splash-1-v1",
-                "adaptation": "exact",
-                "reason": "one indivisible quiet state"
-            }]
-        });
         let cases = vec![
             vec![text_body(&invalid)],
-            vec![
-                text_body(&valid),
-                text_body(&json!({"ranked_candidates": []})),
-            ],
-            vec![
-                text_body(&valid),
-                text_body(&ranking),
-                text_body(&json!({})),
-            ],
+            vec![text_body(&valid), text_body(&json!({}))],
         ];
         let observed = cases
             .into_iter()
@@ -1411,18 +1404,14 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             observed,
-            [(1, true, 1, 1), (2, true, 2, 2), (3, true, 3, 3)],
+            [(1, true, 1, 1), (2, true, 2, 2)],
             "registry scene failures discarded completed-stage costs or called a later stage"
         );
     }
 
     #[test]
     fn observer_failure_stops_the_scene_pipeline_before_the_next_request() {
-        let transport = FakeTransport::new(vec![
-            text_body(&json!({})),
-            text_body(&json!({})),
-            text_body(&json!({})),
-        ]);
+        let transport = FakeTransport::new(vec![text_body(&json!({})), text_body(&json!({}))]);
         let requests = transport.requests.clone();
         let client = GeminiClient::new("key", transport);
         let result = client.scene_observed(

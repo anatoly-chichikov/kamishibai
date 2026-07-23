@@ -57,6 +57,8 @@ pub(super) struct GenerationConfig {
     response_mime_type: Option<String>,
     #[serde(rename = "maxOutputTokens", skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<u32>,
+    #[serde(rename = "thinkingConfig", skip_serializing_if = "Option::is_none")]
+    thinking_config: Option<ThinkingConfig>,
 }
 
 impl GenerationConfig {
@@ -71,6 +73,7 @@ impl GenerationConfig {
             response_format: None,
             response_mime_type: None,
             max_output_tokens: None,
+            thinking_config: None,
         }
     }
 
@@ -99,6 +102,7 @@ impl GenerationConfig {
             response_format: None,
             response_mime_type: None,
             max_output_tokens: None,
+            thinking_config: None,
         }
     }
 
@@ -117,6 +121,7 @@ impl GenerationConfig {
             }),
             response_mime_type: None,
             max_output_tokens: None,
+            thinking_config: None,
         })
     }
 
@@ -129,8 +134,39 @@ impl GenerationConfig {
             response_format: None,
             response_mime_type: Some(String::from("application/json")),
             max_output_tokens: None,
+            thinking_config: None,
         }
     }
+
+    /// Return this configuration with one Gemini 3 thinking level.
+    #[must_use]
+    pub(super) fn with_thinking_level(mut self, level: ThinkingLevel) -> Self {
+        self.thinking_config = Some(ThinkingConfig {
+            thinking_level: level,
+        });
+        self
+    }
+
+    /// Return this configuration with one output-token ceiling.
+    #[must_use]
+    pub(super) fn with_max_output_tokens(mut self, tokens: u32) -> Self {
+        self.max_output_tokens = Some(tokens);
+        self
+    }
+}
+
+/// One supported Gemini 3 thinking level for bounded scene generation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(super) enum ThinkingLevel {
+    Minimal,
+    Low,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct ThinkingConfig {
+    #[serde(rename = "thinkingLevel")]
+    thinking_level: ThinkingLevel,
 }
 
 fn validate_response_schema(schema: &Value) -> Result<()> {
@@ -583,6 +619,73 @@ mod tests {
                 r#"{"contents":[{"parts":[{"text":"speak"}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Aoede"}}}}}"#,
             ),
             "a legacy Gemini request changed while structured output was added"
+        );
+    }
+
+    #[test]
+    fn structured_json_scene_controls_serialize_as_exact_rest_json() {
+        let config = GenerationConfig::json(json!({
+            "type": "object",
+            "properties": {
+                "term": {"type": "string"}
+            },
+            "required": ["term"]
+        }))
+        .expect("scene schema must be supported")
+        .with_thinking_level(ThinkingLevel::Low)
+        .with_max_output_tokens(4096);
+        let request =
+            serde_json::to_string(&Request::text(String::from("features"), Some(config), None))
+                .expect("scene request must serialize");
+        assert_eq!(
+            request,
+            r#"{"contents":[{"parts":[{"text":"features"}]}],"generationConfig":{"responseFormat":{"text":{"mimeType":"APPLICATION_JSON","schema":{"properties":{"term":{"type":"string"}},"required":["term"],"type":"object"}}},"maxOutputTokens":4096,"thinkingConfig":{"thinkingLevel":"LOW"}}}"#,
+            "structured scene controls changed their Gemini REST shape"
+        );
+    }
+
+    #[test]
+    fn json_mode_scene_controls_serialize_minimal_without_token_ceiling() {
+        let config = GenerationConfig::json_mode().with_thinking_level(ThinkingLevel::Minimal);
+        let request =
+            serde_json::to_string(&Request::text(String::from("compose"), Some(config), None))
+                .expect("scene request must serialize");
+        assert_eq!(
+            request,
+            r#"{"contents":[{"parts":[{"text":"compose"}]}],"generationConfig":{"responseMimeType":"application/json","thinkingConfig":{"thinkingLevel":"MINIMAL"}}}"#,
+            "minimal JSON-mode thinking changed its Gemini REST shape"
+        );
+    }
+
+    #[test]
+    fn ordinary_json_requests_omit_scene_controls() {
+        let structured = serde_json::to_string(&Request::text(
+            String::from("meta"),
+            Some(
+                GenerationConfig::json(json!({
+                    "type": "object",
+                    "properties": {
+                        "term": {"type": "string"}
+                    }
+                }))
+                .expect("meta schema must be supported"),
+            ),
+            None,
+        ))
+        .expect("structured request must serialize");
+        let mode = serde_json::to_string(&Request::text(
+            String::from("fallback"),
+            Some(GenerationConfig::json_mode()),
+            None,
+        ))
+        .expect("JSON-mode request must serialize");
+        assert_eq!(
+            (structured.as_str(), mode.as_str()),
+            (
+                r#"{"contents":[{"parts":[{"text":"meta"}]}],"generationConfig":{"responseFormat":{"text":{"mimeType":"APPLICATION_JSON","schema":{"properties":{"term":{"type":"string"}},"type":"object"}}}}}"#,
+                r#"{"contents":[{"parts":[{"text":"fallback"}]}],"generationConfig":{"responseMimeType":"application/json"}}"#,
+            ),
+            "ordinary JSON requests unexpectedly acquired scene controls"
         );
     }
 

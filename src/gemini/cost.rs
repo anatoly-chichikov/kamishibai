@@ -8,6 +8,8 @@ const GEMINI_3_6_FLASH_INPUT_NANOS: u64 = 1_500;
 const GEMINI_3_6_FLASH_OUTPUT_NANOS: u64 = 7_500;
 const GEMINI_3_5_FLASH_INPUT_NANOS: u64 = 1_500;
 const GEMINI_3_5_FLASH_OUTPUT_NANOS: u64 = 9_000;
+const GEMINI_3_5_FLASH_LITE_INPUT_NANOS: u64 = 300;
+const GEMINI_3_5_FLASH_LITE_OUTPUT_NANOS: u64 = 2_500;
 const GEMINI_3_1_FLASH_IMAGE_INPUT_NANOS: u64 = 500;
 const GEMINI_3_1_FLASH_IMAGE_OUTPUT_NANOS: u64 = 60_000;
 const GEMINI_3_1_FLASH_IMAGE_THINKING_NANOS: u64 = 3_000;
@@ -80,6 +82,11 @@ fn rates(model: &str) -> Rates {
             output_nanos: GEMINI_3_5_FLASH_OUTPUT_NANOS,
             thinking_nanos: GEMINI_3_5_FLASH_OUTPUT_NANOS,
         },
+        "gemini-3.5-flash-lite" => Rates {
+            input_nanos: GEMINI_3_5_FLASH_LITE_INPUT_NANOS,
+            output_nanos: GEMINI_3_5_FLASH_LITE_OUTPUT_NANOS,
+            thinking_nanos: GEMINI_3_5_FLASH_LITE_OUTPUT_NANOS,
+        },
         "gemini-3.1-flash-image-preview" | "gemini-3.1-flash-image" => Rates {
             input_nanos: GEMINI_3_1_FLASH_IMAGE_INPUT_NANOS,
             output_nanos: GEMINI_3_1_FLASH_IMAGE_OUTPUT_NANOS,
@@ -131,6 +138,21 @@ mod tests {
                 .dollars(),
             "$.0688",
             "image pricing must price generated image and thinking tokens at their distinct rates"
+        );
+    }
+
+    #[test]
+    fn flash_lite_usage_prices_low_cost_scene_features() {
+        let usage = UsageMetadata {
+            prompt_token_count: 1_000,
+            candidates_token_count: 200,
+            thoughts_token_count: 300,
+            total_token_count: 1_500,
+        };
+        assert_eq!(
+            priced("gemini-3.5-flash-lite", Some(&usage)).cost().nanos(),
+            1_550_000,
+            "Flash Lite feature pricing drifted from the current paid-tier rates"
         );
     }
 

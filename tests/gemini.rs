@@ -59,7 +59,7 @@ impl Transport for ComposerSchemaRejectingTransport {
         let index = self.calls.get();
         self.calls.set(index + 1);
         self.requests.borrow_mut().push(request.clone());
-        if index == 2
+        if index == 1
             && request
                 .pointer("/generationConfig/responseFormat/text/schema")
                 .is_some()
@@ -72,7 +72,6 @@ impl Transport for ComposerSchemaRejectingTransport {
         }
         let value = match index {
             0 => scene_features(),
-            1 => scene_ranking(),
             _ => dynamic_scene(),
         };
         scene_body(&value)
@@ -143,15 +142,6 @@ fn scene_features() -> Value {
         }],
         "selection_logic": "one quiet continuous view preserves the literal sentence"
     })
-}
-
-/// Return the one eligible canonical layout chosen for the feature plan.
-fn scene_ranking() -> Value {
-    json!({"ranked_candidates": [{
-        "template_id": "splash-1-v1",
-        "adaptation": "exact",
-        "reason": "one continuous quiet tableau fits the immutable single view"
-    }]})
 }
 
 /// Return one geometry-free production scene response with no special device.
@@ -255,11 +245,10 @@ fn api_failure(status: u16, code: &str, message: &str) -> TransportResponse {
     }
 }
 
-/// Return the three responses consumed by the production scene pipeline.
+/// Return the two responses consumed by the production scene pipeline.
 fn scene_responses(scene: &Value) -> Result<Vec<Result<TransportResponse>>> {
     Ok(vec![
         Ok(scene_body(&scene_features())?),
-        Ok(scene_body(&scene_ranking())?),
         Ok(scene_body(scene)?),
     ])
 }
@@ -656,21 +645,27 @@ fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()
             requests.len(),
             endpoints,
             (
-                requests[..2].iter().all(|request| {
-                    request
-                        .pointer("/generationConfig/responseFormat/text/mimeType")
-                        .and_then(Value::as_str)
-                        == Some("APPLICATION_JSON")
-                }),
-                requests[2]
+                requests[0]
+                    .pointer("/generationConfig/responseFormat/text/mimeType")
+                    .and_then(Value::as_str),
+                requests[0]
+                    .pointer("/generationConfig/thinkingConfig/thinkingLevel")
+                    .and_then(Value::as_str),
+                requests[0]
+                    .pointer("/generationConfig/maxOutputTokens")
+                    .and_then(Value::as_u64),
+                requests[1]
                     .pointer("/generationConfig/responseMimeType")
                     .and_then(Value::as_str),
-                requests[2]
+                requests[1]
                     .pointer("/generationConfig/responseFormat")
                     .is_none(),
-                requests[2]
+                requests[1]
+                    .pointer("/generationConfig/thinkingConfig/thinkingLevel")
+                    .and_then(Value::as_str),
+                requests[1]
                     .pointer("/generationConfig/maxOutputTokens")
-                    .is_none(),
+                    .and_then(Value::as_u64),
             ),
             (
                 scene["manga_panel"]["meta"]["title"].as_str(),
@@ -683,19 +678,24 @@ fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()
             ),
         ),
         (
-            3,
+            2,
             vec![
                 String::from(
-                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
-                ),
-                String::from(
-                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
                 ),
                 String::from(
                     "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
                 ),
             ],
-            (true, Some("application/json"), true, true),
+            (
+                Some("APPLICATION_JSON"),
+                Some("MINIMAL"),
+                Some(4096),
+                Some("application/json"),
+                true,
+                Some("LOW"),
+                Some(8192),
+            ),
             (
                 Some("The cat is sleeping on the windowsill"),
                 Some("en"),
@@ -721,7 +721,6 @@ fn scene_feature_schema_rejection_falls_back_once_to_json_mode() -> Result<()> {
             "response schema is too complex",
         )),
         Ok(metered_scene_body(&scene_features())?),
-        Ok(metered_scene_body(&scene_ranking())?),
         Ok(metered_scene_body(&dynamic_scene())?),
     ]);
     let requests = transport.requests.clone();
@@ -759,86 +758,20 @@ fn scene_feature_schema_rejection_falls_back_once_to_json_mode() -> Result<()> {
                 .pointer("/generationConfig/responseFormat")
                 .is_none(),
             requests[2]
-                .pointer("/generationConfig/responseFormat/text/schema")
-                .is_some(),
-            requests[3]
                 .pointer("/generationConfig/responseMimeType")
                 .and_then(Value::as_str),
             prompts[0] == prompts[1],
         ),
         (
             Some("The cat is sleeping on the windowsill"),
-            4,
+            3,
             true,
             Some("application/json"),
-            true,
             true,
             Some("application/json"),
             true,
         ),
         "a typed feature-schema rejection did not make exactly one same-prompt JSON-mode fallback"
-    );
-    Ok(())
-}
-
-/// A rejected typed selector schema falls back once inside the same scene attempt.
-#[test]
-fn scene_selector_schema_rejection_falls_back_once_to_json_mode() -> Result<()> {
-    let transport = FakeTransport::new(vec![
-        Ok(metered_scene_body(&scene_features())?),
-        Ok(api_failure(
-            400,
-            "INVALID_ARGUMENT",
-            "selector response schema is too complex",
-        )),
-        Ok(metered_scene_body(&scene_ranking())?),
-        Ok(metered_scene_body(&dynamic_scene())?),
-    ]);
-    let requests = transport.requests.clone();
-    let client = GeminiClient::new("key", transport);
-    let scene = client.scene(
-        "English",
-        "sleep",
-        "The cat is sleeping on the windowsill",
-        "en",
-    )?;
-    let requests = requests
-        .borrow()
-        .iter()
-        .map(|request| serde_json::from_str::<Value>(&request.1))
-        .collect::<Result<Vec<_>, _>>()?;
-    let selector_prompts = requests[1..3]
-        .iter()
-        .map(|request| {
-            request
-                .pointer("/contents/0/parts/0/text")
-                .and_then(Value::as_str)
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        (
-            scene["manga_panel"]["meta"]["title"].as_str(),
-            requests.len(),
-            requests[1]
-                .pointer("/generationConfig/responseFormat/text/schema")
-                .is_some(),
-            requests[2]
-                .pointer("/generationConfig/responseMimeType")
-                .and_then(Value::as_str),
-            requests[2]
-                .pointer("/generationConfig/responseFormat")
-                .is_none(),
-            selector_prompts[0] == selector_prompts[1],
-        ),
-        (
-            Some("The cat is sleeping on the windowsill"),
-            4,
-            true,
-            Some("application/json"),
-            true,
-            true
-        ),
-        "a typed selector-schema rejection did not make exactly one same-prompt JSON-mode fallback"
     );
     Ok(())
 }
@@ -890,16 +823,16 @@ fn scene_composer_never_exposes_a_response_schema_to_transport() -> Result<()> {
         (
             scene["manga_panel"]["meta"]["title"].as_str(),
             requests.len(),
-            requests[2]
+            requests[1]
                 .pointer("/generationConfig/responseMimeType")
                 .and_then(Value::as_str),
-            requests[2]
+            requests[1]
                 .pointer("/generationConfig/responseFormat")
                 .is_none(),
         ),
         (
             Some("The cat is sleeping on the windowsill"),
-            3,
+            2,
             Some("application/json"),
             true
         ),
@@ -971,7 +904,7 @@ fn scene_generation_repairs_one_truncated_json_closer() -> Result<()> {
     raw.pop()
         .expect("invariant: scene fixture must contain one object closer");
     let mut responses = scene_responses(&scene)?;
-    responses[2] = body(json!({
+    responses[1] = body(json!({
         "candidates": [{"content": {"parts": [{"text": raw}]}}]
     }));
     let client = GeminiClient::new("key", FakeTransport::new(responses));

@@ -562,9 +562,9 @@ Cache layout:
 `<key>` is a short content hash. `status` derives card readiness from the
 artifact files in the current visual-policy revision and ignores older visual
 directories. Deleting a card folder forces that card to regenerate on the next
-`generate`. The revision hashes the embedded feature, layout-selector, and
-scene-composer prompts; the composer schema; both layout/device registries; the
-manga template; and a manual policy version that changes when model
+`generate`. The revision hashes the embedded feature and scene-composer
+prompts; the composer schema; both layout/device registries; the manga
+template; and a manual policy version that changes when model
 configuration, local validation, or renderer acceptance changes independently
 of those assets.
 
