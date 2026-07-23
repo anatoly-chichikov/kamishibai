@@ -141,10 +141,10 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
 
 /// Production registry builds use the stable picture-recovery visual revision.
 #[test]
-fn production_registry_uses_the_version_thirty_four_visual_revision() {
+fn production_registry_uses_the_version_thirty_five_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "78a3daa17035bd163e72ca62b15ad3bca1bb205963789d5f0918e8c92c9331db",
+        "59eba6552b771cad2cc0a1941f9bc55522227b15183d1e865a1503ac724a515c",
         "production registry visual revision drifted without a policy-version change"
     );
 }

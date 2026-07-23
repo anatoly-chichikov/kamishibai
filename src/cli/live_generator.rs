@@ -888,10 +888,12 @@ impl LocalImageRejections {
     fn recompose(&self) -> bool {
         matches!(
             self.recent,
-            [
-                Some(LocalImageRejection::Topology),
-                Some(LocalImageRejection::Topology)
-            ]
+            [Some(LocalImageRejection::Topology), Some(_)]
+                | [Some(_), Some(LocalImageRejection::Topology)]
+                | [
+                    Some(LocalImageRejection::Border),
+                    Some(LocalImageRejection::Border)
+                ]
         )
     }
 
@@ -2176,7 +2178,7 @@ mod tests {
     }
 
     #[test]
-    fn two_border_rejections_keep_the_third_attempt_on_the_current_scene() {
+    fn two_border_rejections_enable_third_attempt_recomposition() {
         let recovery = PictureRecovery::default();
         let path = Path::new("cards/repeated-border");
         recovery
@@ -2190,10 +2192,10 @@ mod tests {
             .observe(path, 1, Some(LocalImageRejection::Border))
             .expect("second border rejection must record");
         assert!(
-            !recovery
+            recovery
                 .prepare(path, 2)
                 .expect("third attempt must prepare"),
-            "repeated border-only failures discarded a scene that could still render cleanly"
+            "repeated border failures did not advance the third picture to a fresh scene"
         );
     }
 
@@ -2233,15 +2235,15 @@ mod tests {
     }
 
     #[test]
-    fn mixed_topology_then_ocr_rejections_keep_the_third_attempt_on_the_current_scene() {
+    fn mixed_topology_then_ocr_rejections_enable_third_attempt_recomposition() {
         let temporary = TempDir::new().expect("tempdir must be created");
         write_rejection(temporary.path(), 1, "topology");
         write_rejection(temporary.path(), 2, "ocr");
         assert!(
-            !PictureRecovery::default()
+            PictureRecovery::default()
                 .prepare(temporary.path(), 2)
                 .expect("mixed local verdicts must decode"),
-            "one topology failure plus OCR discarded the scene without repeated structural evidence"
+            "topology evidence followed by OCR did not advance the third picture to a fresh scene"
         );
     }
 
@@ -2344,28 +2346,28 @@ mod tests {
     }
 
     #[test]
-    fn mixed_local_rejections_keep_the_scene_after_a_fresh_generator_process() {
+    fn topology_then_ocr_recomposition_survives_a_fresh_generator_process() {
         let temporary = TempDir::new().expect("tempdir must be created");
-        write_rejection(temporary.path(), 1, "border");
+        write_rejection(temporary.path(), 1, "topology");
         write_rejection(temporary.path(), 2, "ocr");
         assert!(
-            !PictureRecovery::default()
+            PictureRecovery::default()
                 .prepare(temporary.path(), 2)
                 .expect("persisted local verdicts must decode"),
-            "a restarted generator treated unrelated local failures as repeated topology evidence"
+            "a restarted generator forgot topology evidence before the third picture"
         );
     }
 
     #[test]
-    fn repeated_border_recovery_policy_survives_a_fresh_generator_process() {
+    fn repeated_border_recomposition_survives_a_fresh_generator_process() {
         let temporary = TempDir::new().expect("tempdir must be created");
         write_rejection(temporary.path(), 1, "border");
         write_rejection(temporary.path(), 2, "border");
         assert!(
-            !PictureRecovery::default()
+            PictureRecovery::default()
                 .prepare(temporary.path(), 2)
                 .expect("persisted border verdicts must decode"),
-            "a restarted generator forgot the repeated border-only exception"
+            "a restarted generator forgot repeated border evidence before the third picture"
         );
     }
 

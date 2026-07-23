@@ -12,7 +12,7 @@ const LAYOUT_SCENE_SCHEMA: &str = include_str!("../../assets/layout_scene_schema
 const LAYOUT_REGISTRY: &str = include_str!("../../assets/layout_registry_v2.json");
 const DEVICE_REGISTRY: &str = include_str!("../../assets/device_registry_v3.json");
 const LAYOUT_POLICY_VERSION: &str =
-    "kamishibai-layout-registry-production-v34-stable-picture-recovery";
+    "kamishibai-layout-registry-production-v35-structural-third-picture-recovery";
 static VISUAL_REVISION: OnceLock<String> = OnceLock::new();
 
 /// Return the embedded shared audio prompt template.
