@@ -12,7 +12,7 @@
         "intensity": {"type": "integer", "minimum": 1, "maximum": 5},
         "visual_relation": {
           "type": "string",
-          "enum": ["containment", "distance", "opposition", "burden", "repetition", "threshold", "balance", "cause_effect", "approach", "avoidance", "other"]
+          "enum": ["containment", "distance", "opposition", "contrast", "burden", "repetition", "threshold", "balance", "cause_effect", "approach", "avoidance", "other"]
         },
         "memory_hook": {"type": "string"},
         "metaphor": {

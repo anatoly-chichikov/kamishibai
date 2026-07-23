@@ -1,6 +1,6 @@
 //! Tests for the direct Gemini REST client.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use anyhow::Result;
@@ -32,6 +32,50 @@ impl Transport for FakeTransport {
             .borrow_mut()
             .push((String::from(url), String::from(body)));
         self.responses.borrow_mut().remove(0)
+    }
+}
+
+/// Transport that rejects the composer only when it regresses to a response schema.
+#[derive(Clone, Debug)]
+struct ComposerSchemaRejectingTransport {
+    calls: Rc<Cell<usize>>,
+    requests: Rc<RefCell<Vec<Value>>>,
+}
+
+impl ComposerSchemaRejectingTransport {
+    /// Create one schema-sensitive production-scene transport.
+    fn new() -> Self {
+        Self {
+            calls: Rc::new(Cell::new(0)),
+            requests: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+}
+
+impl Transport for ComposerSchemaRejectingTransport {
+    /// Accept typed analysis while rejecting a schema-bearing composer request.
+    fn post(&self, _url: &str, _key: &str, body: &str) -> Result<TransportResponse> {
+        let request = serde_json::from_str::<Value>(body)?;
+        let index = self.calls.get();
+        self.calls.set(index + 1);
+        self.requests.borrow_mut().push(request.clone());
+        if index == 2
+            && request
+                .pointer("/generationConfig/responseFormat/text/schema")
+                .is_some()
+        {
+            return Ok(api_failure(
+                400,
+                "INVALID_ARGUMENT",
+                "composer response schema is unsupported",
+            ));
+        }
+        let value = match index {
+            0 => scene_features(),
+            1 => scene_ranking(),
+            _ => dynamic_scene(),
+        };
+        scene_body(&value)
     }
 }
 
@@ -191,6 +235,26 @@ fn scene_body(value: &Value) -> Result<TransportResponse> {
     body(json!({"candidates": [{"content": {"parts": [{"text": serde_json::to_string(value)?}]}}]}))
 }
 
+/// Wrap one structured value as a metered successful Gemini text response.
+fn metered_scene_body(value: &Value) -> Result<TransportResponse> {
+    body(json!({
+        "candidates": [{"content": {"parts": [{"text": serde_json::to_string(value)?}]}}],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+        }
+    }))
+}
+
+/// Return one structured Gemini API failure.
+fn api_failure(status: u16, code: &str, message: &str) -> TransportResponse {
+    TransportResponse {
+        status,
+        body: json!({"error": {"status": code, "message": message}}).to_string(),
+    }
+}
+
 /// Return the three responses consumed by the production scene pipeline.
 fn scene_responses(scene: &Value) -> Result<Vec<Result<TransportResponse>>> {
     Ok(vec![
@@ -228,17 +292,85 @@ fn structured_completion_uses_the_json_response_format() -> Result<()> {
     let response = client.complete_json(
         "gemini-3.6-flash",
         String::from("compose"),
-        &json!({"type":"object","required":["panels"]}),
+        &json!({"type":"object","additionalProperties":false,"required":["panels"]}),
     )?;
     assert_eq!(
         (response.as_str(), requests.borrow()[0].1.as_str()),
         (
             r#"{"panels":[]}"#,
-            r#"{"contents":[{"parts":[{"text":"compose"}]}],"generationConfig":{"responseFormat":{"text":{"mimeType":"APPLICATION_JSON","schema":{"required":["panels"],"type":"object"}}}}}"#,
+            r#"{"contents":[{"parts":[{"text":"compose"}]}],"generationConfig":{"responseFormat":{"text":{"mimeType":"APPLICATION_JSON","schema":{"additionalProperties":false,"required":["panels"],"type":"object"}}}}}"#,
         ),
         "structured completion request does not preserve the documented responseFormat.text shape"
     );
     Ok(())
+}
+
+/// Unsupported response-schema keywords fail before reaching the transport.
+#[test]
+fn unsupported_response_schema_keywords_fail_before_transport() {
+    let transport = FakeTransport::new(Vec::new());
+    let requests = transport.requests.clone();
+    let result = GeminiClient::new("key", transport).complete_json(
+        "gemini-3.6-flash",
+        String::from("compose"),
+        &json!({"type":"string","minLength":1}),
+    );
+    assert_eq!(
+        (result.is_err(), requests.borrow().len()),
+        (true, 0),
+        "an undocumented response-schema keyword reached the Gemini transport"
+    );
+}
+
+/// Malformed subschemas and nested unsupported keywords fail before reaching the transport.
+#[test]
+fn malformed_response_subschemas_fail_before_transport() {
+    let transport = FakeTransport::new(Vec::new());
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let items = client.complete_json(
+        "gemini-3.6-flash",
+        String::from("compose"),
+        &json!({"type":"array","items":[]}),
+    );
+    let additional = client.complete_json(
+        "gemini-3.6-flash",
+        String::from("compose"),
+        &json!({"type":"object","additionalProperties":"false"}),
+    );
+    let nested = client.complete_json(
+        "gemini-3.6-flash",
+        String::from("compose"),
+        &json!({
+            "type":"object",
+            "additionalProperties": {
+                "type":"object",
+                "properties": {"term":{"type":"string","minLength":1}}
+            }
+        }),
+    );
+    let nested_items = client.complete_json(
+        "gemini-3.6-flash",
+        String::from("compose"),
+        &json!({"type":"array","items":{"type":"string","minLength":1}}),
+    );
+    let prefix_items = client.complete_json(
+        "gemini-3.6-flash",
+        String::from("compose"),
+        &json!({"type":"array","prefixItems":[{"type":"string","minLength":1}]}),
+    );
+    assert_eq!(
+        (
+            items.is_err(),
+            additional.is_err(),
+            nested.is_err(),
+            nested_items.is_err(),
+            prefix_items.is_err(),
+            requests.borrow().len()
+        ),
+        (true, true, true, true, true, 0),
+        "a malformed or unsupported nested response schema reached the Gemini transport"
+    );
 }
 
 /// JSON mode requests valid JSON without imposing a response schema.
@@ -254,7 +386,7 @@ fn json_mode_uses_the_legacy_response_mime_type() -> Result<()> {
         (response.as_str(), requests.borrow()[0].1.as_str()),
         (
             r#"{"panels":[]}"#,
-            r#"{"contents":[{"parts":[{"text":"compose"}]}],"generationConfig":{"responseMimeType":"application/json","maxOutputTokens":8192}}"#,
+            r#"{"contents":[{"parts":[{"text":"compose"}]}],"generationConfig":{"responseMimeType":"application/json"}}"#,
         ),
         "JSON mode request does not preserve the documented responseMimeType shape"
     );
@@ -497,7 +629,7 @@ fn validate_key_accepts_2xx_and_flags_rejected_keys() {
     );
 }
 
-/// Scene generation keeps typed analysis and typed semantic composition.
+/// Scene generation keeps typed analysis and schema-free semantic composition.
 #[test]
 fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()> {
     let transport = FakeTransport::new(scene_responses(&dynamic_scene())?);
@@ -523,25 +655,32 @@ fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()
         (
             requests.len(),
             endpoints,
-            requests.iter().all(|request| {
-                request
-                    .pointer("/generationConfig/responseFormat/text/mimeType")
-                    .and_then(Value::as_str)
-                    == Some("APPLICATION_JSON")
-            }),
-            requests.iter().all(|request| request
-                .pointer("/generationConfig/responseMimeType")
-                .is_none()),
-            requests[2]
-                .pointer("/generationConfig/responseFormat/text/schema/properties/panels/maxItems")
-                .and_then(Value::as_u64),
-            scene["manga_panel"]["meta"]["title"].as_str(),
-            scene["manga_panel"]["meta"]["target_lang"].as_str(),
-            scene["manga_panel"]["panels"][0]["bounds"]["x"].as_i64(),
-            scene["manga_panel"]["panels"][0]["bounds"]["width"].as_i64(),
-            scene["manga_panel"]["panels"][0]["scene"]["text_in_frame"].as_str(),
-            scene["manga_panel"]["page_design"]["layout"]["template_id"].as_str(),
-            scene["manga_panel"]["page_design"]["camera_arc"]["strategy"].as_str(),
+            (
+                requests[..2].iter().all(|request| {
+                    request
+                        .pointer("/generationConfig/responseFormat/text/mimeType")
+                        .and_then(Value::as_str)
+                        == Some("APPLICATION_JSON")
+                }),
+                requests[2]
+                    .pointer("/generationConfig/responseMimeType")
+                    .and_then(Value::as_str),
+                requests[2]
+                    .pointer("/generationConfig/responseFormat")
+                    .is_none(),
+                requests[2]
+                    .pointer("/generationConfig/maxOutputTokens")
+                    .is_none(),
+            ),
+            (
+                scene["manga_panel"]["meta"]["title"].as_str(),
+                scene["manga_panel"]["meta"]["target_lang"].as_str(),
+                scene["manga_panel"]["panels"][0]["bounds"]["x"].as_i64(),
+                scene["manga_panel"]["panels"][0]["bounds"]["width"].as_i64(),
+                scene["manga_panel"]["panels"][0]["scene"]["text_in_frame"].as_str(),
+                scene["manga_panel"]["page_design"]["layout"]["template_id"].as_str(),
+                scene["manga_panel"]["page_design"]["camera_arc"]["strategy"].as_str(),
+            ),
         ),
         (
             3,
@@ -556,20 +695,272 @@ fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()
                     "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
                 ),
             ],
-            true,
-            true,
-            Some(1),
-            Some("The cat is sleeping on the windowsill"),
-            Some("en"),
-            Some(16),
-            Some(992),
-            Some("none"),
-            Some("splash-1-v1"),
-            Some("single_view"),
+            (true, Some("application/json"), true, true),
+            (
+                Some("The cat is sleeping on the windowsill"),
+                Some("en"),
+                Some(16),
+                Some(992),
+                Some("none"),
+                Some("splash-1-v1"),
+                Some("single_view"),
+            ),
         ),
         "public scene generation bypassed the typed-analysis and JSON-composition registry"
     );
     Ok(())
+}
+
+/// A rejected typed feature schema falls back once inside the same scene attempt.
+#[test]
+fn scene_feature_schema_rejection_falls_back_once_to_json_mode() -> Result<()> {
+    let transport = FakeTransport::new(vec![
+        Ok(api_failure(
+            400,
+            "INVALID_ARGUMENT",
+            "response schema is too complex",
+        )),
+        Ok(metered_scene_body(&scene_features())?),
+        Ok(metered_scene_body(&scene_ranking())?),
+        Ok(metered_scene_body(&dynamic_scene())?),
+    ]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let scene = client.scene(
+        "English",
+        "sleep",
+        "The cat is sleeping on the windowsill",
+        "en",
+    )?;
+    let requests = requests
+        .borrow()
+        .iter()
+        .map(|request| serde_json::from_str::<Value>(&request.1))
+        .collect::<Result<Vec<_>, _>>()?;
+    let prompts = requests
+        .iter()
+        .map(|request| {
+            request
+                .pointer("/contents/0/parts/0/text")
+                .and_then(Value::as_str)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        (
+            scene["manga_panel"]["meta"]["title"].as_str(),
+            requests.len(),
+            requests[0]
+                .pointer("/generationConfig/responseFormat/text/schema")
+                .is_some(),
+            requests[1]
+                .pointer("/generationConfig/responseMimeType")
+                .and_then(Value::as_str),
+            requests[1]
+                .pointer("/generationConfig/responseFormat")
+                .is_none(),
+            requests[2]
+                .pointer("/generationConfig/responseFormat/text/schema")
+                .is_some(),
+            requests[3]
+                .pointer("/generationConfig/responseMimeType")
+                .and_then(Value::as_str),
+            prompts[0] == prompts[1],
+        ),
+        (
+            Some("The cat is sleeping on the windowsill"),
+            4,
+            true,
+            Some("application/json"),
+            true,
+            true,
+            Some("application/json"),
+            true,
+        ),
+        "a typed feature-schema rejection did not make exactly one same-prompt JSON-mode fallback"
+    );
+    Ok(())
+}
+
+/// A rejected typed selector schema falls back once inside the same scene attempt.
+#[test]
+fn scene_selector_schema_rejection_falls_back_once_to_json_mode() -> Result<()> {
+    let transport = FakeTransport::new(vec![
+        Ok(metered_scene_body(&scene_features())?),
+        Ok(api_failure(
+            400,
+            "INVALID_ARGUMENT",
+            "selector response schema is too complex",
+        )),
+        Ok(metered_scene_body(&scene_ranking())?),
+        Ok(metered_scene_body(&dynamic_scene())?),
+    ]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let scene = client.scene(
+        "English",
+        "sleep",
+        "The cat is sleeping on the windowsill",
+        "en",
+    )?;
+    let requests = requests
+        .borrow()
+        .iter()
+        .map(|request| serde_json::from_str::<Value>(&request.1))
+        .collect::<Result<Vec<_>, _>>()?;
+    let selector_prompts = requests[1..3]
+        .iter()
+        .map(|request| {
+            request
+                .pointer("/contents/0/parts/0/text")
+                .and_then(Value::as_str)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        (
+            scene["manga_panel"]["meta"]["title"].as_str(),
+            requests.len(),
+            requests[1]
+                .pointer("/generationConfig/responseFormat/text/schema")
+                .is_some(),
+            requests[2]
+                .pointer("/generationConfig/responseMimeType")
+                .and_then(Value::as_str),
+            requests[2]
+                .pointer("/generationConfig/responseFormat")
+                .is_none(),
+            selector_prompts[0] == selector_prompts[1],
+        ),
+        (
+            Some("The cat is sleeping on the windowsill"),
+            4,
+            true,
+            Some("application/json"),
+            true,
+            true
+        ),
+        "a typed selector-schema rejection did not make exactly one same-prompt JSON-mode fallback"
+    );
+    Ok(())
+}
+
+/// A second invalid-argument response stops the bounded schema fallback.
+#[test]
+fn scene_schema_fallback_stops_after_one_json_mode_retry() {
+    let transport = FakeTransport::new(vec![
+        Ok(api_failure(
+            400,
+            "INVALID_ARGUMENT",
+            "feature response schema is too complex",
+        )),
+        Ok(api_failure(
+            400,
+            "INVALID_ARGUMENT",
+            "JSON mode request is still invalid",
+        )),
+    ]);
+    let requests = transport.requests.clone();
+    let failed = GeminiClient::new("key", transport)
+        .scene(
+            "English",
+            "sleep",
+            "The cat is sleeping on the windowsill",
+            "en",
+        )
+        .is_err();
+    assert_eq!(
+        (failed, requests.borrow().len()),
+        (true, 2),
+        "schema fallback retried more than once inside one artifact attempt"
+    );
+}
+
+/// A transport that would reject a schema-bearing composer accepts production JSON mode.
+#[test]
+fn scene_composer_never_exposes_a_response_schema_to_transport() -> Result<()> {
+    let transport = ComposerSchemaRejectingTransport::new();
+    let requests = transport.requests.clone();
+    let scene = GeminiClient::new("key", transport).scene(
+        "English",
+        "sleep",
+        "The cat is sleeping on the windowsill",
+        "en",
+    )?;
+    let requests = requests.borrow();
+    assert_eq!(
+        (
+            scene["manga_panel"]["meta"]["title"].as_str(),
+            requests.len(),
+            requests[2]
+                .pointer("/generationConfig/responseMimeType")
+                .and_then(Value::as_str),
+            requests[2]
+                .pointer("/generationConfig/responseFormat")
+                .is_none(),
+        ),
+        (
+            Some("The cat is sleeping on the windowsill"),
+            3,
+            Some("application/json"),
+            true
+        ),
+        "production composer regressed to the schema-bearing request rejected by Gemini"
+    );
+    Ok(())
+}
+
+/// Authentication, quota, and transport failures never enter schema fallback.
+#[test]
+fn scene_schema_fallback_excludes_non_schema_failures() {
+    let key = FakeTransport::new(vec![Ok(api_failure(
+        400,
+        "INVALID_ARGUMENT",
+        "API key not valid",
+    ))]);
+    let key_requests = key.requests.clone();
+    let key_error = GeminiClient::new("key", key)
+        .scene(
+            "English",
+            "sleep",
+            "The cat is sleeping on the windowsill",
+            "en",
+        )
+        .expect_err("invalid key must fail before schema fallback");
+    let quota = FakeTransport::new(vec![Ok(api_failure(
+        429,
+        "RESOURCE_EXHAUSTED",
+        "quota exhausted",
+    ))]);
+    let quota_requests = quota.requests.clone();
+    let quota_failed = GeminiClient::new("key", quota)
+        .scene(
+            "English",
+            "sleep",
+            "The cat is sleeping on the windowsill",
+            "en",
+        )
+        .is_err();
+    let network = FakeTransport::new(vec![Err(anyhow::anyhow!("connection refused"))]);
+    let network_requests = network.requests.clone();
+    let network_failed = GeminiClient::new("key", network)
+        .scene(
+            "English",
+            "sleep",
+            "The cat is sleeping on the windowsill",
+            "en",
+        )
+        .is_err();
+    assert_eq!(
+        (
+            key_requests.borrow().len(),
+            quota_requests.borrow().len(),
+            network_requests.borrow().len(),
+            rejects_key(&key_error),
+            quota_failed,
+            network_failed,
+        ),
+        (1, 1, 1, true, true, true),
+        "schema fallback retried authentication, quota, or transport failures"
+    );
 }
 
 /// JSON composition repairs only structurally unambiguous missing closers.

@@ -10,6 +10,7 @@ const MINIMUM_REGION_SHARE: usize = 15;
 const REGION_BRIGHTNESS_MARGIN: u8 = 20;
 const RAIL_SEARCH: u32 = 3;
 const WHITE_COVERAGE: u64 = 99;
+const RELAXED_EDGE_BRIGHTNESS: u8 = 230;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Axis {
@@ -195,28 +196,49 @@ impl BorderDetector {
 
     /// Return the edge names that fail the white border check.
     pub fn borders(&self, image: &GrayImage) -> Vec<String> {
-        let mut failed = Vec::new();
         let rows = self.margin.min(image.height() as usize) as u32;
         let cols = self.margin.min(image.width() as usize) as u32;
-        if rows > 0 && band(image, 0, 0, image.width(), rows) <= f64::from(self.brightness) {
-            failed.push(String::from("top"));
-        }
-        if rows > 0
-            && band(image, 0, image.height() - rows, image.width(), rows)
-                <= f64::from(self.brightness)
+        let edges = [
+            ("top", 0, 0, image.width(), rows),
+            (
+                "bottom",
+                0,
+                image.height().saturating_sub(rows),
+                image.width(),
+                rows,
+            ),
+            ("left", 0, 0, cols, image.height()),
+            (
+                "right",
+                image.width().saturating_sub(cols),
+                0,
+                cols,
+                image.height(),
+            ),
+        ];
+        let failed = edges
+            .iter()
+            .filter(|(_, _, _, width, height)| *width > 0 && *height > 0)
+            .filter(|(_, x, y, width, height)| {
+                !band_mean_above(image, *x, *y, *width, *height, self.brightness)
+            })
+            .collect::<Vec<_>>();
+        if failed.len() == 1
+            && band_mean_above(
+                image,
+                failed[0].1,
+                failed[0].2,
+                failed[0].3,
+                failed[0].4,
+                RELAXED_EDGE_BRIGHTNESS,
+            )
         {
-            failed.push(String::from("bottom"));
-        }
-        if cols > 0 && band(image, 0, 0, cols, image.height()) <= f64::from(self.brightness) {
-            failed.push(String::from("left"));
-        }
-        if cols > 0
-            && band(image, image.width() - cols, 0, cols, image.height())
-                <= f64::from(self.brightness)
-        {
-            failed.push(String::from("right"));
+            return Vec::new();
         }
         failed
+            .into_iter()
+            .map(|(name, _, _, _, _)| String::from(*name))
+            .collect()
     }
 
     fn gutter_on(&self, image: &GrayImage, scan: Scan) -> bool {
@@ -399,19 +421,22 @@ where
     matched.saturating_mul(COVERAGE_SCALE) >= u64::from(total).saturating_mul(required)
 }
 
-fn band(image: &GrayImage, x: u32, y: u32, width: u32, height: u32) -> f64 {
-    let mut total = 0u64;
-    let mut count = 0u64;
-    for ypos in y..(y + height) {
-        for xpos in x..(x + width) {
-            total += u64::from(image.get_pixel(xpos, ypos)[0]);
-            count += 1;
+fn band_mean_above(
+    image: &GrayImage,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    brightness: u8,
+) -> bool {
+    let mut total = 0_u64;
+    for ypos in y..y.saturating_add(height) {
+        for xpos in x..x.saturating_add(width) {
+            total = total.saturating_add(u64::from(image.get_pixel(xpos, ypos)[0]));
         }
     }
-    if count == 0 {
-        return 0.0;
-    }
-    total as f64 / count as f64
+    let area = u64::from(width).saturating_mul(u64::from(height));
+    area > 0 && total > area.saturating_mul(u64::from(brightness))
 }
 
 #[cfg(test)]
@@ -419,6 +444,19 @@ mod tests {
     use image::{GrayImage, Luma};
 
     use super::BorderDetector;
+
+    /// Build one dark image surrounded by an exact white band.
+    fn framed(size: u32, margin: u32) -> GrayImage {
+        let mut image = GrayImage::from_pixel(size, size, Luma([0]));
+        for y in 0..size {
+            for x in 0..size {
+                if x < margin || y < margin || x >= size - margin || y >= size - margin {
+                    image.put_pixel(x, y, Luma([255]));
+                }
+            }
+        }
+        image
+    }
 
     /// Region lookup rejects coordinates outside the image instead of wrapping rows.
     #[test]
@@ -430,6 +468,76 @@ mod tests {
                 .1,
             vec![None, None, None],
             "region lookup wraps an out-of-range coordinate into another row"
+        );
+    }
+
+    /// Outer-frame validation accepts the production ten-pixel proof band.
+    #[test]
+    fn outer_frame_accepts_a_continuous_ten_pixel_white_band() {
+        assert_eq!(
+            BorderDetector::new(2, 6, 240, 10).borders(&framed(64, 10)),
+            Vec::<String>::new(),
+            "outer-frame validation rejects the production proof band"
+        );
+    }
+
+    /// Outer-frame validation rejects a page whose every edge misses the proof band.
+    #[test]
+    fn outer_frame_rejects_a_band_narrower_than_ten_pixels() {
+        assert_eq!(
+            BorderDetector::new(2, 6, 240, 10).borders(&framed(64, 9)),
+            vec![
+                String::from("top"),
+                String::from("bottom"),
+                String::from("left"),
+                String::from("right"),
+            ],
+            "outer-frame validation accepts a page without the minimum proof band"
+        );
+    }
+
+    /// Three clean edges tolerate one locally imperfect but near-white edge.
+    #[test]
+    fn outer_frame_accepts_one_near_white_edge() {
+        let mut image = framed(64, 10);
+        for x in 10..54 {
+            image.put_pixel(x, 5, Luma([0]));
+        }
+        assert_eq!(
+            BorderDetector::new(2, 6, 240, 10).borders(&image),
+            Vec::<String>::new(),
+            "one near-white edge cannot use the calibrated fourth-edge tolerance"
+        );
+    }
+
+    /// The fourth-edge tolerance cannot hide defects on two sides.
+    #[test]
+    fn outer_frame_rejects_two_imperfect_edges() {
+        let mut image = framed(64, 10);
+        for x in 10..54 {
+            image.put_pixel(x, 5, Luma([0]));
+            image.put_pixel(x, 58, Luma([0]));
+        }
+        assert_eq!(
+            BorderDetector::new(2, 6, 240, 10).borders(&image),
+            vec![String::from("top"), String::from("bottom")],
+            "two imperfect edges incorrectly consumed one fourth-edge allowance"
+        );
+    }
+
+    /// A single visibly dark edge stays rejected even when the other three are clean.
+    #[test]
+    fn outer_frame_rejects_one_edge_below_the_near_white_floor() {
+        let mut image = framed(64, 10);
+        for y in 4..6 {
+            for x in 10..54 {
+                image.put_pixel(x, y, Luma([0]));
+            }
+        }
+        assert_eq!(
+            BorderDetector::new(2, 6, 240, 10).borders(&image),
+            vec![String::from("top")],
+            "a dark edge passed the calibrated near-white floor"
         );
     }
 }

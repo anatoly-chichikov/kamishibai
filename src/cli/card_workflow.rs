@@ -5,7 +5,8 @@ use anyhow::Result;
 
 use crate::session::{
     ArtifactAttempt, ArtifactFile, BulkCorrection, CardCorrection, CardDraft, CardMeta,
-    CardMetaGeneration, CardRevision, LanguagePair, SenseCorrection, Understanding, Understood,
+    CardMetaGeneration, CardRevision, GenerationCost, LanguagePair, SenseCorrection, Understanding,
+    Understood,
 };
 
 /// Capability that turns typed words into understood words.
@@ -36,9 +37,46 @@ pub(super) trait CardGeneration:
         ArtifactAttempt::unmetered(result)
     }
 
+    /// Generate meta attributed to one stable slot in a persisted session.
+    fn generate_meta_in(
+        &self,
+        _slot: usize,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+    ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
+        self.generate_meta(term, understanding, pair)
+    }
+
     fn generate_scene(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile>;
+    /// Generate a scene attributed to one stable slot in a persisted session.
+    fn generate_scene_in(&self, _slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+        self.generate_scene(draft)
+    }
     fn generate_picture(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile>;
+    /// Generate a picture attributed to one stable slot in a persisted session.
+    fn generate_picture_in(
+        &self,
+        _slot: usize,
+        draft: &CardDraft,
+    ) -> ArtifactAttempt<ArtifactFile> {
+        self.generate_picture(draft)
+    }
     fn generate_sound(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile>;
+    /// Generate sound attributed to one stable slot in a persisted session.
+    fn generate_sound_in(&self, _slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+        self.generate_sound(draft)
+    }
+    /// Correct one card attributed to one stable slot in a persisted session.
+    fn correct_card_in(
+        &self,
+        _slot: usize,
+        draft: &CardDraft,
+        comment: &str,
+        pair: &LanguagePair,
+    ) -> ArtifactAttempt<CardRevision> {
+        self.correct_card_accounted(draft, comment, pair)
+    }
     fn store_card_meta(
         &self,
         term: &str,
@@ -96,7 +134,10 @@ impl<T> CardWorkflow for T where
 pub(super) enum TextOutcome {
     Understanding(Result<Understood>),
     BulkCorrection(Result<SenseCorrection>),
-    CardCorrection(Result<Box<(CardRevision, Option<ArtifactFile>)>>),
+    CardCorrection(
+        Result<Box<(CardRevision, Option<ArtifactFile>)>>,
+        Option<GenerationCost>,
+    ),
     KeyCheck(Result<()>),
 }
 

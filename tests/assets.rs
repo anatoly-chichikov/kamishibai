@@ -139,14 +139,61 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
     Ok(())
 }
 
-/// Production registry builds use the Gemini 3.6 version-sixteen visual revision.
+/// Production registry builds use the topology-recovery version-twenty-eight visual revision.
 #[test]
-fn production_registry_uses_the_version_sixteen_visual_revision() {
+fn production_registry_uses_the_version_twenty_eight_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "f9470cb741b5a94a8a9592dcdfaea96d6879829d975b0106076ee3bf541f0b8a",
+        "f132fa14c86ba82b876a691d8c35ad797dcf63e412fe3eec4619e187d94547ae",
         "production registry visual revision drifted without a policy-version change"
     );
+}
+
+/// Production planning removes printed state cues before the image boundary.
+#[test]
+fn production_registry_prompts_require_unlabeled_physical_state() {
+    let features = include_str!("../assets/layout_features_prompt.txt");
+    let composer = include_str!("../assets/layout_scene_prompt.txt");
+    let template = include_str!("../assets/manga_template.json");
+    assert_eq!(
+        (
+            features.contains("Never put a printed state name"),
+            composer.contains("Never put a printed state name"),
+            template.contains("continuous content-free pure-white 16px band"),
+            !template.contains("blank_hidden_or_icon_only"),
+        ),
+        (true, true, true, true),
+        "production image boundary regained textual state cues or an ambiguous outer frame"
+    );
+}
+
+/// Mechanical state changes stay physical instead of becoming arrows or control labels.
+#[test]
+fn production_image_boundary_forbids_control_state_glyphs() -> anyhow::Result<()> {
+    let features = include_str!("../assets/layout_features_prompt.txt");
+    let composer = include_str!("../assets/layout_scene_prompt.txt");
+    let template =
+        serde_json::from_str::<serde_json::Value>(include_str!("../assets/manga_template.json"))?;
+    let controls = template
+        .pointer("/manga_panel/rendering_rules/mechanical_controls")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    assert_eq!(
+        (
+            features.contains("one static unlabeled physical position per panel"),
+            features.contains("Never request arrows, direction indicators"),
+            composer.contains("one static unlabeled physical position per panel"),
+            composer.contains("Never describe a mechanical control as mid-motion"),
+            composer.contains("Never request arrows, direction indicators"),
+            composer.contains("Set motion_treatment=none"),
+            controls.contains("one static unlabeled physical position per panel"),
+            controls.contains("Never draw arrows, direction indicators"),
+            controls.contains("I/O, ON/OFF, zero/one labels"),
+        ),
+        (true, true, true, true, true, true, true, true, true),
+        "production image boundary regained arrow-like mechanical state cues"
+    );
+    Ok(())
 }
 
 /// Production planning keeps sentence truth separate from cinematic coverage.
@@ -284,6 +331,28 @@ fn production_registry_composer_accepts_scene_to_scene_transitions() {
     );
 }
 
+/// Production scene composition accepts contrast as a semantic visual relation.
+#[test]
+fn production_registry_composer_accepts_contrast_visual_relation() {
+    let schema = serde_json::from_str::<serde_json::Value>(include_str!(
+        "../assets/layout_scene_schema.json"
+    ))
+    .expect("invariant: embedded layout scene schema must decode");
+    let relations = schema
+        .pointer("/properties/semantic_spine/properties/visual_relation/enum")
+        .and_then(serde_json::Value::as_array)
+        .expect("invariant: composer visual relation enum must be an array");
+    let prompt = include_str!("../assets/layout_scene_prompt.txt");
+    assert_eq!(
+        (
+            relations.contains(&serde_json::json!("contrast")),
+            prompt.contains("opposition|contrast|burden"),
+        ),
+        (true, true),
+        "registry composer rejects the model's supported contrast relation"
+    );
+}
+
 /// Production composer schema prevents two observed stochastic wire failures.
 #[test]
 fn production_registry_composer_constrains_transition_and_expression() {
@@ -323,6 +392,7 @@ fn production_registry_composer_selects_operational_special_devices() {
         (
             kinds,
             prompt.contains("Choose exactly one special device from device_candidates"),
+            prompt.contains("locally qualified for automatic production selection"),
             prompt.contains("source_panel and target_panel use shot ids"),
             prompt.contains("The local materializer applies the selected device"),
             prompt.contains("source_panel is the parent/base shot")
@@ -338,6 +408,7 @@ fn production_registry_composer_selects_operational_special_devices() {
                 serde_json::json!("master_view"),
                 serde_json::json!("diagonal_release"),
             ],
+            true,
             true,
             true,
             true,
@@ -364,9 +435,14 @@ fn production_registry_embeds_one_device_budget_and_honest_capability_statuses()
                 value["scene_kind"]
                     .as_str()
                     .expect("invariant: scene kind must be a string"),
-                value["capability_status"]
-                    .as_str()
-                    .expect("invariant: capability status must be a string"),
+                (
+                    value["capability_status"]
+                        .as_str()
+                        .expect("invariant: capability status must be a string"),
+                    value["automatic_selection"]
+                        .as_bool()
+                        .expect("invariant: automatic selection must be a boolean"),
+                ),
             )
         })
         .collect::<std::collections::BTreeMap<_, _>>();
@@ -382,13 +458,13 @@ fn production_registry_embeds_one_device_budget_and_honest_capability_statuses()
             Some(3),
             Some(1),
             std::collections::BTreeMap::from([
-                ("crossing", "proven"),
-                ("diagonal_release", "qualification_required"),
-                ("inset", "qualification_required"),
-                ("master_view", "qualification_required"),
-                ("none", "qualified"),
-                ("open_frame", "qualification_required"),
-                ("overlap", "qualification_required"),
+                ("crossing", ("proven", true)),
+                ("diagonal_release", ("qualification_required", false)),
+                ("inset", ("qualification_required", false)),
+                ("master_view", ("qualification_required", false)),
+                ("none", ("qualified", true)),
+                ("open_frame", ("qualification_required", false)),
+                ("overlap", ("qualification_required", false)),
             ]),
         ),
         "device catalog hides budget or overstates an unqualified visual capability"

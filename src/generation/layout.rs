@@ -103,8 +103,10 @@ const TRANSITION_TRIGGERS: [&str; 10] = [
 ];
 const TEXTLESS_MOTION: &str = "Use only abstract speed lines and blur; never render letters, numbers, symbols, onomatopoeia, or letterlike motion marks.";
 const TEXTLESS_SOUND_EFFECTS: &str = "Absolutely no sound-effect glyphs, including Japanese onomatopoeia, stylized symbols, or pseudo-writing.";
-const TEXTLESS_VISIBLE_WRITING: &str = "No visible writing of any kind, including letterlike marks near moving people, vehicles, machinery, impacts, or reactions.";
+const TEXTLESS_VISIBLE_WRITING: &str = "No visible letters, words, numerals, state labels, interface marks, symbols, or pseudo-writing anywhere; express every device state only through unlabeled physical position, light, shape, or motion.";
 const TEXTLESS_MARKS: &str = "No logos, brand marks, emblems, badges, icons, interface symbols, or decorative pseudo-writing on any object.";
+const TEXTLESS_LABELS: &str = "No signs, captions, labels, legends, state names, icons, or interface text; all text-bearing surfaces stay featureless, hidden, or turned away.";
+const OUTER_WHITE_BAND: &str = "Reserve a continuous content-free pure-white 16px band on all four canvas edges; no ink, screentone, subject, effect, panel frame, or open-frame artwork may touch or cross it.";
 const FEATURE_PROMPT: &str = include_str!("../../assets/layout_features_prompt.txt");
 const DEVICE_KINDS: [&str; 7] = [
     "none",
@@ -133,8 +135,10 @@ pub(crate) struct SceneFeatures {
 pub(crate) struct EligibleLayouts {
     features: SceneFeatures,
     templates: Vec<Value>,
+    retry_template: Option<Value>,
     contract: Value,
     policy: Value,
+    fallback: Option<Value>,
 }
 
 /// Owns one validated, unpadded selector ranking over eligible canonical layouts.
@@ -142,7 +146,10 @@ pub(crate) struct EligibleLayouts {
 pub(crate) struct LayoutRanking {
     features: SceneFeatures,
     templates: Vec<Value>,
+    eligible_count: usize,
+    primary_count: usize,
     candidates: Vec<Value>,
+    fallback: Option<Value>,
 }
 
 /// Owns the chosen canonical template and the exact selection record sent to the composer.
@@ -257,10 +264,10 @@ impl LayoutRegistry {
             "additionalProperties": false,
             "properties": {
                 "panel_count": {"type": "integer", "minimum": 1, "maximum": 4},
-                "added_view": {"type": "string", "minLength": 1},
-                "source_support": {"type": "string", "minLength": 1},
+                "added_view": {"type": "string"},
+                "source_support": {"type": "string"},
                 "verdict": {"type": "string", "enum": COVERAGE_VERDICTS},
-                "reason": {"type": "string", "minLength": 1}
+                "reason": {"type": "string"}
             },
             "required": ["panel_count", "added_view", "source_support", "verdict", "reason"]
         });
@@ -280,8 +287,8 @@ impl LayoutRegistry {
             "additionalProperties": false,
             "properties": {
                 "strategy": {"type": "string", "enum": CAMERA_ARCS},
-                "progression": {"type": "string", "minLength": 1},
-                "motivation": {"type": "string", "minLength": 1},
+                "progression": {"type": "string"},
+                "motivation": {"type": "string"},
                 "continuity": continuity
             },
             "required": ["strategy", "progression", "motivation", "continuity"]
@@ -293,16 +300,16 @@ impl LayoutRegistry {
                 "id": {"type": "string", "enum": ["s1", "s2", "s3", "s4"]},
                 "semantic_beat_index": {"type": "integer", "minimum": 1, "maximum": 4},
                 "role": {"type": "string", "enum": SHOT_ROLES},
-                "visible_anchor": {"type": "string", "minLength": 1},
-                "source_support": {"type": "string", "minLength": 1},
+                "visible_anchor": {"type": "string"},
+                "source_support": {"type": "string"},
                 "shot_scale": {"type": "string", "enum": SHOT_SCALES},
                 "viewpoint": {"type": "string", "enum": VIEWPOINTS},
                 "viewpoint_anchor": {"type": "string"},
                 "framing": {"type": "string", "enum": FRAMINGS},
                 "angle": {"type": "string", "enum": CAMERA_ANGLES},
                 "depth_plan": {"type": "string", "enum": DEPTH_PLANS},
-                "camera_motivation": {"type": "string", "minLength": 1},
-                "information_gain": {"type": "string", "minLength": 1},
+                "camera_motivation": {"type": "string"},
+                "information_gain": {"type": "string"},
                 "transition_trigger": {"type": "string", "enum": TRANSITION_TRIGGERS}
             },
             "required": ["id", "semantic_beat_index", "role", "visible_anchor", "source_support", "shot_scale", "viewpoint", "viewpoint_anchor", "framing", "angle", "depth_plan", "camera_motivation", "information_gain", "transition_trigger"]
@@ -328,7 +335,7 @@ impl LayoutRegistry {
                 "spatial_relation": {"type": "string", "enum": array_field(contract, "allowed_spatial_relations")?},
                 "transition_type": {"type": "string", "enum": array_field(contract, "allowed_transition_types")?},
                 "reading_direction": {"type": "string", "enum": [LEFT_TO_RIGHT]},
-                "literal_anchor": {"type": "string", "minLength": 1},
+                "literal_anchor": {"type": "string"},
                 "camera_arc": camera_arc,
                 "shots": {
                     "type": "array",
@@ -336,7 +343,7 @@ impl LayoutRegistry {
                     "maxItems": 4,
                     "items": shot
                 },
-                "selection_logic": {"type": "string", "minLength": 1}
+                "selection_logic": {"type": "string"}
             },
             "required": FEATURE_FIELDS
         }))
@@ -346,6 +353,8 @@ impl LayoutRegistry {
     pub(crate) fn decode_features(&self, raw: &str) -> Result<SceneFeatures> {
         let mut value = serde_json::from_str::<Value>(raw)
             .context("layout feature extractor returned invalid JSON")?;
+        normalize_coverage_audit(&mut value)?;
+        normalize_shots(&mut value)?;
         normalize_camera_arc(&mut value)?;
         validate_features(&value, contract(&self.value)?)?;
         Ok(SceneFeatures { value })
@@ -355,20 +364,45 @@ impl LayoutRegistry {
     pub(crate) fn eligible(&self, features: &SceneFeatures) -> Result<EligibleLayouts> {
         validate_features(&features.value, contract(&self.value)?)?;
         let root = root_object(&self.value)?;
-        let templates = array_field(root, "templates")?
+        let available = array_field(root, "templates")?;
+        let mut templates = available
             .iter()
             .filter(|template| template_matches(template, &features.value))
             .cloned()
             .collect::<Vec<_>>();
-        if templates.is_empty() {
-            return Err(UnsupportedNarrativeTuple {
-                features: features.value.clone(),
-            }
-            .into());
-        }
+        let fallback = if templates.is_empty() {
+            let template = nearest_same_count_template(available, &features.value)?;
+            let Some(template) = template else {
+                return Err(UnsupportedNarrativeTuple {
+                    features: features.value.clone(),
+                }
+                .into());
+            };
+            let fallback = json!({
+                "kind": "nearest_same_panel_count",
+                "requested": {
+                    "panel_count": field_clone(root_object(&features.value)?, "panel_count")?,
+                    "panel_relation": field_clone(root_object(&features.value)?, "panel_relation")?,
+                    "panel_emphasis": field_clone(root_object(&features.value)?, "panel_emphasis")?
+                },
+                "fallback_template_id": template_id(template)?
+            });
+            templates.push(template.clone());
+            Some(fallback)
+        } else {
+            None
+        };
+        let retry_template = if templates.len() == 1
+            && usize_field(root_object(&features.value)?, "panel_count")? > 1
+        {
+            nearest_same_count_alternative(available, &features.value, &templates[0])?.cloned()
+        } else {
+            None
+        };
         Ok(EligibleLayouts {
             features: features.clone(),
             templates,
+            retry_template,
             contract: root
                 .get("selection_contract")
                 .cloned()
@@ -379,6 +413,7 @@ impl LayoutRegistry {
                 .and_then(|value| value.get("templates"))
                 .cloned()
                 .ok_or_else(|| anyhow!("layout registry lacks layout policy"))?,
+            fallback,
         })
     }
 }
@@ -432,7 +467,7 @@ impl EligibleLayouts {
                         "properties": {
                             "template_id": {"type": "string", "enum": ids},
                             "adaptation": {"type": "string", "enum": ["exact"]},
-                            "reason": {"type": "string", "minLength": 1}
+                            "reason": {"type": "string"}
                         },
                         "required": ["template_id", "adaptation", "reason"]
                     }
@@ -474,29 +509,66 @@ impl EligibleLayouts {
             }));
             validate_candidates(&candidates, &self.templates)?;
         }
+        let primary_count = candidates.len();
+        let eligible_count = self.templates.len();
+        let mut templates = self.templates.clone();
+        if let Some(template) = &self.retry_template {
+            templates.push(template.clone());
+        }
+        if candidates.len() == 1 && templates.len() > 1 {
+            for template in &templates {
+                let mut expanded = candidates.clone();
+                expanded.push(json!({
+                    "template_id": template_id(template)?,
+                    "adaptation": "exact",
+                    "reason": "automatic registry safeguard restored one deterministic retry alternative"
+                }));
+                if validate_candidates(&expanded, &templates).is_ok() {
+                    candidates = expanded;
+                    break;
+                }
+            }
+        }
         Ok(LayoutRanking {
             features: self.features.clone(),
-            templates: self.templates.clone(),
+            templates,
+            eligible_count,
+            primary_count,
             candidates,
+            fallback: self.fallback.clone(),
         })
     }
 }
 
 impl LayoutRanking {
     /// Resolve one viable candidate while preserving required dynamic emphasis.
-    pub(crate) fn select(&self, term: &str) -> Result<LayoutSelection> {
+    pub(crate) fn select(&self, term: &str, attempt: u8) -> Result<LayoutSelection> {
         if term.trim().is_empty() || self.candidates.is_empty() {
             bail!("layout selection requires a nonempty term and ranking");
         }
-        let dynamic = dynamic_candidate_slots(&self.candidates, &self.templates)?;
-        let slot = if dynamic.is_empty() {
-            selection_slot(term, self.candidates.len())
+        let primary = self
+            .candidates
+            .get(..self.primary_count)
+            .filter(|candidates| !candidates.is_empty())
+            .ok_or_else(|| anyhow!("layout ranking has an invalid primary candidate count"))?;
+        let dynamic = dynamic_candidate_slots(primary, &self.templates)?;
+        let base = if dynamic.is_empty() {
+            selection_slot(term, primary.len())
         } else {
             let index = selection_slot(term, dynamic.len());
             dynamic
                 .get(index)
                 .copied()
                 .ok_or_else(|| anyhow!("dynamic layout slot leaves the ranking"))?
+        };
+        let slot = if dynamic.len() > 1 {
+            let index = dynamic
+                .iter()
+                .position(|slot| *slot == base)
+                .ok_or_else(|| anyhow!("dynamic layout base leaves the retry subset"))?;
+            dynamic[(index + usize::from(attempt)) % dynamic.len()]
+        } else {
+            (base + usize::from(attempt)) % self.candidates.len()
         };
         let chosen = self
             .candidates
@@ -506,19 +578,28 @@ impl LayoutRanking {
         let id = template_id(&template)?;
         let eligible = self
             .templates
+            .get(..self.eligible_count)
+            .ok_or_else(|| anyhow!("layout ranking has an invalid eligible template count"))?
             .iter()
             .map(template_id)
             .collect::<Result<Vec<_>>>()?;
         let devices = device_candidates(&template)?;
-        let summary = json!({
+        let mut summary = json!({
             "scene_features": self.features.value,
             "eligible_template_ids": eligible,
             "ranked_candidates": self.candidates,
             "chosen_template_id": id,
             "device_candidates": devices,
             "seed_source": term,
+            "scene_attempt_index": attempt,
             "deterministic_slot": slot
         });
+        if let Some(fallback) = &self.fallback {
+            summary
+                .as_object_mut()
+                .ok_or_else(|| anyhow!("layout selection summary must be an object"))?
+                .insert(String::from("layout_fallback"), fallback.clone());
+        }
         Ok(LayoutSelection { summary, template })
     }
 }
@@ -607,11 +688,13 @@ fn device_candidates(template: &Value) -> Result<Value> {
         .filter_map(|device| {
             let root = device.as_object()?;
             let id = root.get("device_id")?.as_str()?;
+            let status = root.get("capability_status")?.as_str()?;
             let families = root.get("compatible_topology_families")?.as_array()?;
             let minimum = root.get("min_panels")?.as_u64()?;
             let maximum = root.get("max_panels")?.as_u64()?;
             let count = u64::try_from(panels).ok()?;
             (root.get("automatic_selection").and_then(Value::as_bool) == Some(true)
+                && matches!(status, "qualified" | "proven")
                 && (!constrained || compatible.contains(&id))
                 && families.iter().any(|value| value.as_str() == Some(family))
                 && (minimum..=maximum).contains(&count))
@@ -834,10 +917,10 @@ fn validate_device_registry(value: &Value) -> Result<()> {
         let item = root_object(device)?;
         let id = nonempty_string_field(item, "device_id")?;
         let kind = nonempty_string_field(item, "scene_kind")?;
+        bool_field(item, "automatic_selection")?;
         if !ids.insert(id)
             || !kinds.insert(kind)
             || !DEVICE_KINDS.contains(&kind)
-            || !bool_field(item, "automatic_selection")?
             || !matches!(
                 string_field(item, "capability_status")?,
                 "qualified" | "proven" | "qualification_required"
@@ -905,9 +988,18 @@ pub(crate) fn materialize(scene: &mut Value, selection: &LayoutSelection) -> Res
         .get("page_design")
         .and_then(Value::as_object)
         .and_then(|value| value.get("special_device"))
-        .cloned()
-        .ok_or_else(|| anyhow!("semantic composer scene lacks a special-device selection"))?;
-    let device = normalize_device(&requested, selection, &path, planned_shots(selection)?)?;
+        .cloned();
+    let mut device = match requested {
+        Some(requested) => {
+            normalize_device(&requested, selection, &path, planned_shots(selection)?)?
+        }
+        None => canonical_device_fallback(
+            selection,
+            &path,
+            planned_shots(selection)?,
+            "semantic composer omitted special_device",
+        )?,
+    };
     ensure_object(root, "meta")?
         .insert(String::from("layout_selection"), selection.summary.clone());
     ensure_object(root, "canvas")?
@@ -975,7 +1067,18 @@ pub(crate) fn materialize(scene: &mut Value, selection: &LayoutSelection) -> Res
         bind_continuity_contract(panel, camera_continuity, index, panel_count)?;
         materialize_panel(panel, geometry, &path, index, &id)?;
     }
-    apply_device(semantic, &device, &path)?;
+    let mut specialized = semantic.clone();
+    match apply_device(&mut specialized, &device, &path) {
+        Ok(()) => semantic.clone_from(&specialized),
+        Err(error) => {
+            device = canonical_device_fallback(
+                selection,
+                &path,
+                planned_shots(selection)?,
+                error.to_string().as_str(),
+            )?;
+        }
+    }
     let kind = device
         .get("kind")
         .and_then(Value::as_str)
@@ -1018,6 +1121,14 @@ pub(crate) fn materialize(scene: &mut Value, selection: &LayoutSelection) -> Res
     rendering.insert(
         String::from("logos_and_emblems"),
         Value::String(String::from(TEXTLESS_MARKS)),
+    );
+    rendering.insert(
+        String::from("signs_and_labels"),
+        Value::String(String::from(TEXTLESS_LABELS)),
+    );
+    rendering.insert(
+        String::from("outer_border"),
+        Value::String(String::from(OUTER_WHITE_BAND)),
     );
     Ok(())
 }
@@ -1106,6 +1217,45 @@ fn normalize_device(
     path: &[Value],
     shots: &[Value],
 ) -> Result<Value> {
+    let candidates = validated_device_candidates(selection, path, shots)?;
+    let fallback = canonical_none_device(candidates)?;
+    match normalize_requested_device(requested, candidates, path, shots) {
+        Ok(device) => Ok(device),
+        Err(error) => device_fallback_reason(fallback, error.to_string().as_str()),
+    }
+}
+
+fn canonical_device_fallback(
+    selection: &LayoutSelection,
+    path: &[Value],
+    shots: &[Value],
+    cause: &str,
+) -> Result<Value> {
+    device_fallback_reason(
+        canonical_none_device(validated_device_candidates(selection, path, shots)?)?,
+        cause,
+    )
+}
+
+fn device_fallback_reason(mut device: Value, cause: &str) -> Result<Value> {
+    device
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("canonical none device must be an object"))?
+        .insert(
+            String::from("reason"),
+            Value::String(format!(
+                "canonical panel topology retained after local device fallback: {cause}"
+            )),
+        );
+    Ok(device)
+}
+
+fn normalize_requested_device(
+    requested: &Value,
+    candidates: &[Value],
+    path: &[Value],
+    shots: &[Value],
+) -> Result<Value> {
     let root = root_object(requested)?;
     exact_keys(
         root,
@@ -1123,11 +1273,6 @@ fn normalize_device(
     let source = string_field(root, "source_panel")?;
     let target = string_field(root, "target_panel")?;
     let subject = string_field(root, "subject_id")?;
-    let candidates = selection
-        .summary
-        .get("device_candidates")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("layout selection lacks device candidates"))?;
     let candidate = candidates
         .iter()
         .find(|value| {
@@ -1161,6 +1306,111 @@ fn normalize_device(
         "source_panel": canonical_reference(source, shots, path)?,
         "target_panel": canonical_reference(target, shots, path)?,
         "subject_id": subject
+    }))
+}
+
+fn validated_device_candidates<'a>(
+    selection: &'a LayoutSelection,
+    path: &[Value],
+    shots: &[Value],
+) -> Result<&'a Vec<Value>> {
+    if path.len() != shots.len() || path.is_empty() {
+        bail!("layout selection device context has inconsistent panel and shot counts");
+    }
+    let mut shot_ids = BTreeSet::new();
+    let mut panel_ids = BTreeSet::new();
+    for (index, (panel, shot)) in path.iter().zip(shots.iter()).enumerate() {
+        let panel = panel
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow!("layout selection has an invalid canonical panel id"))?;
+        let shot = nonempty_string_field(root_object(shot)?, "id")?;
+        if shot != format!("s{}", index + 1)
+            || !shot_ids.insert(shot.to_owned())
+            || !panel_ids.insert(panel.to_owned())
+        {
+            bail!("layout selection has an invalid device shot-to-panel context");
+        }
+    }
+    let candidates = selection
+        .summary
+        .get("device_candidates")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("layout selection lacks device candidates"))?;
+    let mut ids = BTreeSet::new();
+    let mut kinds = BTreeSet::new();
+    for candidate in candidates {
+        let root = root_object(candidate)?;
+        exact_keys(
+            root,
+            &[
+                "device_id",
+                "scene_kind",
+                "strength",
+                "capability_status",
+                "best_for",
+                "avoid_when",
+                "reference_contract",
+                "allowed_references",
+                "deterministic_materialization",
+            ],
+            "layout selection device candidate",
+        )?;
+        let id = nonempty_string_field(root, "device_id")?;
+        let kind = nonempty_string_field(root, "scene_kind")?;
+        if !ids.insert(id.to_owned())
+            || !kinds.insert(kind.to_owned())
+            || !DEVICE_KINDS.contains(&kind)
+        {
+            bail!("layout selection device candidates are inconsistent");
+        }
+        let references = array_field(root, "allowed_references")?;
+        if references.is_empty() {
+            bail!("layout selection device candidate has no safe references");
+        }
+        for reference in references {
+            let reference = root_object(reference)?;
+            exact_keys(
+                reference,
+                &["source_panel", "target_panel"],
+                "layout selection device reference",
+            )?;
+            let source = string_field(reference, "source_panel")?;
+            let target = string_field(reference, "target_panel")?;
+            if (!source.is_empty() && !shot_ids.contains(source))
+                || (!target.is_empty() && !shot_ids.contains(target))
+                || (!source.is_empty() && source == target)
+            {
+                bail!("layout selection device candidate contains an unsafe reference");
+            }
+        }
+    }
+    if !candidates.iter().any(|candidate| {
+        candidate["scene_kind"] == "none"
+            && candidate["allowed_references"]
+                .as_array()
+                .is_some_and(|references| {
+                    references.iter().any(|reference| {
+                        reference["source_panel"] == "" && reference["target_panel"] == ""
+                    })
+                })
+    }) {
+        bail!("layout selection lacks an explicit safe none device");
+    }
+    Ok(candidates)
+}
+
+fn canonical_none_device(candidates: &[Value]) -> Result<Value> {
+    candidates
+        .iter()
+        .find(|candidate| candidate["scene_kind"] == "none")
+        .ok_or_else(|| anyhow!("layout selection lacks an explicit safe none device"))?;
+    Ok(json!({
+        "kind": "none",
+        "reason": "the requested structural device was rejected locally; canonical panel topology remains unchanged",
+        "source_panel": "",
+        "target_panel": "",
+        "subject_id": ""
     }))
 }
 
@@ -2070,8 +2320,6 @@ fn validate_shots(
         bail!("layout feature extractor returned a shot count that differs from panel_count");
     }
     let mut covered = BTreeSet::new();
-    let mut anchors = BTreeSet::new();
-    let mut gains = BTreeSet::new();
     let mut camera_setups = Vec::with_capacity(shots.len());
     let mut scales = Vec::with_capacity(shots.len());
     for (index, shot) in shots.iter().enumerate() {
@@ -2109,11 +2357,8 @@ fn validate_shots(
         if !SHOT_ROLES.contains(&role) {
             bail!("layout shot has an unsupported cinematic role");
         }
-        let anchor = nonempty_string_field(value, "visible_anchor")?;
+        nonempty_string_field(value, "visible_anchor")?;
         nonempty_string_field(value, "source_support")?;
-        if !anchors.insert(anchor) {
-            bail!("layout feature extractor duplicated a visible shot anchor");
-        }
         let scale = string_field(value, "shot_scale")?;
         let viewpoint = string_field(value, "viewpoint")?;
         let viewpoint_anchor = string_field(value, "viewpoint_anchor")?;
@@ -2136,10 +2381,7 @@ fn validate_shots(
             bail!("layout shot contains a contradictory motivated-camera setup");
         }
         nonempty_string_field(value, "camera_motivation")?;
-        let gain = nonempty_string_field(value, "information_gain")?;
-        if !gains.insert(gain) {
-            bail!("layout feature extractor duplicated camera information gain");
-        }
+        nonempty_string_field(value, "information_gain")?;
         camera_setups.push((scale, viewpoint, framing, angle, depth));
         scales.push(
             SHOT_SCALES
@@ -2269,6 +2511,178 @@ fn normalize_camera_arc(value: &mut Value) -> Result<()> {
         ),
     );
     Ok(())
+}
+
+fn normalize_shots(value: &mut Value) -> Result<()> {
+    let shots = value
+        .as_object_mut()
+        .and_then(|root| root.get_mut("shots"))
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| anyhow!("layout feature response must contain shots"))?;
+    for (index, shot) in shots.iter_mut().enumerate() {
+        let root = shot
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("layout feature shots must be objects"))?;
+        let viewpoint = String::from(string_field(root, "viewpoint")?);
+        let anchor = String::from(string_field(root, "viewpoint_anchor")?);
+        if viewpoint == "objective" {
+            root.insert(
+                String::from("viewpoint_anchor"),
+                Value::String(String::new()),
+            );
+        } else if anchor.trim().is_empty() {
+            root.insert(
+                String::from("viewpoint"),
+                Value::String(String::from("objective")),
+            );
+            root.insert(
+                String::from("viewpoint_anchor"),
+                Value::String(String::new()),
+            );
+        }
+        let trigger = String::from(string_field(root, "transition_trigger")?);
+        if index == 0 && trigger != "scene_open" {
+            root.insert(
+                String::from("transition_trigger"),
+                Value::String(String::from("scene_open")),
+            );
+        } else if index > 0 && trigger == "scene_open" {
+            let replacement = match string_field(root, "role")? {
+                "establishing" => "spatial_reorientation",
+                "action" => "new_action",
+                "detail" => "detail_reveal",
+                "reaction" => "emotion_change",
+                "payoff" => "payoff",
+                "aspect" => "attention_shift",
+                _ => "attention_shift",
+            };
+            root.insert(
+                String::from("transition_trigger"),
+                Value::String(String::from(replacement)),
+            );
+        }
+        let framing = string_field(root, "framing")?;
+        let role = string_field(root, "role")?;
+        let scale = string_field(root, "shot_scale")?;
+        if framing == "insert" && (role != "detail" || !matches!(scale, "close" | "extreme_close"))
+        {
+            root.insert(
+                String::from("framing"),
+                Value::String(String::from("single")),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn normalize_coverage_audit(value: &mut Value) -> Result<()> {
+    let root = root_object(value)?;
+    let panel_count = usize_field(root, "panel_count")?;
+    let supplied = root
+        .get("coverage_audit")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let normalized = (1..=4)
+        .map(|count| {
+            let source = supplied.iter().find_map(|entry| {
+                entry
+                    .as_object()
+                    .filter(|item| item.get("panel_count").and_then(Value::as_u64) == u64::try_from(count).ok())
+            });
+            let prose = |field: &str, fallback: String| {
+                source
+                    .and_then(|item| item.get(field))
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.trim().is_empty())
+                    .map(String::from)
+                    .unwrap_or(fallback)
+            };
+            let verdict = match count.cmp(&panel_count) {
+                std::cmp::Ordering::Less => "insufficient",
+                std::cmp::Ordering::Equal => "selected",
+                std::cmp::Ordering::Greater => "redundant_or_unsupported",
+            };
+            json!({
+                "panel_count": count,
+                "added_view": prose("added_view", format!("canonical {count}-panel coverage option")),
+                "source_support": prose("source_support", String::from("locally normalized from the authoritative panel count")),
+                "verdict": verdict,
+                "reason": prose("reason", format!("local coverage normalization marks {count} panels as {verdict}"))
+            })
+        })
+        .collect::<Vec<_>>();
+    value
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("layout feature response must be an object"))?
+        .insert(String::from("coverage_audit"), Value::Array(normalized));
+    Ok(())
+}
+
+fn nearest_same_count_template<'a>(
+    templates: &'a [Value],
+    features: &Value,
+) -> Result<Option<&'a Value>> {
+    nearest_same_count_template_excluding(templates, features, None)
+}
+
+fn nearest_same_count_alternative<'a>(
+    templates: &'a [Value],
+    features: &Value,
+    selected: &Value,
+) -> Result<Option<&'a Value>> {
+    nearest_same_count_template_excluding(templates, features, Some(selected))
+}
+
+fn nearest_same_count_template_excluding<'a>(
+    templates: &'a [Value],
+    features: &Value,
+    excluded: Option<&Value>,
+) -> Result<Option<&'a Value>> {
+    let feature = root_object(features)?;
+    let panel_count = usize_field(feature, "panel_count")?;
+    let mut ranked = Vec::new();
+    for template in templates {
+        let root = root_object(template)?;
+        let id = template_id(template)?;
+        if let Some(excluded) = excluded {
+            let same_id = template_id(excluded)? == id;
+            let same_geometry = root.get("panels") == root_object(excluded)?.get("panels");
+            if same_id || same_geometry {
+                continue;
+            }
+        }
+        if !bool_field(root, "automatic_selection")?
+            || string_field(root, "reading_direction")? != LEFT_TO_RIGHT
+            || !matches!(
+                string_field(root, "capability_status")?,
+                "candidate" | "qualified"
+            )
+            || usize_field(root, "panel_count")? != panel_count
+            || !dynamic_constraint_matches(root, feature)
+        {
+            continue;
+        }
+        let distance = usize::from(!profile_includes(
+            root,
+            "temporal_relation",
+            feature,
+            "panel_relation",
+        )) + usize::from(!profile_includes(
+            root,
+            "emphasis_curve",
+            feature,
+            "panel_emphasis",
+        ));
+        let ordinary = usize::from(!matches!(
+            id,
+            "splash-1-v1" | "equal-split-vertical-2-v1" | "orthogonal-grid-3-v1" | "grid-2x2-4-v1"
+        ));
+        let dynamic = usize::from(dynamic_only(template));
+        ranked.push(((distance, ordinary, dynamic, id.to_owned()), template));
+    }
+    ranked.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(ranked.first().map(|(_, template)| *template))
 }
 
 fn template_matches(template: &Value, features: &Value) -> bool {
@@ -2444,11 +2858,11 @@ fn rendering_directive(
     if panel_count == 1 {
         if device == "open_frame" {
             return format!(
-                "Render exactly one continuous full-page image in template {template_id}. Keep the outer white safety margin, but omit the declared local panel border so the atmosphere opens into the page. Never add an interior divider, inset, montage, coordinate, label, or construction mark."
+                "{OUTER_WHITE_BAND} Render exactly one continuous image in template {template_id}. Open only the declared local panel frame inside that closed white band; never extend artwork to a canvas edge. Never add an interior divider, inset, montage, coordinate, label, or construction mark."
             );
         }
         return format!(
-            "Render exactly one continuous full-page image inside the single outer border of template {template_id}. Never add an interior border, white divider, gutter, inset, split composition, diptych, montage, coordinate, label, or construction mark."
+            "{OUTER_WHITE_BAND} Render exactly one continuous image inside the single panel frame of template {template_id}. Never add an interior border, white divider, gutter, inset, split composition, diptych, montage, coordinate, label, or construction mark."
         );
     }
     let specialization = match device {
@@ -2465,7 +2879,7 @@ fn rendering_directive(
             "Render exactly the declared detail panel as a higher-z inset contained inside its named parent; do not create any additional inset or panel.",
         ),
         "open_frame" => String::from(
-            "Omit only the declared panel's local border while preserving its clip region, every neighboring panel, and the outer white page margin.",
+            "Omit only the declared panel's local border inside its unchanged clip region. The open frame never becomes page bleed: every neighboring panel and the closed outer white band remain intact.",
         ),
         "master_view" => String::from(
             "Keep the declared subject visually identical across distinct phases of one shared continuous environment while preserving every canonical divider.",
@@ -2479,7 +2893,7 @@ fn rendering_directive(
         .map(|value| format!(" {value}"))
         .unwrap_or_default();
     format!(
-        "Render exactly {panel_count} visible semantic panel regions using the locally materialized geometry for template {template_id}.{geometry} {specialization} Never subdivide, duplicate, merge, or add a semantic panel. Add no invented dividers, coordinates, labels, or construction marks."
+        "{OUTER_WHITE_BAND} Render exactly {panel_count} visible semantic panel regions using the locally materialized geometry for template {template_id}.{geometry} {specialization} Never subdivide, duplicate, merge, or add a semantic panel. Add no invented dividers, coordinates, labels, or construction marks."
     )
 }
 
@@ -2806,6 +3220,85 @@ mod tests {
     }
 
     #[test]
+    fn empty_exact_tuple_uses_one_deterministic_same_count_fallback() {
+        let mut registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let raw = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("three-panel fallback fixture must be valid");
+        registry.value["templates"]
+            .as_array_mut()
+            .expect("invariant: templates must be an array")
+            .retain(|template| !template_matches(template, features.json()));
+        let first = registry
+            .eligible(&features)
+            .expect("missing exact tuple must retain one same-count fallback");
+        let second = registry
+            .eligible(&features)
+            .expect("same fallback input must remain selectable");
+        let first_ids = first
+            .templates
+            .iter()
+            .filter_map(|template| template["template_id"].as_str())
+            .collect::<Vec<_>>();
+        let second_ids = second
+            .templates
+            .iter()
+            .filter_map(|template| template["template_id"].as_str())
+            .collect::<Vec<_>>();
+        let selection = first
+            .decode_ranking(
+                &json!({
+                    "ranked_candidates": [candidate("orthogonal-grid-3-v1", 3)]
+                })
+                .to_string(),
+            )
+            .expect("fallback ranking must decode")
+            .select("fallback-term", 0)
+            .expect("fallback ranking must select");
+        assert_eq!(
+            (
+                first_ids,
+                second_ids,
+                first.templates[0]["panel_count"].as_u64(),
+                selection
+                    .json()
+                    .pointer("/layout_fallback/requested/panel_count")
+                    .and_then(Value::as_u64),
+                selection
+                    .json()
+                    .pointer("/layout_fallback/fallback_template_id")
+                    .and_then(Value::as_str),
+            ),
+            (
+                vec!["orthogonal-grid-3-v1"],
+                vec!["orthogonal-grid-3-v1"],
+                Some(3),
+                Some(3),
+                Some("orthogonal-grid-3-v1"),
+            ),
+            "nearest fallback changed panel count, choice, or provenance"
+        );
+    }
+
+    #[test]
+    fn empty_exact_tuple_fails_when_no_same_count_template_exists() {
+        let mut registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let raw = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("three-panel fallback fixture must be valid");
+        registry.value["templates"]
+            .as_array_mut()
+            .expect("invariant: templates must be an array")
+            .retain(|template| template["panel_count"] != 3);
+        assert!(
+            registry.eligible(&features).is_err(),
+            "tuple fallback changed panel count when no safe layout remained"
+        );
+    }
+
+    #[test]
     fn dynamic_only_three_panel_templates_cannot_reach_quiet_or_still_shortlists() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let mut dynamic = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
@@ -3001,7 +3494,7 @@ mod tests {
                 .to_string(),
             )
             .expect("dynamic directive layout must rank")
-            .select("dynamic-directive")
+            .select("dynamic-directive", 0)
             .expect("dynamic directive layout must select");
         let mut scene = composer_scene(3);
         materialize(&mut scene, &selection).expect("dynamic directive layout must materialize");
@@ -3050,7 +3543,7 @@ mod tests {
             )
             .expect("dynamic ranking must decode");
         let selection = ranking
-            .select("get my brother to help")
+            .select("get my brother to help", 0)
             .expect("dynamic ranking must select");
         assert_eq!(
             (
@@ -3080,7 +3573,7 @@ mod tests {
         let selection = eligible
             .decode_ranking(&ranking.to_string())
             .expect("registry must restore one required dynamic candidate")
-            .select("dynamic-omission")
+            .select("dynamic-omission", 0)
             .expect("restored dynamic ranking must select");
         assert_eq!(
             selection.json()["chosen_template_id"].as_str(),
@@ -3114,7 +3607,7 @@ mod tests {
             .expect("dynamic subset ranking must decode");
         let choices = ["term-0", "term-1"].map(|term| {
             ranking
-                .select(term)
+                .select(term, 0)
                 .expect("dynamic subset ranking must select")
                 .json()["chosen_template_id"]
                 .as_str()
@@ -3152,7 +3645,7 @@ mod tests {
             .expect("ordinary ranking must decode");
         let choices = ["term-0", "term-1"].map(|term| {
             ranking
-                .select(term)
+                .select(term, 0)
                 .expect("ordinary ranking must select")
                 .json()["chosen_template_id"]
                 .as_str()
@@ -3165,6 +3658,163 @@ mod tests {
                 Some(String::from("equal-split-horizontal-2-v1")),
             ],
             "dynamic winner protection disabled diversity for ordinary rankings"
+        );
+    }
+
+    #[test]
+    fn scene_retries_rotate_the_ranked_slot_deterministically() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let raw = feature_json(2, "sequence", "equal", LEFT_TO_RIGHT);
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("retry ranking fixture must be valid");
+        let ranking = registry
+            .eligible(&features)
+            .expect("retry ranking fixture must retain coverage")
+            .decode_ranking(
+                &json!({
+                    "ranked_candidates": [
+                        candidate("equal-split-vertical-2-v1", 2),
+                        candidate("equal-split-horizontal-2-v1", 2)
+                    ]
+                })
+                .to_string(),
+            )
+            .expect("retry ranking must decode");
+        let first = ranking
+            .select("term-0", 0)
+            .expect("first scene attempt must select");
+        let retry = ranking
+            .select("term-0", 1)
+            .expect("second scene attempt must select");
+        let repeated = ranking
+            .select("term-0", 1)
+            .expect("same scene retry must remain deterministic");
+        assert_eq!(
+            (
+                first.json()["chosen_template_id"].as_str(),
+                retry.json()["chosen_template_id"].as_str(),
+                repeated.json()["chosen_template_id"].as_str(),
+                retry.json()["scene_attempt_index"].as_u64(),
+            ),
+            (
+                Some("equal-split-vertical-2-v1"),
+                Some("equal-split-horizontal-2-v1"),
+                Some("equal-split-horizontal-2-v1"),
+                Some(1),
+            ),
+            "scene retry reused the first slot or lost deterministic attempt provenance"
+        );
+    }
+
+    #[test]
+    fn scene_retries_stay_inside_a_required_dynamic_subset() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut raw = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
+        raw["motion_vector"] = Value::String(String::from("diagonal"));
+        raw["intensity"] = Value::String(String::from("high"));
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("dynamic retry fixture must be valid");
+        let ranking = registry
+            .eligible(&features)
+            .expect("dynamic retry fixture must retain coverage")
+            .decode_ranking(
+                &json!({
+                    "ranked_candidates": [
+                        candidate("diagonal-strip-3-v1", 3),
+                        candidate("slanted-t-bottom-3-p2-v1", 3),
+                        candidate("slanted-dominant-rail-3-p2-v1", 3)
+                    ]
+                })
+                .to_string(),
+            )
+            .expect("dynamic retry ranking must decode");
+        let first = ranking
+            .select("dynamic-retry", 0)
+            .expect("first dynamic attempt must select");
+        let retry = ranking
+            .select("dynamic-retry", 1)
+            .expect("second dynamic attempt must select");
+        let first = first.json()["chosen_template_id"].as_str();
+        let retry = retry.json()["chosen_template_id"].as_str();
+        assert!(
+            matches!(
+                first,
+                Some("slanted-t-bottom-3-p2-v1" | "slanted-dominant-rail-3-p2-v1")
+            ) && matches!(
+                retry,
+                Some("slanted-t-bottom-3-p2-v1" | "slanted-dominant-rail-3-p2-v1")
+            ) && first != retry,
+            "scene retry escaped or failed to rotate the required dynamic subset"
+        );
+    }
+
+    #[test]
+    fn scene_retry_escapes_a_single_candidate_shortlist_deterministically() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut raw = feature_json(2, "sequence", "dominant_end", LEFT_TO_RIGHT);
+        raw["motion_vector"] = Value::String(String::from("diagonal"));
+        raw["intensity"] = Value::String(String::from("high"));
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("single-candidate retry fixture must be valid");
+        let ranking = registry
+            .eligible(&features)
+            .expect("single-candidate retry fixture must retain coverage")
+            .decode_ranking(
+                &json!({
+                    "ranked_candidates": [candidate("diagonal-split-2-end-strong-v1", 2)]
+                })
+                .to_string(),
+            )
+            .expect("single-candidate ranking must decode");
+        let choices = [0, 1, 1].map(|attempt| {
+            ranking
+                .select("single-dynamic-retry", attempt)
+                .expect("scene attempt must select")
+                .json()["chosen_template_id"]
+                .as_str()
+                .map(String::from)
+        });
+        assert!(
+            choices[0] == Some(String::from("diagonal-split-2-end-strong-v1"))
+                && choices[0] != choices[1]
+                && choices[1] == choices[2],
+            "a one-item model shortlist defeated deterministic retry variation"
+        );
+    }
+
+    #[test]
+    fn multi_panel_singleton_tuple_gets_a_distinct_retry_geometry() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let raw = feature_json(2, "simultaneous", "equal", LEFT_TO_RIGHT);
+        let features = registry
+            .decode_features(&raw.to_string())
+            .expect("singleton tuple fixture must be valid");
+        let ranking = registry
+            .eligible(&features)
+            .expect("singleton tuple must retain its canonical layout")
+            .decode_ranking(
+                &json!({
+                    "ranked_candidates": [candidate("equal-split-vertical-2-v1", 2)]
+                })
+                .to_string(),
+            )
+            .expect("singleton tuple ranking must decode");
+        let choices = [0, 1].map(|attempt| {
+            ranking
+                .select("singleton-tuple", attempt)
+                .expect("singleton scene attempt must select")
+                .json()["chosen_template_id"]
+                .as_str()
+                .map(String::from)
+        });
+        assert!(
+            choices[0] == Some(String::from("equal-split-vertical-2-v1"))
+                && choices[1].is_some()
+                && choices[0] != choices[1],
+            "a multi-panel singleton tuple repeated identical geometry on retry"
         );
     }
 
@@ -3240,24 +3890,62 @@ mod tests {
     }
 
     #[test]
-    fn feature_decoder_rejects_a_cut_without_a_narrative_trigger() {
+    fn feature_decoder_repairs_a_reopened_later_shot() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let mut features = feature_json(2, "sequence", "dominant_end", LEFT_TO_RIGHT);
         features["shots"][1]["transition_trigger"] = json!("scene_open");
-        assert!(
-            registry.decode_features(&features.to_string()).is_err(),
-            "a later camera setup reopened the scene without a narrative trigger"
+        let decoded = registry
+            .decode_features(&features.to_string())
+            .expect("a safe trigger repair must decode");
+        assert_eq!(
+            decoded.value["shots"][1]["transition_trigger"],
+            json!("new_action"),
+            "a later camera setup kept reopening the scene"
         );
     }
 
     #[test]
-    fn feature_decoder_rejects_repeated_camera_information_gain() {
+    fn feature_decoder_repairs_an_unanchored_subjective_viewpoint() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut features = feature_json(2, "sequence", "dominant_end", LEFT_TO_RIGHT);
+        features["shots"][1]["viewpoint"] = json!("subjective");
+        features["shots"][1]["viewpoint_anchor"] = json!("   ");
+        let decoded = registry
+            .decode_features(&features.to_string())
+            .expect("an ungrounded viewpoint must downgrade safely");
+        assert_eq!(
+            (
+                &decoded.value["shots"][1]["viewpoint"],
+                &decoded.value["shots"][1]["viewpoint_anchor"]
+            ),
+            (&json!("objective"), &json!("")),
+            "an unanchored subjective viewpoint survived normalization"
+        );
+    }
+
+    #[test]
+    fn feature_decoder_repairs_an_unsupported_insert_setup() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut features = feature_json(2, "sequence", "dominant_end", LEFT_TO_RIGHT);
+        features["shots"][1]["framing"] = json!("insert");
+        let decoded = registry
+            .decode_features(&features.to_string())
+            .expect("an unsupported insert must downgrade safely");
+        assert_eq!(
+            decoded.value["shots"][1]["framing"],
+            json!("single"),
+            "an unsupported insert framing survived normalization"
+        );
+    }
+
+    #[test]
+    fn feature_decoder_tolerates_repeated_camera_information_gain() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let mut features = feature_json(2, "sequence", "dominant_end", LEFT_TO_RIGHT);
         features["shots"][1]["information_gain"] = features["shots"][0]["information_gain"].clone();
         assert!(
-            registry.decode_features(&features.to_string()).is_err(),
-            "adjacent shots repeated information under cosmetically different framing"
+            registry.decode_features(&features.to_string()).is_ok(),
+            "repeated descriptive information gain still terminates a valid shot plan"
         );
     }
 
@@ -3304,41 +3992,70 @@ mod tests {
     }
 
     #[test]
-    fn feature_decoder_rejects_an_insert_without_detail_evidence() {
-        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
-        let mut features = feature_json(2, "sequence", "dominant_end", LEFT_TO_RIGHT);
-        features["shots"][1]["framing"] = json!("insert");
-        assert!(
-            registry.decode_features(&features.to_string()).is_err(),
-            "an insert without a close detail role passed motivated-camera validation"
-        );
-    }
-
-    #[test]
-    fn feature_decoder_rejects_coverage_audit_disagreement() {
+    fn feature_decoder_normalizes_cosmetic_coverage_audit_disagreement() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let mut features = expanded_feature_json(4, "contrast", "rising", "wide_detail_pair");
-        features["coverage_audit"][2]["verdict"] = Value::String(String::from("selected"));
-        assert!(
-            registry.decode_features(&features.to_string()).is_err(),
-            "a coverage audit that disagrees with panel_count reached layout selection"
+        features["coverage_audit"] = json!([
+            {
+                "panel_count": 4,
+                "added_view": "",
+                "source_support": null,
+                "verdict": "insufficient",
+                "reason": ""
+            },
+            {"unexpected": "cosmetic model prose"}
+        ]);
+        let decoded = registry
+            .decode_features(&features.to_string())
+            .expect("cosmetic coverage audit drift must normalize locally");
+        let audit = decoded.json()["coverage_audit"]
+            .as_array()
+            .expect("invariant: normalized audit must be an array")
+            .iter()
+            .map(|entry| {
+                (
+                    entry["panel_count"].as_u64(),
+                    entry["verdict"].as_str(),
+                    entry["added_view"]
+                        .as_str()
+                        .is_some_and(|value| !value.is_empty()),
+                    entry["source_support"]
+                        .as_str()
+                        .is_some_and(|value| !value.is_empty()),
+                    entry["reason"]
+                        .as_str()
+                        .is_some_and(|value| !value.is_empty()),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            audit,
+            vec![
+                (Some(1), Some("insufficient"), true, true, true),
+                (Some(2), Some("insufficient"), true, true, true),
+                (Some(3), Some("insufficient"), true, true, true),
+                (Some(4), Some("selected"), true, true, true),
+            ],
+            "coverage audit was not rebuilt from authoritative panel_count"
         );
     }
 
     #[test]
-    fn feature_decoder_rejects_duplicated_or_uncovered_shots() {
+    fn feature_decoder_tolerates_duplicate_prose_but_rejects_uncovered_beats() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let mut duplicated = feature_json(2, "sequence", "equal", LEFT_TO_RIGHT);
         duplicated["shots"][1]["visible_anchor"] = Value::String(String::from("visible beat 1"));
+        duplicated["shots"][1]["information_gain"] =
+            duplicated["shots"][0]["information_gain"].clone();
         let mut uncovered = feature_json(2, "sequence", "equal", LEFT_TO_RIGHT);
         uncovered["shots"][1]["semantic_beat_index"] = Value::Number(1_u64.into());
         assert_eq!(
             (
-                registry.decode_features(&duplicated.to_string()).is_err(),
+                registry.decode_features(&duplicated.to_string()).is_ok(),
                 registry.decode_features(&uncovered.to_string()).is_err(),
             ),
             (true, true),
-            "duplicate coverage or an uncovered semantic beat reached layout selection"
+            "descriptive duplicates still fail or a semantic beat can remain uncovered"
         );
     }
 
@@ -3404,7 +4121,7 @@ mod tests {
         let selection = eligible
             .decode_ranking(&ranking.to_string())
             .expect("canonical ranking must decode")
-            .select("geometry-blind")
+            .select("geometry-blind", 0)
             .expect("canonical ranking must select");
         let card = selection
             .composer_card()
@@ -3460,7 +4177,7 @@ mod tests {
     }
 
     #[test]
-    fn ranking_preserves_a_single_viable_candidate_without_padding() {
+    fn ranking_extends_one_viable_candidate_with_one_distinct_retry() {
         let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
         let raw = feature_json(2, "sequence", "equal", LEFT_TO_RIGHT);
         let features = registry
@@ -3475,14 +4192,14 @@ mod tests {
         let selection = eligible
             .decode_ranking(&ranking.to_string())
             .expect("one genuinely viable candidate must be accepted")
-            .select("unusual-term")
+            .select("unusual-term", 0)
             .expect("one candidate must be selectable");
         assert_eq!(
             selection.json()["ranked_candidates"]
                 .as_array()
                 .map(Vec::len),
-            Some(1),
-            "selection padded a one-candidate ranking"
+            Some(2),
+            "selection failed to restore exactly one distinct retry alternative"
         );
     }
 
@@ -3502,7 +4219,7 @@ mod tests {
         let selection = eligible
             .decode_ranking(&ranking.to_string())
             .expect("canonical ranking must decode")
-            .select("materialize")
+            .select("materialize", 0)
             .expect("canonical ranking must select");
         let mut scene = composer_scene(2);
         materialize(&mut scene, &selection).expect("canonical layout must materialize");
@@ -3561,7 +4278,7 @@ mod tests {
     }
 
     #[test]
-    fn composer_card_exposes_every_operational_device_compatible_with_the_layout() {
+    fn composer_card_exposes_only_qualified_devices_compatible_with_the_layout() {
         let selection = selected_layout("equal-split-vertical-2-v1", "equal");
         let card = selection
             .composer_card()
@@ -3570,19 +4287,51 @@ mod tests {
             .as_array()
             .expect("invariant: composer devices must be an array")
             .iter()
-            .filter_map(|value| value["scene_kind"].as_str())
+            .map(|value| {
+                (
+                    value["scene_kind"]
+                        .as_str()
+                        .expect("invariant: candidate scene kind must be a string"),
+                    value["capability_status"]
+                        .as_str()
+                        .expect("invariant: candidate status must be a string"),
+                )
+            })
             .collect::<BTreeSet<_>>();
         assert_eq!(
             devices,
-            BTreeSet::from([
-                "none",
-                "crossing",
-                "overlap",
-                "inset",
-                "open_frame",
-                "master_view",
-            ]),
-            "composer card hid an operational device supported by the selected layout"
+            BTreeSet::from([("crossing", "proven"), ("none", "qualified")]),
+            "composer card exposed a device that is not qualified for automatic selection"
+        );
+    }
+
+    #[test]
+    fn automatic_catalog_excludes_every_qualification_required_device() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let devices = registry.value["templates"]
+            .as_array()
+            .expect("invariant: templates must be an array")
+            .iter()
+            .filter(|template| {
+                template["automatic_selection"].as_bool() == Some(true)
+                    && matches!(
+                        template["capability_status"].as_str(),
+                        Some("candidate" | "qualified")
+                    )
+            })
+            .flat_map(|template| {
+                device_candidates(template)
+                    .expect("automatic device catalog must build")
+                    .as_array()
+                    .expect("invariant: device candidates must be an array")
+                    .clone()
+            })
+            .filter_map(|candidate| candidate["scene_kind"].as_str().map(String::from))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            devices,
+            BTreeSet::from([String::from("crossing"), String::from("none")]),
+            "qualification-required device remained reachable through an automatic layout"
         );
     }
 
@@ -3605,8 +4354,8 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(
             devices,
-            BTreeSet::from(["none", "open_frame", "master_view"]),
-            "operational catalog ignored the selected template device allowlist"
+            BTreeSet::from(["none"]),
+            "dynamic layout exposed an unqualified device through its allowlist"
         );
     }
 
@@ -3619,16 +4368,9 @@ mod tests {
             .iter()
             .find(|value| value["template_id"] == "grid-2x2-4-v1")
             .expect("invariant: four-panel grid must exist");
-        let candidates = device_candidates(template).expect("grid device catalog must build");
         let pairs = |kind: &str| {
-            candidates
-                .as_array()
-                .expect("invariant: candidates must be an array")
-                .iter()
-                .find(|value| value["scene_kind"] == kind)
-                .expect("invariant: requested device must be eligible")["allowed_references"]
-                .as_array()
-                .expect("invariant: device references must be an array")
+            device_references(kind, template)
+                .expect("device reference catalog must build")
                 .iter()
                 .map(|value| {
                     format!(
@@ -3687,12 +4429,8 @@ mod tests {
                 .collect::<BTreeSet<_>>()
         };
         let overlaps = |id: &str| {
-            candidates(id)
-                .iter()
-                .find(|value| value["scene_kind"] == "overlap")
-                .expect("invariant: overlap must remain available")["allowed_references"]
-                .as_array()
-                .expect("invariant: overlap references must be an array")
+            device_references("overlap", template(id))
+                .expect("overlap reference catalog must build")
                 .iter()
                 .map(|value| {
                     format!(
@@ -3717,7 +4455,7 @@ mod tests {
             ),
             (
                 false,
-                true,
+                false,
                 false,
                 BTreeSet::from([
                     String::from("s2>s1"),
@@ -3809,8 +4547,12 @@ mod tests {
 
     #[test]
     fn materialization_executes_inset_overlap_and_open_frame_geometry() {
-        let dominant = selected_layout("dominant-split-2-v1", "dominant_start");
-        let equal = selected_layout("equal-split-vertical-2-v1", "equal");
+        let dominant =
+            selected_layout_with_device("dominant-split-2-v1", "dominant_start", "inset");
+        let overlap_selection =
+            selected_layout_with_device("equal-split-vertical-2-v1", "equal", "overlap");
+        let open_selection =
+            selected_layout_with_device("equal-split-vertical-2-v1", "equal", "open_frame");
         let mut inset = device_composer_scene(
             2,
             json!({
@@ -3842,8 +4584,8 @@ mod tests {
             }),
         );
         materialize(&mut inset, &dominant).expect("eligible inset must materialize");
-        materialize(&mut overlap, &equal).expect("eligible overlap must materialize");
-        materialize(&mut open, &equal).expect("eligible open frame must materialize");
+        materialize(&mut overlap, &overlap_selection).expect("eligible overlap must materialize");
+        materialize(&mut open, &open_selection).expect("eligible open frame must materialize");
         assert_eq!(
             (
                 inset
@@ -3868,6 +4610,12 @@ mod tests {
                     .and_then(Value::as_str),
                 open.pointer("/manga_panel/panels/0/frame/border")
                     .and_then(Value::as_str),
+                open.pointer("/manga_panel/page_design/layout_rendering_directive")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| {
+                        value.starts_with(OUTER_WHITE_BAND)
+                            && value.contains("never becomes page bleed")
+                    }),
             ),
             (
                 Some("inset"),
@@ -3878,6 +4626,7 @@ mod tests {
                 Some(1),
                 Some("open_frame"),
                 Some("none"),
+                true,
             ),
             "model-selected structural devices did not specialize canonical geometry"
         );
@@ -3885,8 +4634,13 @@ mod tests {
 
     #[test]
     fn materialization_preserves_master_view_and_diagonal_release_contracts() {
-        let equal = selected_layout("equal-split-vertical-2-v1", "equal");
-        let diagonal = selected_layout("diagonal-split-2-v1", "dominant_start");
+        let equal =
+            selected_layout_with_device("equal-split-vertical-2-v1", "equal", "master_view");
+        let diagonal = selected_layout_with_device(
+            "diagonal-split-2-v1",
+            "dominant_start",
+            "diagonal_release",
+        );
         let mut master = device_composer_scene(
             2,
             json!({
@@ -3943,8 +4697,9 @@ mod tests {
     }
 
     #[test]
-    fn materialization_rejects_whitespace_only_master_view_continuity() {
-        let selection = selected_layout("equal-split-vertical-2-v1", "equal");
+    fn invalid_master_view_continuity_falls_back_to_canonical_none() {
+        let selection =
+            selected_layout_with_device("equal-split-vertical-2-v1", "equal", "master_view");
         let device = json!({
             "kind": "master_view",
             "reason": "one actor advances through two phases of the same place",
@@ -3962,32 +4717,169 @@ mod tests {
             Value::String(String::from(" "));
         phases["manga_panel"]["panels"][1]["continuity"]["subject_phase"] =
             Value::String(String::from("  "));
+        materialize(&mut environment, &selection)
+            .expect("invalid master-view environment must degrade");
+        materialize(&mut phases, &selection).expect("invalid master-view phases must degrade");
         assert_eq!(
             (
-                materialize(&mut environment, &selection).is_err(),
-                materialize(&mut phases, &selection).is_err(),
+                environment["manga_panel"]["page_design"]["special_device"]["kind"].as_str(),
+                phases["manga_panel"]["page_design"]["special_device"]["kind"].as_str(),
             ),
-            (true, true),
-            "master view accepted whitespace as a shared environment or distinct phase"
+            (Some("none"), Some("none")),
+            "invalid master-view continuity still terminated materialization"
         );
     }
 
     #[test]
-    fn materialization_rejects_a_device_incompatible_with_the_selected_layout() {
-        let selection = selected_layout("splash-1-v1", "equal");
+    fn absent_model_device_falls_back_to_canonical_none() {
+        let selection = selected_layout("equal-split-vertical-2-v1", "equal");
+        let mut scene = device_composer_scene(2, json!({}));
+        scene["manga_panel"]["page_design"]
+            .as_object_mut()
+            .expect("invariant: page design must be an object")
+            .remove("special_device");
+        materialize(&mut scene, &selection).expect("absent model device must degrade");
+        assert_eq!(
+            (
+                scene["manga_panel"]["page_design"]["special_device"]["kind"].as_str(),
+                scene["manga_panel"]["page_design"]["special_device"]["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("omitted special_device"))
+            ),
+            (Some("none"), true),
+            "absent model device still terminated materialization"
+        );
+    }
+
+    #[test]
+    fn crossing_with_an_absent_subject_falls_back_to_canonical_none() {
+        let selection = selected_layout("equal-split-vertical-2-v1", "equal");
         let mut scene = device_composer_scene(
-            1,
+            2,
             json!({
                 "kind": "crossing",
-                "reason": "invalid one-panel crossing",
+                "reason": "one actor crosses the canonical divider",
                 "source_panel": "s1",
+                "target_panel": "s2",
+                "subject_id": "missing-actor"
+            }),
+        );
+        materialize(&mut scene, &selection).expect("absent crossing subject must degrade");
+        assert_eq!(
+            (
+                scene["manga_panel"]["page_design"]["special_device"]["kind"].as_str(),
+                scene["manga_panel"]["panels"][0]["continuity"]["breakout"]["enabled"].as_bool(),
+            ),
+            (Some("none"), Some(false)),
+            "failed crossing specialization leaked state or terminated materialization"
+        );
+    }
+
+    #[test]
+    fn invalid_model_authored_devices_fall_back_to_canonical_none() {
+        let selection = selected_layout("equal-split-vertical-2-v1", "equal");
+        let devices = [
+            json!({
+                "kind": "invented_device",
+                "reason": "the model invented an unavailable device",
+                "source_panel": "",
                 "target_panel": "",
+                "subject_id": ""
+            }),
+            json!({
+                "kind": "crossing",
+                "reason": "the model chose an unsafe reference pair",
+                "source_panel": "s2",
+                "target_panel": "s1",
+                "subject_id": "actor"
+            }),
+            json!({
+                "kind": "crossing",
+                "reason": "the model omitted the required subject",
+                "source_panel": "s1",
+                "target_panel": "s2",
+                "subject_id": ""
+            }),
+            json!({
+                "kind": "crossing",
+                "reason": "the model named an unavailable shot",
+                "source_panel": "s9",
+                "target_panel": "s2",
+                "subject_id": "actor"
+            }),
+        ];
+        let normalized = devices
+            .into_iter()
+            .map(|device| {
+                let mut scene = device_composer_scene(2, device);
+                materialize(&mut scene, &selection)
+                    .expect("invalid model device must degrade without losing the scene");
+                (
+                    scene
+                        .pointer("/manga_panel/page_design/special_device/kind")
+                        .and_then(Value::as_str)
+                        .map(String::from),
+                    scene
+                        .pointer("/manga_panel/page_design/special_device/reason")
+                        .and_then(Value::as_str)
+                        .is_some_and(|reason| reason.contains("local device fallback")),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            normalized,
+            vec![(Some(String::from("none")), true); 4],
+            "invalid model devices still terminate scene materialization"
+        );
+    }
+
+    #[test]
+    fn registered_device_absent_from_candidates_cannot_be_forged_by_the_composer() {
+        let selection = selected_layout("equal-split-vertical-2-v1", "equal");
+        let mut scene = device_composer_scene(
+            2,
+            json!({
+                "kind": "overlap",
+                "reason": "the composer requested a registered but unqualified device",
+                "source_panel": "s1",
+                "target_panel": "s2",
+                "subject_id": ""
+            }),
+        );
+        materialize(&mut scene, &selection)
+            .expect("device absent from candidates must degrade to canonical none");
+        assert_eq!(
+            (
+                scene["manga_panel"]["page_design"]["special_device"]["kind"].as_str(),
+                scene["manga_panel"]["page_design"]["special_device"]["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("incompatible with the selected layout")),
+            ),
+            (Some("none"), true),
+            "composer forged a registered device outside its selected candidate catalog"
+        );
+    }
+
+    #[test]
+    fn device_fallback_refuses_a_selection_without_canonical_none() {
+        let mut selection = selected_layout("equal-split-vertical-2-v1", "equal");
+        selection.summary["device_candidates"]
+            .as_array_mut()
+            .expect("invariant: device candidates must be an array")
+            .retain(|candidate| candidate["scene_kind"] != "none");
+        let mut scene = device_composer_scene(
+            2,
+            json!({
+                "kind": "crossing",
+                "reason": "one actor crosses the canonical divider",
+                "source_panel": "s1",
+                "target_panel": "s2",
                 "subject_id": "actor"
             }),
         );
         assert!(
             materialize(&mut scene, &selection).is_err(),
-            "materializer accepted a device absent from the selected layout catalog"
+            "selection corruption was hidden behind a model-device fallback"
         );
     }
 
@@ -4007,7 +4899,7 @@ mod tests {
         let selection = eligible
             .decode_ranking(&ranking.to_string())
             .expect("canonical ranking must decode")
-            .select("textless")
+            .select("textless", 0)
             .expect("canonical ranking must select");
         let mut scene = composer_scene(2);
         materialize(&mut scene, &selection).expect("canonical layout must materialize");
@@ -4026,10 +4918,17 @@ mod tests {
                     .pointer("/manga_panel/rendering_rules/logos_and_emblems")
                     .and_then(Value::as_str),
                 scene
+                    .pointer("/manga_panel/rendering_rules/signs_and_labels")
+                    .and_then(Value::as_str),
+                scene
+                    .pointer("/manga_panel/rendering_rules/outer_border")
+                    .and_then(Value::as_str),
+                scene
                     .pointer("/manga_panel/page_design/layout_rendering_directive")
                     .and_then(Value::as_str)
                     .is_some_and(|value| {
-                        value.contains("exactly 2 visible semantic panel regions")
+                        value.starts_with(OUTER_WHITE_BAND)
+                            && value.contains("exactly 2 visible semantic panel regions")
                             && value.contains("Keep every subject contained")
                     }),
             ),
@@ -4040,6 +4939,8 @@ mod tests {
                 Some(
                     "No logos, brand marks, emblems, badges, icons, interface symbols, or decorative pseudo-writing on any object."
                 ),
+                Some(TEXTLESS_LABELS),
+                Some(OUTER_WHITE_BAND),
                 true,
             ),
             "canonical materialization weakened the final textless image directive"
@@ -4062,7 +4963,7 @@ mod tests {
         let selection = eligible
             .decode_ranking(&ranking.to_string())
             .expect("canonical ranking must decode")
-            .select("reordered")
+            .select("reordered", 0)
             .expect("canonical ranking must select");
         let mut scene = composer_scene(2);
         scene["manga_panel"]["panels"][0]["shot_id"] = Value::String(String::from("s2"));
@@ -4177,7 +5078,7 @@ mod tests {
         let selection = eligible
             .decode_ranking(&ranking.to_string())
             .expect("corrected diagonal split must rank")
-            .select("diagonal")
+            .select("diagonal", 0)
             .expect("corrected diagonal split must select");
         let mut scene = composer_scene(2);
         materialize(&mut scene, &selection).expect("corrected diagonal split must materialize");
@@ -4407,8 +5308,36 @@ mod tests {
             .expect("device layout must be eligible")
             .decode_ranking(&json!({"ranked_candidates": [candidate(template_id, 2)]}).to_string())
             .expect("device layout must rank")
-            .select("device-test")
+            .select("device-test", 0)
             .expect("device layout must select")
+    }
+
+    /// Add one explicitly qualified device to a selection for isolated materializer tests.
+    fn selected_layout_with_device(
+        template_id: &str,
+        emphasis: &str,
+        kind: &str,
+    ) -> LayoutSelection {
+        let mut selection = selected_layout(template_id, emphasis);
+        let registry = serde_json::from_str::<Value>(device_registry())
+            .expect("invariant: device registry fixture must decode");
+        let mut device = registry["devices"]
+            .as_array()
+            .expect("invariant: device registry must contain devices")
+            .iter()
+            .find(|device| device["scene_kind"] == kind)
+            .cloned()
+            .expect("invariant: requested materializer device must exist");
+        device["automatic_selection"] = Value::Bool(true);
+        device["capability_status"] = Value::String(String::from("qualified"));
+        let candidate = device_candidate(&device, &selection.template)
+            .expect("qualified materializer fixture must project")
+            .expect("qualified materializer fixture must have safe references");
+        selection.summary["device_candidates"]
+            .as_array_mut()
+            .expect("invariant: selected device candidates must be an array")
+            .push(candidate);
+        selection
     }
 
     /// Create one semantic composer fixture carrying a model-selected device.

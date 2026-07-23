@@ -202,11 +202,11 @@ fn metered_media_retries_keep_cumulative_cost_and_success_does_not_double_count_
     );
     let second = engine.drafts()[0].artifacts().picture().cost();
     let file = file_for(&engine.drafts()[0], Artifact::Picture)
-        .with_cost(GenerationCost::from_nanos(340_000_000));
+        .with_cost(GenerationCost::from_nanos(220_000_000));
     engine.applied_media_attempt(
         0,
         Artifact::Picture,
-        ArtifactAttempt::new(Ok(file), Some(GenerationCost::from_nanos(340_000_000))),
+        ArtifactAttempt::new(Ok(file), Some(GenerationCost::from_nanos(220_000_000))),
     );
     assert_eq!(
         (
@@ -226,7 +226,7 @@ fn metered_media_retries_keep_cumulative_cost_and_success_does_not_double_count_
 #[test]
 fn terminal_media_failure_keeps_the_last_cumulative_cost() {
     let mut engine = SessionEngine::start(vec![draft("whilst")]);
-    for nanos in [90_000_000, 210_000_000, 390_000_000] {
+    for nanos in [90_000_000, 120_000_000, 180_000_000] {
         engine.applied_media_attempt(
             0,
             Artifact::Picture,

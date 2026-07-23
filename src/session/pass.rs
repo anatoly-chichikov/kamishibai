@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use super::candidate::{RawInputBatch, Sense, WordCandidate};
 use super::detection::LearningGuess;
-use super::draft::{CardDraft, CardMeta};
+use super::draft::{ArtifactAttempt, CardDraft, CardMeta};
 use super::pair::LanguagePair;
 
 /// The outcome of the cheap first-pass understanding step.
@@ -148,4 +148,14 @@ pub trait CardCorrection {
         comment: &str,
         pair: &LanguagePair,
     ) -> Result<CardRevision>;
+
+    /// Apply one comment and return the exact cost of this correction call.
+    fn correct_card_accounted(
+        &self,
+        draft: &CardDraft,
+        comment: &str,
+        pair: &LanguagePair,
+    ) -> ArtifactAttempt<CardRevision> {
+        ArtifactAttempt::unmetered(self.correct_card(draft, comment, pair))
+    }
 }

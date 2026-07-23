@@ -52,6 +52,17 @@ impl Renderer for FixedRenderer {
     }
 }
 
+/// Renderer that rejects every proposed scene.
+#[derive(Clone, Debug, Default)]
+struct RejectingRenderer;
+
+impl Renderer for RejectingRenderer {
+    /// Reject the proposed scene before any artifact is staged.
+    fn render(&self, _scene: &Value, _progress: &mut dyn Progress) -> Result<DynamicImage> {
+        anyhow::bail!("render rejected")
+    }
+}
+
 /// Progress recorder for illustration tests.
 #[derive(Clone, Debug, Default)]
 struct Recorder {
@@ -75,6 +86,11 @@ impl Progress for Recorder {
 /// Return one fixed scene JSON document.
 fn scene() -> Value {
     json!({"manga_panel":{"panels":[{"id":"x"}],"meta":{"title":"t","description":"d"}}})
+}
+
+/// Return one scene JSON document tagged with an observable identity.
+fn identified_scene(identity: &str) -> Value {
+    json!({"manga_panel":{"panels":[{"id":identity}],"meta":{"title":"t","description":"d"}}})
 }
 
 /// Return one valid first visual-policy revision.
@@ -325,6 +341,102 @@ fn failed_image_commits_remove_the_staged_image_file() -> Result<()> {
     assert!(
         std::fs::read_dir(probe)?.count() == 1,
         "failed image commits must keep only the committed scene"
+    );
+    Ok(())
+}
+
+/// Accepted recomposition replaces the old scene and writes its rendered picture.
+#[test]
+fn accepted_recomposition_replaces_the_old_scene_and_writes_its_rendered_picture() -> Result<()> {
+    let directory = TempDir::new()?;
+    let cache = Cache::new("manga-en", directory.path()).visual(revision_a())?;
+    let old = identified_scene("old-scene");
+    let new = identified_scene("new-scene");
+    fs::write(cache.filepath(SCENE_FILE)?, serde_json::to_vec(&old)?)?;
+    let illustration =
+        Illustration::new(cache, CountingTranslator::new(new.clone()), FixedRenderer);
+    let mut progress = Recorder::default();
+    let result = illustration.picture_with_recomposed_scene(
+        "The current pulled the swimmer away",
+        "en",
+        &mut progress,
+    )?;
+    let stored = serde_json::from_slice::<Value>(&fs::read(illustration.filepath(SCENE_FILE)?)?)?;
+    assert_eq!(
+        (
+            result,
+            stored,
+            illustration.filepath(ILLUSTRATION_FILE)?.exists(),
+            progress
+                .events
+                .iter()
+                .map(|event| event.1.as_str())
+                .collect::<Vec<_>>(),
+        ),
+        (
+            (String::from(ILLUSTRATION_FILE), false),
+            new,
+            true,
+            vec!["step", "step", "translated", "rendered"],
+        ),
+        "accepted recomposition no longer replaces the old scene and reports the persisted picture"
+    );
+    Ok(())
+}
+
+/// Rejected recomposition preserves the old scene and leaves the picture absent.
+#[test]
+fn rejected_recomposition_preserves_the_old_scene_and_leaves_the_picture_absent() -> Result<()> {
+    let directory = TempDir::new()?;
+    let cache = Cache::new("manga-en", directory.path()).visual(revision_a())?;
+    let old = identified_scene("old-scene");
+    let new = identified_scene("rejected-scene");
+    fs::write(cache.filepath(SCENE_FILE)?, serde_json::to_vec(&old)?)?;
+    let illustration = Illustration::new(cache, CountingTranslator::new(new), RejectingRenderer);
+    let result = illustration.picture_with_recomposed_scene(
+        "The current pulled the swimmer away",
+        "en",
+        &mut Recorder::default(),
+    );
+    let stored = serde_json::from_slice::<Value>(&fs::read(illustration.filepath(SCENE_FILE)?)?)?;
+    assert_eq!(
+        (
+            result.is_err(),
+            stored,
+            illustration.filepath(ILLUSTRATION_FILE)?.exists(),
+        ),
+        (true, old, false),
+        "rejected recomposition must not expose its scene or leave a picture artifact"
+    );
+    Ok(())
+}
+
+/// A failed second commit restores the previous scene and removes the new picture.
+#[test]
+fn failed_recomposition_second_commit_restores_the_previous_visual_pair() -> Result<()> {
+    let directory = TempDir::new()?;
+    let cache = Cache::failing("manga-en", directory.path(), 1).visual(revision_a())?;
+    let old = identified_scene("old-scene");
+    let new = identified_scene("uncommitted-scene");
+    fs::write(cache.filepath(SCENE_FILE)?, serde_json::to_vec(&old)?)?;
+    let probe = cache.path();
+    let illustration =
+        Illustration::new(cache, CountingTranslator::new(new.clone()), FixedRenderer);
+    let result = illustration.picture_with_recomposed_scene(
+        "The current pulled the swimmer away",
+        "en",
+        &mut Recorder::default(),
+    );
+    let stored = serde_json::from_slice::<Value>(&fs::read(illustration.filepath(SCENE_FILE)?)?)?;
+    assert_eq!(
+        (
+            result.is_err(),
+            stored,
+            illustration.filepath(ILLUSTRATION_FILE)?.exists(),
+            fs::read_dir(probe)?.count(),
+        ),
+        (true, old, false, 1),
+        "a partial recomposition commit exposed a scene without its rendered picture"
     );
     Ok(())
 }

@@ -75,6 +75,9 @@ Rules:
 - A close evidence or mechanism detail is not redundant merely because the same object exists in an establishing or action view. Different scale is useful when the close view reveals distinct sentence-grounded stress, contact, obstruction, operation, condition, or result that the wide view cannot make legible.
 - When the sentence visibly grounds an actor, a purposeful process, an obstacle or operating condition, and an observable purpose or result, select four shots when each function remains distinct after the compound-anchor audit.
 - Explicitly audit non-textual evidence: posture under effort, physical contact, deformation, alignment, blockage, movement, separation, intact parts, or a directly observable state. Prefer this evidence over labels or readouts.
+- Never put a printed state name, letter, numeral, legend, interface mark, or other writing cue into visible_anchor or information_gain. Describe device state only through unlabeled physical position, light, shape, or contact.
+- For every mechanical control such as a switch, breaker, button, lever, dial, or gauge, plan one static unlabeled physical position per panel. Never describe it mid-motion or combine its before and after positions in one shot; when the stated change needs both states, assign each static state to a distinct grounded shot.
+- Never request arrows, direction indicators, motion marks around a control, I/O, ON/OFF, zero/one labels, tick marks, legends, numbered bays, status icons, or state diagrams.
 - panel_count counts useful camera views, not chronology. It may exceed semantic_beat_count when context, action, detail, reaction, or aspect views clarify the same grounded event.
 - Every shot must add distinct sentence-grounded information. Do not duplicate a face, pose, object, or visible_anchor merely to increase panel_count.
 - Each semantic beat index must be covered by at least one shot. shots contains exactly panel_count items with consecutive ids from s1.

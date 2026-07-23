@@ -6,13 +6,98 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::Result;
 use anyhow::anyhow;
-use anyhow::{Result, bail};
 use image::DynamicImage;
 use serde_json::Value;
 use serde_json::json;
 
 use super::{BorderDetector, ImageSource, Progress, Renderer, SceneText};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RenderRejection {
+    Topology(String),
+    Ocr(String),
+    Border(String),
+    LegacyGutter(String),
+    Other(String),
+}
+
+impl RenderRejection {
+    fn topology(reason: &str) -> Self {
+        Self::Topology(String::from(reason))
+    }
+
+    fn ocr(reason: String) -> Self {
+        Self::Ocr(reason)
+    }
+
+    fn border(reason: String) -> Self {
+        Self::Border(reason)
+    }
+
+    fn legacy_gutter(reason: &str) -> Self {
+        Self::LegacyGutter(String::from(reason))
+    }
+
+    fn other(reason: String) -> Self {
+        Self::Other(reason)
+    }
+
+    fn reason(&self) -> &str {
+        match self {
+            Self::Topology(reason)
+            | Self::Ocr(reason)
+            | Self::Border(reason)
+            | Self::LegacyGutter(reason)
+            | Self::Other(reason) => reason.as_str(),
+        }
+    }
+
+    fn category(&self) -> &'static str {
+        match self {
+            Self::Topology(_) => "topology",
+            Self::Ocr(_) => "ocr",
+            Self::Border(_) => "border",
+            Self::LegacyGutter(_) => "legacy_gutter",
+            Self::Other(_) => "other",
+        }
+    }
+}
+
+/// Report one exhausted manga render while retaining its rejection category.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct MangaRenderRejection {
+    attempts: usize,
+    rejection: RenderRejection,
+}
+
+impl MangaRenderRejection {
+    fn new(attempts: usize, rejection: RenderRejection) -> Self {
+        Self {
+            attempts,
+            rejection,
+        }
+    }
+
+    /// Return the durable local validation category for retry planning.
+    pub(crate) fn category(&self) -> &'static str {
+        self.rejection.category()
+    }
+}
+
+impl std::fmt::Display for MangaRenderRejection {
+    fn fmt(&self, item: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            item,
+            "Rejected after {} attempts: {}",
+            self.attempts,
+            self.rejection.reason()
+        )
+    }
+}
+
+impl std::error::Error for MangaRenderRejection {}
 
 /// Render one scene through Gemini and reject invalid manga images.
 #[derive(Clone)]
@@ -74,87 +159,152 @@ where
             .and_then(|root| root.get("panels"))
             .and_then(Value::as_array)
             .map_or(0, Vec::len);
-        let mut reason = String::new();
+        let provider = project(scene);
+        let mut rejection = RenderRejection::other(String::new());
         for attempt in 0..self.retries {
-            let bytes = self.client.image(scene)?;
+            let bytes = self.client.image(&provider)?;
             let journal = self
                 .attempts
                 .as_deref()
-                .map(|directory| AttemptJournal::capture(directory, bytes.as_slice()))
+                .map(|directory| AttemptJournal::capture(directory, bytes.as_slice(), &provider))
                 .transpose()?;
             let decoded = image::load_from_memory(bytes.as_slice());
             let gray = match decoded {
                 Ok(image) => image.into_luma8(),
                 Err(error) => {
-                    record_attempt(journal.as_ref(), "error", error.to_string().as_str())?;
+                    record_attempt(
+                        journal.as_ref(),
+                        "error",
+                        "transport_or_decode",
+                        error.to_string().as_str(),
+                    )?;
                     return Err(error.into());
                 }
             };
             let found = self.text.detected(scene, &gray)?;
             let text_rejected = significant_registry_text(found.as_str());
             if text_rejected {
-                reason = format!("OCR detected text: '{found}'");
-                record_attempt(journal.as_ref(), "rejected", reason.as_str())?;
-                progress.retry("Rendering manga", attempt + 1, reason.as_str());
+                rejection = RenderRejection::ocr(format!("OCR detected text: '{found}'"));
+                record_attempt(
+                    journal.as_ref(),
+                    "rejected",
+                    rejection.category(),
+                    rejection.reason(),
+                )?;
+                progress.retry("Rendering manga", attempt + 1, rejection.reason());
                 continue;
             }
             let failed = self.border.borders(&gray);
             if !failed.is_empty() {
-                reason = format!("White border missing on: {}", failed.join(", "));
-                record_attempt(journal.as_ref(), "rejected", reason.as_str())?;
-                progress.retry("Rendering manga", attempt + 1, reason.as_str());
+                rejection = RenderRejection::border(format!(
+                    "White border missing on: {}",
+                    failed.join(", ")
+                ));
+                record_attempt(
+                    journal.as_ref(),
+                    "rejected",
+                    rejection.category(),
+                    rejection.reason(),
+                )?;
+                progress.retry("Rendering manga", attempt + 1, rejection.reason());
                 continue;
             }
             if has_active_layout(scene) {
                 if panels == 1 && !registry_topology_matches(&self.border, scene, &gray, panels) {
-                    reason = String::from("Unexpected internal gutter in one-panel layout");
-                    record_attempt(journal.as_ref(), "rejected", reason.as_str())?;
-                    progress.retry("Rendering manga", attempt + 1, reason.as_str());
+                    rejection =
+                        RenderRejection::topology("Unexpected internal gutter in one-panel layout");
+                    record_attempt(
+                        journal.as_ref(),
+                        "rejected",
+                        rejection.category(),
+                        rejection.reason(),
+                    )?;
+                    progress.retry("Rendering manga", attempt + 1, rejection.reason());
                     continue;
                 }
                 if panels > 1 && !registry_topology_matches(&self.border, scene, &gray, panels) {
-                    reason = String::from("Registered panel topology was not detected");
-                    record_attempt(journal.as_ref(), "rejected", reason.as_str())?;
-                    progress.retry("Rendering manga", attempt + 1, reason.as_str());
+                    rejection =
+                        RenderRejection::topology("Registered panel topology was not detected");
+                    record_attempt(
+                        journal.as_ref(),
+                        "rejected",
+                        rejection.category(),
+                        rejection.reason(),
+                    )?;
+                    progress.retry("Rendering manga", attempt + 1, rejection.reason());
                     continue;
                 }
             } else if requires_gutter(scene, panels) && !self.border.gutter(&gray) {
-                reason = String::from("No white gutter found");
-                record_attempt(journal.as_ref(), "rejected", reason.as_str())?;
-                progress.retry("Rendering manga", attempt + 1, reason.as_str());
+                rejection = RenderRejection::legacy_gutter("No white gutter found");
+                record_attempt(
+                    journal.as_ref(),
+                    "rejected",
+                    rejection.category(),
+                    rejection.reason(),
+                )?;
+                progress.retry("Rendering manga", attempt + 1, rejection.reason());
                 continue;
             }
             if found.is_empty() {
-                record_attempt(journal.as_ref(), "accepted", "")?;
+                record_attempt(journal.as_ref(), "accepted", "accepted", "")?;
             } else {
                 record_attempt(
                     journal.as_ref(),
+                    "accepted",
                     "accepted",
                     format!("Ignored low-signal OCR: '{found}'").as_str(),
                 )?;
             }
             return Ok(DynamicImage::ImageLuma8(gray));
         }
-        bail!("Rejected after {} attempts: {}", self.retries, reason);
+        Err(MangaRenderRejection::new(self.retries, rejection).into())
     }
+}
+
+fn project(scene: &Value) -> Value {
+    let mut provider = scene.clone();
+    if let Some(meta) = provider
+        .pointer_mut("/manga_panel/meta")
+        .and_then(Value::as_object_mut)
+    {
+        meta.remove("title");
+        meta.remove("description");
+    }
+    if let Some(selection) = provider
+        .pointer_mut("/manga_panel/meta/layout_selection")
+        .and_then(Value::as_object_mut)
+    {
+        selection
+            .retain(|key, _| matches!(key.as_str(), "chosen_template_id" | "scene_attempt_index"));
+    }
+    if let Some(layout) = provider
+        .pointer_mut("/manga_panel/panel_layout")
+        .and_then(Value::as_object_mut)
+    {
+        layout.remove("conditional_permissions");
+        layout.remove("permissions_from");
+    }
+    provider
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct AttemptJournal {
     sequence: usize,
     image: String,
+    scene: String,
     verdict: PathBuf,
 }
 
 impl AttemptJournal {
-    fn capture(directory: &Path, bytes: &[u8]) -> Result<Self> {
+    fn capture(directory: &Path, bytes: &[u8], scene: &Value) -> Result<Self> {
         fs::create_dir_all(directory)?;
         let sequence = fs::read_dir(directory)?
             .filter_map(std::result::Result::ok)
             .filter_map(|entry| entry.file_name().into_string().ok())
             .filter_map(|name| {
                 name.strip_prefix("attempt-")?
-                    .strip_suffix(".json")?
+                    .split('.')
+                    .next()?
                     .parse::<usize>()
                     .ok()
             })
@@ -170,33 +320,53 @@ impl AttemptJournal {
             _ => "bin",
         };
         let image = format!("attempt-{sequence:04}.{extension}");
+        let scene_name = format!("attempt-{sequence:04}.scene.json");
         fs::write(directory.join(image.as_str()), bytes)?;
+        fs::write(
+            directory.join(scene_name.as_str()),
+            serde_json::to_vec_pretty(scene)?,
+        )?;
         let journal = Self {
             sequence,
             image,
+            scene: scene_name,
             verdict: directory.join(format!("attempt-{sequence:04}.json")),
         };
-        journal.record("pending", "")?;
+        journal.record("pending", "pending", "")?;
         Ok(journal)
     }
 
-    fn record(&self, status: &str, reason: &str) -> Result<()> {
-        fs::write(
-            self.verdict.as_path(),
-            serde_json::to_vec_pretty(&json!({
+    fn record(&self, status: &str, category: &str, reason: &str) -> Result<()> {
+        let directory = self
+            .verdict
+            .parent()
+            .ok_or_else(|| anyhow!("attempt verdict has no parent directory"))?;
+        let mut staged = tempfile::NamedTempFile::new_in(directory)?;
+        serde_json::to_writer_pretty(
+            staged.as_file_mut(),
+            &json!({
                 "sequence": self.sequence,
                 "image": self.image,
+                "scene": self.scene,
                 "status": status,
+                "category": category,
                 "reason": reason
-            }))?,
+            }),
         )?;
+        staged.as_file().sync_all()?;
+        staged.persist(self.verdict.as_path())?;
         Ok(())
     }
 }
 
-fn record_attempt(journal: Option<&AttemptJournal>, status: &str, reason: &str) -> Result<()> {
+fn record_attempt(
+    journal: Option<&AttemptJournal>,
+    status: &str,
+    category: &str,
+    reason: &str,
+) -> Result<()> {
     if let Some(journal) = journal {
-        journal.record(status, reason)?;
+        journal.record(status, category, reason)?;
     }
     Ok(())
 }
@@ -249,16 +419,110 @@ fn strict_topology_matches(
     image: &image::GrayImage,
     expected: usize,
 ) -> bool {
-    let Some(witnesses) = panel_witnesses(scene, panels, image) else {
+    panel_witnesses(scene, panels, image).is_some_and(|witnesses| {
+        let points = witnesses.iter().flatten().copied().collect::<Vec<_>>();
+        let (regions, labels) = border.region_measure(image, points.as_slice());
+        witness_labels(witnesses.as_slice(), labels.as_slice()).is_some_and(|assignments| {
+            let distinct = assignments.into_iter().collect::<BTreeSet<_>>();
+            regions == expected && distinct.len() == expected
+        })
+    }) || staggered_grid_layout(scene)
+        && staggered_grid_topology_matches(border, scene, panels, image, expected)
+}
+
+fn staggered_grid_layout(scene: &Value) -> bool {
+    scene
+        .pointer("/manga_panel/panel_layout/active_layout/template_id")
+        .and_then(Value::as_str)
+        == Some("staggered-grid-4-v1")
+}
+
+fn staggered_grid_topology_matches(
+    border: &BorderDetector,
+    scene: &Value,
+    panels: &[Value],
+    image: &image::GrayImage,
+    expected: usize,
+) -> bool {
+    if expected != 4 || panels.len() != expected {
+        return false;
+    }
+    let Some((regions, assignments)) = registry_assignments(border, scene, panels, image) else {
         return false;
     };
-    let points = witnesses.iter().flatten().copied().collect::<Vec<_>>();
-    let (regions, labels) = border.region_measure(image, points.as_slice());
-    let Some(assignments) = witness_labels(witnesses.as_slice(), labels.as_slice()) else {
+    if regions != expected || assignments.iter().copied().collect::<BTreeSet<_>>().len() != expected
+    {
+        return false;
+    }
+    let Some(rows) = staggered_rows(panels) else {
         return false;
     };
-    let distinct = assignments.into_iter().collect::<BTreeSet<_>>();
-    regions == expected && distinct.len() == expected
+    let Some(top) = row_separator_position(border, scene, image, rows[0], assignments.as_slice())
+    else {
+        return false;
+    };
+    let Some(bottom) =
+        row_separator_position(border, scene, image, rows[1], assignments.as_slice())
+    else {
+        return false;
+    };
+    let Some(declared_top) = declared_row_separator(panels, rows[0]) else {
+        return false;
+    };
+    let Some(declared_bottom) = declared_row_separator(panels, rows[1]) else {
+        return false;
+    };
+    let minimum = u64::from(image.width().checked_div(64).unwrap_or(0).max(1)).saturating_mul(2);
+    top.cmp(&bottom) == declared_top.cmp(&declared_bottom) && top.abs_diff(bottom) >= minimum
+}
+
+fn staggered_rows(panels: &[Value]) -> Option<[[usize; 2]; 2]> {
+    let mut indices = (0..panels.len()).collect::<Vec<_>>();
+    indices.sort_by_key(|index| panel_center(&panels[*index]).map(|(_, y)| y));
+    let mut top = [*indices.first()?, *indices.get(1)?];
+    let mut bottom = [*indices.get(2)?, *indices.get(3)?];
+    top.sort_by_key(|index| panel_center(&panels[*index]).map(|(x, _)| x));
+    bottom.sort_by_key(|index| panel_center(&panels[*index]).map(|(x, _)| x));
+    Some([top, bottom])
+}
+
+fn declared_row_separator(panels: &[Value], row: [usize; 2]) -> Option<u64> {
+    let left = registry_bounds(panels.get(row[0])?)?;
+    let right = registry_bounds(panels.get(row[1])?)?;
+    left.right()?.checked_add(right.x)?.checked_div(2)
+}
+
+fn row_separator_position(
+    border: &BorderDetector,
+    scene: &Value,
+    image: &image::GrayImage,
+    row: [usize; 2],
+    assignments: &[usize],
+) -> Option<u64> {
+    let centers = panel_centers(
+        scene,
+        scene.pointer("/manga_panel/panels")?.as_array()?,
+        image,
+    )?;
+    let first = *centers.get(row[0])?;
+    let second = *centers.get(row[1])?;
+    let span = second.0.checked_sub(first.0)?;
+    let y = first.1.checked_add(second.1)?.checked_div(2)?;
+    let mut points = (0u64..=64)
+        .map(|step| {
+            let offset = u64::from(span).checked_mul(step)?.checked_div(64)?;
+            Some((first.0.checked_add(u32::try_from(offset).ok()?)?, y))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    points.dedup();
+    let (_, labels) = border.region_measure(image, points.as_slice());
+    transition_position(
+        points.as_slice(),
+        labels.as_slice(),
+        SlantAxis::Vertical,
+        *assignments.get(row[0])?,
+        *assignments.get(row[1])?,
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -293,9 +557,6 @@ fn open_frame_topology_matches(
     image: &image::GrayImage,
     expected: usize,
 ) -> bool {
-    if strict_topology_matches(border, scene, panels, image, expected) {
-        return true;
-    }
     let source = scene
         .pointer("/manga_panel/page_design/special_device/source_panel")
         .and_then(Value::as_str);
@@ -319,15 +580,59 @@ fn open_frame_topology_matches(
         return false;
     }
     let distinct = companions.into_iter().collect::<BTreeSet<_>>();
-    let source_isolated = labels
-        .get(source_index)
-        .copied()
-        .flatten()
-        .is_some_and(|source| !distinct.contains(&source));
+    let source_open = labels.get(source_index).is_some_and(Option::is_none);
     regions >= distinct.len()
         && regions <= expected
         && distinct.len().checked_add(1) == Some(expected)
-        && source_isolated
+        && source_open
+        && source_content_visible(scene, panels.get(source_index), image)
+}
+
+fn source_content_visible(scene: &Value, panel: Option<&Value>, image: &image::GrayImage) -> bool {
+    let Some(panel) = panel else {
+        return false;
+    };
+    let Some(bounds) = registry_bounds(panel) else {
+        return false;
+    };
+    let Some(width) = scene
+        .pointer("/manga_panel/canvas/width")
+        .and_then(Value::as_u64)
+    else {
+        return false;
+    };
+    let Some(height) = scene
+        .pointer("/manga_panel/canvas/height")
+        .and_then(Value::as_u64)
+    else {
+        return false;
+    };
+    let Some(right) = bounds.right() else {
+        return false;
+    };
+    let Some(bottom) = bounds.bottom() else {
+        return false;
+    };
+    let Some(left) = scale_point(bounds.x, width, image.width()) else {
+        return false;
+    };
+    let Some(top) = scale_point(bounds.y, height, image.height()) else {
+        return false;
+    };
+    let Some(right) = scale_point(right, width, image.width()) else {
+        return false;
+    };
+    let Some(bottom) = scale_point(bottom, height, image.height()) else {
+        return false;
+    };
+    let total =
+        u64::from(right.saturating_sub(left)).saturating_mul(u64::from(bottom.saturating_sub(top)));
+    let dark = (top..bottom)
+        .flat_map(|y| (left..right).map(move |x| (x, y)))
+        .filter(|(x, y)| image.get_pixel(*x, *y)[0] < 220)
+        .count();
+    let dark = u64::try_from(dark).unwrap_or(u64::MAX);
+    total > 0 && dark.saturating_mul(100) >= total.saturating_mul(2)
 }
 
 fn crossing_emphasis_topology_matches(
@@ -352,7 +657,7 @@ fn crossing_emphasis_topology_matches(
         assignments.as_slice(),
         proofs.as_slice(),
     ) {
-        return true;
+        return crossing_separator_interrupted(scene, panels, image);
     }
     regions.checked_add(1) == Some(expected)
         && crossing_assignments_match(scene, panels, assignments.as_slice())
@@ -363,6 +668,209 @@ fn crossing_emphasis_topology_matches(
             assignments.as_slice(),
             proofs.as_slice(),
         )
+}
+
+fn crossing_separator_interrupted(
+    scene: &Value,
+    panels: &[Value],
+    image: &image::GrayImage,
+) -> bool {
+    let Some((_, source, target)) = device_pair(scene) else {
+        return false;
+    };
+    let Some(source) = panel_index(panels, source) else {
+        return false;
+    };
+    let Some(target) = panel_index(panels, target) else {
+        return false;
+    };
+    let Some(separator) = device_separator(scene, panels, image, source, target) else {
+        return false;
+    };
+    let samples = separator_samples(image, separator);
+    let minimum = u64::from(match separator.axis {
+        SlantAxis::Horizontal => image.height(),
+        SlantAxis::Vertical => image.width(),
+    })
+    .checked_div(256)
+    .unwrap_or(0)
+    .max(1);
+    let maximum = u64::from(match separator.axis {
+        SlantAxis::Horizontal => image.height(),
+        SlantAxis::Vertical => image.width(),
+    })
+    .checked_div(16)
+    .unwrap_or(0)
+    .max(minimum);
+    let midpoint = separator
+        .scan
+        .start
+        .checked_add(separator.scan.end)
+        .and_then(|sum| sum.checked_div(2));
+    let Some(midpoint) = midpoint else {
+        return false;
+    };
+    let tolerance = separator
+        .scan
+        .end
+        .saturating_sub(separator.scan.start)
+        .checked_div(4)
+        .unwrap_or(0)
+        .max(1);
+    separator_groups(samples.as_slice())
+        .into_iter()
+        .any(|group| {
+            u64::try_from(group.len()).is_ok_and(|length| {
+                (minimum..=maximum).contains(&length)
+                    && group.iter().all(|sample| sample.interrupted)
+                    && group
+                        .first()
+                        .zip(group.last())
+                        .map(|(first, last)| {
+                            u64::from(first.position)
+                                .saturating_add(u64::from(last.position))
+                                .checked_div(2)
+                                .unwrap_or(u64::MAX)
+                                .abs_diff(midpoint)
+                                <= tolerance
+                        })
+                        .unwrap_or(false)
+            })
+        })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DeviceSeparator {
+    axis: SlantAxis,
+    scan: CoordinatePair,
+    cross: CoordinatePair,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SeparatorSample {
+    position: u32,
+    candidate: bool,
+    interrupted: bool,
+}
+
+fn device_separator(
+    scene: &Value,
+    panels: &[Value],
+    image: &image::GrayImage,
+    source: usize,
+    target: usize,
+) -> Option<DeviceSeparator> {
+    let width = scene
+        .pointer("/manga_panel/canvas/width")
+        .and_then(Value::as_u64)?;
+    let height = scene
+        .pointer("/manga_panel/canvas/height")
+        .and_then(Value::as_u64)?;
+    let source_bounds = registry_bounds(panels.get(source)?)?;
+    let target_bounds = registry_bounds(panels.get(target)?)?;
+    let centers = panel_centers(scene, panels, image)?;
+    let source_center = *centers.get(source)?;
+    let target_center = *centers.get(target)?;
+    let mut separators = Vec::new();
+    if source_bounds.bottom()? <= target_bounds.y || target_bounds.bottom()? <= source_bounds.y {
+        let start = source_bounds.x.max(target_bounds.x);
+        let end = source_bounds.right()?.min(target_bounds.right()?);
+        if start < end {
+            separators.push((
+                source_bounds
+                    .bottom()?
+                    .abs_diff(target_bounds.y)
+                    .min(target_bounds.bottom()?.abs_diff(source_bounds.y)),
+                DeviceSeparator {
+                    axis: SlantAxis::Horizontal,
+                    scan: CoordinatePair {
+                        start: u64::from(source_center.1.min(target_center.1)),
+                        end: u64::from(source_center.1.max(target_center.1)),
+                    },
+                    cross: CoordinatePair {
+                        start: u64::from(scale_point(start, width, image.width())?),
+                        end: u64::from(scale_point(end, width, image.width())?),
+                    },
+                },
+            ));
+        }
+    }
+    if source_bounds.right()? <= target_bounds.x || target_bounds.right()? <= source_bounds.x {
+        let start = source_bounds.y.max(target_bounds.y);
+        let end = source_bounds.bottom()?.min(target_bounds.bottom()?);
+        if start < end {
+            separators.push((
+                source_bounds
+                    .right()?
+                    .abs_diff(target_bounds.x)
+                    .min(target_bounds.right()?.abs_diff(source_bounds.x)),
+                DeviceSeparator {
+                    axis: SlantAxis::Vertical,
+                    scan: CoordinatePair {
+                        start: u64::from(source_center.0.min(target_center.0)),
+                        end: u64::from(source_center.0.max(target_center.0)),
+                    },
+                    cross: CoordinatePair {
+                        start: u64::from(scale_point(start, height, image.height())?),
+                        end: u64::from(scale_point(end, height, image.height())?),
+                    },
+                },
+            ));
+        }
+    }
+    separators.sort_by_key(|(gap, _)| *gap);
+    separators.first().map(|(_, separator)| *separator)
+}
+
+fn separator_samples(image: &image::GrayImage, separator: DeviceSeparator) -> Vec<SeparatorSample> {
+    let cross = separator.cross.end.saturating_sub(separator.cross.start);
+    let required = cross.checked_div(64).unwrap_or(0).max(1);
+    (separator.scan.start..=separator.scan.end)
+        .filter_map(|position| {
+            let position = u32::try_from(position).ok()?;
+            let mut white = 0u64;
+            let mut run = 0u64;
+            let mut longest = 0u64;
+            for cross in separator.cross.start..separator.cross.end {
+                let cross = u32::try_from(cross).ok()?;
+                let pixel = match separator.axis {
+                    SlantAxis::Horizontal => image.get_pixel(cross, position)[0],
+                    SlantAxis::Vertical => image.get_pixel(position, cross)[0],
+                };
+                if pixel >= 220 {
+                    white = white.saturating_add(1);
+                    run = 0;
+                } else {
+                    run = run.saturating_add(1);
+                    longest = longest.max(run);
+                }
+            }
+            Some(SeparatorSample {
+                position,
+                candidate: white.saturating_mul(100) >= cross.saturating_mul(60),
+                interrupted: longest >= required,
+            })
+        })
+        .collect()
+}
+
+fn separator_groups(samples: &[SeparatorSample]) -> Vec<&[SeparatorSample]> {
+    let mut groups = Vec::new();
+    let mut start = None;
+    for (index, sample) in samples.iter().enumerate() {
+        if sample.candidate && start.is_none() {
+            start = Some(index);
+        }
+        if !sample.candidate
+            && let Some(start) = start.take()
+        {
+            groups.push(&samples[start..index]);
+        }
+    }
+    if let Some(start) = start {
+        groups.push(&samples[start..]);
+    }
+    groups
 }
 
 fn emphasis_topology_matches(
@@ -1024,7 +1532,10 @@ fn slant_matches(
     let Some(second) = separator_position(border, image, canvas, proof, second, regions) else {
         return false;
     };
-    first.cmp(&second) == proof.direction
+    match proof.axis {
+        SlantAxis::Horizontal => first != second,
+        SlantAxis::Vertical => first.cmp(&second) == proof.direction,
+    }
 }
 
 fn separator_position(
@@ -1285,4 +1796,105 @@ fn requires_gutter(scene: &Value, panels: usize) -> bool {
             .and_then(Value::as_str),
         Some("inset" | "crossing" | "overlap" | "diagonal_release" | "open_frame")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use anyhow::Error;
+    use tempfile::TempDir;
+
+    use super::{AttemptJournal, MangaRenderRejection, RenderRejection};
+
+    fn local(rejection: RenderRejection) -> bool {
+        Error::new(MangaRenderRejection::new(3, rejection))
+            .downcast_ref::<MangaRenderRejection>()
+            .is_some()
+    }
+
+    /// Typed manga errors identify every local image-validation rejection class.
+    #[test]
+    fn manga_render_rejection_downcast_identifies_every_local_gate() {
+        assert_eq!(
+            [
+                RenderRejection::topology("topology"),
+                RenderRejection::ocr(String::from("ocr")),
+                RenderRejection::border(String::from("border")),
+                RenderRejection::legacy_gutter("legacy gutter"),
+                RenderRejection::other(String::from("other")),
+            ]
+            .map(local),
+            [true; 5],
+            "typed manga errors no longer identify every local validation rejection"
+        );
+    }
+
+    /// Provider, transport, and pre-image errors never masquerade as local rejections.
+    #[test]
+    fn nonlocal_errors_do_not_downcast_as_local_rejections() {
+        assert_eq!(
+            [
+                "provider rejected request",
+                "transport failed",
+                "scene composition failed before image",
+            ]
+            .map(|message| {
+                Error::msg(message)
+                    .downcast_ref::<MangaRenderRejection>()
+                    .is_some()
+            }),
+            [false; 3],
+            "a nonlocal failure was typed as a local image-validation rejection"
+        );
+    }
+
+    /// Typed manga errors expose a distinct persistent category for every validation gate.
+    #[test]
+    fn manga_render_rejection_categories_distinguish_validation_gates() {
+        assert_eq!(
+            [
+                RenderRejection::topology("topology"),
+                RenderRejection::ocr(String::from("ocr")),
+                RenderRejection::border(String::from("border")),
+                RenderRejection::legacy_gutter("legacy gutter"),
+                RenderRejection::other(String::from("other")),
+            ]
+            .map(|rejection| rejection.category()),
+            ["topology", "ocr", "border", "legacy_gutter", "other"],
+            "typed manga errors collapse distinct validation gates"
+        );
+    }
+
+    /// Typed manga errors preserve the renderer's established terminal message.
+    #[test]
+    fn manga_render_rejection_display_remains_unchanged() {
+        assert_eq!(
+            MangaRenderRejection::new(
+                3,
+                RenderRejection::topology("Registered panel topology was not detected"),
+            )
+            .to_string(),
+            String::from("Rejected after 3 attempts: Registered panel topology was not detected"),
+            "typed manga error changed the established terminal message"
+        );
+    }
+
+    /// Attempt capture never reuses a sequence reserved by an interrupted raw image write.
+    #[test]
+    fn attempt_journal_advances_past_orphaned_evidence() {
+        let temporary = TempDir::new().expect("attempt directory must be created");
+        let orphan = temporary.path().join("attempt-0001.bin");
+        fs::write(orphan.as_path(), b"orphaned").expect("orphaned attempt must be written");
+        let journal = AttemptJournal::capture(temporary.path(), b"next", &serde_json::json!({}))
+            .expect("next attempt must be captured");
+        assert_eq!(
+            (
+                journal.sequence,
+                fs::read(orphan).expect("orphaned evidence must remain readable"),
+            ),
+            (2, b"orphaned".to_vec()),
+            "attempt capture reused and overwrote an interrupted sequence"
+        );
+    }
 }

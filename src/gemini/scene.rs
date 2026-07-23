@@ -41,6 +41,7 @@ pub(super) fn compose(
         .as_object()
         .cloned()
         .ok_or_else(|| anyhow!("registry scene composer must return one scene object"))?;
+    normalize_panel_roles(&mut fields)?;
     normalize_continuity(&mut fields)?;
     let mut scene = serde_json::from_str::<Value>(manga_template())?;
     let root = scene
@@ -154,6 +155,25 @@ fn normalize_continuity(fields: &mut Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
+fn normalize_panel_roles(fields: &mut Map<String, Value>) -> Result<()> {
+    let panels = fields
+        .get_mut("panels")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| anyhow!("registry scene composer must return a panels array"))?;
+    for panel in panels {
+        let root = panel
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("registry scene composer panels must be objects"))?;
+        if root.get("narrative_role").and_then(Value::as_str) == Some("payoff") {
+            root.insert(
+                String::from("narrative_role"),
+                Value::String(String::from("peak")),
+            );
+        }
+    }
+    Ok(())
+}
+
 fn normalize_camera_subjects(scene: &mut Value) -> Result<()> {
     let policy = String::from(
         scene
@@ -191,10 +211,23 @@ fn normalize_camera_subjects(scene: &mut Value) -> Result<()> {
             .and_then(Value::as_str)
             .map(String::from)
             .ok_or_else(|| anyhow!("registered panel must contain a visible shot anchor"))?;
+        let attention = panel
+            .get("attentional_frame")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .ok_or_else(|| anyhow!("registered panel must contain an attentional frame"))?;
         let subjects = panel
             .pointer_mut("/scene/subjects")
             .and_then(Value::as_array_mut)
             .ok_or_else(|| anyhow!("registered panel must contain subjects"))?;
+        if subjects.is_empty() && !matches!(attention.as_str(), "macro" | "amorphic") {
+            add_camera_subject(
+                subjects,
+                "scene_anchor",
+                visible.as_str(),
+                "clearly visible as the declared focal subject",
+            );
+        }
         if viewpoint == "over_the_shoulder" && !anchor.is_empty() {
             add_camera_subject(
                 subjects,
@@ -942,6 +975,7 @@ fn validate_semantic(root: &Map<String, Value>) -> Result<()> {
             "containment",
             "distance",
             "opposition",
+            "contrast",
             "burden",
             "repetition",
             "threshold",
@@ -1867,7 +1901,7 @@ mod tests {
 
     use super::{
         normalize_camera_subjects, normalize_eyelines, normalize_match_on_action,
-        normalize_subject_expressions, validate_dynamic,
+        normalize_panel_roles, normalize_subject_expressions, validate_dynamic,
     };
 
     fn panel(id: &str, x: i64, y: i64, width: i64, height: i64) -> Value {
@@ -2116,6 +2150,16 @@ mod tests {
     }
 
     #[test]
+    fn contrast_visual_relation_passes_dynamic_validation() {
+        let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
+        scene["manga_panel"]["semantic_spine"]["visual_relation"] = json!("contrast");
+        assert!(
+            validate_dynamic(&scene).is_ok(),
+            "contrast visual relation failed dynamic validation"
+        );
+    }
+
+    #[test]
     fn camera_cannot_be_omitted_from_dynamic_panel() {
         let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
         scene["manga_panel"]["panels"][0]["scene"]["camera"] = Value::Null;
@@ -2328,6 +2372,39 @@ mod tests {
             ),
             (true, Some(3)),
             "group framing remained unsupported by its visible subject count"
+        );
+    }
+
+    #[test]
+    fn mono_panel_materializes_one_missing_visible_subject() {
+        let mut scene = registered_camera_scene();
+        scene["manga_panel"]["panels"][0]["scene"]["subjects"] = json!([]);
+        scene["manga_panel"]["panels"][0]["shot_contract"]["visible_anchor"] =
+            json!("the traveler crossing the station");
+        scene["manga_panel"]["panels"][1]["shot_contract"]["visible_anchor"] =
+            json!("the traveler completing the route");
+        normalize_camera_subjects(&mut scene).expect("visible subject must materialize");
+        assert_eq!(
+            (
+                validate_dynamic(&scene).is_ok(),
+                scene["manga_panel"]["panels"][0]["scene"]["subjects"][0]["id"].as_str(),
+            ),
+            (true, Some("scene_anchor")),
+            "a mono panel remained empty after its visible anchor was available"
+        );
+    }
+
+    #[test]
+    fn composer_payoff_role_normalizes_to_the_canonical_peak() {
+        let mut fields = json!({"panels": [{"narrative_role": "payoff"}]})
+            .as_object()
+            .cloned()
+            .expect("fixture fields must be an object");
+        normalize_panel_roles(&mut fields).expect("payoff alias must normalize");
+        assert_eq!(
+            fields["panels"][0]["narrative_role"],
+            json!("peak"),
+            "the composer payoff alias survived canonicalization"
         );
     }
 

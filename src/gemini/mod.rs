@@ -40,8 +40,11 @@ where
         term: &str,
         sentence: &str,
         target: &str,
+        attempt: u8,
     ) -> Result<serde_json::Value> {
-        GeminiClient::<T>::scene(self, language, term, sentence, target)
+        GeminiClient::<T>::scene_observed(self, language, term, sentence, target, attempt, |_| {
+            Ok(())
+        })
     }
 }
 

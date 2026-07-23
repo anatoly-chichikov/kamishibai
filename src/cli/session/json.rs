@@ -476,6 +476,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            costs: crate::session::ArtifactCosts::default(),
         }];
         let cell = CardCell::new(
             home.path(),

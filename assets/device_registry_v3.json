@@ -78,7 +78,7 @@
       "decision_stage": "structural_or_continuity",
       "strength": "strong",
       "capability_status": "qualification_required",
-      "automatic_selection": true,
+      "automatic_selection": false,
       "compatible_topology_families": [
         "split",
         "grid",
@@ -105,7 +105,7 @@
       "decision_stage": "structural_or_continuity",
       "strength": "strong",
       "capability_status": "qualification_required",
-      "automatic_selection": true,
+      "automatic_selection": false,
       "compatible_topology_families": [
         "split",
         "grid",
@@ -132,7 +132,7 @@
       "decision_stage": "structural_or_continuity",
       "strength": "light",
       "capability_status": "qualification_required",
-      "automatic_selection": true,
+      "automatic_selection": false,
       "compatible_topology_families": [
         "single_focus",
         "split",
@@ -160,7 +160,7 @@
       "decision_stage": "structural_or_continuity",
       "strength": "strong",
       "capability_status": "qualification_required",
-      "automatic_selection": true,
+      "automatic_selection": false,
       "compatible_topology_families": [
         "split",
         "grid",
@@ -190,7 +190,7 @@
       "decision_stage": "structural_or_continuity",
       "strength": "light",
       "capability_status": "qualification_required",
-      "automatic_selection": true,
+      "automatic_selection": false,
       "compatible_topology_families": [
         "diagonal_sequence"
       ],

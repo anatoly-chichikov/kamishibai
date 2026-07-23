@@ -18,9 +18,10 @@ pub use cache::{CachedUnderstanding, CardMetaCache};
 pub use candidate::{RawInputBatch, Sense, WordCandidate};
 pub use cost::{CostRecord, GenerationCost};
 pub use detection::{LearningDetection, LearningGuess, ScriptDetection};
+pub(crate) use draft::ARTIFACT_ATTEMPT_CEILING;
 pub use draft::{
-    Artifact, ArtifactAttempt, ArtifactFile, ArtifactSlot, AttemptTally, CardArtifacts, CardDraft,
-    CardMeta,
+    Artifact, ArtifactAttempt, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptTally,
+    CardArtifacts, CardDraft, CardMeta,
 };
 pub use engine::{EngineEvent, SessionEngine};
 pub use pair::LanguagePair;

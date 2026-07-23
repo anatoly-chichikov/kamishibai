@@ -14,11 +14,14 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use assert_cmd::Command;
-use kamishibai::generation::artifact_cache::{Cache, VISUAL_DIRECTORY};
+use kamishibai::generation::artifact_cache::VISUAL_DIRECTORY;
 use kamishibai::generation::visual_revision;
+use kamishibai::session::{CardCell, LanguagePair};
 use tempfile::TempDir;
 
 const CARDS_JSON: &str = r#"{
@@ -263,6 +266,194 @@ fn failing_gemini() -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+/// Start a metered stub that returns one valid bulk-correction response.
+fn metered_bulk_correction_gemini() -> (String, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("the correction listener must bind");
+    let port = listener
+        .local_addr()
+        .expect("the correction listener has an address")
+        .port();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = calls.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut stream = stream;
+            let mut scratch = [0u8; 65536];
+            let _ = stream.read(&mut scratch);
+            observed.fetch_add(1, Ordering::SeqCst);
+            let body = bulk_correction_body();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    (format!("http://127.0.0.1:{port}"), calls)
+}
+
+/// Start a correction stub that waits until the test commits the session plan.
+fn blocked_bulk_correction_gemini() -> (String, Arc<AtomicUsize>, Arc<AtomicBool>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("the correction listener must bind");
+    let port = listener
+        .local_addr()
+        .expect("the correction listener has an address")
+        .port();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let release = Arc::new(AtomicBool::new(false));
+    let observed = calls.clone();
+    let permitted = release.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut stream = stream;
+            let mut scratch = [0u8; 65536];
+            let _ = stream.read(&mut scratch);
+            observed.fetch_add(1, Ordering::SeqCst);
+            while !permitted.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let body = bulk_correction_body();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    (format!("http://127.0.0.1:{port}"), calls, release)
+}
+
+fn bulk_correction_body() -> String {
+    serde_json::json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"senses\":[{\"understanding\":\"a newspaper hoax\",\"tag\":\"dated\"}],\"message\":null}"
+                }]
+            }
+        }]
+    })
+    .to_string()
+}
+
+/// Attach one nonzero authoritative cost to a committed session and return exact snapshots.
+fn costed_session_snapshots(cache: &Path, id: &str) -> (PathBuf, Vec<u8>, PathBuf, Vec<u8>) {
+    let directory = cache.join("sessions").join(id);
+    let session_path = directory.join("session.json");
+    let mut session: serde_json::Value = serde_json::from_slice(
+        fs::read(&session_path)
+            .expect("the committed session must exist")
+            .as_slice(),
+    )
+    .expect("the committed session must decode");
+    session["drafts"][0]["costs"] = serde_json::json!({"meta": {"nanos": 73_000}});
+    let session_bytes = serde_json::to_vec_pretty(&session).expect("the session must encode");
+    fs::write(&session_path, &session_bytes).expect("the costed session must write");
+    let journal_path = fs::read_dir(&directory)
+        .expect("the session directory must list")
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("costs-") && name.ends_with(".json"))
+        })
+        .expect("the committed session must have a cost journal");
+    let mut journal: serde_json::Value = serde_json::from_slice(
+        fs::read(&journal_path)
+            .expect("the cost journal must exist")
+            .as_slice(),
+    )
+    .expect("the cost journal must decode");
+    journal["slots"][0] = serde_json::json!({"meta": {"nanos": 73_000}});
+    let journal_bytes = serde_json::to_vec_pretty(&journal).expect("the journal must encode");
+    fs::write(&journal_path, &journal_bytes).expect("the cost journal must write");
+    (session_path, session_bytes, journal_path, journal_bytes)
+}
+
+#[derive(Debug, Default)]
+struct GenerationCalls {
+    meta: AtomicUsize,
+    sound: AtomicUsize,
+}
+
+/// Start a metered stub whose delayed responses expose duplicate generators.
+fn metered_generation_gemini() -> (String, Arc<GenerationCalls>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("the audio listener must bind");
+    let port = listener
+        .local_addr()
+        .expect("the audio listener has an address")
+        .port();
+    let calls = Arc::new(GenerationCalls::default());
+    let observed = calls.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let counted = observed.clone();
+            std::thread::spawn(move || {
+                let mut stream = stream;
+                let mut scratch = [0u8; 65536];
+                let size = stream.read(&mut scratch).unwrap_or(0);
+                let request = String::from_utf8_lossy(&scratch[..size]);
+                let sound = request.contains("gemini-3.1-flash-tts-preview");
+                if sound {
+                    counted.sound.fetch_add(1, Ordering::SeqCst);
+                } else {
+                    counted.meta.fetch_add(1, Ordering::SeqCst);
+                }
+                std::thread::sleep(Duration::from_millis(500));
+                let content = if sound {
+                    serde_json::json!({"inlineData": {"data": "AAA="}})
+                } else {
+                    serde_json::json!({"text": serde_json::json!({
+                        "term": "canard",
+                        "understanding": "a duck",
+                        "pronunciation": "ka.naʁ",
+                        "transcription": "lə ka.naʁ",
+                        "meaning": "a duck",
+                        "importance": 5,
+                        "source_sentence": "The duck swam across the pond.",
+                        "source_highlight": "duck",
+                        "source_hint": "a water bird",
+                        "source_context": "animals and nature",
+                        "target_sentence": "Le canard a nagé dans l'étang."
+                    }).to_string()})
+                };
+                let body = serde_json::json!({
+                    "candidates": [{"content": {"parts": [content]}}],
+                    "usageMetadata": {
+                        "promptTokenCount": 10,
+                        "candidatesTokenCount": 5,
+                        "totalTokenCount": 15
+                    }
+                })
+                .to_string();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            });
+        }
+    });
+    (format!("http://127.0.0.1:{port}"), calls)
+}
+
+/// Reap one child within a deadline and report only a successful exit.
+fn finish_success(child: &mut std::process::Child, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().ok().flatten() {
+            return status.success();
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 /// Wait for the detached worker to claim one session and record its pid.
 #[cfg(unix)]
 fn worker_pid(cache: &Path, id: &str) -> i64 {
@@ -315,6 +506,173 @@ fn a_fully_cached_build_session_runs_to_published_offline() {
     assert_eq!(
         phase, "published",
         "a fully-cached build session must run to published with no Gemini calls"
+    );
+}
+
+#[test]
+fn curation_cannot_replace_a_committed_costed_plan() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "costed-plan", CARDS_JSON);
+    seed_artifacts(&first_card_dir(cache.path()));
+    cli(cache.path())
+        .args(["generate", "--wait", "costed-plan"])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .success();
+    let (session_path, session_bytes, journal_path, journal_bytes) =
+        costed_session_snapshots(cache.path(), "costed-plan");
+    let (gemini, calls) = metered_bulk_correction_gemini();
+    let commands = [
+        vec!["select", "costed-plan", "--card", "canard", "--sense", "1"],
+        vec!["exclude", "costed-plan", "--card", "canard"],
+        vec![
+            "correct",
+            "costed-plan",
+            "--card",
+            "canard",
+            "--note",
+            "add its dated newspaper sense",
+        ],
+    ];
+    let mut refused = Vec::new();
+    let mut unchanged = Vec::new();
+    for command in commands {
+        fs::write(&session_path, &session_bytes).expect("the session snapshot must restore");
+        fs::write(&journal_path, &journal_bytes).expect("the journal snapshot must restore");
+        let output = cli_at(cache.path(), gemini.as_str())
+            .args(command)
+            .output()
+            .expect("the curation command must run");
+        refused.push(output.status.code() == Some(2));
+        unchanged.push(
+            fs::read(&session_path).ok().as_ref() == Some(&session_bytes)
+                && fs::read(&journal_path).ok().as_ref() == Some(&journal_bytes),
+        );
+    }
+    assert_eq!(
+        (refused, unchanged, calls.load(Ordering::SeqCst)),
+        (vec![true, true, true], vec![true, true, true], 0),
+        "post-commit curation changed the stable plan or costs, or called Gemini"
+    );
+}
+
+#[test]
+fn a_bulk_correction_cannot_clear_a_plan_committed_while_gemini_answers() {
+    use std::process::Stdio;
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "correction-race", CARDS_JSON);
+    seed_artifacts(&first_card_dir(cache.path()));
+    let (gemini, calls, release) = blocked_bulk_correction_gemini();
+    let mut correction = std::process::Command::new(env!("CARGO_BIN_EXE_kamishibai"))
+        .args([
+            "correct",
+            "correction-race",
+            "--card",
+            "canard",
+            "--note",
+            "add its dated newspaper sense",
+        ])
+        .env("KAMISHIBAI_CACHE", cache.path())
+        .env("KAMISHIBAI_GEMINI_URL", gemini.as_str())
+        .env("GEMINI_API_KEY", "offline-dummy-key")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the correction command must spawn");
+    let started = Instant::now();
+    while calls.load(Ordering::SeqCst) == 0 {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the correction provider call must arrive"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    cli(cache.path())
+        .args(["generate", "--wait", "correction-race"])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .success();
+    let session_path = cache
+        .path()
+        .join("sessions")
+        .join("correction-race")
+        .join("session.json");
+    let committed = fs::read(&session_path).expect("the committed record must read");
+    release.store(true, Ordering::SeqCst);
+    let status = correction.wait().expect("the correction command must exit");
+    assert_eq!(
+        (
+            status.code(),
+            calls.load(Ordering::SeqCst),
+            fs::read(session_path).ok(),
+        ),
+        (Some(2), 1, Some(committed)),
+        "a correction response won its race against a newly committed plan"
+    );
+}
+
+#[test]
+fn concurrent_sessions_share_one_meta_and_sound_request_with_exact_costs() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let first_out = TempDir::new().expect("first output tempdir");
+    let second_out = TempDir::new().expect("second output tempdir");
+    understood_session(cache.path(), first_out.path(), "audio-first", CARDS_JSON);
+    understood_session(cache.path(), second_out.path(), "audio-second", CARDS_JSON);
+    let cell = first_card_dir(cache.path());
+    fs::remove_file(cell.join("meta.json")).expect("the shared meta must be absent");
+    seed_visual_artifacts(cell.as_path());
+    let (gemini, calls) = metered_generation_gemini();
+    let spawn = |id: &str| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_kamishibai"))
+            .args(["generate", "--wait", id])
+            .env("KAMISHIBAI_CACHE", cache.path())
+            .env("KAMISHIBAI_GEMINI_URL", gemini.as_str())
+            .env("GEMINI_API_KEY", "offline-dummy-key")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("the concurrent session must spawn")
+    };
+    let mut first = spawn("audio-first");
+    let mut second = spawn("audio-second");
+    let first_ok = finish_success(&mut first, Duration::from_secs(30));
+    let second_ok = finish_success(&mut second, Duration::from_secs(30));
+    let meta: serde_json::Value = serde_json::from_slice(
+        fs::read(cell.join("meta.cost.json"))
+            .expect("the meta cost must persist")
+            .as_slice(),
+    )
+    .expect("the meta cost must decode");
+    let sound: serde_json::Value = serde_json::from_slice(
+        fs::read(cell.join("audio.cost.json"))
+            .expect("the sound cost must persist")
+            .as_slice(),
+    )
+    .expect("the sound cost must decode");
+    assert_eq!(
+        (
+            first_ok,
+            second_ok,
+            calls.meta.load(Ordering::SeqCst),
+            calls.sound.load(Ordering::SeqCst),
+            meta["requests"].as_u64(),
+            meta["cost"]["nanos"].as_u64(),
+            sound["requests"].as_u64(),
+            sound["cost"]["nanos"].as_u64(),
+        ),
+        (
+            true,
+            true,
+            1,
+            1,
+            Some(1),
+            Some(52_500),
+            Some(1),
+            Some(110_000),
+        ),
+        "two sessions sharing one card duplicated Gemini spend or corrupted its exact costs"
     );
 }
 
@@ -885,12 +1243,13 @@ fn removing_with_cache_deletes_every_visual_revision_for_the_card() {
     fs::create_dir_all(&sibling).expect("sibling visual directory must be seeded");
     fs::write(sibling.join("scene.json"), b"{}").expect("sibling scene must be seeded");
     fs::copy(fixture_jpeg(), sibling.join("picture.jpg")).expect("sibling picture must be seeded");
-    let card = Cache::new(
-        cell.file_name()
-            .and_then(|name| name.to_str())
-            .expect("card folder name must be UTF-8"),
-        cell.parent().expect("card folder must have a parent"),
-    );
+    let card = CardCell::new(
+        cache.path().to_path_buf(),
+        &LanguagePair::new("FR", "EN"),
+        "canard",
+        "a duck",
+    )
+    .cache();
     let guard = card
         .visual(revision)
         .expect("sibling revision must be valid")

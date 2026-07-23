@@ -3,9 +3,10 @@
 //! Artifact readiness is deliberately NOT stored here — it is recomputed from
 //! the shared cache (see `view`). This record carries only what the cache cannot:
 //! the typed words, the curatable candidates, the committed plan (drafts), the
-//! language pair, the output directory, the lifecycle phase, the published
-//! result, and the background worker's pid. Each session is a directory
-//! `<cache>/sessions/<id>/` holding `session.json` (+ `worker.log`).
+//! language pair, session-scoped provider spend, the output directory, the
+//! lifecycle phase, the published result, and the background worker's pid. Each
+//! session is a directory `<cache>/sessions/<id>/` holding `session.json` (+
+//! `worker.log`).
 //!
 //! Concurrency is two locks. The long-held liveness flock (`lock`, see
 //! `liveness`) decides who may generate: the OS releases it when the worker dies,
@@ -32,8 +33,9 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::generation::artifact_cache::Cache;
 use crate::runtime::locations::{SystemContext, cache_root};
-use crate::session::CandidateRecord;
+use crate::session::{ArtifactCosts, CandidateRecord};
 
+use super::cost_journal::SessionCostJournal;
 use super::liveness;
 
 const SESSION_FILE: &str = "session.json";
@@ -69,11 +71,13 @@ pub(in crate::cli) struct WorkerHandle {
     pub started: String,
 }
 
-/// One card draft's identity (the cache holds its artifacts and meta).
+/// One card draft's identity and this session's provider spend.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(in crate::cli) struct DraftRecord {
     pub term: String,
     pub understanding: String,
+    #[serde(default, skip_serializing_if = "ArtifactCosts::is_empty")]
+    pub costs: ArtifactCosts,
 }
 
 /// The last artifact the worker reported working on (advisory heartbeat).
@@ -171,13 +175,23 @@ pub(in crate::cli) struct SessionStore {
 
 impl SessionStore {
     /// Create one store rooted at an explicit cache directory (used by tests).
-    pub(super) fn new(root: impl Into<PathBuf>) -> Self {
+    pub(in crate::cli) fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
 
     /// Create one store rooted at the live cache directory.
     pub(in crate::cli) fn system() -> Result<Self> {
         Ok(Self::new(cache_root(&SystemContext)?))
+    }
+
+    /// Address the cost journal belonging only to this record's immutable run identity.
+    pub(in crate::cli) fn cost_journal(&self, record: &SessionRecord) -> SessionCostJournal {
+        self.cost_journal_for(record.id.as_str(), record.created.as_str())
+    }
+
+    /// Address one cost journal before a fresh TUI has written its first record.
+    pub(in crate::cli) fn cost_journal_for(&self, id: &str, created: &str) -> SessionCostJournal {
+        SessionCostJournal::new(self.root.as_path(), id, created)
     }
 
     /// Return the directory holding one session's files.
@@ -367,6 +381,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            costs: ArtifactCosts::default(),
         }];
         record
     }

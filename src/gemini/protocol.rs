@@ -103,8 +103,9 @@ impl GenerationConfig {
     }
 
     /// Return the structured JSON response configuration.
-    pub(super) fn json(schema: Value) -> Self {
-        Self {
+    pub(super) fn json(schema: Value) -> Result<Self> {
+        validate_response_schema(&schema)?;
+        Ok(Self {
             response_modalities: None,
             image_config: None,
             speech_config: None,
@@ -116,7 +117,7 @@ impl GenerationConfig {
             }),
             response_mime_type: None,
             max_output_tokens: None,
-        }
+        })
     }
 
     /// Return JSON mode without a response schema.
@@ -127,9 +128,71 @@ impl GenerationConfig {
             speech_config: None,
             response_format: None,
             response_mime_type: Some(String::from("application/json")),
-            max_output_tokens: Some(8_192),
+            max_output_tokens: None,
         }
     }
+}
+
+fn validate_response_schema(schema: &Value) -> Result<()> {
+    let root = schema
+        .as_object()
+        .ok_or_else(|| anyhow!("Gemini response schema must be a JSON object"))?;
+    for (keyword, value) in root {
+        if !matches!(
+            keyword.as_str(),
+            "type"
+                | "title"
+                | "description"
+                | "properties"
+                | "required"
+                | "additionalProperties"
+                | "enum"
+                | "format"
+                | "minimum"
+                | "maximum"
+                | "items"
+                | "prefixItems"
+                | "minItems"
+                | "maxItems"
+        ) {
+            bail!("Gemini response schema uses unsupported keyword '{keyword}'");
+        }
+        match keyword.as_str() {
+            "properties" => {
+                let properties = value.as_object().ok_or_else(|| {
+                    anyhow!("Gemini response schema properties must be an object")
+                })?;
+                for property in properties.values() {
+                    validate_response_schema(property)?;
+                }
+            }
+            "items" => {
+                if !value.is_object() {
+                    bail!("Gemini response schema items must be an object");
+                }
+                validate_response_schema(value)?;
+            }
+            "additionalProperties" => match value {
+                Value::Bool(_) => {}
+                Value::Object(_) => validate_response_schema(value)?,
+                _ => {
+                    bail!(
+                        "Gemini response schema additionalProperties must be a boolean or object"
+                    );
+                }
+            },
+            "prefixItems" => {
+                let items = value.as_array().ok_or_else(|| {
+                    anyhow!("Gemini response schema prefixItems must be an array")
+                })?;
+                for item in items {
+                    validate_response_schema(item)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -269,6 +332,7 @@ struct ApiErrorDetail {
 /// Structured Gemini API error returned by the REST API.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GeminiApiError {
+    http_status: u16,
     status: String,
     message: Option<String>,
     reasons: Vec<String>,
@@ -278,6 +342,21 @@ impl GeminiApiError {
     /// Create one Gemini API error from status, message, and detail reasons.
     pub fn new(status: impl Into<String>, message: Option<String>, reasons: Vec<String>) -> Self {
         Self {
+            http_status: 0,
+            status: status.into(),
+            message,
+            reasons,
+        }
+    }
+
+    fn from_http(
+        http_status: u16,
+        status: impl Into<String>,
+        message: Option<String>,
+        reasons: Vec<String>,
+    ) -> Self {
+        Self {
+            http_status,
             status: status.into(),
             message,
             reasons,
@@ -302,6 +381,12 @@ impl GeminiApiError {
             return true;
         }
         false
+    }
+
+    /// Return whether one typed request was rejected as an invalid argument.
+    #[must_use]
+    pub(super) fn rejects_schema(&self) -> bool {
+        self.http_status == 400 && self.status == "INVALID_ARGUMENT" && !self.rejects_key()
     }
 }
 
@@ -441,7 +526,7 @@ pub(super) fn diagnosis(response: &Response) -> String {
 }
 
 /// Convert one error body into a typed anyhow error.
-pub(super) fn api_error(body: &str) -> anyhow::Error {
+pub(super) fn api_error(http_status: u16, body: &str) -> anyhow::Error {
     match serde_json::from_str::<ErrorEnvelope>(body) {
         Ok(error) => {
             let reasons = error
@@ -450,7 +535,8 @@ pub(super) fn api_error(body: &str) -> anyhow::Error {
                 .into_iter()
                 .filter_map(|detail| detail.reason)
                 .collect();
-            anyhow!(GeminiApiError::new(
+            anyhow!(GeminiApiError::from_http(
+                http_status,
                 error
                     .error
                     .status
@@ -469,6 +555,8 @@ fn number(value: i64) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -495,6 +583,99 @@ mod tests {
                 r#"{"contents":[{"parts":[{"text":"speak"}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Aoede"}}}}}"#,
             ),
             "a legacy Gemini request changed while structured output was added"
+        );
+    }
+
+    #[test]
+    fn response_schema_whitelist_distinguishes_keywords_from_property_names() {
+        let supported = GenerationConfig::json(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "minLength": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": 4
+                }
+            },
+            "required": ["minLength"]
+        }));
+        let unsupported = GenerationConfig::json(json!({
+            "type": "object",
+            "properties": {
+                "term": {"type": "string", "minLength": 1}
+            }
+        }));
+        assert_eq!(
+            (supported.is_ok(), unsupported.is_err()),
+            (true, true),
+            "schema whitelist rejected a property name or accepted a nested unsupported keyword"
+        );
+    }
+
+    #[test]
+    fn response_schema_whitelist_rejects_invalid_subschema_shapes() {
+        let scalar_items = GenerationConfig::json(json!({
+            "type": "array",
+            "items": "string"
+        }));
+        let array_items = GenerationConfig::json(json!({
+            "type": "array",
+            "items": [{"type": "string"}]
+        }));
+        let scalar_additional = GenerationConfig::json(json!({
+            "type": "object",
+            "additionalProperties": "false"
+        }));
+        let array_additional = GenerationConfig::json(json!({
+            "type": "object",
+            "additionalProperties": [{"type": "string"}]
+        }));
+        assert_eq!(
+            (
+                scalar_items.is_err(),
+                array_items.is_err(),
+                scalar_additional.is_err(),
+                array_additional.is_err()
+            ),
+            (true, true, true, true),
+            "schema whitelist accepted a malformed items or additionalProperties subschema"
+        );
+    }
+
+    #[test]
+    fn response_schema_whitelist_recurses_through_additional_properties() {
+        let boolean = GenerationConfig::json(json!({
+            "type": "object",
+            "additionalProperties": true
+        }));
+        let object = GenerationConfig::json(json!({
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+        }));
+        let nested_unsupported = GenerationConfig::json(json!({
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "properties": {
+                    "term": {"type": "string", "minLength": 1}
+                }
+            }
+        }));
+        let nested_items_unsupported = GenerationConfig::json(json!({
+            "type": "array",
+            "items": {"type": "string", "minLength": 1}
+        }));
+        assert_eq!(
+            (
+                boolean.is_ok(),
+                object.is_ok(),
+                nested_unsupported.is_err(),
+                nested_items_unsupported.is_err()
+            ),
+            (true, true, true, true),
+            "a supported subschema form was rejected or nested validation was bypassed"
         );
     }
 }

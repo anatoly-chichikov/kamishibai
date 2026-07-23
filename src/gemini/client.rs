@@ -10,9 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::generation::layout::{LayoutRegistry, feature_prompt_data, render_feature_prompt};
-use crate::generation::prompts::{
-    layout_scene_prompt, layout_scene_schema, layout_selector_prompt,
-};
+use crate::generation::prompts::{layout_scene_prompt, layout_selector_prompt};
 use crate::languages::catalog;
 use crate::session::{
     CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair, LearningGuess, RawInputBatch,
@@ -24,7 +22,9 @@ use super::cost::priced;
 use super::prompts::{
     render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
 };
-use super::protocol::{GenerationConfig, Request, Response, api_error, diagnosis, unfence};
+use super::protocol::{
+    GeminiApiError, GenerationConfig, Request, Response, api_error, diagnosis, unfence,
+};
 use super::scene::compose;
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -197,7 +197,7 @@ where
 
     /// Translate one term and sentence through the production registry scene pipeline.
     pub fn scene(&self, language: &str, term: &str, sentence: &str, target: &str) -> Result<Value> {
-        self.scene_observed(language, term, sentence, target, |_| {})
+        self.scene_observed(language, term, sentence, target, 0, |_| Ok(()))
     }
 
     /// Compose one registry-selected scene and report every structured request cost.
@@ -207,10 +207,11 @@ where
         term: &str,
         sentence: &str,
         target: &str,
+        attempt: u8,
         mut observe: F,
     ) -> Result<Value>
     where
-        F: FnMut(CostRecord),
+        F: FnMut(CostRecord) -> Result<()>,
     {
         let registry = LayoutRegistry::embedded()?;
         let feature_data = feature_prompt_data(language, term, sentence)?;
@@ -233,13 +234,12 @@ where
             .structured_text_observed(SCENE_MODEL, selector, &selector_schema, &mut observe)
             .context("scene layout selection request failed")?;
         let ranking = eligible.decode_ranking(unfence(selector_raw.trim()))?;
-        let selection = ranking.select(term)?;
+        let selection = ranking.select(term, attempt)?;
         let composer_card = selection.composer_card()?;
         let composer =
             render_layout_scene(language, term, sentence, selection.json(), &composer_card)?;
-        let composer_schema = build_composer_schema(&composer_card)?;
         let composer_raw = self
-            .structured_text_observed(SCENE_MODEL, composer, &composer_schema, &mut observe)
+            .json_text_observed(SCENE_MODEL, composer, &mut observe)
             .context("scene composition request failed")?;
         compose(composer_raw.as_str(), sentence, target, &selection)
     }
@@ -258,7 +258,7 @@ where
         }
         let metered = self.request_metered(
             model,
-            &Request::text(prompt, Some(GenerationConfig::json(schema.clone())), None),
+            &Request::text(prompt, Some(GenerationConfig::json(schema.clone())?), None),
         )?;
         let raw = response_text(&metered.response);
         if raw.trim().is_empty() {
@@ -295,7 +295,7 @@ where
         if (200..300).contains(&response.status) {
             return Ok(());
         }
-        Err(api_error(response.body.as_str()))
+        Err(api_error(response.status, response.body.as_str()))
     }
 
     /// Resolve raw user input into reviewed rows using the Flash text model.
@@ -361,7 +361,7 @@ where
         mut observe: F,
     ) -> Result<CardMeta>
     where
-        F: FnMut(CostRecord),
+        F: FnMut(CostRecord) -> Result<()>,
     {
         let catalog = catalog();
         let prompt = render_card_meta_prompt(term, understanding, pair, &catalog)?;
@@ -399,6 +399,26 @@ where
         ))
     }
 
+    /// Recompose one card draft and report usage before local JSON decoding.
+    pub(crate) fn correct_card_observed<F>(
+        &self,
+        draft: &CardDraft,
+        comment: &str,
+        pair: &LanguagePair,
+        mut observe: F,
+    ) -> Result<CardRevision>
+    where
+        F: FnMut(CostRecord) -> Result<()>,
+    {
+        let catalog = catalog();
+        let prompt = render_card_prompt(draft, comment, pair, &catalog)?;
+        let raw = self.text_observed(META_MODEL, prompt, &mut observe)?;
+        let decoded: CardCorrectionResponse = serde_json::from_str(unfence(raw.trim()))?;
+        let term = decoded.term.clone();
+        let understanding = decoded.understanding.clone();
+        Ok(CardRevision::new(term, understanding, decoded.into_meta()))
+    }
+
     /// Render one scene JSON payload into raw image bytes.
     pub fn image(&self, scene: &Value) -> Result<Vec<u8>> {
         let (bytes, _) = self.image_metered(scene)?;
@@ -421,7 +441,7 @@ where
     /// Render one scene JSON payload and report usage before local image decoding.
     pub(crate) fn image_observed<F>(&self, scene: &Value, mut observe: F) -> Result<Vec<u8>>
     where
-        F: FnMut(CostRecord),
+        F: FnMut(CostRecord) -> Result<()>,
     {
         let metered = self.request_metered(
             IMAGE_MODEL,
@@ -431,7 +451,7 @@ where
                 Some(GenerationConfig::image_safety()),
             ),
         )?;
-        observe(metered.cost.clone());
+        observe(metered.cost.clone())?;
         image_from_response(&metered.response)
     }
 
@@ -462,7 +482,7 @@ where
         mut observe: F,
     ) -> Result<Vec<u8>>
     where
-        F: FnMut(CostRecord),
+        F: FnMut(CostRecord) -> Result<()>,
     {
         let metered = self.request_metered(
             TTS_MODEL,
@@ -472,7 +492,7 @@ where
                 None,
             ),
         )?;
-        observe(metered.cost.clone());
+        observe(metered.cost.clone())?;
         speech_from_response(&metered.response, text)
     }
 
@@ -483,7 +503,7 @@ where
             .transport
             .post(url.as_str(), self.key.as_str(), body.as_str())?;
         if !(200..300).contains(&response.status) {
-            return Err(api_error(response.body.as_str()));
+            return Err(api_error(response.status, response.body.as_str()));
         }
         let parsed: Response = serde_json::from_str(&response.body)?;
         let cost = priced(model, parsed.usage_metadata.as_ref());
@@ -508,10 +528,10 @@ where
 
     fn text_observed<F>(&self, model: &str, prompt: String, observe: &mut F) -> Result<String>
     where
-        F: FnMut(CostRecord),
+        F: FnMut(CostRecord) -> Result<()>,
     {
         let metered = self.request_metered(model, &Request::text(prompt, None, None))?;
-        observe(metered.cost.clone());
+        observe(metered.cost.clone())?;
         let raw = response_text(&metered.response);
         if raw.trim().is_empty() {
             bail!("No text content in Gemini response");
@@ -527,19 +547,47 @@ where
         observe: &mut F,
     ) -> Result<String>
     where
-        F: FnMut(CostRecord),
+        F: FnMut(CostRecord) -> Result<()>,
     {
-        let metered = self.request_metered(
-            model,
-            &Request::text(prompt, Some(GenerationConfig::json(schema.clone())), None),
-        )?;
-        observe(metered.cost.clone());
+        let config = GenerationConfig::json(schema.clone())?;
+        let request = Request::text(prompt.clone(), Some(config), None);
+        let metered = match self.request_metered(model, &request) {
+            Ok(metered) => metered,
+            Err(error) if schema_rejected(&error) => self.request_metered(
+                model,
+                &Request::text(prompt, Some(GenerationConfig::json_mode()), None),
+            )?,
+            Err(error) => return Err(error),
+        };
+        observe(metered.cost.clone())?;
         let raw = response_text(&metered.response);
         if raw.trim().is_empty() {
             bail!("No text content in Gemini response");
         }
         Ok(raw)
     }
+
+    fn json_text_observed<F>(&self, model: &str, prompt: String, observe: &mut F) -> Result<String>
+    where
+        F: FnMut(CostRecord) -> Result<()>,
+    {
+        let metered = self.request_metered(
+            model,
+            &Request::text(prompt, Some(GenerationConfig::json_mode()), None),
+        )?;
+        observe(metered.cost.clone())?;
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!("No text content in Gemini response");
+        }
+        Ok(raw)
+    }
+}
+
+fn schema_rejected(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<GeminiApiError>()
+        .is_some_and(GeminiApiError::rejects_schema)
 }
 
 fn render_layout_selector(
@@ -576,51 +624,6 @@ fn render_layout_scene(
             &serde_json::to_string_pretty(selection)?,
         )
         .replace("{selected_layout}", &serde_json::to_string_pretty(layout)?))
-}
-
-fn build_composer_schema(layout: &Value) -> Result<Value> {
-    let mut schema = serde_json::from_str::<Value>(layout_scene_schema())
-        .context("cannot decode registry scene schema")?;
-    let panel_count = layout
-        .get("panel_count")
-        .and_then(Value::as_u64)
-        .filter(|count| (1..=4).contains(count))
-        .ok_or_else(|| anyhow!("selected layout has an invalid composer panel count"))?;
-    let panels = schema
-        .pointer_mut("/properties/panels")
-        .and_then(Value::as_object_mut)
-        .ok_or_else(|| anyhow!("registry scene schema lacks its panels contract"))?;
-    panels.insert(String::from("minItems"), Value::Number(panel_count.into()));
-    panels.insert(String::from("maxItems"), Value::Number(panel_count.into()));
-    let candidates = layout
-        .get("device_candidates")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("selected layout lacks composer device candidates"))?;
-    let mut kinds = candidates
-        .iter()
-        .map(|candidate| {
-            candidate
-                .get("scene_kind")
-                .and_then(Value::as_str)
-                .filter(|kind| !kind.trim().is_empty())
-                .map(String::from)
-                .ok_or_else(|| anyhow!("composer device candidate lacks its scene kind"))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    kinds.sort();
-    kinds.dedup();
-    if kinds.is_empty() {
-        bail!("selected layout leaves composer without a device candidate");
-    }
-    let kind = schema
-        .pointer_mut("/properties/page_design/properties/special_device/properties/kind")
-        .and_then(Value::as_object_mut)
-        .ok_or_else(|| anyhow!("registry scene schema lacks its special-device contract"))?;
-    kind.insert(
-        String::from("enum"),
-        Value::Array(kinds.into_iter().map(Value::String).collect()),
-    );
-    Ok(schema)
 }
 
 struct MeteredResponse {
@@ -1060,7 +1063,116 @@ mod tests {
     }
 
     #[test]
-    fn registry_scene_uses_one_typed_schema_per_stage() {
+    fn invalid_card_correction_json_still_reports_request_cost() {
+        let transport = FakeTransport::new(vec![body(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "{not valid correction json"}]
+                }
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "candidatesTokenCount": 20,
+                "thoughtsTokenCount": 30,
+                "totalTokenCount": 150
+            }
+        }))]);
+        let client = GeminiClient::new("key", transport);
+        let draft = CardDraft::new("wound", "noun sense", LanguagePair::new("en", "ru"));
+        let mut costs = Vec::new();
+        let result = client.correct_card_observed(
+            &draft,
+            "make it a verb",
+            &LanguagePair::new("en", "ru"),
+            |cost| {
+                costs.push(cost);
+                Ok(())
+            },
+        );
+        assert_eq!(
+            (
+                result.is_err(),
+                costs.first().map(CostRecord::requests),
+                costs.first().map(|cost| cost.cost().nanos()),
+            ),
+            (true, Some(1), Some(525_000)),
+            "invalid correction JSON discarded the billed Gemini request cost"
+        );
+    }
+
+    #[test]
+    fn typed_schema_fallback_observes_only_the_successful_json_request() {
+        let transport = FakeTransport::new(vec![
+            Ok(TransportResponse {
+                status: 400,
+                body: json!({
+                    "error": {
+                        "status": "INVALID_ARGUMENT",
+                        "message": "response schema is too complex"
+                    }
+                })
+                .to_string(),
+            }),
+            text_body(&json!({"ok": true})),
+        ]);
+        let requests = transport.requests.clone();
+        let client = GeminiClient::new("key", transport);
+        let mut costs = Vec::new();
+        let raw = client
+            .structured_text_observed(
+                SCENE_MODEL,
+                String::from("same prompt"),
+                &json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {"ok": {"type": "boolean"}},
+                    "required": ["ok"]
+                }),
+                &mut |cost| {
+                    costs.push(cost);
+                    Ok(())
+                },
+            )
+            .expect("schema rejection must recover through JSON mode");
+        let bodies = requests
+            .borrow()
+            .iter()
+            .map(|body| serde_json::from_str::<Value>(body))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("fallback requests must stay valid JSON");
+        assert_eq!(
+            (
+                raw,
+                costs.len(),
+                costs.first().map(CostRecord::requests),
+                costs.first().map(|cost| cost.cost().nanos()),
+                bodies.len(),
+                bodies[0]["contents"][0]["parts"][0]["text"].as_str(),
+                bodies[1]["contents"][0]["parts"][0]["text"].as_str(),
+                bodies[0]
+                    .pointer("/generationConfig/responseFormat/text/schema")
+                    .is_some(),
+                bodies[1]
+                    .pointer("/generationConfig/responseMimeType")
+                    .and_then(Value::as_str),
+            ),
+            (
+                String::from("{\"ok\":true}"),
+                1,
+                Some(1),
+                Some(525_000),
+                2,
+                Some("same prompt"),
+                Some("same prompt"),
+                true,
+                Some("application/json"),
+            ),
+            "schema fallback changed the prompt, call count, or successful cost observation"
+        );
+    }
+
+    #[test]
+    fn registry_scene_uses_typed_analysis_and_schema_free_composition() {
         let features = json!({
             "semantic_beat_count": 1,
             "semantic_relation": "single_moment",
@@ -1100,7 +1212,11 @@ mod tests {
                 "reliability",
                 "The reliability of this system is very high",
                 "en",
-                |cost| costs.push(cost),
+                0,
+                |cost| {
+                    costs.push(cost);
+                    Ok(())
+                },
             )
             .expect("registry scene pipeline must compose one valid splash");
         let bodies = requests
@@ -1134,49 +1250,33 @@ mod tests {
         let selector_schema = eligible
             .selector_schema()
             .expect("selector response schema must build");
-        let selection = eligible
-            .decode_ranking(
-                serde_json::to_string(&ranking)
-                    .expect("ranking fixture must encode")
-                    .as_str(),
-            )
-            .expect("ranking fixture must decode")
-            .select("reliability")
-            .expect("ranking fixture must select");
-        let composer_schema =
-            build_composer_schema(&selection.composer_card().expect("composer card must build"))
-                .expect("specialized composer response schema must build");
         assert_eq!(
             (
                 costs.len(),
                 bodies.len(),
                 (
-                    bodies.iter().all(|body| {
+                    bodies[..2].iter().all(|body| {
                         body.pointer("/generationConfig/responseFormat/text/mimeType")
                             .and_then(Value::as_str)
                             == Some("APPLICATION_JSON")
                     }),
-                    bodies.iter().all(|body| {
+                    bodies[..2].iter().all(|body| {
                         body.pointer("/generationConfig/responseMimeType").is_none()
                     }),
                     bodies[0].pointer("/generationConfig/responseFormat/text/schema")
                         == Some(&feature_schema),
                     bodies[1].pointer("/generationConfig/responseFormat/text/schema")
                         == Some(&selector_schema),
-                    bodies[2].pointer("/generationConfig/responseFormat/text/schema")
-                        == Some(&composer_schema),
+                    bodies[2]
+                        .pointer("/generationConfig/responseMimeType")
+                        .and_then(Value::as_str),
+                    bodies[2]
+                        .pointer("/generationConfig/responseFormat")
+                        .is_none(),
+                    bodies[2]
+                        .pointer("/generationConfig/maxOutputTokens")
+                        .is_none(),
                 ),
-                composer_schema
-                    .pointer("/properties/panels/minItems")
-                    .and_then(Value::as_u64),
-                composer_schema
-                    .pointer("/properties/panels/maxItems")
-                    .and_then(Value::as_u64),
-                composer_schema
-                    .pointer(
-                        "/properties/page_design/properties/special_device/properties/kind/enum"
-                    )
-                    .cloned(),
                 prompts[0].contains("reliability")
                     && !prompts[0].contains("splash-1-v1")
                     && !prompts[0].contains("LAYOUT REGISTRY"),
@@ -1193,10 +1293,7 @@ mod tests {
             (
                 3,
                 3,
-                (true, true, true, true, true),
-                Some(1),
-                Some(1),
-                Some(json!(["none", "open_frame"])),
+                (true, true, true, true, Some("application/json"), true, true,),
                 true,
                 true,
                 true,
@@ -1204,7 +1301,7 @@ mod tests {
                 Some("splash-1-v1"),
                 Some("splash-1-v1"),
             ),
-            "registry scene pipeline lost one stage's exact typed wire schema or selection provenance"
+            "registry scene pipeline lost its typed analysis, schema-free composition, or selection provenance"
         );
     }
 
@@ -1302,7 +1399,11 @@ mod tests {
                         "reliability",
                         "The reliability of this system is very high",
                         "en",
-                        |cost| costs.push(cost),
+                        0,
+                        |cost| {
+                            costs.push(cost);
+                            Ok(())
+                        },
                     )
                     .is_err();
                 (index + 1, failed, costs.len(), requests.borrow().len())
@@ -1312,6 +1413,30 @@ mod tests {
             observed,
             [(1, true, 1, 1), (2, true, 2, 2), (3, true, 3, 3)],
             "registry scene failures discarded completed-stage costs or called a later stage"
+        );
+    }
+
+    #[test]
+    fn observer_failure_stops_the_scene_pipeline_before_the_next_request() {
+        let transport = FakeTransport::new(vec![
+            text_body(&json!({})),
+            text_body(&json!({})),
+            text_body(&json!({})),
+        ]);
+        let requests = transport.requests.clone();
+        let client = GeminiClient::new("key", transport);
+        let result = client.scene_observed(
+            "English",
+            "reliability",
+            "The reliability of this system is very high",
+            "en",
+            0,
+            |_| Err(anyhow::anyhow!("cost persistence failed")),
+        );
+        assert_eq!(
+            (result.is_err(), requests.borrow().len()),
+            (true, 1),
+            "a failed usage write allowed later scene stages to spend more"
         );
     }
 }

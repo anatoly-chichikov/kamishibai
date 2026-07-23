@@ -12,9 +12,11 @@ use serde::Serialize;
 
 use super::card_workflow::{CardGeneration, DeckPublishing, PublishPhase, PublishProgress};
 use super::live_generator::LiveCardGenerator;
+use super::session::SessionCostScope;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, SessionEngine, WordCandidate,
+    Artifact, ArtifactCosts, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, SessionEngine,
+    WordCandidate,
 };
 
 use std::path::PathBuf;
@@ -101,7 +103,14 @@ pub(super) trait Reporter {
     /// Announce that generation started for `cards` cards.
     fn generating(&self, cards: usize);
     /// Report one artifact step for one card.
-    fn step(&self, term: &str, artifact: Artifact, outcome: StepOutcome);
+    fn step(
+        &self,
+        card: usize,
+        term: &str,
+        artifact: Artifact,
+        outcome: StepOutcome,
+        costs: ArtifactCosts,
+    );
     /// Announce that the deck and report are being written.
     fn publishing(&self);
     /// Report the final artifacts once the run completes.
@@ -132,6 +141,14 @@ pub(super) fn generator(output: PathBuf) -> Result<LiveCardGenerator> {
     Ok(LiveCardGenerator::for_console(cache, output))
 }
 
+/// Build a console generator whose observed spend belongs to one session run.
+pub(super) fn generator_for_session(
+    output: PathBuf,
+    costs: SessionCostScope,
+) -> Result<LiveCardGenerator> {
+    Ok(generator(output)?.with_session_costs(costs))
+}
+
 /// Drive the missing artifacts for `drafts` to completion, then publish the deck.
 ///
 /// Reuses the engine order (meta → sound → scene → picture) with per-artifact
@@ -156,7 +173,13 @@ where
         if let Some(error) = advance(generator, &mut engine, card, artifact, &draft) {
             reporter.warn(format!("{term} · {}: {error}", artifact.label()).as_str());
         }
-        reporter.step(term.as_str(), artifact, outcome_of(&engine, card, artifact));
+        reporter.step(
+            card,
+            term.as_str(),
+            artifact,
+            outcome_of(&engine, card, artifact),
+            ArtifactCosts::from_artifacts(engine.drafts()[card].artifacts()),
+        );
     }
     let drafts = engine.drafts().to_vec();
     let cards = drafts.iter().filter(|d| d.artifacts().all_ready()).count();
@@ -190,25 +213,25 @@ where
     match artifact {
         Artifact::Meta => {
             let attempt =
-                generator.generate_meta(draft.term(), draft.understanding(), draft.pair());
+                generator.generate_meta_in(card, draft.term(), draft.understanding(), draft.pair());
             let error = attempt.error().map(|error| format!("{error:#}"));
             engine.applied_meta_attempt(card, attempt);
             error
         }
         Artifact::Scene => {
-            let attempt = generator.generate_scene(draft);
+            let attempt = generator.generate_scene_in(card, draft);
             let error = attempt.error().map(|error| format!("{error:#}"));
             engine.applied_media_attempt(card, artifact, attempt);
             error
         }
         Artifact::Picture => {
-            let attempt = generator.generate_picture(draft);
+            let attempt = generator.generate_picture_in(card, draft);
             let error = attempt.error().map(|error| format!("{error:#}"));
             engine.applied_media_attempt(card, artifact, attempt);
             error
         }
         Artifact::Sound => {
-            let attempt = generator.generate_sound(draft);
+            let attempt = generator.generate_sound_in(card, draft);
             let error = attempt.error().map(|error| format!("{error:#}"));
             engine.applied_media_attempt(card, artifact, attempt);
             error
@@ -267,7 +290,14 @@ pub(super) struct HumanReporter;
 impl Reporter for HumanReporter {
     fn generating(&self, _cards: usize) {}
 
-    fn step(&self, term: &str, artifact: Artifact, outcome: StepOutcome) {
+    fn step(
+        &self,
+        _card: usize,
+        term: &str,
+        artifact: Artifact,
+        outcome: StepOutcome,
+        _costs: ArtifactCosts,
+    ) {
         let label = human_label(artifact);
         match outcome {
             StepOutcome::Ready { cached: true } => eprintln!("  {term} · {label} (cached)"),
@@ -308,7 +338,15 @@ pub(super) struct QuietReporter;
 impl Reporter for QuietReporter {
     fn generating(&self, _cards: usize) {}
 
-    fn step(&self, _term: &str, _artifact: Artifact, _outcome: StepOutcome) {}
+    fn step(
+        &self,
+        _card: usize,
+        _term: &str,
+        _artifact: Artifact,
+        _outcome: StepOutcome,
+        _costs: ArtifactCosts,
+    ) {
+    }
 
     fn publishing(&self) {}
 
@@ -362,7 +400,14 @@ impl Reporter for JsonReporter {
         stream(&Event::Generating { cards });
     }
 
-    fn step(&self, term: &str, artifact: Artifact, outcome: StepOutcome) {
+    fn step(
+        &self,
+        _card: usize,
+        term: &str,
+        artifact: Artifact,
+        outcome: StepOutcome,
+        _costs: ArtifactCosts,
+    ) {
         let (status, attempt, ceiling) = match outcome {
             StepOutcome::Ready { cached: true } => ("cache", None, None),
             StepOutcome::Ready { cached: false } => ("ok", None, None),
@@ -558,7 +603,14 @@ mod tests {
 
     impl Reporter for RecordingReporter {
         fn generating(&self, _cards: usize) {}
-        fn step(&self, term: &str, artifact: Artifact, _outcome: StepOutcome) {
+        fn step(
+            &self,
+            _card: usize,
+            term: &str,
+            artifact: Artifact,
+            _outcome: StepOutcome,
+            _costs: ArtifactCosts,
+        ) {
             self.steps
                 .borrow_mut()
                 .push(format!("{term}:{}", artifact.label()));

@@ -9,15 +9,22 @@ pub struct SceneComposer<C> {
     client: C,
     language: String,
     term: String,
+    attempt: u8,
 }
 
 impl<C> SceneComposer<C> {
     /// Create one scene translator.
-    pub fn new(client: C, language: impl Into<String>, term: impl Into<String>) -> Self {
+    pub fn new(
+        client: C,
+        language: impl Into<String>,
+        term: impl Into<String>,
+        attempt: u8,
+    ) -> Self {
         Self {
             client,
             language: language.into(),
             term: term.into(),
+            attempt,
         }
     }
 }
@@ -28,8 +35,13 @@ where
 {
     /// Return one translated scene JSON document.
     fn translate(&self, sentence: &str, target: &str) -> Result<serde_json::Value> {
-        self.client
-            .scene(self.language.as_str(), self.term.as_str(), sentence, target)
+        self.client.scene(
+            self.language.as_str(),
+            self.term.as_str(),
+            sentence,
+            target,
+            self.attempt,
+        )
     }
 }
 
@@ -48,10 +60,17 @@ mod tests {
     }
 
     impl SceneSource for RecordingSource {
-        fn scene(&self, language: &str, term: &str, sentence: &str, target: &str) -> Result<Value> {
+        fn scene(
+            &self,
+            language: &str,
+            term: &str,
+            sentence: &str,
+            target: &str,
+            attempt: u8,
+        ) -> Result<Value> {
             self.calls
                 .borrow_mut()
-                .push(format!("{language}|{term}|{sentence}|{target}"));
+                .push(format!("{language}|{term}|{sentence}|{target}|{attempt}"));
             Ok(json!({}))
         }
     }
@@ -62,14 +81,14 @@ mod tests {
         let source = RecordingSource {
             calls: calls.clone(),
         };
-        let composer = SceneComposer::new(source, "English", "outlier");
+        let composer = SceneComposer::new(source, "English", "outlier", 2);
         let _ = composer
             .translate("This point is an outlier", "en")
             .expect("recording source must accept one scene");
         assert_eq!(
             calls.borrow().as_slice(),
-            ["English|outlier|This point is an outlier|en"],
-            "scene composer lost the target term before layout selection"
+            ["English|outlier|This point is an outlier|en|2"],
+            "scene composer lost the target term or attempt before layout selection"
         );
     }
 }

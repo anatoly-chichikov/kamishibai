@@ -16,6 +16,7 @@ use crate::gemini::{GeminiClient, Transport};
 pub use border::BorderDetector;
 pub use contracts::{ImageSource, ImageText, Progress, Renderer, SceneText, Translator};
 pub use illustration::Illustration;
+pub(crate) use render::MangaRenderRejection;
 pub use render::MangaRenderer;
 pub use text::{TextDetector, TextDetectors, TextEnsemble};
 

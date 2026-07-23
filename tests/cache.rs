@@ -101,17 +101,17 @@ fn visual_revision_artifacts_preserve_sibling_revisions() -> Result<()> {
     Ok(())
 }
 
-/// A configurable producer lease creates the revision-local advisory lock.
+/// A configurable producer lease keeps its advisory file outside artifact folders.
 #[test]
-fn visual_revision_locks_use_the_configured_wait_bound() -> Result<()> {
+fn visual_revision_locks_use_a_stable_external_namespace() -> Result<()> {
     let directory = TempDir::new()?;
     let cache = Cache::new("cards/test", directory.path());
     let visual =
         cache.visual("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")?;
     let _guard = visual.hold_visual(Duration::ZERO)?;
     assert!(
-        visual.exists(VISUAL_LOCK_FILE),
-        "a visual producer lease must not omit its revision-local lock file"
+        !visual.exists(VISUAL_LOCK_FILE),
+        "a visual producer lease remained inside the deletable revision folder"
     );
     Ok(())
 }
@@ -129,8 +129,8 @@ fn visual_lock_child_holds_one_cross_process_lease() -> Result<()> {
     fs::write(cache.root().join("lease-ready"), b"ready")?;
     sleep(Duration::from_millis(250));
     assert!(
-        visual.exists(VISUAL_LOCK_FILE),
-        "the child process lost its visual lease before the hold window ended"
+        !visual.exists(VISUAL_LOCK_FILE),
+        "the child process recreated a lock inside the deletable revision folder"
     );
     Ok(())
 }

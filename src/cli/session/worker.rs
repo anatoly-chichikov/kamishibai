@@ -15,10 +15,13 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Result, bail};
 
+use super::cost_journal::{SessionCostJournal, SessionCostScope};
 use super::liveness;
 use super::store::{Phase, Progress, ResultRecord, SessionRecord, SessionStore, WorkerHandle, now};
-use crate::cli::console::{Outcome, QuietReporter, Reporter, StepOutcome, generator, produce};
-use crate::session::{Artifact, CardDraft, LanguagePair};
+use crate::cli::console::{
+    Outcome, QuietReporter, Reporter, StepOutcome, generator_for_session, produce,
+};
+use crate::session::{Artifact, ArtifactCosts, CardDraft, LanguagePair};
 
 /// Return whether the record still names this process as the generating worker.
 fn owned_by(record: &SessionRecord, pid: i32) -> bool {
@@ -38,17 +41,25 @@ struct SessionReporter {
     id: String,
     pid: i32,
     inner: Box<dyn Reporter>,
+    costs: SessionCostScope,
     revoked: Cell<bool>,
     persist_failure: RefCell<Option<String>>,
 }
 
 impl SessionReporter {
-    fn new(store: SessionStore, id: String, pid: i32, inner: Box<dyn Reporter>) -> Self {
+    fn new(
+        store: SessionStore,
+        id: String,
+        pid: i32,
+        inner: Box<dyn Reporter>,
+        costs: SessionCostScope,
+    ) -> Self {
         Self {
             store,
             id,
             pid,
             inner,
+            costs,
             revoked: Cell::new(false),
             persist_failure: RefCell::new(None),
         }
@@ -79,7 +90,25 @@ impl Reporter for SessionReporter {
         self.inner.generating(cards);
     }
 
-    fn step(&self, term: &str, artifact: Artifact, outcome: StepOutcome) {
+    fn step(
+        &self,
+        card: usize,
+        term: &str,
+        artifact: Artifact,
+        outcome: StepOutcome,
+        costs: ArtifactCosts,
+    ) {
+        let costs = match self.costs.absolute(card, costs) {
+            Ok(costs) => costs,
+            Err(error) => {
+                self.revoked.set(true);
+                *self.persist_failure.borrow_mut() = Some(format!("{error:#}"));
+                self.inner.warn(
+                    format!("worker: failed to read session cost journal: {error:#}").as_str(),
+                );
+                return;
+            }
+        };
         let pid = self.pid;
         let progress = Progress {
             term: String::from(term),
@@ -87,6 +116,17 @@ impl Reporter for SessionReporter {
         };
         match self.store.update(self.id.as_str(), |record| {
             if owned_by(record, pid) {
+                let draft = record
+                    .drafts
+                    .get_mut(card)
+                    .ok_or_else(|| anyhow::anyhow!("worker card index {card} escaped the plan"))?;
+                if draft.term != term {
+                    bail!(
+                        "worker card index {card} names '{}' instead of '{term}'",
+                        draft.term
+                    );
+                }
+                draft.costs = costs;
                 record.progress = Some(progress);
             }
             Ok(())
@@ -96,7 +136,7 @@ impl Reporter for SessionReporter {
                 .inner
                 .warn(format!("worker: failed to persist progress: {error:#}").as_str()),
         }
-        self.inner.step(term, artifact, outcome);
+        self.inner.step(card, term, artifact, outcome, costs);
     }
 
     fn publishing(&self) {
@@ -172,20 +212,12 @@ fn terminal_phase(outcome: &Outcome) -> Phase {
 fn execute(store: &SessionStore, id: &str, inner: Box<dyn Reporter>) -> Result<SessionRecord> {
     let record = store.open(id)?;
     let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
-    let drafts = record
-        .drafts
-        .iter()
-        .map(|draft| {
-            CardDraft::new(
-                draft.term.as_str(),
-                draft.understanding.as_str(),
-                pair.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let live = generator(PathBuf::from(record.out))?;
+    let journal = store.cost_journal(&record);
+    let costs = SessionCostScope::bound(journal.clone());
+    let drafts = drafts_with_costs(&record, &pair, &journal)?;
+    let live = generator_for_session(PathBuf::from(record.out), costs.clone())?;
     let pid = i32::try_from(std::process::id())?;
-    let reporter = SessionReporter::new(store.clone(), String::from(id), pid, inner);
+    let reporter = SessionReporter::new(store.clone(), String::from(id), pid, inner, costs);
     match produce(&live, drafts, &reporter) {
         Ok(()) => match reporter.persist_failure.borrow_mut().take() {
             Some(message) => {
@@ -212,6 +244,32 @@ fn execute(store: &SessionStore, id: &str, inner: Box<dyn Reporter>) -> Result<S
             Err(error)
         }
     }
+}
+
+fn drafts_with_costs(
+    record: &SessionRecord,
+    pair: &LanguagePair,
+    journal: &SessionCostJournal,
+) -> Result<Vec<CardDraft>> {
+    let fallback = record
+        .drafts
+        .iter()
+        .map(|draft| draft.costs)
+        .collect::<Vec<_>>();
+    let absolute = journal.overlay(fallback.as_slice())?;
+    record
+        .drafts
+        .iter()
+        .zip(absolute)
+        .map(|(draft, costs)| {
+            Ok(CardDraft::new(
+                draft.term.as_str(),
+                draft.understanding.as_str(),
+                pair.clone(),
+            )
+            .with_costs(costs))
+        })
+        .collect()
 }
 
 /// Claim the session for this process: record our own pid as the worker and
@@ -358,6 +416,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            costs: crate::session::ArtifactCosts::default(),
         }];
         record.phase = Phase::Generating;
         record.worker = Some(WorkerHandle {
@@ -369,11 +428,24 @@ mod tests {
     }
 
     fn reporter(store: &SessionStore, pid: i32) -> SessionReporter {
+        let record = store.open("fr-1").expect("session must open");
+        let journal = store.cost_journal(&record);
+        journal
+            .seed(
+                record
+                    .drafts
+                    .iter()
+                    .map(|draft| draft.costs)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
+            .expect("session costs must seed");
         SessionReporter::new(
             store.clone(),
             String::from("fr-1"),
             pid,
             Box::new(QuietReporter),
+            SessionCostScope::bound(journal),
         )
     }
 
@@ -429,9 +501,11 @@ mod tests {
         let store = SessionStore::new(home.path());
         generating_session(&store, 1);
         reporter(&store, 1).step(
+            0,
             "canard",
             Artifact::Scene,
             StepOutcome::Ready { cached: false },
+            ArtifactCosts::default(),
         );
         assert_eq!(
             store
@@ -445,15 +519,88 @@ mod tests {
     }
 
     #[test]
+    fn each_step_persists_the_sessions_current_artifact_costs() {
+        let home = TempDir::new().expect("tempdir");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        let costs = ArtifactCosts::default().charged(
+            Artifact::Picture,
+            crate::session::GenerationCost::from_nanos(420_000_000),
+        );
+        let record = store.open("fr-1").expect("session must open");
+        store
+            .cost_journal(&record)
+            .charge(
+                0,
+                Artifact::Picture,
+                crate::session::GenerationCost::from_nanos(420_000_000),
+            )
+            .expect("provider observer must journal spend before progress");
+        reporter(&store, 1).step(
+            0,
+            "canard",
+            Artifact::Picture,
+            StepOutcome::Retry {
+                attempt: 1,
+                ceiling: 3,
+            },
+            costs,
+        );
+        assert_eq!(
+            store.open("fr-1").expect("reopen").drafts[0]
+                .costs
+                .cost(Artifact::Picture),
+            Some(crate::session::GenerationCost::from_nanos(420_000_000)),
+            "the worker persisted progress but lost the session-scoped provider spend"
+        );
+    }
+
+    #[test]
+    fn a_restarted_worker_uses_journal_totals_over_stale_draft_costs() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let record = generating_session(&store, 1);
+        let journal = store.cost_journal(&record);
+        journal
+            .seed(
+                record
+                    .drafts
+                    .iter()
+                    .map(|draft| draft.costs)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
+            .expect("journal must seed");
+        journal
+            .charge(
+                0,
+                Artifact::Picture,
+                crate::session::GenerationCost::from_nanos(730_000_000),
+            )
+            .expect("hard-crash spend must persist");
+        let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
+        assert_eq!(
+            drafts_with_costs(&record, &pair, &journal).expect("worker drafts must hydrate")[0]
+                .artifacts()
+                .picture()
+                .cost(),
+            Some(crate::session::GenerationCost::from_nanos(730_000_000)),
+            "worker restart trusted stale DraftRecord costs instead of the provider-boundary journal"
+        );
+    }
+
+    #[test]
     fn a_step_after_the_session_stops_naming_this_worker_flags_revocation() {
         let home = TempDir::new().expect("tempdir");
         let store = SessionStore::new(home.path());
         generating_session(&store, 1);
         let revoked = reporter(&store, 2);
         revoked.step(
+            0,
             "canard",
             Artifact::Scene,
             StepOutcome::Ready { cached: false },
+            ArtifactCosts::default(),
         );
         assert!(
             revoked.revoked(),

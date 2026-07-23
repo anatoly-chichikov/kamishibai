@@ -46,7 +46,7 @@ CINEMATIC PROGRAM:
 SPECIAL-DEVICE SELECTION:
 
 - Choose exactly one special device from device_candidates in the selected layout card. This includes the explicit none candidate.
-- Every listed candidate is enabled for this production test. capability_status is audit metadata, not a prohibition or ranking penalty; qualification_required means the resulting image still needs visual review.
+- Every listed candidate is locally qualified for automatic production selection: automatic_selection is enabled and capability_status is qualified or proven. Never infer or request a catalog device absent from device_candidates.
 - A device is exceptional, not decoration. Choose none unless the sentence evidence, shot plan, and visible action satisfy the candidate's best_for and reference_contract without triggering avoid_when.
 - The chosen kind must equal one candidate's scene_kind. Use only one pair from that candidate's allowed_references; source_panel and target_panel use shot ids such as s1 and s2, never canonical p ids.
 - For crossing, subject_id names exactly one visible subject in the source shot. Stage that subject continuing physically toward the adjacent target shot and keep every other subject contained.
@@ -63,6 +63,10 @@ PURELY VISUAL:
 - No captions, speech bubbles, sound effects, letters, numbers, logos, signs, labels, interface text, or legible writing.
 - Avoid text-bearing props altogether when possible. Paper, forms, books, signs, phones, tickets, clocks, gauges, and screens must be featureless, turned away, fully obscured, or replaced by a non-textual physical action.
 - Never describe blank lines, boxes, clock indicators, form fields, charts, keyboard legends, branded silhouettes, or pseudo-writing; image models often turn them into visible text.
+- Never put a printed state name, letter, numeral, legend, interface mark, or other writing cue into description, pose, focus, environment, semantic_job, literal_event, memory_hook, or any other image-facing string. Express device state only through unlabeled physical position, light, shape, or contact.
+- For every switch, breaker, button, lever, dial, or gauge, show one static unlabeled physical position per panel. Never describe a mechanical control as mid-motion or combine its before and after positions in the same panel; when a stated change needs both states, use distinct adjacent planned shots.
+- Set motion_treatment=none whenever a mechanical control is the decisive subject; communicate the state through its stable physical orientation and the sentence-grounded consequence.
+- Never request arrows, direction indicators, motion marks around a control, I/O, ON/OFF, zero/one labels, tick marks, legends, numbered bays, status icons, or state diagrams.
 - All JSON ids and construction metadata are invisible and must never be drawn.
 
 OUTPUT CONTRACT:
@@ -73,7 +77,7 @@ OUTPUT CONTRACT:
     "semantic_focus": "string",
     "emotional_relation": "string",
     "intensity": "integer from 1 to 5",
-    "visual_relation": "containment|distance|opposition|burden|repetition|threshold|balance|cause_effect|approach|avoidance|other",
+    "visual_relation": "containment|distance|opposition|contrast|burden|repetition|threshold|balance|cause_effect|approach|avoidance|other",
     "memory_hook": "one concrete sentence-derived visual choice",
     "metaphor": {"mode": "none|juxtaposition|fusion", "mapping": "string", "literal_anchor": "string"}
   },

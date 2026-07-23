@@ -17,9 +17,14 @@
 //! The clap grammar lives in `args`; `cli.rs` only routes a parsed `Command`.
 //! This layer never links the TUI: `open` hands the checked record to the
 //! caller-supplied [`SessionOpener`] port, which the TUI side implements.
+//!
+//! Destructive card-cache work takes leases in one fixed order: meta, voice,
+//! then visual. Live generators hold only one of those leases at a time, so a
+//! cleanup can wait for active work without introducing a nested lock cycle.
 
 mod args;
 mod config;
+mod cost_journal;
 mod curate;
 mod generate;
 mod json;
@@ -32,6 +37,7 @@ mod view;
 mod worker;
 
 pub(super) use args::Command;
+pub(in crate::cli) use cost_journal::SessionCostScope;
 pub(in crate::cli) use store::{
     DraftRecord, Phase, ResultRecord, SessionRecord, SessionStore, WorkerHandle, mint_id, now,
 };
@@ -43,8 +49,10 @@ use anyhow::Result;
 
 use crate::config::default_store;
 use crate::generation::artifact_cache::{
-    Cache, ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, LEGACY_VISUAL_REVISION_FILE, META_COST_FILE,
-    META_FILE, SCENE_COST_FILE, SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE,
+    Cache, ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, IMAGE_ATTEMPTS_DIRECTORY,
+    LEGACY_VISUAL_REVISION_FILE, META_COST_FILE, META_FILE, PICTURE_REQUESTS_FILE,
+    ROOT_STAGE_LOCK_TIMEOUT, RootStage, RootStageGuard, SCENE_ATTEMPT_FILE, SCENE_COST_FILE,
+    SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE, VisualGuard,
 };
 use crate::generation::visual_revision;
 use crate::languages::catalog;
@@ -52,6 +60,7 @@ use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardCell, CardMetaCache, LanguagePair};
 
 use super::error::{self, usage};
+use super::live_generator::restart_picture_request_series;
 
 /// Port through which `open` hands a checked session to the interactive
 /// surface; the TUI side implements it, so this layer never links the TUI.
@@ -284,18 +293,42 @@ pub(in crate::cli::session) fn drop_artifacts(
     understanding: &str,
     keep_meta: bool,
 ) -> Result<()> {
+    drop_artifacts_with_meta(root, pair, term, understanding, keep_meta, keep_meta)
+}
+
+/// Delete one corrected card's stale artifacts while retaining its billed correction cost.
+pub(in crate::cli::session) fn drop_corrected_artifacts(
+    root: &Path,
+    pair: &LanguagePair,
+    term: &str,
+    understanding: &str,
+) -> Result<()> {
+    drop_artifacts_with_meta(root, pair, term, understanding, false, true)
+}
+
+fn drop_artifacts_with_meta(
+    root: &Path,
+    pair: &LanguagePair,
+    term: &str,
+    understanding: &str,
+    keep_meta: bool,
+    keep_meta_cost: bool,
+) -> Result<()> {
     let cache = CardCell::new(root.to_path_buf(), pair, term, understanding).cache();
     let visual = cache.visual(visual_revision())?;
-    let _guard = visual.hold_visual(VISUAL_LOCK_TIMEOUT)?;
+    let _guards = hold_artifacts(&cache, &visual)?;
     remove_cached_files(
         &visual,
         &[
             SCENE_FILE,
+            SCENE_ATTEMPT_FILE,
             SCENE_COST_FILE,
             ILLUSTRATION_FILE,
             ILLUSTRATION_COST_FILE,
+            PICTURE_REQUESTS_FILE,
         ],
     )?;
+    remove_attempt_journal(&visual)?;
     remove_cached_files(
         &cache,
         &[
@@ -305,11 +338,15 @@ pub(in crate::cli::session) fn drop_artifacts(
             SCENE_COST_FILE,
             ILLUSTRATION_FILE,
             ILLUSTRATION_COST_FILE,
+            PICTURE_REQUESTS_FILE,
             LEGACY_VISUAL_REVISION_FILE,
         ],
     )?;
     if !keep_meta {
-        remove_cached_files(&cache, &[META_FILE, META_COST_FILE])?;
+        remove_cached_files(&cache, &[META_FILE])?;
+    }
+    if !keep_meta_cost {
+        remove_cached_files(&cache, &[META_COST_FILE])?;
     }
     Ok(())
 }
@@ -324,50 +361,49 @@ pub(in crate::cli::session) fn drop_incomplete_artifacts(
 ) -> Result<()> {
     let cache = CardCell::new(root.to_path_buf(), pair, term, understanding).cache();
     let visual = cache.visual(visual_revision())?;
-    let _guard = visual.hold_visual(VISUAL_LOCK_TIMEOUT)?;
+    let _guards = hold_artifacts(&cache, &visual)?;
+    restart_picture_request_series(&visual)?;
     if !cached_meta_is_valid(root, pair, term, understanding) {
-        remove_cached_files(
-            &visual,
-            &[
-                SCENE_FILE,
-                SCENE_COST_FILE,
-                ILLUSTRATION_FILE,
-                ILLUSTRATION_COST_FILE,
-            ],
-        )?;
+        remove_cached_files(&visual, &[SCENE_FILE, ILLUSTRATION_FILE])?;
         remove_cached_files(
             &cache,
             &[
                 META_FILE,
-                META_COST_FILE,
                 VOICE_FILE,
-                VOICE_COST_FILE,
                 SCENE_FILE,
-                SCENE_COST_FILE,
                 ILLUSTRATION_FILE,
-                ILLUSTRATION_COST_FILE,
                 LEGACY_VISUAL_REVISION_FILE,
             ],
         )?;
         return Ok(());
     }
     if !cache.exists(VOICE_FILE) {
-        remove_cached_files(&cache, &[VOICE_FILE, VOICE_COST_FILE])?;
+        remove_cached_files(&cache, &[VOICE_FILE])?;
     }
     if !cached_scene_is_valid(&visual) {
-        remove_cached_files(
-            &visual,
-            &[
-                SCENE_FILE,
-                SCENE_COST_FILE,
-                ILLUSTRATION_FILE,
-                ILLUSTRATION_COST_FILE,
-            ],
-        )?;
+        remove_cached_files(&visual, &[SCENE_FILE, ILLUSTRATION_FILE])?;
     } else if !visual.exists(ILLUSTRATION_FILE) {
-        remove_cached_files(&visual, &[ILLUSTRATION_FILE, ILLUSTRATION_COST_FILE])?;
+        remove_cached_files(&visual, &[ILLUSTRATION_FILE])?;
     }
     Ok(())
+}
+
+struct ArtifactGuards {
+    _meta: RootStageGuard,
+    _voice: RootStageGuard,
+    _visual: VisualGuard,
+}
+
+/// Acquire every card artifact lease in the module-level destructive order.
+fn hold_artifacts(cache: &Cache, visual: &Cache) -> Result<ArtifactGuards> {
+    let meta = cache.hold_root_stage(RootStage::Meta, ROOT_STAGE_LOCK_TIMEOUT)?;
+    let voice = cache.hold_root_stage(RootStage::Voice, ROOT_STAGE_LOCK_TIMEOUT)?;
+    let visual = visual.hold_visual(VISUAL_LOCK_TIMEOUT)?;
+    Ok(ArtifactGuards {
+        _meta: meta,
+        _voice: voice,
+        _visual: visual,
+    })
 }
 
 /// Return whether the cached card metadata can be decoded for this exact card.
@@ -402,12 +438,24 @@ fn remove_cached_files(cache: &Cache, files: &[&str]) -> Result<()> {
     Ok(())
 }
 
+fn remove_attempt_journal(cache: &Cache) -> Result<()> {
+    let attempts = cache.path().join(IMAGE_ATTEMPTS_DIRECTORY);
+    if attempts.exists() {
+        fs::remove_dir_all(attempts)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use std::process::{Child, Command as ProcessCommand, Stdio};
+    use std::time::{Duration, Instant};
+
     use tempfile::TempDir;
 
     use super::store::WorkerHandle;
     use super::*;
+    use crate::cli::live_generator::reserve_picture_request;
     use crate::session::{CardMeta, CardMetaCache};
 
     fn record(id: &str, phase: Phase) -> SessionRecord {
@@ -488,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn dropped_artifacts_forget_request_costs() {
+    fn dropped_artifacts_forget_request_costs_and_picture_counter() {
         let home = TempDir::new().expect("tempdir must be created");
         let pair = LanguagePair::new("fr", "en");
         let cache = CardCell::new(home.path().to_path_buf(), &pair, "canard", "a duck").cache();
@@ -514,9 +562,11 @@ mod tests {
         }
         for file in [
             SCENE_FILE,
+            SCENE_ATTEMPT_FILE,
             SCENE_COST_FILE,
             ILLUSTRATION_FILE,
             ILLUSTRATION_COST_FILE,
+            PICTURE_REQUESTS_FILE,
         ] {
             fs::write(
                 visual.filepath(file).expect("visual path must resolve"),
@@ -529,6 +579,16 @@ mod tests {
             )
             .expect("sibling visual fixture must be written");
         }
+        fs::create_dir_all(visual.path().join(IMAGE_ATTEMPTS_DIRECTORY))
+            .expect("attempt archive must be created");
+        fs::write(
+            visual
+                .path()
+                .join(IMAGE_ATTEMPTS_DIRECTORY)
+                .join("attempt-0001.json"),
+            b"{}",
+        )
+        .expect("attempt verdict must be written");
         drop_artifacts(home.path(), &pair, "canard", "a duck", false)
             .expect("artifacts must be dropped");
         assert_eq!(
@@ -542,29 +602,61 @@ mod tests {
                     SCENE_COST_FILE,
                     ILLUSTRATION_FILE,
                     ILLUSTRATION_COST_FILE,
+                    PICTURE_REQUESTS_FILE,
                     LEGACY_VISUAL_REVISION_FILE,
                 ]
                 .iter()
                 .any(|file| cache.path().join(file).exists()),
                 [
                     SCENE_FILE,
+                    SCENE_ATTEMPT_FILE,
                     SCENE_COST_FILE,
                     ILLUSTRATION_FILE,
                     ILLUSTRATION_COST_FILE,
+                    PICTURE_REQUESTS_FILE,
                 ]
                 .iter()
                 .any(|file| visual.path().join(file).exists()),
                 [
                     SCENE_FILE,
+                    SCENE_ATTEMPT_FILE,
                     SCENE_COST_FILE,
                     ILLUSTRATION_FILE,
                     ILLUSTRATION_COST_FILE,
+                    PICTURE_REQUESTS_FILE,
                 ]
                 .iter()
                 .all(|file| sibling.path().join(file).exists()),
+                visual.path().join(IMAGE_ATTEMPTS_DIRECTORY).exists(),
             ),
-            (false, false, true),
+            (false, false, true, false),
             "regeneration must drop current and legacy artifacts without touching sibling revisions"
+        );
+    }
+
+    #[test]
+    fn corrected_artifacts_keep_billed_meta_cost_while_dropping_stale_meta() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let pair = LanguagePair::new("fr", "en");
+        let cache = CardCell::new(home.path().to_path_buf(), &pair, "canard", "a duck").cache();
+        fs::write(
+            cache.filepath(META_FILE).expect("meta path must resolve"),
+            b"stale meta",
+        )
+        .expect("stale meta must be written");
+        fs::write(
+            cache
+                .filepath(META_COST_FILE)
+                .expect("meta cost path must resolve"),
+            b"billed correction",
+        )
+        .expect("correction cost must be written");
+        drop_corrected_artifacts(home.path(), &pair, "canard", "a duck")
+            .expect("corrected artifacts must be dropped");
+        assert_eq!(
+            (cache.exists(META_FILE), cache.exists(META_COST_FILE)),
+            (false, true),
+            "correction cleanup deleted its billed cost or retained stale metadata"
         );
     }
 
@@ -611,6 +703,47 @@ mod tests {
             )
             .expect("visual fixture must be written");
         }
+        seed_picture_counter(&visual, 3, 3);
+        fs::write(
+            visual
+                .filepath(SCENE_ATTEMPT_FILE)
+                .expect("cursor path must resolve"),
+            br#"{"scene_attempt_index":0}"#,
+        )
+        .expect("scene cursor must be written");
+    }
+
+    fn seed_picture_counter(cache: &Cache, requests: u32, series_requests: u32) {
+        fs::write(
+            cache
+                .filepath(PICTURE_REQUESTS_FILE)
+                .expect("picture counter path must resolve"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": "kamishibai.picture-request-counter",
+                "version": 1,
+                "requests": requests,
+                "series_requests": series_requests
+            }))
+            .expect("picture counter must encode"),
+        )
+        .expect("picture counter must be written");
+    }
+
+    fn picture_counter(cache: &Cache) -> (u64, u64) {
+        let counter = serde_json::from_slice::<serde_json::Value>(
+            fs::read(cache.path().join(PICTURE_REQUESTS_FILE))
+                .expect("picture counter must be readable")
+                .as_slice(),
+        )
+        .expect("picture counter must decode");
+        (
+            counter["requests"]
+                .as_u64()
+                .expect("total picture requests must be an integer"),
+            counter["series_requests"]
+                .as_u64()
+                .expect("series picture requests must be an integer"),
+        )
     }
 
     fn current_cache(home: &TempDir) -> (LanguagePair, crate::generation::artifact_cache::Cache) {
@@ -620,26 +753,165 @@ mod tests {
         (pair, cache)
     }
 
+    fn destructive_child(root: &Path, mode: &str) -> Child {
+        ProcessCommand::new(std::env::current_exe().expect("test binary must resolve"))
+            .args([
+                "cli::session::tests::destructive_cleanup_waits_for_root_work_before_deleting",
+                "--exact",
+                "--nocapture",
+            ])
+            .env("KAMISHIBAI_DESTRUCTIVE_LOCK_MODE", mode)
+            .env("KAMISHIBAI_DESTRUCTIVE_LOCK_ROOT", root)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("lock test child must spawn")
+    }
+
+    fn finish_child(child: &mut Child, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = child.try_wait().ok().flatten() {
+                return status.success();
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[test]
-    fn failed_picture_retry_drops_only_picture_cost() {
+    fn destructive_cleanup_waits_for_root_work_before_deleting() {
+        let pair = LanguagePair::new("fr", "en");
+        if let Ok(mode) = std::env::var("KAMISHIBAI_DESTRUCTIVE_LOCK_MODE") {
+            let root = std::env::var_os("KAMISHIBAI_DESTRUCTIVE_LOCK_ROOT")
+                .map(std::path::PathBuf::from)
+                .expect("lock test root must be set");
+            let cache = CardCell::new(root.clone(), &pair, "canard", "a duck").cache();
+            let succeeded = match mode.as_str() {
+                "purge" => drop_artifacts(root.as_path(), &pair, "canard", "a duck", false).is_ok(),
+                "probe" => cache
+                    .hold_root_stage(RootStage::Meta, Duration::ZERO)
+                    .is_err(),
+                "producer" => (|| -> Result<()> {
+                    let _guard = cache.hold_root_stage(RootStage::Meta, Duration::from_secs(5))?;
+                    fs::write(cache.filepath(META_FILE)?, b"committed-after-cleanup")?;
+                    Ok(())
+                })()
+                .is_ok(),
+                _ => false,
+            };
+            assert!(
+                succeeded,
+                "the destructive lock child did not complete its assigned operation"
+            );
+            return;
+        }
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = CardCell::new(home.path().to_path_buf(), &pair, "canard", "a duck").cache();
+        fs::write(
+            cache.filepath(VOICE_FILE).expect("voice path must resolve"),
+            b"old",
+        )
+        .expect("old voice must be seeded");
+        let voice = cache
+            .hold_root_stage(RootStage::Voice, Duration::ZERO)
+            .expect("voice producer lease must be acquired");
+        let mut purge = destructive_child(home.path(), "purge");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let meta_held = loop {
+            let mut probe = destructive_child(home.path(), "probe");
+            if finish_child(&mut probe, Duration::from_secs(2)) {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+        };
+        let purge_waited = purge
+            .try_wait()
+            .expect("purge child must remain observable")
+            .is_none();
+        let mut producer = destructive_child(home.path(), "producer");
+        std::thread::sleep(Duration::from_millis(100));
+        let producer_waited = producer
+            .try_wait()
+            .expect("producer child must remain observable")
+            .is_none();
+        drop(voice);
+        let purge_succeeded = finish_child(&mut purge, Duration::from_secs(5));
+        let producer_succeeded = finish_child(&mut producer, Duration::from_secs(5));
+        assert_eq!(
+            (
+                meta_held,
+                purge_waited,
+                producer_waited,
+                purge_succeeded,
+                producer_succeeded,
+                fs::read(cache.path().join(META_FILE)).ok(),
+                cache.exists(VOICE_FILE),
+            ),
+            (
+                true,
+                true,
+                true,
+                true,
+                true,
+                Some(b"committed-after-cleanup".to_vec()),
+                false,
+            ),
+            "cleanup did not wait for active work or deleted a later producer commit"
+        );
+    }
+
+    fn seed_attempt_history(cache: &Cache) {
+        let attempts = cache.path().join(IMAGE_ATTEMPTS_DIRECTORY);
+        fs::create_dir_all(attempts.as_path()).expect("attempt history must be created");
+        fs::write(attempts.join("attempt-0001.json"), b"{}")
+            .expect("attempt history must be written");
+        fs::write(
+            attempts.join("attempt-0001.scene.json"),
+            br#"{"manga_panel":{"meta":{"layout_selection":{"scene_attempt_index":1}}}}"#,
+        )
+        .expect("attempt scene must be written");
+    }
+
+    #[test]
+    fn failed_picture_retry_preserves_accumulated_picture_cost_and_counter() {
         let home = TempDir::new().expect("tempdir must be created");
         let (pair, cache) = current_cache(&home);
         let visual = cache
             .visual(visual_revision())
             .expect("production revision must be valid");
+        seed_attempt_history(&visual);
         fs::remove_file(visual.path().join(ILLUSTRATION_FILE))
             .expect("picture fixture must be removed");
         drop_incomplete_artifacts(home.path(), &pair, "canard", "a duck")
             .expect("incomplete artifacts must be dropped");
+        let next_series = (0..3).all(|_| reserve_picture_request(&visual).is_ok());
+        let fourth = reserve_picture_request(&visual);
         assert_eq!(
             (
                 cache.exists(META_FILE),
                 cache.exists(VOICE_FILE),
                 visual.exists(SCENE_FILE),
                 visual.exists(ILLUSTRATION_COST_FILE),
+                visual.exists(PICTURE_REQUESTS_FILE),
+                visual.exists(SCENE_ATTEMPT_FILE),
+                visual
+                    .path()
+                    .join(IMAGE_ATTEMPTS_DIRECTORY)
+                    .join("attempt-0001.scene.json")
+                    .exists(),
+                next_series,
+                fourth.is_err(),
+                picture_counter(&visual),
             ),
-            (true, true, true, false),
-            "picture retry must preserve every valid upstream artifact and forget only its cost"
+            (true, true, true, true, true, true, true, true, true, (6, 3)),
+            "failed-only retry erased evidence or failed to start exactly one authorized series"
         );
     }
 
@@ -650,6 +922,7 @@ mod tests {
         let visual = cache
             .visual(visual_revision())
             .expect("production revision must be valid");
+        seed_attempt_history(&visual);
         fs::remove_file(visual.path().join(SCENE_FILE)).expect("scene fixture must be removed");
         drop_incomplete_artifacts(home.path(), &pair, "canard", "a duck")
             .expect("incomplete artifacts must be dropped");
@@ -657,12 +930,15 @@ mod tests {
             (
                 cache.exists(META_FILE),
                 cache.exists(VOICE_FILE),
-                [SCENE_COST_FILE, ILLUSTRATION_FILE, ILLUSTRATION_COST_FILE,]
-                    .iter()
-                    .any(|file| visual.exists(file)),
+                visual.exists(SCENE_COST_FILE),
+                visual.exists(ILLUSTRATION_FILE),
+                visual.exists(ILLUSTRATION_COST_FILE),
+                visual.exists(PICTURE_REQUESTS_FILE),
+                visual.exists(SCENE_ATTEMPT_FILE),
+                visual.path().join(IMAGE_ATTEMPTS_DIRECTORY).exists(),
             ),
-            (true, true, false),
-            "scene retry must preserve meta and audio while clearing the visual dependency chain"
+            (true, true, true, false, true, true, true, true),
+            "scene retry erased billed spend, its cursor, or a valid independent artifact"
         );
     }
 
@@ -684,17 +960,15 @@ mod tests {
             (
                 cache.exists(META_FILE),
                 cache.exists(VOICE_FILE),
-                [
-                    SCENE_FILE,
-                    SCENE_COST_FILE,
-                    ILLUSTRATION_FILE,
-                    ILLUSTRATION_COST_FILE,
-                ]
-                .iter()
-                .any(|file| visual.exists(file)),
+                visual.exists(SCENE_FILE),
+                visual.exists(SCENE_COST_FILE),
+                visual.exists(ILLUSTRATION_FILE),
+                visual.exists(ILLUSTRATION_COST_FILE),
+                visual.exists(PICTURE_REQUESTS_FILE),
+                visual.exists(SCENE_ATTEMPT_FILE),
             ),
-            (true, true, false),
-            "a corrupt scene must be removed with its picture while meta and audio survive"
+            (true, true, false, true, false, true, true, true),
+            "a corrupt scene retry erased billed spend or its durable cursor"
         );
     }
 
@@ -714,9 +988,10 @@ mod tests {
                 cache.exists(VOICE_COST_FILE),
                 visual.exists(SCENE_FILE),
                 visual.exists(ILLUSTRATION_FILE),
+                visual.exists(PICTURE_REQUESTS_FILE),
             ),
-            (true, false, true, true),
-            "sound retry must clear only its stale cost and keep valid visual artifacts"
+            (true, true, true, true, true),
+            "sound retry erased billed spend or a valid visual artifact"
         );
     }
 
@@ -727,30 +1002,27 @@ mod tests {
         let visual = cache
             .visual(visual_revision())
             .expect("production revision must be valid");
+        seed_attempt_history(&visual);
         fs::remove_file(cache.path().join(META_FILE)).expect("meta fixture must be removed");
         drop_incomplete_artifacts(home.path(), &pair, "canard", "a duck")
             .expect("incomplete artifacts must be dropped");
         assert_eq!(
             (
-                [
-                    META_COST_FILE,
-                    VOICE_FILE,
-                    VOICE_COST_FILE,
-                    LEGACY_VISUAL_REVISION_FILE,
-                ]
-                .iter()
-                .any(|file| cache.exists(file)),
-                [
-                    SCENE_FILE,
-                    SCENE_COST_FILE,
-                    ILLUSTRATION_FILE,
-                    ILLUSTRATION_COST_FILE,
-                ]
-                .iter()
-                .any(|file| visual.exists(file)),
+                cache.exists(META_COST_FILE),
+                cache.exists(VOICE_FILE),
+                cache.exists(VOICE_COST_FILE),
+                visual.exists(SCENE_FILE),
+                visual.exists(SCENE_COST_FILE),
+                visual.exists(ILLUSTRATION_FILE),
+                visual.exists(ILLUSTRATION_COST_FILE),
+                visual.exists(PICTURE_REQUESTS_FILE),
+                visual.exists(SCENE_ATTEMPT_FILE),
+                visual.path().join(IMAGE_ATTEMPTS_DIRECTORY).exists(),
             ),
-            (false, false),
-            "meta retry must clear its cost and every downstream artifact"
+            (
+                true, false, true, false, true, false, true, true, true, true
+            ),
+            "meta retry erased billed spend, its cursor, or its attempt history"
         );
     }
 
@@ -766,48 +1038,64 @@ mod tests {
             .expect("incomplete artifacts must be dropped");
         assert_eq!(
             (
-                [
-                    META_FILE,
-                    META_COST_FILE,
-                    VOICE_FILE,
-                    VOICE_COST_FILE,
-                    LEGACY_VISUAL_REVISION_FILE,
-                ]
-                .iter()
-                .any(|file| cache.exists(file)),
-                [
-                    SCENE_FILE,
-                    SCENE_COST_FILE,
-                    ILLUSTRATION_FILE,
-                    ILLUSTRATION_COST_FILE,
-                ]
-                .iter()
-                .any(|file| visual.exists(file)),
+                cache.exists(META_FILE),
+                cache.exists(META_COST_FILE),
+                cache.exists(VOICE_FILE),
+                cache.exists(VOICE_COST_FILE),
+                visual.exists(SCENE_FILE),
+                visual.exists(SCENE_COST_FILE),
+                visual.exists(ILLUSTRATION_FILE),
+                visual.exists(ILLUSTRATION_COST_FILE),
+                visual.exists(PICTURE_REQUESTS_FILE),
+                visual.exists(SCENE_ATTEMPT_FILE),
             ),
-            (false, false),
-            "a corrupt meta must be removed with every dependent artifact"
+            (
+                false, true, false, true, false, true, false, true, true, true
+            ),
+            "a corrupt meta retry erased billed spend or its durable cursor"
         );
     }
 
     #[test]
-    fn imported_full_reroll_keeps_supplied_meta() {
+    fn imported_full_reroll_keeps_supplied_meta_and_resets_picture_series() {
         let home = TempDir::new().expect("tempdir must be created");
         let (pair, cache) = current_cache(&home);
         let visual = cache
             .visual(visual_revision())
             .expect("production revision must be valid");
+        seed_attempt_history(&visual);
         drop_artifacts(home.path(), &pair, "canard", "a duck", true)
             .expect("artifacts must be dropped");
+        let cleared = !visual.exists(PICTURE_REQUESTS_FILE)
+            && !visual.path().join(IMAGE_ATTEMPTS_DIRECTORY).exists();
+        let next_series = (0..3).all(|_| reserve_picture_request(&visual).is_ok());
+        let fourth = reserve_picture_request(&visual);
         assert_eq!(
             (
-                cache.exists(META_FILE),
-                cache.exists(META_COST_FILE),
-                cache.exists(VOICE_FILE),
-                visual.exists(SCENE_FILE),
-                visual.exists(ILLUSTRATION_FILE),
+                cleared,
+                next_series,
+                fourth.is_err(),
+                picture_counter(&visual),
+                [
+                    cache.exists(META_FILE),
+                    cache.exists(META_COST_FILE),
+                    cache.exists(VOICE_FILE),
+                    visual.exists(SCENE_FILE),
+                    visual.exists(ILLUSTRATION_FILE),
+                    visual.exists(SCENE_ATTEMPT_FILE),
+                    visual.exists(SCENE_COST_FILE),
+                    visual.exists(ILLUSTRATION_COST_FILE),
+                    visual.exists(PICTURE_REQUESTS_FILE),
+                ],
             ),
-            (true, true, false, false, false),
-            "an imported card reroll must preserve its supplied meta and rebuild only media"
+            (
+                true,
+                true,
+                true,
+                (3, 3),
+                [true, true, false, false, false, false, false, false, true],
+            ),
+            "an imported full reroll did not clear evidence before opening one new picture series"
         );
     }
 }

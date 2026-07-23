@@ -1,0 +1,717 @@
+{
+  "manga_panel": {
+    "art_style": {
+      "composition": {
+        "cinematic_framing": true,
+        "dynamic_perspective": true,
+        "emotional_closeups": true,
+        "motion_rendering": "Use only abstract speed lines and blur; never render letters, numbers, symbols, onomatopoeia, or letterlike motion marks.",
+        "scale_juxtaposition": true
+      },
+      "contrast": {
+        "distribution": "calculated",
+        "focal_emphasis": true,
+        "range": "extreme",
+        "value_separation": true
+      },
+      "detail": {
+        "anatomical_precision": "high",
+        "background_detail_level": "full",
+        "density": "extreme",
+        "environmental_precision": "high",
+        "texture_differentiation": true
+      },
+      "line_work": {
+        "contour_emphasis": true,
+        "organic_stroke": "fine_pointed",
+        "outline_weight": "variable",
+        "stroke_confidence": "high",
+        "structural_stroke": "chiseled",
+        "weight_range": "wide"
+      },
+      "medium": {
+        "base": "indian_ink",
+        "color_mode": "monochrome_with_screentone",
+        "surface": "high_density_smooth"
+      },
+      "screen_tone": {
+        "dot_pattern": "fine",
+        "enabled": true,
+        "usage": [
+          "skin",
+          "fabric",
+          "atmosphere",
+          "gradients",
+          "metallic_surfaces"
+        ]
+      },
+      "shading": {
+        "black_fill_zones": true,
+        "gradient_method": "hatching_density_variation",
+        "hatching_density": "high",
+        "hatching_directionality": "form_following",
+        "primary_method": "crosshatching",
+        "secondary_method": "screen_tone",
+        "white_on_black_highlights": true
+      }
+    },
+    "canvas": {
+      "format": "square",
+      "height": 1024,
+      "outer_margin": 16,
+      "reading_direction": "left_to_right_top_to_bottom",
+      "width": 1024
+    },
+    "constraints": {
+      "continuity_errors": "forbidden_unless_camera_arc_explicitly_motivates_a_break",
+      "genre_lock": false,
+      "layout_lock": true,
+      "literal_anchor_required": true,
+      "maximum_panels": 3,
+      "panel_count_lock": true,
+      "shot_contract_lock": true,
+      "style_lock": true,
+      "text_rendering": "forbidden",
+      "unmotivated_camera_change": "forbidden",
+      "unmotivated_geometry": "forbidden",
+      "visible_writing": "No visible writing of any kind, including letterlike marks near moving people, vehicles, machinery, impacts, or reactions."
+    },
+    "meta": {
+      "description": "Neem een paraplu mee, want het gaat hard regenen.",
+      "layout_selection": {
+        "chosen_template_id": "slanted-dominant-rail-3-p2-v1",
+        "deterministic_slot": 1,
+        "device_candidates": [
+          {
+            "allowed_references": [
+              {
+                "source_panel": "",
+                "target_panel": ""
+              }
+            ],
+            "avoid_when": [
+              "one supported device is necessary to make a visible sentence relation readable"
+            ],
+            "best_for": [
+              "the selected canonical topology and cinematic shots already carry the complete sentence"
+            ],
+            "capability_status": "qualified",
+            "deterministic_materialization": "Preserve canonical geometry and contained subjects without specialization",
+            "device_id": "none",
+            "reference_contract": "source_panel, target_panel, and subject_id are empty strings",
+            "scene_kind": "none",
+            "strength": "light"
+          },
+          {
+            "allowed_references": [
+              {
+                "source_panel": "s1",
+                "target_panel": ""
+              },
+              {
+                "source_panel": "s2",
+                "target_panel": ""
+              },
+              {
+                "source_panel": "s3",
+                "target_panel": ""
+              }
+            ],
+            "avoid_when": [
+              "time boundaries must remain strict",
+              "removing a border would merge unrelated beats",
+              "the selected topology is already a diagonal strip"
+            ],
+            "best_for": [
+              "memory, atmosphere, scale, emotional release, or a view dissolving into its environment"
+            ],
+            "capability_status": "qualification_required",
+            "deterministic_materialization": "Change exactly one canonical panel to open_frame with border none without changing its clip bounds",
+            "device_id": "open_frame",
+            "reference_contract": "source_panel is the one borderless shot id; target_panel and subject_id are empty",
+            "scene_kind": "open_frame",
+            "strength": "light"
+          },
+          {
+            "allowed_references": [
+              {
+                "source_panel": "s1",
+                "target_panel": "s3"
+              }
+            ],
+            "avoid_when": [
+              "locations are independent",
+              "physical movement is absent",
+              "the same environment and subject cannot remain visually stable"
+            ],
+            "best_for": [
+              "one subject performs ordered visible phases through one continuous place",
+              "the physical route itself teaches the target meaning"
+            ],
+            "capability_status": "qualification_required",
+            "deterministic_materialization": "Map the declared endpoint shot ids to canonical panels and preserve the model-authored shared environment and phase contract",
+            "device_id": "master_view",
+            "reference_contract": "source_panel and target_panel are distinct participating shot ids; subject_id occurs in every panel sharing their nonempty environment id with distinct subject phases",
+            "scene_kind": "master_view",
+            "strength": "strong"
+          }
+        ],
+        "eligible_template_ids": [
+          "diagonal-strip-3-v1",
+          "dominant-rail-3-v1",
+          "t-bottom-3-v1",
+          "slanted-t-bottom-3-p2-v1",
+          "slanted-dominant-rail-3-p2-v1"
+        ],
+        "ranked_candidates": [
+          {
+            "adaptation": "exact",
+            "reason": "Perfect match across all features. Consistently aligns with the diagonal motion vector, rising emphasis curve, action-to-action transition, changing space, and sequential temporal relation for three escalating beats.",
+            "template_id": "diagonal-strip-3-v1"
+          },
+          {
+            "adaptation": "exact",
+            "reason": "Excellent dynamic choice matching the rising emphasis and changing space. The slanted left rail perfectly handles the setup context (s1) and the heavier grabbing action (s2) before opening into the dominant right payoff (s3) as the character steps outside.",
+            "template_id": "slanted-dominant-rail-3-p2-v1"
+          },
+          {
+            "adaptation": "exact",
+            "reason": "A strong dynamic option utilizing the diagonal motion vector and rising emphasis curve, though slightly penalized because its spatial relation profile prefers same_space over changing_space.",
+            "template_id": "slanted-t-bottom-3-p2-v1"
+          }
+        ],
+        "scene_features": {
+          "camera_arc": {
+            "continuity": {
+              "axis": "character line of motion from hallway to open doorway",
+              "axis_mode": "preserve",
+              "eyeline_policy": "matched",
+              "screen_direction": "left_to_right"
+            },
+            "motivation": "Establishes the looming rain threat on a wide scale, focuses closely on the target object (paraplu) being gripped, and then returns to a medium view to show the combined action of stepping outside.",
+            "progression": "wide, close, medium",
+            "strategy": "wide_detail_return"
+          },
+          "coverage_audit": [
+            {
+              "added_view": "A close shot of a hand grabbing a folded umbrella from a hallway stand.",
+              "panel_count": 1,
+              "reason": "Fails to communicate the critical motivating reason for taking the umbrella, which is the impending heavy rain ('want het gaat hard regenen').",
+              "source_support": "Neem een paraplu mee",
+              "verdict": "insufficient"
+            },
+            {
+              "added_view": "A wide view through a window showing dark storm clouds and rain beginning to fall outside.",
+              "panel_count": 2,
+              "reason": "Though both the action and the weather are established, it lacks the active transition of bringing the umbrella along ('meenemen') out of the dry space into the wet outdoors.",
+              "source_support": "want het gaat hard regenen",
+              "verdict": "insufficient"
+            },
+            {
+              "added_view": "A medium shot of the character stepping through the front door into the rain, holding the umbrella under their arm.",
+              "panel_count": 3,
+              "reason": "Forms a complete setup_detail_payoff progression by showing the weather warning, the target object being taken, and the character actively stepping into the rain with it.",
+              "source_support": "Neem een paraplu mee, want het gaat hard regenen",
+              "verdict": "selected"
+            },
+            {
+              "added_view": "An extreme close-up of the umbrella's spring-loaded mechanism opening.",
+              "panel_count": 4,
+              "reason": "Detailing the mechanical opening of the umbrella adds a redundant phase of action that is not supported by the simple instruction to bring the umbrella along.",
+              "source_support": "Missing explicit support for the mechanical deployment or opening of the umbrella.",
+              "verdict": "redundant_or_unsupported"
+            }
+          ],
+          "decomposition_mode": "setup_detail_payoff",
+          "intensity": "medium",
+          "literal_anchor": "paraplu",
+          "motion_vector": "diagonal",
+          "panel_count": 3,
+          "panel_emphasis": "rising",
+          "panel_relation": "sequence",
+          "reading_direction": "left_to_right_top_to_bottom",
+          "selection_logic": "This three-panel progression follows a rising narrative tension. Panel 1 establishes a quiet but ominous baseline context by showing storm clouds and rain hitting a window, representing the causal warning ('want het gaat hard regenen'). Panel 2 introduces a heavier physical action of preparation, showing a close-up of a hand grabbing the umbrella ('Neem een paraplu mee'). Panel 3 is the dominant payoff, uniting the prepared action and the environmental condition as the character steps outside with the umbrella under the active rain. This setup_detail_payoff structure fully captures the sentence's instructions without unnecessary expansion.",
+          "semantic_beat_count": 2,
+          "semantic_relation": "sequence",
+          "shots": [
+            {
+              "angle": "eye_level",
+              "camera_motivation": "Establish the environmental pressure and visual justification for the entire narrative action.",
+              "depth_plan": "deep",
+              "framing": "environment",
+              "id": "s1",
+              "information_gain": "Shows the dark sky and heavy raindrops on the pane, illustrating the imminent weather warning.",
+              "role": "establishing",
+              "semantic_beat_index": 2,
+              "shot_scale": "wide",
+              "source_support": "want het gaat hard regenen",
+              "transition_trigger": "scene_open",
+              "viewpoint": "objective",
+              "viewpoint_anchor": "",
+              "visible_anchor": "dark heavy storm clouds and raindrops hitting a window pane"
+            },
+            {
+              "angle": "low",
+              "camera_motivation": "Isolate the target object (paraplu) at the moment of physical retrieval to highlight preparation.",
+              "depth_plan": "shallow",
+              "framing": "insert",
+              "id": "s2",
+              "information_gain": "Provides a clear view of the target object being gripped and taken by the hand.",
+              "role": "detail",
+              "semantic_beat_index": 1,
+              "shot_scale": "close",
+              "source_support": "Neem een paraplu mee",
+              "transition_trigger": "attention_shift",
+              "viewpoint": "objective",
+              "viewpoint_anchor": "",
+              "visible_anchor": "hand grabbing the handle of a folded umbrella in a stand"
+            },
+            {
+              "angle": "eye_level",
+              "camera_motivation": "Depict the culmination of the action where preparation meets the active environment.",
+              "depth_plan": "layered",
+              "framing": "single",
+              "id": "s3",
+              "information_gain": "Shows the character carrying the umbrella across the threshold into the active downpour.",
+              "role": "payoff",
+              "semantic_beat_index": 1,
+              "shot_scale": "medium",
+              "source_support": "Neem een paraplu mee, want het gaat hard regenen",
+              "transition_trigger": "payoff",
+              "viewpoint": "objective",
+              "viewpoint_anchor": "",
+              "visible_anchor": "person stepping through the open door into the falling rain, carrying the umbrella"
+            }
+          ],
+          "spatial_relation": "changing_space",
+          "transition_type": "action_to_action"
+        },
+        "seed_source": "paraplu"
+      },
+      "spec_version": "2.0.0",
+      "tags": [
+        "narrative_layout",
+        "cinematic_staging"
+      ],
+      "target_lang": "nl",
+      "title": "Neem een paraplu mee, want het gaat hard regenen."
+    },
+    "page_design": {
+      "archetype": "slanted-dominant-rail-3-p2-v1",
+      "camera_arc": {
+        "continuity": {
+          "axis": "character line of motion from hallway to open doorway",
+          "axis_mode": "preserve",
+          "eyeline_policy": "matched",
+          "screen_direction": "left_to_right"
+        },
+        "motivation": "Establishes the looming rain threat on a wide scale, focuses closely on the target object (paraplu) being gripped, and then returns to a medium view to show the combined action of stepping outside.",
+        "progression": "wide, close, medium",
+        "strategy": "wide_detail_return"
+      },
+      "dominant_panel": "p3",
+      "eye_flow_summary": "The gaze descends down the slanted left rail from the rain-streaked window pane down to the grip on the umbrella handle, then sweeps right to follow the character stepping through the doorway into the storm.",
+      "layout": {
+        "family": "blockage",
+        "reading_strategy": "Read the short baseline and longer mechanism beat down the slanted left rail, then enter the dominant right result.",
+        "reason": "Excellent dynamic choice matching the rising emphasis and changing space. The slanted left rail perfectly handles the setup context (s1) and the heavier grabbing action (s2) before opening into the dominant right payoff (s3) as the character steps outside.",
+        "template_id": "slanted-dominant-rail-3-p2-v1",
+        "trigger": "This three-panel progression follows a rising narrative tension. Panel 1 establishes a quiet but ominous baseline context by showing storm clouds and rain hitting a window, representing the causal warning ('want het gaat hard regenen'). Panel 2 introduces a heavier physical action of preparation, showing a close-up of a hand grabbing the umbrella ('Neem een paraplu mee'). Panel 3 is the dominant payoff, uniting the prepared action and the environmental condition as the character steps outside with the umbrella under the active rain. This setup_detail_payoff structure fully captures the sentence's instructions without unnecessary expansion."
+      },
+      "layout_rendering_directive": "Render exactly 3 visible semantic panel regions using the locally materialized geometry for template slanted-dominant-rail-3-p2-v1. Preserve exactly three regions: p3 is the full-height dominant right panel; the 16px gutter between p1 and p2 in the left rail slants down-right; p1 is visibly shorter than p2. Never straighten that rail divider, equalize p1 and p2, merge any region, or add a fourth panel. Omit only the declared panel's local border while preserving its clip region, every neighboring panel, and the outer white page margin. Never subdivide, duplicate, merge, or add a semantic panel. Add no invented dividers, coordinates, labels, or construction marks.",
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "rhythm": "compression_to_release",
+      "special_device": {
+        "kind": "open_frame",
+        "reason": "The atmospheric rain window in s1 uses an open frame to allow the dark, stormy mood to overflow, establishing the weather pressure across the page.",
+        "source_panel": "p1",
+        "subject_id": "",
+        "target_panel": ""
+      }
+    },
+    "panel_layout": {
+      "active_layout": {
+        "family": "blockage",
+        "reading_strategy": "Read the short baseline and longer mechanism beat down the slanted left rail, then enter the dominant right result.",
+        "reason": "Excellent dynamic choice matching the rising emphasis and changing space. The slanted left rail perfectly handles the setup context (s1) and the heavier grabbing action (s2) before opening into the dominant right payoff (s3) as the character steps outside.",
+        "template_id": "slanted-dominant-rail-3-p2-v1",
+        "trigger": "This three-panel progression follows a rising narrative tension. Panel 1 establishes a quiet but ominous baseline context by showing storm clouds and rain hitting a window, representing the causal warning ('want het gaat hard regenen'). Panel 2 introduces a heavier physical action of preparation, showing a close-up of a hand grabbing the umbrella ('Neem een paraplu mee'). Panel 3 is the dominant payoff, uniting the prepared action and the environmental condition as the character steps outside with the umbrella under the active rain. This setup_detail_payoff structure fully captures the sentence's instructions without unnecessary expansion."
+      },
+      "active_permissions": {
+        "crossing": false,
+        "diagonal_release": false,
+        "inset": false,
+        "master_view": false,
+        "open_frame": true,
+        "overlap": false
+      },
+      "allow_page_bleed": false,
+      "border_style": "follow_page_design_and_panel_frames",
+      "border_weight": 2,
+      "conditional_permissions": {
+        "crossing": "only crossing may enable one breakout into one adjacent destination panel",
+        "diagonal_release": "only diagonal_release may use either one trapezoid or one complementary pair of trapezoids forming a shared diagonal gutter",
+        "inset": "only inset may use parent_panel and z_index above its parent",
+        "master_view": "only master_view may repeat one subject across panels sharing one environment id",
+        "open_frame": "only open_frame may set one panel border to none",
+        "overlap": "only overlap may name overlaps_panel"
+      },
+      "default_frame": "rectangle_with_solid_border",
+      "default_overlap": false,
+      "gutter_width": "8_to_16px",
+      "outer_margin": 16,
+      "permissions_from": "page_design.special_device.kind",
+      "preserve_reading_path": true,
+      "special_device_budget": 1
+    },
+    "panels": [
+      {
+        "attentional_frame": "macro",
+        "bleed": false,
+        "bounds": {
+          "height": 432,
+          "width": 300,
+          "x": 16,
+          "y": 16
+        },
+        "continuity": {
+          "axis_relation_from_previous": "establish",
+          "breakout": {
+            "destination_panel": "",
+            "edge": "empty",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "eyeline": {
+            "direction": "none",
+            "enabled": false,
+            "looker_id": "",
+            "target_anchor": ""
+          },
+          "match_on_action": {
+            "action": "",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "screen_direction": "left_to_right",
+          "shared_environment_id": "house_interior",
+          "subject_phase": ""
+        },
+        "frame": {
+          "border": "none",
+          "geometry_intent": "Canonical panel p1 keeps its clip bounds while its local border opens into the page.",
+          "overlaps_panel": "",
+          "parent_panel": "",
+          "polygon": [],
+          "shape": "open_frame",
+          "z_index": 0
+        },
+        "id": "p1",
+        "narrative_role": "establisher",
+        "narrative_weight": "secondary",
+        "scene": {
+          "camera": {
+            "angle": "eye_level",
+            "depth_plan": "deep",
+            "eye_flow_exit": "bottom_right",
+            "focus": "raindrops on glass",
+            "framing": "environment",
+            "shot_scale": "wide",
+            "viewpoint": "objective",
+            "viewpoint_subject_id": ""
+          },
+          "description": "Looking out through a glass window pane thick with sliding raindrops. Beyond the glass, dark storm clouds hang low over a silhouette of distant roofs.",
+          "environment": {
+            "background": [
+              "dark heavy storm clouds in the sky"
+            ],
+            "foreground": [
+              "heavy sliding raindrops on a glass pane"
+            ],
+            "midground": [
+              "blurred window frame"
+            ],
+            "setting": "room looking outside"
+          },
+          "lighting": "dim and gloomy, filtered through storm clouds",
+          "mood": "ominous and wet",
+          "motion_treatment": "none",
+          "subjects": [],
+          "text_in_frame": "none"
+        },
+        "semantic_job": "Establish the heavy rain falling outside the house as the warning motivator.",
+        "shot_contract": {
+          "angle": "eye_level",
+          "camera_motivation": "Establish the environmental pressure and visual justification for the entire narrative action.",
+          "depth_plan": "deep",
+          "framing": "environment",
+          "id": "s1",
+          "information_gain": "Shows the dark sky and heavy raindrops on the pane, illustrating the imminent weather warning.",
+          "role": "establishing",
+          "semantic_beat_index": 2,
+          "shot_scale": "wide",
+          "source_support": "want het gaat hard regenen",
+          "transition_trigger": "scene_open",
+          "viewpoint": "objective",
+          "viewpoint_anchor": "",
+          "visible_anchor": "dark heavy storm clouds and raindrops hitting a window pane"
+        },
+        "transition_from_previous": "none"
+      },
+      {
+        "attentional_frame": "micro",
+        "bleed": false,
+        "bounds": {
+          "height": 608,
+          "width": 300,
+          "x": 16,
+          "y": 400
+        },
+        "continuity": {
+          "axis_relation_from_previous": "preserve",
+          "breakout": {
+            "destination_panel": "",
+            "edge": "empty",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "eyeline": {
+            "direction": "none",
+            "enabled": false,
+            "looker_id": "",
+            "target_anchor": ""
+          },
+          "match_on_action": {
+            "action": "",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "screen_direction": "left_to_right",
+          "shared_environment_id": "house_interior",
+          "subject_phase": "grabbing_umbrella"
+        },
+        "frame": {
+          "border": "solid",
+          "geometry_intent": "Canonical panel 2 of template slanted-dominant-rail-3-p2-v1.",
+          "overlaps_panel": "",
+          "parent_panel": "",
+          "polygon": [
+            [
+              16,
+              400
+            ],
+            [
+              316,
+              464
+            ],
+            [
+              316,
+              1008
+            ],
+            [
+              16,
+              1008
+            ]
+          ],
+          "shape": "trapezoid",
+          "z_index": 0
+        },
+        "id": "p2",
+        "narrative_role": "initial",
+        "narrative_weight": "secondary",
+        "scene": {
+          "camera": {
+            "angle": "low",
+            "depth_plan": "shallow",
+            "eye_flow_exit": "right",
+            "focus": "hand gripping the umbrella handle",
+            "framing": "insert",
+            "shot_scale": "close",
+            "viewpoint": "objective",
+            "viewpoint_subject_id": ""
+          },
+          "description": "A close-up view of a hallway stand where a hand is wrapping its fingers firmly around the curved wooden handle of a black folded umbrella.",
+          "environment": {
+            "background": [
+              "hallway floorboards softly blurred"
+            ],
+            "foreground": [
+              "hand",
+              "curved wooden handle of a folded umbrella"
+            ],
+            "midground": [
+              "ceramic umbrella stand"
+            ],
+            "setting": "entrance hallway"
+          },
+          "lighting": "soft indoor hallway lighting",
+          "mood": "determined preparation",
+          "motion_treatment": "none",
+          "subjects": [
+            {
+              "blocking": "hand reaches down into the frame from the top left",
+              "expression": "focused and resolved",
+              "figure": "a young person in a dark coat",
+              "id": "char_1",
+              "pose": "firmly grabbing the curved wooden handle of the umbrella"
+            }
+          ],
+          "text_in_frame": "none"
+        },
+        "semantic_job": "Show the close-up action of taking the umbrella from its holder.",
+        "shot_contract": {
+          "angle": "low",
+          "camera_motivation": "Isolate the target object (paraplu) at the moment of physical retrieval to highlight preparation.",
+          "depth_plan": "shallow",
+          "framing": "insert",
+          "id": "s2",
+          "information_gain": "Provides a clear view of the target object being gripped and taken by the hand.",
+          "role": "detail",
+          "semantic_beat_index": 1,
+          "shot_scale": "close",
+          "source_support": "Neem een paraplu mee",
+          "transition_trigger": "attention_shift",
+          "viewpoint": "objective",
+          "viewpoint_anchor": "",
+          "visible_anchor": "hand grabbing the handle of a folded umbrella in a stand"
+        },
+        "transition_from_previous": "action_to_action"
+      },
+      {
+        "attentional_frame": "mono",
+        "bleed": false,
+        "bounds": {
+          "height": 992,
+          "width": 676,
+          "x": 332,
+          "y": 16
+        },
+        "continuity": {
+          "axis_relation_from_previous": "preserve",
+          "breakout": {
+            "destination_panel": "",
+            "edge": "empty",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "eyeline": {
+            "direction": "screen_right",
+            "enabled": true,
+            "looker_id": "char_1",
+            "target_anchor": "the pouring rain outside"
+          },
+          "match_on_action": {
+            "action": "",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "screen_direction": "left_to_right",
+          "shared_environment_id": "house_interior",
+          "subject_phase": "stepping_outside"
+        },
+        "frame": {
+          "border": "solid",
+          "geometry_intent": "Canonical panel 3 of template slanted-dominant-rail-3-p2-v1.",
+          "overlaps_panel": "",
+          "parent_panel": "",
+          "polygon": [],
+          "shape": "wide_rectangle",
+          "z_index": 0
+        },
+        "id": "p3",
+        "narrative_role": "peak",
+        "narrative_weight": "primary",
+        "scene": {
+          "camera": {
+            "angle": "eye_level",
+            "depth_plan": "layered",
+            "eye_flow_exit": "right",
+            "focus": "character crossing the threshold",
+            "framing": "single",
+            "shot_scale": "medium",
+            "viewpoint": "objective",
+            "viewpoint_subject_id": ""
+          },
+          "description": "A medium view of the character crossing the threshold of the open front door into a downpour, carrying the folded umbrella securely under one arm, ready to use.",
+          "environment": {
+            "background": [
+              "heavy falling rain sheets",
+              "wet pavement outside"
+            ],
+            "foreground": [
+              "open wooden door frame"
+            ],
+            "midground": [
+              "the character stepping across the stone threshold"
+            ],
+            "setting": "front door threshold"
+          },
+          "lighting": "contrast between warm indoor shadow and cool, bright, wet daylight",
+          "mood": "active and purposeful stepping out",
+          "motion_treatment": "pose_only",
+          "subjects": [
+            {
+              "blocking": "moving from the dry indoor frame on the left into the wet elements on the right",
+              "expression": "resolute",
+              "figure": "the young person in a dark coat",
+              "id": "char_1",
+              "pose": "stepping out with one foot on the wet doorstep, holding the closed umbrella under their arm, looking out into the rain"
+            }
+          ],
+          "text_in_frame": "none"
+        },
+        "semantic_job": "The payoff showing the character crossing the threshold into the active rainstorm carrying the umbrella.",
+        "shot_contract": {
+          "angle": "eye_level",
+          "camera_motivation": "Depict the culmination of the action where preparation meets the active environment.",
+          "depth_plan": "layered",
+          "framing": "single",
+          "id": "s3",
+          "information_gain": "Shows the character carrying the umbrella across the threshold into the active downpour.",
+          "role": "payoff",
+          "semantic_beat_index": 1,
+          "shot_scale": "medium",
+          "source_support": "Neem een paraplu mee, want het gaat hard regenen",
+          "transition_trigger": "payoff",
+          "viewpoint": "objective",
+          "viewpoint_anchor": "",
+          "visible_anchor": "person stepping through the open door into the falling rain, carrying the umbrella"
+        },
+        "transition_from_previous": "action_to_action"
+      }
+    ],
+    "rendering_rules": {
+      "camera_instruction": "render page_design.camera_arc and every panel shot_contract as one motivated edit sequence; preserve the planned scale, viewpoint, framing, angle, depth, 180-degree axis, eyelines, screen direction, and match-on-action continuity",
+      "crossing_occlusion": "never_cover_faces_hands_decisive_objects_or_next_panel_entry",
+      "finished_artwork": "render only final finished manga artwork, never a blueprint, storyboard, wireframe, annotated plan, or layout diagram",
+      "layout_instruction": "render the supplied page_design, bounds, frame relations, reading_path, and layout_rendering_directive as binding page geometry",
+      "layout_priority": "reading_clarity_then_semantic_hierarchy_then_expressiveness",
+      "logos_and_emblems": "No logos, brand marks, emblems, badges, icons, interface symbols, or decorative pseudo-writing on any object.",
+      "metadata_visibility": "all JSON keys, panel and subject ids, bounds, coordinates, dimensions, z-index values, units, guides, and layout annotations are invisible construction metadata and must never appear in the artwork",
+      "outer_border": "16px_pure_white",
+      "panel_gutters": "clean_white_except_one_declared_crossing",
+      "signs_and_labels": "blank_hidden_or_icon_only",
+      "sound_effects": "Absolutely no sound-effect glyphs, including Japanese onomatopoeia, stylized symbols, or pseudo-writing.",
+      "speech_bubbles": "none",
+      "symbols_or_writing": "No visible writing of any kind, including letterlike marks near moving people, vehicles, machinery, impacts, or reactions.",
+      "text_elements": "none"
+    },
+    "semantic_spine": {
+      "emotional_relation": "preparedness overcoming environmental gloom",
+      "intensity": 3,
+      "literal_event": "A person prepares for an impending storm by retrieving an umbrella from a stand and stepping out into the rain.",
+      "memory_hook": "The close detail of a hand gripping a classic curved wooden umbrella handle just before stepping out into a heavy downpour.",
+      "metaphor": {
+        "literal_anchor": "",
+        "mapping": "",
+        "mode": "none"
+      },
+      "semantic_focus": "The physical retrieval of an umbrella to prepare for heavy rainfall.",
+      "visual_relation": "threshold"
+    }
+  }
+}

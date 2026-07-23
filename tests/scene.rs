@@ -1,7 +1,7 @@
 //! Tests for scene OCR routing and manga validation.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::Cursor;
 use std::rc::Rc;
 
@@ -81,6 +81,36 @@ impl QueueSource {
 impl ImageSource for QueueSource {
     /// Return one scripted PNG payload.
     fn image(&self, _scene: &Value) -> Result<Vec<u8>> {
+        let Some(image) = self.values.borrow_mut().pop_front() else {
+            bail!("image source ran out of scripted images");
+        };
+        let mut cursor = Cursor::new(Vec::new());
+        DynamicImage::ImageLuma8(image).write_to(&mut cursor, ImageFormat::Png)?;
+        Ok(cursor.into_inner())
+    }
+}
+
+/// Scripted image source that records every provider scene.
+#[derive(Clone, Debug)]
+struct CapturingSource {
+    values: Rc<RefCell<VecDeque<GrayImage>>>,
+    scenes: Rc<RefCell<Vec<Value>>>,
+}
+
+impl CapturingSource {
+    /// Create one capturing source from scripted grayscale images.
+    fn new(values: Vec<GrayImage>) -> Self {
+        Self {
+            values: Rc::new(RefCell::new(values.into())),
+            scenes: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+}
+
+impl ImageSource for CapturingSource {
+    /// Record the provider scene and return one scripted PNG payload.
+    fn image(&self, scene: &Value) -> Result<Vec<u8>> {
+        self.scenes.borrow_mut().push(scene.clone());
         let Some(image) = self.values.borrow_mut().pop_front() else {
             bail!("image source ran out of scripted images");
         };
@@ -252,6 +282,42 @@ fn slanted_rail_layout_scene(target: &str) -> Value {
     value
 }
 
+/// Create one four-panel staggered grid with offset vertical dividers.
+fn staggered_grid_layout_scene(target: &str) -> Value {
+    let mut value = active_layout_scene(2, target);
+    value["manga_panel"]["panels"] = json!([
+        {
+            "id": "p1",
+            "bounds": {"x": 16, "y": 16, "width": 600, "height": 484},
+            "frame": {"shape": "trapezoid", "polygon": [[16, 16], [616, 16], [600, 500], [16, 500]]}
+        },
+        {
+            "id": "p2",
+            "bounds": {"x": 628, "y": 16, "width": 380, "height": 484},
+            "frame": {"shape": "trapezoid", "polygon": [[628, 16], [1008, 16], [1008, 500], [644, 500]]}
+        },
+        {
+            "id": "p3",
+            "bounds": {"x": 16, "y": 516, "width": 360, "height": 492},
+            "frame": {"shape": "trapezoid", "polygon": [[16, 516], [376, 516], [360, 1008], [16, 1008]]}
+        },
+        {
+            "id": "p4",
+            "bounds": {"x": 388, "y": 516, "width": 620, "height": 492},
+            "frame": {"shape": "trapezoid", "polygon": [[388, 516], [1008, 516], [1008, 1008], [404, 1008]]}
+        }
+    ]);
+    value["manga_panel"]["panel_layout"]["active_layout"]["template_id"] =
+        json!("staggered-grid-4-v1");
+    value["manga_panel"]["page_design"]["special_device"] = json!({
+        "kind": "none",
+        "source_panel": "",
+        "target_panel": "",
+        "subject_id": ""
+    });
+    value
+}
+
 /// Create one declared three-column scene whose panel centers share a horizontal line.
 fn horizontal_triptych_layout_scene(target: &str) -> Value {
     let mut value = active_layout_scene(2, target);
@@ -393,6 +459,22 @@ fn rectangular_panels() -> GrayImage {
     let mut image = framed(32, 1);
     for y in 0..32 {
         for x in 15..17 {
+            image.put_pixel(x, y, Luma([255]));
+        }
+    }
+    image
+}
+
+/// Create one symmetric four-panel grid with aligned vertical dividers.
+fn regular_grid_panels() -> GrayImage {
+    let mut image = framed(64, 1);
+    for y in 0..64 {
+        for x in 31..33 {
+            image.put_pixel(x, y, Luma([255]));
+        }
+    }
+    for y in 31..33 {
+        for x in 0..64 {
             image.put_pixel(x, y, Luma([255]));
         }
     }
@@ -557,6 +639,22 @@ fn shifted_t_bottom_panels() -> GrayImage {
     for y in 15..17 {
         for x in 0..32 {
             image.put_pixel(x, y, Luma([255]));
+        }
+    }
+    image
+}
+
+/// Open the first panel to exterior white while retaining visible local content.
+fn opened_t_bottom_panels() -> GrayImage {
+    let mut image = shifted_t_bottom_panels();
+    for y in 1..15 {
+        for x in 1..15 {
+            image.put_pixel(x, y, Luma([255]));
+        }
+    }
+    for y in 3..12 {
+        for x in 3..6 {
+            image.put_pixel(x, y, Luma([0]));
         }
     }
     image
@@ -1168,6 +1266,198 @@ fn renderer_rejects_unrelated_near_white_contour_outside_gutter_corridor() {
     );
 }
 
+/// Load one compact production topology regression fixture.
+fn production_topology_fixture(name: &str) -> (Value, GrayImage) {
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/topology-production");
+    let scene = serde_json::from_slice::<Value>(
+        std::fs::read(directory.join(format!("{name}.scene.json")))
+            .expect("production topology scene must be readable")
+            .as_slice(),
+    )
+    .expect("production topology scene must decode");
+    let image = image::open(directory.join(format!("{name}.jpg")))
+        .expect("production topology image must decode")
+        .into_luma8();
+    (scene, image)
+}
+
+/// Load one production image used to calibrate a locally declared topology.
+fn production_topology_image(name: &str) -> GrayImage {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/topology-production")
+        .join(format!("{name}.jpg"));
+    image::open(path)
+        .expect("production topology image must decode")
+        .into_luma8()
+}
+
+/// Topology-only replay accepts an archived oblique rail with a reversed shallow slope.
+#[test]
+fn topology_accepts_archived_slanted_rail_with_shifted_divider() {
+    let image = production_topology_image("slanted-rail-shifted");
+    let regions = BorderDetector::new(6, 24, 240, 0).regions(&image);
+    let accepted = MangaRenderer::new(
+        QueueSource::new(vec![image]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(6, 24, 240, 0),
+    )
+    .render(&slanted_rail_layout_scene("en"), &mut Recorder::default())
+    .is_ok();
+    assert_eq!(
+        (regions, accepted),
+        (3, true),
+        "shifted production rail still fails despite retaining three oblique regions"
+    );
+}
+
+/// Topology-only replay accepts archived staggered dividers around isolated centers.
+#[test]
+fn topology_accepts_archived_staggered_grid_with_shifted_dividers() {
+    let image = production_topology_image("staggered-grid-shifted");
+    let regions = BorderDetector::new(6, 24, 240, 0).regions(&image);
+    let accepted = MangaRenderer::new(
+        QueueSource::new(vec![image]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(6, 24, 240, 0),
+    )
+    .render(&staggered_grid_layout_scene("en"), &mut Recorder::default())
+    .is_ok();
+    assert_eq!(
+        (regions, accepted),
+        (4, true),
+        "shifted production staggered grid still fails despite retaining four regions"
+    );
+}
+
+/// A staggered-grid declaration cannot accept a symmetric two-by-two grid.
+#[test]
+fn renderer_rejects_regular_grid_for_declared_staggered_grid() {
+    let image = regular_grid_panels();
+    let regions = BorderDetector::new(2, 6, 240, 1).regions(&image);
+    let rejected = MangaRenderer::new(
+        QueueSource::new(vec![image]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .render(&staggered_grid_layout_scene("en"), &mut Recorder::default())
+    .is_err();
+    assert_eq!(
+        (regions, rejected),
+        (4, true),
+        "staggered-grid fallback still accepts aligned symmetric dividers"
+    );
+}
+
+/// Topology-only replay accepts an archived crossing whose halo preserves three regions.
+#[test]
+fn topology_accepts_archived_crossing_with_closed_registered_regions() {
+    let (scene, image) = production_topology_fixture("crossing-exact");
+    let regions = BorderDetector::new(6, 24, 240, 0).regions(&image);
+    let accepted = MangaRenderer::new(
+        QueueSource::new(vec![image]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(6, 24, 240, 0),
+    )
+    .render(&scene, &mut Recorder::default())
+    .is_ok();
+    assert_eq!(
+        (regions, accepted),
+        (3, true),
+        "closed subject halo still makes a valid slanted crossing fail topology"
+    );
+}
+
+/// Exact regions and a slanted divider cannot stand in for visible crossing content.
+#[test]
+fn renderer_rejects_slanted_layout_without_visible_crossing_content() {
+    let image = shifted_slanted_t_bottom_panels();
+    let regions = BorderDetector::new(2, 6, 240, 1).regions(&image);
+    let rejected = MangaRenderer::new(
+        QueueSource::new(vec![image]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .render(
+        &slanted_crossing_layout_scene("en"),
+        &mut Recorder::default(),
+    )
+    .is_err();
+    assert_eq!(
+        (regions, rejected),
+        (3, true),
+        "crossing gate still accepts an uninterrupted slanted gutter"
+    );
+}
+
+/// Topology-only replay accepts an archived crossing that merges its declared pair.
+#[test]
+fn topology_accepts_archived_crossing_with_declared_merged_pair() {
+    let (scene, image) = production_topology_fixture("crossing-merged");
+    let regions = BorderDetector::new(6, 24, 240, 0).regions(&image);
+    let accepted = MangaRenderer::new(
+        QueueSource::new(vec![image]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(6, 24, 240, 0),
+    )
+    .render(&scene, &mut Recorder::default())
+    .is_ok();
+    assert_eq!(
+        (regions, accepted),
+        (2, true),
+        "declared merged crossing still loses its registered separator slope"
+    );
+}
+
+/// Topology-only replay rejects an archived closed panel declared as open frame.
+#[test]
+fn topology_rejects_archived_closed_panel_declared_as_open_frame() {
+    let (scene, image) = production_topology_fixture("open-frame");
+    let regions = BorderDetector::new(6, 24, 240, 0).regions(&image);
+    let rejected = MangaRenderer::new(
+        QueueSource::new(vec![image]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(6, 24, 240, 0),
+    )
+    .render(&scene, &mut Recorder::default())
+    .is_err();
+    assert_eq!(
+        (regions, rejected),
+        (3, true),
+        "open-frame gate still accepts an ordinary closed production panel"
+    );
+}
+
+/// An open source retains visible content while its center joins exterior white.
+#[test]
+fn renderer_accepts_visibly_open_frame_with_registered_companions() {
+    let image = opened_t_bottom_panels();
+    let regions = BorderDetector::new(2, 6, 240, 1).regions(&image);
+    let accepted = MangaRenderer::new(
+        QueueSource::new(vec![image]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .render(
+        &active_device_scene(t_bottom_layout_scene("en"), "open_frame"),
+        &mut Recorder::default(),
+    )
+    .is_ok();
+    assert_eq!(
+        (regions, accepted),
+        (3, true),
+        "visibly open source cannot retain its two closed companion regions"
+    );
+}
+
 /// An open-frame declaration cannot stand in for a missing source panel.
 #[test]
 fn renderer_rejects_open_frame_with_a_blank_source_region() {
@@ -1269,12 +1559,112 @@ fn renderer_accepts_strong_diagonal_and_rejects_straightened_split() {
     );
 }
 
+/// Provider requests keep selected render contracts without inactive planning alternatives.
+#[test]
+fn renderer_sends_only_selected_planning_metadata_to_the_image_source() {
+    let mut canonical = active_layout_scene(2, "en");
+    canonical["manga_panel"]["meta"]["title"] =
+        json!("EXACT_SENTENCE_MUST_NOT_REACH_IMAGE_PROVIDER");
+    canonical["manga_panel"]["meta"]["description"] =
+        json!("EXACT_SENTENCE_MUST_NOT_REACH_IMAGE_PROVIDER");
+    canonical["manga_panel"]["meta"]["layout_selection"] = json!({
+        "chosen_template_id": "test-rectangles-v1",
+        "deterministic_slot": 1,
+        "device_candidates": [{"scene_kind": "open_frame"}],
+        "eligible_template_ids": ["test-rectangles-v1", "competing-layout-v1"],
+        "ranked_candidates": [{"template_id": "competing-layout-v1"}],
+        "scene_attempt_index": 2,
+        "scene_features": {"panel_count": 2},
+        "seed_source": "provider-test"
+    });
+    canonical["manga_panel"]["panel_layout"]["active_permissions"] = json!({"open_frame": false});
+    canonical["manga_panel"]["panel_layout"]["conditional_permissions"] =
+        json!({"open_frame": "inactive alternative"});
+    canonical["manga_panel"]["panel_layout"]["permissions_from"] =
+        json!("page_design.special_device.kind");
+    canonical["manga_panel"]["page_design"] = json!({
+        "camera_arc": {"strategy": "push_in"},
+        "special_device": {"kind": "none", "source_panel": "", "target_panel": "", "subject_id": ""}
+    });
+    canonical["manga_panel"]["semantic_spine"] = json!({"literal_event": "one selected event"});
+    canonical["manga_panel"]["rendering_rules"] = json!({"outer_border": "16px_pure_white"});
+    canonical["manga_panel"]["panels"][0]["scene"] = json!({"camera": {"shot_scale": "wide"}});
+    let source = CapturingSource::new(vec![rectangular_panels()]);
+    let captured = source.scenes.clone();
+    MangaRenderer::new(
+        source,
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .render(&canonical, &mut Recorder::default())
+    .expect("projected provider scene must retain valid canonical geometry");
+    let provider = captured
+        .borrow()
+        .first()
+        .cloned()
+        .expect("image source must receive one provider scene");
+    let selection = provider
+        .pointer("/manga_panel/meta/layout_selection")
+        .and_then(Value::as_object)
+        .expect("provider scene must retain compact selection provenance");
+    assert_eq!(
+        (
+            captured.borrow().len(),
+            selection.keys().cloned().collect::<BTreeSet<_>>(),
+            provider
+                .pointer("/manga_panel/meta/layout_selection/chosen_template_id")
+                .and_then(Value::as_str),
+            provider
+                .pointer("/manga_panel/meta/layout_selection/scene_attempt_index")
+                .and_then(Value::as_u64),
+            [
+                provider
+                    .pointer("/manga_panel/panel_layout/conditional_permissions")
+                    .is_none(),
+                provider
+                    .pointer("/manga_panel/panel_layout/permissions_from")
+                    .is_none(),
+                provider.pointer("/manga_panel/meta/title").is_none(),
+                provider.pointer("/manga_panel/meta/description").is_none(),
+                !provider
+                    .to_string()
+                    .contains("EXACT_SENTENCE_MUST_NOT_REACH_IMAGE_PROVIDER"),
+                provider.pointer("/manga_panel/panel_layout/active_layout")
+                    == canonical.pointer("/manga_panel/panel_layout/active_layout"),
+                provider.pointer("/manga_panel/panel_layout/active_permissions")
+                    == canonical.pointer("/manga_panel/panel_layout/active_permissions"),
+                provider.pointer("/manga_panel/page_design")
+                    == canonical.pointer("/manga_panel/page_design"),
+                provider.pointer("/manga_panel/panels") == canonical.pointer("/manga_panel/panels"),
+                provider.pointer("/manga_panel/semantic_spine")
+                    == canonical.pointer("/manga_panel/semantic_spine"),
+                provider.pointer("/manga_panel/rendering_rules")
+                    == canonical.pointer("/manga_panel/rendering_rules"),
+            ],
+        ),
+        (
+            1,
+            BTreeSet::from([
+                String::from("chosen_template_id"),
+                String::from("scene_attempt_index"),
+            ]),
+            Some("test-rectangles-v1"),
+            Some(2),
+            [true; 11],
+        ),
+        "provider projection leaked inactive planning alternatives or discarded render contracts"
+    );
+}
+
 /// Production validation archives every accepted and rejected raw image attempt.
 #[test]
 fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
     let temporary = tempdir()?;
+    let source = CapturingSource::new(vec![rectangular_panels(), rectangular_panels()]);
+    let captured = source.scenes.clone();
     let renderer = MangaRenderer::new(
-        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
+        source,
         2,
         ScriptedText::new(&["word", ""]),
         BorderDetector::new(2, 6, 240, 1),
@@ -1288,21 +1678,40 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
     let second = serde_json::from_str::<Value>(&std::fs::read_to_string(
         temporary.path().join("attempt-0002.json"),
     )?)?;
+    let first_scene = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.scene.json"),
+    )?)?;
+    let second_scene = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0002.scene.json"),
+    )?)?;
+    let sent = captured.borrow().clone();
     assert_eq!(
         (
             rendered.color().has_color(),
             temporary.path().join("attempt-0001.png").is_file(),
             temporary.path().join("attempt-0002.png").is_file(),
+            first["scene"].as_str(),
+            second["scene"].as_str(),
+            first_scene,
+            second_scene,
             first["status"].as_str(),
+            first["category"].as_str(),
             first["reason"].as_str(),
             second["status"].as_str(),
+            second["category"].as_str(),
         ),
         (
             false,
             true,
             true,
+            Some("attempt-0001.scene.json"),
+            Some("attempt-0002.scene.json"),
+            sent[0].clone(),
+            sent[1].clone(),
             Some("rejected"),
+            Some("ocr"),
             Some("OCR detected text: 'word'"),
+            Some("accepted"),
             Some("accepted"),
         ),
         "production image attempts or their validation verdicts were discarded"
@@ -1366,6 +1775,7 @@ fn renderer_accepts_fully_materialized_structural_devices_with_valid_topology() 
     let accepted = ["crossing", "overlap", "inset", "open_frame"].map(|device| {
         let image = match device {
             "crossing" => crossed_t_bottom_panels(),
+            "open_frame" => opened_t_bottom_panels(),
             _ => shifted_t_bottom_panels(),
         };
         MangaRenderer::new(

@@ -1,11 +1,11 @@
 //! Curation handlers: pick senses, exclude a card, or ask Gemini to add senses.
 //!
-//! Each edits one candidate by term and resets the session to `understood`,
-//! clearing the committed plan so the next `generate` re-derives it. Every edit
-//! runs inside one `store.update` closure, so concurrent curation commands
-//! serialize and all apply. The shared preconditions (`resolve`,
-//! `refuse_if_live`, `reset_to_understood`, `preflight_key`) live in the parent
-//! module.
+//! Each edits one candidate by term before generation commits a plan. Every
+//! edit runs inside one `store.update` closure, so concurrent curation commands
+//! serialize and all apply. A nonempty draft plan is immutable here; generated
+//! cards are changed only through `regenerate`, preserving stable cost-journal
+//! slots. The shared preconditions (`resolve`, `refuse_if_live`,
+//! `reset_to_understood`, `preflight_key`) live in the parent module.
 
 use std::path::PathBuf;
 
@@ -19,8 +19,7 @@ use super::args::{CardArg, CorrectArgs, SelectArgs};
 use super::store::{Phase, SessionRecord, SessionStore};
 use super::{Render, json, preflight_key, refuse_if_live, reset_to_understood, resolve, view};
 
-/// Run one curation edit against a candidate found by term, clearing the
-/// committed plan so the next `generate` re-derives it from the new selection.
+/// Run one pre-generation curation edit against a candidate found by term.
 /// Returns the record as updated, for the JSON document.
 fn curate(
     store: &SessionStore,
@@ -30,6 +29,7 @@ fn curate(
 ) -> Result<SessionRecord> {
     store.update(id, |record| {
         refuse_if_live(store, record)?;
+        refuse_if_committed(record)?;
         let index = record
             .candidates
             .iter()
@@ -38,9 +38,19 @@ fn curate(
         let updated = edit(record.candidates[index].clone().candidate())?;
         record.candidates[index] = CandidateRecord::from_candidate(&updated);
         reset_to_understood(record);
-        record.drafts.clear();
         Ok(())
     })
+}
+
+/// Refuse curation after a stable generation plan has acquired journal slots.
+fn refuse_if_committed(record: &SessionRecord) -> Result<()> {
+    if record.drafts.is_empty() {
+        return Ok(());
+    }
+    Err(usage(format!(
+        "session '{}' already has a committed plan — use 'kamishibai regenerate {} --card <term>' to change a generated card",
+        record.id, record.id
+    )))
 }
 
 /// Print the post-mutation state: the session document in JSON mode, or the
@@ -145,6 +155,7 @@ pub(super) fn correct(args: &CorrectArgs, render: Render) -> Result<()> {
     let record = resolve(&store, args.id.as_deref(), render)?;
     let id = record.id.clone();
     refuse_if_live(&store, &record)?;
+    refuse_if_committed(&record)?;
     preflight_key()?;
     let snapshot = record
         .candidates
@@ -159,6 +170,7 @@ pub(super) fn correct(args: &CorrectArgs, render: Render) -> Result<()> {
     let mut appended = 0;
     let updated = store.update(id.as_str(), |record| {
         refuse_if_live(&store, record)?;
+        refuse_if_committed(record)?;
         let index = record
             .candidates
             .iter()
@@ -175,7 +187,6 @@ pub(super) fn correct(args: &CorrectArgs, render: Render) -> Result<()> {
         record.candidates[index] =
             CandidateRecord::from_candidate(&added.selecting_senses(selection));
         reset_to_understood(record);
-        record.drafts.clear();
         Ok(())
     })?;
     let note = correct_note(&updated, args.card.as_str(), appended);
