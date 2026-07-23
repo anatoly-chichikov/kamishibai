@@ -12,10 +12,12 @@ use image::DynamicImage;
 use serde_json::Value;
 use serde_json::json;
 
-use super::{BorderDetector, ImageSource, Progress, Renderer, SceneText};
+use super::monochrome::color_detected;
+use super::{BorderDetector, ImageSource, Progress, Renderer, SceneText, compile_image_prompt};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RenderRejection {
+    Color(String),
     Topology(String),
     Ocr(String),
     Border(String),
@@ -24,6 +26,10 @@ enum RenderRejection {
 }
 
 impl RenderRejection {
+    fn color(reason: &str) -> Self {
+        Self::Color(String::from(reason))
+    }
+
     fn topology(reason: &str) -> Self {
         Self::Topology(String::from(reason))
     }
@@ -46,7 +52,8 @@ impl RenderRejection {
 
     fn reason(&self) -> &str {
         match self {
-            Self::Topology(reason)
+            Self::Color(reason)
+            | Self::Topology(reason)
             | Self::Ocr(reason)
             | Self::Border(reason)
             | Self::LegacyGutter(reason)
@@ -56,6 +63,7 @@ impl RenderRejection {
 
     fn category(&self) -> &'static str {
         match self {
+            Self::Color(_) => "color",
             Self::Topology(_) => "topology",
             Self::Ocr(_) => "ocr",
             Self::Border(_) => "border",
@@ -159,18 +167,32 @@ where
             .and_then(|root| root.get("panels"))
             .and_then(Value::as_array)
             .map_or(0, Vec::len);
-        let provider = project(scene);
+        let prompt = compile_image_prompt(scene)?;
         let mut rejection = RenderRejection::other(String::new());
         for attempt in 0..self.retries {
-            let bytes = self.client.image(&provider)?;
-            let journal = self
+            let mut journal = self
                 .attempts
                 .as_deref()
-                .map(|directory| AttemptJournal::capture(directory, bytes.as_slice(), &provider))
+                .map(|directory| AttemptJournal::start(directory, scene, prompt.as_str()))
                 .transpose()?;
+            let bytes = match self.client.image(prompt.as_str()) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    let reason = error.to_string();
+                    record_attempt(journal.as_ref(), "error", "provider", reason.as_str())?;
+                    return Err(error);
+                }
+            };
+            if let Some(journal) = journal.as_mut()
+                && let Err(error) = journal.capture_image(bytes.as_slice())
+            {
+                let reason = error.to_string();
+                let _ = journal.record("error", "archive", reason.as_str());
+                return Err(error);
+            }
             let decoded = image::load_from_memory(bytes.as_slice());
-            let gray = match decoded {
-                Ok(image) => image.into_luma8(),
+            let image = match decoded {
+                Ok(image) => image,
                 Err(error) => {
                     record_attempt(
                         journal.as_ref(),
@@ -181,7 +203,26 @@ where
                     return Err(error.into());
                 }
             };
-            let found = self.text.detected(scene, &gray)?;
+            if color_detected(&image) {
+                rejection = RenderRejection::color("Color detected");
+                record_attempt(
+                    journal.as_ref(),
+                    "rejected",
+                    rejection.category(),
+                    rejection.reason(),
+                )?;
+                progress.retry("Rendering manga", attempt + 1, rejection.reason());
+                continue;
+            }
+            let gray = image.into_luma8();
+            let found = match self.text.detected(scene, &gray) {
+                Ok(found) => found,
+                Err(error) => {
+                    let reason = error.to_string();
+                    record_attempt(journal.as_ref(), "error", "ocr", reason.as_str())?;
+                    return Err(error);
+                }
+            };
             let text_rejected = significant_registry_text(found.as_str());
             if text_rejected {
                 rejection = RenderRejection::ocr(format!("OCR detected text: '{found}'"));
@@ -261,42 +302,16 @@ where
     }
 }
 
-fn project(scene: &Value) -> Value {
-    let mut provider = scene.clone();
-    if let Some(meta) = provider
-        .pointer_mut("/manga_panel/meta")
-        .and_then(Value::as_object_mut)
-    {
-        meta.remove("title");
-        meta.remove("description");
-    }
-    if let Some(selection) = provider
-        .pointer_mut("/manga_panel/meta/layout_selection")
-        .and_then(Value::as_object_mut)
-    {
-        selection
-            .retain(|key, _| matches!(key.as_str(), "chosen_template_id" | "scene_attempt_index"));
-    }
-    if let Some(layout) = provider
-        .pointer_mut("/manga_panel/panel_layout")
-        .and_then(Value::as_object_mut)
-    {
-        layout.remove("conditional_permissions");
-        layout.remove("permissions_from");
-    }
-    provider
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct AttemptJournal {
     sequence: usize,
-    image: String,
+    image: Option<String>,
     scene: String,
     verdict: PathBuf,
 }
 
 impl AttemptJournal {
-    fn capture(directory: &Path, bytes: &[u8], scene: &Value) -> Result<Self> {
+    fn start(directory: &Path, scene: &Value, prompt: &str) -> Result<Self> {
         fs::create_dir_all(directory)?;
         let sequence = fs::read_dir(directory)?
             .filter_map(std::result::Result::ok)
@@ -312,6 +327,24 @@ impl AttemptJournal {
             .unwrap_or(0)
             .checked_add(1)
             .ok_or_else(|| anyhow!("registry image attempt sequence overflow"))?;
+        let scene_name = format!("attempt-{sequence:04}.scene.json");
+        let prompt_name = format!("attempt-{sequence:04}.prompt.txt");
+        fs::write(
+            directory.join(scene_name.as_str()),
+            serde_json::to_vec_pretty(scene)?,
+        )?;
+        fs::write(directory.join(prompt_name), prompt)?;
+        let journal = Self {
+            sequence,
+            image: None,
+            scene: scene_name,
+            verdict: directory.join(format!("attempt-{sequence:04}.json")),
+        };
+        journal.record("pending", "pending", "")?;
+        Ok(journal)
+    }
+
+    fn capture_image(&mut self, bytes: &[u8]) -> Result<()> {
         let extension = match image::guess_format(bytes).ok() {
             Some(image::ImageFormat::Png) => "png",
             Some(image::ImageFormat::Jpeg) => "jpg",
@@ -319,21 +352,14 @@ impl AttemptJournal {
             Some(image::ImageFormat::Gif) => "gif",
             _ => "bin",
         };
-        let image = format!("attempt-{sequence:04}.{extension}");
-        let scene_name = format!("attempt-{sequence:04}.scene.json");
+        let image = format!("attempt-{:04}.{extension}", self.sequence);
+        let directory = self
+            .verdict
+            .parent()
+            .ok_or_else(|| anyhow!("attempt verdict has no parent directory"))?;
         fs::write(directory.join(image.as_str()), bytes)?;
-        fs::write(
-            directory.join(scene_name.as_str()),
-            serde_json::to_vec_pretty(scene)?,
-        )?;
-        let journal = Self {
-            sequence,
-            image,
-            scene: scene_name,
-            verdict: directory.join(format!("attempt-{sequence:04}.json")),
-        };
-        journal.record("pending", "pending", "")?;
-        Ok(journal)
+        self.image = Some(image);
+        self.record("pending", "pending", "")
     }
 
     fn record(&self, status: &str, category: &str, reason: &str) -> Result<()> {
@@ -348,6 +374,7 @@ impl AttemptJournal {
                 "sequence": self.sequence,
                 "image": self.image,
                 "scene": self.scene,
+                "prompt": format!("attempt-{:04}.prompt.txt", self.sequence),
                 "status": status,
                 "category": category,
                 "reason": reason
@@ -1818,6 +1845,7 @@ mod tests {
     fn manga_render_rejection_downcast_identifies_every_local_gate() {
         assert_eq!(
             [
+                RenderRejection::color("color"),
                 RenderRejection::topology("topology"),
                 RenderRejection::ocr(String::from("ocr")),
                 RenderRejection::border(String::from("border")),
@@ -1825,7 +1853,7 @@ mod tests {
                 RenderRejection::other(String::from("other")),
             ]
             .map(local),
-            [true; 5],
+            [true; 6],
             "typed manga errors no longer identify every local validation rejection"
         );
     }
@@ -1854,6 +1882,7 @@ mod tests {
     fn manga_render_rejection_categories_distinguish_validation_gates() {
         assert_eq!(
             [
+                RenderRejection::color("color"),
                 RenderRejection::topology("topology"),
                 RenderRejection::ocr(String::from("ocr")),
                 RenderRejection::border(String::from("border")),
@@ -1861,7 +1890,14 @@ mod tests {
                 RenderRejection::other(String::from("other")),
             ]
             .map(|rejection| rejection.category()),
-            ["topology", "ocr", "border", "legacy_gutter", "other"],
+            [
+                "color",
+                "topology",
+                "ocr",
+                "border",
+                "legacy_gutter",
+                "other"
+            ],
             "typed manga errors collapse distinct validation gates"
         );
     }
@@ -1886,8 +1922,12 @@ mod tests {
         let temporary = TempDir::new().expect("attempt directory must be created");
         let orphan = temporary.path().join("attempt-0001.bin");
         fs::write(orphan.as_path(), b"orphaned").expect("orphaned attempt must be written");
-        let journal = AttemptJournal::capture(temporary.path(), b"next", &serde_json::json!({}))
-            .expect("next attempt must be captured");
+        let mut journal =
+            AttemptJournal::start(temporary.path(), &serde_json::json!({}), "compiled prompt")
+                .expect("next attempt must be reserved");
+        journal
+            .capture_image(b"next")
+            .expect("next attempt image must be captured");
         assert_eq!(
             (
                 journal.sequence,

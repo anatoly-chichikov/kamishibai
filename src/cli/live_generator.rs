@@ -753,6 +753,7 @@ fn persisted_local_rejections(path: &Path) -> Result<LocalImageRejections> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LocalImageRejection {
+    Color,
     Topology,
     Ocr,
     Border,
@@ -763,6 +764,7 @@ enum LocalImageRejection {
 impl LocalImageRejection {
     fn from_category(category: &str) -> Self {
         match category {
+            "color" => Self::Color,
             "topology" => Self::Topology,
             "ocr" => Self::Ocr,
             "border" => Self::Border,
@@ -1166,9 +1168,9 @@ impl<C> ImageSource for RequestCountingImage<C>
 where
     C: ImageSource,
 {
-    fn image(&self, scene: &serde_json::Value) -> Result<Vec<u8>> {
+    fn image(&self, prompt: &str) -> Result<Vec<u8>> {
         reserve_picture_request(&self.cache)?;
-        self.client.image(scene)
+        self.client.image(prompt)
     }
 }
 
@@ -1201,9 +1203,9 @@ impl SceneSource for MeteredGemini {
 }
 
 impl ImageSource for MeteredGemini {
-    fn image(&self, scene: &serde_json::Value) -> Result<Vec<u8>> {
+    fn image(&self, prompt: &str) -> Result<Vec<u8>> {
         self.client
-            .image_observed(scene, |cost| self.costs.push(cost))
+            .image_observed(prompt, |cost| self.costs.push(cost))
     }
 }
 
@@ -1399,7 +1401,7 @@ mod tests {
     }
 
     impl ImageSource for FailingImageSource {
-        fn image(&self, _scene: &Value) -> Result<Vec<u8>> {
+        fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
             self.calls.set(self.calls.get() + 1);
             bail!(self.error)
         }
@@ -1418,7 +1420,7 @@ mod tests {
     }
 
     impl ImageSource for UsageFreeImageSource {
-        fn image(&self, _scene: &Value) -> Result<Vec<u8>> {
+        fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
             self.costs.push(CostRecord::new(
                 "gemini-3.1-flash-image",
                 0,
@@ -1432,7 +1434,7 @@ mod tests {
     }
 
     impl ImageSource for CountingImageSource {
-        fn image(&self, _scene: &Value) -> Result<Vec<u8>> {
+        fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
             self.calls.set(self.calls.get() + 1);
             Ok(self.image.clone())
         }
@@ -1483,6 +1485,41 @@ mod tests {
         image_bytes(image)
     }
 
+    fn renderable_scene() -> Value {
+        serde_json::json!({
+            "manga_panel": {
+                "canvas": {
+                    "width": 1024,
+                    "height": 1024
+                },
+                "panel_layout": {
+                    "active_layout": {
+                        "template_id": "splash-1-v1"
+                    }
+                },
+                "page_design": {
+                    "special_device": {
+                        "kind": "none"
+                    }
+                },
+                "panels": [{
+                    "id": "p1",
+                    "bounds": {"x": 16, "y": 16, "width": 992, "height": 992},
+                    "scene": {
+                        "description": "One grounded subject performs a visible action",
+                        "camera": {
+                            "shot_scale": "medium",
+                            "viewpoint": "objective",
+                            "angle": "eye_level",
+                            "depth_plan": "layered"
+                        },
+                        "lighting": "controlled high-value contrast"
+                    }
+                }]
+            }
+        })
+    }
+
     fn picture_requests(cache: &Cache) -> u32 {
         load_picture_request_counter(cache)
             .expect("picture request counter must decode")
@@ -1523,10 +1560,7 @@ mod tests {
             RejectingText,
             BorderDetector::new(2, 6, 240, 2),
         );
-        let result = renderer.render(
-            &serde_json::json!({"manga_panel": {"panels": []}}),
-            &mut NoopProgress,
-        );
+        let result = renderer.render(&renderable_scene(), &mut NoopProgress);
         assert_eq!(
             (result.is_err(), source.calls()),
             (true, 1),
@@ -1600,7 +1634,7 @@ mod tests {
         let cache = Cache::new("visual", home.path());
         let source = FailingImageSource::new("transport failed");
         let image = RequestCountingImage::new(source.clone(), cache.clone());
-        let result = image.image(&serde_json::json!({}));
+        let result = image.image("compiled image prompt");
         assert_eq!(
             (result.is_err(), source.calls(), picture_requests(&cache)),
             (true, 1, 1),
@@ -1614,7 +1648,7 @@ mod tests {
         let cache = Cache::new("visual", home.path());
         let source = FailingImageSource::new("INVALID_ARGUMENT: request rejected");
         let image = RequestCountingImage::new(source.clone(), cache.clone());
-        let result = image.image(&serde_json::json!({}));
+        let result = image.image("compiled image prompt");
         assert_eq!(
             (result.is_err(), source.calls(), picture_requests(&cache)),
             (true, 1, 1),
@@ -1629,7 +1663,7 @@ mod tests {
         let costs = CostRecorder::new(cache.clone(), Artifact::Picture);
         let source = UsageFreeImageSource::new(costs, valid_image());
         let image = RequestCountingImage::new(source, cache.clone());
-        let result = image.image(&serde_json::json!({}));
+        let result = image.image("compiled image prompt");
         assert_eq!(
             (
                 result.is_ok(),
@@ -1652,7 +1686,7 @@ mod tests {
             AcceptingText,
             BorderDetector::new(2, 6, 240, 2),
         );
-        let result = renderer.render(&serde_json::json!({}), &mut NoopProgress);
+        let result = renderer.render(&renderable_scene(), &mut NoopProgress);
         assert_eq!(
             (result.is_err(), source.calls(), picture_requests(&cache)),
             (true, 1, 1),
@@ -1671,7 +1705,7 @@ mod tests {
             RejectingText,
             BorderDetector::new(2, 6, 240, 2),
         );
-        let result = renderer.render(&serde_json::json!({}), &mut NoopProgress);
+        let result = renderer.render(&renderable_scene(), &mut NoopProgress);
         assert_eq!(
             (result.is_err(), source.calls(), picture_requests(&cache)),
             (true, 1, 1),
@@ -1690,10 +1724,7 @@ mod tests {
             AcceptingText,
             BorderDetector::new(2, 6, 240, 2),
         );
-        let result = renderer.render(
-            &serde_json::json!({"manga_panel": {"panels": []}}),
-            &mut NoopProgress,
-        );
+        let result = renderer.render(&renderable_scene(), &mut NoopProgress);
         assert_eq!(
             (result.is_ok(), source.calls(), picture_requests(&cache)),
             (true, 1, 1),
@@ -1708,10 +1739,10 @@ mod tests {
         let source = FailingImageSource::new("transport failed");
         let first = RequestCountingImage::new(source.clone(), cache.clone());
         for _ in 0..3 {
-            let _ = first.image(&serde_json::json!({}));
+            let _ = first.image("compiled image prompt");
         }
         let restarted = RequestCountingImage::new(source.clone(), cache.clone());
-        let fourth = restarted.image(&serde_json::json!({}));
+        let fourth = restarted.image("compiled image prompt");
         assert_eq!(
             (
                 fourth.is_err(),
@@ -1737,7 +1768,7 @@ mod tests {
         .expect("legacy counter must be written");
         let source = CountingImageSource::new(valid_image());
         let image = RequestCountingImage::new(source.clone(), cache.clone());
-        let result = image.image(&serde_json::json!({}));
+        let result = image.image("compiled image prompt");
         assert_eq!(
             (
                 result.is_err(),
@@ -1756,7 +1787,7 @@ mod tests {
         let cache = Cache::failing("visual", home.path(), 0);
         let source = CountingImageSource::new(valid_image());
         let image = RequestCountingImage::new(source.clone(), cache.clone());
-        let result = image.image(&serde_json::json!({}));
+        let result = image.image("compiled image prompt");
         assert_eq!(
             (
                 result.is_err(),

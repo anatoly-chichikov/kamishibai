@@ -38,8 +38,8 @@ pub trait SceneText {
     fn detected(&self, scene: &Value, image: &GrayImage) -> Result<String>;
 }
 
-/// Render one scene JSON payload into raw image bytes.
+/// Render one compiled prose prompt into raw image bytes.
 pub trait ImageSource {
-    /// Return one encoded image payload for the scene.
-    fn image(&self, scene: &Value) -> Result<Vec<u8>>;
+    /// Return one encoded image payload for the prompt.
+    fn image(&self, prompt: &str) -> Result<Vec<u8>>;
 }

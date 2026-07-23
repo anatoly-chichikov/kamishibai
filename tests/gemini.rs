@@ -1090,12 +1090,12 @@ fn image_generation_keeps_the_image_modality_and_square_aspect_ratio() -> Result
     )?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let _bytes =
-        client.image(&json!({"manga_panel":{"panels":[{"scene":{"description":"A cat"}}]}}))?;
+    let _bytes = client.image("A cat sleeps in a finished black-and-white manga panel")?;
     let request = serde_json::from_str::<Value>(&requests.borrow()[0].1)?;
     assert_eq!(
         (
             requests.borrow()[0].0.clone(),
+            request["contents"][0]["parts"][0]["text"].as_str(),
             request["generationConfig"]["responseModalities"][0].as_str(),
             request["generationConfig"]["imageConfig"]["aspectRatio"].as_str(),
             request["safetySettings"]
@@ -1106,6 +1106,7 @@ fn image_generation_keeps_the_image_modality_and_square_aspect_ratio() -> Result
             String::from(
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent"
             ),
+            Some("A cat sleeps in a finished black-and-white manga panel"),
             Some("IMAGE"),
             Some("1:1"),
             Some(4),
@@ -1122,7 +1123,7 @@ fn image_generation_surfaces_blocked_response_diagnostics() {
     let client = GeminiClient::new("key", transport);
     assert_eq!(
         client
-            .image(&json!({"manga_panel":{"panels":[{"scene":{"description":"A cat"}}]}}))
+            .image("A cat sleeps in a finished black-and-white manga panel")
             .unwrap_err()
             .to_string(),
         "No candidates in image response: SAFETY, blocked, flagged=[HARM_CATEGORY_HARASSMENT=MEDIUM]",

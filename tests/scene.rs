@@ -1,7 +1,7 @@
 //! Tests for scene OCR routing and manga validation.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::io::Cursor;
 use std::rc::Rc;
 
@@ -80,7 +80,7 @@ impl QueueSource {
 
 impl ImageSource for QueueSource {
     /// Return one scripted PNG payload.
-    fn image(&self, _scene: &Value) -> Result<Vec<u8>> {
+    fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
         let Some(image) = self.values.borrow_mut().pop_front() else {
             bail!("image source ran out of scripted images");
         };
@@ -90,11 +90,53 @@ impl ImageSource for QueueSource {
     }
 }
 
-/// Scripted image source that records every provider scene.
+#[derive(Clone, Debug)]
+struct FixedBytes {
+    bytes: Vec<u8>,
+}
+
+impl FixedBytes {
+    fn new(bytes: &[u8]) -> Self {
+        Self {
+            bytes: bytes.to_vec(),
+        }
+    }
+}
+
+impl ImageSource for FixedBytes {
+    /// Return one fixed encoded image payload.
+    fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
+        Ok(self.bytes.clone())
+    }
+}
+
+/// Image source that always reports one provider failure.
+#[derive(Clone, Debug)]
+struct FailingSource;
+
+impl ImageSource for FailingSource {
+    /// Return one provider failure without encoded image bytes.
+    fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
+        bail!("provider rejected image request")
+    }
+}
+
+/// Scene OCR detector that always reports one local processing failure.
+#[derive(Clone, Debug)]
+struct FailingText;
+
+impl SceneText for FailingText {
+    /// Return one OCR failure after the raw image has been captured.
+    fn detected(&self, _scene: &Value, _image: &GrayImage) -> Result<String> {
+        bail!("OCR engine failed")
+    }
+}
+
+/// Scripted image source that records every provider prompt.
 #[derive(Clone, Debug)]
 struct CapturingSource {
     values: Rc<RefCell<VecDeque<GrayImage>>>,
-    scenes: Rc<RefCell<Vec<Value>>>,
+    prompts: Rc<RefCell<Vec<String>>>,
 }
 
 impl CapturingSource {
@@ -102,15 +144,15 @@ impl CapturingSource {
     fn new(values: Vec<GrayImage>) -> Self {
         Self {
             values: Rc::new(RefCell::new(values.into())),
-            scenes: Rc::new(RefCell::new(Vec::new())),
+            prompts: Rc::new(RefCell::new(Vec::new())),
         }
     }
 }
 
 impl ImageSource for CapturingSource {
-    /// Record the provider scene and return one scripted PNG payload.
-    fn image(&self, scene: &Value) -> Result<Vec<u8>> {
-        self.scenes.borrow_mut().push(scene.clone());
+    /// Record the provider prompt and return one scripted PNG payload.
+    fn image(&self, prompt: &str) -> Result<Vec<u8>> {
+        self.prompts.borrow_mut().push(String::from(prompt));
         let Some(image) = self.values.borrow_mut().pop_front() else {
             bail!("image source ran out of scripted images");
         };
@@ -142,14 +184,49 @@ impl Progress for Recorder {
 
 /// Create one scene document with the requested panel count and target language.
 fn scene(panels: usize, target: &str) -> Value {
+    let (template, materialized) = match panels {
+        1 => (
+            "splash-1-v1",
+            vec![json!({
+                "id": "panel-0",
+                "bounds": {"x": 32, "y": 32, "width": 960, "height": 960}
+            })],
+        ),
+        2 => (
+            "equal-split-vertical-2-v1",
+            vec![
+                json!({
+                    "id": "panel-0",
+                    "bounds": {"x": 32, "y": 32, "width": 448, "height": 960}
+                }),
+                json!({
+                    "id": "panel-1",
+                    "bounds": {"x": 544, "y": 32, "width": 448, "height": 960}
+                }),
+            ],
+        ),
+        _ => panic!("invariant: basic scene test supports one or two panels"),
+    };
     json!({
         "manga_panel": {
             "meta": {
                 "target_lang": target
             },
-            "panels": (0..panels)
-                .map(|index| json!({"id": format!("panel-{index}")}))
-                .collect::<Vec<_>>()
+            "canvas": {
+                "width": 1024,
+                "height": 1024
+            },
+            "panel_layout": {
+                "active_layout": {
+                    "template_id": template
+                }
+            },
+            "page_design": {
+                "special_device": {
+                    "kind": "none"
+                }
+            },
+            "panels": materialized
         }
     })
 }
@@ -194,7 +271,11 @@ fn active_layout_scene(panels: usize, target: &str) -> Value {
     });
     value["manga_panel"]["panel_layout"] = json!({
         "active_layout": {
-            "template_id": "test-rectangles-v1"
+            "template_id": if panels == 1 {
+                "splash-1-v1"
+            } else {
+                "equal-split-vertical-2-v1"
+            }
         }
     });
     value
@@ -208,6 +289,7 @@ fn t_bottom_layout_scene(target: &str) -> Value {
         {"id": "p2", "bounds": {"x": 512, "y": 16, "width": 496, "height": 376}, "frame": {"shape": "rectangle"}},
         {"id": "p3", "bounds": {"x": 16, "y": 408, "width": 992, "height": 600}, "frame": {"shape": "wide_rectangle"}}
     ]);
+    value["manga_panel"]["panel_layout"]["active_layout"]["template_id"] = json!("t-bottom-3-v1");
     value
 }
 
@@ -326,6 +408,8 @@ fn horizontal_triptych_layout_scene(target: &str) -> Value {
         {"id": "p2", "bounds": {"x": 352, "y": 16, "width": 320, "height": 992}, "frame": {"shape": "rectangle"}},
         {"id": "p3", "bounds": {"x": 688, "y": 16, "width": 320, "height": 992}, "frame": {"shape": "rectangle"}}
     ]);
+    value["manga_panel"]["panel_layout"]["active_layout"]["template_id"] =
+        json!("vertical-triptych-3-v1");
     value
 }
 
@@ -351,7 +435,7 @@ fn diagonal_layout_scene(target: &str) -> Value {
         }
     ]);
     value["manga_panel"]["panel_layout"]["active_layout"]["template_id"] =
-        json!("test-diagonal-2-v1");
+        json!("diagonal-split-2-v1");
     value
 }
 
@@ -387,6 +471,10 @@ fn active_device_scene(mut value: Value, device: &str) -> Value {
     });
     match device {
         "crossing" => {
+            value["manga_panel"]["panels"][0]["scene"]["subjects"] = json!([{
+                "id": "actor",
+                "figure": "the same visible actor"
+            }]);
             value["manga_panel"]["panels"][0]["continuity"]["breakout"] = json!({
                 "enabled": true,
                 "subject_id": "actor",
@@ -954,7 +1042,7 @@ fn border_detector_counts_closed_panel_regions() {
 #[test]
 fn renderer_retries_when_ocr_text_is_detected_before_a_valid_frame_appears() -> Result<()> {
     let renderer = MangaRenderer::new(
-        QueueSource::new(vec![guttered(32, 1, 2), guttered(32, 1, 2)]),
+        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
         2,
         ScriptedText::new(&["слово", ""]),
         BorderDetector::new(2, 6, 240, 1),
@@ -1016,7 +1104,7 @@ fn renderer_rejects_a_multi_panel_frame_when_no_gutter_appears() {
             .render(&scene(2, "en"), &mut Recorder::default())
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: No white gutter found"),
+        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
         "renderer no longer rejects a multi panel frame when no gutter appears"
     );
 }
@@ -1026,9 +1114,9 @@ fn renderer_rejects_a_multi_panel_frame_when_no_gutter_appears() {
 fn renderer_accepts_expressive_geometry_while_retaining_ocr_and_border_validation() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![
-            framed(32, 1),
+            crossed_t_bottom_panels(),
             GrayImage::from_pixel(32, 32, Luma([0])),
-            framed(32, 1),
+            crossed_t_bottom_panels(),
         ]),
         3,
         ScriptedText::new(&["word", "", ""]),
@@ -1036,7 +1124,10 @@ fn renderer_accepts_expressive_geometry_while_retaining_ocr_and_border_validatio
     );
     let mut progress = Recorder::default();
     let rendered = renderer
-        .render(&device_scene(2, "en", "overlap"), &mut progress)
+        .render(
+            &active_device_scene(t_bottom_layout_scene("en"), "crossing"),
+            &mut progress,
+        )
         .expect("expressive layout must render after OCR and border retries");
     assert_eq!(
         (rendered.color().has_color(), progress.retries),
@@ -1076,8 +1167,8 @@ fn renderer_rejects_explicit_ordinary_layouts_without_a_gutter() {
     assert_eq!(
         reasons,
         [
-            String::from("Rejected after 1 attempts: No white gutter found"),
-            String::from("Rejected after 1 attempts: No white gutter found"),
+            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
         ],
         "ordinary page devices no longer require a straight gutter"
     );
@@ -1559,19 +1650,19 @@ fn renderer_accepts_strong_diagonal_and_rejects_straightened_split() {
     );
 }
 
-/// Provider requests keep selected render contracts without inactive planning alternatives.
+/// Provider requests use bounded prose without inactive planning alternatives.
 #[test]
-fn renderer_sends_only_selected_planning_metadata_to_the_image_source() {
+fn renderer_sends_compiled_prose_without_planning_metadata() {
     let mut canonical = active_layout_scene(2, "en");
     canonical["manga_panel"]["meta"]["title"] =
         json!("EXACT_SENTENCE_MUST_NOT_REACH_IMAGE_PROVIDER");
     canonical["manga_panel"]["meta"]["description"] =
         json!("EXACT_SENTENCE_MUST_NOT_REACH_IMAGE_PROVIDER");
     canonical["manga_panel"]["meta"]["layout_selection"] = json!({
-        "chosen_template_id": "test-rectangles-v1",
+        "chosen_template_id": "equal-split-vertical-2-v1",
         "deterministic_slot": 1,
         "device_candidates": [{"scene_kind": "open_frame"}],
-        "eligible_template_ids": ["test-rectangles-v1", "competing-layout-v1"],
+        "eligible_template_ids": ["equal-split-vertical-2-v1", "competing-layout-v1"],
         "ranked_candidates": [{"template_id": "competing-layout-v1"}],
         "scene_attempt_index": 2,
         "scene_features": {"panel_count": 2},
@@ -1590,7 +1681,7 @@ fn renderer_sends_only_selected_planning_metadata_to_the_image_source() {
     canonical["manga_panel"]["rendering_rules"] = json!({"outer_border": "16px_pure_white"});
     canonical["manga_panel"]["panels"][0]["scene"] = json!({"camera": {"shot_scale": "wide"}});
     let source = CapturingSource::new(vec![rectangular_panels()]);
-    let captured = source.scenes.clone();
+    let captured = source.prompts.clone();
     MangaRenderer::new(
         source,
         1,
@@ -1598,62 +1689,50 @@ fn renderer_sends_only_selected_planning_metadata_to_the_image_source() {
         BorderDetector::new(2, 6, 240, 1),
     )
     .render(&canonical, &mut Recorder::default())
-    .expect("projected provider scene must retain valid canonical geometry");
-    let provider = captured
+    .expect("compiled provider prompt must retain valid canonical geometry");
+    let prompt = captured
         .borrow()
         .first()
         .cloned()
-        .expect("image source must receive one provider scene");
-    let selection = provider
-        .pointer("/manga_panel/meta/layout_selection")
-        .and_then(Value::as_object)
-        .expect("provider scene must retain compact selection provenance");
+        .expect("image source must receive one provider prompt");
     assert_eq!(
         (
             captured.borrow().len(),
-            selection.keys().cloned().collect::<BTreeSet<_>>(),
-            provider
-                .pointer("/manga_panel/meta/layout_selection/chosen_template_id")
-                .and_then(Value::as_str),
-            provider
-                .pointer("/manga_panel/meta/layout_selection/scene_attempt_index")
-                .and_then(Value::as_u64),
             [
-                provider
-                    .pointer("/manga_panel/panel_layout/conditional_permissions")
-                    .is_none(),
-                provider
-                    .pointer("/manga_panel/panel_layout/permissions_from")
-                    .is_none(),
-                provider.pointer("/manga_panel/meta/title").is_none(),
-                provider.pointer("/manga_panel/meta/description").is_none(),
-                !provider
-                    .to_string()
-                    .contains("EXACT_SENTENCE_MUST_NOT_REACH_IMAGE_PROVIDER"),
-                provider.pointer("/manga_panel/panel_layout/active_layout")
-                    == canonical.pointer("/manga_panel/panel_layout/active_layout"),
-                provider.pointer("/manga_panel/panel_layout/active_permissions")
-                    == canonical.pointer("/manga_panel/panel_layout/active_permissions"),
-                provider.pointer("/manga_panel/page_design")
-                    == canonical.pointer("/manga_panel/page_design"),
-                provider.pointer("/manga_panel/panels") == canonical.pointer("/manga_panel/panels"),
-                provider.pointer("/manga_panel/semantic_spine")
-                    == canonical.pointer("/manga_panel/semantic_spine"),
-                provider.pointer("/manga_panel/rendering_rules")
-                    == canonical.pointer("/manga_panel/rendering_rules"),
+                prompt.starts_with("Create a finished black-and-white manga page"),
+                prompt.contains("two equal upright panels side by side"),
+                prompt.contains("The first panel:"),
+                !prompt.contains("EXACT_SENTENCE_MUST_NOT_REACH_IMAGE_PROVIDER"),
+                !prompt.contains("chosen_template_id"),
+                !prompt.contains("competing-layout-v1"),
+                !prompt.contains("scene_attempt_index"),
+                !prompt.contains("provider-test"),
+                prompt.chars().all(|character| !character.is_ascii_digit()),
+                (150..=250).contains(&prompt.split_whitespace().count()),
             ],
         ),
-        (
-            1,
-            BTreeSet::from([
-                String::from("chosen_template_id"),
-                String::from("scene_attempt_index"),
-            ]),
-            Some("test-rectangles-v1"),
-            Some(2),
-            [true; 11],
-        ),
-        "provider projection leaked inactive planning alternatives or discarded render contracts"
+        (1, [true; 10]),
+        "provider prose leaked planner metadata or lost the image-prompt contract"
+    );
+}
+
+/// Local prompt failures consume no image-provider request.
+#[test]
+fn renderer_cannot_call_provider_before_prompt_compilation_succeeds() {
+    let source = CapturingSource::new(Vec::new());
+    let captured = source.prompts.clone();
+    let failed = MangaRenderer::new(
+        source,
+        1,
+        ScriptedText::new(&[]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .render(&json!({}), &mut Recorder::default())
+    .is_err();
+    assert_eq!(
+        (failed, captured.borrow().len()),
+        (true, 0),
+        "an invalid local prompt consumed one image-provider request"
     );
 }
 
@@ -1662,7 +1741,8 @@ fn renderer_sends_only_selected_planning_metadata_to_the_image_source() {
 fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
     let temporary = tempdir()?;
     let source = CapturingSource::new(vec![rectangular_panels(), rectangular_panels()]);
-    let captured = source.scenes.clone();
+    let captured = source.prompts.clone();
+    let scene = active_layout_scene(2, "en");
     let renderer = MangaRenderer::new(
         source,
         2,
@@ -1671,7 +1751,7 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
     )
     .with_attempt_archive(temporary.path().to_path_buf());
     let mut progress = Recorder::default();
-    let rendered = renderer.render(&active_layout_scene(2, "en"), &mut progress)?;
+    let rendered = renderer.render(&scene, &mut progress)?;
     let first = serde_json::from_str::<Value>(&std::fs::read_to_string(
         temporary.path().join("attempt-0001.json"),
     )?)?;
@@ -1684,39 +1764,182 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
     let second_scene = serde_json::from_str::<Value>(&std::fs::read_to_string(
         temporary.path().join("attempt-0002.scene.json"),
     )?)?;
+    let first_prompt = std::fs::read_to_string(temporary.path().join("attempt-0001.prompt.txt"))?;
+    let second_prompt = std::fs::read_to_string(temporary.path().join("attempt-0002.prompt.txt"))?;
     let sent = captured.borrow().clone();
     assert_eq!(
         (
-            rendered.color().has_color(),
-            temporary.path().join("attempt-0001.png").is_file(),
-            temporary.path().join("attempt-0002.png").is_file(),
-            first["scene"].as_str(),
-            second["scene"].as_str(),
-            first_scene,
-            second_scene,
-            first["status"].as_str(),
-            first["category"].as_str(),
-            first["reason"].as_str(),
-            second["status"].as_str(),
-            second["category"].as_str(),
+            [
+                rendered.color().has_color(),
+                temporary.path().join("attempt-0001.png").is_file(),
+                temporary.path().join("attempt-0002.png").is_file(),
+            ],
+            [
+                first["scene"].as_str(),
+                second["scene"].as_str(),
+                first["prompt"].as_str(),
+                second["prompt"].as_str(),
+            ],
+            [first_scene == scene, second_scene == scene],
+            [first_prompt == sent[0], second_prompt == sent[1]],
+            [
+                first["status"].as_str(),
+                first["category"].as_str(),
+                first["reason"].as_str(),
+                second["status"].as_str(),
+                second["category"].as_str(),
+            ],
         ),
         (
-            false,
-            true,
-            true,
-            Some("attempt-0001.scene.json"),
-            Some("attempt-0002.scene.json"),
-            sent[0].clone(),
-            sent[1].clone(),
-            Some("rejected"),
-            Some("ocr"),
-            Some("OCR detected text: 'word'"),
-            Some("accepted"),
-            Some("accepted"),
+            [false, true, true],
+            [
+                Some("attempt-0001.scene.json"),
+                Some("attempt-0002.scene.json"),
+                Some("attempt-0001.prompt.txt"),
+                Some("attempt-0002.prompt.txt"),
+            ],
+            [true; 2],
+            [true; 2],
+            [
+                Some("rejected"),
+                Some("ocr"),
+                Some("OCR detected text: 'word'"),
+                Some("accepted"),
+                Some("accepted"),
+            ],
         ),
         "production image attempts or their validation verdicts were discarded"
     );
     Ok(())
+}
+
+/// Provider failures archive their request and terminal verdict without inventing a raw image.
+#[test]
+fn renderer_archives_provider_failures_without_raw_images() -> Result<()> {
+    let temporary = tempdir()?;
+    let scene = active_layout_scene(2, "en");
+    let failed = MangaRenderer::new(
+        FailingSource,
+        1,
+        ScriptedText::new(&[]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .render(&scene, &mut Recorder::default())
+    .is_err();
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    let archived_scene = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.scene.json"),
+    )?)?;
+    let prompt = std::fs::read_to_string(temporary.path().join("attempt-0001.prompt.txt"))?;
+    let raw = std::fs::read_dir(temporary.path())?
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .any(|path| {
+            matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("png" | "jpg" | "webp" | "gif" | "bin")
+            )
+        });
+    assert_eq!(
+        (
+            failed,
+            verdict["status"].as_str(),
+            verdict["category"].as_str(),
+            verdict["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("provider")),
+            verdict["image"].is_null(),
+            archived_scene == scene,
+            prompt.starts_with("Create a finished black-and-white manga page"),
+            raw,
+        ),
+        (
+            true,
+            Some("error"),
+            Some("provider"),
+            true,
+            true,
+            true,
+            true,
+            false
+        ),
+        "a launched provider failure was left without terminal request evidence"
+    );
+    Ok(())
+}
+
+/// OCR failures replace the captured image's pending verdict with a terminal local error.
+#[test]
+fn renderer_archives_ocr_failures_after_raw_capture() -> Result<()> {
+    let temporary = tempdir()?;
+    let scene = active_layout_scene(2, "en");
+    let failed = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        FailingText,
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .render(&scene, &mut Recorder::default())
+    .is_err();
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            failed,
+            temporary.path().join("attempt-0001.png").is_file(),
+            verdict["status"].as_str(),
+            verdict["category"].as_str(),
+            verdict["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("OCR")),
+            verdict["image"].as_str(),
+        ),
+        (
+            true,
+            true,
+            Some("error"),
+            Some("ocr"),
+            true,
+            Some("attempt-0001.png"),
+        ),
+        "an OCR failure left a captured production attempt pending"
+    );
+    Ok(())
+}
+
+/// Color rejection runs before OCR and records its own retry reason.
+#[test]
+fn renderer_rejects_color_before_ocr() {
+    let text = ScriptedText::new(&["ocr must not run"]);
+    let pending = text.values.clone();
+    let renderer = MangaRenderer::new(
+        FixedBytes::new(include_bytes!("fixtures/monochrome/color-linger.jpg")),
+        1,
+        text,
+        BorderDetector::new(2, 6, 240, 1),
+    );
+    let mut progress = Recorder::default();
+    let error = renderer
+        .render(&active_layout_scene(1, "en"), &mut progress)
+        .expect_err("colored image must be rejected");
+    assert_eq!(
+        (error.to_string(), pending.borrow().len(), progress.retries,),
+        (
+            String::from("Rejected after 1 attempts: Color detected"),
+            1,
+            vec![(
+                String::from("Rendering manga"),
+                1,
+                String::from("Color detected"),
+            )],
+        ),
+        "color validation no longer runs before OCR with a distinct rejection"
+    );
 }
 
 /// Registry one-panel geometry retries an image that contains an internal gutter.

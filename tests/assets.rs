@@ -139,12 +139,12 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
     Ok(())
 }
 
-/// Production registry builds use the topology-recovery version-twenty-eight visual revision.
+/// Production registry builds use the reviewed image-prose version-thirty visual revision.
 #[test]
-fn production_registry_uses_the_version_twenty_eight_visual_revision() {
+fn production_registry_uses_the_version_thirty_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "f132fa14c86ba82b876a691d8c35ad797dcf63e412fe3eec4619e187d94547ae",
+        "5ed3d50cca94699f06d9391d2f950acd9fa1383ca4bd0e6ba69b109da35bf8d8",
         "production registry visual revision drifted without a policy-version change"
     );
 }

@@ -419,18 +419,18 @@ where
         Ok(CardRevision::new(term, understanding, decoded.into_meta()))
     }
 
-    /// Render one scene JSON payload into raw image bytes.
-    pub fn image(&self, scene: &Value) -> Result<Vec<u8>> {
-        let (bytes, _) = self.image_metered(scene)?;
+    /// Render one compiled prose prompt into raw image bytes.
+    pub fn image(&self, prompt: &str) -> Result<Vec<u8>> {
+        let (bytes, _) = self.image_metered(prompt)?;
         Ok(bytes)
     }
 
-    /// Render one scene JSON payload and return the request cost record.
-    pub(crate) fn image_metered(&self, scene: &Value) -> Result<(Vec<u8>, CostRecord)> {
+    /// Render one compiled prose prompt and return the request cost record.
+    pub(crate) fn image_metered(&self, prompt: &str) -> Result<(Vec<u8>, CostRecord)> {
         let metered = self.request_metered(
             IMAGE_MODEL,
             &Request::text(
-                serde_json::to_string_pretty(scene)?,
+                String::from(prompt),
                 Some(GenerationConfig::image()),
                 Some(GenerationConfig::image_safety()),
             ),
@@ -438,15 +438,15 @@ where
         Ok((image_from_response(&metered.response)?, metered.cost))
     }
 
-    /// Render one scene JSON payload and report usage before local image decoding.
-    pub(crate) fn image_observed<F>(&self, scene: &Value, mut observe: F) -> Result<Vec<u8>>
+    /// Render one compiled prose prompt and report usage before local image decoding.
+    pub(crate) fn image_observed<F>(&self, prompt: &str, mut observe: F) -> Result<Vec<u8>>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
         let metered = self.request_metered(
             IMAGE_MODEL,
             &Request::text(
-                serde_json::to_string_pretty(scene)?,
+                String::from(prompt),
                 Some(GenerationConfig::image()),
                 Some(GenerationConfig::image_safety()),
             ),
