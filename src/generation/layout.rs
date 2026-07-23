@@ -979,16 +979,30 @@ pub(crate) fn materialize(scene: &mut Value, selection: &LayoutSelection) -> Res
         .and_then(Value::as_object)
         .and_then(|value| value.get("special_device"))
         .cloned();
-    let mut device = match requested {
-        Some(requested) => {
-            normalize_device(&requested, selection, &path, planned_shots(selection)?)?
-        }
-        None => canonical_device_fallback(
+    let recovery = selection
+        .summary
+        .get("scene_attempt_index")
+        .and_then(Value::as_u64)
+        .is_some_and(|attempt| attempt > 0);
+    let mut device = if recovery {
+        canonical_device_fallback(
             selection,
             &path,
             planned_shots(selection)?,
-            "semantic composer omitted special_device",
-        )?,
+            "recovery scene uses canonical panel topology",
+        )?
+    } else {
+        match requested {
+            Some(requested) => {
+                normalize_device(&requested, selection, &path, planned_shots(selection)?)?
+            }
+            None => canonical_device_fallback(
+                selection,
+                &path,
+                planned_shots(selection)?,
+                "semantic composer omitted special_device",
+            )?,
+        }
     };
     ensure_object(root, "meta")?
         .insert(String::from("layout_selection"), selection.summary.clone());
@@ -4804,6 +4818,30 @@ mod tests {
             ),
             (Some("crossing"), Some(true)),
             "current layout candidate device id did not canonicalize to its scene kind"
+        );
+    }
+
+    #[test]
+    fn recovery_scene_materialization_disables_structural_devices() {
+        let mut selection = selected_layout("equal-split-vertical-2-v1", "equal");
+        selection.summary["scene_attempt_index"] = json!(1);
+        let mut scene = device_composer_scene(
+            2,
+            json!({
+                "kind": "crossing",
+                "reason": "one actor visibly continues through the adjacent beat",
+                "source_panel": "s1",
+                "target_panel": "s2",
+                "subject_id": "actor"
+            }),
+        );
+        materialize(&mut scene, &selection).expect("recovery scene must materialize");
+        assert_eq!(
+            scene
+                .pointer("/manga_panel/page_design/special_device/kind")
+                .and_then(Value::as_str),
+            Some("none"),
+            "recovery scene retained a failure-prone structural device"
         );
     }
 

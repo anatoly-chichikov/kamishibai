@@ -327,6 +327,46 @@ fn slanted_crossing_layout_scene(target: &str) -> Value {
     value
 }
 
+/// Create one plain three-panel diagonal strip scene.
+fn diagonal_strip_layout_scene(target: &str) -> Value {
+    let mut value = active_layout_scene(2, target);
+    value["manga_panel"]["panels"] = json!([
+        {
+            "id": "p1",
+            "bounds": {"x": 16, "y": 16, "width": 344, "height": 992},
+            "frame": {
+                "shape": "trapezoid",
+                "polygon": [[16, 16], [280, 16], [360, 1008], [16, 1008]]
+            }
+        },
+        {
+            "id": "p2",
+            "bounds": {"x": 292, "y": 16, "width": 440, "height": 992},
+            "frame": {
+                "shape": "trapezoid",
+                "polygon": [[292, 16], [652, 16], [732, 1008], [372, 1008]]
+            }
+        },
+        {
+            "id": "p3",
+            "bounds": {"x": 664, "y": 16, "width": 344, "height": 992},
+            "frame": {
+                "shape": "trapezoid",
+                "polygon": [[664, 16], [1008, 16], [1008, 1008], [744, 1008]]
+            }
+        }
+    ]);
+    value["manga_panel"]["panel_layout"]["active_layout"]["template_id"] =
+        json!("diagonal-strip-3-v1");
+    value["manga_panel"]["page_design"]["special_device"] = json!({
+        "kind": "none",
+        "source_panel": "",
+        "target_panel": "",
+        "subject_id": ""
+    });
+    value
+}
+
 /// Create one slanted left rail whose second beat leads into a dominant right panel.
 fn slanted_rail_layout_scene(target: &str) -> Value {
     let mut value = active_layout_scene(2, target);
@@ -680,6 +720,25 @@ fn shifted_slanted_t_bottom_panels() -> GrayImage {
     for y in 49..51 {
         for x in 0..128 {
             image.put_pixel(x, y, Luma([255]));
+        }
+    }
+    image
+}
+
+/// Create one diagonal strip with independently mirrored parallel separators.
+fn diagonal_strip_panels(mirrored: [bool; 2]) -> GrayImage {
+    let mut image = framed(128, 1);
+    for y in 0u32..128 {
+        let offset = y.saturating_mul(10) / 127;
+        for (index, start) in [35u32, 82u32].into_iter().enumerate() {
+            let x = if mirrored[index] {
+                start.saturating_add(10).saturating_sub(offset)
+            } else {
+                start.saturating_add(offset)
+            };
+            for gutter in x..x.saturating_add(2).min(128) {
+                image.put_pixel(gutter, y, Luma([255]));
+            }
         }
     }
     image
@@ -1339,6 +1398,40 @@ fn renderer_accepts_a_steeper_slanted_separator_with_exact_topology() -> Result<
         "steeper slanted separator is still rejected despite retaining exact topology"
     );
     Ok(())
+}
+
+/// A plain slanted layout may mirror its decorative slope while preserving exact topology.
+#[test]
+fn renderer_accepts_a_mirrored_plain_slant_with_exact_topology() -> Result<()> {
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![diagonal_strip_panels([true, true])]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    );
+    let rendered = renderer.render(&diagonal_strip_layout_scene("en"), &mut Recorder::default())?;
+    assert!(
+        !rendered.color().has_color(),
+        "globally mirrored diagonal strip is rejected despite preserving exact panel topology"
+    );
+    Ok(())
+}
+
+/// A V-shaped strip cannot masquerade as one globally mirrored diagonal layout.
+#[test]
+fn renderer_rejects_a_mixed_direction_diagonal_strip() {
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![diagonal_strip_panels([true, false])]),
+        1,
+        ScriptedText::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    );
+    assert!(
+        renderer
+            .render(&diagonal_strip_layout_scene("en"), &mut Recorder::default())
+            .is_err(),
+        "mixed-direction gutters were accepted as one globally mirrored diagonal strip"
+    );
 }
 
 /// The emphasis rail requires its declared horizontal divider to retain a real slope.

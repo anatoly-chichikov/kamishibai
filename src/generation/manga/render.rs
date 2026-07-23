@@ -484,13 +484,45 @@ fn none_slanted_topology_matches(
         return false;
     };
     !proofs.is_empty()
-        && registry_slants_match(
+        && (registry_slants_match(
             border,
             scene,
             image,
             assignments.as_slice(),
             proofs.as_slice(),
-        )
+        ) || mirrored_diagonal_strip_matches(
+            border,
+            scene,
+            image,
+            assignments.as_slice(),
+            proofs.as_slice(),
+        ))
+}
+
+fn mirrored_diagonal_strip_matches(
+    border: &BorderDetector,
+    scene: &Value,
+    image: &image::GrayImage,
+    assignments: &[usize],
+    proofs: &[SlantProof],
+) -> bool {
+    if scene
+        .pointer("/manga_panel/panel_layout/active_layout/template_id")
+        .and_then(Value::as_str)
+        != Some("diagonal-strip-3-v1")
+        || proofs.len() != 2
+        || proofs.iter().any(|proof| proof.axis != SlantAxis::Vertical)
+    {
+        return false;
+    }
+    let mirrored = proofs
+        .iter()
+        .map(|proof| SlantProof {
+            direction: proof.direction.reverse(),
+            ..*proof
+        })
+        .collect::<Vec<_>>();
+    registry_slants_match(border, scene, image, assignments, mirrored.as_slice())
 }
 
 fn staggered_grid_layout(scene: &Value) -> bool {
