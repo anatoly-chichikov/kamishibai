@@ -1,15 +1,20 @@
 {
   "manga_panel": {
     "meta": {
-      "spec_version": "1.0.0",
+      "spec_version": "2.0.0",
       "title": "",
       "description": "",
-      "tags": []
+      "tags": [
+        "narrative_layout",
+        "cinematic_staging"
+      ]
     },
     "canvas": {
       "width": 1024,
       "height": 1024,
-      "format": "square"
+      "format": "square",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "outer_margin": 16
     },
     "art_style": {
       "medium": {
@@ -67,29 +72,56 @@
       }
     },
     "panel_layout": {
-      "gutter_width": 8,
-      "border_style": "solid_black",
+      "gutter_width": "8_to_16px",
+      "border_style": "follow_page_design_and_panel_frames",
       "border_weight": 2,
-      "allow_bleed": false,
-      "allow_overlap": false,
+      "allow_page_bleed": false,
+      "default_frame": "rectangle_with_solid_border",
+      "default_overlap": false,
+      "special_device_budget": 1,
+      "permissions_from": "page_design.special_device.kind",
+      "conditional_permissions": {
+        "inset": "only inset may use parent_panel and z_index above its parent",
+        "master_view": "only master_view may repeat one subject across panels sharing one environment id",
+        "crossing": "only crossing may enable one breakout into one adjacent destination panel",
+        "overlap": "only overlap may name overlaps_panel",
+        "diagonal_release": "only diagonal_release may use either one trapezoid or one complementary pair of trapezoids forming a shared diagonal gutter",
+        "open_frame": "only open_frame may set one panel border to none"
+      },
+      "preserve_reading_path": true,
       "outer_margin": 16
     },
     "constraints": {
       "style_lock": true,
-      "layout_lock": false,
+      "layout_lock": true,
       "genre_lock": false,
       "panel_count_lock": false,
-      "text_rendering": "forbidden"
+      "text_rendering": "forbidden",
+      "literal_anchor_required": true,
+      "unmotivated_geometry": "forbidden",
+      "unmotivated_camera_change": "forbidden",
+      "shot_contract_lock": true,
+      "continuity_errors": "forbidden_unless_camera_arc_explicitly_motivates_a_break",
+      "maximum_panels": 4
     },
     "rendering_rules": {
       "text_elements": "none",
       "speech_bubbles": "none",
       "sound_effects": "none",
-      "signs_and_labels": "blank_or_hidden",
-      "panel_gutters": "clean_white_no_text",
-      "symbols_or_writing": "none",
-      "outer_border": "16px_pure_white"
+      "signs_and_labels": "No signs, captions, labels, legends, state names, icons, or interface text; all text-bearing surfaces stay featureless, hidden, or turned away.",
+      "panel_gutters": "clean_white_except_one_declared_crossing",
+      "symbols_or_writing": "No visible letters, words, numerals, state labels, interface marks, symbols, or pseudo-writing anywhere; express every device state only through unlabeled physical position, light, shape, or motion.",
+      "mechanical_controls": "Render every switch, breaker, button, lever, dial, or gauge in one static unlabeled physical position per panel. Never draw arrows, direction indicators, before-and-after ghosts, motion marks around a control, I/O, ON/OFF, zero/one labels, tick marks, legends, numbered bays, status icons, or state diagrams.",
+      "outer_border": "Reserve a continuous content-free pure-white 16px band on all four canvas edges; no ink, screentone, subject, effect, panel frame, or open-frame artwork may touch or cross it.",
+      "crossing_occlusion": "never_cover_faces_hands_decisive_objects_or_next_panel_entry",
+      "layout_priority": "reading_clarity_then_semantic_hierarchy_then_expressiveness",
+      "layout_instruction": "render the supplied page_design, bounds, frame relations, reading_path, and layout_rendering_directive as binding page geometry",
+      "camera_instruction": "render page_design.camera_arc and every panel shot_contract as one motivated edit sequence; preserve the planned scale, viewpoint, framing, angle, depth, 180-degree axis, eyelines, screen direction, and match-on-action continuity",
+      "metadata_visibility": "all JSON keys, panel and subject ids, bounds, coordinates, dimensions, z-index values, units, guides, and layout annotations are invisible construction metadata and must never appear in the artwork",
+      "finished_artwork": "render only final finished manga artwork, never a blueprint, storyboard, wireframe, annotated plan, or layout diagram"
     },
+    "semantic_spine": {},
+    "page_design": {},
     "panels": []
   }
 }

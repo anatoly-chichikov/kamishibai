@@ -1,0 +1,767 @@
+{
+  "manga_panel": {
+    "art_style": {
+      "composition": {
+        "cinematic_framing": true,
+        "dynamic_perspective": true,
+        "emotional_closeups": true,
+        "motion_rendering": "Use only abstract speed lines and blur; never render letters, numbers, symbols, onomatopoeia, or letterlike motion marks.",
+        "scale_juxtaposition": true
+      },
+      "contrast": {
+        "distribution": "calculated",
+        "focal_emphasis": true,
+        "range": "extreme",
+        "value_separation": true
+      },
+      "detail": {
+        "anatomical_precision": "high",
+        "background_detail_level": "full",
+        "density": "extreme",
+        "environmental_precision": "high",
+        "texture_differentiation": true
+      },
+      "line_work": {
+        "contour_emphasis": true,
+        "organic_stroke": "fine_pointed",
+        "outline_weight": "variable",
+        "stroke_confidence": "high",
+        "structural_stroke": "chiseled",
+        "weight_range": "wide"
+      },
+      "medium": {
+        "base": "indian_ink",
+        "color_mode": "monochrome_with_screentone",
+        "surface": "high_density_smooth"
+      },
+      "screen_tone": {
+        "dot_pattern": "fine",
+        "enabled": true,
+        "usage": [
+          "skin",
+          "fabric",
+          "atmosphere",
+          "gradients",
+          "metallic_surfaces"
+        ]
+      },
+      "shading": {
+        "black_fill_zones": true,
+        "gradient_method": "hatching_density_variation",
+        "hatching_density": "high",
+        "hatching_directionality": "form_following",
+        "primary_method": "crosshatching",
+        "secondary_method": "screen_tone",
+        "white_on_black_highlights": true
+      }
+    },
+    "canvas": {
+      "format": "square",
+      "height": 1024,
+      "outer_margin": 16,
+      "reading_direction": "left_to_right_top_to_bottom",
+      "width": 1024
+    },
+    "constraints": {
+      "continuity_errors": "forbidden_unless_camera_arc_explicitly_motivates_a_break",
+      "genre_lock": false,
+      "layout_lock": true,
+      "literal_anchor_required": true,
+      "maximum_panels": 3,
+      "panel_count_lock": true,
+      "shot_contract_lock": true,
+      "style_lock": true,
+      "text_rendering": "forbidden",
+      "unmotivated_camera_change": "forbidden",
+      "unmotivated_geometry": "forbidden",
+      "visible_writing": "No visible writing of any kind, including letterlike marks near moving people, vehicles, machinery, impacts, or reactions."
+    },
+    "meta": {
+      "description": "Na een drukke week wilde ze even lekker uitwaaien op het strand.",
+      "layout_selection": {
+        "chosen_template_id": "slanted-t-bottom-3-p2-v1",
+        "deterministic_slot": 1,
+        "device_candidates": [
+          {
+            "allowed_references": [
+              {
+                "source_panel": "",
+                "target_panel": ""
+              }
+            ],
+            "avoid_when": [
+              "one supported device is necessary to make a visible sentence relation readable"
+            ],
+            "best_for": [
+              "the selected canonical topology and cinematic shots already carry the complete sentence"
+            ],
+            "capability_status": "qualified",
+            "deterministic_materialization": "Preserve canonical geometry and contained subjects without specialization",
+            "device_id": "none",
+            "reference_contract": "source_panel, target_panel, and subject_id are empty strings",
+            "scene_kind": "none",
+            "strength": "light"
+          },
+          {
+            "allowed_references": [
+              {
+                "source_panel": "s2",
+                "target_panel": "s3"
+              }
+            ],
+            "avoid_when": [
+              "the subject is static",
+              "the source and destination shots are not adjacent",
+              "more than one subject would cross"
+            ],
+            "best_for": [
+              "one visible subject physically continues into the next adjacent shot",
+              "a sentence-supported handoff, chase, fall, or reach crosses one gutter"
+            ],
+            "capability_status": "proven",
+            "deterministic_materialization": "Enable exactly one breakout from the canonical source panel toward the canonical destination panel without moving either panel",
+            "device_id": "character_crossing",
+            "reference_contract": "source_panel and target_panel are adjacent shot ids; subject_id exists in the source shot",
+            "scene_kind": "crossing",
+            "strength": "strong"
+          },
+          {
+            "allowed_references": [
+              {
+                "source_panel": "s1",
+                "target_panel": ""
+              },
+              {
+                "source_panel": "s2",
+                "target_panel": ""
+              },
+              {
+                "source_panel": "s3",
+                "target_panel": ""
+              }
+            ],
+            "avoid_when": [
+              "time boundaries must remain strict",
+              "removing a border would merge unrelated beats",
+              "the selected topology is already a diagonal strip"
+            ],
+            "best_for": [
+              "memory, atmosphere, scale, emotional release, or a view dissolving into its environment"
+            ],
+            "capability_status": "qualification_required",
+            "deterministic_materialization": "Change exactly one canonical panel to open_frame with border none without changing its clip bounds",
+            "device_id": "open_frame",
+            "reference_contract": "source_panel is the one borderless shot id; target_panel and subject_id are empty",
+            "scene_kind": "open_frame",
+            "strength": "light"
+          },
+          {
+            "allowed_references": [
+              {
+                "source_panel": "s1",
+                "target_panel": "s3"
+              }
+            ],
+            "avoid_when": [
+              "locations are independent",
+              "physical movement is absent",
+              "the same environment and subject cannot remain visually stable"
+            ],
+            "best_for": [
+              "one subject performs ordered visible phases through one continuous place",
+              "the physical route itself teaches the target meaning"
+            ],
+            "capability_status": "qualification_required",
+            "deterministic_materialization": "Map the declared endpoint shot ids to canonical panels and preserve the model-authored shared environment and phase contract",
+            "device_id": "master_view",
+            "reference_contract": "source_panel and target_panel are distinct participating shot ids; subject_id occurs in every panel sharing their nonempty environment id with distinct subject phases",
+            "scene_kind": "master_view",
+            "strength": "strong"
+          }
+        ],
+        "eligible_template_ids": [
+          "diagonal-strip-3-v1",
+          "dominant-rail-3-v1",
+          "t-bottom-3-v1",
+          "slanted-t-bottom-3-p2-v1",
+          "slanted-dominant-rail-3-p2-v1"
+        ],
+        "ranked_candidates": [
+          {
+            "adaptation": "exact",
+            "reason": "This template is a perfect match for the diagonal motion vector and medium intensity of the scene. The diagonal cuts beautifully capture the physical wind sweeping across the beach ('uitwaaien'), while providing a smooth, continuous diagonal route that guides the reader through the escalating push-in sequence from wide context to medium action to the close-up payoff.",
+            "template_id": "diagonal-strip-3-v1"
+          },
+          {
+            "adaptation": "exact",
+            "reason": "This dynamic template fits the rising emphasis and diagonal motion vector. The layout allows the wide establishing shot (s1) to act as a compact baseline context, the active struggle against the wind (s2) to expand into a heavier, slanted upper action panel, and the final emotional release (s3) to command the dominant full-width lower field.",
+            "template_id": "slanted-t-bottom-3-p2-v1"
+          },
+          {
+            "adaptation": "exact",
+            "reason": "This layout offers a strong alternative for the rising emphasis curve. It stacks the beach context (s1) and active walking shot (s2) as two compact beats down the left rail, leaving the dominant, tall right field exclusively for the close-up of her face (s3)—a vertical frame that is geometrically ideal for a portrait-oriented close-up. It carries a minor penalty for not directly reflecting the diagonal motion vector.",
+            "template_id": "dominant-rail-3-v1"
+          }
+        ],
+        "scene_features": {
+          "camera_arc": {
+            "continuity": {
+              "axis": "shoreline walk direction",
+              "axis_mode": "preserve",
+              "eyeline_policy": "matched",
+              "screen_direction": "left_to_right"
+            },
+            "motivation": "To guide the viewer from the vast beach setting, into her physical struggle with the wind, and finally into her intimate, emotional release of letting go of stress.",
+            "progression": "wide to medium to close",
+            "strategy": "push_in"
+          },
+          "coverage_audit": [
+            {
+              "added_view": "A wide shot of the woman standing on the beach looking at the ocean.",
+              "panel_count": 1,
+              "reason": "A single wide view cannot show both the windy movement of 'uitwaaien' and the close-up emotional relief of clearing her head after a busy week.",
+              "source_support": "op het strand",
+              "verdict": "insufficient"
+            },
+            {
+              "added_view": "A medium shot of the woman walking along the wet sand with her coat and hair blowing in the wind.",
+              "panel_count": 2,
+              "reason": "While it captures the physical setting and action, it lacks a dedicated close-up view to fully register her facial expression of relief ('lekker') contrasting with the 'drukke week'.",
+              "source_support": "uitwaaien op het strand",
+              "verdict": "insufficient"
+            },
+            {
+              "added_view": "A close-up shot of her face, eyes closed, smiling with wind-swept hair as she breathes in the fresh air.",
+              "panel_count": 3,
+              "reason": "Three panels perfectly progress from environmental context, to active physical wind interaction, to the emotional and physical payoff of clearing her head.",
+              "source_support": "even lekker ... na een drukke week",
+              "verdict": "selected"
+            },
+            {
+              "added_view": "An insert of her footprints in the wet sand being washed away by a wave.",
+              "panel_count": 4,
+              "reason": "Footprints do not contribute to the core meaning of 'uitwaaien' or her personal relief, making a fourth panel unnecessary and distracting.",
+              "source_support": "op het strand",
+              "verdict": "redundant_or_unsupported"
+            }
+          ],
+          "decomposition_mode": "context_action_detail",
+          "intensity": "medium",
+          "literal_anchor": "the woman walking on the windy beach and smiling",
+          "motion_vector": "diagonal",
+          "panel_count": 3,
+          "panel_emphasis": "rising",
+          "panel_relation": "sequence",
+          "reading_direction": "left_to_right_top_to_bottom",
+          "selection_logic": "The plan relies on a three-panel sequence to unpack the complex cultural meaning of 'uitwaaien' (walking in the wind to clear one's head). A single panel would fail to capture both the physical scale and the personal relief. Two panels would rush the transition from the physical action to the emotional payoff. The chosen three-panel 'push-in' strategy allows the viewer to first take in the spacious setting, witness the active physical engagement with the windy elements, and finally focus entirely on her face to witness the therapeutic mental release of leaving her busy week behind.",
+          "semantic_beat_count": 2,
+          "semantic_relation": "sequence",
+          "shots": [
+            {
+              "angle": "eye_level",
+              "camera_motivation": "To establish the vast, solitary beach environment that she has sought out for her escape.",
+              "depth_plan": "deep",
+              "framing": "environment",
+              "id": "s1",
+              "information_gain": "Shows the empty scale of the beach and her arrival at the location.",
+              "role": "establishing",
+              "semantic_beat_index": 1,
+              "shot_scale": "wide",
+              "source_support": "op het strand",
+              "transition_trigger": "scene_open",
+              "viewpoint": "objective",
+              "viewpoint_anchor": "",
+              "visible_anchor": "the woman standing on the wide, empty beach looking towards the grey, windy sea"
+            },
+            {
+              "angle": "eye_level",
+              "camera_motivation": "To capture the physical confrontation with the wind, illustrating the active nature of 'uitwaaien'.",
+              "depth_plan": "layered",
+              "framing": "single",
+              "id": "s2",
+              "information_gain": "Shows her active movement and the strength of the wind acting on her body and clothing.",
+              "role": "action",
+              "semantic_beat_index": 2,
+              "shot_scale": "medium",
+              "source_support": "uitwaaien op het strand",
+              "transition_trigger": "new_action",
+              "viewpoint": "objective",
+              "viewpoint_anchor": "",
+              "visible_anchor": "the woman walking along the shoreline, leaning forward slightly as her coat and hair whip violently in the wind"
+            },
+            {
+              "angle": "eye_level",
+              "camera_motivation": "To capture the deep, quiet feeling of physical and mental relief ('lekker') as the wind clears away her stress.",
+              "depth_plan": "shallow",
+              "framing": "single",
+              "id": "s3",
+              "information_gain": "Reveals her internal emotional transformation from tiredness to refreshed relaxation.",
+              "role": "payoff",
+              "semantic_beat_index": 2,
+              "shot_scale": "close",
+              "source_support": "even lekker ... na een drukke week",
+              "transition_trigger": "payoff",
+              "viewpoint": "objective",
+              "viewpoint_anchor": "",
+              "visible_anchor": "the woman's face, eyes closed in content, a serene smile, and wind-blown hair framing her face"
+            }
+          ],
+          "spatial_relation": "same_space",
+          "transition_type": "action_to_action"
+        },
+        "seed_source": "uitwaaien"
+      },
+      "spec_version": "2.0.0",
+      "tags": [
+        "narrative_layout",
+        "cinematic_staging"
+      ],
+      "target_lang": "nl",
+      "title": "Na een drukke week wilde ze even lekker uitwaaien op het str"
+    },
+    "page_design": {
+      "archetype": "slanted-t-bottom-3-p2-v1",
+      "camera_arc": {
+        "continuity": {
+          "axis": "shoreline walk direction",
+          "axis_mode": "preserve",
+          "eyeline_policy": "matched",
+          "screen_direction": "left_to_right"
+        },
+        "motivation": "To guide the viewer from the vast beach setting, into her physical struggle with the wind, and finally into her intimate, emotional release of letting go of stress.",
+        "progression": "wide to medium to close",
+        "strategy": "push_in"
+      },
+      "dominant_panel": "p3",
+      "eye_flow_summary": "Staging moves the reader from the wide beach on the left (s1), follows her active step forward against the heavy sea wind (s2), and flows across the slanted panel border to her serene, giant close-up profile (s3).",
+      "layout": {
+        "family": "span_grid",
+        "reading_strategy": "Read a compact context, expand through the slanted upper action, then land in the full-width lower payoff.",
+        "reason": "This dynamic template fits the rising emphasis and diagonal motion vector. The layout allows the wide establishing shot (s1) to act as a compact baseline context, the active struggle against the wind (s2) to expand into a heavier, slanted upper action panel, and the final emotional release (s3) to command the dominant full-width lower field.",
+        "template_id": "slanted-t-bottom-3-p2-v1",
+        "trigger": "The plan relies on a three-panel sequence to unpack the complex cultural meaning of 'uitwaaien' (walking in the wind to clear one's head). A single panel would fail to capture both the physical scale and the personal relief. Two panels would rush the transition from the physical action to the emotional payoff. The chosen three-panel 'push-in' strategy allows the viewer to first take in the spacious setting, witness the active physical engagement with the windy elements, and finally focus entirely on her face to witness the therapeutic mental release of leaving her busy week behind."
+      },
+      "layout_rendering_directive": "Render exactly 3 visible semantic panel regions using the locally materialized geometry for template slanted-t-bottom-3-p2-v1. Preserve exactly three regions: p3 is the full-width dominant bottom panel; the 16px upper gutter between p1 and p2 slants down-left; p1 is visibly smaller than p2. Never straighten that upper divider, equalize p1 and p2, subdivide any region, or add a fourth panel. Render exactly the one declared subject crossing from its source panel into its adjacent destination while every other subject and gutter remains contained. Never subdivide, duplicate, merge, or add a semantic panel. Add no invented dividers, coordinates, labels, or construction marks.",
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "rhythm": "compression_to_release",
+      "special_device": {
+        "kind": "crossing",
+        "reason": "The woman's physical stride and wind-swept clothing cross the gutter boundary from the active walking shot (s2) into her close-up relief shot (s3), reinforcing the continuity of her journey.",
+        "source_panel": "p2",
+        "subject_id": "woman_ze",
+        "target_panel": "p3"
+      }
+    },
+    "panel_layout": {
+      "active_layout": {
+        "family": "span_grid",
+        "reading_strategy": "Read a compact context, expand through the slanted upper action, then land in the full-width lower payoff.",
+        "reason": "This dynamic template fits the rising emphasis and diagonal motion vector. The layout allows the wide establishing shot (s1) to act as a compact baseline context, the active struggle against the wind (s2) to expand into a heavier, slanted upper action panel, and the final emotional release (s3) to command the dominant full-width lower field.",
+        "template_id": "slanted-t-bottom-3-p2-v1",
+        "trigger": "The plan relies on a three-panel sequence to unpack the complex cultural meaning of 'uitwaaien' (walking in the wind to clear one's head). A single panel would fail to capture both the physical scale and the personal relief. Two panels would rush the transition from the physical action to the emotional payoff. The chosen three-panel 'push-in' strategy allows the viewer to first take in the spacious setting, witness the active physical engagement with the windy elements, and finally focus entirely on her face to witness the therapeutic mental release of leaving her busy week behind."
+      },
+      "active_permissions": {
+        "crossing": true,
+        "diagonal_release": false,
+        "inset": false,
+        "master_view": false,
+        "open_frame": false,
+        "overlap": false
+      },
+      "allow_page_bleed": false,
+      "border_style": "follow_page_design_and_panel_frames",
+      "border_weight": 2,
+      "conditional_permissions": {
+        "crossing": "only crossing may enable one breakout into one adjacent destination panel",
+        "diagonal_release": "only diagonal_release may use either one trapezoid or one complementary pair of trapezoids forming a shared diagonal gutter",
+        "inset": "only inset may use parent_panel and z_index above its parent",
+        "master_view": "only master_view may repeat one subject across panels sharing one environment id",
+        "open_frame": "only open_frame may set one panel border to none",
+        "overlap": "only overlap may name overlaps_panel"
+      },
+      "default_frame": "rectangle_with_solid_border",
+      "default_overlap": false,
+      "gutter_width": "8_to_16px",
+      "outer_margin": 16,
+      "permissions_from": "page_design.special_device.kind",
+      "preserve_reading_path": true,
+      "special_device_budget": 1
+    },
+    "panels": [
+      {
+        "attentional_frame": "macro",
+        "bleed": false,
+        "bounds": {
+          "height": 376,
+          "width": 400,
+          "x": 16,
+          "y": 16
+        },
+        "continuity": {
+          "axis_relation_from_previous": "establish",
+          "breakout": {
+            "destination_panel": "",
+            "edge": "empty",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "eyeline": {
+            "direction": "none",
+            "enabled": false,
+            "looker_id": "",
+            "target_anchor": ""
+          },
+          "match_on_action": {
+            "action": "",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "screen_direction": "left_to_right",
+          "shared_environment_id": "windy_shoreline",
+          "subject_phase": "arrival"
+        },
+        "frame": {
+          "border": "solid",
+          "geometry_intent": "Canonical panel 1 of template slanted-t-bottom-3-p2-v1.",
+          "overlaps_panel": "",
+          "parent_panel": "",
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              416,
+              16
+            ],
+            [
+              352,
+              392
+            ],
+            [
+              16,
+              392
+            ]
+          ],
+          "shape": "trapezoid",
+          "z_index": 0
+        },
+        "id": "p1",
+        "narrative_role": "establisher",
+        "narrative_weight": "secondary",
+        "scene": {
+          "camera": {
+            "angle": "eye_level",
+            "depth_plan": "deep",
+            "eye_flow_exit": "bottom_right",
+            "focus": "Deep focus showing the vast horizon and texture of the sand",
+            "framing": "environment",
+            "shot_scale": "wide",
+            "viewpoint": "objective",
+            "viewpoint_subject_id": ""
+          },
+          "description": "An expansive wide shot of a vast sandy beach on a cool, cloudy day. A small, lone female figure stands near the edge of the water, looking out at the white-capped ocean waves rolling under a grey sky.",
+          "environment": {
+            "background": [
+              "Vast grey sea",
+              "low hanging heavy storm clouds"
+            ],
+            "foreground": [
+              "Damp dark wet sand with delicate lines of white foam"
+            ],
+            "midground": [
+              "The woman standing still",
+              "distant ocean tide coming in"
+            ],
+            "setting": "A wide, open beach on an overcast day"
+          },
+          "lighting": "Flat, cool, natural diffused day-light from the overcast sky",
+          "mood": "Solitary, spacious, and meditative",
+          "motion_treatment": "none",
+          "subjects": [
+            {
+              "blocking": "Staged in the lower right, visually dwarfed by the massive coastal elements",
+              "expression": "Contemplative and quiet",
+              "figure": "A young woman wearing a long winter coat and sturdy boots",
+              "id": "woman_ze",
+              "pose": "Standing with her back slightly to the viewer, looking out toward the sea horizon"
+            }
+          ],
+          "text_in_frame": "none"
+        },
+        "semantic_job": "Establishes the vast, desolate beach environment she seeks out for her mental escape.",
+        "shot_contract": {
+          "angle": "eye_level",
+          "camera_motivation": "To establish the vast, solitary beach environment that she has sought out for her escape.",
+          "depth_plan": "deep",
+          "framing": "environment",
+          "id": "s1",
+          "information_gain": "Shows the empty scale of the beach and her arrival at the location.",
+          "role": "establishing",
+          "semantic_beat_index": 1,
+          "shot_scale": "wide",
+          "source_support": "op het strand",
+          "transition_trigger": "scene_open",
+          "viewpoint": "objective",
+          "viewpoint_anchor": "",
+          "visible_anchor": "the woman standing on the wide, empty beach looking towards the grey, windy sea"
+        },
+        "transition_from_previous": "none"
+      },
+      {
+        "attentional_frame": "mono",
+        "bleed": false,
+        "bounds": {
+          "height": 376,
+          "width": 640,
+          "x": 368,
+          "y": 16
+        },
+        "continuity": {
+          "axis_relation_from_previous": "preserve",
+          "breakout": {
+            "destination_panel": "p3",
+            "edge": "bottom",
+            "enabled": true,
+            "subject_id": "woman_ze"
+          },
+          "eyeline": {
+            "direction": "screen_right",
+            "enabled": true,
+            "looker_id": "woman_ze",
+            "target_anchor": "windy_shoreline"
+          },
+          "match_on_action": {
+            "action": "walking forward through wind",
+            "enabled": true,
+            "subject_id": "woman_ze"
+          },
+          "screen_direction": "left_to_right",
+          "shared_environment_id": "windy_shoreline",
+          "subject_phase": "active_walk"
+        },
+        "frame": {
+          "border": "solid",
+          "geometry_intent": "Canonical panel 2 of template slanted-t-bottom-3-p2-v1.",
+          "overlaps_panel": "",
+          "parent_panel": "",
+          "polygon": [
+            [
+              432,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              392
+            ],
+            [
+              368,
+              392
+            ]
+          ],
+          "shape": "trapezoid",
+          "z_index": 0
+        },
+        "id": "p2",
+        "narrative_role": "initial",
+        "narrative_weight": "primary",
+        "scene": {
+          "camera": {
+            "angle": "eye_level",
+            "depth_plan": "layered",
+            "eye_flow_exit": "right",
+            "focus": "Sharp focus on the subject and the flying sea foam",
+            "framing": "single",
+            "shot_scale": "medium",
+            "viewpoint": "objective",
+            "viewpoint_subject_id": ""
+          },
+          "description": "A medium shot of the woman walking along the shoreline. She leans forward slightly, her body fighting the heavy gusts. Her long coat billows out dramatically behind her to the left, and strands of hair whip across her face in the wind. Her forward foot is stepping out of the panel boundary toward the right.",
+          "environment": {
+            "background": [
+              "Turbulent ocean and foggy sea spray"
+            ],
+            "foreground": [
+              "Reflective wet sand",
+              "splashes of ocean spray"
+            ],
+            "midground": [
+              "The woman walking",
+              "white-capped waves breaking next to her"
+            ],
+            "setting": "The edge of the sea under a windy gale"
+          },
+          "lighting": "Bright, cool daylight reflecting off the wet sand and splashing waves",
+          "mood": "Active, dynamic, and bracing",
+          "motion_treatment": "speed_lines",
+          "subjects": [
+            {
+              "blocking": "Striding dynamically, her front boot and coat edge overlapping the right panel boundary",
+              "expression": "Determined and focused on her movement",
+              "figure": "The young woman in a long, dark wool coat and winter boots",
+              "id": "woman_ze",
+              "pose": "Leaning forward mid-stride, marching actively from left to right"
+            }
+          ],
+          "text_in_frame": "none"
+        },
+        "semantic_job": "Captures the physical struggle against the heavy wind, showing her active movement.",
+        "shot_contract": {
+          "angle": "eye_level",
+          "camera_motivation": "To capture the physical confrontation with the wind, illustrating the active nature of 'uitwaaien'.",
+          "depth_plan": "layered",
+          "framing": "single",
+          "id": "s2",
+          "information_gain": "Shows her active movement and the strength of the wind acting on her body and clothing.",
+          "role": "action",
+          "semantic_beat_index": 2,
+          "shot_scale": "medium",
+          "source_support": "uitwaaien op het strand",
+          "transition_trigger": "new_action",
+          "viewpoint": "objective",
+          "viewpoint_anchor": "",
+          "visible_anchor": "the woman walking along the shoreline, leaning forward slightly as her coat and hair whip violently in the wind"
+        },
+        "transition_from_previous": "action_to_action"
+      },
+      {
+        "attentional_frame": "mono",
+        "bleed": false,
+        "bounds": {
+          "height": 600,
+          "width": 992,
+          "x": 16,
+          "y": 408
+        },
+        "continuity": {
+          "axis_relation_from_previous": "preserve",
+          "breakout": {
+            "destination_panel": "",
+            "edge": "empty",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "eyeline": {
+            "direction": "none",
+            "enabled": false,
+            "looker_id": "",
+            "target_anchor": ""
+          },
+          "match_on_action": {
+            "action": "",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "screen_direction": "left_to_right",
+          "shared_environment_id": "windy_shoreline",
+          "subject_phase": "emotional_relief"
+        },
+        "frame": {
+          "border": "solid",
+          "geometry_intent": "Canonical panel 3 of template slanted-t-bottom-3-p2-v1.",
+          "overlaps_panel": "",
+          "parent_panel": "",
+          "polygon": [],
+          "shape": "wide_rectangle",
+          "z_index": 0
+        },
+        "id": "p3",
+        "narrative_role": "release",
+        "narrative_weight": "primary",
+        "scene": {
+          "camera": {
+            "angle": "eye_level",
+            "depth_plan": "shallow",
+            "eye_flow_exit": "bottom_right",
+            "focus": "Shallow depth of field, rendering the background a soft haze of ocean grey",
+            "framing": "single",
+            "shot_scale": "close",
+            "viewpoint": "objective",
+            "viewpoint_subject_id": ""
+          },
+          "description": "A warm close-up of her face. Her eyes are closed in peaceful satisfaction, and a serene, happy smile curves her lips. Soft, wind-blown hair sweeps across her cheeks. The background of cold waves and grey sky is soft and thoroughly blurred.",
+          "environment": {
+            "background": [
+              "Extremely blurry, dreamy grey sky and soft sea horizon"
+            ],
+            "foreground": [
+              "Delicate strands of wind-blown hair sweeping across the camera view"
+            ],
+            "midground": [
+              "The woman's peaceful smiling face"
+            ],
+            "setting": "The seaside air"
+          },
+          "lighting": "Soft, cleansing, and bright white light that highlights her serene expression",
+          "mood": "Peaceful, liberated, and deeply relaxed",
+          "motion_treatment": "none",
+          "subjects": [
+            {
+              "blocking": "Centered in the frame, filling the dominant visual space",
+              "expression": "Serene, relieved, happy smile, showing deep mental release",
+              "figure": "The young woman's face and upper shoulders",
+              "id": "woman_ze",
+              "pose": "Head tilted slightly upward to catch the cold breeze on her face"
+            }
+          ],
+          "text_in_frame": "none"
+        },
+        "semantic_job": "Focuses on her facial expression to reveal her internal relief and mental clarity.",
+        "shot_contract": {
+          "angle": "eye_level",
+          "camera_motivation": "To capture the deep, quiet feeling of physical and mental relief ('lekker') as the wind clears away her stress.",
+          "depth_plan": "shallow",
+          "framing": "single",
+          "id": "s3",
+          "information_gain": "Reveals her internal emotional transformation from tiredness to refreshed relaxation.",
+          "role": "payoff",
+          "semantic_beat_index": 2,
+          "shot_scale": "close",
+          "source_support": "even lekker ... na een drukke week",
+          "transition_trigger": "payoff",
+          "viewpoint": "objective",
+          "viewpoint_anchor": "",
+          "visible_anchor": "the woman's face, eyes closed in content, a serene smile, and wind-blown hair framing her face"
+        },
+        "transition_from_previous": "action_to_action"
+      }
+    ],
+    "rendering_rules": {
+      "camera_instruction": "render page_design.camera_arc and every panel shot_contract as one motivated edit sequence; preserve the planned scale, viewpoint, framing, angle, depth, 180-degree axis, eyelines, screen direction, and match-on-action continuity",
+      "crossing_occlusion": "never_cover_faces_hands_decisive_objects_or_next_panel_entry",
+      "finished_artwork": "render only final finished manga artwork, never a blueprint, storyboard, wireframe, annotated plan, or layout diagram",
+      "layout_instruction": "render the supplied page_design, bounds, frame relations, reading_path, and layout_rendering_directive as binding page geometry",
+      "layout_priority": "reading_clarity_then_semantic_hierarchy_then_expressiveness",
+      "logos_and_emblems": "No logos, brand marks, emblems, badges, icons, interface symbols, or decorative pseudo-writing on any object.",
+      "metadata_visibility": "all JSON keys, panel and subject ids, bounds, coordinates, dimensions, z-index values, units, guides, and layout annotations are invisible construction metadata and must never appear in the artwork",
+      "outer_border": "16px_pure_white",
+      "panel_gutters": "clean_white_except_one_declared_crossing",
+      "signs_and_labels": "blank_hidden_or_icon_only",
+      "sound_effects": "Absolutely no sound-effect glyphs, including Japanese onomatopoeia, stylized symbols, or pseudo-writing.",
+      "speech_bubbles": "none",
+      "symbols_or_writing": "No visible writing of any kind, including letterlike marks near moving people, vehicles, machinery, impacts, or reactions.",
+      "text_elements": "none"
+    },
+    "semantic_spine": {
+      "emotional_relation": "Transitioning from stressful exhaustion to peaceful, airy relief.",
+      "intensity": 3,
+      "literal_event": "A woman walks on a windy beach to clear her head after a busy, exhausting week.",
+      "memory_hook": "Her wind-swept hair and billowing coat in a heavy beach breeze, culminating in a serene, eyes-closed smile.",
+      "metaphor": {
+        "literal_anchor": "",
+        "mapping": "",
+        "mode": "none"
+      },
+      "semantic_focus": "The physical and mental therapeutic action of 'uitwaaien' (walking in the wind to refresh oneself).",
+      "visual_relation": "cause_effect"
+    }
+  }
+}

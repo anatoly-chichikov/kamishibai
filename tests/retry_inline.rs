@@ -3,7 +3,8 @@
 
 use anyhow::{Result, anyhow};
 use kamishibai::session::{
-    Artifact, ArtifactFile, CardDraft, CardMeta, EngineEvent, LanguagePair, SessionEngine,
+    Artifact, ArtifactAttempt, ArtifactFile, CardDraft, CardMeta, EngineEvent, GenerationCost,
+    LanguagePair, SessionEngine,
 };
 use kamishibai::tui::{App, Screen, draw};
 use ratatui::Terminal;
@@ -61,7 +62,14 @@ fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() -> Resul
         Artifact::Scene,
         Ok(file_for("in the end", Artifact::Scene)),
     );
-    let event = engine.applied_media(0, Artifact::Picture, Err(anyhow!("transient")));
+    let event = engine.applied_media_attempt(
+        0,
+        Artifact::Picture,
+        ArtifactAttempt::new(
+            Err(anyhow!("transient")),
+            Some(GenerationCost::from_nanos(123_400_000)),
+        ),
+    );
     assert!(
         matches!(
             event,
@@ -79,7 +87,7 @@ fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() -> Resul
         .cards_started(drafts);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("retry"),
+        rendered.contains("retry") && rendered.contains("$.1234") && rendered.contains("$0.12"),
         "your cards must surface the retry attempt inline without leaving the screen: {rendered}"
     );
     Ok(())

@@ -94,7 +94,8 @@ fn cached_artifacts() -> CardArtifacts {
 }
 
 fn retrying_artifacts() -> CardArtifacts {
-    let picture = ArtifactSlot::fresh(Artifact::Picture).attempted();
+    let picture = ArtifactSlot::fresh(Artifact::Picture)
+        .attempted_with(GenerationCost::from_nanos(123_400_000));
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
@@ -105,8 +106,8 @@ fn retrying_artifacts() -> CardArtifacts {
 
 fn failed_artifacts() -> CardArtifacts {
     let mut picture = ArtifactSlot::fresh(Artifact::Picture);
-    for _ in 0..3 {
-        picture = picture.attempted();
+    for nanos in [90_000_000, 210_000_000, 321_000_000] {
+        picture = picture.attempted_with(GenerationCost::from_nanos(nanos));
     }
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
@@ -297,7 +298,7 @@ fn retry_state_shows_retrying_count_inline_inside_the_card_row() {
     let app = seeded(vec![draft("in the end", retrying_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("retry 2/3") || rendered.contains("retry 1/3"),
+        rendered.contains("retry 2/3") && rendered.contains("$.1234") && rendered.contains("$0.12"),
         "retrying state must be rendered inline without leaving the your cards screen: {rendered}"
     );
 }
@@ -307,7 +308,11 @@ fn failure_banner_appears_when_any_card_exhausts_its_retries() {
     let app = seeded(vec![draft("wreck", failed_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("gave up") && rendered.contains("✗") && rendered.contains("picture"),
+        rendered.contains("gave up")
+            && rendered.contains("✗")
+            && rendered.contains("picture")
+            && rendered.contains("$.3210")
+            && rendered.contains("$0.32"),
         "your cards must mark the card as `gave up` and show the ✗ on the failed step: {rendered}"
     );
 }

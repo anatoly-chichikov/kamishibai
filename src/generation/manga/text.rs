@@ -140,6 +140,47 @@ impl PartialEq for TextDetector {
 
 impl Eq for TextDetector {}
 
+/// Combine multiple OCR recognizers so every configured script can reject visible writing.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TextEnsemble<D> {
+    detectors: Vec<D>,
+}
+
+impl<D> TextEnsemble<D> {
+    /// Create one OCR ensemble from independent recognizers.
+    pub fn new(detectors: Vec<D>) -> Self {
+        Self { detectors }
+    }
+}
+
+impl<D> ImageText for TextEnsemble<D>
+where
+    D: ImageText,
+{
+    /// Return every nonempty recognizer result in configured order.
+    fn detected(&self, image: &GrayImage) -> Result<String> {
+        Ok(self
+            .detectors
+            .iter()
+            .map(|detector| detector.detected(image))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "))
+    }
+}
+
+impl<D> SceneText for TextEnsemble<D>
+where
+    D: ImageText,
+{
+    /// Return every nonempty recognizer result for one scene image.
+    fn detected(&self, _scene: &Value, image: &GrayImage) -> Result<String> {
+        ImageText::detected(self, image)
+    }
+}
+
 /// Convert OCR results into one filtered whitespace-normalized text string.
 fn extracted(items: &[OcrResult_], threshold: i32) -> String {
     let mut rows = items.iter().collect::<Vec<_>>();

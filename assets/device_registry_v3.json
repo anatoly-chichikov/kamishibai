@@ -1,0 +1,211 @@
+{
+  "schema": "kamishibai.dynamic-manga.operational-device-registry",
+  "version": 3,
+  "selection_policy": {
+    "maximum_devices": 1,
+    "absence_device": "none",
+    "model_references": "shot_id",
+    "materialized_references": "canonical_panel_id",
+    "hard_rules": [
+      "Choose exactly one listed candidate",
+      "Choose none unless a device is load-bearing for visible sentence meaning or cinematic continuity",
+      "Never invent a beat, subject, motion, or spatial relation to justify a device",
+      "The canonical topology keeps ownership of panel count and reading order",
+      "Only the local materializer may write bounds, polygons, border relations, z-index, or breakout fields"
+    ]
+  },
+  "devices": [
+    {
+      "device_id": "none",
+      "scene_kind": "none",
+      "decision_stage": "structural_or_continuity",
+      "strength": "light",
+      "capability_status": "qualified",
+      "automatic_selection": true,
+      "compatible_topology_families": [
+        "single_focus",
+        "split",
+        "grid",
+        "span_grid",
+        "blockage",
+        "variable_strip",
+        "diagonal_sequence",
+        "staggered"
+      ],
+      "min_panels": 1,
+      "max_panels": 4,
+      "best_for": [
+        "the selected canonical topology and cinematic shots already carry the complete sentence"
+      ],
+      "avoid_when": [
+        "one supported device is necessary to make a visible sentence relation readable"
+      ],
+      "reference_contract": "source_panel, target_panel, and subject_id are empty strings",
+      "deterministic_materialization": "Preserve canonical geometry and contained subjects without specialization"
+    },
+    {
+      "device_id": "character_crossing",
+      "scene_kind": "crossing",
+      "decision_stage": "structural_or_continuity",
+      "strength": "strong",
+      "capability_status": "proven",
+      "automatic_selection": true,
+      "compatible_topology_families": [
+        "split",
+        "grid",
+        "span_grid",
+        "blockage",
+        "variable_strip",
+        "staggered"
+      ],
+      "min_panels": 2,
+      "max_panels": 4,
+      "best_for": [
+        "one visible subject physically continues into the next adjacent shot",
+        "a sentence-supported handoff, chase, fall, or reach crosses one gutter"
+      ],
+      "avoid_when": [
+        "the subject is static",
+        "the source and destination shots are not adjacent",
+        "more than one subject would cross"
+      ],
+      "reference_contract": "source_panel and target_panel are adjacent shot ids; subject_id exists in the source shot",
+      "deterministic_materialization": "Enable exactly one breakout from the canonical source panel toward the canonical destination panel without moving either panel"
+    },
+    {
+      "device_id": "panel_overlap",
+      "scene_kind": "overlap",
+      "decision_stage": "structural_or_continuity",
+      "strength": "strong",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "compatible_topology_families": [
+        "split",
+        "grid",
+        "span_grid",
+        "blockage"
+      ],
+      "min_panels": 2,
+      "max_panels": 4,
+      "best_for": [
+        "near-simultaneous actions",
+        "rapid progression or two perspectives compressed in time"
+      ],
+      "avoid_when": [
+        "different places or times need strict separation",
+        "dialogue order is critical",
+        "the selected topology already uses trapezoidal panels"
+      ],
+      "reference_contract": "source_panel is the foreground shot id; target_panel is one adjacent background shot id; subject_id is empty",
+      "deterministic_materialization": "Extend the foreground canonical slot through one gutter by a bounded registry-owned amount and assign one higher z-index overlap relation"
+    },
+    {
+      "device_id": "inset",
+      "scene_kind": "inset",
+      "decision_stage": "structural_or_continuity",
+      "strength": "strong",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "compatible_topology_families": [
+        "split",
+        "grid",
+        "span_grid",
+        "blockage"
+      ],
+      "min_panels": 2,
+      "max_panels": 4,
+      "best_for": [
+        "one existing shot is a decisive hand, eye, clue, or object detail inside a larger spatial shot",
+        "point-of-view refinement without leaving the parent scene"
+      ],
+      "avoid_when": [
+        "the detail repeats the parent image",
+        "the page requires strictly equal independent beats",
+        "the inset would hide a protected face, hand, action, or reading entry"
+      ],
+      "reference_contract": "source_panel is the parent shot id; target_panel is the existing detail shot id; subject_id is empty",
+      "deterministic_materialization": "Place the target slot inside a protected upper-right safe zone of the source slot with a fixed higher z-index"
+    },
+    {
+      "device_id": "open_frame",
+      "scene_kind": "open_frame",
+      "decision_stage": "structural_or_continuity",
+      "strength": "light",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "compatible_topology_families": [
+        "single_focus",
+        "split",
+        "grid",
+        "span_grid",
+        "blockage",
+        "variable_strip"
+      ],
+      "min_panels": 1,
+      "max_panels": 4,
+      "best_for": [
+        "memory, atmosphere, scale, emotional release, or a view dissolving into its environment"
+      ],
+      "avoid_when": [
+        "time boundaries must remain strict",
+        "removing a border would merge unrelated beats",
+        "the selected topology is already a diagonal strip"
+      ],
+      "reference_contract": "source_panel is the one borderless shot id; target_panel and subject_id are empty",
+      "deterministic_materialization": "Change exactly one canonical panel to open_frame with border none without changing its clip bounds"
+    },
+    {
+      "device_id": "master_view",
+      "scene_kind": "master_view",
+      "decision_stage": "structural_or_continuity",
+      "strength": "strong",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "compatible_topology_families": [
+        "split",
+        "grid",
+        "span_grid",
+        "blockage",
+        "variable_strip",
+        "diagonal_sequence",
+        "staggered"
+      ],
+      "min_panels": 2,
+      "max_panels": 4,
+      "best_for": [
+        "one subject performs ordered visible phases through one continuous place",
+        "the physical route itself teaches the target meaning"
+      ],
+      "avoid_when": [
+        "locations are independent",
+        "physical movement is absent",
+        "the same environment and subject cannot remain visually stable"
+      ],
+      "reference_contract": "source_panel and target_panel are distinct participating shot ids; subject_id occurs in every panel sharing their nonempty environment id with distinct subject phases",
+      "deterministic_materialization": "Map the declared endpoint shot ids to canonical panels and preserve the model-authored shared environment and phase contract"
+    },
+    {
+      "device_id": "diagonal_release",
+      "scene_kind": "diagonal_release",
+      "decision_stage": "structural_or_continuity",
+      "strength": "light",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "compatible_topology_families": [
+        "diagonal_sequence"
+      ],
+      "min_panels": 2,
+      "max_panels": 4,
+      "best_for": [
+        "one sentence-supported directional change or release follows the canonical diagonal route",
+        "the slanted progression clarifies motion, separation, or convergence"
+      ],
+      "avoid_when": [
+        "the scene is static",
+        "the diagonal geometry would be decorative rather than semantic"
+      ],
+      "reference_contract": "source_panel is the first shot id; target_panel is the last shot id; subject_id is empty",
+      "deterministic_materialization": "Bind the declared endpoints to the first and last canonical trapezoidal slots without altering registry geometry"
+    }
+  ]
+}

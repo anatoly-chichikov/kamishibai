@@ -21,7 +21,7 @@ impl LanguageCatalog {
     }
 
     /// Return the supported language codes in stable order.
-    pub fn codes(&self) -> [&'static str; 10] {
+    pub fn codes(&self) -> [&'static str; 11] {
         profiles().map(|profile| profile.code)
     }
 
@@ -45,7 +45,7 @@ pub fn language(code: &str) -> Result<LanguageProfile> {
 /// the order surfaced everywhere in the UI (Welcome chips, `Cmd+L` picker,
 /// Gemini language list) and is sorted by global learning popularity, not
 /// alphabetically.
-fn profiles() -> [LanguageProfile; 10] {
+fn profiles() -> [LanguageProfile; 11] {
     [
         LanguageProfile {
             code: "en",
@@ -116,6 +116,13 @@ fn profiles() -> [LanguageProfile; 10] {
             ocr: String::from("eng+ell"),
             naming: DeckNaming::new("Greek Vocabulary", "el", super::DEFAULT_FILE),
             labels: UiLabels::new("Μετάφραση", "Πλαίσιο", "Υπόδειξη", "Σπουδαιότητα"),
+        },
+        LanguageProfile {
+            code: "nl",
+            prompt: String::from("Dutch"),
+            ocr: String::from("eng+nld"),
+            naming: DeckNaming::new("Dutch Vocabulary", "nl", super::DEFAULT_FILE),
+            labels: UiLabels::new("Vertaling", "Context", "Hint", "Belang"),
         },
     ]
 }

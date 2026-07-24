@@ -1,21 +1,28 @@
 //! Direct REST client for Gemini text, image, and TTS generation.
 
+mod access;
 mod client;
 mod codec;
 mod cost;
 mod prompts;
 mod protocol;
+mod scene;
+mod understanding;
 
+pub(crate) use access::GeminiAccess;
 pub use client::{GeminiClient, HttpTransport, Transport, TransportResponse};
 pub use protocol::GeminiApiError;
+pub(crate) use scene::validate_cached as validate_cached_scene;
+pub(crate) use understanding::GeminiUnderstanding;
 
 use anyhow::Result;
 
+use crate::application::{BulkCorrection, CardCorrection, CardMetaGeneration, Understanding};
 use crate::generation::SceneSource;
 use crate::generation::Speaker;
 use crate::session::{
-    BulkCorrection, CardCorrection, CardDraft, CardMeta, CardMetaGeneration, CardRevision,
-    LanguagePair, RawInputBatch, SenseCorrection, Understanding, Understood, WordCandidate,
+    CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch, SenseCorrection, Understood,
+    WordCandidate,
 };
 
 /// Return whether one error means Gemini rejected the configured API key.
@@ -32,8 +39,17 @@ where
     T: Transport,
 {
     /// Return one translated scene JSON document.
-    fn scene(&self, language: &str, sentence: &str, target: &str) -> Result<serde_json::Value> {
-        GeminiClient::<T>::scene(self, language, sentence, target)
+    fn scene(
+        &self,
+        language: &str,
+        term: &str,
+        sentence: &str,
+        target: &str,
+        attempt: u8,
+    ) -> Result<serde_json::Value> {
+        GeminiClient::<T>::scene_observed(self, language, term, sentence, target, attempt, |_| {
+            Ok(())
+        })
     }
 }
 

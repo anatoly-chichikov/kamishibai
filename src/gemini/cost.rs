@@ -4,10 +4,17 @@ use crate::session::{CostRecord, GenerationCost};
 
 use super::protocol::UsageMetadata;
 
+const GEMINI_3_6_FLASH_INPUT_NANOS: u64 = 1_500;
+const GEMINI_3_6_FLASH_OUTPUT_NANOS: u64 = 7_500;
 const GEMINI_3_5_FLASH_INPUT_NANOS: u64 = 1_500;
 const GEMINI_3_5_FLASH_OUTPUT_NANOS: u64 = 9_000;
+const GEMINI_3_5_FLASH_LITE_INPUT_NANOS: u64 = 300;
+const GEMINI_3_5_FLASH_LITE_OUTPUT_NANOS: u64 = 2_500;
+const GEMINI_2_5_FLASH_LITE_INPUT_NANOS: u64 = 100;
+const GEMINI_2_5_FLASH_LITE_OUTPUT_NANOS: u64 = 400;
 const GEMINI_3_1_FLASH_IMAGE_INPUT_NANOS: u64 = 500;
 const GEMINI_3_1_FLASH_IMAGE_OUTPUT_NANOS: u64 = 60_000;
+const GEMINI_3_1_FLASH_IMAGE_THINKING_NANOS: u64 = 3_000;
 const GEMINI_3_1_FLASH_TTS_INPUT_NANOS: u64 = 1_000;
 const GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS: u64 = 20_000;
 
@@ -15,6 +22,7 @@ const GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS: u64 = 20_000;
 struct Rates {
     input_nanos: u64,
     output_nanos: u64,
+    thinking_nanos: u64,
 }
 
 impl Rates {
@@ -22,7 +30,18 @@ impl Rates {
         let input = usage.prompt_token_count;
         let output = output_tokens(usage);
         let input_cost = input.saturating_mul(self.input_nanos);
-        let output_cost = output.saturating_mul(self.output_nanos);
+        let output_cost = if usage.candidates_token_count > 0 || usage.thoughts_token_count > 0 {
+            usage
+                .candidates_token_count
+                .saturating_mul(self.output_nanos)
+                .saturating_add(
+                    usage
+                        .thoughts_token_count
+                        .saturating_mul(self.thinking_nanos),
+                )
+        } else {
+            output.saturating_mul(self.output_nanos)
+        };
         CostRecord::new(
             model,
             1,
@@ -42,8 +61,11 @@ pub(super) fn priced(model: &str, usage: Option<&UsageMetadata>) -> CostRecord {
 }
 
 fn output_tokens(usage: &UsageMetadata) -> u64 {
-    if usage.candidates_token_count > 0 {
-        return usage.candidates_token_count;
+    let generated = usage
+        .candidates_token_count
+        .saturating_add(usage.thoughts_token_count);
+    if generated > 0 {
+        return generated;
     }
     usage
         .total_token_count
@@ -52,21 +74,40 @@ fn output_tokens(usage: &UsageMetadata) -> u64 {
 
 fn rates(model: &str) -> Rates {
     match model {
+        "gemini-3.6-flash" => Rates {
+            input_nanos: GEMINI_3_6_FLASH_INPUT_NANOS,
+            output_nanos: GEMINI_3_6_FLASH_OUTPUT_NANOS,
+            thinking_nanos: GEMINI_3_6_FLASH_OUTPUT_NANOS,
+        },
         "gemini-3.5-flash" => Rates {
             input_nanos: GEMINI_3_5_FLASH_INPUT_NANOS,
             output_nanos: GEMINI_3_5_FLASH_OUTPUT_NANOS,
+            thinking_nanos: GEMINI_3_5_FLASH_OUTPUT_NANOS,
+        },
+        "gemini-3.5-flash-lite" => Rates {
+            input_nanos: GEMINI_3_5_FLASH_LITE_INPUT_NANOS,
+            output_nanos: GEMINI_3_5_FLASH_LITE_OUTPUT_NANOS,
+            thinking_nanos: GEMINI_3_5_FLASH_LITE_OUTPUT_NANOS,
+        },
+        "gemini-2.5-flash-lite" => Rates {
+            input_nanos: GEMINI_2_5_FLASH_LITE_INPUT_NANOS,
+            output_nanos: GEMINI_2_5_FLASH_LITE_OUTPUT_NANOS,
+            thinking_nanos: GEMINI_2_5_FLASH_LITE_OUTPUT_NANOS,
         },
         "gemini-3.1-flash-image-preview" | "gemini-3.1-flash-image" => Rates {
             input_nanos: GEMINI_3_1_FLASH_IMAGE_INPUT_NANOS,
             output_nanos: GEMINI_3_1_FLASH_IMAGE_OUTPUT_NANOS,
+            thinking_nanos: GEMINI_3_1_FLASH_IMAGE_THINKING_NANOS,
         },
         "gemini-3.1-flash-tts-preview" => Rates {
             input_nanos: GEMINI_3_1_FLASH_TTS_INPUT_NANOS,
             output_nanos: GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS,
+            thinking_nanos: GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS,
         },
         _ => Rates {
             input_nanos: 0,
             output_nanos: 0,
+            thinking_nanos: 0,
         },
     }
 }
@@ -76,16 +117,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn flash_text_usage_prices_input_and_output_tokens() {
+    fn flash_text_usage_prices_input_output_and_thinking_tokens() {
         let usage = UsageMetadata {
             prompt_token_count: 100,
             candidates_token_count: 20,
-            total_token_count: 120,
+            thoughts_token_count: 30,
+            total_token_count: 150,
         };
         assert_eq!(
-            priced("gemini-3.5-flash", Some(&usage)).cost().nanos(),
-            330_000,
-            "flash text pricing must apply the current paid-tier input and output token rates"
+            priced("gemini-3.6-flash", Some(&usage)).cost().nanos(),
+            525_000,
+            "flash text pricing must apply the current paid-tier rates to visible and thinking tokens"
         );
     }
 
@@ -94,14 +136,45 @@ mod tests {
         let usage = UsageMetadata {
             prompt_token_count: 200,
             candidates_token_count: 1_120,
-            total_token_count: 1_320,
+            thoughts_token_count: 500,
+            total_token_count: 1_820,
         };
         assert_eq!(
-            priced("gemini-3.1-flash-image-preview", Some(&usage))
+            priced("gemini-3.1-flash-image", Some(&usage))
                 .cost()
                 .dollars(),
-            "$.0673",
-            "image pricing must include text input plus generated image output tokens"
+            "$.0688",
+            "image pricing must price generated image and thinking tokens at their distinct rates"
+        );
+    }
+
+    #[test]
+    fn flash_lite_usage_prices_low_cost_scene_features() {
+        let usage = UsageMetadata {
+            prompt_token_count: 1_000,
+            candidates_token_count: 200,
+            thoughts_token_count: 300,
+            total_token_count: 1_500,
+        };
+        assert_eq!(
+            priced("gemini-3.5-flash-lite", Some(&usage)).cost().nanos(),
+            1_550_000,
+            "Flash Lite feature pricing drifted from the current paid-tier rates"
+        );
+    }
+
+    #[test]
+    fn two_five_flash_lite_prices_multimodal_recall_review() {
+        let usage = UsageMetadata {
+            prompt_token_count: 536,
+            candidates_token_count: 76,
+            thoughts_token_count: 0,
+            total_token_count: 612,
+        };
+        assert_eq!(
+            priced("gemini-2.5-flash-lite", Some(&usage)).cost().nanos(),
+            84_000,
+            "Gemini 2.5 Flash-Lite recall pricing drifted from the paid-tier rates"
         );
     }
 
@@ -110,6 +183,7 @@ mod tests {
         let usage = UsageMetadata {
             prompt_token_count: 300,
             candidates_token_count: 500,
+            thoughts_token_count: 0,
             total_token_count: 800,
         };
         assert_eq!(
@@ -124,7 +198,7 @@ mod tests {
     #[test]
     fn missing_usage_metadata_is_not_a_billable_record() {
         assert_eq!(
-            priced("gemini-3.5-flash", None).requests(),
+            priced("gemini-3.6-flash", None).requests(),
             0,
             "missing Gemini usage metadata must not be rendered as a zero-dollar request"
         );

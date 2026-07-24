@@ -10,12 +10,12 @@ const CARD_VERSION: &str = "v3";
 
 /// The single cache folder that holds every artifact for one card.
 ///
-/// `meta.json`, `scene.json`, `audio.wav`, and `picture.jpg` for one card
-/// live together under `cards/<support>-<target>/<key>`, where `key` is a short
-/// digest of the card identity (language pair, term, understanding). Browsing
-/// the cache root therefore shows one folder per card instead of the older
-/// artifact-type-major directories. Use [`CardCell::cache`] to read or write the
-/// artifacts and [`CardCell::media_name`] to derive a package-unique media name.
+/// `meta.json` and `audio.wav` live directly under
+/// `cards/<support>-<target>/<key>`; each visual policy stores `scene.json` and
+/// `picture.jpg` below `visual/<revision>`. The key is a short digest of the card
+/// identity (language pair, term, understanding). Use [`CardCell::cache`] to
+/// read or write the artifacts and [`CardCell::media_name`] to derive a
+/// package-unique media name.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CardCell {
     key: String,
@@ -78,6 +78,21 @@ mod tests {
             duck.cache().path(),
             hoax.cache().path(),
             "two senses of one term must not share a card folder"
+        );
+    }
+
+    #[test]
+    fn model_refresh_preserves_the_existing_card_identity() {
+        let cell = CardCell::new(
+            "/tmp/kamishibai-cell-version-test",
+            &LanguagePair::new("fr", "en"),
+            "canard",
+            "a duck",
+        );
+        assert_eq!(
+            cell.media_name("jpg"),
+            "3dfcb9807a67.jpg",
+            "model refreshes must not orphan artifacts from existing published sessions"
         );
     }
 }

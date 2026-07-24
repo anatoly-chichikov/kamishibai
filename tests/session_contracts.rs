@@ -4,9 +4,9 @@
 
 use anyhow::Result;
 use kamishibai::session::{
-    Artifact, BulkCorrection, CardArtifacts, CardDraft, CardMeta, LanguagePair, LearningDetection,
-    LearningGuess, RawInputBatch, ScriptDetection, Sense, SenseCorrection, SessionState,
-    Understanding, Understood, WordCandidate, to_document, to_entry,
+    Artifact, ArtifactFile, BulkCorrection, CardArtifacts, CardDraft, CardMeta, GenerationCost,
+    LanguagePair, LearningDetection, LearningGuess, RawInputBatch, ScriptDetection, Sense,
+    SenseCorrection, SessionState, Understanding, Understood, WordCandidate, to_document, to_entry,
 };
 
 struct FakeUnderstanding;
@@ -161,6 +161,39 @@ fn terminal_failure_is_recognisable_after_three_failed_attempts() {
     assert!(
         slot.failed_terminally(),
         "three spent attempts without success must mark the slot as terminally failed"
+    );
+}
+
+#[test]
+fn failed_artifact_slot_keeps_the_latest_cumulative_cost_without_a_file() {
+    let first = GenerationCost::from_nanos(120_000_000);
+    let latest = GenerationCost::from_nanos(310_000_000);
+    let slot = kamishibai::session::ArtifactSlot::fresh(Artifact::Picture)
+        .attempted_with(first)
+        .attempted_with(latest);
+    assert_eq!(
+        slot.cost(),
+        Some(latest),
+        "failed artifact slot lost the latest cumulative Gemini spend"
+    );
+}
+
+#[test]
+fn successful_file_cost_replaces_the_failed_attempt_total_without_double_counting() {
+    let file = ArtifactFile::new(
+        "picture.jpg",
+        std::env::temp_dir().join("picture.jpg"),
+        "1 B",
+        false,
+    )
+    .with_cost(GenerationCost::from_nanos(450_000_000));
+    let slot = kamishibai::session::ArtifactSlot::fresh(Artifact::Picture)
+        .attempted_with(GenerationCost::from_nanos(130_000_000))
+        .succeeded_with(file);
+    assert_eq!(
+        slot.cost(),
+        Some(GenerationCost::from_nanos(450_000_000)),
+        "successful cumulative file cost was added to the failed-attempt total twice"
     );
 }
 

@@ -493,6 +493,7 @@ Languages
 - `IT`: Italian
 - `PT`: Portuguese
 - `EL`: Greek
+- `NL`: Dutch
 
 Input schema for `new --build`
 
@@ -551,15 +552,21 @@ Saved language and key live under the data home:
 
 Cache layout:
 
-- `<cache>/cards/<KNOWN>-<LEARNING>/<key>/`: `meta.json`, `scene.json`,
-  `audio.wav`, `picture.jpg`
+- `<cache>/cards/<KNOWN>-<LEARNING>/<key>/`: `meta.json`, `audio.wav`, and
+  `visual/<revision>/` containing `scene.json` and `picture.jpg` for the current
+  content-addressed visual policy
 - `<cache>/understanding/<KNOWN>-<LEARNING>/<key>.json`
 - `<cache>/sessions/<id>/`: `session.json`, `worker.log`
 - `<cache>/ocr-models/`: shared OCR model files
 
 `<key>` is a short content hash. `status` derives card readiness from the
-artifact files that exist. Deleting a card folder forces that card to regenerate
-on the next `generate`.
+artifact files in the current visual-policy revision and ignores older visual
+directories. Deleting a card folder forces that card to regenerate on the next
+`generate`. The revision hashes the embedded feature and scene-composer
+prompts; the composer schema; both layout/device registries; the manga
+template; and a manual policy version that changes when model
+configuration, local validation, or renderer acceptance changes independently
+of those assets.
 
 Script example
 

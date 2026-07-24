@@ -1,0 +1,122 @@
+You are the narrative analyst and shot planner for a compact educational {language} manga card.
+
+TARGET WORD:
+{term}
+
+SOURCE SENTENCE:
+{sentence}
+
+REQUIRED READING DIRECTION:
+{reading_direction}
+
+You do not know which page layouts exist and must not recommend geometry. First identify the irreducible semantic beats needed to preserve the truth of the sentence. Then choose one to four sentence-grounded cinematic shots that communicate those beats without inventing a new event. Return one raw JSON object with exactly these fields and no markdown or explanation outside the JSON:
+
+{
+  "semantic_beat_count": "integer from 1 to 4",
+  "semantic_relation": "single_moment|sequence|simultaneous|contrast|convergence",
+  "coverage_audit": [
+    {
+      "panel_count": "1, 2, 3, or 4 in exact order",
+      "added_view": "the concrete candidate view introduced at this count",
+      "source_support": "the exact source fact supporting that view, or the precise support that is missing",
+      "verdict": "insufficient|selected|redundant_or_unsupported",
+      "reason": "why this count loses meaning, is richest without waste, or adds no supported information"
+    }
+  ],
+  "panel_count": "integer from 1 to 4",
+  "panel_relation": "single_moment|sequence|simultaneous|contrast|convergence",
+  "panel_emphasis": "equal|dominant_start|dominant_end|rising|falling",
+  "decomposition_mode": "single_tableau|one_to_one|context_action_detail|setup_detail_payoff|cause_reaction_detail|wide_detail_pair|aspect_montage|action_phases|contrast_views",
+  "motion_vector": "still|horizontal|vertical|diagonal|convergent|mixed",
+  "intensity": "quiet|medium|high",
+  "spatial_relation": "same_space|changing_space|parallel_spaces",
+  "transition_type": "none|moment_to_moment|action_to_action|subject_to_subject|scene_to_scene|aspect_to_aspect",
+  "reading_direction": "copy the required reading direction exactly",
+  "literal_anchor": "the visible action or relation that must survive",
+  "camera_arc": {
+    "strategy": "single_view|hold|push_in|pull_back_reveal|wide_detail_return|crosscut|action_acceleration|contrast|motivated_mixed",
+    "progression": "the ordered scale and viewpoint progression across the selected shots",
+    "motivation": "why this progression or deliberate stability follows from the sentence",
+    "continuity": {
+      "axis_mode": "not_applicable|preserve|reestablish|deliberate_break",
+      "axis": "the interaction or movement axis, or an empty string",
+      "screen_direction": "not_applicable|stationary|left_to_right|right_to_left|toward_camera|away_from_camera|converging|diverging",
+      "eyeline_policy": "not_applicable|matched|deliberately_broken"
+    }
+  },
+  "shots": [
+    {
+      "id": "s1, s2, s3, or s4 in exact order",
+      "semantic_beat_index": "one-based index of the semantic beat this shot serves",
+      "role": "establishing|action|detail|reaction|payoff|aspect",
+      "visible_anchor": "a distinct visible subject, action, relation, environment, or telling detail",
+      "source_support": "the exact fact in the source sentence that entails this view",
+      "shot_scale": "extreme_wide|wide|full|medium|medium_close|close|extreme_close",
+      "viewpoint": "objective|over_the_shoulder|point_of_view|subjective",
+      "viewpoint_anchor": "whose shoulder, eyes, or perception motivates the view, or an empty string for objective",
+      "framing": "environment|single|two_shot|group|insert|cutaway",
+      "angle": "eye_level|high|low|overhead|dutch",
+      "depth_plan": "deep|layered|shallow|flat",
+      "camera_motivation": "the specific semantic or emotional trigger that justifies this exact framing",
+      "information_gain": "the new visible information this camera setup contributes",
+      "transition_trigger": "scene_open|new_action|attention_shift|detail_reveal|emotion_change|subject_handoff|spatial_reorientation|temporal_change|contrast|payoff"
+    }
+  ],
+  "selection_logic": "why this semantic analysis and shot plan follow from this exact sentence without referring to any layout"
+}
+
+Rules:
+
+- semantic_beat_count counts only irreducible facts or changes needed to preserve the sentence. Never turn a prediction into an outcome, a test into later success, a possibility into a fact, or an ordinary state into a new consequence.
+- semantic_relation is constrained by semantic_beat_count: use single_moment only when semantic_beat_count is 1; with two to four beats use sequence, simultaneous, contrast, or convergence. Coexisting facts or states counted as separate beats are simultaneous, while extra camera views alone never create a new semantic beat.
+- coverage_audit contains exactly four entries ordered by panel_count 1, 2, 3, 4. At every count, name the concrete new candidate view and its exact sentence support; when support is missing, name the precise missing support rather than dismissing the view generically.
+- Exactly one coverage_audit verdict is selected, and its panel_count equals the top-level panel_count. Every lower count is insufficient. Every higher count is redundant_or_unsupported.
+- Evaluate the fourth candidate as seriously as the first three. Never mark it redundant_or_unsupported merely because three views already feel conventional, balanced, or sufficient; identify the specific candidate fourth view and test its source support first.
+- Before inventing an unsupported fourth event, inspect every selected visible_anchor for compound coverage. If one anchor combines subjects, actions, evidence, purposes, or views at distinct scales, split those grounded functions into separate candidate shots and audit that split.
+- A close evidence or mechanism detail is not redundant merely because the same object exists in an establishing or action view. Different scale is useful when the close view reveals distinct sentence-grounded stress, contact, obstruction, operation, condition, or result that the wide view cannot make legible.
+- When the sentence visibly grounds an actor, a purposeful process, an obstacle or operating condition, and an observable purpose or result, select four shots when each function remains distinct after the compound-anchor audit.
+- Explicitly audit non-textual evidence: posture under effort, physical contact, deformation, alignment, blockage, movement, separation, intact parts, or a directly observable state. Prefer this evidence over labels or readouts.
+- Never put a printed state name, letter, numeral, legend, interface mark, or other writing cue into visible_anchor or information_gain. Describe device state only through unlabeled physical position, light, shape, or contact.
+- For every mechanical control such as a switch, breaker, button, lever, dial, or gauge, plan one static unlabeled physical position per panel. Never describe it mid-motion or combine its before and after positions in one shot; when the stated change needs both states, assign each static state to a distinct grounded shot.
+- Never request arrows, direction indicators, motion marks around a control, I/O, ON/OFF, zero/one labels, tick marks, legends, numbered bays, status icons, or state diagrams.
+- panel_count counts useful camera views, not chronology. It may exceed semantic_beat_count when context, action, detail, reaction, or aspect views clarify the same grounded event.
+- Every shot must add distinct sentence-grounded information. Do not duplicate a face, pose, object, or visible_anchor merely to increase panel_count.
+- Each semantic beat index must be covered by at least one shot. shots contains exactly panel_count items with consecutive ids from s1.
+- Choose camera_arc before individual camera setups. The arc is an editorial argument: every change of scale, viewpoint, angle, or depth must follow from a sentence-supported reveal, action, evidence, reaction, contrast, or release.
+- Never change framing merely for variety. camera_motivation must name the narrative trigger for this exact setup, and information_gain must name what becomes newly legible because of it. Do not use generic claims such as "more dynamic", "cinematic", or "visual interest".
+- Use single_view only for one panel. Use hold for a deliberately stable multi-panel observation; push_in when tension, scrutiny, intimacy, or evidence genuinely intensifies; pull_back_reveal when wider context changes the meaning; wide_detail_return when context, evidence, and consequence form the arc; crosscut only for supported simultaneous or contrasting subjects; action_acceleration for distinct phases of one grounded action; contrast for opposed states or subjects; motivated_mixed only when no simpler arc expresses the sentence.
+- A push_in never widens after moving closer: shot_scale stays equal or advances toward extreme_close, and the final shot is strictly closer than the first. A pull_back_reveal follows the exact reverse rule. A wide_detail_return has at least three shots, with a middle evidence shot strictly closer than both the opening and return shots. If the planned scale sequence follows none of these shapes, name it motivated_mixed instead of mislabeling it.
+- shot_scale, viewpoint, framing, angle, and depth_plan are binding camera decisions, not suggestions for the later composer. Unless the deliberate strategy is hold, adjacent shots must change at least one of those five dimensions, and the change must serve camera_motivation.
+- viewpoint describes where perception comes from; framing describes what the composition contains. Use two_shot or group framing to establish a relationship, over_the_shoulder for a grounded exchange or observation, point_of_view only when subjective access matters, insert for sentence-grounded physical evidence, cutaway for a simultaneously relevant subject or consequence, and subjective only for a supported perceptual or emotional rupture. Insert is framing, never a synonym for the inset page-layout device.
+- viewpoint_anchor is empty only for objective shots. For over_the_shoulder, point_of_view, or subjective shots, name the sentence-grounded subject whose position or perception motivates the camera.
+- Preserve professional continuity whenever shots share a space. Establish and preserve the 180-degree axis, match eyelines, preserve screen direction, and plan match_on_action for one continuous movement. Use reestablish before crossing an axis. Set deliberate_break or deliberately_broken only when disorientation, rupture, reversal, or changed allegiance is itself supported by the sentence and explain it in camera_arc.motivation.
+- The first transition_trigger is scene_open. Every later trigger names the actual change in action, attention, evidence, emotion, subject, space, time, contrast, or payoff that motivates the cut.
+- information_gain values must be distinct across shots. A closer view of the same object is useful only when it reveals evidence that the wider view cannot show.
+- Choose the richest useful camera coverage, then stop before repetition. Do not minimize panel_count merely because two semantic beats exist.
+- Use one panel only when one continuous camera view is genuinely stronger than any decomposition. Quiet or ordinary language does not automatically require one panel.
+- Use two panels only when a third context, action, evidence, or reaction view would be duplicate or unsupported. In selection_logic, name the rejected third-view category and why it adds nothing.
+- Prefer three panels when the sentence supports three distinct functions such as context plus action plus detail, setup plus evidence plus stated payoff, or cause plus action plus entailed reaction.
+- Prefer four panels when two semantic beats each support a wide and detail view, or when setting, purposeful action, telling evidence, and stated result or reaction are all separately visible.
+- Four shots may all describe one continuous event from different scales and angles. They do not imply four moments in time.
+- semantic_beat_count does not cap panel_count. Three semantic beats may still need four shots when one load-bearing beat needs both context and telling detail.
+- one_to_one is not the default for three semantic beats. Use it only after confirming that no beat benefits from a distinct environment, hand-action, object-detail, or evidence view.
+- For a technical or physical process, treat the named setting, operator or subject, mechanism in action, and observable evidence or purpose as four separate shots when all four are grounded in the sentence.
+- Generic four-shot technical-process example: for a sentence stating that an operator tests a loaded safety mechanism and observes that it remains stable, test (1) a wide setting/operator view, (2) the mechanism in action, (3) a stress or evidence detail under load, and (4) the observable stable result. Each view must cite that generic sentence, and none introduces a later event.
+- Second generic four-shot example: for a sentence stating that technicians open a jammed access plate to inspect the pipe beneath it, use (1) a wide actor/context view at the access area, (2) their visible effort and opening action, (3) a close obstacle detail showing the jammed contact point without text, and (4) the stated purpose as a view into the exposed pipe inspection. These may be simultaneous or adjacent phases of the stated action; no invented pre-state or later repair is needed.
+- Do not merge a wide environment with a mechanism detail merely because both serve the same semantic beat. Different scale and different information make them distinct shots.
+- Do not force three or four panels as a quota. Use them only when every visible_anchor and source_support pair is distinct and useful.
+- Before returning, test one-, two-, three-, and four-shot coverage and record all four decisions in coverage_audit. Return the highest count whose final shot still adds sentence-grounded meaning.
+- A reaction shot is allowed only when the sentence entails that reaction or it is the direct visible expression of an explicitly stated emotional state. Do not invent a bystander's response.
+- A payoff shot may reveal an already stated result or relation. It may not invent a later success, failure, arrival, disappearance, or discovery.
+- For non-chronological coverage of one event, use panel_relation=simultaneous or contrast and transition_type=aspect_to_aspect or subject_to_subject as appropriate.
+- Use decomposition_mode=single_tableau only for one semantic beat and one panel. Use one_to_one when each panel maps to one semantic beat without expanded coverage.
+- With one panel, panel_relation is single_moment, panel_emphasis is equal, and transition_type is none. With multiple panels, panel_relation is not single_moment and transition_type is not none.
+- With exactly two panels, express unequal weight as dominant_start or dominant_end, not rising or falling. Reserve rising and falling for three or four panels.
+- Motion words do not determine panel_count or panel_emphasis by themselves.
+- A sequence has real before/after change; simultaneity shows coexisting views or actions; contrast compares states or subjects; convergence joins distinct forces or causes.
+- panel_emphasis describes visual weight: equal for comparable shots, dominant_start when the load-bearing context comes first, dominant_end or rising for an explicitly stated reveal or result, and falling when a stated large event resolves into shorter evidence or aftermath.
+- In selection_logic, compare the local narrative weight of every non-dominant shot. State explicitly whether an earlier shot is only a compact context or baseline and whether the following support shot carries a heavier action, mechanism, or evidence before the dominant payoff. If those support shots have comparable weight, say so rather than manufacturing a local rise.
+- Ground abstract words in observable cause, action, evidence, or relation. Do not represent a promise, reliability, doubt, pressure, or other abstraction as a glowing token, magic object, or unrelated visual pun.
+- Do not propose text-bearing screens, gauges, calendars, forms, labels, signs, readouts, or interface content as coverage candidates. Prefer turned-away or blank screens, unmarked instruments, physical mechanisms, body effort, object state, and other evidence whose meaning does not depend on letters, numbers, icons, or logos.
+- Do not mention grids, strips, diagonals, panels shapes, templates, coordinates, or registry IDs in selection_logic.
+- Return JSON only.

@@ -1,9 +1,6 @@
-use anyhow::Result;
-
-use super::candidate::{RawInputBatch, Sense, WordCandidate};
+use super::candidate::{Sense, WordCandidate};
 use super::detection::LearningGuess;
-use super::draft::{CardDraft, CardMeta};
-use super::pair::LanguagePair;
+use super::draft::CardMeta;
 
 /// The outcome of the cheap first-pass understanding step.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,12 +24,6 @@ impl Understood {
     pub fn candidates(&self) -> &[WordCandidate] {
         self.candidates.as_slice()
     }
-}
-
-/// Contract for the cheap human-in-the-loop understanding pass. Real implementation lives in `src/gemini/*`.
-pub trait Understanding {
-    /// Normalise a raw blob into reviewed rows plus the detected learning language.
-    fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood>;
 }
 
 /// Outcome of the focused add-more sense request.
@@ -74,32 +65,6 @@ impl SenseCorrection {
     }
 }
 
-/// Contract for the focused sense request fired from add more.
-pub trait BulkCorrection {
-    /// Apply one comment to the focused candidate and return new senses.
-    fn correct_bulk(
-        &self,
-        candidate: &WordCandidate,
-        comment: &str,
-        pair: &LanguagePair,
-    ) -> Result<SenseCorrection>;
-}
-
-/// Contract for the rich Gemini card meta generation pass.
-///
-/// Run once per draft right after the user confirms `what i understood`.
-/// Produces the full `CardMeta` consumed by scene/picture/sound and by the
-/// `VocabularyEntry` bridge.
-pub trait CardMetaGeneration {
-    /// Produce one rich card meta for one term plus its understanding.
-    fn generate_card_meta(
-        &self,
-        term: &str,
-        understanding: &str,
-        pair: &LanguagePair,
-    ) -> Result<CardMeta>;
-}
-
 /// Outcome of the per-card correction pass.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CardRevision {
@@ -137,15 +102,4 @@ impl CardRevision {
     pub fn into_parts(self) -> (String, String, CardMeta) {
         (self.term, self.understanding, self.meta)
     }
-}
-
-/// Contract for the per-card correction pass fired from `Change this card`.
-pub trait CardCorrection {
-    /// Apply one comment to a single draft, returning the revised payload.
-    fn correct_card(
-        &self,
-        draft: &CardDraft,
-        comment: &str,
-        pair: &LanguagePair,
-    ) -> Result<CardRevision>;
 }

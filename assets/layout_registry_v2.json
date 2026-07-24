@@ -1,0 +1,4495 @@
+{
+  "schema": "kamishibai.dynamic-manga.layout-registry",
+  "version": 2,
+  "coordinate_space": {
+    "canvas": 1024,
+    "safe_min": 16,
+    "safe_max": 1008,
+    "default_gutter": 16
+  },
+  "canonical_families": [
+    "single_focus",
+    "split",
+    "grid",
+    "span_grid",
+    "blockage",
+    "variable_strip",
+    "diagonal_sequence",
+    "staggered",
+    "radial"
+  ],
+  "reading_directions": [
+    "left_to_right_top_to_bottom",
+    "right_to_left_top_to_bottom"
+  ],
+  "grouping_tree_contract": {
+    "leaf": {
+      "kind": "leaf",
+      "panel": "panel id"
+    },
+    "group": {
+      "kind": "group",
+      "axis": "horizontal | vertical | non_slicing",
+      "children": "nonempty array of leaf or group nodes"
+    },
+    "child_order": "reading_path order"
+  },
+  "selection_contract": {
+    "minimum_ranked_candidates": 1,
+    "maximum_ranked_candidates": 3,
+    "maximum_panels": 4,
+    "features": [
+      "beat_count",
+      "temporal_relation",
+      "emphasis_curve",
+      "motion_vector",
+      "intensity",
+      "spatial_relation",
+      "transition_type",
+      "reading_direction"
+    ],
+    "hard_features": [
+      "beat_count",
+      "temporal_relation",
+      "emphasis_curve",
+      "reading_direction"
+    ],
+    "soft_features": [
+      "motion_vector",
+      "intensity",
+      "spatial_relation",
+      "transition_type"
+    ],
+    "allowed_temporal_relations": [
+      "single_moment",
+      "sequence",
+      "simultaneous",
+      "contrast",
+      "convergence"
+    ],
+    "allowed_emphasis_curves": [
+      "equal",
+      "dominant_start",
+      "dominant_end",
+      "rising",
+      "falling"
+    ],
+    "allowed_motion_vectors": [
+      "still",
+      "horizontal",
+      "vertical",
+      "diagonal",
+      "convergent",
+      "mixed"
+    ],
+    "allowed_intensities": [
+      "quiet",
+      "medium",
+      "high"
+    ],
+    "allowed_spatial_relations": [
+      "same_space",
+      "changing_space",
+      "parallel_spaces"
+    ],
+    "allowed_transition_types": [
+      "none",
+      "moment_to_moment",
+      "action_to_action",
+      "subject_to_subject",
+      "scene_to_scene",
+      "aspect_to_aspect"
+    ],
+    "allowed_reading_directions": [
+      "left_to_right_top_to_bottom",
+      "right_to_left_top_to_bottom"
+    ],
+    "hard_rules": [
+      "Choose only templates whose automatic_selection flag is true",
+      "Apply panel count, reading direction, and temporal relation as hard filters",
+      "Return one to three genuinely viable candidates after soft-fit ranking and never pad the shortlist with a weak fallback",
+      "Use ordinary grids for regular beats so expressive layouts retain contrast",
+      "Apply a dynamic_only template constraint as a hard gate requiring medium or high intensity and non-still motion",
+      "Never invent coordinates or alter immutable template geometry",
+      "Do not select a topology only because the sentence contains motion",
+      "Treat non_slicing routes as high risk and avoid critical dialogue order"
+    ]
+  },
+  "layout_policy": {
+    "criterion": "composition_quality_after_hard_scene_fit",
+    "templates": {
+      "radial-y-3-v1": {
+        "priority": "deprioritized",
+        "selection_effect": "quarantined_from_automatic_selection"
+      },
+      "dominant-rail-3-v1": {
+        "priority": "preferred",
+        "selection_effect": "positive_tiebreaker"
+      },
+      "staggered-grid-4-v1": {
+        "priority": "preferred",
+        "selection_effect": "positive_tiebreaker"
+      },
+      "orthogonal-grid-3-v1": {
+        "priority": "preferred",
+        "selection_effect": "positive_tiebreaker"
+      },
+      "diagonal-strip-3-v1": {
+        "priority": "preferred",
+        "selection_effect": "positive_tiebreaker_with_diversity_penalty"
+      },
+      "slanted-t-bottom-3-p2-v1": {
+        "priority": "preferred",
+        "selection_effect": "positive_dynamic_tiebreaker"
+      },
+      "slanted-dominant-rail-3-p2-v1": {
+        "priority": "preferred",
+        "selection_effect": "positive_dynamic_tiebreaker"
+      },
+      "diagonal-split-2-end-strong-v1": {
+        "priority": "conditional",
+        "selection_effect": "positive_only_when_exact_two_panel_topology_survives"
+      }
+    }
+  },
+  "templates": [
+    {
+      "family": "single_focus",
+      "variant": "single_splash",
+      "template_id": "splash-1-v1",
+      "name": "Single splash",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "clip-studio-layout-guide",
+        "comics-devices-layout"
+      ],
+      "evidence_level": "narrative_theory",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 1,
+      "reading_path": [
+        "p1"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p1",
+      "dominant_index": 0,
+      "grouping_tree": {
+        "kind": "leaf",
+        "panel": "p1"
+      },
+      "reading_strategy": "Hold on one full-page image with no internal navigation.",
+      "best_for": [
+        "one indivisible reveal",
+        "world or character introduction",
+        "climax",
+        "quiet image that must linger"
+      ],
+      "avoid_when": [
+        "the meaning needs cause and effect",
+        "two reactions must be compared",
+        "several concrete actions are required"
+      ],
+      "risk": "Low reading-order risk; use only when one image can carry the complete meaning.",
+      "feature_profile": {
+        "temporal_relation": [
+          "single_moment"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "still",
+          "mixed"
+        ],
+        "intensity": [
+          "quiet",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space"
+        ],
+        "transition_type": []
+      },
+      "compatible_devices": [
+        "none",
+        "open_frame",
+        "partial_bleed"
+      ],
+      "panels": [
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 992,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "split",
+      "variant": "equal_vertical_split",
+      "template_id": "equal-split-vertical-2-v1",
+      "name": "Equal vertical split",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-ecs",
+        "clip-studio-layout-guide"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 2,
+      "reading_path": [
+        "p1",
+        "p2"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p2",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          }
+        ]
+      },
+      "reading_strategy": "Read two equal full-height fields from left to right.",
+      "best_for": [
+        "two equally weighted subjects",
+        "contrast",
+        "simultaneous reactions",
+        "before and after"
+      ],
+      "avoid_when": [
+        "one beat is clearly more important",
+        "the action travels vertically"
+      ],
+      "risk": "Low route risk in LTR use; simultaneity still requires content that does not depend on a hidden causal order.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "horizontal",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "subject_to_subject"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 488,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 520,
+            "y": 16,
+            "width": 488,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "split",
+      "variant": "equal_horizontal_split",
+      "template_id": "equal-split-horizontal-2-v1",
+      "name": "Equal horizontal split",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-ecs",
+        "clip-studio-layout-guide"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 2,
+      "reading_path": [
+        "p1",
+        "p2"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p2",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "vertical",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          }
+        ]
+      },
+      "reading_strategy": "Read the upper field, then drop into the lower field.",
+      "best_for": [
+        "setup then payoff",
+        "establishing view then human detail",
+        "vertical movement",
+        "calm before and after"
+      ],
+      "avoid_when": [
+        "two beats must feel simultaneous",
+        "the scene needs a lateral chase"
+      ],
+      "risk": "Low route risk; equal geometry must not be described as a dominant-final composition.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "contrast"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "vertical",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "scene_to_scene",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 992,
+            "height": 488
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 520,
+            "width": 992,
+            "height": 488
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "diagonal_sequence",
+      "variant": "diagonal_split_2",
+      "template_id": "diagonal-split-2-v1",
+      "name": "Diagonal two-way split",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "clip-studio-layout-guide",
+        "comics-devices-geometric"
+      ],
+      "evidence_level": "design_heuristic",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 2,
+      "reading_path": [
+        "p1",
+        "p2"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p2",
+      "dominant_index": 0,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          }
+        ]
+      },
+      "reading_strategy": "Read left to right across one slanted separating gutter.",
+      "best_for": [
+        "conflict",
+        "separation",
+        "handoff",
+        "one decisive directional change"
+      ],
+      "avoid_when": [
+        "the scene is calm and observational",
+        "more than two distinct beats are needed"
+      ],
+      "risk": "Medium risk: angled borders add energy but do not establish reading order without a clear LTR content handoff.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "contrast"
+        ],
+        "emphasis_curve": [
+          "dominant_start"
+        ],
+        "motion_vector": [
+          "diagonal",
+          "horizontal"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "subject_to_subject"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing"
+      ],
+      "panels": [
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 600,
+            "height": 992
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              520,
+              16
+            ],
+            [
+              616,
+              1008
+            ],
+            [
+              16,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 536,
+            "y": 16,
+            "width": 472,
+            "height": 992
+          },
+          "polygon": [
+            [
+              536,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              1008
+            ],
+            [
+              632,
+              1008
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "family": "diagonal_sequence",
+      "variant": "diagonal_split_2_end",
+      "template_id": "diagonal-split-2-end-v1",
+      "name": "Diagonal setup and dominant payoff",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "clip-studio-layout-guide",
+        "comics-devices-geometric"
+      ],
+      "evidence_level": "design_heuristic",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 2,
+      "reading_path": [
+        "p1",
+        "p2"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p2",
+      "dominant_index": 1,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          }
+        ]
+      },
+      "reading_strategy": "Read the compact setup, then cross the slanted gutter into the broad dominant payoff.",
+      "best_for": [
+        "directed setup opening into a dominant payoff",
+        "conflict resolved by a large final action",
+        "handoff with a dominant destination",
+        "one decisive directional change with a dominant endpoint"
+      ],
+      "avoid_when": [
+        "the scene is calm and observational",
+        "more than two distinct beats are needed",
+        "the premise must remain dominant"
+      ],
+      "risk": "Medium risk: the angled border adds energy, so the small setup must establish an unmistakable LTR handoff into the larger final field.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "contrast"
+        ],
+        "emphasis_curve": [
+          "dominant_end",
+          "rising"
+        ],
+        "motion_vector": [
+          "diagonal",
+          "horizontal"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "subject_to_subject"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing"
+      ],
+      "panels": [
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 472,
+            "height": 992
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              488,
+              16
+            ],
+            [
+              392,
+              1008
+            ],
+            [
+              16,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 408,
+            "y": 16,
+            "width": 600,
+            "height": 992
+          },
+          "polygon": [
+            [
+              504,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              1008
+            ],
+            [
+              408,
+              1008
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "family": "span_grid",
+      "variant": "dominant_side_2",
+      "template_id": "dominant-split-2-v1",
+      "name": "Dominant field and reaction rail",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "comics-devices-layout",
+        "clip-studio-layout-guide"
+      ],
+      "evidence_level": "narrative_theory",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 2,
+      "reading_path": [
+        "p1",
+        "p2"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p2",
+      "dominant_index": 0,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          }
+        ]
+      },
+      "reading_strategy": "Absorb the broad main situation, then read the narrow reaction field.",
+      "best_for": [
+        "main action plus reaction",
+        "place plus telling detail",
+        "unequal comparison",
+        "held situation followed by consequence"
+      ],
+      "avoid_when": [
+        "both beats need equal weight",
+        "the payoff must dominate at the end"
+      ],
+      "risk": "Low route risk; reject when the narrow reaction rail carries the narrative climax.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "dominant_start",
+          "falling"
+        ],
+        "motion_vector": [
+          "horizontal",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium"
+        ],
+        "spatial_relation": [
+          "same_space"
+        ],
+        "transition_type": [
+          "subject_to_subject",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "inset",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 656,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 688,
+            "y": 16,
+            "width": 320,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "span_grid",
+      "variant": "dominant_end_2",
+      "template_id": "dominant-split-2-end-v1",
+      "name": "Setup rail and dominant payoff",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "comics-devices-layout",
+        "clip-studio-layout-guide"
+      ],
+      "evidence_level": "narrative_theory",
+      "capability_status": "qualified",
+      "automatic_selection": true,
+      "panel_count": 2,
+      "reading_path": [
+        "p1",
+        "p2"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p2",
+      "dominant_index": 1,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          }
+        ]
+      },
+      "reading_strategy": "Read the narrow setup rail, then release into the broad dominant payoff.",
+      "best_for": [
+        "brief cause followed by a large consequence",
+        "small action opening into place",
+        "setup followed by a dominant reveal"
+      ],
+      "avoid_when": [
+        "both beats need equal weight",
+        "the premise must remain dominant"
+      ],
+      "risk": "Low route risk, but the narrow first rail must remain legible before the large final field.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "dominant_end",
+          "rising"
+        ],
+        "motion_vector": [
+          "horizontal",
+          "convergent",
+          "mixed"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "subject_to_subject",
+          "scene_to_scene"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 320,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 352,
+            "y": 16,
+            "width": 656,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "grid",
+      "variant": "vertical_triptych_legacy",
+      "template_id": "orthogonal-grid-3-v1",
+      "name": "Equal vertical triptych",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-grid",
+        "comics-devices-layout"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "qualified",
+      "automatic_selection": true,
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Read three equal full-height rails from left to right.",
+      "best_for": [
+        "three regular beats",
+        "calm comparison",
+        "incremental action",
+        "neutral control"
+      ],
+      "avoid_when": [
+        "one beat deserves much more weight",
+        "the narrative is simultaneous rather than sequential"
+      ],
+      "risk": "Low route risk; this legacy ID is geometrically identical to vertical-triptych-3-v1.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "horizontal",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "moment_to_moment",
+          "action_to_action",
+          "subject_to_subject"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 316,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 348,
+            "y": 16,
+            "width": 316,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 680,
+            "y": 16,
+            "width": 328,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ],
+      "selection_note": "preferred as an asymmetric three-panel option"
+    },
+    {
+      "family": "grid",
+      "variant": "horizontal_triptych",
+      "template_id": "horizontal-triptych-3-v1",
+      "name": "Equal horizontal triptych",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-grid",
+        "comics-devices-layout"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "vertical",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Read three full-width tiers from top to bottom.",
+      "best_for": [
+        "vertical travel",
+        "three landscape beats",
+        "place action consequence",
+        "slow observational progression"
+      ],
+      "avoid_when": [
+        "faces need tall portrait framing",
+        "action flows strongly left to right"
+      ],
+      "risk": "Low route risk; simultaneous use should read as three aspects rather than a causal sequence.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "vertical",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "scene_to_scene",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 992,
+            "height": 312
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 344,
+            "width": 992,
+            "height": 320
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 680,
+            "width": 992,
+            "height": 328
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "diagonal_sequence",
+      "variant": "diagonal_strip_3",
+      "template_id": "diagonal-strip-3-v1",
+      "name": "Three-panel diagonal strip",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "clip-studio-layout-guide",
+        "comics-devices-geometric"
+      ],
+      "evidence_level": "design_heuristic",
+      "capability_status": "qualified",
+      "automatic_selection": true,
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": 2,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Read left to right along two parallel diagonal gutters.",
+      "best_for": [
+        "continuous route",
+        "acceleration",
+        "handoff into motion",
+        "three escalating beats"
+      ],
+      "avoid_when": [
+        "the beats are simultaneous",
+        "the scene is quiet",
+        "a recent page already used a diagonal strip"
+      ],
+      "risk": "Medium risk: the parallel diagonal gutters need explicit adjacent exits and must not be selected from motion wording alone.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence"
+        ],
+        "emphasis_curve": [
+          "equal",
+          "rising"
+        ],
+        "motion_vector": [
+          "diagonal",
+          "horizontal"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "action_to_action"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing"
+      ],
+      "panels": [
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 344,
+            "height": 992
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              280,
+              16
+            ],
+            [
+              360,
+              1008
+            ],
+            [
+              16,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 292,
+            "y": 16,
+            "width": 440,
+            "height": 992
+          },
+          "polygon": [
+            [
+              292,
+              16
+            ],
+            [
+              652,
+              16
+            ],
+            [
+              732,
+              1008
+            ],
+            [
+              372,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 664,
+            "y": 16,
+            "width": 344,
+            "height": 992
+          },
+          "polygon": [
+            [
+              664,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              1008
+            ],
+            [
+              744,
+              1008
+            ]
+          ]
+        }
+      ],
+      "selection_note": "preferred when three equal horizontal beats are semantically justified"
+    },
+    {
+      "family": "radial",
+      "variant": "radial_y_3",
+      "template_id": "radial-y-3-v1",
+      "name": "Three-way radial Y",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "comics-devices-geometric"
+      ],
+      "evidence_level": "design_heuristic",
+      "capability_status": "quarantined",
+      "automatic_selection": false,
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": 2,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "non_slicing",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Enter through two upper wedges and resolve below a central Y hub.",
+      "best_for": [
+        "two causes converge on one result",
+        "simultaneous actions with one shared payoff"
+      ],
+      "avoid_when": [
+        "ordinary linear action",
+        "the central hub has no semantic role",
+        "automatic selection before a redesign passes ratings"
+      ],
+      "risk": "High route ambiguity and an adverse user rating; keep quarantined until a redesigned capability test passes.",
+      "feature_profile": {
+        "temporal_relation": [
+          "simultaneous",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "dominant_end"
+        ],
+        "motion_vector": [
+          "convergent"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "subject_to_subject"
+        ]
+      },
+      "compatible_devices": [
+        "none"
+      ],
+      "panels": [
+        {
+          "shape": "polygon",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 484,
+            "height": 976
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              500,
+              16
+            ],
+            [
+              500,
+              500
+            ],
+            [
+              16,
+              992
+            ]
+          ]
+        },
+        {
+          "shape": "polygon",
+          "bounds": {
+            "x": 524,
+            "y": 16,
+            "width": 484,
+            "height": 976
+          },
+          "polygon": [
+            [
+              524,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              992
+            ],
+            [
+              524,
+              500
+            ]
+          ]
+        },
+        {
+          "shape": "polygon",
+          "bounds": {
+            "x": 28,
+            "y": 524,
+            "width": 968,
+            "height": 484
+          },
+          "polygon": [
+            [
+              28,
+              1008
+            ],
+            [
+              996,
+              1008
+            ],
+            [
+              518,
+              524
+            ],
+            [
+              506,
+              524
+            ]
+          ]
+        }
+      ],
+      "selection_note": "deprioritized because radial geometry weakens stable reading order"
+    },
+    {
+      "family": "blockage",
+      "variant": "stack_2_then_dominant_ltr",
+      "template_id": "dominant-rail-3-v1",
+      "name": "Two supports into one dominant field",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "comics-devices-layout",
+        "cohn-ecs"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "qualified",
+      "automatic_selection": true,
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": 2,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "group",
+            "axis": "vertical",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p1"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              }
+            ]
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Read two compact support beats down the left rail, then enter the large right field.",
+      "best_for": [
+        "two clues then reveal",
+        "setup detail payoff",
+        "small actions leading to one held consequence",
+        "contrasting source and reaction ending in one decisive detail"
+      ],
+      "avoid_when": [
+        "all beats have equal weight",
+        "the large field is only decorative"
+      ],
+      "risk": "Medium-high risk: blockage can override a normal Z path, so rail-first exits and a genuine final payoff are required.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast"
+        ],
+        "emphasis_curve": [
+          "dominant_end",
+          "rising"
+        ],
+        "motion_vector": [
+          "vertical",
+          "mixed",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "subject_to_subject",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "inset",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 300,
+            "height": 480
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 512,
+            "width": 300,
+            "height": 496
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 332,
+            "y": 16,
+            "width": 676,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ],
+      "selection_note": "preferred when two setup beats feed one dominant field"
+    },
+    {
+      "family": "span_grid",
+      "variant": "dominant_top_3",
+      "template_id": "t-top-3-v1",
+      "name": "Dominant top with two outcomes",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-ecs",
+        "comics-devices-layout"
+      ],
+      "evidence_level": "narrative_theory",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": 0,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "vertical",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "group",
+            "axis": "horizontal",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p3"
+              }
+            ]
+          }
+        ]
+      },
+      "reading_strategy": "Read the broad upper situation, then compare the two lower consequences.",
+      "best_for": [
+        "establishing tableau then two reactions",
+        "one cause with two outcomes",
+        "location followed by paired details"
+      ],
+      "avoid_when": [
+        "the final moment should dominate",
+        "the lower beats are not meaningfully paired"
+      ],
+      "risk": "Low route risk; the two lower panels must form a meaningful pair.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "dominant_start",
+          "falling"
+        ],
+        "motion_vector": [
+          "vertical",
+          "mixed"
+        ],
+        "intensity": [
+          "quiet",
+          "medium"
+        ],
+        "spatial_relation": [
+          "same_space"
+        ],
+        "transition_type": [
+          "subject_to_subject",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "inset",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 992,
+            "height": 600
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 632,
+            "width": 480,
+            "height": 376
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 512,
+            "y": 632,
+            "width": 496,
+            "height": 376
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "span_grid",
+      "variant": "dominant_bottom_3",
+      "template_id": "t-bottom-3-v1",
+      "name": "Two causes into dominant bottom",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-ecs",
+        "comics-devices-layout"
+      ],
+      "evidence_level": "narrative_theory",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": 2,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "vertical",
+        "children": [
+          {
+            "kind": "group",
+            "axis": "horizontal",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p1"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              }
+            ]
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Read two compact upper beats, then land in the broad lower payoff.",
+      "best_for": [
+        "paired setup then reveal",
+        "two viewpoints converge",
+        "choice then consequence",
+        "contrasting cause and reaction ending in one shared detail"
+      ],
+      "avoid_when": [
+        "the first beat needs to dominate",
+        "the two setup beats are not distinct"
+      ],
+      "risk": "Low route risk; convergence is valid only when both upper panels resolve into the lower field.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "dominant_end",
+          "rising"
+        ],
+        "motion_vector": [
+          "vertical",
+          "convergent",
+          "still"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "subject_to_subject"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "inset",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 480,
+            "height": 376
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 512,
+            "y": 16,
+            "width": 496,
+            "height": 376
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 408,
+            "width": 992,
+            "height": 600
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "grid",
+      "variant": "grid_2x2",
+      "template_id": "grid-2x2-4-v1",
+      "name": "Regular two-by-two grid",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-grid",
+        "comics-devices-layout"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "vertical",
+        "children": [
+          {
+            "kind": "group",
+            "axis": "horizontal",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p1"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              }
+            ]
+          },
+          {
+            "kind": "group",
+            "axis": "horizontal",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p3"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p4"
+              }
+            ]
+          }
+        ]
+      },
+      "reading_strategy": "Read a conventional Z path across two equal rows.",
+      "best_for": [
+        "four clear actions",
+        "methodical explanation",
+        "regular dialogue",
+        "neutral pacing"
+      ],
+      "avoid_when": [
+        "one beat must dominate",
+        "the page needs exceptional urgency"
+      ],
+      "risk": "Lowest route risk for LTR pages; equal geometry must preserve equal semantic weight.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "mixed",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "moment_to_moment",
+          "action_to_action",
+          "subject_to_subject"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 480,
+            "height": 480
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 512,
+            "y": 16,
+            "width": 496,
+            "height": 480
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 512,
+            "width": 480,
+            "height": 496
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 512,
+            "y": 512,
+            "width": 496,
+            "height": 496
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "staggered",
+      "variant": "staggered_2x2",
+      "template_id": "staggered-grid-4-v1",
+      "name": "Staggered two-row grid",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-navigation",
+        "cohn-ecs",
+        "clip-studio-layout-guide"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "qualified",
+      "automatic_selection": true,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": 3,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "vertical",
+        "children": [
+          {
+            "kind": "group",
+            "axis": "horizontal",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p1"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              }
+            ]
+          },
+          {
+            "kind": "group",
+            "axis": "horizontal",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p3"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p4"
+              }
+            ]
+          }
+        ]
+      },
+      "reading_strategy": "Read a Z path across two rows whose internal dividers are visibly offset.",
+      "best_for": [
+        "four sequential actions",
+        "controlled visual variety",
+        "route with alternating close and wide shots"
+      ],
+      "avoid_when": [
+        "only two or three real beats exist",
+        "the action needs one continuous diagonal current"
+      ],
+      "risk": "Low route risk when row grouping remains stronger than the offset dividers.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence"
+        ],
+        "emphasis_curve": [
+          "equal",
+          "rising"
+        ],
+        "motion_vector": [
+          "mixed",
+          "horizontal"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "action_to_action"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 600,
+            "height": 484
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              616,
+              16
+            ],
+            [
+              600,
+              500
+            ],
+            [
+              16,
+              500
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 628,
+            "y": 16,
+            "width": 380,
+            "height": 484
+          },
+          "polygon": [
+            [
+              628,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              500
+            ],
+            [
+              644,
+              500
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 16,
+            "y": 516,
+            "width": 360,
+            "height": 492
+          },
+          "polygon": [
+            [
+              16,
+              516
+            ],
+            [
+              376,
+              516
+            ],
+            [
+              360,
+              1008
+            ],
+            [
+              16,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 388,
+            "y": 516,
+            "width": 620,
+            "height": 492
+          },
+          "polygon": [
+            [
+              388,
+              516
+            ],
+            [
+              1008,
+              516
+            ],
+            [
+              1008,
+              1008
+            ],
+            [
+              404,
+              1008
+            ]
+          ]
+        }
+      ],
+      "selection_note": "preferred when one dominant beat needs three supporting views"
+    },
+    {
+      "family": "blockage",
+      "variant": "stack_3_then_dominant_ltr",
+      "template_id": "blockage-rail-4-v1",
+      "name": "Three-beat rail into dominant field",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-navigation",
+        "cohn-navigation-ii"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": 3,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "group",
+            "axis": "vertical",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p1"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p3"
+              }
+            ]
+          },
+          {
+            "kind": "leaf",
+            "panel": "p4"
+          }
+        ]
+      },
+      "reading_strategy": "Complete the three stacked left panels before entering the full-height right panel.",
+      "best_for": [
+        "three clues then revelation",
+        "decompressed preparation then payoff",
+        "reaction ladder beside one held scene",
+        "three contextual views beside one dominant contrast"
+      ],
+      "avoid_when": [
+        "the audience cannot be given an explicit reading path",
+        "the large panel is not a genuine payoff"
+      ],
+      "risk": "High route sensitivity: the stacked rail must complete before entry into the full-height dominant field.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "dominant_end",
+          "rising"
+        ],
+        "motion_vector": [
+          "vertical",
+          "mixed",
+          "still"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space"
+        ],
+        "transition_type": [
+          "moment_to_moment",
+          "action_to_action",
+          "subject_to_subject",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "inset",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 300,
+            "height": 309
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 341,
+            "width": 300,
+            "height": 310
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 667,
+            "width": 300,
+            "height": 341
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 332,
+            "y": 16,
+            "width": 676,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "variable_strip",
+      "variant": "expanding_vertical_4",
+      "template_id": "expansion-stack-4-v1",
+      "name": "Expanding four-tier stack",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "comics-devices-expansion",
+        "clip-studio-layout-guide"
+      ],
+      "evidence_level": "design_heuristic",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": 3,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "vertical",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p4"
+          }
+        ]
+      },
+      "reading_strategy": "Descend through successively taller horizontal tiers into a held final image.",
+      "best_for": [
+        "realization that gains weight",
+        "rising emotional emphasis",
+        "small cue growing into consequence",
+        "slowing toward a final beat"
+      ],
+      "avoid_when": [
+        "the ending should feel abrupt",
+        "all beats have equal weight"
+      ],
+      "risk": "Low route risk; the claimed slowing effect is a design heuristic and needs semantic reinforcement.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence"
+        ],
+        "emphasis_curve": [
+          "rising",
+          "dominant_end"
+        ],
+        "motion_vector": [
+          "vertical",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "moment_to_moment",
+          "action_to_action",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 992,
+            "height": 160
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 192,
+            "width": 992,
+            "height": 208
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 416,
+            "width": 992,
+            "height": 256
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 688,
+            "width": 992,
+            "height": 320
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "variable_strip",
+      "variant": "contracting_vertical_4",
+      "template_id": "contraction-stack-4-v1",
+      "name": "Contracting four-tier stack",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "comics-devices-contraction",
+        "clip-studio-layout-guide"
+      ],
+      "evidence_level": "design_heuristic",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": 0,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "vertical",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p4"
+          }
+        ]
+      },
+      "reading_strategy": "Descend from a broad opening field through successively tighter slices.",
+      "best_for": [
+        "large event followed by quick reactions",
+        "accelerating countdown",
+        "attention narrowing to a detail",
+        "abrupt final beat"
+      ],
+      "avoid_when": [
+        "the payoff needs the largest panel",
+        "the ending should linger"
+      ],
+      "risk": "Low route risk; shrinking tiers must not make the final semantic beat illegible.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "falling",
+          "dominant_start"
+        ],
+        "motion_vector": [
+          "vertical",
+          "mixed"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "moment_to_moment",
+          "action_to_action"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 992,
+            "height": 320
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 352,
+            "width": 992,
+            "height": 256
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 624,
+            "width": 992,
+            "height": 208
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 848,
+            "width": 992,
+            "height": 160
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "diagonal_sequence",
+      "variant": "diagonal_strip_4",
+      "template_id": "diagonal-strip-4-v1",
+      "name": "Four-panel diagonal strip",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "clip-studio-layout-guide",
+        "comics-devices-geometric"
+      ],
+      "evidence_level": "design_heuristic",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": 3,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p4"
+          }
+        ]
+      },
+      "reading_strategy": "Read four narrow fields from left to right along parallel diagonal gutters.",
+      "best_for": [
+        "four-step chase",
+        "rapid physical procedure",
+        "continuous motion through one route",
+        "staccato escalation"
+      ],
+      "avoid_when": [
+        "the sentence has fewer than four concrete beats",
+        "a recent page already used a diagonal strip",
+        "quiet conversation"
+      ],
+      "risk": "Medium risk: four narrow fields invite repetition and require four genuinely distinct adjacent beats.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence"
+        ],
+        "emphasis_curve": [
+          "equal",
+          "rising"
+        ],
+        "motion_vector": [
+          "diagonal",
+          "horizontal"
+        ],
+        "intensity": [
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "action_to_action"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing"
+      ],
+      "panels": [
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 280,
+            "height": 992
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              232,
+              16
+            ],
+            [
+              296,
+              1008
+            ],
+            [
+              16,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 244,
+            "y": 16,
+            "width": 292,
+            "height": 992
+          },
+          "polygon": [
+            [
+              244,
+              16
+            ],
+            [
+              472,
+              16
+            ],
+            [
+              536,
+              1008
+            ],
+            [
+              308,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 484,
+            "y": 16,
+            "width": 292,
+            "height": 992
+          },
+          "polygon": [
+            [
+              484,
+              16
+            ],
+            [
+              712,
+              16
+            ],
+            [
+              776,
+              1008
+            ],
+            [
+              548,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 724,
+            "y": 16,
+            "width": 284,
+            "height": 992
+          },
+          "polygon": [
+            [
+              724,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              1008
+            ],
+            [
+              788,
+              1008
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "family": "radial",
+      "variant": "radial_cross_4",
+      "template_id": "radial-cross-4-v1",
+      "name": "Four-way radial cross",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "comics-devices-geometric"
+      ],
+      "evidence_level": "design_heuristic",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "non_slicing",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p4"
+          }
+        ]
+      },
+      "reading_strategy": "Orbit clockwise from the top field through right and bottom to the left field around a white central hub.",
+      "best_for": [
+        "four simultaneous perspectives around one locus",
+        "cyclical relation",
+        "surrounded character",
+        "four-way confrontation"
+      ],
+      "avoid_when": [
+        "linear action",
+        "the center has no semantic anchor",
+        "automatic selection before capability and rating gates pass"
+      ],
+      "risk": "High ambiguity: clockwise order is not recoverable from geometry alone and critical dialogue must be avoided.",
+      "feature_profile": {
+        "temporal_relation": [
+          "simultaneous",
+          "convergence"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "convergent",
+          "mixed"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "subject_to_subject",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none"
+      ],
+      "panels": [
+        {
+          "shape": "polygon",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 992,
+            "height": 472
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              536,
+              488
+            ],
+            [
+              488,
+              488
+            ]
+          ]
+        },
+        {
+          "shape": "polygon",
+          "bounds": {
+            "x": 552,
+            "y": 32,
+            "width": 456,
+            "height": 960
+          },
+          "polygon": [
+            [
+              552,
+              504
+            ],
+            [
+              1008,
+              32
+            ],
+            [
+              1008,
+              992
+            ],
+            [
+              552,
+              536
+            ]
+          ]
+        },
+        {
+          "shape": "polygon",
+          "bounds": {
+            "x": 16,
+            "y": 552,
+            "width": 992,
+            "height": 456
+          },
+          "polygon": [
+            [
+              536,
+              552
+            ],
+            [
+              1008,
+              1008
+            ],
+            [
+              16,
+              1008
+            ],
+            [
+              488,
+              552
+            ]
+          ]
+        },
+        {
+          "shape": "polygon",
+          "bounds": {
+            "x": 16,
+            "y": 32,
+            "width": 456,
+            "height": 960
+          },
+          "polygon": [
+            [
+              472,
+              536
+            ],
+            [
+              16,
+              992
+            ],
+            [
+              16,
+              32
+            ],
+            [
+              472,
+              504
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "family": "grid",
+      "variant": "vertical_triptych",
+      "template_id": "vertical-triptych-3-v1",
+      "name": "Equal vertical triptych",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-grid",
+        "cohn-ecs"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": false,
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Read three equal full-height fields from left to right.",
+      "best_for": [
+        "three regular beats",
+        "simultaneous comparison",
+        "three aspects of one subject"
+      ],
+      "avoid_when": [
+        "one beat must dominate",
+        "the action depends on vertical travel"
+      ],
+      "risk": "Low route risk; this immutable canonical ID duplicates the legacy orthogonal-grid-3-v1 geometry and is excluded from automatic selection to avoid false diversity.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "horizontal",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "moment_to_moment",
+          "action_to_action",
+          "subject_to_subject",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 316,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 348,
+            "y": 16,
+            "width": 316,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 680,
+            "y": 16,
+            "width": 328,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "grid",
+      "variant": "horizontal_strip_4",
+      "template_id": "horizontal-strip-4-v1",
+      "name": "Four-field horizontal strip",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-grid",
+        "cohn-ecs"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p4"
+          }
+        ]
+      },
+      "reading_strategy": "Read four equal tall fields from left to right.",
+      "best_for": [
+        "four regular phases",
+        "parallel comparison",
+        "incremental lateral motion"
+      ],
+      "avoid_when": [
+        "faces need generous width",
+        "one beat deserves a larger field"
+      ],
+      "risk": "Low route risk but high repetition risk; vary camera distance without changing semantic order.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "horizontal",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "moment_to_moment",
+          "action_to_action",
+          "subject_to_subject"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 236,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 268,
+            "y": 16,
+            "width": 236,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 520,
+            "y": 16,
+            "width": 236,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "tall_rectangle",
+          "bounds": {
+            "x": 772,
+            "y": 16,
+            "width": 236,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "grid",
+      "variant": "vertical_strip_4",
+      "template_id": "vertical-strip-4-v1",
+      "name": "Four-tier vertical strip",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-grid",
+        "cohn-ecs"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "vertical",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p4"
+          }
+        ]
+      },
+      "reading_strategy": "Read four equal full-width tiers from top to bottom.",
+      "best_for": [
+        "vertical travel",
+        "four landscape beats",
+        "parallel environmental aspects"
+      ],
+      "avoid_when": [
+        "portrait framing is essential",
+        "one beat must dominate"
+      ],
+      "risk": "Low route risk; four shallow tiers can underserve faces and hands.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "simultaneous",
+          "contrast"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "vertical",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "moment_to_moment",
+          "action_to_action",
+          "scene_to_scene",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 992,
+            "height": 236
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 268,
+            "width": 992,
+            "height": 236
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 520,
+            "width": 992,
+            "height": 236
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 772,
+            "width": 992,
+            "height": 236
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "blockage",
+      "variant": "stack_2_then_dominant_rtl",
+      "template_id": "dominant-rail-3-rtl-v1",
+      "name": "Two supports into one dominant field, RTL",
+      "reading_direction": "right_to_left_top_to_bottom",
+      "source_basis": [
+        "cohn-navigation",
+        "cohn-ecs",
+        "cohn-cross-cultural-layouts"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": 2,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "group",
+            "axis": "vertical",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p1"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              }
+            ]
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Read two compact support beats down the right rail, then enter the large left field.",
+      "best_for": [
+        "two clues then reveal in RTL manga",
+        "setup detail payoff",
+        "small actions leading to one held consequence"
+      ],
+      "avoid_when": [
+        "the output is read LTR",
+        "all beats have equal weight",
+        "the large field is decorative"
+      ],
+      "risk": "Medium-high risk: the mirrored geometry is valid only when the renderer and reader both use RTL entry conventions.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence"
+        ],
+        "emphasis_curve": [
+          "dominant_end",
+          "rising"
+        ],
+        "motion_vector": [
+          "vertical",
+          "mixed"
+        ],
+        "intensity": [
+          "quiet",
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "inset",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 708,
+            "y": 16,
+            "width": 300,
+            "height": 480
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 708,
+            "y": 512,
+            "width": 300,
+            "height": 496
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 676,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "blockage",
+      "variant": "stack_3_then_dominant_rtl",
+      "template_id": "blockage-rail-4-rtl-v1",
+      "name": "Three-beat rail into dominant field, RTL",
+      "reading_direction": "right_to_left_top_to_bottom",
+      "source_basis": [
+        "cohn-navigation",
+        "cohn-navigation-ii",
+        "cohn-cross-cultural-layouts"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": 3,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "group",
+            "axis": "vertical",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p1"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p3"
+              }
+            ]
+          },
+          {
+            "kind": "leaf",
+            "panel": "p4"
+          }
+        ]
+      },
+      "reading_strategy": "Complete the three stacked right panels before entering the full-height left panel.",
+      "best_for": [
+        "three clues then revelation in RTL manga",
+        "decompressed preparation then payoff",
+        "reaction ladder beside one held scene"
+      ],
+      "avoid_when": [
+        "the output is read LTR",
+        "the large field is not a genuine payoff",
+        "dialogue order lacks strong eye-flow cues"
+      ],
+      "risk": "High route sensitivity: RTL entry, rail grouping, and the final transition into p4 must all be reinforced by content.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence"
+        ],
+        "emphasis_curve": [
+          "dominant_end",
+          "rising"
+        ],
+        "motion_vector": [
+          "vertical",
+          "mixed"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space"
+        ],
+        "transition_type": [
+          "moment_to_moment",
+          "action_to_action",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "inset",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 708,
+            "y": 16,
+            "width": 300,
+            "height": 309
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 708,
+            "y": 341,
+            "width": 300,
+            "height": 310
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 708,
+            "y": 667,
+            "width": 300,
+            "height": 341
+          },
+          "polygon": []
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 676,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "split",
+      "variant": "parallel_tracks_4",
+      "template_id": "parallel-tracks-4-v1",
+      "name": "Two grouped parallel tracks",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-ecs",
+        "cohn-navigation"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "panel_count": 4,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p4",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "group",
+            "axis": "vertical",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p1"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              }
+            ]
+          },
+          {
+            "kind": "group",
+            "axis": "vertical",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p3"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p4"
+              }
+            ]
+          }
+        ]
+      },
+      "reading_strategy": "Read down the left pair, then down the right pair; the wider central gutter keeps the two tracks grouped.",
+      "best_for": [
+        "two simultaneous two-step actions",
+        "before-and-after comparison across two subjects",
+        "parallel spaces"
+      ],
+      "avoid_when": [
+        "dialogue depends on alternating row order",
+        "the two tracks are not genuinely parallel"
+      ],
+      "risk": "Medium risk: a conventional 2x2 Z path competes with track-wise grouping, so critical dialogue order should be avoided.",
+      "feature_profile": {
+        "temporal_relation": [
+          "simultaneous",
+          "contrast",
+          "sequence"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "vertical",
+          "mixed",
+          "still"
+        ],
+        "intensity": [
+          "quiet",
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "subject_to_subject",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "shared_background",
+        "cross_cutting",
+        "open_frame"
+      ],
+      "panels": [
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 472,
+            "height": 480
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 512,
+            "width": 472,
+            "height": 496
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 536,
+            "y": 16,
+            "width": 472,
+            "height": 480
+          },
+          "polygon": []
+        },
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 536,
+            "y": 512,
+            "width": 472,
+            "height": 496
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "single_focus",
+      "variant": "dominant_with_inset",
+      "template_id": "inset-dominant-2-v1",
+      "name": "Dominant field with detail inset",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-navigation",
+        "cohn-visual-narrative-architecture"
+      ],
+      "evidence_level": "narrative_theory",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "panel_count": 2,
+      "reading_path": [
+        "p1",
+        "p2"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p2",
+      "dominant_index": 0,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "non_slicing",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          }
+        ]
+      },
+      "reading_strategy": "Read the dominant spatial field first, then its contained upper-right detail.",
+      "best_for": [
+        "one scene plus a decisive eye, hand, clue, or object detail",
+        "point-of-view refinement"
+      ],
+      "avoid_when": [
+        "strict chronological order is critical",
+        "the inset repeats the parent image",
+        "the detail obscures a face or route"
+      ],
+      "risk": "High ambiguity: dominant-before-inset preference is not universal, so the detail must refine rather than reverse the meaning.",
+      "feature_profile": {
+        "temporal_relation": [
+          "single_moment",
+          "sequence"
+        ],
+        "emphasis_curve": [
+          "dominant_start"
+        ],
+        "motion_vector": [
+          "still",
+          "mixed"
+        ],
+        "intensity": [
+          "quiet",
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space"
+        ],
+        "transition_type": [
+          "aspect_to_aspect",
+          "subject_to_subject"
+        ]
+      },
+      "compatible_devices": [
+        "inset"
+      ],
+      "panels": [
+        {
+          "shape": "rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 992,
+            "height": 992
+          },
+          "polygon": []
+        },
+        {
+          "shape": "inset",
+          "bounds": {
+            "x": 640,
+            "y": 80,
+            "width": 288,
+            "height": 288
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "radial",
+      "variant": "fan_3",
+      "template_id": "fan-3-v1",
+      "name": "Three-way convergent fan",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "comics-devices-geometric",
+        "peeters-decorative-page"
+      ],
+      "evidence_level": "design_heuristic",
+      "capability_status": "qualification_required",
+      "automatic_selection": false,
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": null,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "non_slicing",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Scan three left-to-right fan wedges that converge near a shared lower hub.",
+      "best_for": [
+        "three simultaneous aspects around one locus",
+        "parallel viewpoints",
+        "convergent atmosphere"
+      ],
+      "avoid_when": [
+        "strict causal dialogue",
+        "ordinary linear action",
+        "the shared hub has no semantic role"
+      ],
+      "risk": "High ambiguity: fan geometry is an engineering archetype rather than a validated manga reading-order grammar.",
+      "feature_profile": {
+        "temporal_relation": [
+          "simultaneous",
+          "convergence",
+          "contrast"
+        ],
+        "emphasis_curve": [
+          "equal"
+        ],
+        "motion_vector": [
+          "convergent",
+          "mixed"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "parallel_spaces"
+        ],
+        "transition_type": [
+          "subject_to_subject",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none"
+      ],
+      "panels": [
+        {
+          "shape": "polygon",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 472,
+            "height": 992
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              320,
+              16
+            ],
+            [
+              488,
+              952
+            ],
+            [
+              16,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "polygon",
+          "bounds": {
+            "x": 336,
+            "y": 16,
+            "width": 352,
+            "height": 936
+          },
+          "polygon": [
+            [
+              336,
+              16
+            ],
+            [
+              688,
+              16
+            ],
+            [
+              536,
+              952
+            ],
+            [
+              504,
+              952
+            ]
+          ]
+        },
+        {
+          "shape": "polygon",
+          "bounds": {
+            "x": 552,
+            "y": 16,
+            "width": 456,
+            "height": 992
+          },
+          "polygon": [
+            [
+              704,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              1008
+            ],
+            [
+              552,
+              952
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "family": "span_grid",
+      "variant": "slanted_dominant_bottom_3_p2",
+      "template_id": "slanted-t-bottom-3-p2-v1",
+      "name": "Slanted unequal supports into dominant bottom",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "cohn-ecs",
+        "comics-devices-layout"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "dynamic_only": true,
+      "rendering_directive": "Preserve exactly three regions: p3 is the full-width dominant bottom panel; the 16px upper gutter between p1 and p2 slants down-left; p1 is visibly smaller than p2. Never straighten that upper divider, equalize p1 and p2, subdivide any region, or add a fourth panel.",
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": 2,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "vertical",
+        "children": [
+          {
+            "kind": "group",
+            "axis": "horizontal",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p1"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              }
+            ]
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Read a compact context, expand through the slanted upper action, then land in the full-width lower payoff.",
+      "best_for": [
+        "compact context then a visibly weightier action and dominant payoff",
+        "high-stakes setup action payoff",
+        "cooperative or rescue action whose middle effort deserves more area than its setup"
+      ],
+      "avoid_when": [
+        "the scene is quiet or still",
+        "the two upper support shots have equal semantic weight",
+        "the middle shot is only decorative",
+        "the first beat should dominate"
+      ],
+      "risk": "Medium risk: the unequal slanted supports must express a real s1-to-s2 weight increase rather than decorative motion.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence"
+        ],
+        "emphasis_curve": [
+          "rising"
+        ],
+        "motion_vector": [
+          "diagonal",
+          "mixed"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space"
+        ],
+        "transition_type": [
+          "action_to_action"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "character_crossing",
+        "open_frame",
+        "master_view"
+      ],
+      "panels": [
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 400,
+            "height": 376
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              416,
+              16
+            ],
+            [
+              352,
+              392
+            ],
+            [
+              16,
+              392
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 368,
+            "y": 16,
+            "width": 640,
+            "height": 376
+          },
+          "polygon": [
+            [
+              432,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              392
+            ],
+            [
+              368,
+              392
+            ]
+          ]
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 16,
+            "y": 408,
+            "width": 992,
+            "height": 600
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "blockage",
+      "variant": "slanted_stack_2_then_dominant_ltr_p2",
+      "template_id": "slanted-dominant-rail-3-p2-v1",
+      "name": "Slanted unequal rail into dominant field",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "comics-devices-layout",
+        "cohn-ecs"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "dynamic_only": true,
+      "rendering_directive": "Preserve exactly three regions: p3 is the full-height dominant right panel; the 16px gutter between p1 and p2 in the left rail slants down-right; p1 is visibly shorter than p2. Never straighten that rail divider, equalize p1 and p2, merge any region, or add a fourth panel.",
+      "panel_count": 3,
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p3",
+      "dominant_index": 2,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "group",
+            "axis": "vertical",
+            "children": [
+              {
+                "kind": "leaf",
+                "panel": "p1"
+              },
+              {
+                "kind": "leaf",
+                "panel": "p2"
+              }
+            ]
+          },
+          {
+            "kind": "leaf",
+            "panel": "p3"
+          }
+        ]
+      },
+      "reading_strategy": "Read the short baseline and longer mechanism beat down the slanted left rail, then enter the dominant right result.",
+      "best_for": [
+        "baseline mechanism result",
+        "compact cause then a weightier transformation and held consequence",
+        "small dynamic evidence beats leading into one dominant field"
+      ],
+      "avoid_when": [
+        "the scene is quiet or still",
+        "the rail beats have equal semantic weight",
+        "the dominant right field is decorative",
+        "a normal Z path is required for dialogue"
+      ],
+      "risk": "Medium-high risk: blockage and the slanted rail both redirect reading, so s2 must be meaningfully heavier than s1 and p3 must be the stated payoff.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence"
+        ],
+        "emphasis_curve": [
+          "rising"
+        ],
+        "motion_vector": [
+          "mixed",
+          "vertical"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "subject_to_subject",
+          "aspect_to_aspect"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "open_frame",
+        "master_view"
+      ],
+      "panels": [
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 300,
+            "height": 432
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              316,
+              16
+            ],
+            [
+              316,
+              448
+            ],
+            [
+              16,
+              384
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 16,
+            "y": 400,
+            "width": 300,
+            "height": 608
+          },
+          "polygon": [
+            [
+              16,
+              400
+            ],
+            [
+              316,
+              464
+            ],
+            [
+              316,
+              1008
+            ],
+            [
+              16,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "wide_rectangle",
+          "bounds": {
+            "x": 332,
+            "y": 16,
+            "width": 676,
+            "height": 992
+          },
+          "polygon": []
+        }
+      ]
+    },
+    {
+      "family": "diagonal_sequence",
+      "variant": "diagonal_split_2_end_strong",
+      "template_id": "diagonal-split-2-end-strong-v1",
+      "name": "Strong diagonal setup and dominant payoff",
+      "reading_direction": "left_to_right_top_to_bottom",
+      "source_basis": [
+        "clip-studio-layout-guide",
+        "comics-devices-geometric"
+      ],
+      "evidence_level": "empirical_geometry",
+      "capability_status": "candidate",
+      "automatic_selection": true,
+      "dynamic_only": true,
+      "rendering_directive": "Preserve exactly two regions separated by one 16px diagonal gutter: p1 occupies about one third of the page and p2 occupies about two thirds as the dominant payoff. Never center or straighten the divider, equalize the regions, or add another divider or panel.",
+      "panel_count": 2,
+      "reading_path": [
+        "p1",
+        "p2"
+      ],
+      "entry_panel": "p1",
+      "exit_panel": "p2",
+      "dominant_index": 1,
+      "grouping_tree": {
+        "kind": "group",
+        "axis": "horizontal",
+        "children": [
+          {
+            "kind": "leaf",
+            "panel": "p1"
+          },
+          {
+            "kind": "leaf",
+            "panel": "p2"
+          }
+        ]
+      },
+      "reading_strategy": "Read the compressed setup, then cross one strong diagonal gutter into the broad stated payoff.",
+      "best_for": [
+        "a compressible setup with an explicitly dominant destination or result",
+        "one decisive directional action opening into a much larger payoff",
+        "a causal handoff whose endpoint carries the memory anchor"
+      ],
+      "avoid_when": [
+        "the scene is quiet or still",
+        "setup and payoff have comparable weight",
+        "the premise must remain dominant",
+        "a third evidence view is semantically required"
+      ],
+      "risk": "Medium-high risk: strong area imbalance is useful only when the final result is explicitly more important, and the exact two-region topology must survive rendering.",
+      "feature_profile": {
+        "temporal_relation": [
+          "sequence",
+          "contrast"
+        ],
+        "emphasis_curve": [
+          "dominant_end"
+        ],
+        "motion_vector": [
+          "diagonal",
+          "horizontal"
+        ],
+        "intensity": [
+          "medium",
+          "high"
+        ],
+        "spatial_relation": [
+          "same_space",
+          "changing_space"
+        ],
+        "transition_type": [
+          "action_to_action",
+          "subject_to_subject"
+        ]
+      },
+      "compatible_devices": [
+        "none",
+        "diagonal_release",
+        "master_view"
+      ],
+      "panels": [
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 16,
+            "y": 16,
+            "width": 384,
+            "height": 992
+          },
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              400,
+              16
+            ],
+            [
+              304,
+              1008
+            ],
+            [
+              16,
+              1008
+            ]
+          ]
+        },
+        {
+          "shape": "trapezoid",
+          "bounds": {
+            "x": 320,
+            "y": 16,
+            "width": 688,
+            "height": 992
+          },
+          "polygon": [
+            [
+              416,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              1008
+            ],
+            [
+              320,
+              1008
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

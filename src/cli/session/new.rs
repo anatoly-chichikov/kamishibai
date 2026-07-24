@@ -8,15 +8,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::cli::card_workflow::CardGeneration;
+use crate::application::{CardProduction, WordUnderstanding};
 use crate::cli::console::{self, SensePolicy};
 use crate::cli::error::{usage, usage_hint};
-use crate::cli::live_generator::default_output;
 use crate::config::{PreferenceStore, default_store};
-use crate::runtime::locations::SystemContext;
+use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    CandidateRecord, LanguagePair, RawInputBatch, Understanding, WordCandidate,
-    drafts_from_document,
+    CandidateRecord, LanguagePair, RawInputBatch, WordCandidate, drafts_from_document,
 };
 use crate::vocabulary::VocabularyDocument;
 
@@ -29,14 +27,14 @@ use super::{Render, json, preflight_key, validate_language, view};
 pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
     let out = output_dir(args.out.as_deref())?;
-    let generator = console::generator(out.clone())?;
+    let workflow = console::workflow(out.clone())?;
     let session = match args.build.as_deref() {
-        Some(path) => build_session(&generator, path)?,
+        Some(path) => build_session(&workflow, path)?,
         None => {
             let prefs_store = default_store(&SystemContext)?;
             let known = resolve_known(args.known.as_deref(), &prefs_store)?;
             preflight_key()?;
-            word_session(&generator, args, known.as_str())?
+            word_session(&workflow, args, known.as_str())?
         }
     };
     if session.candidates.is_empty() {
@@ -86,13 +84,17 @@ struct Prepared {
     source: &'static str,
 }
 
-fn word_session(generator: &impl Understanding, args: &NewArgs, known: &str) -> Result<Prepared> {
+fn word_session(
+    workflow: &impl WordUnderstanding,
+    args: &NewArgs,
+    known: &str,
+) -> Result<Prepared> {
     let words = words_lines(args)?;
     let raw = RawInputBatch::new(words.join("\n"));
     if !raw.has_content() {
         return Err(usage("no words to learn: input was empty"));
     }
-    let understood = generator.understand(&raw, known)?;
+    let understood = workflow.understand(&raw, known)?;
     let learning = args
         .learning
         .clone()
@@ -125,7 +127,7 @@ fn initial_selection(candidate: &WordCandidate, senses: SensePolicy) -> WordCand
     }
 }
 
-fn build_session(generator: &impl CardGeneration, path: &Path) -> Result<Prepared> {
+fn build_session(workflow: &impl CardProduction, path: &Path) -> Result<Prepared> {
     let document = read_document(path.to_string_lossy().as_ref())?;
     let (pair, drafts) = drafts_from_document(&document)?;
     let mut candidates = Vec::with_capacity(drafts.len());
@@ -134,7 +136,7 @@ fn build_session(generator: &impl CardGeneration, path: &Path) -> Result<Prepare
         let meta = draft
             .meta()
             .ok_or_else(|| anyhow!("internal: an imported card has no meta"))?;
-        generator.store_card_meta(draft.term(), draft.understanding(), draft.pair(), meta)?;
+        workflow.store_card_meta(draft.term(), draft.understanding(), draft.pair(), meta)?;
         words.push(String::from(draft.term()));
         candidates.push(CandidateRecord::from_candidate(&WordCandidate::new(
             draft.term(),
@@ -189,7 +191,7 @@ fn resolve_known(explicit: Option<&str>, store: &PreferenceStore) -> Result<Stri
 fn output_dir(out: Option<&Path>) -> Result<PathBuf> {
     match out {
         Some(dir) => Ok(dir.to_path_buf()),
-        None => default_output(),
+        None => Locations::new(LocationArgs::default(), SystemContext).output(),
     }
 }
 

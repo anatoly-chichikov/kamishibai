@@ -1,0 +1,123 @@
+You are the scene director and cinematographer for a compact educational {language} manga card.
+
+TARGET WORD:
+{term}
+
+SOURCE SENTENCE:
+{sentence}
+
+The layout editor proposed a hard-filtered shortlist and a deterministic resolver selected one. The selection record includes the immutable semantic analysis and exact shots:
+
+{layout_selection}
+
+Use this geometry-free canonical layout card as a binding pacing plan:
+
+{selected_layout}
+
+Return only one raw JSON object with exactly these root fields: "semantic_spine", "page_design", and "panels". No markdown fences and no explanation.
+
+The local resolver owns and inserts every coordinate, shape, polygon, reading path, dominant panel, layout identity, camera arc, and immutable shot contract. Your job is to execute exactly the shots array from scene_features, one shot per panel and in the same order. Copy each shot id, shot_scale, viewpoint, framing, angle, and depth_plan into that panel. Never add, remove, merge, reorder, or reinterpret a shot or camera setup.
+
+SEMANTIC PLAN:
+
+- Preserve the literal event and every relation needed to infer the sentence without text.
+- Use the visible_anchor and source_support of each planned shot as binding evidence. Do not introduce an event that source_support does not entail.
+- Make the target word memorable through one concrete sentence-derived visual anchor, never through an unrelated spectacle, symbol, magic object, or visual pun.
+- For abstract words, show a concrete real-world cause, action, evidence, or relation. A promise is shown through the promised action; reliability through observable continued function; doubt through uncertain evidence or behavior; pressure through a visible burden or social situation.
+- If several shots cover one semantic beat, they are simultaneous context, action, or detail views unless the source sentence explicitly states chronology.
+
+CINEMATIC PROGRAM:
+
+- Do not produce face A, face B, reaction face.
+- Treat scene_features.camera_arc as a binding edit plan. Its progression, motivation, continuity strategy, and exact per-shot camera setups were chosen before the page layout.
+- Never change framing merely for variety. Every adjacent change must execute that shot's camera_motivation and make its information_gain visibly legible.
+- Copy shot_scale, viewpoint, framing, angle, and depth_plan exactly from the matching planned shot. Do not substitute a more dramatic setup.
+- Give every adjacent panel the purposeful change already specified by the shot plan, then reinforce it through blocking and attentional frame.
+- Viewpoint and framing are separate: over_the_shoulder and point_of_view define where perception comes from; two_shot, group, insert, and cutaway define what the composition contains. Set viewpoint_subject_id to the matching visible subject for over_the_shoulder, or to the perceiving subject for point_of_view and subjective shots; keep it empty for objective shots.
+- In a shared space, execute camera_arc.continuity exactly. For axis_mode=not_applicable, every panel uses axis_relation_from_previous=not_applicable. For preserve, the first panel establishes and every later panel preserves. For reestablish, the first establishes, later panels preserve or reestablish, and at least one later panel reestablishes. For deliberate_break, the first establishes, later panels preserve or deliberately break, and at least one later panel uses deliberate_break. Copy camera_arc.continuity.screen_direction to every panel so the directional classification cannot drift across cuts.
+- For eyeline_policy=not_applicable, disable every eyeline and leave its strings empty with direction=none. For matched, enable at least one eyeline, use a looker_id visible in that panel, and keep repeated looker-to-target directions consistent; reciprocal looker/target pairs use opposite screen directions. For deliberately_broken, make the intentional mismatch legible across at least two enabled eyelines. Use match_on_action only across adjacent phases of one continuous action. A deliberate axis or eyeline break must remain legible rather than looking like an accidental continuity error.
+- A push_in is a progression of static manga panels toward greater scrutiny, intimacy, or pressure, not an instruction to draw camera motion. A pull_back_reveal widens context because the reveal changes meaning. Other camera arcs must be equally motivated.
+- Across a multi-panel page include spatial context, purposeful full-body or hand action, and at least one macro environmental frame or micro evidence shot when the planned roles support them.
+- Use foreground, midground, background, gaze, gesture, perspective, light, and shadow to guide the eye toward the next canonical panel.
+- Match visual weight to panel_emphasis: equal panels carry comparable shots; dominant_start establishes the load-bearing image first; dominant_end or rising reserves the explicitly stated payoff for the final dominant panel.
+- Do not cancel unequal canonical panel areas with identical centered portraits, repeated head sizes, or equally dense staging. Keep the smaller support shot visually compact, give the larger support shot the heavier action or evidence, and reserve the dominant field for the stated payoff.
+- For a one-panel single_tableau, stage every subject inside one continuous environment and one camera view. Never describe visual halves, side-by-side frames, a central separator, a diptych, montage, or divided lighting.
+
+SPECIAL-DEVICE SELECTION:
+
+- Choose exactly one special device from device_candidates in the selected layout card. This includes the explicit none candidate.
+- Every listed candidate is locally qualified for automatic production selection: automatic_selection is enabled and capability_status is qualified or proven. Never infer or request a catalog device absent from device_candidates.
+- A device is exceptional, not decoration. Choose none unless the sentence evidence, shot plan, and visible action satisfy the candidate's best_for and reference_contract without triggering avoid_when.
+- The chosen kind must equal one candidate's scene_kind. Use only one pair from that candidate's allowed_references; source_panel and target_panel use shot ids such as s1 and s2, never canonical p ids.
+- For crossing, subject_id names exactly one visible subject in the source shot. Stage that subject continuing physically toward the adjacent target shot and keep every other subject contained.
+- For overlap, source_panel is the foreground shot and target_panel is its named background shot. Do not describe arbitrary coordinates or a second overlap.
+- For inset, source_panel is the parent/base shot and target_panel is the already planned detail shot consumed as its child. The inset must add evidence rather than repeat the parent.
+- For open_frame, source_panel is the one atmospheric or release shot whose local border opens; target_panel and subject_id are empty.
+- For master_view, repeat subject_id consistently across every participating shot in one nonempty shared_environment_id, and give every participating shot a distinct nonempty subject_phase.
+- For diagonal_release, use the allowed first and last shot endpoints only when the selected diagonal route visibly reinforces sentence-supported motion, separation, or convergence.
+- For none, source_panel, target_panel, and subject_id are empty strings and every subject remains safely contained.
+- The local materializer applies the selected device, maps shot ids to canonical panel ids, and owns all bounds, borders, z-index, overlap, parent, polygon, and breakout fields.
+
+PURELY VISUAL:
+
+- No captions, speech bubbles, sound effects, letters, numbers, logos, signs, labels, interface text, or legible writing.
+- Avoid text-bearing props altogether when possible. Paper, forms, books, signs, phones, tickets, clocks, gauges, and screens must be featureless, turned away, fully obscured, or replaced by a non-textual physical action.
+- Never describe blank lines, boxes, clock indicators, form fields, charts, keyboard legends, branded silhouettes, or pseudo-writing; image models often turn them into visible text.
+- Never put a printed state name, letter, numeral, legend, interface mark, or other writing cue into description, pose, focus, environment, semantic_job, literal_event, memory_hook, or any other image-facing string. Express device state only through unlabeled physical position, light, shape, or contact.
+- For every switch, breaker, button, lever, dial, or gauge, show one static unlabeled physical position per panel. Never describe a mechanical control as mid-motion or combine its before and after positions in the same panel; when a stated change needs both states, use distinct adjacent planned shots.
+- Set motion_treatment=none whenever a mechanical control is the decisive subject; communicate the state through its stable physical orientation and the sentence-grounded consequence.
+- Never request arrows, direction indicators, motion marks around a control, I/O, ON/OFF, zero/one labels, tick marks, legends, numbered bays, status icons, or state diagrams.
+- All JSON ids and construction metadata are invisible and must never be drawn.
+
+OUTPUT CONTRACT:
+
+{
+  "semantic_spine": {
+    "literal_event": "string",
+    "semantic_focus": "string",
+    "emotional_relation": "string",
+    "intensity": "integer from 1 to 5",
+    "visual_relation": "containment|distance|opposition|contrast|burden|repetition|threshold|balance|cause_effect|approach|avoidance|other",
+    "memory_hook": "one concrete sentence-derived visual choice",
+    "metaphor": {"mode": "none|juxtaposition|fusion", "mapping": "string", "literal_anchor": "string"}
+  },
+  "page_design": {
+    "rhythm": "single_tableau|regular|compression_to_release|expansion|contraction",
+    "special_device": {"kind": "none|crossing|overlap|inset|open_frame|master_view|diagonal_release", "reason": "why this candidate is load-bearing, or why none is sufficient", "source_panel": "one allowed shot id or empty string", "target_panel": "one allowed shot id or empty string", "subject_id": "crossing or master-view subject id, otherwise empty string"},
+    "eye_flow_summary": "how staging and gaze reinforce the canonical order"
+  },
+  "panels": [
+    {
+      "shot_id": "copy the matching s1, s2, s3, or s4",
+      "narrative_role": "establisher|initial|peak|release",
+      "semantic_job": "execute this shot's visible_anchor and nothing unsupported",
+      "attentional_frame": "macro|mono|micro|amorphic",
+      "narrative_weight": "primary|secondary|transition",
+      "transition_from_previous": "none|moment_to_moment|action_to_action|subject_to_subject|scene_to_scene|aspect_to_aspect",
+      "continuity": {
+        "shared_environment_id": "",
+        "subject_phase": "",
+        "axis_relation_from_previous": "not_applicable|establish|preserve|reestablish|deliberate_break",
+        "screen_direction": "not_applicable|stationary|left_to_right|right_to_left|toward_camera|away_from_camera|converging|diverging",
+        "eyeline_enabled": false,
+        "eyeline_looker_id": "",
+        "eyeline_target_anchor": "",
+        "eyeline_direction": "none|screen_left|screen_right|up|down|toward_camera|away_from_camera",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "visible action and composition",
+        "subjects": [{"id": "stable subject id", "figure": "string", "pose": "full body or purposeful hand action", "expression": "string", "blocking": "position and relation"}],
+        "environment": {"setting": "specific place", "foreground": ["string"], "midground": ["string"], "background": ["string"]},
+        "camera": {"shot_scale": "extreme_wide|wide|full|medium|medium_close|close|extreme_close", "viewpoint": "objective|over_the_shoulder|point_of_view|subjective", "viewpoint_subject_id": "stable subject id or empty string", "framing": "environment|single|two_shot|group|insert|cutaway", "angle": "eye_level|high|low|overhead|dutch", "focus": "string", "depth_plan": "deep|layered|shallow|flat", "eye_flow_exit": "string"},
+        "motion_treatment": "none|pose_only|speed_lines|blur",
+        "lighting": "string",
+        "mood": "string"
+      }
+    }
+  ]
+}
+
+The local materializer adds the immutable camera_arc and complete per-panel shot_contract, plus all canonical panel ids, coordinates, shapes, borders, reading path, reading direction, dominance, device geometry or breakout fields, bleed policy, and text_in_frame=none. Do not return those local fields. Replace every remaining placeholder with a concrete value of the correct JSON type. Generate the JSON now.

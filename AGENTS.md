@@ -68,25 +68,31 @@ The runtime is split into a few focused modules:
 - `src/vocabulary`: validates the strict JSON document and exposes canonical entry types
 - `src/languages`: keeps language profiles, naming, labels, and report font preferences
 - `src/runtime`: resolves paths and renders progress and diagnosis output
-- `src/gemini`: talks to Gemini through the frozen direct REST contract
-- `src/generation`: writes cached WAV audio, composes scenes, routes OCR, validates manga output, and orchestrates the fixed Gemini production pipeline
+- `src/application`: owns the UI-neutral ports for understanding, card production, study publishing, key validation, and cost attribution; `CardWorkflow` composes only the learner workflow (understand → produce → publish), while credential validation remains an independent delivery dependency
+- `src/gemini`: owns the frozen direct REST contract plus the credential-access and cached-understanding adapters
+- `src/generation/card_production`: implements metadata, sound, and visual production as focused Gemini adapters; its accounting, durable picture-request budget, scene-attempt cursor, and recovery policy remain independent of CLI sessions
+- `src/generation`: writes cached WAV audio, composes scenes, routes OCR, and validates manga output below the card-production adapter
+- `src/publishing`: publishes the completed subset as one Anki deck plus printable PDF while holding visual leases in stable order
 - `src/anki`: defines the language-neutral Anki note model and APKG writer
 - `src/report`: builds the PDF report with layout, thumbnails, and font resolution
 - `src/cli.rs`: parses arguments (clap, including the global `--json` flag) and routes to the interactive TUI or a `session` subcommand
-- `src/cli/console.rs`: generation primitives shared by the session worker — the `produce` engine loop (meta → sound → scene → picture, then publish) and the `Reporter` port (human / quiet / JSON events on stderr)
+- `src/cli/wiring.rs`: the sole composition root for interactive, console, and cost-attributed session variants of the Gemini-backed `CardWorkflow`; maintenance commands may address low-level cache invalidation directly but cannot compose workflow adapters
+- `src/cli/console.rs`: drives the application workflow through the shared `produce` engine loop (meta → sound → scene → picture, then publish) and reports through the human / quiet / JSON `Reporter` port
 - `src/cli/session`: the console (API) layer — `store` (the `session.json` record + serialized atomic `create`/`update` IO), `worker` (the managed background worker + the `__run` entrypoint, ownership-guarded writes), `liveness` (the two flocks + pid kill via rustix), `view` (the cache-derived status projection both renders share), `json` (the `Serialize` DTOs + the one emit seam), and one handler module per concern (`new`, `curate`, `generate`, `result`, `maintenance`) routed by `mod.rs`. This layer never links the TUI (`tests/separation.rs` enforces it): `open` hands the checked record to the `SessionOpener` port
 - `src/cli/bridge.rs`: the TUI side of the session contract — projects between the live `App` and the persisted record, owns the `TuiSession` the shell claims and writes, and implements `SessionOpener` over `run_tui`
+
+Within the card-workflow boundary, direct dependencies point inward: CLI delivery → concrete Gemini / production / publishing adapters → application ports and session domain values. `tests/separation.rs` rejects reverse imports and prevents workflow adapters from being composed outside `src/cli/wiring.rs`; legacy cache-backed session types are outside this narrower claim.
 
 ## Cache layout
 
 The cache (printed by `kamishibai cache-path`) groups one folder per card, keyed by a content hash of the card identity:
 
-- `cards/<known>-<learning>/<key>/` holds `meta.json`, `scene.json`, `audio.wav`, and `picture.jpg` for one card
+- `cards/<known>-<learning>/<key>/` holds `meta.json` and `audio.wav`; `visual/<revision>/` beneath it holds `scene.json` and `picture.jpg` for one visual-policy revision
 - `understanding/<known>-<learning>/<key>.json` holds the understanding-pass result
 - `sessions/<id>/` holds `session.json` (identity, phase, words, curated candidates, committed plan, worker pid, result) and `worker.log`
 - `ocr-models/` holds the shared OCR model files
 
-`CardCell` (`src/session/vault.rs`) owns this layout; deleting a card's folder forces just that card to regenerate. Anki media names are decoupled from disk filenames in `src/anki/deck.rs` so per-card role-named files stay unique inside the `.apkg`.
+`CardCell` (`src/session/vault.rs`) owns this layout; deleting a card's folder forces just that card to regenerate. Visual revisions hash the production feature and scene-composer prompts, the composer schema, both layout/device registries, and the manga template together with the manual `LAYOUT_POLICY_VERSION`, so concurrent application versions never overwrite one another. Bump that version whenever a scene model/configuration, local scene specialization/validation rule, or renderer acceptance policy changes without changing an embedded asset. Anki media names are decoupled from disk filenames in `src/anki/deck.rs` so per-card role-named files stay unique inside the `.apkg`.
 
 ## Language Profiles
 

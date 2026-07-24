@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use image::DynamicImage;
 use image::codecs::jpeg::JpegEncoder;
 use serde_json::Value;
@@ -113,6 +113,80 @@ where
         Ok((ILLUSTRATION_FILE.to_string(), false))
     }
 
+    /// Recompose the scene and render a missing picture without exposing a rejected scene.
+    ///
+    /// A cached picture remains authoritative. When the picture is absent, the replacement
+    /// scene is rendered in memory before either accepted artifact replaces the cache.
+    pub fn picture_with_recomposed_scene(
+        &self,
+        sentence: &str,
+        target: &str,
+        progress: &mut dyn Progress,
+    ) -> Result<(String, bool)> {
+        let imagepath = self.cache.filepath(ILLUSTRATION_FILE)?;
+        if self.cache.exists(ILLUSTRATION_FILE) {
+            progress.done("Rendering manga", "cached", Some(imagepath.as_path()));
+            return Ok((ILLUSTRATION_FILE.to_string(), true));
+        }
+        let scenepath = self.cache.filepath(SCENE_FILE)?;
+        progress.step("Composing scene");
+        let scene = self.translator.translate(sentence, target)?;
+        progress.step("Rendering manga");
+        let image = self.renderer.render(&scene, progress)?;
+        let staged_scene = self.cache.stage(".json")?;
+        let staged_image = match self.cache.stage(".jpg") {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = fs::remove_file(&staged_scene);
+                return Err(error);
+            }
+        };
+        let previous_scene = if self.cache.exists(SCENE_FILE) {
+            let path = match self.cache.stage(".previous.json") {
+                Ok(path) => path,
+                Err(error) => {
+                    let _ = fs::remove_file(&staged_scene);
+                    let _ = fs::remove_file(&staged_image);
+                    return Err(error);
+                }
+            };
+            if let Err(error) = fs::copy(&scenepath, &path) {
+                let _ = fs::remove_file(&staged_scene);
+                let _ = fs::remove_file(&staged_image);
+                let _ = fs::remove_file(&path);
+                return Err(error.into());
+            }
+            Some(path)
+        } else {
+            None
+        };
+        let result =
+            write_scene(&staged_scene, &scene).and_then(|_| write_image(&staged_image, &image));
+        if let Err(error) = result {
+            let _ = fs::remove_file(&staged_scene);
+            let _ = fs::remove_file(&staged_image);
+            remove_optional(previous_scene.as_deref());
+            return Err(error);
+        }
+        if let Err(error) = self.cache.commit(&staged_scene, SCENE_FILE) {
+            let _ = fs::remove_file(&staged_scene);
+            let _ = fs::remove_file(&staged_image);
+            remove_optional(previous_scene.as_deref());
+            return Err(error);
+        }
+        if let Err(error) = self.cache.commit(&staged_image, ILLUSTRATION_FILE) {
+            let _ = fs::remove_file(&staged_image);
+            restore_scene(&scenepath, previous_scene.as_deref()).with_context(|| {
+                format!("scene rollback failed after picture commit failed: {error:#}")
+            })?;
+            return Err(error);
+        }
+        remove_optional(previous_scene.as_deref());
+        progress.done("Composing scene", "translated", Some(scenepath.as_path()));
+        progress.done("Rendering manga", "rendered", Some(imagepath.as_path()));
+        Ok((ILLUSTRATION_FILE.to_string(), false))
+    }
+
     fn cached_scene(&self, progress: &mut dyn Progress) -> Result<()> {
         if self.cache.exists(SCENE_FILE) {
             let path = self.cache.filepath(SCENE_FILE)?;
@@ -163,4 +237,21 @@ fn write_image(path: &Path, image: &DynamicImage) -> Result<()> {
     let mut encoder = JpegEncoder::new_with_quality(writer, 60);
     encoder.encode_image(image)?;
     Ok(())
+}
+
+fn restore_scene(scene: &Path, previous: Option<&Path>) -> Result<()> {
+    match previous {
+        Some(previous) => {
+            fs::remove_file(scene)?;
+            fs::rename(previous, scene)?;
+        }
+        None => fs::remove_file(scene)?,
+    }
+    Ok(())
+}
+
+fn remove_optional(path: Option<&Path>) {
+    if let Some(path) = path {
+        let _ = fs::remove_file(path);
+    }
 }

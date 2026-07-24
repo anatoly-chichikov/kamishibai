@@ -1,0 +1,794 @@
+{
+  "manga_panel": {
+    "art_style": {
+      "composition": {
+        "cinematic_framing": true,
+        "dynamic_perspective": true,
+        "emotional_closeups": true,
+        "motion_rendering": "Use only abstract speed lines and blur; never render letters, numbers, symbols, onomatopoeia, or letterlike motion marks.",
+        "scale_juxtaposition": true
+      },
+      "contrast": {
+        "distribution": "calculated",
+        "focal_emphasis": true,
+        "range": "extreme",
+        "value_separation": true
+      },
+      "detail": {
+        "anatomical_precision": "high",
+        "background_detail_level": "full",
+        "density": "extreme",
+        "environmental_precision": "high",
+        "texture_differentiation": true
+      },
+      "line_work": {
+        "contour_emphasis": true,
+        "organic_stroke": "fine_pointed",
+        "outline_weight": "variable",
+        "stroke_confidence": "high",
+        "structural_stroke": "chiseled",
+        "weight_range": "wide"
+      },
+      "medium": {
+        "base": "indian_ink",
+        "color_mode": "monochrome_with_screentone",
+        "surface": "high_density_smooth"
+      },
+      "screen_tone": {
+        "dot_pattern": "fine",
+        "enabled": true,
+        "usage": [
+          "skin",
+          "fabric",
+          "atmosphere",
+          "gradients",
+          "metallic_surfaces"
+        ]
+      },
+      "shading": {
+        "black_fill_zones": true,
+        "gradient_method": "hatching_density_variation",
+        "hatching_density": "high",
+        "hatching_directionality": "form_following",
+        "primary_method": "crosshatching",
+        "secondary_method": "screen_tone",
+        "white_on_black_highlights": true
+      }
+    },
+    "canvas": {
+      "format": "square",
+      "height": 1024,
+      "outer_margin": 16,
+      "reading_direction": "left_to_right_top_to_bottom",
+      "width": 1024
+    },
+    "constraints": {
+      "continuity_errors": "forbidden_unless_camera_arc_explicitly_motivates_a_break",
+      "genre_lock": false,
+      "layout_lock": true,
+      "literal_anchor_required": true,
+      "maximum_panels": 3,
+      "panel_count_lock": true,
+      "shot_contract_lock": true,
+      "style_lock": true,
+      "text_rendering": "forbidden",
+      "unmotivated_camera_change": "forbidden",
+      "unmotivated_geometry": "forbidden",
+      "visible_writing": "No visible writing of any kind, including letterlike marks near moving people, vehicles, machinery, impacts, or reactions."
+    },
+    "meta": {
+      "description": "De politie moest de dief door de smalle straten achtervolgen.",
+      "layout_selection": {
+        "chosen_template_id": "slanted-t-bottom-3-p2-v1",
+        "deterministic_slot": 0,
+        "device_candidates": [
+          {
+            "allowed_references": [
+              {
+                "source_panel": "",
+                "target_panel": ""
+              }
+            ],
+            "avoid_when": [
+              "one supported device is necessary to make a visible sentence relation readable"
+            ],
+            "best_for": [
+              "the selected canonical topology and cinematic shots already carry the complete sentence"
+            ],
+            "capability_status": "qualified",
+            "deterministic_materialization": "Preserve canonical geometry and contained subjects without specialization",
+            "device_id": "none",
+            "reference_contract": "source_panel, target_panel, and subject_id are empty strings",
+            "scene_kind": "none",
+            "strength": "light"
+          },
+          {
+            "allowed_references": [
+              {
+                "source_panel": "s2",
+                "target_panel": "s3"
+              }
+            ],
+            "avoid_when": [
+              "the subject is static",
+              "the source and destination shots are not adjacent",
+              "more than one subject would cross"
+            ],
+            "best_for": [
+              "one visible subject physically continues into the next adjacent shot",
+              "a sentence-supported handoff, chase, fall, or reach crosses one gutter"
+            ],
+            "capability_status": "proven",
+            "deterministic_materialization": "Enable exactly one breakout from the canonical source panel toward the canonical destination panel without moving either panel",
+            "device_id": "character_crossing",
+            "reference_contract": "source_panel and target_panel are adjacent shot ids; subject_id exists in the source shot",
+            "scene_kind": "crossing",
+            "strength": "strong"
+          },
+          {
+            "allowed_references": [
+              {
+                "source_panel": "s1",
+                "target_panel": ""
+              },
+              {
+                "source_panel": "s2",
+                "target_panel": ""
+              },
+              {
+                "source_panel": "s3",
+                "target_panel": ""
+              }
+            ],
+            "avoid_when": [
+              "time boundaries must remain strict",
+              "removing a border would merge unrelated beats",
+              "the selected topology is already a diagonal strip"
+            ],
+            "best_for": [
+              "memory, atmosphere, scale, emotional release, or a view dissolving into its environment"
+            ],
+            "capability_status": "qualification_required",
+            "deterministic_materialization": "Change exactly one canonical panel to open_frame with border none without changing its clip bounds",
+            "device_id": "open_frame",
+            "reference_contract": "source_panel is the one borderless shot id; target_panel and subject_id are empty",
+            "scene_kind": "open_frame",
+            "strength": "light"
+          },
+          {
+            "allowed_references": [
+              {
+                "source_panel": "s1",
+                "target_panel": "s3"
+              }
+            ],
+            "avoid_when": [
+              "locations are independent",
+              "physical movement is absent",
+              "the same environment and subject cannot remain visually stable"
+            ],
+            "best_for": [
+              "one subject performs ordered visible phases through one continuous place",
+              "the physical route itself teaches the target meaning"
+            ],
+            "capability_status": "qualification_required",
+            "deterministic_materialization": "Map the declared endpoint shot ids to canonical panels and preserve the model-authored shared environment and phase contract",
+            "device_id": "master_view",
+            "reference_contract": "source_panel and target_panel are distinct participating shot ids; subject_id occurs in every panel sharing their nonempty environment id with distinct subject phases",
+            "scene_kind": "master_view",
+            "strength": "strong"
+          }
+        ],
+        "eligible_template_ids": [
+          "diagonal-strip-3-v1",
+          "dominant-rail-3-v1",
+          "t-bottom-3-v1",
+          "slanted-t-bottom-3-p2-v1",
+          "slanted-dominant-rail-3-p2-v1"
+        ],
+        "ranked_candidates": [
+          {
+            "adaptation": "exact",
+            "reason": "Perfect match for a high-intensity chase sequence with diagonal motion and a rising emphasis. The layout cleanly structures the cinematic hierarchy: a compact wide establishing shot (s1) and a heavier, close-up physical action shot (s2) sit on the slanted top row, leading down to the dominant, full-width payoff shot (s3) at the bottom.",
+            "template_id": "slanted-t-bottom-3-p2-v1"
+          },
+          {
+            "adaptation": "exact",
+            "reason": "An excellent alternative for continuous, high-stakes kinetic energy. The parallel diagonal gutters provide a strong sense of physical acceleration and directional flight, matching the diagonal motion vector of the police chase.",
+            "template_id": "diagonal-strip-3-v1"
+          },
+          {
+            "adaptation": "exact",
+            "reason": "A highly reliable, stable counterpart to the slanted T-bottom. It preserves the exact same sequential hierarchy (s1 and s2 leading down to the dominant payoff s3) but uses quiet, orthogonal boundaries instead of dynamic slants, serving as a solid conservative choice.",
+            "template_id": "t-bottom-3-v1"
+          }
+        ],
+        "scene_features": {
+          "camera_arc": {
+            "continuity": {
+              "axis": "line of flight down the alley",
+              "axis_mode": "preserve",
+              "eyeline_policy": "matched",
+              "screen_direction": "left_to_right"
+            },
+            "motivation": "Establish the fleeing target first in the narrow environment, zoom in to capture the pursuer's physical strain, then frame them together in a deep-focus OTS shot to clarify the chase dynamic.",
+            "progression": "wide objective to medium_close objective to full over_the_shoulder",
+            "strategy": "motivated_mixed"
+          },
+          "coverage_audit": [
+            {
+              "added_view": "A single wide shot showing the police chasing the thief down a narrow street.",
+              "panel_count": 1,
+              "reason": "A single shot cannot capture both the individual desperate motion of the thief and the straining pursuit of the police within the claustrophobic constraints of the narrow streets without losing clarity and narrative tension.",
+              "source_support": "De politie moest de dief door de smalle straten achtervolgen.",
+              "verdict": "insufficient"
+            },
+            {
+              "added_view": "Two shots: the thief running, followed by a separate shot of the police officers chasing.",
+              "panel_count": 2,
+              "reason": "This pairs the actors but fails to emphasize the specific physical obstacle of the tight, narrow streets ('smalle straten') which forces and complicates the pursuit ('moest... achtervolgen').",
+              "source_support": "De politie moest de dief... achtervolgen.",
+              "verdict": "insufficient"
+            },
+            {
+              "added_view": "Three shots: (1) Thief fleeing down a narrow alleyway, (2) Police in close pursuit showing intense physical effort, and (3) A deep-focus over-the-shoulder shot showing the direct chase alignment down the tight street corridor.",
+              "panel_count": 3,
+              "reason": "This is the richest possible decomposition of the single chase event. It establishes the target in the constrained setting, focuses on the pursuers' active effort, and resolves into the explicit 'achtervolgen' spatial relationship in a single continuous sequence without inventing any new events.",
+              "source_support": "De politie moest de dief door de smalle straten achtervolgen.",
+              "verdict": "selected"
+            },
+            {
+              "added_view": "A close-up detail shot of a police badge or a generic street sign on the brick wall.",
+              "panel_count": 4,
+              "reason": "Adding a fourth shot would introduce non-essential, decorative elements that do not further clarify the action of chasing ('achtervolgen') or the setting of narrow streets ('smalle straten'), violating the rule against inventing unsupported narrative details.",
+              "source_support": "None. The sentence has no support for specific accessory details like badges or signs.",
+              "verdict": "redundant_or_unsupported"
+            }
+          ],
+          "decomposition_mode": "action_phases",
+          "intensity": "high",
+          "literal_anchor": "police chasing thief through narrow streets",
+          "motion_vector": "diagonal",
+          "panel_count": 3,
+          "panel_emphasis": "rising",
+          "panel_relation": "sequence",
+          "reading_direction": "left_to_right_top_to_bottom",
+          "selection_logic": "This shot plan breaks down the single continuous action of the chase into three distinct phases to capture the full narrative weight of the Dutch sentence. By dedicating s1 to the thief and the narrow street context, s2 to the physical effort of the police, and s3 to the chase alignment, we preserve the literal truth of the sentence without inventing any new events. A fourth shot is rejected as redundant because all narrative elements—the pursuer, the target, the action, and the physical obstacle—are fully and legibly covered by these three shots.",
+          "semantic_beat_count": 1,
+          "semantic_relation": "single_moment",
+          "shots": [
+            {
+              "angle": "high",
+              "camera_motivation": "Establish the claustrophobic setting of the narrow streets and identify the target of the chase.",
+              "depth_plan": "deep",
+              "framing": "environment",
+              "id": "s1",
+              "information_gain": "Shows the tight stone walls of the street with the thief running ahead.",
+              "role": "establishing",
+              "semantic_beat_index": 1,
+              "shot_scale": "wide",
+              "source_support": "de dief door de smalle straten",
+              "transition_trigger": "scene_open",
+              "viewpoint": "objective",
+              "viewpoint_anchor": "",
+              "visible_anchor": "the thief sprinting down a narrow cobblestone alley"
+            },
+            {
+              "angle": "eye_level",
+              "camera_motivation": "Highlight the active physical strain and urgency of the police during the pursuit.",
+              "depth_plan": "shallow",
+              "framing": "group",
+              "id": "s2",
+              "information_gain": "Shows the determination and effort on the police officers' faces as they run.",
+              "role": "action",
+              "semantic_beat_index": 1,
+              "shot_scale": "medium_close",
+              "source_support": "De politie moest... achtervolgen",
+              "transition_trigger": "attention_shift",
+              "viewpoint": "objective",
+              "viewpoint_anchor": "",
+              "visible_anchor": "police officers sprinting in hot pursuit"
+            },
+            {
+              "angle": "eye_level",
+              "camera_motivation": "Frame the direct chase relationship between the police and the thief within the narrow corridor.",
+              "depth_plan": "layered",
+              "framing": "group",
+              "id": "s3",
+              "information_gain": "Synthesizes the positions of both parties, making the actual 'achtervolgen' dynamic visible in one shot.",
+              "role": "payoff",
+              "semantic_beat_index": 1,
+              "shot_scale": "full",
+              "source_support": "moest de dief door de smalle straten achtervolgen",
+              "transition_trigger": "payoff",
+              "viewpoint": "over_the_shoulder",
+              "viewpoint_anchor": "police officers",
+              "visible_anchor": "police officers chasing the thief down the narrow street"
+            }
+          ],
+          "spatial_relation": "same_space",
+          "transition_type": "action_to_action"
+        },
+        "seed_source": "achtervolgen"
+      },
+      "spec_version": "2.0.0",
+      "tags": [
+        "narrative_layout",
+        "cinematic_staging"
+      ],
+      "target_lang": "nl",
+      "title": "De politie moest de dief door de smalle straten achtervolgen"
+    },
+    "page_design": {
+      "archetype": "slanted-t-bottom-3-p2-v1",
+      "camera_arc": {
+        "continuity": {
+          "axis": "line of flight down the alley",
+          "axis_mode": "preserve",
+          "eyeline_policy": "matched",
+          "screen_direction": "left_to_right"
+        },
+        "motivation": "Establish the fleeing target first in the narrow environment, zoom in to capture the pursuer's physical strain, then frame them together in a deep-focus OTS shot to clarify the chase dynamic.",
+        "progression": "wide objective to medium_close objective to full over_the_shoulder",
+        "strategy": "motivated_mixed"
+      },
+      "dominant_panel": "p3",
+      "eye_flow_summary": "We follow the thief sprinting left-to-right in s1, then shift attention to the pursuing police officers charging left-to-right in s2, with the lead officer breaking the frame to guide the eye down into s3 where both thief and police align in a deep alleyway perspective.",
+      "layout": {
+        "family": "span_grid",
+        "reading_strategy": "Read a compact context, expand through the slanted upper action, then land in the full-width lower payoff.",
+        "reason": "Perfect match for a high-intensity chase sequence with diagonal motion and a rising emphasis. The layout cleanly structures the cinematic hierarchy: a compact wide establishing shot (s1) and a heavier, close-up physical action shot (s2) sit on the slanted top row, leading down to the dominant, full-width payoff shot (s3) at the bottom.",
+        "template_id": "slanted-t-bottom-3-p2-v1",
+        "trigger": "This shot plan breaks down the single continuous action of the chase into three distinct phases to capture the full narrative weight of the Dutch sentence. By dedicating s1 to the thief and the narrow street context, s2 to the physical effort of the police, and s3 to the chase alignment, we preserve the literal truth of the sentence without inventing any new events. A fourth shot is rejected as redundant because all narrative elements—the pursuer, the target, the action, and the physical obstacle—are fully and legibly covered by these three shots."
+      },
+      "layout_rendering_directive": "Render exactly 3 visible semantic panel regions using the locally materialized geometry for template slanted-t-bottom-3-p2-v1. Preserve exactly three regions: p3 is the full-width dominant bottom panel; the 16px upper gutter between p1 and p2 slants down-left; p1 is visibly smaller than p2. Never straighten that upper divider, equalize p1 and p2, subdivide any region, or add a fourth panel. Render exactly the one declared subject crossing from its source panel into its adjacent destination while every other subject and gutter remains contained. Never subdivide, duplicate, merge, or add a semantic panel. Add no invented dividers, coordinates, labels, or construction marks.",
+      "reading_path": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "rhythm": "expansion",
+      "special_device": {
+        "kind": "crossing",
+        "reason": "The leading police officer crosses the gutter from the medium action shot s2 into the dominant payoff shot s3, visually driving the physical momentum of the chase across the layout",
+        "source_panel": "p2",
+        "subject_id": "police_officer_1",
+        "target_panel": "p3"
+      }
+    },
+    "panel_layout": {
+      "active_layout": {
+        "family": "span_grid",
+        "reading_strategy": "Read a compact context, expand through the slanted upper action, then land in the full-width lower payoff.",
+        "reason": "Perfect match for a high-intensity chase sequence with diagonal motion and a rising emphasis. The layout cleanly structures the cinematic hierarchy: a compact wide establishing shot (s1) and a heavier, close-up physical action shot (s2) sit on the slanted top row, leading down to the dominant, full-width payoff shot (s3) at the bottom.",
+        "template_id": "slanted-t-bottom-3-p2-v1",
+        "trigger": "This shot plan breaks down the single continuous action of the chase into three distinct phases to capture the full narrative weight of the Dutch sentence. By dedicating s1 to the thief and the narrow street context, s2 to the physical effort of the police, and s3 to the chase alignment, we preserve the literal truth of the sentence without inventing any new events. A fourth shot is rejected as redundant because all narrative elements—the pursuer, the target, the action, and the physical obstacle—are fully and legibly covered by these three shots."
+      },
+      "active_permissions": {
+        "crossing": true,
+        "diagonal_release": false,
+        "inset": false,
+        "master_view": false,
+        "open_frame": false,
+        "overlap": false
+      },
+      "allow_page_bleed": false,
+      "border_style": "follow_page_design_and_panel_frames",
+      "border_weight": 2,
+      "conditional_permissions": {
+        "crossing": "only crossing may enable one breakout into one adjacent destination panel",
+        "diagonal_release": "only diagonal_release may use either one trapezoid or one complementary pair of trapezoids forming a shared diagonal gutter",
+        "inset": "only inset may use parent_panel and z_index above its parent",
+        "master_view": "only master_view may repeat one subject across panels sharing one environment id",
+        "open_frame": "only open_frame may set one panel border to none",
+        "overlap": "only overlap may name overlaps_panel"
+      },
+      "default_frame": "rectangle_with_solid_border",
+      "default_overlap": false,
+      "gutter_width": "8_to_16px",
+      "outer_margin": 16,
+      "permissions_from": "page_design.special_device.kind",
+      "preserve_reading_path": true,
+      "special_device_budget": 1
+    },
+    "panels": [
+      {
+        "attentional_frame": "macro",
+        "bleed": false,
+        "bounds": {
+          "height": 376,
+          "width": 400,
+          "x": 16,
+          "y": 16
+        },
+        "continuity": {
+          "axis_relation_from_previous": "establish",
+          "breakout": {
+            "destination_panel": "",
+            "edge": "empty",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "eyeline": {
+            "direction": "screen_right",
+            "enabled": true,
+            "looker_id": "thief",
+            "target_anchor": "alley_exit"
+          },
+          "match_on_action": {
+            "action": "",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "screen_direction": "left_to_right",
+          "shared_environment_id": "narrow_alley",
+          "subject_phase": "thief_start_fleeing"
+        },
+        "frame": {
+          "border": "solid",
+          "geometry_intent": "Canonical panel 1 of template slanted-t-bottom-3-p2-v1.",
+          "overlaps_panel": "",
+          "parent_panel": "",
+          "polygon": [
+            [
+              16,
+              16
+            ],
+            [
+              416,
+              16
+            ],
+            [
+              352,
+              392
+            ],
+            [
+              16,
+              392
+            ]
+          ],
+          "shape": "trapezoid",
+          "z_index": 0
+        },
+        "id": "p1",
+        "narrative_role": "establisher",
+        "narrative_weight": "secondary",
+        "scene": {
+          "camera": {
+            "angle": "high",
+            "depth_plan": "deep",
+            "eye_flow_exit": "screen_right",
+            "focus": "deep focus across the narrow alleyway",
+            "framing": "environment",
+            "shot_scale": "wide",
+            "viewpoint": "objective",
+            "viewpoint_subject_id": ""
+          },
+          "description": "High-angle view looking down into a claustrophobic, towering cobblestone alleyway. A thief wearing a dark hooded jacket is sprinting desperately away from the camera.",
+          "environment": {
+            "background": [
+              "a distant turn in the alleyway under a dim streetlamp"
+            ],
+            "foreground": [
+              "rough stone floor in shadow",
+              "corner of a brick wall"
+            ],
+            "midground": [
+              "the sprinting thief",
+              "towering damp brick walls of the narrow street"
+            ],
+            "setting": "narrow cobblestone alley"
+          },
+          "lighting": "high-contrast dramatic daylight with deep shadows cast by the tall buildings",
+          "mood": "tense and claustrophobic",
+          "motion_treatment": "speed_lines",
+          "subjects": [
+            {
+              "blocking": "midground, running away towards the right side of the frame",
+              "expression": "fear and focus",
+              "figure": "A young man in a dark, worn hooded jacket and slim trousers",
+              "id": "thief",
+              "pose": "sprinting hard, body leaned forward, arms pumping, head looking straight ahead"
+            }
+          ],
+          "text_in_frame": "none"
+        },
+        "semantic_job": "execute the visual of the thief sprinting down a narrow cobblestone alleyway to establish the location and target",
+        "shot_contract": {
+          "angle": "high",
+          "camera_motivation": "Establish the claustrophobic setting of the narrow streets and identify the target of the chase.",
+          "depth_plan": "deep",
+          "framing": "environment",
+          "id": "s1",
+          "information_gain": "Shows the tight stone walls of the street with the thief running ahead.",
+          "role": "establishing",
+          "semantic_beat_index": 1,
+          "shot_scale": "wide",
+          "source_support": "de dief door de smalle straten",
+          "transition_trigger": "scene_open",
+          "viewpoint": "objective",
+          "viewpoint_anchor": "",
+          "visible_anchor": "the thief sprinting down a narrow cobblestone alley"
+        },
+        "transition_from_previous": "none"
+      },
+      {
+        "attentional_frame": "mono",
+        "bleed": false,
+        "bounds": {
+          "height": 376,
+          "width": 640,
+          "x": 368,
+          "y": 16
+        },
+        "continuity": {
+          "axis_relation_from_previous": "preserve",
+          "breakout": {
+            "destination_panel": "p3",
+            "edge": "bottom",
+            "enabled": true,
+            "subject_id": "police_officer_1"
+          },
+          "eyeline": {
+            "direction": "screen_right",
+            "enabled": true,
+            "looker_id": "police_officer_1",
+            "target_anchor": "thief"
+          },
+          "match_on_action": {
+            "action": "",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "screen_direction": "left_to_right",
+          "shared_environment_id": "narrow_alley",
+          "subject_phase": "police_pursuit_sprint"
+        },
+        "frame": {
+          "border": "solid",
+          "geometry_intent": "Canonical panel 2 of template slanted-t-bottom-3-p2-v1.",
+          "overlaps_panel": "",
+          "parent_panel": "",
+          "polygon": [
+            [
+              432,
+              16
+            ],
+            [
+              1008,
+              16
+            ],
+            [
+              1008,
+              392
+            ],
+            [
+              368,
+              392
+            ]
+          ],
+          "shape": "trapezoid",
+          "z_index": 0
+        },
+        "id": "p2",
+        "narrative_role": "initial",
+        "narrative_weight": "primary",
+        "scene": {
+          "camera": {
+            "angle": "eye_level",
+            "depth_plan": "shallow",
+            "eye_flow_exit": "screen_right",
+            "focus": "shallow focus on the lead officer",
+            "framing": "group",
+            "shot_scale": "medium_close",
+            "viewpoint": "objective",
+            "viewpoint_subject_id": ""
+          },
+          "description": "Eye-level medium-close shot of two uniformed police officers running at full speed. The lead officer has his face strained with determination, charging intensely toward the right.",
+          "environment": {
+            "background": [
+              "out-of-focus brick wall textures"
+            ],
+            "foreground": [
+              "motion-blurred cobblestones"
+            ],
+            "midground": [
+              "the running police officers"
+            ],
+            "setting": "narrow cobblestone alley"
+          },
+          "lighting": "focused natural light highlighting the determination on the officers' faces",
+          "mood": "urgent and high-energy",
+          "motion_treatment": "blur",
+          "subjects": [
+            {
+              "blocking": "foreground, slightly leading, crossing the right frame boundary toward the next panel",
+              "expression": "intense physical strain and focus",
+              "figure": "A determined male police officer in a dark blue Dutch police uniform",
+              "id": "police_officer_1",
+              "pose": "running aggressively, torso angled forward, arms bent and pumping"
+            },
+            {
+              "blocking": "midground, left side of the frame",
+              "expression": "concentrated effort",
+              "figure": "A female police officer in the same uniform",
+              "id": "police_officer_2",
+              "pose": "running slightly behind the first officer, eyes fixed forward"
+            },
+            {
+              "blocking": "clearly visible within the planned multi-subject composition",
+              "expression": "scene-consistent visible state",
+              "figure": "scene-supported subject from police officers sprinting in hot pursuit",
+              "id": "camera_support_1",
+              "pose": "visibly participating in the planned composition"
+            }
+          ],
+          "text_in_frame": "none"
+        },
+        "semantic_job": "execute the visual of police officers in hot pursuit showing intense physical strain",
+        "shot_contract": {
+          "angle": "eye_level",
+          "camera_motivation": "Highlight the active physical strain and urgency of the police during the pursuit.",
+          "depth_plan": "shallow",
+          "framing": "group",
+          "id": "s2",
+          "information_gain": "Shows the determination and effort on the police officers' faces as they run.",
+          "role": "action",
+          "semantic_beat_index": 1,
+          "shot_scale": "medium_close",
+          "source_support": "De politie moest... achtervolgen",
+          "transition_trigger": "attention_shift",
+          "viewpoint": "objective",
+          "viewpoint_anchor": "",
+          "visible_anchor": "police officers sprinting in hot pursuit"
+        },
+        "transition_from_previous": "action_to_action"
+      },
+      {
+        "attentional_frame": "macro",
+        "bleed": false,
+        "bounds": {
+          "height": 600,
+          "width": 992,
+          "x": 16,
+          "y": 408
+        },
+        "continuity": {
+          "axis_relation_from_previous": "preserve",
+          "breakout": {
+            "destination_panel": "",
+            "edge": "empty",
+            "enabled": false,
+            "subject_id": ""
+          },
+          "eyeline": {
+            "direction": "screen_right",
+            "enabled": true,
+            "looker_id": "police_officer_1",
+            "target_anchor": "thief"
+          },
+          "match_on_action": {
+            "action": "running in pursuit",
+            "enabled": true,
+            "subject_id": "police_officer_1"
+          },
+          "screen_direction": "left_to_right",
+          "shared_environment_id": "narrow_alley",
+          "subject_phase": "police_closing_distance"
+        },
+        "frame": {
+          "border": "solid",
+          "geometry_intent": "Canonical panel 3 of template slanted-t-bottom-3-p2-v1.",
+          "overlaps_panel": "",
+          "parent_panel": "",
+          "polygon": [],
+          "shape": "wide_rectangle",
+          "z_index": 0
+        },
+        "id": "p3",
+        "narrative_role": "peak",
+        "narrative_weight": "primary",
+        "scene": {
+          "camera": {
+            "angle": "eye_level",
+            "depth_plan": "layered",
+            "eye_flow_exit": "screen_right",
+            "focus": "deep focus tracking from the foreground shoulder to the distant thief",
+            "framing": "group",
+            "shot_scale": "full",
+            "viewpoint": "over_the_shoulder",
+            "viewpoint_subject_id": "police_officer_1"
+          },
+          "description": "Deep-focus over-the-shoulder shot from behind the police officers as they chase the thief. The officers frame the foreground, while the thief is visible further down the narrowing corridor.",
+          "environment": {
+            "background": [
+              "towering brick walls converging in perspective, wet from rain, reflecting faint light"
+            ],
+            "foreground": [
+              "back and shoulder of the police officer"
+            ],
+            "midground": [
+              "the wet cobblestone street stretching away",
+              "the fleeing thief"
+            ],
+            "setting": "narrow cobblestone alley"
+          },
+          "lighting": "dramatic directional light cutting across the narrow street, creating strong light and shadow patterns on the wet floor",
+          "mood": "suspenseful and climactic",
+          "motion_treatment": "pose_only",
+          "subjects": [
+            {
+              "blocking": "left foreground, framing the shot",
+              "expression": "not visible",
+              "figure": "The lead police officer, seen from behind his shoulder",
+              "id": "police_officer_1",
+              "pose": "sprinting forward, shoulder and back of head prominent in the left foreground"
+            },
+            {
+              "blocking": "midground, centered but distant down the alley corridor",
+              "expression": "panic and wide-eyed surprise",
+              "figure": "The thief in the dark hooded jacket",
+              "id": "thief",
+              "pose": "running hard down the alley, looking back over his shoulder with a panicked expression"
+            },
+            {
+              "blocking": "clearly visible within the planned multi-subject composition",
+              "expression": "scene-consistent visible state",
+              "figure": "scene-supported subject from police officers chasing the thief down the narrow street",
+              "id": "camera_support_1",
+              "pose": "visibly participating in the planned composition"
+            }
+          ],
+          "text_in_frame": "none"
+        },
+        "semantic_job": "execute the visual of the over-the-shoulder chase showing the spatial relationship between the police and the thief",
+        "shot_contract": {
+          "angle": "eye_level",
+          "camera_motivation": "Frame the direct chase relationship between the police and the thief within the narrow corridor.",
+          "depth_plan": "layered",
+          "framing": "group",
+          "id": "s3",
+          "information_gain": "Synthesizes the positions of both parties, making the actual 'achtervolgen' dynamic visible in one shot.",
+          "role": "payoff",
+          "semantic_beat_index": 1,
+          "shot_scale": "full",
+          "source_support": "moest de dief door de smalle straten achtervolgen",
+          "transition_trigger": "payoff",
+          "viewpoint": "over_the_shoulder",
+          "viewpoint_anchor": "police officers",
+          "visible_anchor": "police officers chasing the thief down the narrow street"
+        },
+        "transition_from_previous": "action_to_action"
+      }
+    ],
+    "rendering_rules": {
+      "camera_instruction": "render page_design.camera_arc and every panel shot_contract as one motivated edit sequence; preserve the planned scale, viewpoint, framing, angle, depth, 180-degree axis, eyelines, screen direction, and match-on-action continuity",
+      "crossing_occlusion": "never_cover_faces_hands_decisive_objects_or_next_panel_entry",
+      "finished_artwork": "render only final finished manga artwork, never a blueprint, storyboard, wireframe, annotated plan, or layout diagram",
+      "layout_instruction": "render the supplied page_design, bounds, frame relations, reading_path, and layout_rendering_directive as binding page geometry",
+      "layout_priority": "reading_clarity_then_semantic_hierarchy_then_expressiveness",
+      "logos_and_emblems": "No logos, brand marks, emblems, badges, icons, interface symbols, or decorative pseudo-writing on any object.",
+      "metadata_visibility": "all JSON keys, panel and subject ids, bounds, coordinates, dimensions, z-index values, units, guides, and layout annotations are invisible construction metadata and must never appear in the artwork",
+      "outer_border": "16px_pure_white",
+      "panel_gutters": "clean_white_except_one_declared_crossing",
+      "signs_and_labels": "blank_hidden_or_icon_only",
+      "sound_effects": "Absolutely no sound-effect glyphs, including Japanese onomatopoeia, stylized symbols, or pseudo-writing.",
+      "speech_bubbles": "none",
+      "symbols_or_writing": "No visible writing of any kind, including letterlike marks near moving people, vehicles, machinery, impacts, or reactions.",
+      "text_elements": "none"
+    },
+    "semantic_spine": {
+      "emotional_relation": "urgency and high-stakes tension",
+      "intensity": 5,
+      "literal_event": "police chasing a thief through narrow streets",
+      "memory_hook": "the narrow cobblestone walls framing the dynamic line of pursuit between the fleeing thief and the straining police officers",
+      "metaphor": {
+        "literal_anchor": "",
+        "mapping": "",
+        "mode": "none"
+      },
+      "semantic_focus": "the act of active pursuit",
+      "visual_relation": "approach"
+    }
+  }
+}

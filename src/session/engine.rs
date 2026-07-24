@@ -8,7 +8,10 @@
 
 use anyhow::Result;
 
-use super::draft::{Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta};
+use super::GenerationCost;
+use super::draft::{
+    Artifact, ArtifactAttempt, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta,
+};
 
 /// One step emitted by the engine for the outer shell to consume.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -71,20 +74,38 @@ impl SessionEngine {
         card: usize,
         result: Result<(CardMeta, Option<ArtifactFile>)>,
     ) -> EngineEvent {
+        self.applied_meta_attempt(card, ArtifactAttempt::unmetered(result))
+    }
+
+    /// Apply a meta-generation operation together with its incremental spend.
+    pub fn applied_meta_attempt(
+        &mut self,
+        card: usize,
+        attempt: ArtifactAttempt<(CardMeta, Option<ArtifactFile>)>,
+    ) -> EngineEvent {
         let attempt_before = slot(self.drafts[card].artifacts(), Artifact::Meta)
             .tally()
             .done()
             .saturating_add(1);
+        let (result, cost, related) = attempt.into_accounted_parts();
         match result {
             Ok((meta, file)) => {
-                self.drafts[card] = self.drafts[card].clone().with_meta(meta, file);
+                let updated = self.drafts[card].clone().with_meta(meta, file);
+                let artifacts = mark_related_costs(
+                    mark_cost(updated.artifacts().clone(), Artifact::Meta, cost),
+                    related,
+                );
+                self.drafts[card] = updated.with_artifacts(artifacts);
                 EngineEvent::ArtifactReady {
                     card,
                     artifact: Artifact::Meta,
                 }
             }
             Err(_) => {
-                let bumped = mark_attempted(self.drafts[card].artifacts().clone(), Artifact::Meta);
+                let bumped = mark_related_costs(
+                    mark_attempted(self.drafts[card].artifacts().clone(), Artifact::Meta, cost),
+                    related,
+                );
                 let cascaded = if slot(&bumped, Artifact::Meta).failed_terminally() {
                     discard_dependents_of_meta(bumped)
                 } else {
@@ -115,6 +136,16 @@ impl SessionEngine {
         artifact: Artifact,
         result: Result<ArtifactFile>,
     ) -> EngineEvent {
+        self.applied_media_attempt(card, artifact, ArtifactAttempt::unmetered(result))
+    }
+
+    /// Apply one media operation together with its incremental spend.
+    pub fn applied_media_attempt(
+        &mut self,
+        card: usize,
+        artifact: Artifact,
+        attempt: ArtifactAttempt<ArtifactFile>,
+    ) -> EngineEvent {
         debug_assert!(
             !matches!(artifact, Artifact::Meta),
             "applied_media must not be called with Artifact::Meta"
@@ -123,17 +154,21 @@ impl SessionEngine {
             .tally()
             .done()
             .saturating_add(1);
+        let (result, cost, related) = attempt.into_accounted_parts();
         match result {
             Ok(file) => {
-                self.drafts[card] = self.drafts[card].clone().with_artifacts(mark_ready(
-                    self.drafts[card].artifacts().clone(),
-                    artifact,
-                    file,
-                ));
+                let artifacts = mark_related_costs(
+                    mark_ready(self.drafts[card].artifacts().clone(), artifact, file, cost),
+                    related,
+                );
+                self.drafts[card] = self.drafts[card].clone().with_artifacts(artifacts);
                 EngineEvent::ArtifactReady { card, artifact }
             }
             Err(_) => {
-                let bumped = mark_attempted(self.drafts[card].artifacts().clone(), artifact);
+                let bumped = mark_related_costs(
+                    mark_attempted(self.drafts[card].artifacts().clone(), artifact, cost),
+                    related,
+                );
                 let cascaded = if slot(&bumped, artifact).failed_terminally()
                     && matches!(artifact, Artifact::Scene)
                 {
@@ -207,12 +242,61 @@ fn slot(artifacts: &CardArtifacts, kind: Artifact) -> &ArtifactSlot {
     }
 }
 
-fn mark_ready(artifacts: CardArtifacts, kind: Artifact, file: ArtifactFile) -> CardArtifacts {
-    reshape(artifacts, kind, |slot| slot.succeeded_with(file.clone()))
+fn mark_ready(
+    artifacts: CardArtifacts,
+    kind: Artifact,
+    file: ArtifactFile,
+    cost: Option<GenerationCost>,
+) -> CardArtifacts {
+    reshape(artifacts, kind, |slot| {
+        let previous = slot.cost();
+        let ready = slot.succeeded_with(file.clone());
+        charge_slot(ready, previous, cost)
+    })
 }
 
-fn mark_attempted(artifacts: CardArtifacts, kind: Artifact) -> CardArtifacts {
-    reshape(artifacts, kind, |slot| slot.attempted())
+fn mark_attempted(
+    artifacts: CardArtifacts,
+    kind: Artifact,
+    cost: Option<GenerationCost>,
+) -> CardArtifacts {
+    reshape(artifacts, kind, |slot| {
+        let previous = slot.cost();
+        charge_slot(slot.attempted(), previous, cost)
+    })
+}
+
+fn mark_cost(
+    artifacts: CardArtifacts,
+    kind: Artifact,
+    cost: Option<GenerationCost>,
+) -> CardArtifacts {
+    reshape(artifacts, kind, |slot| {
+        let previous = slot.cost();
+        charge_slot(slot, previous, cost)
+    })
+}
+
+fn mark_related_costs(
+    artifacts: CardArtifacts,
+    related: Vec<(Artifact, GenerationCost)>,
+) -> CardArtifacts {
+    related
+        .into_iter()
+        .fold(artifacts, |current, (kind, cost)| {
+            mark_cost(current, kind, Some(cost))
+        })
+}
+
+fn charge_slot(
+    slot: ArtifactSlot,
+    previous: Option<GenerationCost>,
+    delta: Option<GenerationCost>,
+) -> ArtifactSlot {
+    match delta {
+        Some(delta) => slot.accounted(previous.unwrap_or_default() + delta),
+        None => slot,
+    }
 }
 
 fn discard_dependents_of_meta(artifacts: CardArtifacts) -> CardArtifacts {
@@ -256,4 +340,68 @@ where
         artifacts.sound().clone()
     };
     CardArtifacts::from_parts(meta, scene, picture, sound)
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::anyhow;
+
+    use super::*;
+    use crate::session::LanguagePair;
+
+    fn draft() -> CardDraft {
+        CardDraft::new(
+            "whilst",
+            "during the time that",
+            LanguagePair::new("en", "ru"),
+        )
+    }
+
+    fn file(artifact: Artifact, cost: GenerationCost) -> ArtifactFile {
+        ArtifactFile::new(
+            format!("{}.bin", artifact.label()),
+            std::env::temp_dir().join(format!("{}.bin", artifact.label())),
+            "1 B",
+            false,
+        )
+        .with_cost(cost)
+    }
+
+    #[test]
+    fn related_scene_spend_stays_out_of_picture_cost_and_inside_card_total() {
+        let mut engine = SessionEngine::start(vec![draft()]);
+        engine.applied_media_attempt(
+            0,
+            Artifact::Scene,
+            ArtifactAttempt::new(
+                Ok(file(
+                    Artifact::Scene,
+                    GenerationCost::from_nanos(100_000_000),
+                )),
+                Some(GenerationCost::from_nanos(100_000_000)),
+            ),
+        );
+        engine.applied_media_attempt(
+            0,
+            Artifact::Picture,
+            ArtifactAttempt::new(
+                Err(anyhow!("picture rejected")),
+                Some(GenerationCost::from_nanos(900_000_000)),
+            )
+            .with_related_cost(Artifact::Scene, GenerationCost::from_nanos(200_000_000)),
+        );
+        assert_eq!(
+            (
+                engine.drafts()[0].artifacts().scene().cost(),
+                engine.drafts()[0].artifacts().picture().cost(),
+                engine.drafts()[0].artifacts().cost(),
+            ),
+            (
+                Some(GenerationCost::from_nanos(300_000_000)),
+                Some(GenerationCost::from_nanos(900_000_000)),
+                Some(GenerationCost::from_nanos(1_200_000_000)),
+            ),
+            "recomposition spend was mislabeled or omitted from the card total"
+        );
+    }
 }

@@ -3,29 +3,33 @@
 mod border;
 mod contracts;
 mod illustration;
+mod image_prompt;
+mod monochrome;
 pub mod ocr_bundle;
+mod recall;
 mod redirect;
 mod render;
 mod text;
 
-use anyhow::Result;
-use serde_json::Value;
-
 use crate::gemini::{GeminiClient, Transport};
+use anyhow::Result;
 
 pub use border::BorderDetector;
 pub use contracts::{ImageSource, ImageText, Progress, Renderer, SceneText, Translator};
 pub use illustration::Illustration;
+pub(crate) use image_prompt::compile_image_prompt;
+pub use recall::{HiddenRecall, RecallCard, RecallJudge, RecallReview, ShownRecall};
+pub(crate) use render::MangaRenderRejection;
 pub use render::MangaRenderer;
-pub use text::{TextDetector, TextDetectors};
+pub use text::{TextDetector, TextDetectors, TextEnsemble};
 
 impl<T> ImageSource for GeminiClient<T>
 where
     T: Transport,
 {
-    /// Return one encoded image payload for the scene.
-    fn image(&self, scene: &Value) -> Result<Vec<u8>> {
-        GeminiClient::<T>::image(self, scene)
+    /// Return one encoded image payload for the compiled prompt.
+    fn image(&self, prompt: &str) -> Result<Vec<u8>> {
+        GeminiClient::<T>::image(self, prompt)
     }
 }
 

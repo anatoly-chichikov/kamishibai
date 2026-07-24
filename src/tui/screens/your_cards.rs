@@ -360,14 +360,13 @@ fn step_state<'a>(
                 pad_left(file.size(), STEP_SIZE_COL_CHARS),
                 palette::dim(),
             ));
-            if let Some(cost) = file.cost() {
-                note.push(Span::styled("  ", palette::dim()));
-                note.push(Span::styled(cost.dollars(), palette::dim2()));
-            }
-            if file.cached() {
-                note.push(Span::styled("  ", palette::dim()));
-                note.push(Span::styled("cached", palette::dim2()));
-            }
+        }
+        push_slot_cost(&mut note, slot);
+        if let Some(file) = slot.file()
+            && file.cached()
+        {
+            note.push(Span::styled("  ", palette::dim()));
+            note.push(Span::styled("cached", palette::dim2()));
         }
         return (String::from("✓"), row_fg, palette::link(), note);
     }
@@ -380,15 +379,12 @@ fn step_state<'a>(
         );
     }
     if slot.failed_terminally() {
-        return (
-            String::from("✗"),
-            row_fg,
-            row_fg,
-            vec![Span::styled(
-                String::from("gave up after 3 tries"),
-                palette::dim(),
-            )],
-        );
+        let mut note = vec![Span::styled(
+            String::from("gave up after 3 tries"),
+            palette::dim(),
+        )];
+        push_slot_cost(&mut note, slot);
+        return (String::from("✗"), row_fg, row_fg, note);
     }
     let attempts = slot.tally().done();
     if attempts > 0 {
@@ -402,12 +398,9 @@ fn step_state<'a>(
         } else {
             String::from("·")
         };
-        return (
-            glyph,
-            row_fg,
-            row_fg,
-            vec![Span::styled(label, palette::dim())],
-        );
+        let mut note = vec![Span::styled(label, palette::dim())];
+        push_slot_cost(&mut note, slot);
+        return (glyph, row_fg, row_fg, note);
     }
     if active {
         return (
@@ -423,6 +416,13 @@ fn step_state<'a>(
         row_dim2,
         vec![Span::styled(String::from("queued"), palette::dim())],
     )
+}
+
+fn push_slot_cost<'a>(note: &mut Vec<Span<'a>>, slot: &ArtifactSlot) {
+    if let Some(cost) = slot.cost() {
+        note.push(Span::styled("  ", palette::dim()));
+        note.push(Span::styled(cost.dollars(), palette::dim2()));
+    }
 }
 
 fn step_name(kind: Artifact) -> &'static str {

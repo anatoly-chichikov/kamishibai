@@ -1,0 +1,50 @@
+{
+  "type": "OBJECT",
+  "properties": {
+    "decision": {
+      "type": "STRING",
+      "enum": [
+        "ALLOW",
+        "REJECT"
+      ]
+    },
+    "evidence": {
+      "type": "ARRAY",
+      "maxItems": 6,
+      "items": {
+        "type": "OBJECT",
+        "properties": {
+          "reading": {
+            "type": "STRING"
+          },
+          "location": {
+            "type": "STRING"
+          },
+          "kind": {
+            "type": "STRING",
+            "enum": [
+              "FOCUS",
+              "TARGET_FRAGMENT",
+              "COMPETING_ANSWER",
+              "VISIBLE_CUE",
+              "UNRELATED"
+            ]
+          }
+        },
+        "required": [
+          "reading",
+          "location",
+          "kind"
+        ]
+      }
+    },
+    "reason": {
+      "type": "STRING"
+    }
+  },
+  "required": [
+    "decision",
+    "evidence",
+    "reason"
+  ]
+}

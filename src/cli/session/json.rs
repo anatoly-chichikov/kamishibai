@@ -399,8 +399,24 @@ mod tests {
 
     use super::super::store::{DraftRecord, WorkerHandle};
     use super::*;
-    use crate::generation::artifact_cache::{META_FILE, VOICE_FILE};
-    use crate::session::{CandidateRecord, CardCell, Sense, WordCandidate};
+    use crate::generation::artifact_cache::VOICE_FILE;
+    use crate::session::{
+        CandidateRecord, CardCell, CardMeta, CardMetaCache, Sense, WordCandidate,
+    };
+
+    fn fixture_meta() -> CardMeta {
+        CardMeta::new(
+            "/ka.naʁ/",
+            "/lə ka.naʁ naʒ/",
+            "a duck",
+            5,
+            "The duck swims",
+            "duck",
+            "Think of a pond",
+            "A common concrete noun",
+            "Le canard nage",
+        )
+    }
 
     fn record() -> SessionRecord {
         SessionRecord::understood(
@@ -460,6 +476,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            costs: crate::session::ArtifactCosts::default(),
         }];
         let cell = CardCell::new(
             home.path(),
@@ -468,8 +485,14 @@ mod tests {
             "a duck",
         );
         let cache = cell.cache();
-        fs::create_dir_all(cache.path()).expect("cell dir must be created");
-        fs::write(cache.path().join(META_FILE), b"{}").expect("meta written");
+        CardMetaCache::new(home.path())
+            .store(
+                "canard",
+                "a duck",
+                &LanguagePair::new("fr", "en"),
+                &fixture_meta(),
+            )
+            .expect("valid meta fixture must be stored");
         fs::write(cache.path().join(VOICE_FILE), b"x").expect("voice written");
         let value = value_of(&record, home.path());
         assert_eq!(
