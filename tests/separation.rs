@@ -1,7 +1,7 @@
 //! Layering enforcement: the console/API layer must never link the TUI side.
 //!
 //! The console closure is `error.rs`, `console.rs`, the workflow ports
-//! (`card_workflow.rs`), the live generator, and everything under
+//! (`card_workflow.rs`), the Gemini workflow, and everything under
 //! `cli/session/`. `cli.rs` itself stays out of the closure: it is the
 //! composition root that legitimately wires both sides together through the
 //! `SessionOpener` port. The TUI side (`shell`, `terminal`, `bridge`, `batch`,
@@ -17,15 +17,22 @@ fn console_sources() -> Vec<PathBuf> {
         "src/cli/error.rs",
         "src/cli/console.rs",
         "src/cli/card_workflow.rs",
-        "src/cli/live_generator.rs",
     ]
     .iter()
     .map(|file| root.join(file))
     .collect();
-    let session = root.join("src/cli/session");
-    for entry in fs::read_dir(&session).expect("session dir must be readable") {
-        let path = entry.expect("session entry must be readable").path();
-        if path.extension().is_some_and(|extension| extension == "rs") {
+    sources.extend(rust_sources(root.join("src/cli/gemini_workflow").as_path()));
+    sources.extend(rust_sources(root.join("src/cli/session").as_path()));
+    sources
+}
+
+fn rust_sources(directory: &Path) -> Vec<PathBuf> {
+    let mut sources = Vec::new();
+    for entry in fs::read_dir(directory).expect("source directory must be readable") {
+        let path = entry.expect("source entry must be readable").path();
+        if path.is_dir() {
+            sources.extend(rust_sources(path.as_path()));
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
             sources.push(path);
         }
     }
@@ -60,5 +67,14 @@ fn the_console_layer_never_imports_the_tui() {
         offenders,
         Vec::<String>::new(),
         "the console layer must not import the TUI"
+    );
+}
+
+#[test]
+fn the_legacy_live_generator_module_cannot_return() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        !root.join("src/cli/live_generator.rs").exists(),
+        "the implementation lost its Gemini workflow vocabulary"
     );
 }

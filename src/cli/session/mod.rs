@@ -19,7 +19,7 @@
 //! caller-supplied [`SessionOpener`] port, which the TUI side implements.
 //!
 //! Destructive card-cache work takes leases in one fixed order: meta, voice,
-//! then visual. Live generators hold only one of those leases at a time, so a
+//! then visual. Gemini workflows hold only one of those leases at a time, so a
 //! cleanup can wait for active work without introducing a nested lock cycle.
 
 mod args;
@@ -60,7 +60,7 @@ use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardCell, CardMetaCache, LanguagePair};
 
 use super::error::{self, usage};
-use super::live_generator::restart_picture_request_series;
+use super::gemini_workflow::restart_picture_request_series;
 
 /// Port through which `open` hands a checked session to the interactive
 /// surface; the TUI side implements it, so this layer never links the TUI.
@@ -455,7 +455,7 @@ mod tests {
 
     use super::store::WorkerHandle;
     use super::*;
-    use crate::cli::live_generator::reserve_picture_request;
+    use crate::cli::gemini_workflow::reserve_picture_request;
     use crate::session::{CardMeta, CardMetaCache};
 
     fn record(id: &str, phase: Phase) -> SessionRecord {

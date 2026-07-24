@@ -221,7 +221,7 @@ impl TuiSession {
         })
     }
 
-    /// Share this TUI run's late-bound journal with cloned live generators.
+    /// Share this TUI run's late-bound journal with cloned Gemini workflows.
     pub(super) fn cost_scope(&self) -> SessionCostScope {
         self.costs.clone()
     }

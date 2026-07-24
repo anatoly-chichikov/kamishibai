@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow};
 use crate::cli::card_workflow::CardGeneration;
 use crate::cli::console::{self, SensePolicy};
 use crate::cli::error::{usage, usage_hint};
-use crate::cli::live_generator::default_output;
+use crate::cli::gemini_workflow::default_output;
 use crate::config::{PreferenceStore, default_store};
 use crate::runtime::locations::SystemContext;
 use crate::session::{

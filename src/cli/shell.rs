@@ -11,7 +11,7 @@ use super::bridge::TuiSession;
 use super::card_workflow::{
     ArtifactOutcome, CardWorkflow, DeckPublishMessage, PublishPhase, PublishProgress, TextOutcome,
 };
-use super::live_generator::{LiveCardGenerator, default_output};
+use super::gemini_workflow::{GeminiCardWorkflow, default_output};
 use crate::config::{PreferenceStore, Preferences, default_store};
 use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
@@ -107,7 +107,7 @@ pub(super) struct Shell<P> {
     output: PathBuf,
 }
 
-impl Shell<LiveCardGenerator> {
+impl Shell<GeminiCardWorkflow> {
     /// Build a live card shell for an interactive empty session.
     pub(super) fn new(app: App, session: Option<TuiSession>) -> Result<Self> {
         let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
@@ -119,8 +119,8 @@ impl Shell<LiveCardGenerator> {
         };
         let costs = session.as_ref().map(TuiSession::cost_scope);
         let generator = match costs {
-            Some(costs) => LiveCardGenerator::new(cache, output.clone()).with_session_costs(costs),
-            None => LiveCardGenerator::new(cache, output.clone()),
+            Some(costs) => GeminiCardWorkflow::new(cache, output.clone()).with_session_costs(costs),
+            None => GeminiCardWorkflow::new(cache, output.clone()),
         };
         Ok(Self {
             app,

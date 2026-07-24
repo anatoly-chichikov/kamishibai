@@ -11,7 +11,7 @@ use anyhow::{Result, bail};
 use serde::Serialize;
 
 use super::card_workflow::{CardGeneration, DeckPublishing, PublishPhase, PublishProgress};
-use super::live_generator::LiveCardGenerator;
+use super::gemini_workflow::GeminiCardWorkflow;
 use super::session::SessionCostScope;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
@@ -135,17 +135,17 @@ impl PublishProgress for Unwatched {
     fn advance(&self, _phase: PublishPhase) {}
 }
 
-/// Build a console-flow live generator rooted at the shared cache and output dir.
-pub(super) fn generator(output: PathBuf) -> Result<LiveCardGenerator> {
+/// Build a console Gemini workflow rooted at the shared cache and output dir.
+pub(super) fn generator(output: PathBuf) -> Result<GeminiCardWorkflow> {
     let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
-    Ok(LiveCardGenerator::for_console(cache, output))
+    Ok(GeminiCardWorkflow::for_console(cache, output))
 }
 
 /// Build a console generator whose observed spend belongs to one session run.
 pub(super) fn generator_for_session(
     output: PathBuf,
     costs: SessionCostScope,
-) -> Result<LiveCardGenerator> {
+) -> Result<GeminiCardWorkflow> {
     Ok(generator(output)?.with_session_costs(costs))
 }
 
