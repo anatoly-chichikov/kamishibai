@@ -253,9 +253,39 @@ fn try_exclusive_lock(file: &File) -> Result<bool> {
 
 #[cfg(not(unix))]
 fn try_exclusive_lock(file: &File) -> Result<bool> {
-    match file.try_lock() {
+    classify_lock(file.try_lock())
+}
+
+#[cfg(any(test, not(unix)))]
+fn classify_lock(result: std::result::Result<(), std::fs::TryLockError>) -> Result<bool> {
+    match result {
         Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(false),
-        Err(error) => Err(error.into()),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(false),
+        Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_lock;
+
+    #[test]
+    fn contended_standard_lock_is_not_an_operational_failure() {
+        let result = classify_lock(Err(std::fs::TryLockError::WouldBlock));
+        assert!(
+            !result.expect("contended lock must remain a retryable state"),
+            "contended lock became an operational failure"
+        );
+    }
+
+    #[test]
+    fn standard_lock_io_error_stays_an_operational_failure() {
+        let result = classify_lock(Err(std::fs::TryLockError::Error(std::io::Error::other(
+            "broken lock",
+        ))));
+        assert!(
+            result.is_err(),
+            "standard lock I/O failure was mistaken for contention"
+        );
     }
 }

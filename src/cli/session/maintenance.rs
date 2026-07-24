@@ -301,8 +301,8 @@ mod tests {
         #[cfg(not(unix))]
         let locked = match file.try_lock() {
             Ok(()) => true,
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
-            Err(error) => return Err(error.into()),
+            Err(std::fs::TryLockError::WouldBlock) => false,
+            Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
         };
         Ok(locked)
     }
