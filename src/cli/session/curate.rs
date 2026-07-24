@@ -11,9 +11,10 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
+use crate::application::BulkCorrection;
 use crate::cli::console;
 use crate::cli::error::usage;
-use crate::session::{BulkCorrection, CandidateRecord, LanguagePair, WordCandidate};
+use crate::session::{CandidateRecord, LanguagePair, WordCandidate};
 
 use super::args::{CardArg, CorrectArgs, SelectArgs};
 use super::store::{Phase, SessionRecord, SessionStore};
@@ -165,8 +166,8 @@ pub(super) fn correct(args: &CorrectArgs, render: Render) -> Result<()> {
         .clone()
         .candidate();
     let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
-    let generator = console::generator(PathBuf::from(record.out.clone()))?;
-    let correction = generator.correct_bulk(&snapshot, args.note.as_str(), &pair)?;
+    let workflow = console::workflow(PathBuf::from(record.out.clone()))?;
+    let correction = workflow.correct_bulk(&snapshot, args.note.as_str(), &pair)?;
     let mut appended = 0;
     let updated = store.update(id.as_str(), |record| {
         refuse_if_live(&store, record)?;

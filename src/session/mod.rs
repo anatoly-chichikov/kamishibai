@@ -12,6 +12,8 @@ mod pass;
 mod state;
 mod vault;
 
+#[doc(inline)]
+pub use crate::application::{BulkCorrection, CardCorrection, CardMetaGeneration, Understanding};
 pub use bridge::{drafts_from_document, from_entry, to_document, to_entry};
 pub(crate) use cache::CandidateRecord;
 pub use cache::{CachedUnderstanding, CardMetaCache};
@@ -25,10 +27,7 @@ pub use draft::{
 };
 pub use engine::{EngineEvent, SessionEngine};
 pub use pair::LanguagePair;
-pub use pass::{
-    BulkCorrection, CardCorrection, CardMetaGeneration, CardRevision, SenseCorrection,
-    Understanding, Understood,
-};
+pub use pass::{CardRevision, SenseCorrection, Understood};
 pub use state::SessionState;
 pub use vault::CardCell;
 

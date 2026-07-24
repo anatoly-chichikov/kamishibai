@@ -2,12 +2,12 @@
 
 use anyhow::{Result, bail};
 
-use super::CostRecorder;
+use super::cost_accounting::CostRecorder;
 use crate::gemini::{GeminiClient, HttpTransport};
 use crate::generation::manga::{ImageSource, RecallCard, RecallJudge, RecallReview};
 use crate::generation::{SceneSource, Speaker};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 /// Adapts metered Gemini calls to scene, image, and speech ports.
 pub(super) struct MeteredGemini {
     client: GeminiClient<HttpTransport>,
@@ -51,7 +51,7 @@ impl Speaker for MeteredGemini {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 /// Uses Gemini to judge whether an image preserves the recall contract.
 pub(super) struct GeminiRecall {
     client: GeminiClient<HttpTransport>,

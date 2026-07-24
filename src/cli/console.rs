@@ -2,7 +2,7 @@
 //! the TUI walks, scripted for agents and pipes.
 //!
 //! The driver reuses the real flow components — the `Understanding` pass, the
-//! `SessionEngine` artifact queue, and the `DeckPublishing` step — so a console
+//! `SessionEngine` artifact queue, and the `StudyPublishing` step — so a console
 //! run produces exactly what the interactive run would. Only the rendering
 //! differs: progress is reported through a [`Reporter`] port with human,
 //! quiet, and NDJSON-on-stderr implementations.
@@ -10,9 +10,10 @@
 use anyhow::{Result, bail};
 use serde::Serialize;
 
-use super::card_workflow::{CardGeneration, DeckPublishing, PublishPhase, PublishProgress};
-use super::gemini_workflow::GeminiCardWorkflow;
+use crate::application::{CardProduction, PublishPhase, PublishProgress, StudyPublishing};
+
 use super::session::SessionCostScope;
+use super::wiring::{GeminiCardWorkflow, console_workflow, session_workflow};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
     Artifact, ArtifactCosts, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, SessionEngine,
@@ -136,17 +137,18 @@ impl PublishProgress for Unwatched {
 }
 
 /// Build a console Gemini workflow rooted at the shared cache and output dir.
-pub(super) fn generator(output: PathBuf) -> Result<GeminiCardWorkflow> {
+pub(super) fn workflow(output: PathBuf) -> Result<GeminiCardWorkflow> {
     let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
-    Ok(GeminiCardWorkflow::for_console(cache, output))
+    Ok(console_workflow(cache, output))
 }
 
-/// Build a console generator whose observed spend belongs to one session run.
-pub(super) fn generator_for_session(
+/// Build a console workflow whose observed spend belongs to one session run.
+pub(super) fn workflow_for_session(
     output: PathBuf,
     costs: SessionCostScope,
 ) -> Result<GeminiCardWorkflow> {
-    Ok(generator(output)?.with_session_costs(costs))
+    let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
+    Ok(session_workflow(cache, output, costs))
 }
 
 /// Drive the missing artifacts for `drafts` to completion, then publish the deck.
@@ -155,12 +157,12 @@ pub(super) fn generator_for_session(
 /// retries; artifacts already present in the cache are cheap hits, so this is
 /// idempotent and resumable. Progress and the final paths flow through `reporter`.
 pub(super) fn produce<G>(
-    generator: &G,
+    workflow: &G,
     drafts: Vec<CardDraft>,
     reporter: &dyn Reporter,
 ) -> Result<()>
 where
-    G: CardGeneration + DeckPublishing,
+    G: CardProduction + StudyPublishing,
 {
     reporter.generating(drafts.len());
     let mut engine = SessionEngine::start(drafts);
@@ -170,7 +172,7 @@ where
         }
         let draft = engine.drafts()[card].clone();
         let term = draft.term().to_string();
-        if let Some(error) = advance(generator, &mut engine, card, artifact, &draft) {
+        if let Some(error) = advance(workflow, &mut engine, card, artifact, &draft) {
             reporter.warn(format!("{term} · {}: {error}", artifact.label()).as_str());
         }
         reporter.step(
@@ -188,7 +190,7 @@ where
         bail!("the session no longer names this worker");
     }
     reporter.publishing();
-    let (deck, report, output) = generator.publish_deck(&drafts, &Unwatched)?;
+    let (deck, report, output) = workflow.publish(&drafts, &Unwatched)?.into_paths();
     let outcome = Outcome {
         deck,
         report,
@@ -201,37 +203,37 @@ where
 }
 
 fn advance<G>(
-    generator: &G,
+    workflow: &G,
     engine: &mut SessionEngine,
     card: usize,
     artifact: Artifact,
     draft: &CardDraft,
 ) -> Option<String>
 where
-    G: CardGeneration + DeckPublishing,
+    G: CardProduction + StudyPublishing,
 {
     match artifact {
         Artifact::Meta => {
             let attempt =
-                generator.generate_meta_in(card, draft.term(), draft.understanding(), draft.pair());
+                workflow.generate_meta_in(card, draft.term(), draft.understanding(), draft.pair());
             let error = attempt.error().map(|error| format!("{error:#}"));
             engine.applied_meta_attempt(card, attempt);
             error
         }
         Artifact::Scene => {
-            let attempt = generator.generate_scene_in(card, draft);
+            let attempt = workflow.generate_scene_in(card, draft);
             let error = attempt.error().map(|error| format!("{error:#}"));
             engine.applied_media_attempt(card, artifact, attempt);
             error
         }
         Artifact::Picture => {
-            let attempt = generator.generate_picture_in(card, draft);
+            let attempt = workflow.generate_picture_in(card, draft);
             let error = attempt.error().map(|error| format!("{error:#}"));
             engine.applied_media_attempt(card, artifact, attempt);
             error
         }
         Artifact::Sound => {
-            let attempt = generator.generate_sound_in(card, draft);
+            let attempt = workflow.generate_sound_in(card, draft);
             let error = attempt.error().map(|error| format!("{error:#}"));
             engine.applied_media_attempt(card, artifact, attempt);
             error
@@ -441,20 +443,20 @@ mod tests {
     use anyhow::Result;
 
     use super::*;
+    use crate::application::{CardCorrection, CardMetaGeneration, PublishedStudyPackage};
     use crate::session::{
-        ArtifactAttempt, ArtifactFile, CardCorrection, CardMeta, CardMetaGeneration, CardRevision,
-        Sense, WordCandidate,
+        ArtifactAttempt, ArtifactFile, CardMeta, CardRevision, Sense, WordCandidate,
     };
 
     #[derive(Clone, Default)]
-    struct LocalGenerator;
+    struct LocalWorkflow;
 
     #[derive(Clone, Default)]
-    struct FailingPictureGenerator {
+    struct FailingPictureWorkflow {
         pictures: Cell<usize>,
     }
 
-    impl CardMetaGeneration for LocalGenerator {
+    impl CardMetaGeneration for LocalWorkflow {
         fn generate_card_meta(
             &self,
             term: &str,
@@ -475,7 +477,7 @@ mod tests {
         }
     }
 
-    impl CardCorrection for LocalGenerator {
+    impl CardCorrection for LocalWorkflow {
         fn correct_card(
             &self,
             draft: &CardDraft,
@@ -488,17 +490,55 @@ mod tests {
         }
     }
 
-    impl CardGeneration for LocalGenerator {
-        fn generate_scene(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+    impl CardProduction for LocalWorkflow {
+        fn generate_meta_in(
+            &self,
+            _slot: usize,
+            term: &str,
+            understanding: &str,
+            pair: &LanguagePair,
+        ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
+            let result = self
+                .generate_card_meta(term, understanding, pair)
+                .and_then(|meta| {
+                    self.store_card_meta(term, understanding, pair, &meta)
+                        .map(|file| (meta, Some(file)))
+                });
+            ArtifactAttempt::unmetered(result)
+        }
+
+        fn generate_scene_in(
+            &self,
+            _slot: usize,
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<ArtifactFile> {
             ArtifactAttempt::unmetered(Ok(local_file(draft.term(), "scene")))
         }
 
-        fn generate_picture(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+        fn generate_picture_in(
+            &self,
+            _slot: usize,
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<ArtifactFile> {
             ArtifactAttempt::unmetered(Ok(local_file(draft.term(), "picture")))
         }
 
-        fn generate_sound(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+        fn generate_sound_in(
+            &self,
+            _slot: usize,
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<ArtifactFile> {
             ArtifactAttempt::unmetered(Ok(local_file(draft.term(), "sound")))
+        }
+
+        fn correct_card_in(
+            &self,
+            _slot: usize,
+            draft: &CardDraft,
+            comment: &str,
+            pair: &LanguagePair,
+        ) -> ArtifactAttempt<CardRevision> {
+            ArtifactAttempt::unmetered(self.correct_card(draft, comment, pair))
         }
 
         fn store_card_meta(
@@ -517,14 +557,14 @@ mod tests {
         }
     }
 
-    impl DeckPublishing for LocalGenerator {
-        fn publish_deck(
+    impl StudyPublishing for LocalWorkflow {
+        fn publish(
             &self,
             drafts: &[CardDraft],
             progress: &dyn PublishProgress,
-        ) -> Result<(String, String, String)> {
+        ) -> Result<PublishedStudyPackage> {
             progress.advance(PublishPhase::Report);
-            Ok((
+            Ok(PublishedStudyPackage::new(
                 format!("/out/deck-{}.apkg", drafts.len()),
                 format!("/out/deck-{}.pdf", drafts.len()),
                 String::from("/out"),
@@ -532,40 +572,72 @@ mod tests {
         }
     }
 
-    impl CardMetaGeneration for FailingPictureGenerator {
+    impl CardMetaGeneration for FailingPictureWorkflow {
         fn generate_card_meta(
             &self,
             term: &str,
             understanding: &str,
             pair: &LanguagePair,
         ) -> Result<CardMeta> {
-            LocalGenerator.generate_card_meta(term, understanding, pair)
+            LocalWorkflow.generate_card_meta(term, understanding, pair)
         }
     }
 
-    impl CardCorrection for FailingPictureGenerator {
+    impl CardCorrection for FailingPictureWorkflow {
         fn correct_card(
             &self,
             draft: &CardDraft,
             comment: &str,
             pair: &LanguagePair,
         ) -> Result<CardRevision> {
-            LocalGenerator.correct_card(draft, comment, pair)
+            LocalWorkflow.correct_card(draft, comment, pair)
         }
     }
 
-    impl CardGeneration for FailingPictureGenerator {
-        fn generate_scene(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
-            LocalGenerator.generate_scene(draft)
+    impl CardProduction for FailingPictureWorkflow {
+        fn generate_meta_in(
+            &self,
+            slot: usize,
+            term: &str,
+            understanding: &str,
+            pair: &LanguagePair,
+        ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
+            LocalWorkflow.generate_meta_in(slot, term, understanding, pair)
         }
 
-        fn generate_picture(&self, _draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+        fn generate_scene_in(
+            &self,
+            slot: usize,
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<ArtifactFile> {
+            LocalWorkflow.generate_scene_in(slot, draft)
+        }
+
+        fn generate_picture_in(
+            &self,
+            _slot: usize,
+            _draft: &CardDraft,
+        ) -> ArtifactAttempt<ArtifactFile> {
             self.pictures.set(self.pictures.get().saturating_add(1));
             ArtifactAttempt::unmetered(Err(anyhow::anyhow!("picture rejected")))
         }
 
-        fn generate_sound(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
-            LocalGenerator.generate_sound(draft)
+        fn generate_sound_in(
+            &self,
+            slot: usize,
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<ArtifactFile> {
+            LocalWorkflow.generate_sound_in(slot, draft)
+        }
+
+        fn correct_card_in(
+            &self,
+            _slot: usize,
+            draft: &CardDraft,
+            comment: &str,
+            pair: &LanguagePair,
+        ) -> ArtifactAttempt<CardRevision> {
+            ArtifactAttempt::unmetered(self.correct_card(draft, comment, pair))
         }
 
         fn store_card_meta(
@@ -575,17 +647,17 @@ mod tests {
             pair: &LanguagePair,
             meta: &CardMeta,
         ) -> Result<ArtifactFile> {
-            LocalGenerator.store_card_meta(term, understanding, pair, meta)
+            LocalWorkflow.store_card_meta(term, understanding, pair, meta)
         }
     }
 
-    impl DeckPublishing for FailingPictureGenerator {
-        fn publish_deck(
+    impl StudyPublishing for FailingPictureWorkflow {
+        fn publish(
             &self,
             drafts: &[CardDraft],
             progress: &dyn PublishProgress,
-        ) -> Result<(String, String, String)> {
-            LocalGenerator.publish_deck(drafts, progress)
+        ) -> Result<PublishedStudyPackage> {
+            LocalWorkflow.publish(drafts, progress)
         }
     }
 
@@ -679,7 +751,7 @@ mod tests {
             CardDraft::new("flaner", "to stroll", pair()),
         ];
         let reporter = RecordingReporter::default();
-        produce(&LocalGenerator, drafts, &reporter).expect("produce must publish");
+        produce(&LocalWorkflow, drafts, &reporter).expect("produce must publish");
         assert_eq!(
             *reporter.published.borrow(),
             Some((2, 0)),
@@ -691,7 +763,7 @@ mod tests {
     fn produce_runs_artifacts_in_engine_order() {
         let drafts = vec![CardDraft::new("canard", "a duck", pair())];
         let reporter = RecordingReporter::default();
-        produce(&LocalGenerator, drafts, &reporter).expect("produce must publish");
+        produce(&LocalWorkflow, drafts, &reporter).expect("produce must publish");
         assert_eq!(
             *reporter.steps.borrow(),
             vec![
@@ -706,12 +778,12 @@ mod tests {
 
     #[test]
     fn produce_stops_picture_generation_at_three_failed_calls() {
-        let generator = FailingPictureGenerator::default();
+        let workflow = FailingPictureWorkflow::default();
         let drafts = vec![CardDraft::new("canard", "a duck", pair())];
         let reporter = RecordingReporter::default();
-        produce(&generator, drafts, &reporter).expect("produce must publish surviving cards");
+        produce(&workflow, drafts, &reporter).expect("produce must publish surviving cards");
         assert_eq!(
-            (generator.pictures.get(), *reporter.published.borrow()),
+            (workflow.pictures.get(), *reporter.published.borrow()),
             (3, Some((0, 1))),
             "produce exceeded the three-call picture ceiling for one failed card"
         );
@@ -719,10 +791,10 @@ mod tests {
 
     #[test]
     fn produce_reports_each_picture_failure_reason() {
-        let generator = FailingPictureGenerator::default();
+        let workflow = FailingPictureWorkflow::default();
         let drafts = vec![CardDraft::new("canard", "a duck", pair())];
         let reporter = RecordingReporter::default();
-        produce(&generator, drafts, &reporter).expect("produce must publish surviving cards");
+        produce(&workflow, drafts, &reporter).expect("produce must publish surviving cards");
         assert_eq!(
             *reporter.warnings.borrow(),
             vec![String::from("canard · picture: picture rejected"); 3],

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::cli::card_workflow::CardGeneration;
+use crate::application::CardProduction;
 use crate::cli::console::{self, HumanReporter, JsonReporter, Reporter, drafts_for};
 use crate::cli::error::{json_line, operational_hint, usage, usage_hint};
 use crate::runtime::locations::{SystemContext, cache_root};
@@ -224,9 +224,8 @@ fn rewrite(
             .as_slice(),
     )?;
     let costs = SessionCostScope::bound(journal);
-    let generator =
-        console::generator_for_session(PathBuf::from(record.out.clone()), costs.clone())?;
-    let attempt = generator.correct_card_in(slot, &draft, note, &pair);
+    let workflow = console::workflow_for_session(PathBuf::from(record.out.clone()), costs.clone())?;
+    let attempt = workflow.correct_card_in(slot, &draft, note, &pair);
     account_correction(
         store,
         record,
@@ -242,7 +241,7 @@ fn rewrite(
                 current.term.as_str(),
                 current.understanding.as_str(),
             )?;
-            generator.store_card_meta(term.as_str(), understanding.as_str(), &pair, &meta)?;
+            workflow.store_card_meta(term.as_str(), understanding.as_str(), &pair, &meta)?;
             store.update(record.id.as_str(), |fresh| {
                 refuse_if_live(store, fresh)?;
                 let draft = fresh.drafts.get(slot).ok_or_else(|| {

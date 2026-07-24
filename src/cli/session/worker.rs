@@ -19,7 +19,7 @@ use super::cost_journal::{SessionCostJournal, SessionCostScope};
 use super::liveness;
 use super::store::{Phase, Progress, ResultRecord, SessionRecord, SessionStore, WorkerHandle, now};
 use crate::cli::console::{
-    Outcome, QuietReporter, Reporter, StepOutcome, generator_for_session, produce,
+    Outcome, QuietReporter, Reporter, StepOutcome, produce, workflow_for_session,
 };
 use crate::session::{Artifact, ArtifactCosts, CardDraft, LanguagePair};
 
@@ -215,10 +215,10 @@ fn execute(store: &SessionStore, id: &str, inner: Box<dyn Reporter>) -> Result<S
     let journal = store.cost_journal(&record);
     let costs = SessionCostScope::bound(journal.clone());
     let drafts = drafts_with_costs(&record, &pair, &journal)?;
-    let live = generator_for_session(PathBuf::from(record.out), costs.clone())?;
+    let workflow = workflow_for_session(PathBuf::from(record.out), costs.clone())?;
     let pid = i32::try_from(std::process::id())?;
     let reporter = SessionReporter::new(store.clone(), String::from(id), pid, inner, costs);
-    match produce(&live, drafts, &reporter) {
+    match produce(&workflow, drafts, &reporter) {
         Ok(()) => match reporter.persist_failure.borrow_mut().take() {
             Some(message) => {
                 bail!("generated the cards but failed to persist the published state: {message}")

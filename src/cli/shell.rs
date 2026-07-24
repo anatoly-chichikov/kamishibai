@@ -8,10 +8,9 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow, bail};
 
 use super::bridge::TuiSession;
-use super::card_workflow::{
-    ArtifactOutcome, CardWorkflow, DeckPublishMessage, PublishPhase, PublishProgress, TextOutcome,
-};
-use super::gemini_workflow::{GeminiCardWorkflow, default_output};
+use super::jobs::{ArtifactOutcome, StudyPublishMessage, TextOutcome};
+use super::wiring::{GeminiCardWorkflow, GeminiKeyValidation, interactive_application};
+use crate::application::{CardUseCases, KeyValidation, PublishPhase, PublishProgress};
 use crate::config::{PreferenceStore, Preferences, default_store};
 use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
@@ -75,53 +74,51 @@ struct PendingArtifactJob {
 
 /// Channel adapter that forwards publish-phase changes into the shell's
 /// publish-job mailbox, implementing the UI-neutral [`PublishProgress`] port.
-struct DeckPublishProgress {
-    sender: Sender<DeckPublishMessage>,
+struct StudyPublishProgress {
+    sender: Sender<StudyPublishMessage>,
 }
 
-impl DeckPublishProgress {
+impl StudyPublishProgress {
     /// Build progress reporting around a publish message sender.
-    fn new(sender: Sender<DeckPublishMessage>) -> Self {
+    fn new(sender: Sender<StudyPublishMessage>) -> Self {
         Self { sender }
     }
 }
 
-impl PublishProgress for DeckPublishProgress {
+impl PublishProgress for StudyPublishProgress {
     fn advance(&self, phase: PublishPhase) {
-        let _ = self.sender.send(DeckPublishMessage::Phase(phase));
+        let _ = self.sender.send(StudyPublishMessage::Phase(phase));
     }
 }
 
 /// Stateful coordinator for TUI app transitions and background card workflow execution.
-pub(super) struct Shell<P> {
+pub(super) struct Shell<P, K> {
     app: App,
     engine: Option<SessionEngine>,
     text: Option<PendingJob<TextOutcome>>,
     artifact_job: Option<PendingArtifactJob>,
-    publish_job: Option<PendingJob<DeckPublishMessage>>,
+    publish_job: Option<PendingJob<StudyPublishMessage>>,
     started: Option<Instant>,
     quit_armed_at: Option<Instant>,
-    generator: P,
+    workflow: P,
+    keys: K,
     store: PreferenceStore,
     session: Option<TuiSession>,
     output: PathBuf,
 }
 
-impl Shell<GeminiCardWorkflow> {
+impl Shell<GeminiCardWorkflow, GeminiKeyValidation> {
     /// Build a live card shell for an interactive empty session.
     pub(super) fn new(app: App, session: Option<TuiSession>) -> Result<Self> {
         let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
-        let output = default_output()?;
+        let output = Locations::new(LocationArgs::default(), SystemContext).output()?;
         crate::report::warm_fonts_async();
         let session = match session {
-            Some(session) => Some(session),
-            None => Some(TuiSession::fresh()?),
+            Some(session) => session,
+            None => TuiSession::fresh()?,
         };
-        let costs = session.as_ref().map(TuiSession::cost_scope);
-        let generator = match costs {
-            Some(costs) => GeminiCardWorkflow::new(cache, output.clone()).with_session_costs(costs),
-            None => GeminiCardWorkflow::new(cache, output.clone()),
-        };
+        let costs = session.cost_scope();
+        let (workflow, keys) = interactive_application(cache, output.clone(), costs).into_parts();
         Ok(Self {
             app,
             engine: None,
@@ -130,9 +127,10 @@ impl Shell<GeminiCardWorkflow> {
             publish_job: None,
             started: None,
             quit_armed_at: None,
-            generator,
+            workflow,
+            keys,
             store: default_store(&SystemContext)?,
-            session,
+            session: Some(session),
             output,
         })
     }
@@ -151,9 +149,10 @@ impl Shell<GeminiCardWorkflow> {
     }
 }
 
-impl<P> Shell<P>
+impl<P, K> Shell<P, K>
 where
-    P: CardWorkflow,
+    P: CardUseCases,
+    K: KeyValidation,
 {
     /// Borrow the app model for rendering and pointer geometry.
     pub(super) fn app(&self) -> &App {
@@ -395,19 +394,14 @@ where
         let pair = draft.pair().clone();
         let term = draft.term().to_string();
         let understanding = draft.understanding().to_string();
-        let generator = self.generator.clone();
+        let workflow = self.workflow.clone();
         let job = PendingJob::spawn(move || match artifact {
-            Artifact::Meta => ArtifactOutcome::Meta(generator.generate_meta_in(
-                card,
-                &term,
-                &understanding,
-                &pair,
-            )),
-            Artifact::Scene => ArtifactOutcome::Media(generator.generate_scene_in(card, &draft)),
-            Artifact::Picture => {
-                ArtifactOutcome::Media(generator.generate_picture_in(card, &draft))
+            Artifact::Meta => {
+                ArtifactOutcome::Meta(workflow.generate_meta_in(card, &term, &understanding, &pair))
             }
-            Artifact::Sound => ArtifactOutcome::Media(generator.generate_sound_in(card, &draft)),
+            Artifact::Scene => ArtifactOutcome::Media(workflow.generate_scene_in(card, &draft)),
+            Artifact::Picture => ArtifactOutcome::Media(workflow.generate_picture_in(card, &draft)),
+            Artifact::Sound => ArtifactOutcome::Media(workflow.generate_sound_in(card, &draft)),
         });
         self.artifact_job = Some(PendingArtifactJob {
             job,
@@ -607,9 +601,9 @@ where
             Side::RunUnderstanding => {
                 let raw = RawInputBatch::new(self.app.blob());
                 let known = self.app.pair().known().to_string();
-                let generator = self.generator.clone();
+                let workflow = self.workflow.clone();
                 self.start_text(BusyKind::Understanding, move || {
-                    TextOutcome::Understanding(generator.understand(&raw, known.as_str()))
+                    TextOutcome::Understanding(workflow.understand(&raw, known.as_str()))
                 })?;
             }
             Side::StartGeneration => {
@@ -629,9 +623,9 @@ where
                     return Ok(());
                 };
                 let pair = self.app.pair().clone();
-                let generator = self.generator.clone();
+                let workflow = self.workflow.clone();
                 self.start_text(BusyKind::BulkCorrection, move || {
-                    TextOutcome::BulkCorrection(generator.correct_bulk(
+                    TextOutcome::BulkCorrection(workflow.correct_bulk(
                         &focused,
                         comment.as_str(),
                         &pair,
@@ -642,9 +636,9 @@ where
                 self.persist_preferences(|prefs| prefs.adopt(code));
                 let raw = RawInputBatch::new(self.app.blob());
                 let known = self.app.pair().known().to_string();
-                let generator = self.generator.clone();
+                let workflow = self.workflow.clone();
                 self.start_text(BusyKind::Understanding, move || {
-                    TextOutcome::Understanding(generator.understand(&raw, known.as_str()))
+                    TextOutcome::Understanding(workflow.understand(&raw, known.as_str()))
                 })?;
             }
             Side::RunCardCorrection(comment) => {
@@ -657,13 +651,13 @@ where
                 }
                 let draft = self.app.cards()[slot].clone();
                 let pair = self.app.pair().clone();
-                let generator = self.generator.clone();
+                let workflow = self.workflow.clone();
                 self.start_text(BusyKind::CardCorrection, move || {
-                    let (result, delta) = generator
+                    let (result, delta) = workflow
                         .correct_card_in(slot, &draft, comment.as_str(), &pair)
                         .into_parts();
                     let result = result.and_then(|revision| {
-                        let file = generator.store_card_meta(
+                        let file = workflow.store_card_meta(
                             revision.term(),
                             revision.understanding(),
                             &pair,
@@ -685,9 +679,9 @@ where
                 self.persist_preferences(|prefs| prefs.adopt(code));
             }
             Side::ValidateKey(key) => {
-                let generator = self.generator.clone();
+                let keys = self.keys.clone();
                 self.start_text(BusyKind::CheckingKey, move || {
-                    TextOutcome::KeyCheck(generator.check_key(key.as_str()))
+                    TextOutcome::KeyCheck(keys.check_key(key.as_str()))
                 })?;
             }
             Side::LoadEnvKey => {
@@ -814,12 +808,12 @@ where
             return Ok(());
         }
         let drafts = self.app.cards().to_vec();
-        let generator = self.generator.clone();
+        let workflow = self.workflow.clone();
         let (sender, receiver) = channel();
-        let progress = DeckPublishProgress::new(sender.clone());
+        let progress = StudyPublishProgress::new(sender.clone());
         let handle = thread::spawn(move || {
-            let outcome = generator.publish_deck(&drafts, &progress);
-            let _ = sender.send(DeckPublishMessage::Done(outcome));
+            let outcome = workflow.publish(&drafts, &progress);
+            let _ = sender.send(StudyPublishMessage::Done(outcome));
         });
         self.publish_job = Some(PendingJob {
             receiver,
@@ -857,7 +851,7 @@ where
                 }
             };
             match message {
-                DeckPublishMessage::Phase(phase) => {
+                StudyPublishMessage::Phase(phase) => {
                     let kind = match phase {
                         PublishPhase::Deck => BusyKind::PublishingDeck,
                         PublishPhase::Report => BusyKind::PublishingReport,
@@ -865,7 +859,7 @@ where
                     self.app = self.app.clone().busy_kind_swapped(kind);
                     changed = true;
                 }
-                DeckPublishMessage::Done(result) => {
+                StudyPublishMessage::Done(result) => {
                     let job = self
                         .publish_job
                         .take()
@@ -882,7 +876,8 @@ where
                     }
                     self.app = self.app.clone().busy_finished();
                     match result {
-                        Ok((deck, report, output)) => {
+                        Ok(package) => {
+                            let (deck, report, output) = package.into_paths();
                             self.app = self.app.clone().done_published(deck, report, output);
                             self.engine = None;
                             self.started = None;
@@ -952,13 +947,17 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use super::super::card_workflow::{CardGeneration, DeckPublishing, KeyValidation, TextOutcome};
+    use crate::application::{
+        BulkCorrection, CardCorrection, CardMetaGeneration, CardProduction, CardUseCases,
+        KeyValidation, PublishedStudyPackage, StudyPublishing, Understanding,
+    };
+
+    use super::super::jobs::TextOutcome;
     use super::*;
     use crate::cli::session::{DraftRecord, Phase, SessionRecord, SessionStore};
     use crate::session::{
-        ArtifactFile, BulkCorrection, CandidateRecord, CardCorrection, CardMeta,
-        CardMetaGeneration, CardRevision, GenerationCost, LanguagePair, LearningDetection,
-        RawInputBatch, ScriptDetection, Sense, SenseCorrection, Understanding, Understood,
+        ArtifactFile, CandidateRecord, CardMeta, CardRevision, GenerationCost, LanguagePair,
+        LearningDetection, RawInputBatch, ScriptDetection, Sense, SenseCorrection, Understood,
         WordCandidate, catalog_for_detection,
     };
     use crate::tui::ModalKind;
@@ -971,13 +970,13 @@ mod tests {
     }
 
     #[derive(Clone, Debug, Default)]
-    struct TestCardGenerator {
+    struct TestWorkflow {
         failure: Option<TestFailure>,
         publish_fails: bool,
         calls: Option<Arc<AtomicUsize>>,
     }
 
-    impl TestCardGenerator {
+    impl TestWorkflow {
         fn local() -> Self {
             Self {
                 failure: None,
@@ -1054,7 +1053,7 @@ mod tests {
         }
     }
 
-    impl Understanding for TestCardGenerator {
+    impl Understanding for TestWorkflow {
         fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
             self.ready()?;
             let guess = ScriptDetection.detect(raw.text(), &catalog_for_detection())?;
@@ -1075,7 +1074,7 @@ mod tests {
         }
     }
 
-    impl BulkCorrection for TestCardGenerator {
+    impl BulkCorrection for TestWorkflow {
         fn correct_bulk(
             &self,
             candidate: &WordCandidate,
@@ -1091,7 +1090,7 @@ mod tests {
         }
     }
 
-    impl CardMetaGeneration for TestCardGenerator {
+    impl CardMetaGeneration for TestWorkflow {
         fn generate_card_meta(
             &self,
             term: &str,
@@ -1103,7 +1102,7 @@ mod tests {
         }
     }
 
-    impl CardCorrection for TestCardGenerator {
+    impl CardCorrection for TestWorkflow {
         fn correct_card(
             &self,
             draft: &CardDraft,
@@ -1129,26 +1128,64 @@ mod tests {
         }
     }
 
-    impl CardGeneration for TestCardGenerator {
-        fn generate_scene(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+    impl CardProduction for TestWorkflow {
+        fn generate_meta_in(
+            &self,
+            _slot: usize,
+            term: &str,
+            understanding: &str,
+            pair: &LanguagePair,
+        ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
+            let result = self
+                .generate_card_meta(term, understanding, pair)
+                .and_then(|meta| {
+                    self.store_card_meta(term, understanding, pair, &meta)
+                        .map(|file| (meta, Some(file)))
+                });
+            ArtifactAttempt::unmetered(result)
+        }
+
+        fn generate_scene_in(
+            &self,
+            _slot: usize,
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<ArtifactFile> {
             ArtifactAttempt::unmetered(
                 self.ready()
                     .and_then(|()| local_artifact(draft, Artifact::Scene)),
             )
         }
 
-        fn generate_picture(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+        fn generate_picture_in(
+            &self,
+            _slot: usize,
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<ArtifactFile> {
             ArtifactAttempt::unmetered(
                 self.ready()
                     .and_then(|()| local_artifact(draft, Artifact::Picture)),
             )
         }
 
-        fn generate_sound(&self, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+        fn generate_sound_in(
+            &self,
+            _slot: usize,
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<ArtifactFile> {
             ArtifactAttempt::unmetered(
                 self.ready()
                     .and_then(|()| local_artifact(draft, Artifact::Sound)),
             )
+        }
+
+        fn correct_card_in(
+            &self,
+            _slot: usize,
+            draft: &CardDraft,
+            comment: &str,
+            pair: &LanguagePair,
+        ) -> ArtifactAttempt<CardRevision> {
+            CardCorrection::correct_card_accounted(self, draft, comment, pair)
         }
 
         fn store_card_meta(
@@ -1165,18 +1202,18 @@ mod tests {
         }
     }
 
-    impl DeckPublishing for TestCardGenerator {
-        fn publish_deck(
+    impl StudyPublishing for TestWorkflow {
+        fn publish(
             &self,
             drafts: &[CardDraft],
             progress: &dyn PublishProgress,
-        ) -> Result<(String, String, String)> {
+        ) -> Result<PublishedStudyPackage> {
             self.ready()?;
             if self.publish_fails {
                 anyhow::bail!("publish boom");
             }
             progress.advance(PublishPhase::Report);
-            Ok((
+            Ok(PublishedStudyPackage::new(
                 format!("local-{}-cards.apkg", drafts.len()),
                 format!("local-{}-cards.pdf", drafts.len()),
                 String::from("/tmp/local-out"),
@@ -1184,7 +1221,7 @@ mod tests {
         }
     }
 
-    impl KeyValidation for TestCardGenerator {
+    impl KeyValidation for TestWorkflow {
         fn check_key(&self, _key: &str) -> Result<()> {
             self.ready()
         }
@@ -1212,19 +1249,19 @@ mod tests {
         String::from(trimmed)
     }
 
-    fn shell(app: App) -> Shell<TestCardGenerator> {
-        shell_with(app, TestCardGenerator::local())
+    fn shell(app: App) -> Shell<TestWorkflow, TestWorkflow> {
+        shell_with(app, TestWorkflow::local())
     }
 
-    fn failing_shell(app: App) -> Shell<TestCardGenerator> {
-        shell_with(app, TestCardGenerator::failing())
+    fn failing_shell(app: App) -> Shell<TestWorkflow, TestWorkflow> {
+        shell_with(app, TestWorkflow::failing())
     }
 
-    fn key_rejecting_shell(app: App) -> Shell<TestCardGenerator> {
-        shell_with(app, TestCardGenerator::key_rejecting())
+    fn key_rejecting_shell(app: App) -> Shell<TestWorkflow, TestWorkflow> {
+        shell_with(app, TestWorkflow::key_rejecting())
     }
 
-    fn shell_with(app: App, generator: TestCardGenerator) -> Shell<TestCardGenerator> {
+    fn shell_with(app: App, workflow: TestWorkflow) -> Shell<TestWorkflow, TestWorkflow> {
         Shell {
             app,
             engine: None,
@@ -1233,7 +1270,8 @@ mod tests {
             publish_job: None,
             started: None,
             quit_armed_at: None,
-            generator,
+            workflow: workflow.clone(),
+            keys: workflow,
             store: PreferenceStore::at(
                 std::env::temp_dir().join("kamishibai-shell-test-prefs.json"),
             ),
@@ -1261,9 +1299,10 @@ mod tests {
             .understood(vec![candidate("whilst")])
     }
 
-    fn settle_shell<P>(shell: &mut Shell<P>, max_ticks: usize)
+    fn settle_shell<P, K>(shell: &mut Shell<P, K>, max_ticks: usize)
     where
-        P: CardWorkflow,
+        P: CardUseCases,
+        K: KeyValidation,
     {
         for _ in 0..max_ticks {
             shell.tick().expect("shell tick must succeed");
@@ -1475,7 +1514,7 @@ mod tests {
             .cards_started(drafts)
             .with_modal(ModalKind::ChangeThisCard);
         let mut shell = key_rejecting_shell(app);
-        shell.generator.calls = Some(calls.clone());
+        shell.workflow.calls = Some(calls.clone());
         shell.start_engine();
         settle_shell(&mut shell, 200);
         for _ in 0..5 {
@@ -1557,7 +1596,8 @@ mod tests {
             publish_job: None,
             started: None,
             quit_armed_at: None,
-            generator: TestCardGenerator::local(),
+            workflow: TestWorkflow::local(),
+            keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
             session: Some(session),
             output: home.path().to_path_buf(),
@@ -1704,7 +1744,8 @@ mod tests {
             publish_job: None,
             started: None,
             quit_armed_at: None,
-            generator: TestCardGenerator::counting(calls.clone()),
+            workflow: TestWorkflow::counting(calls.clone()),
+            keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
             session: Some(session),
             output: home.path().to_path_buf(),
@@ -1799,7 +1840,8 @@ mod tests {
             publish_job: None,
             started: None,
             quit_armed_at: None,
-            generator: TestCardGenerator::counting(calls.clone()),
+            workflow: TestWorkflow::counting(calls.clone()),
+            keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
             session: Some(session),
             output: home.path().to_path_buf(),
@@ -2071,7 +2113,7 @@ mod tests {
     fn a_failed_publish_clears_the_engine_instead_of_relooping() {
         let mut shell = shell_with(
             review().understood(vec![candidate("whilst")]),
-            TestCardGenerator::publish_failing(),
+            TestWorkflow::publish_failing(),
         );
         shell
             .handle(AppEvent::Generate)

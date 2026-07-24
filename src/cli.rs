@@ -7,14 +7,14 @@
 
 mod batch;
 mod bridge;
-mod card_workflow;
 mod console;
 mod error;
-mod gemini_workflow;
 mod host;
+mod jobs;
 mod session;
 mod shell;
 mod terminal;
+mod wiring;
 
 use std::path::PathBuf;
 

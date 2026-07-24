@@ -5,7 +5,7 @@ use std::fs;
 use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 
-use super::AccountingHealth;
+use super::cost_accounting::AccountingHealth;
 use crate::generation::artifact_cache::{Cache, PICTURE_REQUESTS_FILE};
 use crate::generation::manga::ImageSource;
 use crate::session::ARTIFACT_ATTEMPT_CEILING;
@@ -96,13 +96,13 @@ fn store_picture_request_counter(cache: &Cache, counter: &PictureRequestCounter)
 }
 
 /// Durably reserve one request before contacting the image provider.
-pub(in crate::cli) fn reserve_picture_request(cache: &Cache) -> Result<()> {
+pub(crate) fn reserve_picture_request(cache: &Cache) -> Result<()> {
     let counter = load_picture_request_counter(cache)?.reserved()?;
     store_picture_request_counter(cache, &counter)
 }
 
 /// Reset the bounded series for an explicit picture regeneration.
-pub(in crate::cli) fn restart_picture_request_series(cache: &Cache) -> Result<()> {
+pub(crate) fn restart_picture_request_series(cache: &Cache) -> Result<()> {
     if cache.exists(PICTURE_REQUESTS_FILE) {
         store_picture_request_counter(cache, &load_picture_request_counter(cache)?.restarted())?;
     }

@@ -1,33 +1,76 @@
-//! Records provider spend in artifact and session journals.
+//! Records provider spend in artifact and workflow ledgers.
 
 use std::cell::RefCell;
 use std::fs;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::cli::session::SessionCostScope;
+use crate::application::GenerationCostLedger;
 use crate::generation::artifact_cache::{
     Cache, ILLUSTRATION_COST_FILE, META_COST_FILE, ROOT_STAGE_LOCK_TIMEOUT, RootStage,
     SCENE_COST_FILE, VOICE_COST_FILE,
 };
 use crate::session::{Artifact, ArtifactAttempt, CostRecord, GenerationCost};
 
-#[derive(Clone, Debug)]
-/// Attributes provider cost to one stable card slot in a session.
-pub(super) struct SessionCostAttribution {
-    scope: SessionCostScope,
+/// Opens cost recorders with optional stable-slot attribution.
+#[derive(Clone)]
+pub(super) struct CostAccounting {
+    ledger: Option<Arc<dyn GenerationCostLedger>>,
+}
+
+impl CostAccounting {
+    /// Bind accounting to an optional workflow ledger.
+    #[must_use]
+    pub(super) fn new(ledger: Option<Arc<dyn GenerationCostLedger>>) -> Self {
+        Self { ledger }
+    }
+
+    /// Open an artifact recorder using isolated accounting health.
+    #[must_use]
+    pub(super) fn recorder(
+        &self,
+        cache: Cache,
+        artifact: Artifact,
+        slot: Option<usize>,
+    ) -> CostRecorder {
+        self.guarded(cache, artifact, slot, AccountingHealth::default())
+    }
+
+    /// Open an artifact recorder sharing one provider operation's health.
+    #[must_use]
+    pub(super) fn guarded(
+        &self,
+        cache: Cache,
+        artifact: Artifact,
+        slot: Option<usize>,
+        health: AccountingHealth,
+    ) -> CostRecorder {
+        let attribution = self
+            .ledger
+            .clone()
+            .zip(slot)
+            .map(|(ledger, slot)| SlotCostAttribution::new(ledger, slot));
+        CostRecorder::guarded(cache, artifact, attribution, health)
+    }
+}
+
+#[derive(Clone)]
+/// Attributes provider cost to one stable card slot.
+pub(super) struct SlotCostAttribution {
+    ledger: Arc<dyn GenerationCostLedger>,
     slot: usize,
 }
 
-impl SessionCostAttribution {
-    /// Bind a session journal to one stable card slot.
-    pub(super) fn new(scope: SessionCostScope, slot: usize) -> Self {
-        Self { scope, slot }
+impl SlotCostAttribution {
+    /// Bind a workflow ledger to one stable card slot.
+    pub(super) fn new(ledger: Arc<dyn GenerationCostLedger>, slot: usize) -> Self {
+        Self { ledger, slot }
     }
 
     fn charge(&self, artifact: Artifact, delta: GenerationCost) -> Result<()> {
-        self.scope.charge(self.slot, artifact, delta).map(|_| ())
+        self.ledger.charge(self.slot, artifact, delta)
     }
 }
 
@@ -77,13 +120,13 @@ impl CostState {
     }
 }
 
-#[derive(Clone, Debug)]
-/// Persists provider usage and optionally journals it to a session slot.
+#[derive(Clone)]
+/// Persists provider usage and optionally journals it to a stable card slot.
 pub(super) struct CostRecorder {
     cache: Cache,
     artifact: Artifact,
     state: CostState,
-    session: Option<SessionCostAttribution>,
+    attribution: Option<SlotCostAttribution>,
 }
 
 impl CostRecorder {
@@ -98,23 +141,23 @@ impl CostRecorder {
     pub(super) fn attributed(
         cache: Cache,
         artifact: Artifact,
-        session: Option<SessionCostAttribution>,
+        attribution: Option<SlotCostAttribution>,
     ) -> Self {
-        Self::guarded(cache, artifact, session, AccountingHealth::default())
+        Self::guarded(cache, artifact, attribution, AccountingHealth::default())
     }
 
     /// Build a recorder sharing accounting health with its provider boundary.
     pub(super) fn guarded(
         cache: Cache,
         artifact: Artifact,
-        session: Option<SessionCostAttribution>,
+        attribution: Option<SlotCostAttribution>,
         accounting: AccountingHealth,
     ) -> Self {
         Self {
             cache,
             artifact,
             state: CostState::new(accounting),
-            session,
+            attribution,
         }
     }
 
@@ -141,8 +184,8 @@ impl CostRecorder {
     }
 
     fn observe(&self, record: &CostRecord) -> Result<()> {
-        if let Some(session) = self.session.as_ref() {
-            session.charge(self.artifact, record.cost())?;
+        if let Some(attribution) = self.attribution.as_ref() {
+            attribution.charge(self.artifact, record.cost())?;
         }
         let aggregate = self
             .state

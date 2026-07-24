@@ -6,13 +6,14 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
+use crate::application::Understanding;
 use crate::generation::artifact_cache::{Cache, META_FILE};
 use crate::languages::catalog;
 
 use super::vault::{CardCell, digest};
 use super::{
     CardMeta, LanguagePair, LearningDetection, LearningGuess, RawInputBatch, ScriptDetection,
-    Sense, Understanding, Understood, WordCandidate,
+    Sense, Understood, WordCandidate,
 };
 
 const UNDERSTANDING_VERSION: &str = "v4";

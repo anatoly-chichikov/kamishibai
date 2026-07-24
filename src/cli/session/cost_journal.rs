@@ -8,6 +8,7 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use super::liveness;
+use crate::application::GenerationCostLedger;
 use crate::generation::artifact_cache::Cache;
 use crate::session::{Artifact, ArtifactCosts, GenerationCost};
 
@@ -71,19 +72,13 @@ pub(in crate::cli) struct SessionCostJournal {
     run: RunIdentity,
 }
 
-/// Late-bindable journal handle shared by a TUI session and cloned generators.
+/// Late-bindable journal handle shared by a TUI session and cloned workflows.
 #[derive(Clone, Debug, Default)]
 pub(in crate::cli) struct SessionCostScope {
     journal: Arc<Mutex<Option<SessionCostJournal>>>,
 }
 
 impl SessionCostScope {
-    /// Build a bound scope directly from one session identity.
-    #[cfg(test)]
-    pub(in crate::cli) fn for_run(root: &Path, id: &str, created: &str) -> Self {
-        Self::bound(SessionCostJournal::new(root, id, created))
-    }
-
     /// Build a scope already bound to one console session run.
     pub(in crate::cli) fn bound(journal: SessionCostJournal) -> Self {
         Self {
@@ -160,6 +155,12 @@ impl SessionCostScope {
             .lock()
             .map_err(|_| anyhow::anyhow!("session cost scope lock is poisoned"))?;
         Ok(current.clone())
+    }
+}
+
+impl GenerationCostLedger for SessionCostScope {
+    fn charge(&self, slot: usize, artifact: Artifact, delta: GenerationCost) -> Result<()> {
+        SessionCostScope::charge(self, slot, artifact, delta).map(|_| ())
     }
 }
 
@@ -324,6 +325,32 @@ mod tests {
             (overlay, journal.directory.exists()),
             (vec![fallback], false),
             "a read-only preclaim overlay created journal authority before the session commit"
+        );
+    }
+
+    #[test]
+    fn the_generation_cost_ledger_contract_survives_a_fresh_scope() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let writer = SessionCostScope::bound(SessionCostJournal::new(
+            home.path(),
+            "durable-id",
+            "created-z",
+        ));
+        let delta = GenerationCost::from_nanos(731);
+        crate::application::GenerationCostLedger::charge(&writer, 2, Artifact::Sound, delta)
+            .expect("ledger charge must persist");
+        let reader = SessionCostScope::bound(SessionCostJournal::new(
+            home.path(),
+            "durable-id",
+            "created-z",
+        ));
+        assert_eq!(
+            reader
+                .absolute(2, ArtifactCosts::default())
+                .expect("fresh scope must read persisted spend")
+                .cost(Artifact::Sound),
+            Some(delta),
+            "a ledger charge disappeared when a fresh session cost scope read the journal"
         );
     }
 }

@@ -54,13 +54,13 @@ use crate::generation::artifact_cache::{
     ROOT_STAGE_LOCK_TIMEOUT, RootStage, RootStageGuard, SCENE_ATTEMPT_FILE, SCENE_COST_FILE,
     SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE, VisualGuard,
 };
+use crate::generation::restart_picture_request_series;
 use crate::generation::visual_revision;
 use crate::languages::catalog;
 use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardCell, CardMetaCache, LanguagePair};
 
 use super::error::{self, usage};
-use super::gemini_workflow::restart_picture_request_series;
 
 /// Port through which `open` hands a checked session to the interactive
 /// surface; the TUI side implements it, so this layer never links the TUI.
@@ -455,7 +455,7 @@ mod tests {
 
     use super::store::WorkerHandle;
     use super::*;
-    use crate::cli::gemini_workflow::reserve_picture_request;
+    use crate::generation::reserve_picture_request;
     use crate::session::{CardMeta, CardMetaCache};
 
     fn record(id: &str, phase: Phase) -> SessionRecord {
