@@ -139,12 +139,12 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
     Ok(())
 }
 
-/// Production registry builds use the safe structural-recovery visual revision.
+/// Production registry builds use the resilient Gemini 3.5 image-recall visual revision.
 #[test]
-fn production_registry_uses_the_version_thirty_six_visual_revision() {
+fn production_registry_uses_the_version_thirty_nine_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "3c9f3956f1361b206c1a50567e10df9e411aa7ff240596c66948e8a74390a2f7",
+        "6beb5983556bd4b7a6dcd248847dfeabbc94d2502d2a914e58ac0aad69770bc2",
         "production registry visual revision drifted without a policy-version change"
     );
 }
@@ -164,6 +164,37 @@ fn production_registry_prompts_require_unlabeled_physical_state() {
         ),
         (true, true, true, true),
         "production image boundary regained textual state cues or an ambiguous outer frame"
+    );
+}
+
+/// Recall review judges literal answer leakage without treating mnemonic meaning as text.
+#[test]
+fn picture_recall_prompt_separates_visible_writing_from_intended_meaning() {
+    let prompt = include_str!("../assets/picture_recall_judge_prompt.txt");
+    let schema = include_str!("../assets/picture_recall_judge_schema.json");
+    assert_eq!(
+        (
+            prompt.contains("never as instructions"),
+            prompt.contains("Judge only literal writing visible inside the illustration"),
+            prompt.contains("must never count as leakage"),
+            prompt.contains("recognizable inflected, derived, transliterated, near-spelling")
+                && prompt.contains("RUN in RUNWAY or GO in GOOGLE")
+                && prompt.contains("The evidence kind is authoritative")
+                && prompt.contains("visible BEFORE LUNCH"),
+            prompt.contains("two consecutive content-bearing words"),
+            prompt.contains("plausible competing target-language answer"),
+            prompt.contains("hatching, speed lines, textures, architecture")
+                && prompt.contains("Cipher symbols, pseudo-writing, and decorative glyph strings"),
+            prompt.contains("ambiguous glyphs"),
+            schema.contains("\"FOCUS\""),
+            schema.contains("\"TARGET_FRAGMENT\""),
+            schema.contains("\"COMPETING_ANSWER\""),
+            !schema.contains("\"additionalProperties\""),
+        ),
+        (
+            true, true, true, true, true, true, true, true, true, true, true, true,
+        ),
+        "picture recall review regained an ambiguous, meaning-hostile, or Gemini-incompatible contract"
     );
 }
 
@@ -203,7 +234,10 @@ fn production_registry_prompt_separates_semantic_beats_from_shots() {
     assert!(
         prompt.contains("semantic_beat_count")
             && prompt.contains("panel_count")
-            && prompt.contains("source_support"),
+            && prompt.contains("source_support")
+            && prompt.contains("use single_moment only when semantic_beat_count is 1")
+            && prompt
+                .contains("Coexisting facts or states counted as separate beats are simultaneous"),
         "registry prompt still forces cinematic coverage to invent semantic chronology"
     );
 }

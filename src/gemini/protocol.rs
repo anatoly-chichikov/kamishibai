@@ -24,10 +24,41 @@ impl Request {
     ) -> Self {
         Self {
             contents: vec![Content {
-                parts: vec![RequestPart { text: Some(text) }],
+                parts: vec![RequestPart {
+                    text: Some(text),
+                    inline_data: None,
+                }],
             }],
             generation_config,
             safety_settings,
+        }
+    }
+
+    /// Return one text-plus-image Gemini request.
+    pub(super) fn vision(
+        text: String,
+        mime_type: &str,
+        data: String,
+        generation_config: GenerationConfig,
+    ) -> Self {
+        Self {
+            contents: vec![Content {
+                parts: vec![
+                    RequestPart {
+                        text: Some(text),
+                        inline_data: None,
+                    },
+                    RequestPart {
+                        text: None,
+                        inline_data: Some(RequestInlineData {
+                            mime_type: String::from(mime_type),
+                            data,
+                        }),
+                    },
+                ],
+            }],
+            generation_config: Some(generation_config),
+            safety_settings: Some(GenerationConfig::image_safety()),
         }
     }
 }
@@ -41,6 +72,15 @@ struct Content {
 struct RequestPart {
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
+    #[serde(rename = "inlineData", skip_serializing_if = "Option::is_none")]
+    inline_data: Option<RequestInlineData>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct RequestInlineData {
+    #[serde(rename = "mimeType")]
+    mime_type: String,
+    data: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -55,10 +95,16 @@ pub(super) struct GenerationConfig {
     response_format: Option<ResponseFormat>,
     #[serde(rename = "responseMimeType", skip_serializing_if = "Option::is_none")]
     response_mime_type: Option<String>,
+    #[serde(rename = "responseSchema", skip_serializing_if = "Option::is_none")]
+    response_schema: Option<Value>,
     #[serde(rename = "maxOutputTokens", skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<u32>,
     #[serde(rename = "thinkingConfig", skip_serializing_if = "Option::is_none")]
     thinking_config: Option<ThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<u8>,
+    #[serde(rename = "mediaResolution", skip_serializing_if = "Option::is_none")]
+    media_resolution: Option<MediaResolution>,
 }
 
 impl GenerationConfig {
@@ -72,8 +118,11 @@ impl GenerationConfig {
             speech_config: None,
             response_format: None,
             response_mime_type: None,
+            response_schema: None,
             max_output_tokens: None,
             thinking_config: None,
+            temperature: None,
+            media_resolution: None,
         }
     }
 
@@ -101,8 +150,11 @@ impl GenerationConfig {
             }),
             response_format: None,
             response_mime_type: None,
+            response_schema: None,
             max_output_tokens: None,
             thinking_config: None,
+            temperature: None,
+            media_resolution: None,
         }
     }
 
@@ -120,8 +172,11 @@ impl GenerationConfig {
                 },
             }),
             response_mime_type: None,
+            response_schema: None,
             max_output_tokens: None,
             thinking_config: None,
+            temperature: None,
+            media_resolution: None,
         })
     }
 
@@ -133,16 +188,37 @@ impl GenerationConfig {
             speech_config: None,
             response_format: None,
             response_mime_type: Some(String::from("application/json")),
+            response_schema: None,
             max_output_tokens: None,
             thinking_config: None,
+            temperature: None,
+            media_resolution: None,
         }
+    }
+
+    /// Return the bounded Gemini 3.5 multimodal recall-review configuration.
+    pub(super) fn recall(schema: Value) -> Result<Self> {
+        validate_response_schema(&schema)?;
+        Ok(Self {
+            response_modalities: None,
+            image_config: None,
+            speech_config: None,
+            response_format: None,
+            response_mime_type: Some(String::from("application/json")),
+            response_schema: Some(schema),
+            max_output_tokens: Some(256),
+            thinking_config: None,
+            temperature: Some(0),
+            media_resolution: Some(MediaResolution::High),
+        })
     }
 
     /// Return this configuration with one Gemini 3 thinking level.
     #[must_use]
     pub(super) fn with_thinking_level(mut self, level: ThinkingLevel) -> Self {
         self.thinking_config = Some(ThinkingConfig {
-            thinking_level: level,
+            thinking_level: Some(level),
+            thinking_budget: None,
         });
         self
     }
@@ -165,8 +241,16 @@ pub(super) enum ThinkingLevel {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 struct ThinkingConfig {
-    #[serde(rename = "thinkingLevel")]
-    thinking_level: ThinkingLevel,
+    #[serde(rename = "thinkingLevel", skip_serializing_if = "Option::is_none")]
+    thinking_level: Option<ThinkingLevel>,
+    #[serde(rename = "thinkingBudget", skip_serializing_if = "Option::is_none")]
+    thinking_budget: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+enum MediaResolution {
+    #[serde(rename = "MEDIA_RESOLUTION_HIGH")]
+    High,
 }
 
 fn validate_response_schema(schema: &Value) -> Result<()> {
@@ -294,6 +378,15 @@ pub(super) struct Response {
     prompt_feedback: Option<PromptFeedback>,
 }
 
+impl Response {
+    /// Return the first candidate's terminal generation reason when Gemini supplies one.
+    pub(super) fn finish_reason(&self) -> Option<&str> {
+        self.candidates
+            .first()
+            .and_then(|candidate| candidate.finish_reason.as_deref())
+    }
+}
+
 /// Token usage returned by one Gemini response.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub(super) struct UsageMetadata {
@@ -310,6 +403,8 @@ pub(super) struct UsageMetadata {
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct Candidate {
     pub(super) content: Option<ResponseContent>,
+    #[serde(rename = "finishReason")]
+    finish_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

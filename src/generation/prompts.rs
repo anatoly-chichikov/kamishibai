@@ -11,8 +11,12 @@ const LAYOUT_SCENE_PROMPT: &str = include_str!("../../assets/layout_scene_prompt
 const LAYOUT_SCENE_SCHEMA: &str = include_str!("../../assets/layout_scene_schema.json");
 const LAYOUT_REGISTRY: &str = include_str!("../../assets/layout_registry_v2.json");
 const DEVICE_REGISTRY: &str = include_str!("../../assets/device_registry_v3.json");
+const PICTURE_RECALL_JUDGE_PROMPT: &str =
+    include_str!("../../assets/picture_recall_judge_prompt.txt");
+const PICTURE_RECALL_JUDGE_SCHEMA: &str =
+    include_str!("../../assets/picture_recall_judge_schema.json");
 const LAYOUT_POLICY_VERSION: &str =
-    "kamishibai-layout-registry-production-v36-safe-structural-recovery";
+    "kamishibai-layout-registry-production-v39-resilient-image-recall";
 static VISUAL_REVISION: OnceLock<String> = OnceLock::new();
 
 /// Return the embedded shared audio prompt template.
@@ -50,6 +54,16 @@ pub fn manga_template() -> &'static str {
     MANGA_TEMPLATE.trim()
 }
 
+/// Return the image-based flashcard answer-leakage review prompt.
+pub(crate) fn picture_recall_judge_prompt() -> &'static str {
+    PICTURE_RECALL_JUDGE_PROMPT.trim()
+}
+
+/// Return the image-based flashcard answer-leakage response schema.
+pub(crate) fn picture_recall_judge_schema() -> &'static str {
+    PICTURE_RECALL_JUDGE_SCHEMA.trim()
+}
+
 /// Render the audio prompt template for one language.
 pub fn render_audio_prompt(language: &str) -> String {
     audio_prompt().replace("{language}", language)
@@ -73,6 +87,10 @@ pub fn visual_revision() -> &'static str {
             digest.update(device_registry().as_bytes());
             digest.update([0]);
             digest.update(manga_template().as_bytes());
+            digest.update([0]);
+            digest.update(picture_recall_judge_prompt().as_bytes());
+            digest.update([0]);
+            digest.update(picture_recall_judge_schema().as_bytes());
             digest
                 .finalize()
                 .iter()

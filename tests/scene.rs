@@ -8,8 +8,8 @@ use std::rc::Rc;
 use anyhow::{Result, bail};
 use image::{DynamicImage, GrayImage, ImageFormat, Luma};
 use kamishibai::generation::manga::{
-    BorderDetector, ImageSource, ImageText, MangaRenderer, Progress, Renderer, SceneText,
-    TextDetector, TextDetectors, TextEnsemble,
+    BorderDetector, ImageSource, ImageText, MangaRenderer, Progress, RecallJudge, RecallReview,
+    Renderer, SceneText, TextDetector, TextDetectors, TextEnsemble,
 };
 use serde_json::{Value, json};
 use tempfile::tempdir;
@@ -39,28 +39,55 @@ impl ImageText for FixedText {
     }
 }
 
-/// Scripted scene OCR for renderer tests.
+/// Scripted image recall judge for renderer tests.
 #[derive(Clone, Debug)]
-struct ScriptedText {
-    values: Rc<RefCell<VecDeque<String>>>,
+struct ScriptedRecall {
+    values: Rc<RefCell<VecDeque<RecallReview>>>,
+    images: Rc<RefCell<Vec<Vec<u8>>>>,
 }
 
-impl ScriptedText {
-    /// Create one scripted scene OCR detector.
+impl ScriptedRecall {
+    /// Create one scripted image recall judge.
     fn new(values: &[&str]) -> Self {
         Self {
             values: Rc::new(RefCell::new(
-                values.iter().map(|value| String::from(*value)).collect(),
+                values.iter().map(|value| recall_review(value)).collect(),
             )),
+            images: Rc::new(RefCell::new(Vec::new())),
         }
     }
 }
 
-impl SceneText for ScriptedText {
-    /// Return the next scripted OCR payload.
-    fn detected(&self, _scene: &Value, _image: &GrayImage) -> Result<String> {
-        Ok(self.values.borrow_mut().pop_front().unwrap_or_default())
+impl RecallJudge for ScriptedRecall {
+    /// Return the next scripted image recall verdict.
+    fn review(&self, image: &[u8]) -> Result<RecallReview> {
+        self.images.borrow_mut().push(image.to_vec());
+        self.values
+            .borrow_mut()
+            .pop_front()
+            .ok_or_else(|| anyhow::anyhow!("recall judge ran out of scripted verdicts"))
     }
+}
+
+fn recall_review(reading: &str) -> RecallReview {
+    if reading.is_empty() || reading == "un un" {
+        return serde_json::from_value(json!({
+            "decision": "ALLOW",
+            "evidence": [],
+            "reason": "No answer-bearing writing is visible"
+        }))
+        .expect("allow recall review must decode");
+    }
+    serde_json::from_value(json!({
+        "decision": "REJECT",
+        "evidence": [{
+            "reading": reading,
+            "location": "upper panel",
+            "kind": "FOCUS"
+        }],
+        "reason": "The hidden answer is legible"
+    }))
+    .expect("reject recall review must decode")
 }
 
 /// Scripted image source for renderer tests.
@@ -121,14 +148,41 @@ impl ImageSource for FailingSource {
     }
 }
 
-/// Scene OCR detector that always reports one local processing failure.
+/// Image recall judge that always reports one infrastructure failure.
 #[derive(Clone, Debug)]
-struct FailingText;
+struct FailingRecall;
 
-impl SceneText for FailingText {
-    /// Return one OCR failure after the raw image has been captured.
-    fn detected(&self, _scene: &Value, _image: &GrayImage) -> Result<String> {
-        bail!("OCR engine failed")
+impl RecallJudge for FailingRecall {
+    /// Return one image recall failure after the raw image has been captured.
+    fn review(&self, _image: &[u8]) -> Result<RecallReview> {
+        bail!("recall judge failed")
+    }
+}
+
+/// Image recall judge that recovers after one infrastructure failure.
+#[derive(Clone, Debug)]
+struct RecoveringRecall {
+    calls: Rc<RefCell<usize>>,
+}
+
+impl RecoveringRecall {
+    /// Create one recall judge that fails once and then allows the image.
+    fn new() -> Self {
+        Self {
+            calls: Rc::new(RefCell::new(0)),
+        }
+    }
+}
+
+impl RecallJudge for RecoveringRecall {
+    /// Fail the first review and allow every later review.
+    fn review(&self, _image: &[u8]) -> Result<RecallReview> {
+        let mut calls = self.calls.borrow_mut();
+        *calls += 1;
+        if *calls == 1 {
+            bail!("recall judge failed once");
+        }
+        Ok(recall_review(""))
     }
 }
 
@@ -1135,13 +1189,15 @@ fn border_detector_counts_closed_panel_regions() {
     );
 }
 
-/// The renderer retries when OCR text is detected before a valid frame appears.
+/// The renderer retries when direct image review finds the hidden answer.
 #[test]
-fn renderer_retries_when_ocr_text_is_detected_before_a_valid_frame_appears() -> Result<()> {
+fn renderer_retries_when_recall_review_finds_the_hidden_answer() -> Result<()> {
+    let recall = ScriptedRecall::new(&["слово", ""]);
+    let reviewed = recall.images.clone();
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
         2,
-        ScriptedText::new(&["слово", ""]),
+        recall,
         BorderDetector::new(2, 6, 240, 1),
     );
     let mut progress = Recorder::default();
@@ -1152,16 +1208,22 @@ fn renderer_retries_when_ocr_text_is_detected_before_a_valid_frame_appears() -> 
                 .color()
                 .has_color(),
             progress.retries,
+            reviewed.borrow().iter().all(|image| {
+                image::guess_format(image).is_ok_and(|format| format == ImageFormat::Png)
+            }),
         ),
         (
             false,
             vec![(
                 String::from("Rendering manga"),
                 1,
-                String::from("OCR detected text: 'слово'"),
+                String::from(
+                    "Recall judge rejected image: The hidden answer is legible: 'слово' at upper panel",
+                ),
             )],
+            true,
         ),
-        "renderer no longer retries when OCR text is detected before a valid frame appears"
+        "renderer did not judge the actual candidate image before accepting it"
     );
     Ok(())
 }
@@ -1172,7 +1234,7 @@ fn renderer_rejects_a_frame_after_the_last_missing_border_attempt() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![GrayImage::from_pixel(16, 16, Luma([0]))]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 2),
     );
     assert_eq!(
@@ -1193,7 +1255,7 @@ fn renderer_rejects_a_multi_panel_frame_when_no_gutter_appears() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![framed(16, 1)]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert_eq!(
@@ -1206,9 +1268,9 @@ fn renderer_rejects_a_multi_panel_frame_when_no_gutter_appears() {
     );
 }
 
-/// The renderer accepts expressive geometry without a straight gutter while retaining validation.
+/// The renderer accepts expressive geometry while retaining recall and border validation.
 #[test]
-fn renderer_accepts_expressive_geometry_while_retaining_ocr_and_border_validation() {
+fn renderer_accepts_expressive_geometry_while_retaining_recall_and_border_validation() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![
             crossed_t_bottom_panels(),
@@ -1216,7 +1278,7 @@ fn renderer_accepts_expressive_geometry_while_retaining_ocr_and_border_validatio
             crossed_t_bottom_panels(),
         ]),
         3,
-        ScriptedText::new(&["word", "", ""]),
+        ScriptedRecall::new(&["word", "", ""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     let mut progress = Recorder::default();
@@ -1225,7 +1287,7 @@ fn renderer_accepts_expressive_geometry_while_retaining_ocr_and_border_validatio
             &active_device_scene(t_bottom_layout_scene("en"), "crossing"),
             &mut progress,
         )
-        .expect("expressive layout must render after OCR and border retries");
+        .expect("expressive layout must render after recall and border retries");
     assert_eq!(
         (rendered.color().has_color(), progress.retries),
         (
@@ -1234,7 +1296,9 @@ fn renderer_accepts_expressive_geometry_while_retaining_ocr_and_border_validatio
                 (
                     String::from("Rendering manga"),
                     1,
-                    String::from("OCR detected text: 'word'"),
+                    String::from(
+                        "Recall judge rejected image: The hidden answer is legible: 'word' at upper panel",
+                    ),
                 ),
                 (
                     String::from("Rendering manga"),
@@ -1243,7 +1307,7 @@ fn renderer_accepts_expressive_geometry_while_retaining_ocr_and_border_validatio
                 ),
             ],
         ),
-        "expressive geometry bypasses OCR or outer border validation"
+        "expressive geometry bypasses recall or outer border validation"
     );
 }
 
@@ -1254,7 +1318,7 @@ fn renderer_rejects_explicit_ordinary_layouts_without_a_gutter() {
         MangaRenderer::new(
             QueueSource::new(vec![framed(16, 1)]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(&device_scene(2, "en", device), &mut Recorder::default())
@@ -1271,23 +1335,23 @@ fn renderer_rejects_explicit_ordinary_layouts_without_a_gutter() {
     );
 }
 
-/// Registry multi-panel geometry retains topology, OCR, and outer-border checks.
+/// Registry multi-panel geometry retains topology, recall, and outer-border checks.
 #[test]
-fn renderer_accepts_registry_geometry_while_retaining_ocr_and_border_validation() {
+fn renderer_accepts_registry_geometry_while_retaining_recall_and_border_validation() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![
-            framed(32, 1),
+            rectangular_panels(),
             GrayImage::from_pixel(32, 32, Luma([0])),
             rectangular_panels(),
         ]),
         3,
-        ScriptedText::new(&["word", "", ""]),
+        ScriptedRecall::new(&["word", "", ""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     let mut progress = Recorder::default();
     let rendered = renderer
         .render(&active_layout_scene(2, "en"), &mut progress)
-        .expect("registry layout must render after OCR and border retries");
+        .expect("registry layout must render after recall and border retries");
     assert_eq!(
         (rendered.color().has_color(), progress.retries),
         (
@@ -1296,7 +1360,9 @@ fn renderer_accepts_registry_geometry_while_retaining_ocr_and_border_validation(
                 (
                     String::from("Rendering manga"),
                     1,
-                    String::from("OCR detected text: 'word'"),
+                    String::from(
+                        "Recall judge rejected image: The hidden answer is legible: 'word' at upper panel",
+                    ),
                 ),
                 (
                     String::from("Rendering manga"),
@@ -1305,7 +1371,7 @@ fn renderer_accepts_registry_geometry_while_retaining_ocr_and_border_validation(
                 ),
             ],
         ),
-        "registry geometry bypasses topology, OCR, or outer border validation"
+        "registry geometry bypasses topology, recall, or outer border validation"
     );
 }
 
@@ -1315,7 +1381,7 @@ fn renderer_rejects_registry_multi_panel_scene_rendered_as_one_splash() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![framed(32, 1)]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert_eq!(
@@ -1328,13 +1394,13 @@ fn renderer_rejects_registry_multi_panel_scene_rendered_as_one_splash() {
     );
 }
 
-/// Production OCR keeps a short Latin hallucination as audit noise instead of rejecting artwork.
+/// Semantic image review keeps unrelated visible writing without rejecting artwork.
 #[test]
-fn renderer_accepts_short_latin_ocr_noise_for_registry_artwork() -> Result<()> {
+fn renderer_accepts_unrelated_visible_writing_for_registry_artwork() -> Result<()> {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![rectangular_panels()]),
         1,
-        ScriptedText::new(&["un un"]),
+        ScriptedRecall::new(&["un un"]),
         BorderDetector::new(2, 6, 240, 1),
     );
     let mut progress = Recorder::default();
@@ -1347,7 +1413,7 @@ fn renderer_accepts_short_latin_ocr_noise_for_registry_artwork() -> Result<()> {
             progress.retries,
         ),
         (false, Vec::new()),
-        "short Latin OCR noise still rejects clean registry artwork"
+        "unrelated visible writing still rejects safe registry artwork"
     );
     Ok(())
 }
@@ -1358,7 +1424,7 @@ fn renderer_accepts_shifted_separator_in_a_multi_panel_registry_page() -> Result
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![shifted_t_bottom_panels()]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     let mut progress = Recorder::default();
@@ -1389,7 +1455,7 @@ fn renderer_accepts_a_steeper_slanted_separator_with_exact_topology() -> Result<
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![shifted_slanted_t_bottom_panels()]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     let rendered = renderer.render(&scene, &mut Recorder::default())?;
@@ -1406,7 +1472,7 @@ fn renderer_accepts_a_mirrored_plain_slant_with_exact_topology() -> Result<()> {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![diagonal_strip_panels([true, true])]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     let rendered = renderer.render(&diagonal_strip_layout_scene("en"), &mut Recorder::default())?;
@@ -1423,7 +1489,7 @@ fn renderer_rejects_a_mixed_direction_diagonal_strip() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![diagonal_strip_panels([true, false])]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert!(
@@ -1441,7 +1507,7 @@ fn renderer_accepts_slanted_rail_and_rejects_straightened_rail() {
         MangaRenderer::new(
             QueueSource::new(vec![slanted_rail_panels(slanted)]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(&slanted_rail_layout_scene("en"), &mut Recorder::default())
@@ -1464,7 +1530,7 @@ fn renderer_rejects_unrelated_near_white_contour_outside_gutter_corridor() {
     let rejected = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         detector,
     )
     .render(
@@ -1522,7 +1588,7 @@ fn topology_accepts_archived_slanted_rail_with_shifted_divider() {
     let accepted = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(6, 24, 240, 0),
     )
     .render(&slanted_rail_layout_scene("en"), &mut Recorder::default())
@@ -1542,7 +1608,7 @@ fn topology_accepts_archived_staggered_grid_with_shifted_dividers() {
     let accepted = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(6, 24, 240, 0),
     )
     .render(&staggered_grid_layout_scene("en"), &mut Recorder::default())
@@ -1562,7 +1628,7 @@ fn renderer_rejects_regular_grid_for_declared_staggered_grid() {
     let rejected = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .render(&staggered_grid_layout_scene("en"), &mut Recorder::default())
@@ -1582,7 +1648,7 @@ fn topology_accepts_archived_crossing_with_closed_registered_regions() {
     let accepted = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(6, 24, 240, 0),
     )
     .render(&scene, &mut Recorder::default())
@@ -1602,7 +1668,7 @@ fn renderer_rejects_slanted_layout_without_visible_crossing_content() {
     let rejected = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .render(
@@ -1625,7 +1691,7 @@ fn topology_accepts_archived_crossing_with_declared_merged_pair() {
     let accepted = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(6, 24, 240, 0),
     )
     .render(&scene, &mut Recorder::default())
@@ -1645,7 +1711,7 @@ fn topology_rejects_archived_closed_panel_declared_as_open_frame() {
     let rejected = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(6, 24, 240, 0),
     )
     .render(&scene, &mut Recorder::default())
@@ -1665,7 +1731,7 @@ fn renderer_accepts_visibly_open_frame_with_registered_companions() {
     let accepted = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .render(
@@ -1692,7 +1758,7 @@ fn renderer_rejects_open_frame_with_a_blank_source_region() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert_eq!(
@@ -1714,7 +1780,7 @@ fn renderer_rejects_t_grid_for_a_declared_horizontal_triptych() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![upper_t_bottom_panels()]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert_eq!(
@@ -1739,7 +1805,7 @@ fn renderer_rejects_extra_panel_and_straight_split_for_declared_diagonal() {
         MangaRenderer::new(
             QueueSource::new(vec![image]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(&diagonal_layout_scene("en"), &mut Recorder::default())
@@ -1758,7 +1824,7 @@ fn renderer_accepts_shifted_inset_diagonal_with_declared_direction() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![inset_diagonal_panels(false)]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert!(
@@ -1775,7 +1841,7 @@ fn renderer_rejects_shifted_inset_diagonal_with_mirrored_direction() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![inset_diagonal_panels(true)]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert!(
@@ -1794,7 +1860,7 @@ fn renderer_ignores_sub_two_percent_separator_region() {
     let accepted = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .render(&active_layout_scene(2, "en"), &mut Recorder::default())
@@ -1814,7 +1880,7 @@ fn renderer_rejects_registry_sized_extra_region() {
     let rejected = MangaRenderer::new(
         QueueSource::new(vec![image]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .render(&active_layout_scene(2, "en"), &mut Recorder::default())
@@ -1832,7 +1898,7 @@ fn renderer_rejects_shifted_diagonal_without_declared_crossing() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![inset_diagonal_panels(false)]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert!(
@@ -1862,7 +1928,7 @@ fn renderer_accepts_strong_diagonal_and_rejects_straightened_split() {
         MangaRenderer::new(
             QueueSource::new(vec![image]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(&scene, &mut Recorder::default())
@@ -1910,7 +1976,7 @@ fn renderer_sends_compiled_prose_without_planning_metadata() {
     MangaRenderer::new(
         source,
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .render(&canonical, &mut Recorder::default())
@@ -1949,7 +2015,7 @@ fn renderer_cannot_call_provider_before_prompt_compilation_succeeds() {
     let failed = MangaRenderer::new(
         source,
         1,
-        ScriptedText::new(&[]),
+        ScriptedRecall::new(&[]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .render(&json!({}), &mut Recorder::default())
@@ -1971,7 +2037,7 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
     let renderer = MangaRenderer::new(
         source,
         2,
-        ScriptedText::new(&["word", ""]),
+        ScriptedRecall::new(&["word", ""]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .with_attempt_archive(temporary.path().to_path_buf());
@@ -1982,6 +2048,12 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
     )?)?;
     let second = serde_json::from_str::<Value>(&std::fs::read_to_string(
         temporary.path().join("attempt-0002.json"),
+    )?)?;
+    let first_recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.recall.json"),
+    )?)?;
+    let second_recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0002.recall.json"),
     )?)?;
     let first_scene = serde_json::from_str::<Value>(&std::fs::read_to_string(
         temporary.path().join("attempt-0001.scene.json"),
@@ -2004,9 +2076,16 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
                 second["scene"].as_str(),
                 first["prompt"].as_str(),
                 second["prompt"].as_str(),
+                first["recall"].as_str(),
+                second["recall"].as_str(),
             ],
             [first_scene == scene, second_scene == scene],
             [first_prompt == sent[0], second_prompt == sent[1]],
+            [
+                first_recall["decision"].as_str(),
+                first_recall["evidence"][0]["reading"].as_str(),
+                second_recall["decision"].as_str(),
+            ],
             [
                 first["status"].as_str(),
                 first["category"].as_str(),
@@ -2022,13 +2101,18 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
                 Some("attempt-0002.scene.json"),
                 Some("attempt-0001.prompt.txt"),
                 Some("attempt-0002.prompt.txt"),
+                Some("attempt-0001.recall.json"),
+                Some("attempt-0002.recall.json"),
             ],
             [true; 2],
             [true; 2],
+            [Some("REJECT"), Some("word"), Some("ALLOW")],
             [
                 Some("rejected"),
-                Some("ocr"),
-                Some("OCR detected text: 'word'"),
+                Some("recall_text"),
+                Some(
+                    "Recall judge rejected image: The hidden answer is legible: 'word' at upper panel",
+                ),
                 Some("accepted"),
                 Some("accepted"),
             ],
@@ -2046,7 +2130,7 @@ fn renderer_archives_provider_failures_without_raw_images() -> Result<()> {
     let failed = MangaRenderer::new(
         FailingSource,
         1,
-        ScriptedText::new(&[]),
+        ScriptedRecall::new(&[]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .with_attempt_archive(temporary.path().to_path_buf())
@@ -2096,15 +2180,15 @@ fn renderer_archives_provider_failures_without_raw_images() -> Result<()> {
     Ok(())
 }
 
-/// OCR failures replace the captured image's pending verdict with a terminal local error.
+/// Recall judge failures replace the captured image's pending verdict with an infrastructure error.
 #[test]
-fn renderer_archives_ocr_failures_after_raw_capture() -> Result<()> {
+fn renderer_archives_recall_judge_failures_after_raw_capture() -> Result<()> {
     let temporary = tempdir()?;
     let scene = active_layout_scene(2, "en");
     let failed = MangaRenderer::new(
         QueueSource::new(vec![rectangular_panels()]),
         1,
-        FailingText,
+        FailingRecall,
         BorderDetector::new(2, 6, 240, 1),
     )
     .with_attempt_archive(temporary.path().to_path_buf())
@@ -2121,31 +2205,114 @@ fn renderer_archives_ocr_failures_after_raw_capture() -> Result<()> {
             verdict["category"].as_str(),
             verdict["reason"]
                 .as_str()
-                .is_some_and(|reason| reason.contains("OCR")),
+                .is_some_and(|reason| reason.contains("recall judge")),
             verdict["image"].as_str(),
+            verdict["recall"].is_null(),
         ),
         (
             true,
             true,
             Some("error"),
-            Some("ocr"),
+            Some("recall_judge"),
             true,
             Some("attempt-0001.png"),
+            true,
         ),
-        "an OCR failure left a captured production attempt pending"
+        "a recall judge failure was retried or left a production attempt pending"
     );
     Ok(())
 }
 
-/// Color rejection runs before OCR and records its own retry reason.
+/// A recovered recall review reuses its archived image instead of paying for another render.
 #[test]
-fn renderer_rejects_color_before_ocr() {
-    let text = ScriptedText::new(&["ocr must not run"]);
-    let pending = text.values.clone();
+fn renderer_reuses_archived_image_after_recall_judge_failure() -> Result<()> {
+    let temporary = tempdir()?;
+    let scene = active_layout_scene(2, "en");
+    let source = CapturingSource::new(vec![rectangular_panels()]);
+    let recall = RecoveringRecall::new();
+    let renderer = MangaRenderer::new(
+        source.clone(),
+        1,
+        recall.clone(),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let first = renderer.render(&scene, &mut Recorder::default()).is_err();
+    let second = renderer.render(&scene, &mut Recorder::default()).is_ok();
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            first,
+            second,
+            source.prompts.borrow().len(),
+            *recall.calls.borrow(),
+            verdict["status"].as_str(),
+            verdict["recall"].as_str(),
+            temporary.path().join("attempt-0002.json").exists(),
+        ),
+        (
+            true,
+            true,
+            1,
+            2,
+            Some("accepted"),
+            Some("attempt-0001.recall.json"),
+            false,
+        ),
+        "recall recovery generated a replacement image or abandoned its immutable attempt"
+    );
+    Ok(())
+}
+
+/// A process restart reuses an image whose pending review never wrote a verdict.
+#[test]
+fn renderer_reuses_pending_archived_image_after_process_restart() -> Result<()> {
+    let temporary = tempdir()?;
+    let scene = active_layout_scene(2, "en");
+    let source = CapturingSource::new(vec![rectangular_panels()]);
+    let first = MangaRenderer::new(
+        source.clone(),
+        1,
+        FailingRecall,
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .render(&scene, &mut Recorder::default())
+    .is_err();
+    let verdict_path = temporary.path().join("attempt-0001.json");
+    let mut verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(&verdict_path)?)?;
+    verdict["status"] = json!("pending");
+    verdict["category"] = json!("pending");
+    verdict["reason"] = json!("");
+    std::fs::write(&verdict_path, serde_json::to_vec_pretty(&verdict)?)?;
+    let second = MangaRenderer::new(
+        source.clone(),
+        1,
+        ScriptedRecall::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .render(&scene, &mut Recorder::default())
+    .is_ok();
+    assert_eq!(
+        (first, second, source.prompts.borrow().len()),
+        (true, true, 1),
+        "a pending archived image was replaced after a process restart"
+    );
+    Ok(())
+}
+
+/// Color rejection runs before paid recall review and records its own retry reason.
+#[test]
+fn renderer_rejects_color_before_recall_review() {
+    let recall = ScriptedRecall::new(&["recall must not run"]);
+    let pending = recall.values.clone();
     let renderer = MangaRenderer::new(
         FixedBytes::new(include_bytes!("fixtures/monochrome/color-linger.jpg")),
         1,
-        text,
+        recall,
         BorderDetector::new(2, 6, 240, 1),
     );
     let mut progress = Recorder::default();
@@ -2163,17 +2330,19 @@ fn renderer_rejects_color_before_ocr() {
                 String::from("Color detected"),
             )],
         ),
-        "color validation no longer runs before OCR with a distinct rejection"
+        "color validation no longer runs before paid recall review"
     );
 }
 
 /// Registry one-panel geometry retries an image that contains an internal gutter.
 #[test]
 fn renderer_retries_registry_one_panel_geometry_with_an_internal_gutter() -> Result<()> {
+    let recall = ScriptedRecall::new(&["", ""]);
+    let pending = recall.values.clone();
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![guttered(32, 1, 2), framed(32, 1)]),
         2,
-        ScriptedText::new(&["", ""]),
+        recall,
         BorderDetector::new(2, 6, 240, 1),
     );
     let mut progress = Recorder::default();
@@ -2184,6 +2353,7 @@ fn renderer_retries_registry_one_panel_geometry_with_an_internal_gutter() -> Res
                 .color()
                 .has_color(),
             progress.retries,
+            pending.borrow().len(),
         ),
         (
             false,
@@ -2192,8 +2362,9 @@ fn renderer_retries_registry_one_panel_geometry_with_an_internal_gutter() -> Res
                 1,
                 String::from("Unexpected internal gutter in one-panel layout"),
             )],
+            1,
         ),
-        "registry one-panel geometry no longer retries an internal gutter"
+        "structurally rejected artwork still consumed a paid recall review"
     );
     Ok(())
 }
@@ -2204,7 +2375,7 @@ fn renderer_rejects_registry_one_panel_geometry_split_diagonally() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![diagonal_panels()]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert_eq!(
@@ -2229,7 +2400,7 @@ fn renderer_accepts_fully_materialized_structural_devices_with_valid_topology() 
         MangaRenderer::new(
             QueueSource::new(vec![image]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(
@@ -2251,7 +2422,7 @@ fn renderer_rejects_crossing_with_an_unbroken_gutter() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![shifted_t_bottom_panels()]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert_eq!(
@@ -2280,7 +2451,7 @@ fn renderer_rejects_straightened_slanted_crossing_with_same_region_count() {
         MangaRenderer::new(
             QueueSource::new(vec![image]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(
@@ -2305,7 +2476,7 @@ fn renderer_uses_polygon_centers_for_crossing_region_proof() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![crossed_t_bottom_panels()]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert!(
@@ -2327,7 +2498,7 @@ fn renderer_rejects_crossing_anchors_outside_the_registry_canvas() {
         MangaRenderer::new(
             QueueSource::new(vec![crossed_t_bottom_panels()]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(&scene, &mut Recorder::default())
@@ -2352,7 +2523,7 @@ fn renderer_rejects_unrelated_panel_loss_for_structural_devices() {
         MangaRenderer::new(
             QueueSource::new(vec![image]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(
@@ -2377,7 +2548,7 @@ fn renderer_rejects_structural_devices_without_materialized_relations() {
         MangaRenderer::new(
             QueueSource::new(vec![shifted_t_bottom_panels()]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(&scene, &mut Recorder::default())
@@ -2390,9 +2561,9 @@ fn renderer_rejects_structural_devices_without_materialized_relations() {
     );
 }
 
-/// A crossing still rejects OCR and a missing outer frame before accepting connected panels.
+/// A crossing still rejects answer leakage and a missing outer frame before accepting connected panels.
 #[test]
-fn renderer_keeps_ocr_and_outer_border_checks_for_crossing() {
+fn renderer_keeps_recall_and_outer_border_checks_for_crossing() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![
             crossed_t_bottom_panels(),
@@ -2400,7 +2571,7 @@ fn renderer_keeps_ocr_and_outer_border_checks_for_crossing() {
             crossed_t_bottom_panels(),
         ]),
         3,
-        ScriptedText::new(&["word", "", ""]),
+        ScriptedRecall::new(&["word", "", ""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     let mut progress = Recorder::default();
@@ -2409,7 +2580,7 @@ fn renderer_keeps_ocr_and_outer_border_checks_for_crossing() {
             &active_device_scene(t_bottom_layout_scene("en"), "crossing"),
             &mut progress,
         )
-        .expect("valid crossing must render after OCR and border retries");
+        .expect("valid crossing must render after recall and border retries");
     assert_eq!(
         (rendered.color().has_color(), progress.retries),
         (
@@ -2418,7 +2589,9 @@ fn renderer_keeps_ocr_and_outer_border_checks_for_crossing() {
                 (
                     String::from("Rendering manga"),
                     1,
-                    String::from("OCR detected text: 'word'"),
+                    String::from(
+                        "Recall judge rejected image: The hidden answer is legible: 'word' at upper panel",
+                    ),
                 ),
                 (
                     String::from("Rendering manga"),
@@ -2427,7 +2600,7 @@ fn renderer_keeps_ocr_and_outer_border_checks_for_crossing() {
                 ),
             ],
         ),
-        "crossing bypasses OCR or outer border validation"
+        "crossing bypasses recall or outer border validation"
     );
 }
 
@@ -2438,7 +2611,7 @@ fn renderer_rejects_two_missing_regions_for_structural_devices() {
         MangaRenderer::new(
             QueueSource::new(vec![framed(32, 1)]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(
@@ -2467,7 +2640,7 @@ fn renderer_keeps_exact_topology_for_non_merging_devices() {
         MangaRenderer::new(
             QueueSource::new(vec![framed(32, 1)]),
             1,
-            ScriptedText::new(&[""]),
+            ScriptedRecall::new(&[""]),
             BorderDetector::new(2, 6, 240, 1),
         )
         .render(
@@ -2494,7 +2667,7 @@ fn renderer_keeps_one_panel_devices_as_one_region() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![diagonal_panels()]),
         1,
-        ScriptedText::new(&[""]),
+        ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 1),
     );
     assert_eq!(

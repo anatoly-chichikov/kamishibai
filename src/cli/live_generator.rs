@@ -25,10 +25,9 @@ use crate::generation::artifact_cache::{
     PICTURE_REQUESTS_FILE, ROOT_STAGE_LOCK_TIMEOUT, RootStage, SCENE_ATTEMPT_FILE, SCENE_COST_FILE,
     SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE, VisualGuard,
 };
-use crate::generation::manga::TextEnsemble;
 use crate::generation::manga::{
-    BorderDetector, Illustration, ImageSource, MangaRenderRejection, MangaRenderer,
-    Progress as SceneProgress, TextDetector,
+    BorderDetector, HiddenRecall, Illustration, ImageSource, MangaRenderRejection, MangaRenderer,
+    Progress as SceneProgress, RecallCard, RecallJudge, RecallReview, ShownRecall,
 };
 use crate::generation::speech::Audio;
 use crate::generation::{
@@ -48,8 +47,7 @@ use crate::vocabulary::VocabularyEntry;
 const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
 const IMAGE_ATTEMPTS_PER_ARTIFACT: usize = 1;
 
-type LiveText = TextEnsemble<TextDetector>;
-type LiveIllustration = Illustration<SceneComposer<MeteredGemini>, MangaRenderer<LiveText>>;
+type LiveIllustration = Illustration<SceneComposer<MeteredGemini>, MangaRenderer<GeminiRecall>>;
 
 /// Where the live generator looks for the Gemini API key.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -258,23 +256,43 @@ impl LiveCardGenerator {
         scene_attempt: u8,
         accounting: AccountingHealth,
     ) -> Result<LiveIllustration> {
-        let item = self.catalog.item(draft.pair().learning())?;
+        let meta = draft
+            .meta()
+            .ok_or_else(|| anyhow!("meta must be ready before illustration"))?;
+        let learning = self.catalog.item(draft.pair().learning())?;
+        let known = self.catalog.item(draft.pair().known())?;
         let client = self.client()?;
         let scene_client = MeteredGemini::new(client.clone(), scene_costs);
+        let recall = GeminiRecall::new(
+            client.clone(),
+            RecallCard::new(
+                ShownRecall::new(
+                    known.prompt,
+                    meta.source_sentence(),
+                    meta.source_highlight(),
+                    meta.source_hint(),
+                ),
+                HiddenRecall::new(
+                    learning.prompt.clone(),
+                    draft.term(),
+                    meta.target_sentence(),
+                ),
+            ),
+            picture_costs.clone(),
+        );
         let picture_client = RequestCountingImage::guarded(
             MeteredGemini::new(client, picture_costs),
             cache.clone(),
             accounting,
         );
-        let text = manga_text(item.ocr.as_str(), self.cache.as_path());
         let renderer =
-            production_renderer(picture_client, text, BorderDetector::new(6, 24, 240, 10));
+            production_renderer(picture_client, recall, BorderDetector::new(6, 24, 240, 10));
         let renderer = renderer.with_attempt_archive(cache.filepath(IMAGE_ATTEMPTS_DIRECTORY)?);
         Ok(Illustration::new(
             cache,
             SceneComposer::new(
                 scene_client,
-                item.prompt.as_str(),
+                learning.prompt.as_str(),
                 draft.term(),
                 scene_attempt,
             ),
@@ -834,7 +852,7 @@ fn persisted_local_rejections(path: &Path) -> Result<LocalImageRejections> {
 enum LocalImageRejection {
     Color,
     Topology,
-    Ocr,
+    RecallText,
     Border,
     LegacyGutter,
     Other,
@@ -845,7 +863,7 @@ impl LocalImageRejection {
         match category {
             "color" => Self::Color,
             "topology" => Self::Topology,
-            "ocr" => Self::Ocr,
+            "ocr" | "recall_text" => Self::RecallText,
             "border" => Self::Border,
             "legacy_gutter" => Self::LegacyGutter,
             _ => Self::Other,
@@ -1367,6 +1385,42 @@ impl Speaker for MeteredGemini {
     }
 }
 
+#[derive(Clone, Debug)]
+struct GeminiRecall {
+    client: GeminiClient<HttpTransport>,
+    card: RecallCard,
+    costs: CostRecorder,
+}
+
+impl GeminiRecall {
+    fn new(client: GeminiClient<HttpTransport>, card: RecallCard, costs: CostRecorder) -> Self {
+        Self {
+            client,
+            card,
+            costs,
+        }
+    }
+}
+
+impl RecallJudge for GeminiRecall {
+    fn review(&self, image: &[u8]) -> Result<RecallReview> {
+        self.client
+            .review_recall_observed(&self.card, image_mime(image)?, image, |cost| {
+                self.costs.push(cost)
+            })
+    }
+}
+
+fn image_mime(image: &[u8]) -> Result<&'static str> {
+    match image::guess_format(image)? {
+        image::ImageFormat::Jpeg => Ok("image/jpeg"),
+        image::ImageFormat::Png => Ok("image/png"),
+        image::ImageFormat::WebP => Ok("image/webp"),
+        image::ImageFormat::Gif => Ok("image/gif"),
+        format => bail!("unsupported recall-review image format {format:?}"),
+    }
+}
+
 pub(super) fn default_output() -> Result<PathBuf> {
     Locations::new(LocationArgs::default(), SystemContext).output()
 }
@@ -1483,19 +1537,12 @@ fn release_stamp() -> Result<String> {
         .format(parse_time("[year]-[month]-[day]_[hour][minute][second]")?.as_slice())?)
 }
 
-fn manga_text(value: &str, cache: &Path) -> TextEnsemble<TextDetector> {
-    let mut detectors = vec![TextDetector::cached(60, value, cache)];
-    if !value.split('+').any(|language| language == "jpn") {
-        detectors.push(TextDetector::cached(60, "jpn", cache));
-    }
-    TextEnsemble::new(detectors)
-}
-
-fn production_renderer<C, D>(client: C, text: D, border: BorderDetector) -> MangaRenderer<D>
+fn production_renderer<C, J>(client: C, recall: J, border: BorderDetector) -> MangaRenderer<J>
 where
     C: ImageSource + 'static,
+    J: RecallJudge,
 {
-    MangaRenderer::new(client, IMAGE_ATTEMPTS_PER_ARTIFACT, text, border)
+    MangaRenderer::new(client, IMAGE_ATTEMPTS_PER_ARTIFACT, recall, border)
 }
 
 #[cfg(test)]
@@ -1510,7 +1557,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::generation::manga::{Renderer, SceneText, Translator};
+    use crate::generation::manga::{Renderer, Translator};
     use crate::session::ArtifactCosts;
 
     #[derive(Clone, Debug)]
@@ -1584,6 +1631,26 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug)]
+    struct PaidImageSource {
+        costs: CostRecorder,
+        image: Vec<u8>,
+    }
+
+    impl ImageSource for PaidImageSource {
+        fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
+            self.costs.push(CostRecord::new(
+                "gemini-3.1-flash-image",
+                1,
+                40,
+                10,
+                50,
+                GenerationCost::from_nanos(900_000),
+            ))?;
+            Ok(self.image.clone())
+        }
+    }
+
     impl ImageSource for CountingImageSource {
         fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
             self.calls.set(self.calls.get() + 1);
@@ -1592,20 +1659,51 @@ mod tests {
     }
 
     #[derive(Clone, Copy, Debug)]
-    struct RejectingText;
+    struct RejectingRecall;
 
-    impl SceneText for RejectingText {
-        fn detected(&self, _scene: &Value, _image: &GrayImage) -> Result<String> {
-            Ok(String::from("detected text"))
+    impl RecallJudge for RejectingRecall {
+        fn review(&self, _image: &[u8]) -> Result<RecallReview> {
+            Ok(serde_json::from_value(serde_json::json!({
+                "decision": "REJECT",
+                "evidence": [{
+                    "reading": "ANSWER",
+                    "location": "center",
+                    "kind": "FOCUS"
+                }],
+                "reason": "The focus answer is visible"
+            }))?)
         }
     }
 
     #[derive(Clone, Copy, Debug)]
-    struct AcceptingText;
+    struct AcceptingRecall;
 
-    impl SceneText for AcceptingText {
-        fn detected(&self, _scene: &Value, _image: &GrayImage) -> Result<String> {
-            Ok(String::new())
+    impl RecallJudge for AcceptingRecall {
+        fn review(&self, _image: &[u8]) -> Result<RecallReview> {
+            Ok(serde_json::from_value(serde_json::json!({
+                "decision": "ALLOW",
+                "evidence": [],
+                "reason": "No answer-bearing writing is visible"
+            }))?)
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct PaidRecall {
+        costs: CostRecorder,
+    }
+
+    impl RecallJudge for PaidRecall {
+        fn review(&self, _image: &[u8]) -> Result<RecallReview> {
+            self.costs.push(CostRecord::new(
+                "gemini-3.5-flash-lite",
+                1,
+                400,
+                25,
+                425,
+                GenerationCost::from_nanos(50_000),
+            ))?;
+            AcceptingRecall.review(&[])
         }
     }
 
@@ -1726,7 +1824,7 @@ mod tests {
             CountingImageSource::new(image_bytes(GrayImage::from_pixel(16, 16, Luma([0]))));
         let renderer = production_renderer(
             source.clone(),
-            RejectingText,
+            RejectingRecall,
             BorderDetector::new(2, 6, 240, 2),
         );
         let result = renderer.render(&renderable_scene(), &mut NoopProgress);
@@ -1752,7 +1850,7 @@ mod tests {
             MangaRenderer::new(
                 RequestCountingImage::new(scene_source.clone(), scene_cache.clone()),
                 1,
-                AcceptingText,
+                AcceptingRecall,
                 BorderDetector::new(2, 6, 240, 2),
             ),
         );
@@ -1762,7 +1860,7 @@ mod tests {
             MangaRenderer::new(
                 RequestCountingImage::new(cache_source.clone(), cache_cache.clone()),
                 1,
-                AcceptingText,
+                AcceptingRecall,
                 BorderDetector::new(2, 6, 240, 2),
             ),
         );
@@ -1772,7 +1870,7 @@ mod tests {
             MangaRenderer::new(
                 RequestCountingImage::new(recompose_source.clone(), recompose_cache.clone()),
                 1,
-                AcceptingText,
+                AcceptingRecall,
                 BorderDetector::new(2, 6, 240, 2),
             ),
         );
@@ -2034,7 +2132,7 @@ mod tests {
         let renderer = MangaRenderer::new(
             RequestCountingImage::new(source.clone(), cache.clone()),
             1,
-            AcceptingText,
+            AcceptingRecall,
             BorderDetector::new(2, 6, 240, 2),
         );
         let result = renderer.render(&renderable_scene(), &mut NoopProgress);
@@ -2053,7 +2151,7 @@ mod tests {
         let renderer = MangaRenderer::new(
             RequestCountingImage::new(source.clone(), cache.clone()),
             1,
-            RejectingText,
+            RejectingRecall,
             BorderDetector::new(2, 6, 240, 2),
         );
         let result = renderer.render(&renderable_scene(), &mut NoopProgress);
@@ -2072,7 +2170,7 @@ mod tests {
         let renderer = MangaRenderer::new(
             RequestCountingImage::new(source.clone(), cache.clone()),
             1,
-            AcceptingText,
+            AcceptingRecall,
             BorderDetector::new(2, 6, 240, 2),
         );
         let result = renderer.render(&renderable_scene(), &mut NoopProgress);
@@ -2080,6 +2178,46 @@ mod tests {
             (result.is_ok(), source.calls(), picture_requests(&cache)),
             (true, 1, 1),
             "an accepted image response was not counted exactly once"
+        );
+    }
+
+    #[test]
+    fn picture_cost_includes_recall_review_without_inflating_image_request_count() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new("visual", home.path());
+        let costs = CostRecorder::new(cache.clone(), Artifact::Picture);
+        let source = PaidImageSource {
+            costs: costs.clone(),
+            image: valid_image(),
+        };
+        let renderer = MangaRenderer::new(
+            RequestCountingImage::new(source, cache.clone()),
+            1,
+            PaidRecall {
+                costs: costs.clone(),
+            },
+            BorderDetector::new(2, 6, 240, 2),
+        );
+        let result = renderer.render(&renderable_scene(), &mut NoopProgress);
+        let record = load_cost_record(&cache, Artifact::Picture)
+            .expect("picture cost must decode")
+            .expect("picture cost must exist");
+        assert_eq!(
+            (
+                result.is_ok(),
+                picture_requests(&cache),
+                record.requests(),
+                record.model().to_string(),
+                record.cost(),
+            ),
+            (
+                true,
+                1,
+                2,
+                String::from("gemini-3.1-flash-image,gemini-3.5-flash-lite"),
+                GenerationCost::from_nanos(950_000),
+            ),
+            "recall review cost was hidden from Picture or counted as another image generation"
         );
     }
 
@@ -2152,20 +2290,20 @@ mod tests {
     }
 
     #[test]
-    fn two_ocr_rejections_keep_the_third_attempt_on_the_current_scene() {
+    fn two_recall_text_rejections_keep_the_third_attempt_on_the_current_scene() {
         let recovery = PictureRecovery::default();
         let path = Path::new("cards/local-rejections");
         let first = recovery
             .prepare(path, 0)
             .expect("first attempt must prepare");
         recovery
-            .observe(path, 0, Some(LocalImageRejection::Ocr))
+            .observe(path, 0, Some(LocalImageRejection::RecallText))
             .expect("first local rejection must record");
         let second = recovery
             .prepare(path, 1)
             .expect("second attempt must prepare");
         recovery
-            .observe(path, 1, Some(LocalImageRejection::Ocr))
+            .observe(path, 1, Some(LocalImageRejection::RecallText))
             .expect("second local rejection must record");
         let third = recovery
             .prepare(path, 2)
@@ -2173,7 +2311,7 @@ mod tests {
         assert_eq!(
             (first, second, third),
             (false, false, false),
-            "OCR failures discarded a scene that could still render without text"
+            "recall-text failures discarded a scene that could still render without text"
         );
     }
 
@@ -2548,15 +2686,15 @@ mod tests {
             .prepare(path, 0)
             .expect("first attempt must prepare");
         recovery
-            .observe(path, 0, Some(LocalImageRejection::Ocr))
+            .observe(path, 0, Some(LocalImageRejection::RecallText))
             .expect("first outcome must record");
         recovery.prepare(path, 1).expect("retry must prepare");
         recovery
-            .observe(path, 1, Some(LocalImageRejection::Ocr))
+            .observe(path, 1, Some(LocalImageRejection::RecallText))
             .expect("retry outcome must record");
         let reset = recovery.prepare(path, 0).expect("reroll must reset");
         recovery
-            .observe(path, 0, Some(LocalImageRejection::Ocr))
+            .observe(path, 0, Some(LocalImageRejection::RecallText))
             .expect("new first outcome must record");
         assert_eq!(
             (

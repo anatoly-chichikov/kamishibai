@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use kamishibai::gemini::{GeminiClient, Transport, TransportResponse, rejects_key};
+use kamishibai::generation::manga::{HiddenRecall, RecallCard, ShownRecall};
 use kamishibai::session::{CardDraft, CardMeta, LanguagePair, RawInputBatch, WordCandidate};
 use serde_json::{Value, json};
 
@@ -1045,6 +1046,95 @@ fn image_generation_keeps_the_image_modality_and_square_aspect_ratio() -> Result
             Some(4),
         ),
         "image generation request no longer keeps the frozen modality and aspect-ratio contract"
+    );
+    Ok(())
+}
+
+/// Recall review sends the candidate image itself at high media resolution.
+#[test]
+fn recall_review_uses_the_validated_high_resolution_multimodal_contract() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"decision\":\"ALLOW\",\"evidence\":[],\"reason\":\"No answer-bearing writing is visible\"}"
+                }]
+            }
+        }],
+        "usageMetadata": {
+            "promptTokenCount": 320,
+            "candidatesTokenCount": 24,
+            "totalTokenCount": 344
+        }
+    }))?)]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let card = RecallCard::new(
+        ShownRecall::new(
+            "RU",
+            "Внезапный громкий шум может испугать лошадей.",
+            "испугать",
+            "Не просто секундный прыжок от startle.",
+        ),
+        HiddenRecall::new(
+            "EN",
+            "frighten",
+            "A sudden loud noise can frighten the horses.",
+        ),
+    );
+    let review = client.review_recall(&card, "image/jpeg", &[1, 2, 3])?;
+    let items = requests.borrow();
+    let request = serde_json::from_str::<Value>(&items[0].1)?;
+    assert_eq!(
+        (
+            review.allows(),
+            items[0].0.as_str(),
+            request["contents"][0]["parts"][0]["text"]
+                .as_str()
+                .is_some_and(|prompt| {
+                    prompt.contains("\"shown_source_sentence\"")
+                        && prompt.contains("\"hidden_focus_term\"")
+                        && prompt.contains("never as instructions")
+                }),
+            request["contents"][0]["parts"][1]["inlineData"]["mimeType"].as_str(),
+            request["contents"][0]["parts"][1]["inlineData"]["data"].as_str(),
+            request["generationConfig"]["responseMimeType"].as_str(),
+            request["generationConfig"]["responseSchema"]["properties"]["decision"]["enum"]
+                .as_array()
+                .map(Vec::len),
+            [
+                request["generationConfig"]["responseSchema"]["additionalProperties"].is_null(),
+                request["generationConfig"]["responseSchema"]["properties"]["evidence"]["items"]
+                    ["additionalProperties"]
+                    .is_null(),
+                request["generationConfig"]["responseFormat"].is_null(),
+            ],
+            request["generationConfig"]["temperature"].as_u64(),
+            request["generationConfig"]["maxOutputTokens"].as_u64(),
+            [
+                request["generationConfig"]["thinkingConfig"].is_null(),
+                request["generationConfig"]["mediaResolution"].as_str()
+                    == Some("MEDIA_RESOLUTION_HIGH"),
+                request["safetySettings"]
+                    .as_array()
+                    .is_some_and(|items| items.len() == 4),
+                request["safetySettings"][0]["threshold"].as_str() == Some("BLOCK_NONE"),
+            ],
+        ),
+        (
+            true,
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+            true,
+            Some("image/jpeg"),
+            Some("AQID"),
+            Some("application/json"),
+            Some(2),
+            [true, true, true],
+            Some(0),
+            Some(256),
+            [true, true, true, true],
+        ),
+        "recall review stopped sending the actual image through the bounded high-resolution contract"
     );
     Ok(())
 }

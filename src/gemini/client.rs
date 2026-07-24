@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::generation::layout::{LayoutRegistry, feature_prompt_data, render_feature_prompt};
+use crate::generation::manga::{RecallCard, RecallReview};
 use crate::generation::prompts::layout_scene_prompt;
 use crate::languages::catalog;
 use crate::session::{
@@ -17,7 +18,7 @@ use crate::session::{
     Sense, SenseCorrection, Understood, WordCandidate,
 };
 
-use super::codec::decode;
+use super::codec::{decode, encode};
 use super::cost::priced;
 use super::prompts::{
     render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
@@ -44,9 +45,12 @@ const META_MODEL: &str = TEXT_MODEL;
 const FEATURE_MODEL: &str = "gemini-3.5-flash-lite";
 const SCENE_MODEL: &str = TEXT_MODEL;
 const IMAGE_MODEL: &str = "gemini-3.1-flash-image";
+const RECALL_MODEL: &str = "gemini-3.5-flash-lite";
 const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
 const FEATURE_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const COMPOSER_MAX_OUTPUT_TOKENS: u32 = 8_192;
+const RECALL_MAX_OUTPUT_TOKENS: u32 = 256;
+const RECALL_RECOVERY_MAX_OUTPUT_TOKENS: u32 = 512;
 const VOICES: [&str; 30] = [
     "Achernar",
     "Achird",
@@ -460,6 +464,62 @@ where
         )?;
         observe(metered.cost.clone())?;
         image_from_response(&metered.response)
+    }
+
+    /// Review one candidate illustration for answer-bearing visible writing.
+    pub fn review_recall(
+        &self,
+        card: &RecallCard,
+        mime_type: &str,
+        image: &[u8],
+    ) -> Result<RecallReview> {
+        self.review_recall_observed(card, mime_type, image, |_| Ok(()))
+    }
+
+    /// Review one candidate illustration and report usage before verdict decoding.
+    pub(crate) fn review_recall_observed<F>(
+        &self,
+        card: &RecallCard,
+        mime_type: &str,
+        image: &[u8],
+        mut observe: F,
+    ) -> Result<RecallReview>
+    where
+        F: FnMut(CostRecord) -> Result<()>,
+    {
+        let prompt = card.prompt()?;
+        let schema = card.schema()?;
+        let data = encode(image);
+        let request = |tokens| -> Result<Request> {
+            Ok(Request::vision(
+                prompt.clone(),
+                mime_type,
+                data.clone(),
+                GenerationConfig::recall(schema.clone())?.with_max_output_tokens(tokens),
+            ))
+        };
+        let mut metered =
+            self.request_metered(RECALL_MODEL, &request(RECALL_MAX_OUTPUT_TOKENS)?)?;
+        observe(metered.cost.clone())?;
+        if metered.response.finish_reason() == Some("MAX_TOKENS") {
+            metered =
+                self.request_metered(RECALL_MODEL, &request(RECALL_RECOVERY_MAX_OUTPUT_TOKENS)?)?;
+            observe(metered.cost.clone())?;
+            if metered.response.finish_reason() == Some("MAX_TOKENS") {
+                bail!(
+                    "Gemini recall review exceeded the adaptive {}-token output ceiling",
+                    RECALL_RECOVERY_MAX_OUTPUT_TOKENS
+                );
+            }
+        }
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!(
+                "No text content in Gemini recall review response: {}",
+                diagnosis(&metered.response)
+            );
+        }
+        card.review(unfence(raw.trim()))
     }
 
     /// Generate one PCM audio payload from the configured TTS model.
@@ -1113,6 +1173,178 @@ mod tests {
             ),
             (true, Some(1), Some(525_000)),
             "invalid correction JSON discarded the billed Gemini request cost"
+        );
+    }
+
+    #[test]
+    fn invalid_recall_verdict_still_reports_multimodal_request_cost() {
+        let transport = FakeTransport::new(vec![body(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "{not valid recall verdict"}]
+                }
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 536,
+                "candidatesTokenCount": 76,
+                "thoughtsTokenCount": 0,
+                "totalTokenCount": 612
+            }
+        }))]);
+        let client = GeminiClient::new("key", transport);
+        let card = RecallCard::new(
+            crate::generation::manga::ShownRecall::new(
+                "Russian",
+                "Она выглядела испуганной.",
+                "испуганной",
+                "О сильном страхе.",
+            ),
+            crate::generation::manga::HiddenRecall::new(
+                "English",
+                "frightened",
+                "She looked frightened.",
+            ),
+        );
+        let mut costs = Vec::new();
+        let result = client.review_recall_observed(&card, "image/jpeg", &[1, 2, 3], |cost| {
+            costs.push(cost);
+            Ok(())
+        });
+        assert_eq!(
+            (
+                result.is_err(),
+                costs.first().map(CostRecord::requests),
+                costs.first().map(|cost| cost.cost().nanos()),
+            ),
+            (true, Some(1), Some(350_800)),
+            "invalid recall JSON discarded the billed multimodal Gemini request cost"
+        );
+    }
+
+    #[test]
+    fn max_tokens_recall_review_retries_once_with_more_room_and_observes_both_costs() {
+        let transport = FakeTransport::new(vec![
+            body(json!({
+                "candidates": [{
+                    "content": {"parts": [{"text": "{\"decision\":\"ALLOW\""}]},
+                    "finishReason": "MAX_TOKENS"
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 500,
+                    "candidatesTokenCount": 256,
+                    "thoughtsTokenCount": 0,
+                    "totalTokenCount": 756
+                }
+            })),
+            body(json!({
+                "candidates": [{
+                    "content": {
+                        "parts": [{
+                            "text": "{\"decision\":\"ALLOW\",\"evidence\":[],\"reason\":\"No answer-bearing writing is visible\"}"
+                        }]
+                    },
+                    "finishReason": "STOP"
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 500,
+                    "candidatesTokenCount": 40,
+                    "thoughtsTokenCount": 0,
+                    "totalTokenCount": 540
+                }
+            })),
+        ]);
+        let requests = transport.requests.clone();
+        let client = GeminiClient::new("key", transport);
+        let card = RecallCard::new(
+            crate::generation::manga::ShownRecall::new(
+                "Russian",
+                "Она выглядела испуганной.",
+                "испуганной",
+                "О сильном страхе.",
+            ),
+            crate::generation::manga::HiddenRecall::new(
+                "English",
+                "frightened",
+                "She looked frightened.",
+            ),
+        );
+        let mut costs = Vec::new();
+        let review = client.review_recall_observed(&card, "image/jpeg", &[1, 2, 3], |cost| {
+            costs.push(cost);
+            Ok(())
+        });
+        let payloads = requests
+            .borrow()
+            .iter()
+            .map(|request| serde_json::from_str::<Value>(request))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("recall requests must decode");
+        assert_eq!(
+            (
+                review.is_ok_and(|review| review.allows()),
+                payloads.len(),
+                payloads[0]["generationConfig"]["maxOutputTokens"].as_u64(),
+                payloads[1]["generationConfig"]["maxOutputTokens"].as_u64(),
+                payloads[0]["contents"][0]["parts"][1]["inlineData"]["data"].as_str(),
+                payloads[1]["contents"][0]["parts"][1]["inlineData"]["data"].as_str(),
+                costs.iter().map(CostRecord::requests).collect::<Vec<_>>(),
+                costs.iter().map(|cost| cost.cost().nanos()).sum::<u64>(),
+            ),
+            (
+                true,
+                2,
+                Some(256),
+                Some(512),
+                Some("AQID"),
+                Some("AQID"),
+                vec![1, 1],
+                1_040_000,
+            ),
+            "MAX_TOKENS recovery changed the image, exceeded two reviews, or hid billed usage"
+        );
+    }
+
+    #[test]
+    fn persistent_max_tokens_recall_review_stops_after_one_adaptive_retry() {
+        let response = || {
+            body(json!({
+                "candidates": [{
+                    "content": {"parts": [{"text": "{\"decision\":\"ALLOW\""}]},
+                    "finishReason": "MAX_TOKENS"
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 500,
+                    "candidatesTokenCount": 256,
+                    "thoughtsTokenCount": 0,
+                    "totalTokenCount": 756
+                }
+            }))
+        };
+        let transport = FakeTransport::new(vec![response(), response()]);
+        let requests = transport.requests.clone();
+        let client = GeminiClient::new("key", transport);
+        let card = RecallCard::new(
+            crate::generation::manga::ShownRecall::new(
+                "Russian",
+                "Она выглядела испуганной.",
+                "испуганной",
+                "О сильном страхе.",
+            ),
+            crate::generation::manga::HiddenRecall::new(
+                "English",
+                "frightened",
+                "She looked frightened.",
+            ),
+        );
+        let mut costs = Vec::new();
+        let result = client.review_recall_observed(&card, "image/jpeg", &[1, 2, 3], |cost| {
+            costs.push(cost);
+            Ok(())
+        });
+        assert_eq!(
+            (result.is_err(), requests.borrow().len(), costs.len()),
+            (true, 2, 2),
+            "persistent MAX_TOKENS escaped the single adaptive review retry"
         );
     }
 

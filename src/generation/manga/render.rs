@@ -13,13 +13,16 @@ use serde_json::Value;
 use serde_json::json;
 
 use super::monochrome::color_detected;
-use super::{BorderDetector, ImageSource, Progress, Renderer, SceneText, compile_image_prompt};
+use super::{
+    BorderDetector, ImageSource, Progress, RecallJudge, RecallReview, Renderer,
+    compile_image_prompt,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RenderRejection {
     Color(String),
     Topology(String),
-    Ocr(String),
+    RecallText(String),
     Border(String),
     LegacyGutter(String),
     Other(String),
@@ -34,8 +37,8 @@ impl RenderRejection {
         Self::Topology(String::from(reason))
     }
 
-    fn ocr(reason: String) -> Self {
-        Self::Ocr(reason)
+    fn recall_text(reason: String) -> Self {
+        Self::RecallText(reason)
     }
 
     fn border(reason: String) -> Self {
@@ -54,7 +57,7 @@ impl RenderRejection {
         match self {
             Self::Color(reason)
             | Self::Topology(reason)
-            | Self::Ocr(reason)
+            | Self::RecallText(reason)
             | Self::Border(reason)
             | Self::LegacyGutter(reason)
             | Self::Other(reason) => reason.as_str(),
@@ -65,7 +68,7 @@ impl RenderRejection {
         match self {
             Self::Color(_) => "color",
             Self::Topology(_) => "topology",
-            Self::Ocr(_) => "ocr",
+            Self::RecallText(_) => "recall_text",
             Self::Border(_) => "border",
             Self::LegacyGutter(_) => "legacy_gutter",
             Self::Other(_) => "other",
@@ -109,24 +112,24 @@ impl std::error::Error for MangaRenderRejection {}
 
 /// Render one scene through Gemini and reject invalid manga images.
 #[derive(Clone)]
-pub struct MangaRenderer<D> {
+pub struct MangaRenderer<J> {
     client: Rc<dyn ImageSource>,
     retries: usize,
-    text: D,
+    judge: J,
     border: BorderDetector,
     attempts: Option<PathBuf>,
 }
 
-impl<D> MangaRenderer<D> {
+impl<J> MangaRenderer<J> {
     /// Create one validating manga renderer.
-    pub fn new<C>(client: C, retries: usize, text: D, border: BorderDetector) -> Self
+    pub fn new<C>(client: C, retries: usize, judge: J, border: BorderDetector) -> Self
     where
         C: ImageSource + 'static,
     {
         Self {
             client: Rc::new(client),
             retries,
-            text,
+            judge,
             border,
             attempts: None,
         }
@@ -139,9 +142,9 @@ impl<D> MangaRenderer<D> {
     }
 }
 
-impl<D> std::fmt::Debug for MangaRenderer<D>
+impl<J> std::fmt::Debug for MangaRenderer<J>
 where
-    D: std::fmt::Debug,
+    J: std::fmt::Debug,
 {
     /// Render one stable debug view for test diagnostics.
     fn fmt(&self, item: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -149,16 +152,16 @@ where
         debug
             .field("client", &"ImageSource")
             .field("retries", &self.retries)
-            .field("text", &self.text)
+            .field("judge", &self.judge)
             .field("border", &self.border);
         debug.field("attempts", &self.attempts);
         debug.finish()
     }
 }
 
-impl<D> Renderer for MangaRenderer<D>
+impl<J> Renderer for MangaRenderer<J>
 where
-    D: SceneText,
+    J: RecallJudge,
 {
     /// Return one rendered image for the scene.
     fn render(&self, scene: &Value, progress: &mut dyn Progress) -> Result<DynamicImage> {
@@ -170,26 +173,38 @@ where
         let prompt = compile_image_prompt(scene)?;
         let mut rejection = RenderRejection::other(String::new());
         for attempt in 0..self.retries {
-            let mut journal = self
+            let recovered = self
                 .attempts
                 .as_deref()
-                .map(|directory| AttemptJournal::start(directory, scene, prompt.as_str()))
-                .transpose()?;
-            let bytes = match self.client.image(prompt.as_str()) {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    let reason = error.to_string();
-                    record_attempt(journal.as_ref(), "error", "provider", reason.as_str())?;
-                    return Err(error);
+                .map(|directory| AttemptJournal::resume_recall(directory, scene, prompt.as_str()))
+                .transpose()?
+                .flatten();
+            let (mut journal, bytes) = match recovered {
+                Some((journal, bytes)) => (Some(journal), bytes),
+                None => {
+                    let mut journal = self
+                        .attempts
+                        .as_deref()
+                        .map(|directory| AttemptJournal::start(directory, scene, prompt.as_str()))
+                        .transpose()?;
+                    let bytes = match self.client.image(prompt.as_str()) {
+                        Ok(bytes) => bytes,
+                        Err(error) => {
+                            let reason = error.to_string();
+                            record_attempt(journal.as_ref(), "error", "provider", reason.as_str())?;
+                            return Err(error);
+                        }
+                    };
+                    if let Some(journal) = journal.as_mut()
+                        && let Err(error) = journal.capture_image(bytes.as_slice())
+                    {
+                        let reason = error.to_string();
+                        let _ = journal.record("error", "archive", reason.as_str());
+                        return Err(error);
+                    }
+                    (journal, bytes)
                 }
             };
-            if let Some(journal) = journal.as_mut()
-                && let Err(error) = journal.capture_image(bytes.as_slice())
-            {
-                let reason = error.to_string();
-                let _ = journal.record("error", "archive", reason.as_str());
-                return Err(error);
-            }
             let decoded = image::load_from_memory(bytes.as_slice());
             let image = match decoded {
                 Ok(image) => image,
@@ -215,26 +230,6 @@ where
                 continue;
             }
             let gray = image.into_luma8();
-            let found = match self.text.detected(scene, &gray) {
-                Ok(found) => found,
-                Err(error) => {
-                    let reason = error.to_string();
-                    record_attempt(journal.as_ref(), "error", "ocr", reason.as_str())?;
-                    return Err(error);
-                }
-            };
-            let text_rejected = significant_registry_text(found.as_str());
-            if text_rejected {
-                rejection = RenderRejection::ocr(format!("OCR detected text: '{found}'"));
-                record_attempt(
-                    journal.as_ref(),
-                    "rejected",
-                    rejection.category(),
-                    rejection.reason(),
-                )?;
-                progress.retry("Rendering manga", attempt + 1, rejection.reason());
-                continue;
-            }
             let failed = self.border.borders(&gray);
             if !failed.is_empty() {
                 rejection = RenderRejection::border(format!(
@@ -286,16 +281,34 @@ where
                 progress.retry("Rendering manga", attempt + 1, rejection.reason());
                 continue;
             }
-            if found.is_empty() {
-                record_attempt(journal.as_ref(), "accepted", "accepted", "")?;
-            } else {
+            let review = match self.judge.review(bytes.as_slice()) {
+                Ok(review) => review,
+                Err(error) => {
+                    let reason = error.to_string();
+                    record_attempt(journal.as_ref(), "error", "recall_judge", reason.as_str())?;
+                    return Err(error);
+                }
+            };
+            if let Some(journal) = journal.as_mut()
+                && let Err(error) = journal.capture_recall(&review)
+            {
+                let reason = error.to_string();
+                let _ = journal.record("error", "archive", reason.as_str());
+                return Err(error);
+            }
+            if let Some(reason) = review.rejection() {
+                rejection =
+                    RenderRejection::recall_text(format!("Recall judge rejected image: {reason}"));
                 record_attempt(
                     journal.as_ref(),
-                    "accepted",
-                    "accepted",
-                    format!("Ignored low-signal OCR: '{found}'").as_str(),
+                    "rejected",
+                    rejection.category(),
+                    rejection.reason(),
                 )?;
+                progress.retry("Rendering manga", attempt + 1, rejection.reason());
+                continue;
             }
+            record_attempt(journal.as_ref(), "accepted", "accepted", "")?;
             return Ok(DynamicImage::ImageLuma8(gray));
         }
         Err(MangaRenderRejection::new(self.retries, rejection).into())
@@ -306,6 +319,7 @@ where
 struct AttemptJournal {
     sequence: usize,
     image: Option<String>,
+    recall: Option<String>,
     scene: String,
     verdict: PathBuf,
 }
@@ -337,11 +351,69 @@ impl AttemptJournal {
         let journal = Self {
             sequence,
             image: None,
+            recall: None,
             scene: scene_name,
             verdict: directory.join(format!("attempt-{sequence:04}.json")),
         };
         journal.record("pending", "pending", "")?;
         Ok(journal)
+    }
+
+    fn resume_recall(
+        directory: &Path,
+        scene: &Value,
+        prompt: &str,
+    ) -> Result<Option<(Self, Vec<u8>)>> {
+        if !directory.is_dir() {
+            return Ok(None);
+        }
+        let latest = fs::read_dir(directory)?
+            .filter_map(std::result::Result::ok)
+            .filter_map(|entry| {
+                let name = entry.file_name().into_string().ok()?;
+                let sequence = name
+                    .strip_prefix("attempt-")?
+                    .strip_suffix(".json")?
+                    .parse::<usize>()
+                    .ok()?;
+                Some((sequence, entry.path()))
+            })
+            .max_by_key(|(sequence, _)| *sequence);
+        let Some((sequence, verdict)) = latest else {
+            return Ok(None);
+        };
+        let value = serde_json::from_slice::<Value>(fs::read(&verdict)?.as_slice())?;
+        let status = value.get("status").and_then(Value::as_str);
+        let category = value.get("category").and_then(Value::as_str);
+        let retryable_error = status == Some("error") && category == Some("recall_judge");
+        let retryable_pending = status == Some("pending")
+            && category == Some("pending")
+            && value.get("image").and_then(Value::as_str).is_some();
+        if !(retryable_error || retryable_pending)
+            || !value.get("recall").is_none_or(Value::is_null)
+        {
+            return Ok(None);
+        }
+        let image = attempt_member(&value, "image")?;
+        let scene_name = attempt_member(&value, "scene")?;
+        let prompt_name = attempt_member(&value, "prompt")?;
+        let archived_scene = serde_json::from_slice::<Value>(
+            fs::read(directory.join(scene_name.as_str()))?.as_slice(),
+        )?;
+        let archived_prompt = fs::read_to_string(directory.join(prompt_name))?;
+        if archived_scene != *scene || archived_prompt != prompt {
+            return Ok(None);
+        }
+        let bytes = fs::read(directory.join(image.as_str()))?;
+        let journal = Self {
+            sequence,
+            image: Some(image),
+            recall: None,
+            scene: scene_name,
+            verdict,
+        };
+        journal.record("pending", "pending", "")?;
+        Ok(Some((journal, bytes)))
     }
 
     fn capture_image(&mut self, bytes: &[u8]) -> Result<()> {
@@ -362,6 +434,20 @@ impl AttemptJournal {
         self.record("pending", "pending", "")
     }
 
+    fn capture_recall(&mut self, review: &RecallReview) -> Result<()> {
+        let recall = format!("attempt-{:04}.recall.json", self.sequence);
+        let directory = self
+            .verdict
+            .parent()
+            .ok_or_else(|| anyhow!("attempt verdict has no parent directory"))?;
+        let mut staged = tempfile::NamedTempFile::new_in(directory)?;
+        serde_json::to_writer_pretty(staged.as_file_mut(), review)?;
+        staged.as_file().sync_all()?;
+        staged.persist(directory.join(recall.as_str()))?;
+        self.recall = Some(recall);
+        self.record("pending", "pending", "")
+    }
+
     fn record(&self, status: &str, category: &str, reason: &str) -> Result<()> {
         let directory = self
             .verdict
@@ -373,6 +459,7 @@ impl AttemptJournal {
             &json!({
                 "sequence": self.sequence,
                 "image": self.image,
+                "recall": self.recall,
                 "scene": self.scene,
                 "prompt": format!("attempt-{:04}.prompt.txt", self.sequence),
                 "status": status,
@@ -384,6 +471,18 @@ impl AttemptJournal {
         staged.persist(self.verdict.as_path())?;
         Ok(())
     }
+}
+
+fn attempt_member(value: &Value, key: &str) -> Result<String> {
+    let name = value
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("attempt verdict has no {key} member"))?;
+    let path = Path::new(name);
+    if path.file_name().and_then(|member| member.to_str()) != Some(name) {
+        return Err(anyhow!("attempt verdict {key} member is not a filename"));
+    }
+    Ok(String::from(name))
 }
 
 fn record_attempt(
@@ -1870,17 +1969,6 @@ fn registry_bounds(panel: &Value) -> Option<RegistryBounds> {
     })
 }
 
-fn significant_registry_text(found: &str) -> bool {
-    found
-        .split(|value: char| !value.is_alphanumeric())
-        .any(|token| {
-            !token.is_empty()
-                && (token.chars().any(|value| value.is_numeric())
-                    || !token.is_ascii()
-                    || token.len() >= 3)
-        })
-}
-
 fn requires_gutter(scene: &Value, panels: usize) -> bool {
     if panels <= 1 {
         return false;
@@ -1915,7 +2003,7 @@ mod tests {
             [
                 RenderRejection::color("color"),
                 RenderRejection::topology("topology"),
-                RenderRejection::ocr(String::from("ocr")),
+                RenderRejection::recall_text(String::from("recall text")),
                 RenderRejection::border(String::from("border")),
                 RenderRejection::legacy_gutter("legacy gutter"),
                 RenderRejection::other(String::from("other")),
@@ -1952,7 +2040,7 @@ mod tests {
             [
                 RenderRejection::color("color"),
                 RenderRejection::topology("topology"),
-                RenderRejection::ocr(String::from("ocr")),
+                RenderRejection::recall_text(String::from("recall text")),
                 RenderRejection::border(String::from("border")),
                 RenderRejection::legacy_gutter("legacy gutter"),
                 RenderRejection::other(String::from("other")),
@@ -1961,7 +2049,7 @@ mod tests {
             [
                 "color",
                 "topology",
-                "ocr",
+                "recall_text",
                 "border",
                 "legacy_gutter",
                 "other"

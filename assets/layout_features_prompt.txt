@@ -68,6 +68,7 @@ You do not know which page layouts exist and must not recommend geometry. First 
 Rules:
 
 - semantic_beat_count counts only irreducible facts or changes needed to preserve the sentence. Never turn a prediction into an outcome, a test into later success, a possibility into a fact, or an ordinary state into a new consequence.
+- semantic_relation is constrained by semantic_beat_count: use single_moment only when semantic_beat_count is 1; with two to four beats use sequence, simultaneous, contrast, or convergence. Coexisting facts or states counted as separate beats are simultaneous, while extra camera views alone never create a new semantic beat.
 - coverage_audit contains exactly four entries ordered by panel_count 1, 2, 3, 4. At every count, name the concrete new candidate view and its exact sentence support; when support is missing, name the precise missing support rather than dismissing the view generically.
 - Exactly one coverage_audit verdict is selected, and its panel_count equals the top-level panel_count. Every lower count is insufficient. Every higher count is redundant_or_unsupported.
 - Evaluate the fourth candidate as seriously as the first three. Never mark it redundant_or_unsupported merely because three views already feel conventional, balanced, or sufficient; identify the specific candidate fourth view and test its source support first.

@@ -359,6 +359,7 @@ impl LayoutRegistry {
     pub(crate) fn decode_features(&self, raw: &str) -> Result<SceneFeatures> {
         let mut value = serde_json::from_str::<Value>(raw)
             .context("layout feature extractor returned invalid JSON")?;
+        normalize_semantic_relation(&mut value)?;
         normalize_coverage_audit(&mut value)?;
         normalize_shots(&mut value)?;
         normalize_camera_arc(&mut value)?;
@@ -2441,6 +2442,29 @@ fn validate_camera_progression(
     Ok(())
 }
 
+fn normalize_semantic_relation(value: &mut Value) -> Result<()> {
+    let root = root_object(value)?;
+    let semantic_count = usize_field(root, "semantic_beat_count")?;
+    let semantic_relation = string_field(root, "semantic_relation")?;
+    let panel_relation = string_field(root, "panel_relation")?;
+    let transition = string_field(root, "transition_type")?;
+    if semantic_count <= 1
+        || semantic_relation != "single_moment"
+        || panel_relation != "simultaneous"
+        || transition != "aspect_to_aspect"
+    {
+        return Ok(());
+    }
+    value
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("layout feature response must be an object"))?
+        .insert(
+            String::from("semantic_relation"),
+            Value::String(String::from("simultaneous")),
+        );
+    Ok(())
+}
+
 fn normalize_camera_arc(value: &mut Value) -> Result<()> {
     let root = root_object(value)?;
     let arc = object_field(root, "camera_arc")?;
@@ -4119,6 +4143,46 @@ mod tests {
             ),
             (true, true, true),
             "cross-field feature contradictions reached layout filtering"
+        );
+    }
+
+    #[test]
+    fn feature_decoder_repairs_a_multi_beat_simultaneous_single_moment_label() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut features = feature_json(2, "simultaneous", "dominant_end", LEFT_TO_RIGHT);
+        features["semantic_relation"] = json!("single_moment");
+        features["decomposition_mode"] = json!("wide_detail_pair");
+        features["transition_type"] = json!("aspect_to_aspect");
+        let decoded = registry
+            .decode_features(&features.to_string())
+            .expect("the narrow simultaneous-relation repair must decode");
+        assert_eq!(
+            decoded.value["semantic_relation"],
+            json!("simultaneous"),
+            "coexisting semantic beats kept the model's contradictory single-moment label"
+        );
+    }
+
+    #[test]
+    fn feature_decoder_rejects_single_moment_labels_outside_the_narrow_repair() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut non_simultaneous = feature_json(2, "sequence", "dominant_end", LEFT_TO_RIGHT);
+        non_simultaneous["semantic_relation"] = json!("single_moment");
+        non_simultaneous["decomposition_mode"] = json!("wide_detail_pair");
+        non_simultaneous["transition_type"] = json!("aspect_to_aspect");
+        let mut non_aspect = feature_json(2, "simultaneous", "dominant_end", LEFT_TO_RIGHT);
+        non_aspect["semantic_relation"] = json!("single_moment");
+        non_aspect["decomposition_mode"] = json!("wide_detail_pair");
+        non_aspect["transition_type"] = json!("subject_to_subject");
+        assert_eq!(
+            (
+                registry
+                    .decode_features(&non_simultaneous.to_string())
+                    .is_err(),
+                registry.decode_features(&non_aspect.to_string()).is_err(),
+            ),
+            (true, true),
+            "a contradiction outside the simultaneous aspect repair escaped fail-fast validation"
         );
     }
 
