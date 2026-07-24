@@ -84,3 +84,25 @@ jobs:
           env-vars: "CARGO CC CFLAGS CXX CMAKE PKG_CONFIG RUST"
           save-if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
       - run: cargo test --all-targets --all-features --locked
+
+  windows:
+    name: windows
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Use the latest stable Rust
+        shell: bash
+        run: rustup update stable
+      - name: Install system dependencies
+        shell: pwsh
+        run: |
+          choco install llvm --yes --no-progress
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2.9.1
+        with:
+          cache-bin: "false"
+          cache-on-failure: "true"
+          env-vars: "CARGO CC CFLAGS CXX CMAKE LIBCLANG_PATH PKG_CONFIG RUST"
+          save-if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+      - run: cargo check --all-targets --all-features --locked
