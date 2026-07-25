@@ -14,7 +14,8 @@ use super::screens::banner;
 use super::screens::common::{GUTTER, TOP_MARGIN, frame_rects, language_chip};
 use super::screens::welcome;
 use super::screens::your_cards::{
-    artifact_file_label, detail_pane_height, head_rows_for, step_rows_for,
+    artifact_file_label, detail_pane_height, head_rows_for, rejected_attempts,
+    rejected_link_columns, rejected_rows_offset, step_rows_for,
 };
 
 const STEP_FILE_LABEL_START: u16 = 6;
@@ -156,9 +157,51 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
                 target: file.path().to_string_lossy().into_owned(),
             });
         }
+        if detail > 0 {
+            links.extend(rejected_regions(
+                draft,
+                body_x,
+                body_y + banner_rows,
+                body_height,
+                content_row + head_height + steps.len(),
+                app.body_scroll(),
+                width,
+            ));
+        }
         content_row += card_total;
     }
     links
+}
+
+fn rejected_regions(
+    draft: &crate::session::CardDraft,
+    body_x: u16,
+    body_start: u16,
+    body_height: u16,
+    pane_row: usize,
+    scroll: u16,
+    width: usize,
+) -> Vec<LinkRegion> {
+    let Some(offset) = rejected_rows_offset(draft, width) else {
+        return Vec::new();
+    };
+    rejected_attempts(draft)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(row, attempt)| {
+            let absolute = pane_row + offset + row;
+            let screen_row = visible_content_row(body_start, body_height, absolute, scroll)?;
+            Some(rejected_link_columns(attempt, width).into_iter().map(
+                move |(start, end, target)| LinkRegion {
+                    row: screen_row,
+                    hit_start: body_x.saturating_add(start),
+                    hit_end: body_x.saturating_add(end),
+                    target: target.to_string_lossy().into_owned(),
+                },
+            ))
+        })
+        .flatten()
+        .collect()
 }
 
 fn banner_visible(app: &App) -> bool {

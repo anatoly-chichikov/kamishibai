@@ -137,30 +137,35 @@ fn what_i_understood_to_your_cards_flow_bridges_drafts_into_vocabulary_document(
 }
 
 #[test]
-fn card_artifacts_start_unready_with_three_attempt_ceiling_each() {
+fn card_artifacts_start_unready_with_one_try_and_three_retries_each() {
     let artifacts = CardArtifacts::default();
     let slot = artifacts.scene();
     assert_eq!(
         (
             slot.kind(),
             slot.ready(),
-            slot.tally().ceiling(),
+            slot.tally().retries(),
+            slot.tally().retry(),
             slot.tally().done(),
         ),
-        (Artifact::Scene, false, 3, 0),
-        "fresh card artifacts must start unready with a three-attempt budget per slot"
+        (Artifact::Scene, false, 3, None, 0),
+        "fresh card artifacts must start unready on an unnumbered first try with three retries left"
     );
 }
 
 #[test]
-fn terminal_failure_is_recognisable_after_three_failed_attempts() {
-    let mut slot = kamishibai::session::ArtifactSlot::fresh(Artifact::Picture);
-    for _ in 0..3 {
-        slot = slot.attempted();
-    }
-    assert!(
-        slot.failed_terminally(),
-        "three spent attempts without success must mark the slot as terminally failed"
+fn terminal_failure_waits_for_the_first_try_and_all_three_retries() {
+    let spent = (0..4).scan(
+        kamishibai::session::ArtifactSlot::fresh(Artifact::Picture),
+        |slot, _| {
+            *slot = slot.clone().attempted();
+            Some(slot.failed_terminally())
+        },
+    );
+    assert_eq!(
+        spent.collect::<Vec<_>>(),
+        vec![false, false, false, true],
+        "the slot gave up before its three retries were spent, or never gave up at all"
     );
 }
 

@@ -656,6 +656,39 @@ pub(super) fn diagnosis(response: &Response) -> String {
     parts.join(", ")
 }
 
+/// One model reply that arrived intact but did not survive decoding, kept
+/// verbatim so the caller can archive what was actually thrown away.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RejectedReply {
+    stage: &'static str,
+    body: String,
+}
+
+impl RejectedReply {
+    /// Wrap the reply of one named stage.
+    #[must_use]
+    pub fn new(stage: &'static str, body: impl Into<String>) -> Self {
+        Self {
+            stage,
+            body: body.into(),
+        }
+    }
+
+    /// Return the reply verbatim, exactly as the model sent it.
+    #[must_use]
+    pub fn body(&self) -> &str {
+        self.body.as_str()
+    }
+}
+
+impl fmt::Display for RejectedReply {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "the {} reply was rejected", self.stage)
+    }
+}
+
+impl Error for RejectedReply {}
+
 /// Convert one error body into a typed anyhow error.
 pub(super) fn api_error(http_status: u16, body: &str) -> anyhow::Error {
     match serde_json::from_str::<ErrorEnvelope>(body) {

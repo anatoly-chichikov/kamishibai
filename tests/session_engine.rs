@@ -226,7 +226,7 @@ fn metered_media_retries_keep_cumulative_cost_and_success_does_not_double_count_
 #[test]
 fn terminal_media_failure_keeps_the_last_cumulative_cost() {
     let mut engine = SessionEngine::start(vec![draft("whilst")]);
-    for nanos in [90_000_000, 120_000_000, 180_000_000] {
+    for nanos in [90_000_000, 120_000_000, 180_000_000, 60_000_000] {
         engine.applied_media_attempt(
             0,
             Artifact::Picture,
@@ -239,7 +239,7 @@ fn terminal_media_failure_keeps_the_last_cumulative_cost() {
     let picture = engine.drafts()[0].artifacts().picture();
     assert_eq!(
         (picture.failed_terminally(), picture.cost()),
-        (true, Some(GenerationCost::from_nanos(390_000_000)),),
+        (true, Some(GenerationCost::from_nanos(450_000_000)),),
         "terminal media failure discarded its metered Gemini spend"
     );
 }

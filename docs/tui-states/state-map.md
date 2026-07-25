@@ -168,9 +168,19 @@ not forwarded to card generation.
 
 ## Recovery semantics (MVP)
 
-- Retry: each artifact (`scene`, `picture`, `sound`) retries up to 3 times. Between
-  attempts the card row shows an inline retry indicator without blocking the queue.
-- Terminal failure: after 3 attempts, the card stays in the queue but marked as failed.
+- Retry: each artifact (`scene`, `picture`, `sound`) gets one plain try plus up to 3
+  retries. The plain try is unnumbered (`ai is working…`); once it fails the row
+  numbers the retry under way (`retry 2/3`) without blocking the queue, and every
+  spent try keeps the reason it was spent.
+- Rejected attempts: once a try has failed, the step row carries a muted `N rejected`
+  note that stays on the row after the artifact succeeds. Expanding the card (Enter/→)
+  reveals, below the card body and behind a dashed rule, a `rejected attempts` block:
+  one row per failure, naming the gate (`border`, `topology`, `recall_text`, …) and its
+  reason. A row links to whatever its own try left behind — the archived frame for a
+  picture, the rejected model reply for a scene — and it opens with the system
+  handler. A try that never reached the model leaves that column blank.
+- Terminal failure: after the plain try and all 3 retries, the card stays in the queue
+  but marked as failed.
 - Recovery via `Ctrl+G`: on `YourCards` it regenerates the currently selected card
   (`RegenerateCurrent`); on `Done` it regenerates every failed card, but only when
   `cards_failed > 0` (`RegenerateFailed`). Building the `.apkg` and `.pdf` is not a

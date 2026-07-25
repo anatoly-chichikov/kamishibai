@@ -12,10 +12,12 @@ use image::{DynamicImage, GrayImage, ImageFormat, Luma};
 use serde_json::Value;
 use tempfile::TempDir;
 
+use super::attempt_archive::*;
 use super::cost_accounting::*;
 use super::picture_recovery::*;
 use super::picture_requests::*;
 use super::scene_attempt::*;
+use super::visual::judged;
 use super::*;
 use crate::application::GenerationCostLedger;
 use crate::generation::artifact_cache::{
@@ -27,7 +29,7 @@ use crate::generation::manga::{
     Translator,
 };
 use crate::generation::{Audio, Speaker};
-use crate::session::{Artifact, ArtifactCosts, CostRecord, GenerationCost};
+use crate::session::{Artifact, ArtifactCosts, ArtifactFile, CostRecord, GenerationCost};
 
 #[derive(Clone, Default)]
 struct RecordingLedger {

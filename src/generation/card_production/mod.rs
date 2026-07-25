@@ -1,5 +1,6 @@
 //! Gemini-backed production of cached card artifacts.
 
+mod attempt_archive;
 mod cost_accounting;
 mod gemini_media;
 mod metadata;

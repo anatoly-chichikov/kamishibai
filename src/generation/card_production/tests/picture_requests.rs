@@ -150,19 +150,19 @@ fn picture_request_ceiling_survives_a_fresh_generator_instance() {
     let cache = Cache::new("visual", home.path());
     let source = FailingImageSource::new("transport failed");
     let first = RequestCountingImage::new(source.clone(), cache.clone());
-    for _ in 0..3 {
+    for _ in 0..4 {
         let _ = first.image("compiled image prompt");
     }
     let restarted = RequestCountingImage::new(source.clone(), cache.clone());
-    let fourth = restarted.image("compiled image prompt");
+    let beyond = restarted.image("compiled image prompt");
     assert_eq!(
         (
-            fourth.is_err(),
+            beyond.is_err(),
             source.calls(),
             picture_requests(&cache),
             picture_series_requests(&cache),
         ),
-        (true, 3, 3, 3),
+        (true, 4, 4, 4),
         "a fresh generator instance expanded the durable picture ceiling"
     );
 }
@@ -175,7 +175,7 @@ fn legacy_picture_counter_defaults_to_one_unfinished_series() {
         cache
             .filepath(PICTURE_REQUESTS_FILE)
             .expect("counter path must resolve"),
-        br#"{"schema":"kamishibai.picture-request-counter","version":1,"requests":3}"#,
+        br#"{"schema":"kamishibai.picture-request-counter","version":1,"requests":4}"#,
     )
     .expect("legacy counter must be written");
     let source = CountingImageSource::new(valid_image());
@@ -188,7 +188,7 @@ fn legacy_picture_counter_defaults_to_one_unfinished_series() {
             picture_requests(&cache),
             picture_series_requests(&cache),
         ),
-        (true, 0, 3, 3),
+        (true, 0, 4, 4),
         "a legacy counter silently opened an unauthorized picture series"
     );
 }

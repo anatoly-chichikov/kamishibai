@@ -24,8 +24,8 @@ use super::prompts::{
     render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
 };
 use super::protocol::{
-    GeminiApiError, GenerationConfig, Request, Response, ThinkingLevel, api_error, diagnosis,
-    unfence,
+    GeminiApiError, GenerationConfig, RejectedReply, Request, Response, ThinkingLevel, api_error,
+    diagnosis, unfence,
 };
 use super::scene::compose;
 
@@ -253,6 +253,7 @@ where
             )
             .context("scene composition request failed")?;
         compose(composer_raw.as_str(), sentence, target, &selection)
+            .map_err(|error| error.context(RejectedReply::new("scene composer", composer_raw)))
     }
 
     /// Send one free-form prompt to a text model and return the raw textual

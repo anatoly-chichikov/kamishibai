@@ -1,5 +1,6 @@
 //! Word-first session contracts: language pair, target detection, and batch state.
 
+mod attempt;
 mod bridge;
 mod cache;
 mod candidate;
@@ -14,16 +15,17 @@ mod vault;
 
 #[doc(inline)]
 pub use crate::application::{BulkCorrection, CardCorrection, CardMetaGeneration, Understanding};
+pub(crate) use attempt::ARTIFACT_ATTEMPT_CEILING;
+pub use attempt::{AttemptFault, AttemptLog, AttemptTally};
 pub use bridge::{drafts_from_document, from_entry, to_document, to_entry};
 pub(crate) use cache::CandidateRecord;
 pub use cache::{CachedUnderstanding, CardMetaCache};
 pub use candidate::{RawInputBatch, Sense, WordCandidate};
 pub use cost::{CostRecord, GenerationCost};
 pub use detection::{LearningDetection, LearningGuess, ScriptDetection};
-pub(crate) use draft::ARTIFACT_ATTEMPT_CEILING;
 pub use draft::{
-    Artifact, ArtifactAttempt, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptTally,
-    CardArtifacts, CardDraft, CardMeta,
+    Artifact, ArtifactAttempt, ArtifactCosts, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft,
+    CardMeta,
 };
 pub use engine::{EngineEvent, SessionEngine};
 pub use pair::LanguagePair;

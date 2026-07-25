@@ -16,8 +16,8 @@ use super::session::SessionCostScope;
 use super::wiring::{GeminiCardWorkflow, console_workflow, session_workflow};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    Artifact, ArtifactCosts, ArtifactSlot, CardArtifacts, CardDraft, LanguagePair, SessionEngine,
-    WordCandidate,
+    Artifact, ArtifactCosts, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, LanguagePair,
+    SessionEngine, WordCandidate,
 };
 
 use std::path::PathBuf;
@@ -88,14 +88,27 @@ impl Outcome {
 }
 
 /// Per-artifact result reported as one step advances.
+///
+/// A failed step always carries the fault of the attempt it just spent, so
+/// both renderings can name why the picture (or any other artifact) was
+/// rejected instead of printing a bare counter. `retry` numbers the retry that
+/// the reported failure has just triggered, matching what the TUI step row
+/// shows at that same moment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum StepOutcome {
+pub(super) enum StepOutcome<'a> {
     /// The artifact is ready, optionally served straight from cache.
     Ready { cached: bool },
-    /// The artifact failed and a retry will follow.
-    Retry { attempt: u8, ceiling: u8 },
-    /// The artifact exhausted its retries and was abandoned after `ceiling`.
-    Failed { ceiling: u8 },
+    /// An attempt failed and retry number `retry` of `retries` will follow.
+    Retry {
+        retry: u8,
+        retries: u8,
+        fault: Option<&'a AttemptFault>,
+    },
+    /// The artifact exhausted its retries and was abandoned after `retries`.
+    Failed {
+        retries: u8,
+        fault: Option<&'a AttemptFault>,
+    },
 }
 
 /// Progress sink for one console run. The flow is identical to the TUI; only the
@@ -109,7 +122,7 @@ pub(super) trait Reporter {
         card: usize,
         term: &str,
         artifact: Artifact,
-        outcome: StepOutcome,
+        outcome: StepOutcome<'_>,
         costs: ArtifactCosts,
     );
     /// Announce that the deck and report are being written.
@@ -241,7 +254,7 @@ where
     }
 }
 
-fn outcome_of(engine: &SessionEngine, card: usize, artifact: Artifact) -> StepOutcome {
+fn outcome_of(engine: &SessionEngine, card: usize, artifact: Artifact) -> StepOutcome<'_> {
     let slot = slot_for(engine.drafts()[card].artifacts(), artifact);
     if slot.ready() {
         return StepOutcome::Ready {
@@ -250,12 +263,14 @@ fn outcome_of(engine: &SessionEngine, card: usize, artifact: Artifact) -> StepOu
     }
     if slot.failed_terminally() {
         return StepOutcome::Failed {
-            ceiling: slot.tally().ceiling(),
+            retries: slot.tally().retries(),
+            fault: slot.latest_fault(),
         };
     }
     StepOutcome::Retry {
-        attempt: slot.tally().done(),
-        ceiling: slot.tally().ceiling(),
+        retry: slot.tally().done(),
+        retries: slot.tally().retries(),
+        fault: slot.latest_fault(),
     }
 }
 
@@ -297,19 +312,25 @@ impl Reporter for HumanReporter {
         _card: usize,
         term: &str,
         artifact: Artifact,
-        outcome: StepOutcome,
+        outcome: StepOutcome<'_>,
         _costs: ArtifactCosts,
     ) {
         let label = human_label(artifact);
         match outcome {
             StepOutcome::Ready { cached: true } => eprintln!("  {term} · {label} (cached)"),
             StepOutcome::Ready { cached: false } => eprintln!("  {term} · {label} ✓"),
-            StepOutcome::Retry { attempt, ceiling } => {
-                eprintln!("  {term} · {label} · retry {attempt}/{ceiling}")
-            }
-            StepOutcome::Failed { ceiling } => {
-                eprintln!("  {term} · {label} · gave up ({ceiling}/{ceiling})")
-            }
+            StepOutcome::Retry {
+                retry,
+                retries,
+                fault,
+            } => eprintln!(
+                "  {term} · {label} · retry {retry}/{retries}{}",
+                because(fault)
+            ),
+            StepOutcome::Failed { retries, fault } => eprintln!(
+                "  {term} · {label} · gave up after {retries} retries{}",
+                because(fault)
+            ),
         }
     }
 
@@ -321,6 +342,11 @@ impl Reporter for HumanReporter {
         eprintln!("{}", outcome.report());
         eprintln!("{}", outcome.output());
     }
+}
+
+/// Render the cause of one spent attempt as a plain-output suffix.
+fn because(fault: Option<&AttemptFault>) -> String {
+    fault.map_or_else(String::new, |fault| format!(" · {}", fault.reason()))
 }
 
 /// The user-facing artifact label for the `--wait` stream: meta reads as
@@ -375,9 +401,13 @@ enum Event<'a> {
         artifact: &'a str,
         status: &'static str,
         #[serde(skip_serializing_if = "Option::is_none")]
-        attempt: Option<u8>,
+        retry: Option<u8>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        ceiling: Option<u8>,
+        retries: Option<u8>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        category: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<&'a str>,
     },
     Publishing,
     Warning {
@@ -407,21 +437,27 @@ impl Reporter for JsonReporter {
         _card: usize,
         term: &str,
         artifact: Artifact,
-        outcome: StepOutcome,
+        outcome: StepOutcome<'_>,
         _costs: ArtifactCosts,
     ) {
-        let (status, attempt, ceiling) = match outcome {
-            StepOutcome::Ready { cached: true } => ("cache", None, None),
-            StepOutcome::Ready { cached: false } => ("ok", None, None),
-            StepOutcome::Retry { attempt, ceiling } => ("retry", Some(attempt), Some(ceiling)),
-            StepOutcome::Failed { ceiling } => ("fail", None, Some(ceiling)),
+        let (status, retry, retries, fault) = match outcome {
+            StepOutcome::Ready { cached: true } => ("cache", None, None, None),
+            StepOutcome::Ready { cached: false } => ("ok", None, None, None),
+            StepOutcome::Retry {
+                retry,
+                retries,
+                fault,
+            } => ("retry", Some(retry), Some(retries), fault),
+            StepOutcome::Failed { retries, fault } => ("fail", None, Some(retries), fault),
         };
         stream(&Event::Step {
             term,
             artifact: artifact.label(),
             status,
-            attempt,
-            ceiling,
+            retry,
+            retries,
+            category: fault.map(AttemptFault::category),
+            reason: fault.map(AttemptFault::reason),
         });
     }
 
@@ -671,6 +707,7 @@ mod tests {
         steps: RefCell<Vec<String>>,
         published: RefCell<Option<(usize, usize)>>,
         warnings: RefCell<Vec<String>>,
+        faults: RefCell<Vec<String>>,
     }
 
     impl Reporter for RecordingReporter {
@@ -680,12 +717,21 @@ mod tests {
             _card: usize,
             term: &str,
             artifact: Artifact,
-            _outcome: StepOutcome,
+            outcome: StepOutcome<'_>,
             _costs: ArtifactCosts,
         ) {
             self.steps
                 .borrow_mut()
                 .push(format!("{term}:{}", artifact.label()));
+            let fault = match outcome {
+                StepOutcome::Retry { fault, .. } | StepOutcome::Failed { fault, .. } => fault,
+                StepOutcome::Ready { .. } => None,
+            };
+            if let Some(fault) = fault {
+                self.faults
+                    .borrow_mut()
+                    .push(format!("{}:{}", fault.category(), fault.reason()));
+            }
         }
         fn publishing(&self) {}
         fn finished(&self, outcome: &Outcome) {
@@ -777,15 +823,28 @@ mod tests {
     }
 
     #[test]
-    fn produce_stops_picture_generation_at_three_failed_calls() {
+    fn produce_stops_picture_generation_after_the_first_try_and_three_retries() {
         let workflow = FailingPictureWorkflow::default();
         let drafts = vec![CardDraft::new("canard", "a duck", pair())];
         let reporter = RecordingReporter::default();
         produce(&workflow, drafts, &reporter).expect("produce must publish surviving cards");
         assert_eq!(
             (workflow.pictures.get(), *reporter.published.borrow()),
-            (3, Some((0, 1))),
-            "produce exceeded the three-call picture ceiling for one failed card"
+            (4, Some((0, 1))),
+            "produce exceeded the first try plus three retries for one failed card"
+        );
+    }
+
+    #[test]
+    fn every_spent_picture_attempt_reports_the_fault_that_spent_it() {
+        let workflow = FailingPictureWorkflow::default();
+        let drafts = vec![CardDraft::new("canard", "a duck", pair())];
+        let reporter = RecordingReporter::default();
+        produce(&workflow, drafts, &reporter).expect("produce must publish surviving cards");
+        assert_eq!(
+            *reporter.faults.borrow(),
+            vec![String::from("error:picture rejected"); 4],
+            "a spent picture attempt reached the reporter without naming its cause"
         );
     }
 
@@ -797,7 +856,7 @@ mod tests {
         produce(&workflow, drafts, &reporter).expect("produce must publish surviving cards");
         assert_eq!(
             *reporter.warnings.borrow(),
-            vec![String::from("canard · picture: picture rejected"); 3],
+            vec![String::from("canard · picture: picture rejected"); 4],
             "produce hid one or more picture failure reasons"
         );
     }

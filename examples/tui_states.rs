@@ -21,8 +21,8 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use kamishibai::session::{
-    Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
-    WordCandidate,
+    Artifact, ArtifactFile, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, CardMeta,
+    LanguagePair, WordCandidate,
 };
 use kamishibai::tui::{
     App, BusyKind, KeySource, ModalKind, MousePointer, Screen, draw, mouse_pointer_at,
@@ -192,23 +192,42 @@ fn cached_artifacts() -> CardArtifacts {
     )
 }
 
+fn rejected_frame(sequence: usize, category: &str, reason: &str) -> AttemptFault {
+    AttemptFault::new(
+        category,
+        reason,
+        Some(std::env::temp_dir().join(format!("attempt-{sequence:04}.jpg"))),
+    )
+}
+
 fn retrying_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture)
-            .attempted()
-            .attempted(),
+            .faulted(rejected_frame(
+                1,
+                "border",
+                "White border missing on: bottom",
+            ))
+            .faulted(rejected_frame(
+                2,
+                "topology",
+                "Registered panel topology was not detected",
+            )),
         ArtifactSlot::fresh(Artifact::Sound),
     )
 }
 
 fn second_retrying_artifacts() -> CardArtifacts {
+    let sound = ArtifactSlot::fresh(Artifact::Sound)
+        .faulted(AttemptFault::failed("the voice response carried no audio"))
+        .faulted(AttemptFault::failed("the voice response carried no audio"));
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
-        ArtifactSlot::fresh(Artifact::Sound).attempted().attempted(),
+        sound,
     )
 }
 
@@ -216,15 +235,27 @@ fn making_picture_artifacts() -> CardArtifacts {
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
-        ArtifactSlot::fresh(Artifact::Picture).attempted(),
+        ArtifactSlot::fresh(Artifact::Picture).faulted(rejected_frame(
+            1,
+            "border",
+            "White border missing on: top, left",
+        )),
         ArtifactSlot::fresh(Artifact::Sound),
     )
 }
 
 fn failed_picture_artifacts() -> CardArtifacts {
     let mut picture = ArtifactSlot::fresh(Artifact::Picture);
-    for _ in 0..3 {
-        picture = picture.attempted();
+    for (sequence, category, reason) in [
+        (1, "border", "White border missing on: bottom"),
+        (2, "topology", "Registered panel topology was not detected"),
+        (
+            3,
+            "recall_text",
+            "Recall judge rejected image: visible answer",
+        ),
+    ] {
+        picture = picture.faulted(rejected_frame(sequence, category, reason));
     }
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),

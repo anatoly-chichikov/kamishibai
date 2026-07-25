@@ -95,7 +95,7 @@ impl Reporter for SessionReporter {
         card: usize,
         term: &str,
         artifact: Artifact,
-        outcome: StepOutcome,
+        outcome: StepOutcome<'_>,
         costs: ArtifactCosts,
     ) {
         let costs = match self.costs.absolute(card, costs) {
@@ -541,8 +541,9 @@ mod tests {
             "canard",
             Artifact::Picture,
             StepOutcome::Retry {
-                attempt: 1,
-                ceiling: 3,
+                retry: 1,
+                retries: 3,
+                fault: None,
             },
             costs,
         );

@@ -4,13 +4,14 @@
 use std::path::PathBuf;
 
 use kamishibai::session::{
-    Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, GenerationCost,
-    LanguagePair,
+    Artifact, ArtifactFile, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, CardMeta,
+    GenerationCost, LanguagePair,
 };
-use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
+use kamishibai::tui::{App, AppEvent, Screen, Side, draw, link_at, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::style::Color;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier};
 
 fn flat(app: &App) -> String {
     let backend = TestBackend::new(120, 50);
@@ -106,7 +107,7 @@ fn retrying_artifacts() -> CardArtifacts {
 
 fn failed_artifacts() -> CardArtifacts {
     let mut picture = ArtifactSlot::fresh(Artifact::Picture);
-    for nanos in [90_000_000, 210_000_000, 321_000_000] {
+    for nanos in [60_000_000, 150_000_000, 240_000_000, 321_000_000] {
         picture = picture.attempted_with(GenerationCost::from_nanos(nanos));
     }
     CardArtifacts::from_parts(
@@ -298,7 +299,7 @@ fn retry_state_shows_retrying_count_inline_inside_the_card_row() {
     let app = seeded(vec![draft("in the end", retrying_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("retry 2/3") && rendered.contains("$.1234") && rendered.contains("$0.12"),
+        rendered.contains("retry 1/3") && rendered.contains("$.1234") && rendered.contains("$0.12"),
         "retrying state must be rendered inline without leaving the your cards screen: {rendered}"
     );
 }
@@ -378,5 +379,127 @@ fn expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane() {
             && rendered.contains("meaning")
             && artifact_lines <= 1,
         "expanded row must reveal the meta preview without duplicating the step list: {rendered}"
+    );
+}
+
+fn rejected_picture_artifacts(image: &str) -> CardArtifacts {
+    let picture = ArtifactSlot::fresh(Artifact::Picture).faulted(AttemptFault::new(
+        "border",
+        "White border missing on: bottom",
+        Some(PathBuf::from(format!("/tmp/{image}"))),
+    ));
+    CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        picture,
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    )
+}
+
+fn cell_of(app: &App, needle: &str) -> (u16, u16) {
+    let backend = TestBackend::new(120, 50);
+    let mut terminal = Terminal::new(backend).expect("backend");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    for row in 0..buffer.area.height {
+        let mut rendered = String::new();
+        for column in 0..buffer.area.width {
+            rendered.push_str(buffer[(column, row)].symbol());
+        }
+        if let Some(start) = rendered.find(needle) {
+            return (rendered[..start].chars().count() as u16, row);
+        }
+    }
+    panic!("the rendered screen never showed '{needle}'");
+}
+
+#[test]
+fn clicking_a_rejected_frame_opens_the_archived_picture() {
+    let app = seeded(vec![draft(
+        "whilst",
+        rejected_picture_artifacts("attempt-0001.jpg"),
+    )])
+    .card_revealed(0);
+    let (column, row) = cell_of(&app, "attempt-0001.jpg");
+    assert_eq!(
+        link_at(&app, Rect::new(0, 0, 120, 50), column, row),
+        Some(String::from("/tmp/attempt-0001.jpg")),
+        "the rejected frame was drawn but its click target does not open the archived picture"
+    );
+}
+
+#[test]
+fn rejected_frame_name_reads_as_a_muted_link_not_as_struck_out_text() {
+    let app = seeded(vec![draft(
+        "whilst",
+        rejected_picture_artifacts("attempt-0001.jpg"),
+    )])
+    .card_revealed(0);
+    let (column, row) = cell_of(&app, "attempt-0001.jpg");
+    let backend = TestBackend::new(120, 50);
+    let mut terminal = Terminal::new(backend).expect("backend");
+    terminal.draw(|frame| draw(frame, &app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let name = "attempt-0001.jpg".len() as u16;
+    assert!(
+        (0..name).all(|offset| {
+            let cell = &buffer[(column + offset, row)];
+            cell.modifier.contains(Modifier::UNDERLINED)
+                && !cell.modifier.contains(Modifier::CROSSED_OUT)
+        }) && !buffer[(column + name, row)]
+            .modifier
+            .contains(Modifier::UNDERLINED),
+        "the rejected frame must read as a muted underlined link that stops at its name"
+    );
+}
+
+#[test]
+fn rejected_block_sits_below_the_card_behind_a_dashed_rule() {
+    let app = seeded(vec![draft(
+        "whilst",
+        rejected_picture_artifacts("attempt-0001.jpg"),
+    )])
+    .card_revealed(0);
+    let (_, heading) = cell_of(&app, "rejected attempts");
+    let backend = TestBackend::new(120, 50);
+    let mut terminal = Terminal::new(backend).expect("backend");
+    terminal.draw(|frame| draw(frame, &app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let rule = (0..120u16)
+        .filter(|column| {
+            buffer[(*column, heading - 1)]
+                .modifier
+                .contains(Modifier::CROSSED_OUT)
+        })
+        .count();
+    assert!(
+        rule > 20 && cell_of(&app, "context").1 < heading,
+        "the rejected block must follow the card body behind a dashed rule"
+    );
+}
+
+fn recovered_picture_artifacts() -> CardArtifacts {
+    let picture = ArtifactSlot::fresh(Artifact::Picture)
+        .faulted(AttemptFault::new(
+            "border",
+            "White border missing on: bottom",
+            Some(PathBuf::from("/tmp/attempt-0001.jpg")),
+        ))
+        .succeeded_with(priced_file("picture.jpg", 67_300_000));
+    CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        picture,
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    )
+}
+
+#[test]
+fn a_finished_artifact_keeps_showing_the_attempts_it_cost() {
+    let app = seeded(vec![draft("whilst", recovered_picture_artifacts())]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("✓ picture.jpg") && rendered.contains("1 rejected"),
+        "a finished artifact hid the attempts that were spent to reach it: {rendered}"
     );
 }

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Result, anyhow};
 
 use super::artifact_file;
+use super::attempt_archive::{archived_reply, archived_sequence, latest_verdict};
 use super::cost_accounting::{
     AccountingHealth, CostAccounting, CostRecorder, attach_scene_cost, visual_costs,
 };
@@ -71,7 +72,7 @@ impl VisualProduction {
 
     /// Compose a scene attributed to one stable card slot.
     pub(super) fn scene(&self, slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
-        self.generate(
+        let attempt = self.generate(
             slot,
             draft,
             Artifact::Scene,
@@ -80,7 +81,11 @@ impl VisualProduction {
             |illustration, sentence, target, progress, _accounting| {
                 illustration.scene_only(sentence, target, progress)
             },
-        )
+        );
+        match self.cell(draft).cache().visual(visual_revision()) {
+            Ok(cache) => archived_reply(attempt, &cache),
+            Err(_) => attempt,
+        }
     }
 
     /// Render a picture attributed to one stable card slot.
@@ -100,6 +105,7 @@ impl VisualProduction {
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
         let recover = cursor.recompose(recover);
+        let archived = archived_sequence(&cache);
         let attempt = if recover {
             let fallback_cache = cache.clone();
             self.generate(
@@ -143,7 +149,7 @@ impl VisualProduction {
         {
             return ArtifactAttempt::unmetered(Err(error));
         }
-        attempt
+        judged(attempt, &cache, archived)
     }
 
     fn generate<F>(
@@ -303,6 +309,25 @@ impl VisualProduction {
             draft.term(),
             draft.understanding(),
         )
+    }
+}
+
+/// Attach the archived verdict of one picture attempt that the provider judged.
+///
+/// A verdict only belongs to this attempt when the archive actually grew: an
+/// attempt that failed before reaching the provider keeps the plain error, so
+/// the shell never blames a fresh failure on an older rejected picture.
+pub(super) fn judged(
+    attempt: ArtifactAttempt<ArtifactFile>,
+    cache: &Cache,
+    archived: usize,
+) -> ArtifactAttempt<ArtifactFile> {
+    if attempt.error().is_none() {
+        return attempt;
+    }
+    match latest_verdict(cache).filter(|verdict| verdict.sequence() > archived) {
+        Some(verdict) => attempt.with_fault(verdict.fault()),
+        None => attempt,
     }
 }
 

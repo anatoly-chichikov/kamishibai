@@ -84,6 +84,15 @@ fn dashed_rule(width: u16) -> Paragraph<'static> {
     Paragraph::new(Line::from(dashed_spans(0, usize::from(width)))).style(palette::base())
 }
 
+/// Return one dashed rule as a line, indented by `start` plain columns. Screens
+/// reuse it to separate blocks inside the body the way the status rule
+/// separates the footer.
+pub fn dashed_line(start: usize, width: usize) -> Line<'static> {
+    let mut spans = vec![Span::styled(" ".repeat(start), palette::base())];
+    spans.extend(dashed_spans(start, width));
+    Line::from(spans)
+}
+
 fn dashed_spans(start: usize, width: usize) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::with_capacity(width);
     let dash_style = palette::rule().add_modifier(Modifier::CROSSED_OUT);

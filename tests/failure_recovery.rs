@@ -24,7 +24,7 @@ fn flat(app: &App) -> String {
 
 fn failed_picture() -> CardArtifacts {
     let mut picture = ArtifactSlot::fresh(Artifact::Picture);
-    for nanos in [90_000_000, 210_000_000, 321_000_000] {
+    for nanos in [60_000_000, 150_000_000, 240_000_000, 321_000_000] {
         picture = picture.attempted_with(GenerationCost::from_nanos(nanos));
     }
     CardArtifacts::from_parts(
@@ -35,13 +35,17 @@ fn failed_picture() -> CardArtifacts {
     )
 }
 
-fn failed_meta() -> CardArtifacts {
-    let mut meta = ArtifactSlot::fresh(Artifact::Meta);
-    for _ in 0..3 {
-        meta = meta.attempted();
+fn exhausted(slot: ArtifactSlot) -> ArtifactSlot {
+    let mut spent = slot;
+    while !spent.failed_terminally() {
+        spent = spent.attempted();
     }
+    spent
+}
+
+fn failed_meta() -> CardArtifacts {
     CardArtifacts::from_parts(
-        meta,
+        exhausted(ArtifactSlot::fresh(Artifact::Meta)),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
@@ -49,28 +53,20 @@ fn failed_meta() -> CardArtifacts {
 }
 
 fn failed_scene() -> CardArtifacts {
-    let mut scene = ArtifactSlot::fresh(Artifact::Scene);
-    for _ in 0..3 {
-        scene = scene.attempted();
-    }
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
-        scene,
+        exhausted(ArtifactSlot::fresh(Artifact::Scene)),
         ArtifactSlot::fresh(Artifact::Picture).discard(),
         ArtifactSlot::fresh(Artifact::Sound).succeeded(),
     )
 }
 
 fn failed_sound() -> CardArtifacts {
-    let mut sound = ArtifactSlot::fresh(Artifact::Sound);
-    for _ in 0..3 {
-        sound = sound.attempted();
-    }
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).succeeded(),
-        sound,
+        exhausted(ArtifactSlot::fresh(Artifact::Sound)),
     )
 }
 

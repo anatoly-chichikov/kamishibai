@@ -891,8 +891,8 @@ mod tests {
             .expect("picture fixture must be removed");
         drop_incomplete_artifacts(home.path(), &pair, "canard", "a duck")
             .expect("incomplete artifacts must be dropped");
-        let next_series = (0..3).all(|_| reserve_picture_request(&visual).is_ok());
-        let fourth = reserve_picture_request(&visual);
+        let next_series = (0..4).all(|_| reserve_picture_request(&visual).is_ok());
+        let beyond = reserve_picture_request(&visual);
         assert_eq!(
             (
                 cache.exists(META_FILE),
@@ -907,10 +907,10 @@ mod tests {
                     .join("attempt-0001.scene.json")
                     .exists(),
                 next_series,
-                fourth.is_err(),
+                beyond.is_err(),
                 picture_counter(&visual),
             ),
-            (true, true, true, true, true, true, true, true, true, (6, 3)),
+            (true, true, true, true, true, true, true, true, true, (7, 4)),
             "failed-only retry erased evidence or failed to start exactly one authorized series"
         );
     }
@@ -1068,13 +1068,13 @@ mod tests {
             .expect("artifacts must be dropped");
         let cleared = !visual.exists(PICTURE_REQUESTS_FILE)
             && !visual.path().join(IMAGE_ATTEMPTS_DIRECTORY).exists();
-        let next_series = (0..3).all(|_| reserve_picture_request(&visual).is_ok());
-        let fourth = reserve_picture_request(&visual);
+        let next_series = (0..4).all(|_| reserve_picture_request(&visual).is_ok());
+        let beyond = reserve_picture_request(&visual);
         assert_eq!(
             (
                 cleared,
                 next_series,
-                fourth.is_err(),
+                beyond.is_err(),
                 picture_counter(&visual),
                 [
                     cache.exists(META_FILE),
@@ -1092,7 +1092,7 @@ mod tests {
                 true,
                 true,
                 true,
-                (3, 3),
+                (4, 4),
                 [true, true, false, false, false, false, false, false, true],
             ),
             "an imported full reroll did not clear evidence before opening one new picture series"
