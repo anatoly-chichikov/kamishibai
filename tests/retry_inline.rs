@@ -3,15 +3,15 @@
 
 use anyhow::{Result, anyhow};
 use kamishibai::session::{
-    Artifact, ArtifactAttempt, ArtifactFile, CardDraft, CardMeta, EngineEvent, GenerationCost,
-    LanguagePair, SessionEngine,
+    Artifact, ArtifactAttempt, ArtifactFile, AttemptFault, CardDraft, CardMeta, EngineEvent,
+    GenerationCost, LanguagePair, SessionEngine,
 };
 use kamishibai::tui::{App, Screen, draw};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 fn flat(app: &App) -> String {
-    let backend = TestBackend::new(120, 24);
+    let backend = TestBackend::new(120, 44);
     let mut terminal = Terminal::new(backend).expect("backend");
     terminal.draw(|frame| draw(frame, app)).expect("draw");
     let buffer = terminal.backend().buffer();
@@ -87,8 +87,44 @@ fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() -> Resul
         .cards_started(drafts);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("retry") && rendered.contains("$.1234") && rendered.contains("$0.12"),
-        "your cards must surface the retry attempt inline without leaving the screen: {rendered}"
+        rendered.contains("retry 1/3")
+            && rendered.contains("1 rejected")
+            && rendered.contains("$.1234")
+            && rendered.contains("$0.12"),
+        "your cards must surface the numbered retry and its rejected predecessor inline: {rendered}"
+    );
+    Ok(())
+}
+
+#[test]
+fn rejected_attempt_names_its_reason_in_the_expanded_card() -> Result<()> {
+    let mut engine = SessionEngine::start(vec![draft("in the end")]);
+    engine.applied_meta(0, Ok((meta_for("in the end"), None)));
+    engine.applied_media(
+        0,
+        Artifact::Scene,
+        Ok(file_for("in the end", Artifact::Scene)),
+    );
+    engine.applied_media_attempt(
+        0,
+        Artifact::Picture,
+        ArtifactAttempt::new(Err(anyhow!("rejected")), None).with_fault(AttemptFault::new(
+            "border",
+            "White border missing on: bottom",
+            Some(std::env::temp_dir().join("attempt-0001.jpg")),
+        )),
+    );
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::YourCards)
+        .confirmed_learning("en")
+        .cards_started(engine.drafts().to_vec())
+        .card_revealed(0);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("rejected attempts")
+            && rendered.contains("attempt-0001.jpg")
+            && rendered.contains("border · White border missing on: bottom"),
+        "the expanded card must name why the picture was rejected and which frame it was: {rendered}"
     );
     Ok(())
 }

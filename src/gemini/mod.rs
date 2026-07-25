@@ -11,7 +11,7 @@ mod understanding;
 
 pub(crate) use access::GeminiAccess;
 pub use client::{GeminiClient, HttpTransport, Transport, TransportResponse};
-pub use protocol::GeminiApiError;
+pub use protocol::{GeminiApiError, RejectedReply};
 pub(crate) use scene::validate_cached as validate_cached_scene;
 pub(crate) use understanding::GeminiUnderstanding;
 

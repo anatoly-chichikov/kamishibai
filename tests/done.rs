@@ -38,7 +38,7 @@ fn published() -> App {
 
 fn failed_published() -> App {
     let mut picture = ArtifactSlot::fresh(Artifact::Picture);
-    for nanos in [90_000_000, 210_000_000, 321_000_000] {
+    for nanos in [60_000_000, 150_000_000, 240_000_000, 321_000_000] {
         picture = picture.attempted_with(GenerationCost::from_nanos(nanos));
     }
     let artifacts = CardArtifacts::from_parts(

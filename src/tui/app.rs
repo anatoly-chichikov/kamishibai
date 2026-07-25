@@ -867,6 +867,15 @@ impl App {
         self
     }
 
+    /// Return the app with one card focused and expanded (clicked disclosure).
+    pub fn card_revealed(mut self, card: usize) -> Self {
+        if card < self.cards.drafts.len() {
+            self.cards.selected = card;
+            self.cards.expanded = true;
+        }
+        self
+    }
+
     /// Return the elapsed generation time shown on the Your Cards status line.
     pub fn elapsed(&self) -> Duration {
         self.cards.elapsed

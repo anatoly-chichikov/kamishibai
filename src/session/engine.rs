@@ -9,6 +9,7 @@
 use anyhow::Result;
 
 use super::GenerationCost;
+use super::attempt::AttemptFault;
 use super::draft::{
     Artifact, ArtifactAttempt, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta,
 };
@@ -87,7 +88,8 @@ impl SessionEngine {
             .tally()
             .done()
             .saturating_add(1);
-        let (result, cost, related) = attempt.into_accounted_parts();
+        let (result, cost, related, fault) = attempt.into_accounted_parts();
+        let fault = diagnosed(result.as_ref().err(), fault);
         match result {
             Ok((meta, file)) => {
                 let updated = self.drafts[card].clone().with_meta(meta, file);
@@ -103,7 +105,12 @@ impl SessionEngine {
             }
             Err(_) => {
                 let bumped = mark_related_costs(
-                    mark_attempted(self.drafts[card].artifacts().clone(), Artifact::Meta, cost),
+                    mark_faulted(
+                        self.drafts[card].artifacts().clone(),
+                        Artifact::Meta,
+                        cost,
+                        fault,
+                    ),
                     related,
                 );
                 let cascaded = if slot(&bumped, Artifact::Meta).failed_terminally() {
@@ -154,7 +161,8 @@ impl SessionEngine {
             .tally()
             .done()
             .saturating_add(1);
-        let (result, cost, related) = attempt.into_accounted_parts();
+        let (result, cost, related, fault) = attempt.into_accounted_parts();
+        let fault = diagnosed(result.as_ref().err(), fault);
         match result {
             Ok(file) => {
                 let artifacts = mark_related_costs(
@@ -166,7 +174,7 @@ impl SessionEngine {
             }
             Err(_) => {
                 let bumped = mark_related_costs(
-                    mark_attempted(self.drafts[card].artifacts().clone(), artifact, cost),
+                    mark_faulted(self.drafts[card].artifacts().clone(), artifact, cost, fault),
                     related,
                 );
                 let cascaded = if slot(&bumped, artifact).failed_terminally()
@@ -255,14 +263,24 @@ fn mark_ready(
     })
 }
 
-fn mark_attempted(
+fn mark_faulted(
     artifacts: CardArtifacts,
     kind: Artifact,
     cost: Option<GenerationCost>,
+    fault: AttemptFault,
 ) -> CardArtifacts {
     reshape(artifacts, kind, |slot| {
         let previous = slot.cost();
-        charge_slot(slot.attempted(), previous, cost)
+        charge_slot(slot.faulted(fault.clone()), previous, cost)
+    })
+}
+
+fn diagnosed(error: Option<&anyhow::Error>, fault: Option<AttemptFault>) -> AttemptFault {
+    fault.unwrap_or_else(|| {
+        AttemptFault::failed(error.map_or_else(
+            || String::from("attempt failed"),
+            |error| format!("{error:#}"),
+        ))
     })
 }
 

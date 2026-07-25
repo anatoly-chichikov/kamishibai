@@ -2,10 +2,8 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use super::GenerationCost;
+use super::attempt::{ARTIFACT_ATTEMPT_CEILING, AttemptFault, AttemptLog, AttemptTally};
 use super::pair::LanguagePair;
-
-/// Absolute retry ceiling shared by every generated artifact series.
-pub(crate) const ARTIFACT_ATTEMPT_CEILING: u8 = 3;
 
 /// Artifact type produced for each card.
 ///
@@ -32,11 +30,21 @@ impl Artifact {
     }
 }
 
+/// One settled artifact operation: its result, own spend, related-stage spend,
+/// and the diagnosed cause when it failed.
+pub(crate) type AccountedAttempt<T> = (
+    Result<T>,
+    Option<GenerationCost>,
+    Vec<(Artifact, GenerationCost)>,
+    Option<AttemptFault>,
+);
+
 /// One artifact operation together with its primary and related stage spend.
 pub struct ArtifactAttempt<T> {
     result: Result<T>,
     cost: Option<GenerationCost>,
     related: Vec<(Artifact, GenerationCost)>,
+    fault: Option<AttemptFault>,
 }
 
 impl<T> ArtifactAttempt<T> {
@@ -47,6 +55,7 @@ impl<T> ArtifactAttempt<T> {
             result,
             cost,
             related: Vec::new(),
+            fault: None,
         }
     }
 
@@ -62,10 +71,23 @@ impl<T> ArtifactAttempt<T> {
         self.result.as_ref().err()
     }
 
+    /// Return the diagnosed cause attached to this failed operation.
+    #[must_use]
+    pub fn fault(&self) -> Option<&AttemptFault> {
+        self.fault.as_ref()
+    }
+
     /// Attach incremental spend that belongs to a related artifact stage.
     #[must_use]
     pub(crate) fn with_related_cost(mut self, artifact: Artifact, cost: GenerationCost) -> Self {
         self.related.push((artifact, cost));
+        self
+    }
+
+    /// Attach the diagnosed cause of one failed operation.
+    #[must_use]
+    pub fn with_fault(mut self, fault: AttemptFault) -> Self {
+        self.fault = Some(fault);
         self
     }
 
@@ -74,15 +96,9 @@ impl<T> ArtifactAttempt<T> {
         (self.result, self.cost)
     }
 
-    /// Consume the operation into its result and stage-aware incremental spend.
-    pub(crate) fn into_accounted_parts(
-        self,
-    ) -> (
-        Result<T>,
-        Option<GenerationCost>,
-        Vec<(Artifact, GenerationCost)>,
-    ) {
-        (self.result, self.cost, self.related)
+    /// Consume the operation into its result, stage-aware spend, and cause.
+    pub(crate) fn into_accounted_parts(self) -> AccountedAttempt<T> {
+        (self.result, self.cost, self.related, self.fault)
     }
 
     /// Consume the operation and discard its accounting metadata.
@@ -151,51 +167,13 @@ impl ArtifactFile {
     }
 }
 
-/// Number of attempts already spent versus the absolute cap.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AttemptTally {
-    done: u8,
-    ceiling: u8,
-}
-
-impl AttemptTally {
-    /// Start one tally with an explicit ceiling.
-    pub fn new(ceiling: u8) -> Self {
-        Self { done: 0, ceiling }
-    }
-
-    /// Return the number of attempts already spent.
-    pub fn done(&self) -> u8 {
-        self.done
-    }
-
-    /// Return the ceiling (typically 3).
-    pub fn ceiling(&self) -> u8 {
-        self.ceiling
-    }
-
-    /// Return whether the artifact has run out of retry budget.
-    pub fn exhausted(&self) -> bool {
-        self.done >= self.ceiling
-    }
-
-    /// Record one more attempt.
-    pub fn spent(self) -> Self {
-        let next = self.done.saturating_add(1);
-        Self {
-            done: next.min(self.ceiling),
-            ceiling: self.ceiling,
-        }
-    }
-}
-
 /// Per-artifact state for one card.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArtifactSlot {
     kind: Artifact,
     ready: bool,
     discarded: bool,
-    tally: AttemptTally,
+    attempts: AttemptLog,
     file: Option<ArtifactFile>,
     cost: Option<GenerationCost>,
 }
@@ -207,7 +185,7 @@ impl ArtifactSlot {
             kind,
             ready: false,
             discarded: false,
-            tally: AttemptTally::new(ARTIFACT_ATTEMPT_CEILING),
+            attempts: AttemptLog::new(ARTIFACT_ATTEMPT_CEILING),
             file: None,
             cost: None,
         }
@@ -235,7 +213,17 @@ impl ArtifactSlot {
 
     /// Return the attempt tally.
     pub fn tally(&self) -> AttemptTally {
-        self.tally
+        self.attempts.tally()
+    }
+
+    /// Return why each spent attempt failed, in attempt order.
+    pub fn faults(&self) -> &[AttemptFault] {
+        self.attempts.faults()
+    }
+
+    /// Return why the most recently spent attempt failed.
+    pub fn latest_fault(&self) -> Option<&AttemptFault> {
+        self.attempts.latest()
     }
 
     /// Return completed artifact file metadata, if available.
@@ -267,9 +255,15 @@ impl ArtifactSlot {
         self
     }
 
-    /// Return the slot after a failed attempt.
+    /// Return the slot after a failed attempt whose cause was not diagnosed.
     pub fn attempted(mut self) -> Self {
-        self.tally = self.tally.spent();
+        self.attempts = self.attempts.spent();
+        self
+    }
+
+    /// Return the slot after a failed attempt that failed for `fault`.
+    pub fn faulted(mut self, fault: AttemptFault) -> Self {
+        self.attempts = self.attempts.faulted(fault);
         self
     }
 
@@ -307,7 +301,7 @@ impl ArtifactSlot {
 
     /// Return whether retry budget has been exhausted without success.
     pub fn failed_terminally(&self) -> bool {
-        !self.ready && !self.discarded && self.tally.exhausted()
+        !self.ready && !self.discarded && self.attempts.tally().exhausted()
     }
 }
 

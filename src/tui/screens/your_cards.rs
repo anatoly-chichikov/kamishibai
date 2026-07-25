@@ -7,6 +7,7 @@
 //! expands into a meta preview + artifact pane.
 
 use std::borrow::Cow;
+use std::path::{Path, PathBuf};
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -17,7 +18,8 @@ use ratatui::widgets::Paragraph;
 use super::ScreenView;
 use crate::markdown::{parse_markdown, to_ratatui};
 use crate::session::{
-    Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, GenerationCost,
+    Artifact, ArtifactFile, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, CardMeta,
+    GenerationCost,
 };
 use crate::tui::app::App;
 use crate::tui::disclosure::DisclosureControls;
@@ -146,7 +148,7 @@ fn card_block<'a>(
         }
     }
     if expanded {
-        lines.extend(detail_pane(draft, width));
+        lines.extend(detail_pane(draft, width).lines);
     }
     if progressed || expanded {
         lines.push(Line::from(""));
@@ -368,6 +370,7 @@ fn step_state<'a>(
             note.push(Span::styled("  ", palette::dim()));
             note.push(Span::styled("cached", palette::dim2()));
         }
+        push_rejected_chip(&mut note, slot);
         return (String::from("✓"), row_fg, palette::link(), note);
     }
     if slot.discarded() {
@@ -378,20 +381,21 @@ fn step_state<'a>(
             vec![Span::styled(String::from("discarded"), palette::dim())],
         );
     }
+    let retries = slot.tally().retries();
     if slot.failed_terminally() {
         let mut note = vec![Span::styled(
-            String::from("gave up after 3 tries"),
+            format!("gave up after {retries} retries"),
             palette::dim(),
         )];
+        push_rejected_chip(&mut note, slot);
         push_slot_cost(&mut note, slot);
         return (String::from("✗"), row_fg, row_fg, note);
     }
-    let attempts = slot.tally().done();
-    if attempts > 0 {
+    if let Some(retry) = slot.tally().retry() {
         let label = if active {
-            format!("retry {}/3…", attempts + 1)
+            format!("retry {retry}/{retries}")
         } else {
-            format!("retry {}/3 paused", attempts + 1)
+            format!("retry {retry}/{retries} paused")
         };
         let glyph = if active {
             String::from(SPINNER_FRAMES[spinner_frame])
@@ -399,6 +403,7 @@ fn step_state<'a>(
             String::from("·")
         };
         let mut note = vec![Span::styled(label, palette::dim())];
+        push_rejected_chip(&mut note, slot);
         push_slot_cost(&mut note, slot);
         return (glyph, row_fg, row_fg, note);
     }
@@ -416,6 +421,21 @@ fn step_state<'a>(
         row_dim2,
         vec![Span::styled(String::from("queued"), palette::dim())],
     )
+}
+
+/// Append the `N rejected` tally. It is a plain muted note, not a control, and
+/// it outlives the retries: a finished artifact keeps showing what it cost to
+/// get there. The rejected attempts themselves live in the expanded card.
+fn push_rejected_chip<'a>(note: &mut Vec<Span<'a>>, slot: &ArtifactSlot) {
+    let rejected = slot.faults().len();
+    if rejected == 0 {
+        return;
+    }
+    note.push(Span::styled("  ", palette::dim()));
+    note.push(Span::styled(
+        format!("{rejected} rejected"),
+        palette::dim2(),
+    ));
 }
 
 fn push_slot_cost<'a>(note: &mut Vec<Span<'a>>, slot: &ArtifactSlot) {
@@ -462,7 +482,15 @@ fn pad_left(text: &str, width: usize) -> String {
     format!("{}{}", " ".repeat(width - len), text)
 }
 
-fn detail_pane(draft: &CardDraft, width: usize) -> Vec<Line<'_>> {
+/// The expanded card body together with the row its rejected block starts on.
+struct DetailPane<'a> {
+    lines: Vec<Line<'a>>,
+    rejected_start: Option<usize>,
+}
+
+/// Render the expanded card: the meta preview first, then — below the card and
+/// behind a dashed rule — the attempts that were rejected on the way to it.
+fn detail_pane(draft: &CardDraft, width: usize) -> DetailPane<'_> {
     let mut lines: Vec<Line<'_>> = Vec::new();
     let indent = "      ";
     lines.push(Line::from(""));
@@ -474,7 +502,182 @@ fn detail_pane(draft: &CardDraft, width: usize) -> Vec<Line<'_>> {
             Span::styled("meta not generated yet", palette::dim2()),
         ]));
     }
-    lines
+    let attempts = rejected_attempts(draft);
+    if attempts.is_empty() {
+        return DetailPane {
+            lines,
+            rejected_start: None,
+        };
+    }
+    lines.push(Line::from(""));
+    lines.push(super::common::dashed_line(
+        super::common::display_width(indent),
+        width.saturating_sub(super::common::display_width(indent)),
+    ));
+    lines.push(Line::from(vec![
+        Span::styled(indent, palette::base()),
+        Span::styled("rejected attempts", palette::dim2()),
+    ]));
+    let rejected_start = lines.len();
+    lines.extend(
+        attempts
+            .into_iter()
+            .map(|attempt| rejected_row(attempt, width).line),
+    );
+    DetailPane {
+        lines,
+        rejected_start: Some(rejected_start),
+    }
+}
+
+const REJECTED_INDENT: &str = "       ";
+const REJECTED_STEP_COL_CHARS: usize = 12;
+const REJECTED_FILE_COL_CHARS: usize = 22;
+
+/// One rejected attempt of one artifact, as listed in the expanded card.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RejectedAttempt<'a> {
+    artifact: Artifact,
+    index: usize,
+    fault: &'a AttemptFault,
+}
+
+impl<'a> RejectedAttempt<'a> {
+    fn new(artifact: Artifact, index: usize, fault: &'a AttemptFault) -> Self {
+        Self {
+            artifact,
+            index,
+            fault,
+        }
+    }
+
+    /// Return what this rejected attempt produced, when anything survived it.
+    pub(crate) fn artifact(&self) -> Option<&'a Path> {
+        self.fault.artifact()
+    }
+}
+
+/// Return every rejected attempt of one card, in artifact and attempt order.
+pub(crate) fn rejected_attempts(draft: &CardDraft) -> Vec<RejectedAttempt<'_>> {
+    STEPS
+        .iter()
+        .flat_map(|&(_, kind)| {
+            slot_for(draft.artifacts(), kind)
+                .faults()
+                .iter()
+                .enumerate()
+                .map(move |(position, fault)| RejectedAttempt::new(kind, position + 1, fault))
+        })
+        .collect()
+}
+
+/// One rendered rejected-attempt row together with the click targets on it.
+pub(crate) struct RejectedRow<'a> {
+    line: Line<'a>,
+    links: Vec<(u16, u16, PathBuf)>,
+}
+
+/// Render one rejected attempt: which try it was, whatever that try produced
+/// before it was thrown away, and the gate that rejected it. A try that never
+/// produced anything leaves the middle column blank — the reason already says
+/// what happened. The archived file is the click target, so the row is built
+/// once and reused by the hit-tester instead of being measured twice.
+pub(crate) fn rejected_row<'a>(attempt: RejectedAttempt<'_>, width: usize) -> RejectedRow<'a> {
+    let step = format!("{} {}", step_name(attempt.artifact), attempt.index);
+    let used = REJECTED_INDENT.chars().count()
+        + 2
+        + REJECTED_STEP_COL_CHARS.max(step.chars().count() + 2)
+        + REJECTED_FILE_COL_CHARS;
+    let reason = clip(
+        format!("{} · {}", attempt.fault.category(), attempt.fault.reason()).as_str(),
+        width.saturating_sub(used).max(12),
+    );
+    let mut spans = vec![
+        Span::styled(REJECTED_INDENT, palette::base()),
+        Span::styled("✗ ", palette::dim()),
+        Span::styled(
+            pad_right(step.as_str(), REJECTED_STEP_COL_CHARS),
+            palette::dim(),
+        ),
+    ];
+    let mut links: Vec<(u16, u16, PathBuf)> = Vec::new();
+    let files_start = spans
+        .iter()
+        .map(|span| super::common::display_width(span.content.as_ref()))
+        .sum::<usize>();
+    match archive_label(attempt.artifact()) {
+        Some(name) => {
+            let column = push_link(
+                &mut spans,
+                &mut links,
+                files_start,
+                name,
+                attempt.artifact(),
+            );
+            spans.push(Span::styled(
+                column_gap(column, files_start + REJECTED_FILE_COL_CHARS),
+                palette::dim(),
+            ));
+        }
+        None => spans.push(Span::styled(
+            " ".repeat(REJECTED_FILE_COL_CHARS),
+            palette::dim(),
+        )),
+    }
+    spans.push(Span::styled(reason, palette::dim()));
+    RejectedRow {
+        line: Line::from(spans),
+        links,
+    }
+}
+
+fn archive_label(path: Option<&Path>) -> Option<String> {
+    path.and_then(|path| path.file_name().and_then(|name| name.to_str()))
+        .map(String::from)
+}
+
+fn push_link<'a>(
+    spans: &mut Vec<Span<'a>>,
+    links: &mut Vec<(u16, u16, PathBuf)>,
+    column: usize,
+    label: String,
+    target: Option<&Path>,
+) -> usize {
+    let width = super::common::display_width(label.as_str());
+    spans.push(Span::styled(
+        label,
+        palette::dim2().add_modifier(Modifier::UNDERLINED),
+    ));
+    if let Some(target) = target {
+        links.push((
+            u16::try_from(column).unwrap_or(u16::MAX),
+            u16::try_from(column + width).unwrap_or(u16::MAX),
+            target.to_path_buf(),
+        ));
+    }
+    column + width
+}
+
+/// Return the plain spacing that pads one label out to its column, so an
+/// underline stops at the label instead of trailing through the gap.
+fn column_gap(column: usize, next_column: usize) -> String {
+    " ".repeat(next_column.saturating_sub(column).max(2))
+}
+
+fn pad_right(text: &str, width: usize) -> String {
+    let len = text.chars().count();
+    if len >= width {
+        return format!("{text} ");
+    }
+    format!("{text}{}", " ".repeat(width - len))
+}
+
+fn clip(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return String::from(text);
+    }
+    let kept: String = text.chars().take(width.saturating_sub(1)).collect();
+    format!("{kept}…")
 }
 
 fn meta_preview<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -> Vec<Line<'a>> {
@@ -811,10 +1014,23 @@ fn card_layout(
 /// card. Verbatim mirror of `detail_pane` / `meta_preview` so callers can keep
 /// scroll offsets and click hit-tests aligned with the rendered output.
 pub(crate) fn detail_pane_height(draft: &CardDraft, width: usize) -> usize {
-    let Some(meta) = draft.meta() else {
-        return 2;
-    };
-    1 + meta_preview(meta, "      ", width).len()
+    detail_pane(draft, width).lines.len()
+}
+
+/// Row offset of the first rejected-attempt row inside the expanded detail
+/// pane, counted from the pane's first row. Taken from the rendered pane
+/// itself, so the click hit-tester cannot drift from the rejected block that
+/// sits below the card.
+pub(crate) fn rejected_rows_offset(draft: &CardDraft, width: usize) -> Option<usize> {
+    detail_pane(draft, width).rejected_start
+}
+
+/// Click targets on one rejected row: the archived frame and its scene.
+pub(crate) fn rejected_link_columns(
+    attempt: RejectedAttempt<'_>,
+    width: usize,
+) -> Vec<(u16, u16, PathBuf)> {
+    rejected_row(attempt, width).links
 }
 
 /// Return one card's known Gemini cost across generated artifacts.

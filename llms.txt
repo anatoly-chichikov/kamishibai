@@ -442,14 +442,15 @@ Before a plan is committed, the item carries `selected` instead of `cards`.
 Wait events
 
 `generate --wait` and `regenerate --wait` emit NDJSON lines on stderr. The final
-session document still goes to stdout. `attempt` and `ceiling` appear only on
-retry or failure.
+session document still goes to stdout. `retry` and `retries` appear only on
+retry or failure, and so do `category` and `reason`, which name why the try that
+just failed was spent.
 
 Examples:
 
 ```json
 {"event": "generating", "cards": 2}
-{"event": "step", "term": "canard", "artifact": "picture", "status": "retry", "attempt": 1, "ceiling": 3}
+{"event": "step", "term": "canard", "artifact": "picture", "status": "retry", "retry": 1, "retries": 3, "category": "border", "reason": "White border missing on: bottom"}
 {"event": "step", "term": "canard", "artifact": "picture", "status": "ok"}
 {"event": "publishing"}
 {"event": "warning", "message": "..."}
@@ -457,6 +458,27 @@ Examples:
 
 Step status is one of `ok`, `cache`, `retry`, or `fail`. Artifact is one of
 `meta`, `sound`, `scene`, or `picture`.
+
+Every artifact gets one plain try plus `retries` (3) retries on top of it, so at
+most four provider calls per artifact. The first try is never numbered: `retry`
+counts the retry the reported failure has just triggered, from `1` to `retries`.
+A `fail` step means all retries were spent and carries `retries` without
+`retry`.
+
+`category` is the renderer's verdict slug for a picture the model did draw and a
+local gate rejected — `border`, `topology`, `color`, `recall_text`,
+`legacy_gutter`, `other` — or `error` when the attempt failed before any picture
+existed (transport, cache lease, exhausted request budget). Every rejected
+picture stays on disk under
+`cards/<known>-<learning>/<key>/visual/<revision>/attempts/attempt-NNNN.jpg`
+next to its `attempt-NNNN.json` verdict, the `attempt-NNNN.scene.json` it was
+drawn from, the `attempt-NNNN.prompt.txt` compiled for it, and the
+`attempt-NNNN.recall.json` review — so a rejected frame can be read against its
+own scene after the run. A scene step that fails after the model answered
+archives that answer in the same folder as `scene-NNNN.json` (when the reply
+parses as JSON and failed later validation) or `scene-NNNN.txt` (when it never
+was JSON), so a rejected scene is readable too. Nothing in the archive is pruned
+by a later run; `regenerate` is what clears it.
 
 On `--wait`, stdout carries the final document: `phase` is `published` or
 `partial`. A run where every card failed exits 1 with the error envelope, and
