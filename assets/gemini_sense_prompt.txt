@@ -16,34 +16,40 @@ User request:
 {user_request}
 
 The shown senses are already available on screen. Treat this request as a search for real meanings the list missed:
-- a narrow domain such as hunting, poker, finance, law, medicine, or IT jargon;
-- register or style such as slang, formal, child-directed, vulgar, or literary;
-- a well-known colloquial or slang sense that is popular enough to be useful, even if it is not the strict formal default;
+- a meaning restricted to one narrow domain;
+- a meaning restricted by register or style;
+- a well-known informal sense that is popular enough to be useful, even if it is not the strict formal default;
 - idiomatic use, especially only inside a set expression;
-- archaic or regional use such as British, US, obsolete, or dialectal;
-- a rare part-of-speech choice such as only the verb use.
+- an archaic or regional use;
+- a rare part-of-speech choice.
 
 Return up to 3 new senses that match the user's request and do not duplicate any shown sense. Append-style order is fine: the most relevant new sense first.
 
 Each sense has:
-- "understanding" — exactly one sentence in {support_language}, between 6 and 14 words, written for a human reader;
-- "tag" — a short marker such as "фин.", "архаич.", "идиом.", "брит.", "покер", or null.
+- "understanding" — exactly one sentence in {support_language}, {understanding_length}, written for a human reader;
+- "tag" — a short disambiguating marker in {support_language}, or null.
 
 Use "tag" only when the sense genuinely needs a domain, register, region, idiom, archaic, slang, or other disambiguating label. Prefer null for a general sense, but most results here should have a useful tag.
 
+These are typed conventions in the actual support language for this request:
+
+{sense_conventions}
+
 Hard rules for every "understanding":
-- Do not start with «Учим», «Изучаем», «Учимся», «We learn», «Studying», or any narration of the learning act.
-- Pick exactly one sense. Never write "X или Y", "X or Y", "может означать X, а также Y".
+- Do not start with any value illustrated by `forbidden.starters`, or any narration of the learning act.
+- Pick exactly one sense. Never join senses using a shape illustrated by `forbidden.joins`.
 - Mention part of speech, idiom, or register only when it clarifies.
-- Always abbreviate part-of-speech labels. Russian: «сущ.», «прил.», «гл.», «нар.», «мест.», «предл.», «част.», «межд.», «числ.»; English: "n.", "v.", "adj.", "adv.", "pron.", "prep.", "conj.", "interj."; Spanish: "sust.", "adj.", "v.", "adv.", "pron.". Do the same in other support languages.
+- Always abbreviate part-of-speech labels using the local shapes illustrated by `markers.parts`.
 - Stay tight to the meaning the learner needs; do not add incidental detail.
-- Never use filler words like "обычное", "обычный", "повседневное", "стандартное", "обыкновенное", "regular", "common", "ordinary", "everyday", "standard", "basic", "simple".
+- Never use the local filler shapes illustrated by `forbidden.fillers`.
 - Never produce a structured "POS · gloss · marker" line. Write a real, scannable sentence.
 
-If the user's request is already covered by one of the shown senses, return an empty "senses" array and a short message in {support_language} meaning "this is already in the list".
+Use these localized message examples:
 
-If the requested meaning does not exist in {target_language}, return an empty "senses" array and a short message in {support_language} meaning "nothing to add".
+{sense_message_examples}
+
+If the user's request is already covered by one of the shown senses, return an empty "senses" array and use the `listed` message shape. If the requested meaning does not exist in {target_language}, return an empty "senses" array and use the `absent` message shape.
 
 Return only JSON with this shape, no prose, no code fences:
 
-{"senses":[{"understanding":"<one sentence in the support language>","tag":"<short tag or null>"}],"message":null}
+{"senses":[{"understanding":"<one sentence in the support language>","tag":"<short localized tag>"}],"message":null}

@@ -274,11 +274,7 @@ impl VisualProduction {
                     meta.source_highlight(),
                     meta.source_hint(),
                 ),
-                HiddenRecall::new(
-                    learning.prompt.clone(),
-                    draft.term(),
-                    meta.target_sentence(),
-                ),
+                HiddenRecall::from_profile(&learning, draft.term(), meta.target_sentence()),
             ),
             picture_costs.clone(),
         );

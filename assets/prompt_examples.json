@@ -1,0 +1,685 @@
+{
+  "en": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["fin.", "arch.", "idiom", "BrE", "poker"],
+        "parts": ["n.", "v.", "adj.", "adv.", "pron.", "prep."]
+      },
+      "forbidden": {
+        "starters": ["We learn", "Studying", "We are learning"],
+        "joins": ["X or Y", "may mean X and also Y"],
+        "fillers": ["regular", "common", "ordinary", "everyday", "standard", "basic", "simple"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "N. <one precise primary meaning in one concise sentence>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "N. <one distinct secondary meaning in one concise sentence>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "V. <the exact meaning selected by the user's hint>",
+          "tag": null
+        },
+        "invalid": "This word is not in the detected target language."
+      },
+      "messages": {
+        "listed": "This is already in the list.",
+        "absent": "There is nothing to add."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Used when politely asking for something.",
+          "Means tired.",
+          "Common in business contexts."
+        ],
+        "good": "\"<near target word>\" has cranes and trucks; here, rocks enclose still water.",
+        "contrast": "\"<near target word>\" has …; here, …"
+      },
+      "context": {
+        "headers": [
+          "Meaning.",
+          "Where you'll hear it.",
+          "Where it's out of place.",
+          "Subtlety."
+        ],
+        "rarity": "rare, classical prose"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "pan",
+        "longer": "company"
+      },
+      "fragment": {
+        "visible": "FINAL DESIGN",
+        "sentence_end": "final design"
+      }
+    }
+  },
+  "zh": {
+    "spacing": "unspaced",
+    "understanding": {
+      "markers": {
+        "tags": ["金融", "古语", "习语", "英式", "扑克"],
+        "parts": ["名", "动", "形", "副", "代", "介"]
+      },
+      "forbidden": {
+        "starters": ["我们学习", "正在学习", "我们来学"],
+        "joins": ["X或Y", "既可表示X，也可表示Y"],
+        "fillers": ["普通的", "常见的", "日常的", "标准的", "基础的", "简单的"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "名：<用一个简短句子说明一个准确的主要含义>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "名：<用一个简短句子说明另一个不同的含义>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "动：<准确说明用户提示所指定的含义>",
+          "tag": null
+        },
+        "invalid": "这个词不属于检测到的目标语言。"
+      },
+      "messages": {
+        "listed": "这已经在列表里了。",
+        "absent": "没有可补充的内容。"
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "用于礼貌地请求某物。",
+          "意思是疲倦。",
+          "常见于商务语境。"
+        ],
+        "good": "「<near target word>」有吊车和卡车；这里有岩石和平静的水面。",
+        "contrast": "「<near target word>」……；这里……"
+      },
+      "context": {
+        "headers": ["含义", "常见场景", "不适用的场合", "细微差别"],
+        "rarity": "罕见，多见于古典散文"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "马",
+        "longer": "马虎"
+      },
+      "fragment": {
+        "visible": "最终设计",
+        "sentence_end": "最终设计"
+      }
+    }
+  },
+  "es": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["fin.", "arca.", "loc.", "brit.", "póquer"],
+        "parts": ["sust.", "v.", "adj.", "adv.", "pron.", "prep."]
+      },
+      "forbidden": {
+        "starters": ["Aprendemos", "Estudiando", "Estamos aprendiendo"],
+        "joins": ["X o Y", "puede significar X y también Y"],
+        "fillers": ["regular", "común", "corriente", "cotidiano", "estándar", "básico", "simple"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "Sust. <un sentido principal preciso en una frase breve>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "Sust. <otro sentido distinto en una frase breve>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "V. <el sentido exacto indicado por la pista del usuario>",
+          "tag": null
+        },
+        "invalid": "Esta palabra no pertenece al idioma objetivo detectado."
+      },
+      "messages": {
+        "listed": "Esto ya está en la lista.",
+        "absent": "No hay nada que añadir."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Se usa para pedir algo con cortesía.",
+          "Significa estar cansado.",
+          "Es común en contextos empresariales."
+        ],
+        "good": "\"<near target word>\" tiene grúas y camiones; aquí hay rocas y agua tranquila.",
+        "contrast": "\"<near target word>\" tiene …; aquí …"
+      },
+      "context": {
+        "headers": [
+          "Significado.",
+          "Dónde lo oirás.",
+          "Dónde desentona.",
+          "Matiz."
+        ],
+        "rarity": "raro, propio de la prosa clásica"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "pan",
+        "longer": "pantalla"
+      },
+      "fragment": {
+        "visible": "DISEÑO FINAL",
+        "sentence_end": "diseño final"
+      }
+    }
+  },
+  "ja": {
+    "spacing": "unspaced",
+    "understanding": {
+      "markers": {
+        "tags": ["金融", "古語", "慣用句", "英国", "ポーカー"],
+        "parts": ["名", "動", "形", "副", "代", "助"]
+      },
+      "forbidden": {
+        "starters": ["学びます", "勉強中", "学んでいるのは"],
+        "joins": ["XまたはY", "Xを意味することもYを意味することもある"],
+        "fillers": ["普通の", "一般的な", "日常的な", "標準的な", "基本的な", "簡単な"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "名：<一つの正確な主要語義を短い一文で説明>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "名：<別の異なる語義を短い一文で説明>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "動：<ユーザーのヒントが指定した意味を正確に説明>",
+          "tag": null
+        },
+        "invalid": "この語は検出された対象言語のものではありません。"
+      },
+      "messages": {
+        "listed": "これはすでに一覧にあります。",
+        "absent": "追加できる意味はありません。"
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "丁寧に何かを頼むときに使います。",
+          "疲れているという意味です。",
+          "ビジネスの場面でよく使います。"
+        ],
+        "good": "「<near target word>」にはクレーンとトラックがあり、こちらには岩と静かな水面があります。",
+        "contrast": "「<near target word>」には……、こちらには……"
+      },
+      "context": {
+        "headers": ["意味", "どこで耳にするか", "不自然な場面", "ニュアンス"],
+        "rarity": "まれで、古典的な散文に見られる"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "パン",
+        "longer": "パンツ"
+      },
+      "fragment": {
+        "visible": "最終デザイン",
+        "sentence_end": "最終デザイン"
+      }
+    }
+  },
+  "fr": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["fin.", "arch.", "loc.", "brit.", "poker"],
+        "parts": ["n.", "v.", "adj.", "adv.", "pron.", "prép."]
+      },
+      "forbidden": {
+        "starters": ["Nous apprenons", "En étudiant", "Nous étudions"],
+        "joins": ["X ou Y", "peut signifier X et aussi Y"],
+        "fillers": ["ordinaire", "courant", "quotidien", "standard", "basique", "simple"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "N. <un sens principal précis dans une phrase brève>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "N. <un autre sens distinct dans une phrase brève>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "V. <le sens exact indiqué par l’indice de l’utilisateur>",
+          "tag": null
+        },
+        "invalid": "Ce mot n’appartient pas à la langue cible détectée."
+      },
+      "messages": {
+        "listed": "C’est déjà dans la liste.",
+        "absent": "Il n’y a rien à ajouter."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "S’emploie pour demander quelque chose poliment.",
+          "Signifie être fatigué.",
+          "Courant dans les contextes professionnels."
+        ],
+        "good": "«<near target word>» montre des grues; ici, des rochers entourent l’eau calme.",
+        "contrast": "«<near target word>» montre… ; ici…"
+      },
+      "context": {
+        "headers": [
+          "Sens.",
+          "Où vous l’entendrez.",
+          "Où il détonne.",
+          "Nuance."
+        ],
+        "rarity": "rare, propre à la prose classique"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "art",
+        "longer": "article"
+      },
+      "fragment": {
+        "visible": "CONCEPTION FINALE",
+        "sentence_end": "conception finale"
+      }
+    }
+  },
+  "de": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["Fin.", "arch.", "Redew.", "brit.", "Poker"],
+        "parts": ["Subst.", "V.", "Adj.", "Adv.", "Pron.", "Präp."]
+      },
+      "forbidden": {
+        "starters": ["Wir lernen", "Beim Lernen", "Wir üben"],
+        "joins": ["X oder Y", "kann X und auch Y bedeuten"],
+        "fillers": ["gewöhnlich", "üblich", "alltäglich", "standardmäßig", "grundlegend", "einfach"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "Subst. <eine genaue Hauptbedeutung in einem kurzen Satz>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "Subst. <eine andere Bedeutung in einem kurzen Satz>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "V. <die genaue durch den Hinweis bestimmte Bedeutung>",
+          "tag": null
+        },
+        "invalid": "Dieses Wort gehört nicht zur erkannten Zielsprache."
+      },
+      "messages": {
+        "listed": "Das steht bereits in der Liste.",
+        "absent": "Es gibt nichts hinzuzufügen."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Wird für eine höfliche Bitte verwendet.",
+          "Bedeutet müde.",
+          "Ist im Geschäftsumfeld üblich."
+        ],
+        "good": "„<near target word>“ zeigt Kräne und Lastwagen; hier umschließen Felsen ruhiges Wasser.",
+        "contrast": "„<near target word>“ zeigt …; hier …"
+      },
+      "context": {
+        "headers": [
+          "Bedeutung.",
+          "Wo du es hörst.",
+          "Wo es unpassend ist.",
+          "Nuance."
+        ],
+        "rarity": "selten, vor allem in klassischer Prosa"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "Ei",
+        "longer": "Eimer"
+      },
+      "fragment": {
+        "visible": "FERTIGES DESIGN",
+        "sentence_end": "fertiges Design"
+      }
+    }
+  },
+  "ru": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["фин.", "архаич.", "идиом.", "брит.", "покер"],
+        "parts": ["сущ.", "гл.", "прил.", "нар.", "мест.", "предл."]
+      },
+      "forbidden": {
+        "starters": ["Учим", "Изучаем", "Учимся"],
+        "joins": ["X или Y", "может означать X, а также Y"],
+        "fillers": ["обычное", "обычный", "повседневное", "стандартное", "обыкновенное", "базовое", "простое"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "Сущ. <одно точное основное значение в коротком предложении>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "Сущ. <другое отдельное значение в коротком предложении>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "Гл. <точное значение, заданное подсказкой пользователя>",
+          "tag": null
+        },
+        "invalid": "Это слово не относится к распознанному целевому языку."
+      },
+      "messages": {
+        "listed": "Это уже есть в списке.",
+        "absent": "Добавить больше нечего."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Используется, когда вежливо о чём-то просят.",
+          "Означает усталость.",
+          "Часто встречается в деловом контексте."
+        ],
+        "good": "«<near target word>»: краны и грузовики; здесь — скалы и тихая вода.",
+        "contrast": "«<near target word>»: …; здесь — …"
+      },
+      "context": {
+        "headers": [
+          "Значение.",
+          "Где встречается.",
+          "Где неуместно.",
+          "Нюанс."
+        ],
+        "rarity": "редко, преимущественно в классической прозе"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "кот",
+        "longer": "котлета"
+      },
+      "fragment": {
+        "visible": "ФИНАЛЬНЫЙ ПРОЕКТ",
+        "sentence_end": "финальный проект"
+      }
+    }
+  },
+  "it": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["fin.", "arc.", "idiom.", "brit.", "poker"],
+        "parts": ["s.", "v.", "agg.", "avv.", "pron.", "prep."]
+      },
+      "forbidden": {
+        "starters": ["Impariamo", "Studiando", "Stiamo imparando"],
+        "joins": ["X o Y", "può significare X e anche Y"],
+        "fillers": ["regolare", "comune", "ordinario", "quotidiano", "standard", "basilare", "semplice"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "S. <un significato principale preciso in una frase breve>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "S. <un altro significato distinto in una frase breve>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "V. <il significato esatto indicato dal suggerimento>",
+          "tag": null
+        },
+        "invalid": "Questa parola non appartiene alla lingua obiettivo rilevata."
+      },
+      "messages": {
+        "listed": "È già presente nell’elenco.",
+        "absent": "Non c’è nulla da aggiungere."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Si usa per chiedere qualcosa con cortesia.",
+          "Significa essere stanco.",
+          "È comune nei contesti aziendali."
+        ],
+        "good": "«<near target word>» mostra gru e camion; qui, le rocce circondano l’acqua calma.",
+        "contrast": "«<near target word>» mostra …; qui …"
+      },
+      "context": {
+        "headers": [
+          "Significato.",
+          "Dove lo sentirai.",
+          "Dove stona.",
+          "Sfumatura."
+        ],
+        "rarity": "raro, tipico della prosa classica"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "re",
+        "longer": "rete"
+      },
+      "fragment": {
+        "visible": "PROGETTO FINALE",
+        "sentence_end": "progetto finale"
+      }
+    }
+  },
+  "pt": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["fin.", "arc.", "idiom.", "brit.", "pôquer"],
+        "parts": ["s.", "v.", "adj.", "adv.", "pron.", "prep."]
+      },
+      "forbidden": {
+        "starters": ["Aprendemos", "Estudando", "Estamos aprendendo"],
+        "joins": ["X ou Y", "pode significar X e também Y"],
+        "fillers": ["regular", "comum", "corriqueiro", "cotidiano", "padrão", "básico", "simples"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "S. <um significado principal preciso numa frase breve>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "S. <outro significado distinto numa frase breve>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "V. <o significado exato indicado pela pista do usuário>",
+          "tag": null
+        },
+        "invalid": "Esta palavra não pertence ao idioma-alvo detectado."
+      },
+      "messages": {
+        "listed": "Isto já está na lista.",
+        "absent": "Não há nada a acrescentar."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Usa-se para pedir algo educadamente.",
+          "Significa estar cansado.",
+          "É comum em contextos empresariais."
+        ],
+        "good": "\"<near target word>\" mostra guindastes e caminhões; aqui, rochas cercam águas calmas.",
+        "contrast": "\"<near target word>\" mostra …; aqui …"
+      },
+      "context": {
+        "headers": [
+          "Significado.",
+          "Onde você ouvirá.",
+          "Onde não combina.",
+          "Nuance."
+        ],
+        "rarity": "raro, próprio da prosa clássica"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "mar",
+        "longer": "martelo"
+      },
+      "fragment": {
+        "visible": "PROJETO FINAL",
+        "sentence_end": "projeto final"
+      }
+    }
+  },
+  "el": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["χρημ.", "αρχ.", "ιδιωμ.", "βρετ.", "πόκερ"],
+        "parts": ["ουσ.", "ρήμ.", "επίθ.", "επίρρ.", "αντων.", "πρόθ."]
+      },
+      "forbidden": {
+        "starters": ["Μαθαίνουμε", "Μελετώντας", "Μαθαίνουμε τη λέξη"],
+        "joins": ["X ή Y", "μπορεί να σημαίνει X αλλά και Y"],
+        "fillers": ["συνηθισμένο", "κοινό", "καθημερινό", "τυπικό", "βασικό", "απλό"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "Ουσ. <μία ακριβής κύρια σημασία σε σύντομη πρόταση>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "Ουσ. <μία άλλη διακριτή σημασία σε σύντομη πρόταση>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "Ρήμ. <η ακριβής σημασία που ορίζει η υπόδειξη>",
+          "tag": null
+        },
+        "invalid": "Αυτή η λέξη δεν ανήκει στην αναγνωρισμένη γλώσσα-στόχο."
+      },
+      "messages": {
+        "listed": "Αυτό υπάρχει ήδη στη λίστα.",
+        "absent": "Δεν υπάρχει κάτι άλλο να προστεθεί."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Χρησιμοποιείται όταν ζητάμε κάτι ευγενικά.",
+          "Σημαίνει κουρασμένος.",
+          "Είναι συχνό σε επαγγελματικά συμφραζόμενα."
+        ],
+        "good": "«<near target word>»: γερανοί και φορτηγά· εδώ, βράχοι και ήρεμο νερό.",
+        "contrast": "«<near target word>»: …· εδώ, …"
+      },
+      "context": {
+        "headers": [
+          "Σημασία.",
+          "Πού θα το ακούσεις.",
+          "Πού δεν ταιριάζει.",
+          "Απόχρωση."
+        ],
+        "rarity": "σπάνιο, κυρίως στην κλασική πεζογραφία"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "ΜΕΛΙ",
+        "longer": "ΜΕΛΙΤΖΑΝΑ"
+      },
+      "fragment": {
+        "visible": "τελικό σχέδιο",
+        "sentence_end": "τελικό σχέδιο"
+      }
+    }
+  },
+  "nl": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["fin.", "arch.", "idioom", "Brits", "poker"],
+        "parts": ["zn.", "ww.", "bn.", "bw.", "vnw.", "vz."]
+      },
+      "forbidden": {
+        "starters": ["We leren", "Aan het leren", "We bestuderen"],
+        "joins": ["X of Y", "kan X en ook Y betekenen"],
+        "fillers": ["gewoon", "gangbaar", "alledaags", "standaard", "elementair", "eenvoudig"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "Zn. <één precieze hoofdbetekenis in een korte zin>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "Zn. <een andere betekenis in een korte zin>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "Ww. <de exacte betekenis die de aanwijzing bepaalt>",
+          "tag": null
+        },
+        "invalid": "Dit woord behoort niet tot de gedetecteerde doeltaal."
+      },
+      "messages": {
+        "listed": "Dit staat al in de lijst.",
+        "absent": "Er is niets toe te voegen."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Wordt gebruikt om beleefd iets te vragen.",
+          "Betekent moe.",
+          "Komt vaak voor in zakelijke contexten."
+        ],
+        "good": "‘<near target word>’ toont kranen en vrachtwagens; hier omsluiten rotsen rustig water.",
+        "contrast": "‘<near target word>’ toont …; hier …"
+      },
+      "context": {
+        "headers": [
+          "Betekenis.",
+          "Waar je het hoort.",
+          "Waar het niet past.",
+          "Nuance."
+        ],
+        "rarity": "zeldzaam, vooral in klassiek proza"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "ram",
+        "longer": "ramen"
+      },
+      "fragment": {
+        "visible": "DEFINITIEF ONTWERP",
+        "sentence_end": "definitief ontwerp"
+      }
+    }
+  }
+}

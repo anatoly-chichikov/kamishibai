@@ -139,12 +139,12 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
     Ok(())
 }
 
-/// Production registry builds use the resilient Gemini 3.5 image-recall visual revision.
+/// Production registry builds use the language-local prompt-example visual revision.
 #[test]
-fn production_registry_uses_the_version_thirty_nine_visual_revision() {
+fn production_registry_uses_the_version_forty_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "6beb5983556bd4b7a6dcd248847dfeabbc94d2502d2a914e58ac0aad69770bc2",
+        "714b45b8598bc3dd2f63a74ff8074dd3e5e3b59a3716771c55bf408be705c47c",
         "production registry visual revision drifted without a policy-version change"
     );
 }
@@ -178,9 +178,11 @@ fn picture_recall_prompt_separates_visible_writing_from_intended_meaning() {
             prompt.contains("Judge only literal writing visible inside the illustration"),
             prompt.contains("must never count as leakage"),
             prompt.contains("recognizable inflected, derived, transliterated, near-spelling")
-                && prompt.contains("RUN in RUNWAY or GO in GOOGLE")
+                && prompt.contains("{focus_example}")
                 && prompt.contains("The evidence kind is authoritative")
-                && prompt.contains("visible BEFORE LUNCH"),
+                && prompt.contains("{fragment_example}")
+                && !prompt.contains("RUN in RUNWAY")
+                && !prompt.contains("visible BEFORE LUNCH"),
             prompt.contains("two consecutive content-bearing words"),
             prompt.contains("plausible competing target-language answer"),
             prompt.contains("hatching, speed lines, textures, architecture")

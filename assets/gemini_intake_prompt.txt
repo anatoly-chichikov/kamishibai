@@ -26,33 +26,33 @@ For each non-empty input line, return one item with four fields.
    - do not include duplicates that only rephrase the same sense.
 
    Each sense has:
-   - "understanding" — exactly one sentence in {support_language}, between 6 and 14 words, written for a human reader;
-   - "tag" — a short marker such as "фин.", "архаич.", "идиом.", "брит.", "покер", or null.
+   - "understanding" — exactly one sentence in {support_language}, {understanding_length}, written for a human reader;
+   - "tag" — a short disambiguating marker in {support_language}, or null.
 
    Use "tag" only when the sense genuinely needs a domain, register, region, idiom, archaic, slang, or other disambiguating label. Prefer null for the default general sense. Use a short slang/register tag for popular informal senses.
 
+   These are typed conventions in the actual support language for this request:
+
+{sense_conventions}
+
    Hard rules for every "understanding":
-   - Do not start with «Учим», «Изучаем», «Учимся», «We learn», «Studying», or any narration of the learning act.
-   - Pick exactly one sense. Never write "X или Y", "X or Y", "может означать X, а также Y".
+   - Do not start with any value illustrated by `forbidden.starters`, or any narration of the learning act.
+   - Pick exactly one sense. Never join senses using a shape illustrated by `forbidden.joins`.
    - Mention part of speech, idiom, or register only when it clarifies.
-   - Always abbreviate part-of-speech labels. Russian: «сущ.», «прил.», «гл.», «нар.», «мест.», «предл.», «част.», «межд.», «числ.»; English: "n.", "v.", "adj.", "adv.", "pron.", "prep.", "conj.", "interj."; Spanish: "sust.", "adj.", "v.", "adv.", "pron.". Do the same in other support languages.
+   - Always abbreviate part-of-speech labels using the local shapes illustrated by `markers.parts`.
    - Stay tight to the meaning the learner needs; do not add incidental detail.
-   - Never use filler words like "обычное", "обычный", "повседневное", "стандартное", "обыкновенное", "regular", "common", "ordinary", "everyday", "standard", "basic", "simple".
+   - Never use the local filler shapes illustrated by `forbidden.fillers`.
    - Never produce a structured "POS · gloss · marker" line. Write a real, scannable sentence.
 
 3. "selected" — always 0 in the intake response.
 
 4. "ok" — boolean. `true` when the item belongs to the chosen target language and can be turned into a card. `false` when it cannot: not in the target language, gibberish, or empty after trim. When `ok` is false, return exactly one sense whose "understanding" briefly states the reason in {support_language}, with "tag": null.
 
-Examples (target=en, support=ru):
+Target-neutral output-shape examples in {support_language}:
 
-- input "bank" → term "bank", senses:
-  1. {"understanding":"Сущ. «банк», финансовое учреждение.", "tag":"фин."}
-  2. {"understanding":"Сущ. «берег» реки или водоёма.", "tag":null}
-  3. {"understanding":"Гл. «наклонять(ся)» при повороте самолёта.", "tag":"авиац."}
-- input "set — установить" → first sense {"understanding":"Гл. «установить» значение, правило или устройство.", "tag":null}
-- input "bittersweet feeling" → sense {"understanding":"Прил. про смешанное чувство — радостное и грустное.", "tag":null}
-- input "сообщение" (in EN batch) → term "сообщение", ok false, senses [{"understanding":"Слово на русском, не на target-языке.", "tag":null}]
+{intake_examples}
+
+`primary` and `secondary` illustrate two distinct senses for one placeholder target term. `hinted` illustrates the first sense for a placeholder term followed by a dash hint. `invalid` is the understanding for a placeholder off-language term with `ok=false`. The placeholders are structural and are never literal vocabulary to copy.
 
 Return only JSON with this shape, no prose, no code fences:
 

@@ -4,6 +4,8 @@ use std::{fmt::Write as _, sync::OnceLock};
 
 use sha2::{Digest, Sha256};
 
+use crate::languages::prompt_recall_examples_document;
+
 const AUDIO_PROMPT: &str = include_str!("../../assets/audio_prompt.txt");
 const MANGA_TEMPLATE: &str = include_str!("../../assets/manga_template.json");
 const LAYOUT_FEATURES_PROMPT: &str = include_str!("../../assets/layout_features_prompt.txt");
@@ -16,7 +18,7 @@ const PICTURE_RECALL_JUDGE_PROMPT: &str =
 const PICTURE_RECALL_JUDGE_SCHEMA: &str =
     include_str!("../../assets/picture_recall_judge_schema.json");
 const LAYOUT_POLICY_VERSION: &str =
-    "kamishibai-layout-registry-production-v39-resilient-image-recall";
+    "kamishibai-layout-registry-production-v40-language-local-prompt-examples";
 static VISUAL_REVISION: OnceLock<String> = OnceLock::new();
 
 /// Return the embedded shared audio prompt template.
@@ -91,6 +93,8 @@ pub fn visual_revision() -> &'static str {
             digest.update(picture_recall_judge_prompt().as_bytes());
             digest.update([0]);
             digest.update(picture_recall_judge_schema().as_bytes());
+            digest.update([0]);
+            digest.update(prompt_recall_examples_document().as_bytes());
             digest
                 .finalize()
                 .iter()

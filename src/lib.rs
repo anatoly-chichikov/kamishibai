@@ -10,6 +10,7 @@ pub mod gemini;
 pub mod generation;
 pub mod languages;
 pub mod markdown;
+mod prompt;
 mod publishing;
 pub mod report;
 pub mod runtime;

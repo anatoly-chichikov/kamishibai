@@ -16,7 +16,8 @@ use super::{
     Sense, Understood, WordCandidate,
 };
 
-const UNDERSTANDING_VERSION: &str = "v4";
+const UNDERSTANDING_VERSION: &str = "v5";
+const META_POLICY: &str = "v2-language-local-prompt-examples";
 
 /// Caching decorator for the first-pass understanding contract.
 #[derive(Clone, Debug)]
@@ -168,12 +169,22 @@ impl CardMetaCache {
         understanding: &str,
         pair: &LanguagePair,
     ) -> Result<Option<CardMeta>> {
-        let cache = CardCell::new(self.root.clone(), pair, term, understanding).cache();
-        if !cache.exists(META_FILE) {
-            return Ok(None);
-        }
-        let record: MetaRecord = read_json(&cache, META_FILE)?;
-        Ok(Some(record.meta()))
+        Ok(self
+            .record(term, understanding, pair)?
+            .map(MetaRecord::meta))
+    }
+
+    /// Return cached card meta only when it uses the current generation policy.
+    pub(crate) fn load_current(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+    ) -> Result<Option<CardMeta>> {
+        Ok(self
+            .record(term, understanding, pair)?
+            .filter(MetaRecord::current)
+            .map(MetaRecord::meta))
     }
 
     /// Persist one card meta and return filename, path, and whether it already existed.
@@ -185,9 +196,10 @@ impl CardMetaCache {
         meta: &CardMeta,
     ) -> Result<(String, PathBuf, bool)> {
         let cache = CardCell::new(self.root.clone(), pair, term, understanding).cache();
-        let cached = cache.exists(META_FILE);
+        let existed = cache.exists(META_FILE);
+        let cached = existed && read_json::<MetaRecord>(&cache, META_FILE)?.current();
         if !cached {
-            write_json(
+            replace_json(
                 &cache,
                 META_FILE,
                 &MetaRecord::from_meta(term, understanding, pair, meta),
@@ -195,6 +207,19 @@ impl CardMetaCache {
         }
         let path = cache.filepath(META_FILE)?;
         Ok((META_FILE.to_string(), path, cached))
+    }
+
+    fn record(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+    ) -> Result<Option<MetaRecord>> {
+        let cache = CardCell::new(self.root.clone(), pair, term, understanding).cache();
+        if !cache.exists(META_FILE) {
+            return Ok(None);
+        }
+        Ok(Some(read_json(&cache, META_FILE)?))
     }
 }
 
@@ -315,6 +340,8 @@ impl SenseRecord {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct MetaRecord {
+    #[serde(default)]
+    policy: String,
     term: String,
     #[serde(default)]
     understanding: String,
@@ -334,6 +361,7 @@ struct MetaRecord {
 impl MetaRecord {
     fn from_meta(term: &str, understanding: &str, pair: &LanguagePair, meta: &CardMeta) -> Self {
         Self {
+            policy: String::from(META_POLICY),
             term: term.to_string(),
             understanding: understanding.to_string(),
             target_lang: pair.learning().to_string(),
@@ -348,6 +376,10 @@ impl MetaRecord {
             source_context: meta.source_context().to_string(),
             target_sentence: meta.target_sentence().to_string(),
         }
+    }
+
+    fn current(&self) -> bool {
+        self.policy == META_POLICY
     }
 
     fn meta(self) -> CardMeta {
@@ -388,6 +420,51 @@ where
         let _ = fs::remove_file(&staged);
     }
     result
+}
+
+fn replace_json<T>(cache: &Cache, filename: &str, payload: &T) -> Result<()>
+where
+    T: Serialize,
+{
+    let staged = cache.stage(".json")?;
+    let result = fs::write(&staged, serde_json::to_string_pretty(payload)?)
+        .map_err(anyhow::Error::from)
+        .and_then(|()| commit_replacement(cache, &staged, filename));
+    if result.is_err() {
+        let _ = fs::remove_file(&staged);
+    }
+    result
+}
+
+#[cfg(not(windows))]
+fn commit_replacement(cache: &Cache, staged: &std::path::Path, filename: &str) -> Result<()> {
+    cache.commit(staged, filename)
+}
+
+#[cfg(windows)]
+fn commit_replacement(cache: &Cache, staged: &std::path::Path, filename: &str) -> Result<()> {
+    let current = cache.filepath(filename)?;
+    if !current.exists() {
+        return cache.commit(staged, filename);
+    }
+    let backup = cache.stage(".backup")?;
+    fs::remove_file(&backup)?;
+    fs::rename(&current, &backup)?;
+    match cache.commit(staged, filename) {
+        Ok(()) => {
+            fs::remove_file(backup)?;
+            Ok(())
+        }
+        Err(error) => {
+            if current.exists() {
+                fs::remove_file(&current)?;
+            }
+            fs::rename(backup, current).with_context(|| {
+                format!("failed to restore cache after replacement error: {error:#}")
+            })?;
+            Err(error)
+        }
+    }
 }
 
 fn normalized_entries(raw: &RawInputBatch) -> Vec<String> {
@@ -493,15 +570,15 @@ mod tests {
     }
 
     #[test]
-    fn current_text_model_uses_the_version_four_understanding_identity() {
+    fn language_local_examples_use_the_version_five_understanding_identity() {
         let cache = CachedUnderstanding::new(
             ChangingUnderstanding::new(Rc::new(RefCell::new(0))),
             "/tmp/kamishibai-understanding-version-test",
         );
         assert_eq!(
             cache.entry_filename("lantern", "ru", "en"),
-            "3020fb5446c5.json",
-            "Gemini 3.6 understanding must not reuse an earlier model's cache entry"
+            "614dca79c87e.json",
+            "language-local prompt examples reused an earlier understanding contract"
         );
     }
 
@@ -593,6 +670,88 @@ mod tests {
             ),
             (true, false, true, "The lantern glowed under rain"),
             "card meta cache no longer preserves the first generated sentence"
+        );
+    }
+
+    #[test]
+    fn failed_meta_replacement_preserves_the_previous_document() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::failing("card", directory.path(), 0);
+        fs::write(
+            cache.filepath(META_FILE).expect("meta path must resolve"),
+            r#"{"value":"old"}"#,
+        )
+        .expect("old meta must store");
+        let result = replace_json(&cache, META_FILE, &serde_json::json!({"value": "new"}));
+        let preserved = fs::read_to_string(
+            cache
+                .filepath(META_FILE)
+                .expect("preserved meta path must resolve"),
+        )
+        .expect("old meta must remain readable");
+        assert_eq!(
+            (result.is_err(), preserved.as_str()),
+            (true, r#"{"value":"old"}"#),
+            "failed meta replacement deleted the previous readable document"
+        );
+    }
+
+    #[test]
+    fn card_meta_cache_replaces_an_older_prompt_policy_in_place() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let pair = LanguagePair::new("en", "ru");
+        let cache = CardMetaCache::new(directory.path());
+        let cell = CardCell::new(directory.path(), &pair, "lantern", "a portable lamp").cache();
+        let mut legacy = serde_json::to_value(MetaRecord::from_meta(
+            "lantern",
+            "a portable lamp",
+            &pair,
+            &meta("The old prompt wrote this sentence"),
+        ))
+        .expect("legacy meta must serialize");
+        legacy
+            .as_object_mut()
+            .expect("legacy meta must be an object")
+            .remove("policy");
+        fs::write(
+            cell.filepath(META_FILE)
+                .expect("legacy meta path must resolve"),
+            serde_json::to_vec_pretty(&legacy).expect("legacy meta must encode"),
+        )
+        .expect("legacy meta must store");
+        let legacy_read = cache
+            .load("lantern", "a portable lamp", &pair)
+            .expect("legacy meta lookup must succeed")
+            .expect("legacy meta must remain readable");
+        let generation_read = cache
+            .load_current("lantern", "a portable lamp", &pair)
+            .expect("generation meta lookup must succeed");
+        let stored = cache
+            .store(
+                "lantern",
+                "a portable lamp",
+                &pair,
+                &meta("The localized prompt wrote this sentence"),
+            )
+            .expect("localized meta must replace the stale record");
+        let refreshed = cache
+            .load("lantern", "a portable lamp", &pair)
+            .expect("localized meta must load")
+            .expect("localized meta must exist");
+        assert_eq!(
+            (
+                legacy_read.target_sentence(),
+                generation_read,
+                stored.2,
+                refreshed.target_sentence()
+            ),
+            (
+                "The old prompt wrote this sentence",
+                None,
+                false,
+                "The localized prompt wrote this sentence"
+            ),
+            "card meta cache lost legacy reads or reused an older generation policy"
         );
     }
 

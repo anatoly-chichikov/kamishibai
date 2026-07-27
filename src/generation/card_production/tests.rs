@@ -22,14 +22,103 @@ use super::*;
 use crate::application::GenerationCostLedger;
 use crate::generation::artifact_cache::{
     Cache, ILLUSTRATION_COST_FILE, IMAGE_ATTEMPTS_DIRECTORY, META_COST_FILE, PICTURE_REQUESTS_FILE,
-    RootStage, SCENE_FILE, VOICE_FILE,
+    RootStage, SCENE_FILE, VOICE_COST_FILE, VOICE_FILE,
 };
 use crate::generation::manga::{
     BorderDetector, Illustration, ImageSource, MangaRenderer, RecallJudge, RecallReview, Renderer,
     Translator,
 };
 use crate::generation::{Audio, Speaker};
-use crate::session::{Artifact, ArtifactCosts, ArtifactFile, CostRecord, GenerationCost};
+use crate::session::{
+    Artifact, ArtifactCosts, ArtifactFile, CardCell, CardMetaCache, CostRecord, GenerationCost,
+};
+
+#[test]
+fn localized_meta_refresh_removes_legacy_audio_and_its_cost() {
+    let directory = TempDir::new().expect("tempdir must be created");
+    let pair = LanguagePair::new("fr", "en");
+    let term = "canard";
+    let understanding = "a false newspaper story";
+    let cache = CardMetaCache::new(directory.path());
+    cache
+        .store(
+            term,
+            understanding,
+            &pair,
+            &card_meta("The old sentence used canard"),
+        )
+        .expect("legacy meta seed must store");
+    let cell = CardCell::new(directory.path(), &pair, term, understanding).cache();
+    let meta_path = cell
+        .filepath(crate::generation::artifact_cache::META_FILE)
+        .expect("meta path must resolve");
+    let mut legacy = serde_json::from_slice::<Value>(
+        &fs::read(&meta_path).expect("meta seed must remain readable"),
+    )
+    .expect("meta seed must decode");
+    legacy
+        .as_object_mut()
+        .expect("meta seed must be an object")
+        .remove("policy");
+    fs::write(
+        &meta_path,
+        serde_json::to_vec_pretty(&legacy).expect("legacy meta must encode"),
+    )
+    .expect("legacy meta must store");
+    fs::write(
+        cell.filepath(VOICE_FILE)
+            .expect("legacy audio path must resolve"),
+        b"old audio",
+    )
+    .expect("legacy audio must store");
+    fs::write(
+        cell.filepath(VOICE_COST_FILE)
+            .expect("legacy audio cost path must resolve"),
+        b"old cost",
+    )
+    .expect("legacy audio cost must store");
+    let production = MetadataProduction::new(
+        directory.path().to_path_buf(),
+        GeminiAccess::console(),
+        CostAccounting::new(None),
+    );
+    let file = production
+        .store(
+            term,
+            understanding,
+            &pair,
+            &card_meta("The localized sentence uses canard"),
+        )
+        .expect("localized meta must replace legacy meta");
+    let refreshed = cache
+        .load(term, understanding, &pair)
+        .expect("refreshed meta lookup must succeed")
+        .expect("refreshed meta must exist");
+    assert_eq!(
+        (
+            file.cached(),
+            refreshed.target_sentence(),
+            cell.exists(VOICE_FILE),
+            cell.exists(VOICE_COST_FILE)
+        ),
+        (false, "The localized sentence uses canard", false, false),
+        "localized meta refresh retained legacy audio or failed to replace meta"
+    );
+}
+
+fn card_meta(sentence: &str) -> CardMeta {
+    CardMeta::new(
+        "ka.naʁ",
+        "sample",
+        "hoax",
+        5,
+        "A source sentence",
+        "source",
+        "A concise hint",
+        "A concise context",
+        sentence,
+    )
+}
 
 #[derive(Clone, Default)]
 struct RecordingLedger {

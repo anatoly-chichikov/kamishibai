@@ -1,5 +1,6 @@
 //! Gemini metadata generation, correction, and stable cache persistence.
 
+use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -7,7 +8,9 @@ use anyhow::Result;
 use super::artifact_file;
 use super::cost_accounting::CostAccounting;
 use crate::gemini::GeminiAccess;
-use crate::generation::artifact_cache::{ROOT_STAGE_LOCK_TIMEOUT, RootStage};
+use crate::generation::artifact_cache::{
+    Cache, ROOT_STAGE_LOCK_TIMEOUT, RootStage, VOICE_COST_FILE, VOICE_FILE,
+};
 use crate::session::{
     Artifact, ArtifactAttempt, ArtifactFile, CardCell, CardDraft, CardMeta, CardMetaCache,
     CardRevision, LanguagePair,
@@ -45,7 +48,7 @@ impl MetadataProduction {
             Ok(guard) => guard,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        match self.meta_cache().load(term, understanding, pair) {
+        match self.meta_cache().load_current(term, understanding, pair) {
             Ok(Some(meta)) => {
                 let result = self
                     .store_unlocked(term, understanding, pair, &meta)
@@ -120,6 +123,18 @@ impl MetadataProduction {
         pair: &LanguagePair,
         meta: &CardMeta,
     ) -> Result<ArtifactFile> {
+        let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
+        let refresh = self
+            .meta_cache()
+            .load_current(term, understanding, pair)?
+            .is_none();
+        let _voice = refresh
+            .then(|| cache.hold_root_stage(RootStage::Voice, ROOT_STAGE_LOCK_TIMEOUT))
+            .transpose()?;
+        if refresh {
+            remove_cached(&cache, VOICE_FILE)?;
+            remove_cached(&cache, VOICE_COST_FILE)?;
+        }
         let (filename, path, cached) = self.meta_cache().store(term, understanding, pair, meta)?;
         Ok(artifact_file(filename, path, cached, None))
     }
@@ -127,4 +142,12 @@ impl MetadataProduction {
     fn meta_cache(&self) -> CardMetaCache {
         CardMetaCache::new(self.cache.clone())
     }
+}
+
+fn remove_cached(cache: &Cache, filename: &str) -> Result<()> {
+    let path = cache.path().join(filename);
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
 }
