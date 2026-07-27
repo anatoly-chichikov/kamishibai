@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 
+use super::prompt_examples::{LanguagePromptExamples, examples};
 use super::{DeckNaming, FALLBACK_OCR, LanguageProfile, UiLabels};
 
 /// Registry for supported language profiles.
@@ -22,13 +23,34 @@ impl LanguageCatalog {
 
     /// Return the supported language codes in stable order.
     pub fn codes(&self) -> [&'static str; 11] {
-        profiles().map(|profile| profile.code)
+        profile_codes()
     }
 
     /// Return the fallback OCR language string.
     pub fn fallback_ocr(&self) -> &'static str {
         FALLBACK_OCR
     }
+
+    /// Return the typed prompt examples for one supported language code.
+    pub(crate) fn prompts(&self, code: &str) -> Result<LanguagePromptExamples> {
+        let profile = self.item(code)?;
+        Ok(examples(profile.code))
+    }
+
+    /// Resolve either a supported code or its prompt display name.
+    pub(crate) fn resolve(&self, value: &str) -> Result<LanguageProfile> {
+        self.item(value).or_else(|_| {
+            profiles()
+                .into_iter()
+                .find(|profile| profile.prompt.eq_ignore_ascii_case(value))
+                .ok_or_else(|| anyhow!("Unsupported language '{value}'"))
+        })
+    }
+}
+
+/// Return codes from the canonical profile declarations.
+pub(super) fn profile_codes() -> [&'static str; 11] {
+    profiles().map(|profile| profile.code)
 }
 
 /// Return the supported language catalog.

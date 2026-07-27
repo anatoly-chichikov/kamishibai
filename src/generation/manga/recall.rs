@@ -4,6 +4,8 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::generation::prompts::{picture_recall_judge_prompt, picture_recall_judge_schema};
+use crate::languages::{LanguageProfile, catalog};
+use crate::prompt::PromptTemplate;
 
 /// Source-language fields already visible on the front of one flashcard.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -52,6 +54,15 @@ impl HiddenRecall {
             hidden_target_sentence: sentence.into(),
         }
     }
+
+    /// Create one target-language recall answer from a resolved profile.
+    pub(crate) fn from_profile(
+        language: &LanguageProfile,
+        term: impl Into<String>,
+        sentence: impl Into<String>,
+    ) -> Self {
+        Self::new(language.prompt.clone(), term, sentence)
+    }
 }
 
 /// Complete shown-versus-hidden recall contract for one flashcard image.
@@ -69,8 +80,16 @@ impl RecallCard {
 
     /// Render the injection-resistant image-review prompt with quoted JSON data.
     pub(crate) fn prompt(&self) -> Result<String> {
-        Ok(picture_recall_judge_prompt()
-            .replace("{card_json}", serde_json::to_string_pretty(self)?.as_str()))
+        let catalog = catalog();
+        let language = catalog
+            .resolve(self.hidden.hidden_target_language.as_str())
+            .or_else(|_| catalog.item("en"))?;
+        let examples = catalog.prompts(language.code)?;
+        PromptTemplate::new(picture_recall_judge_prompt()).render(&[
+            ("{card_json}", serde_json::to_string_pretty(self)?),
+            ("{focus_example}", examples.recall_focus()?),
+            ("{fragment_example}", examples.recall_fragment()?),
+        ])
     }
 
     /// Return the bounded response schema used by the image-review model.
@@ -367,6 +386,64 @@ mod tests {
         assert!(
             !review.allows(),
             "a clearly visible focus term was accepted before answer reveal"
+        );
+    }
+
+    #[test]
+    fn recall_prompt_uses_the_hidden_target_languages_examples() {
+        let card = RecallCard::new(
+            ShownRecall::new(
+                "English",
+                "The manager approved the final design.",
+                "approved",
+                "Think of a confirmed decision.",
+            ),
+            HiddenRecall::new("zh", "批准", "经理批准了最终设计。"),
+        );
+        let prompt = card.prompt().expect("chinese recall prompt must render");
+        assert!(
+            prompt.contains(r#""focus":"马","longer":"马虎""#)
+                && prompt.contains(r#""visible":"最终设计","sentence_end":"最终设计""#)
+                && !prompt.contains("runway"),
+            "recall prompt retained examples from another target language"
+        );
+    }
+
+    #[test]
+    fn every_supported_target_renders_its_recall_examples() {
+        let complete = crate::languages::catalog().codes().into_iter().all(|code| {
+            let card = RecallCard::new(
+                ShownRecall::new(
+                    "English",
+                    "The manager approved the design.",
+                    "approved",
+                    "Think of a decision.",
+                ),
+                HiddenRecall::new(code, "term", "one target sentence"),
+            );
+            card.prompt().is_ok()
+        });
+        assert!(
+            complete,
+            "a supported target language cannot render its recall examples"
+        );
+    }
+
+    #[test]
+    fn arbitrary_recall_language_values_remain_serializable() {
+        let card = RecallCard::new(
+            ShownRecall::new("English", "A visible sentence.", "visible", "A hint."),
+            HiddenRecall::new("Klingon", "qaH", "qaH vIpoQ."),
+        );
+        let encoded = serde_json::to_value(&card).expect("recall card must serialize");
+        let prompt = card.prompt();
+        assert_eq!(
+            (
+                encoded["hidden"]["hidden_target_language"].as_str(),
+                prompt.is_ok()
+            ),
+            (Some("Klingon"), true),
+            "the public recall path rejected a previously accepted language string"
         );
     }
 

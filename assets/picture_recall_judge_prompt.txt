@@ -10,8 +10,8 @@ Judge only literal writing visible inside the illustration. Meaning conveyed by 
 Transcribe only localized, genuinely text-like glyphs. Do not invent letters from hatching, speed lines, textures, architecture, object contours, or the scene narrative. Cipher symbols, pseudo-writing, and decorative glyph strings are not words and must never become evidence merely because the depicted activity suggests the hidden answer.
 
 REJECT clearly legible image text when it:
-- reveals the hidden focus term through a recognizable inflected, derived, transliterated, near-spelling, or true lexical-stem form; never match focus characters merely contained inside a different longer word (for example, RUN in RUNWAY or GO in GOOGLE);
-- reproduces at least two consecutive content-bearing words from the hidden target sentence; compare the literal reading word by word against the full hidden sentence before choosing a kind (for example, visible BEFORE LUNCH in a sentence ending "before lunch" is TARGET_FRAGMENT, not one unrelated word); or
+- reveals the hidden focus term through a recognizable inflected, derived, transliterated, near-spelling, or true lexical-stem form; never match focus characters merely contained inside a different longer word (target-language example: {focus_example});
+- reproduces at least two consecutive content-bearing words from the hidden target sentence; compare the literal reading word by word against the full hidden sentence before choosing a kind (target-language example: {fragment_example}); or
 - presents a plausible competing target-language answer for the shown source highlight, rather than a merely thematic word.
 
 ALLOW when there is no clearly legible answer-bearing writing. Allow unrelated labels, isolated numerals, one non-focus word from the target sentence, pseudo-writing, decorative marks, and ambiguous glyphs. Writing that merely repeats information already present in the SHOWN fields is also allowed.
