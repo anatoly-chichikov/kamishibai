@@ -331,8 +331,9 @@ function Test-Private([System.Security.AccessControl.FileSystemSecurity]$acl) {
     $full = [System.Security.AccessControl.FileSystemRights]::FullControl
     return $rule.IdentityReference.Value -eq $sid.Value -and $rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and ($rule.FileSystemRights -band $full) -eq $full
 }
-$file = Get-Acl -LiteralPath $target
-$directory = Get-Acl -LiteralPath (Split-Path -Parent $target)
+$file = [System.IO.FileInfo]::new($target).GetAccessControl()
+$parent = [System.IO.Path]::GetDirectoryName($target)
+$directory = [System.IO.DirectoryInfo]::new($parent).GetAccessControl()
 if ((Test-Private $file) -and (Test-Private $directory)) { Write-Output 'private' } else { exit 30 }
 "#;
     let output = Command::new("powershell.exe")
@@ -346,6 +347,7 @@ if ((Test-Private $file) -and (Test-Private $directory)) { Write-Output 'private
             script,
         ])
         .env("KAMISHIBAI_ACL_TEST_TARGET", store.path())
+        .env("PSModulePath", "")
         .output()
         .expect("Windows ACL verification must run");
     assert_eq!(

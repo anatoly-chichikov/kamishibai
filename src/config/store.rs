@@ -31,7 +31,18 @@ $kind = [Environment]::GetEnvironmentVariable('KAMISHIBAI_ACL_KIND')
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 $administrators = [System.Security.Principal.SecurityIdentifier]::new([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
 if ([string]::IsNullOrWhiteSpace($target)) { exit 20 }
-$security = Get-Acl -LiteralPath $target
+if ($kind -eq 'directory') {
+    $item = [System.IO.DirectoryInfo]::new($target)
+    $security = $item.GetAccessControl()
+    $inheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, [System.Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
+} elseif ($kind -eq 'file') {
+    $item = [System.IO.FileInfo]::new($target)
+    $security = $item.GetAccessControl()
+    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, [System.Security.AccessControl.FileSystemRights]::FullControl, [System.Security.AccessControl.AccessControlType]::Allow)
+} else {
+    exit 21
+}
 $owner = $security.GetOwner([System.Security.Principal.SecurityIdentifier])
 if (($owner.Value -ne $sid.Value) -and ($owner.Value -ne $administrators.Value)) { exit 23 }
 $security.SetAccessRuleProtection($true, $false)
@@ -39,17 +50,9 @@ $explicit = @($security.GetAccessRules($true, $false, [System.Security.Principal
 foreach ($entry in $explicit) {
     [void]$security.RemoveAccessRuleSpecific($entry)
 }
-if ($kind -eq 'directory') {
-    $inheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
-    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, [System.Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
-} elseif ($kind -eq 'file') {
-    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, [System.Security.AccessControl.FileSystemRights]::FullControl, [System.Security.AccessControl.AccessControlType]::Allow)
-} else {
-    exit 21
-}
 $security.AddAccessRule($rule)
-Set-Acl -LiteralPath $target -AclObject $security
-$actual = Get-Acl -LiteralPath $target
+$item.SetAccessControl($security)
+$actual = $item.GetAccessControl()
 if (-not $actual.AreAccessRulesProtected) { exit 22 }
 $owner = $actual.GetOwner([System.Security.Principal.SecurityIdentifier])
 if (($owner.Value -ne $sid.Value) -and ($owner.Value -ne $administrators.Value)) { exit 23 }
@@ -328,6 +331,7 @@ fn secure_windows_acl(path: &Path, kind: &str) -> std::io::Result<()> {
         ])
         .env("KAMISHIBAI_ACL_TARGET", path)
         .env("KAMISHIBAI_ACL_KIND", kind)
+        .env("PSModulePath", "")
         .output()?;
     if output.status.success() {
         return Ok(());
