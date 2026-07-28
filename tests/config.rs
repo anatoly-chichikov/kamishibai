@@ -334,7 +334,7 @@ function Test-Private([System.Security.AccessControl.FileSystemSecurity]$acl) {
 $file = [System.IO.FileInfo]::new($target).GetAccessControl()
 $parent = [System.IO.Path]::GetDirectoryName($target)
 $directory = [System.IO.DirectoryInfo]::new($parent).GetAccessControl()
-if ((Test-Private $file) -and (Test-Private $directory)) { Write-Output 'private' } else { exit 30 }
+if ((Test-Private $file) -and (Test-Private $directory)) { [Console]::Out.WriteLine('private') } else { exit 30 }
 "#;
     let output = Command::new("powershell.exe")
         .args([
