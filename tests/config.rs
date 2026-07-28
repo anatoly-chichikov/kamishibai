@@ -320,9 +320,11 @@ fn preferences_use_a_verified_private_windows_acl() {
 $ErrorActionPreference = 'Stop'
 $target = [Environment]::GetEnvironmentVariable('KAMISHIBAI_ACL_TEST_TARGET')
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$administrators = [System.Security.Principal.SecurityIdentifier]::new([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
 function Test-Private([System.Security.AccessControl.FileSystemSecurity]$acl) {
     if (-not $acl.AreAccessRulesProtected) { return $false }
-    if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { return $false }
+    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+    if (($owner.Value -ne $sid.Value) -and ($owner.Value -ne $administrators.Value)) { return $false }
     $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
     if ($rules.Count -ne 1) { return $false }
     $rule = $rules[0]

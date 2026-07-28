@@ -29,25 +29,30 @@ $ErrorActionPreference = 'Stop'
 $target = [Environment]::GetEnvironmentVariable('KAMISHIBAI_ACL_TARGET')
 $kind = [Environment]::GetEnvironmentVariable('KAMISHIBAI_ACL_KIND')
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$administrators = [System.Security.Principal.SecurityIdentifier]::new([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
 if ([string]::IsNullOrWhiteSpace($target)) { exit 20 }
+$security = Get-Acl -LiteralPath $target
+$owner = $security.GetOwner([System.Security.Principal.SecurityIdentifier])
+if (($owner.Value -ne $sid.Value) -and ($owner.Value -ne $administrators.Value)) { exit 23 }
+$security.SetAccessRuleProtection($true, $false)
+$explicit = @($security.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))
+foreach ($entry in $explicit) {
+    [void]$security.RemoveAccessRuleSpecific($entry)
+}
 if ($kind -eq 'directory') {
-    $security = [System.Security.AccessControl.DirectorySecurity]::new()
     $inheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
     $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, [System.Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
 } elseif ($kind -eq 'file') {
-    $security = [System.Security.AccessControl.FileSecurity]::new()
     $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, [System.Security.AccessControl.FileSystemRights]::FullControl, [System.Security.AccessControl.AccessControlType]::Allow)
 } else {
     exit 21
 }
-$security.SetOwner($sid)
-$security.SetAccessRuleProtection($true, $false)
 $security.AddAccessRule($rule)
 Set-Acl -LiteralPath $target -AclObject $security
 $actual = Get-Acl -LiteralPath $target
 if (-not $actual.AreAccessRulesProtected) { exit 22 }
 $owner = $actual.GetOwner([System.Security.Principal.SecurityIdentifier])
-if ($owner.Value -ne $sid.Value) { exit 23 }
+if (($owner.Value -ne $sid.Value) -and ($owner.Value -ne $administrators.Value)) { exit 23 }
 $rules = @($actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
 if ($rules.Count -ne 1) { exit 24 }
 $entry = $rules[0]
@@ -327,9 +332,15 @@ fn secure_windows_acl(path: &Path, kind: &str) -> std::io::Result<()> {
     if output.status.success() {
         return Ok(());
     }
+    let stderr = String::from_utf8_lossy(output.stderr.as_slice());
+    let detail = stderr
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().trim_end_matches('.'))
+        .unwrap_or("PowerShell did not report a cause");
     Err(std::io::Error::other(format!(
-        "Windows ACL enforcement failed with {}",
-        output.status
+        "Windows ACL enforcement failed with {}: {detail}",
+        output.status,
     )))
 }
 
@@ -360,10 +371,10 @@ fn sync_directory(path: &Path) -> std::io::Result<()> {
 #[cfg(unix)]
 fn sync_unsupported(error: &std::io::Error) -> bool {
     error.raw_os_error().is_some_and(|code| {
-        matches!(
-            rustix::io::Errno::from_raw_os_error(code),
-            rustix::io::Errno::INVAL | rustix::io::Errno::NOTSUP | rustix::io::Errno::OPNOTSUPP
-        )
+        let errno = rustix::io::Errno::from_raw_os_error(code);
+        errno == rustix::io::Errno::INVAL
+            || errno == rustix::io::Errno::NOTSUP
+            || errno == rustix::io::Errno::OPNOTSUPP
     })
 }
 
