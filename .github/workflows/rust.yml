@@ -55,7 +55,7 @@ jobs:
       - run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
   tests:
-    name: tests
+    name: Linux tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -86,7 +86,7 @@ jobs:
       - run: cargo test --all-targets --all-features --locked
 
   windows:
-    name: windows
+    name: Windows tests
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v6.0.2
