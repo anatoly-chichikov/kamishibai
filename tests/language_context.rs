@@ -37,6 +37,20 @@ fn ready() -> CardArtifacts {
     )
 }
 
+#[test]
+fn app_debug_redacts_the_welcome_key() {
+    let app = App::new(LanguagePair::new("en", "ru")).welcome_paste_key("debug-secret-welcome");
+    let rendered = format!("{app:?}");
+    assert_eq!(
+        (
+            rendered.contains("debug-secret-welcome"),
+            rendered.contains("[REDACTED]")
+        ),
+        (false, true),
+        "App Debug exposed the Welcome API key"
+    );
+}
+
 fn meta_for(term: &str) -> CardMeta {
     CardMeta::new(
         format!("/{term}/"),

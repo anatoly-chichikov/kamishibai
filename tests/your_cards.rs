@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use kamishibai::session::{
-    Artifact, ArtifactFile, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, CardMeta,
-    GenerationCost, LanguagePair,
+    Artifact, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft,
+    CardMeta, GenerationCost, LanguagePair,
 };
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, link_at, transit};
 use ratatui::Terminal;
@@ -105,6 +105,26 @@ fn retrying_artifacts() -> CardArtifacts {
     )
 }
 
+fn rejected_attempt() -> AttemptFault {
+    AttemptFault::new(
+        "border",
+        "White border missing on: bottom",
+        Some(PathBuf::from("/tmp/attempt.jpg")),
+    )
+}
+
+fn rejected_picture_artifacts_with(attempts: usize) -> CardArtifacts {
+    let picture = (0..attempts).fold(ArtifactSlot::fresh(Artifact::Picture), |slot, _| {
+        slot.faulted(rejected_attempt())
+    });
+    CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded_with(priced_file("meta.json", 15_400_000)),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded_with(priced_file("scene.json", 23_100_000)),
+        picture,
+        ArtifactSlot::fresh(Artifact::Sound).succeeded_with(priced_file("audio.wav", 2_500_000)),
+    )
+}
+
 fn failed_artifacts() -> CardArtifacts {
     let mut picture = ArtifactSlot::fresh(Artifact::Picture);
     for nanos in [60_000_000, 150_000_000, 240_000_000, 321_000_000] {
@@ -147,6 +167,18 @@ fn seeded(drafts: Vec<CardDraft>) -> App {
         .with_screen(Screen::YourCards)
         .confirmed_learning("en")
         .cards_started(drafts)
+}
+
+fn row_containing<'a>(rendered: &'a str, needle: &str) -> &'a str {
+    rendered
+        .lines()
+        .find(|line| line.contains(needle))
+        .expect("rendered card row must exist")
+}
+
+fn column_of(row: &str, needle: &str) -> usize {
+    let offset = row.find(needle).expect("rendered card cell must exist");
+    row[..offset].chars().count()
 }
 
 #[test]
@@ -208,10 +240,10 @@ fn your_cards_shows_card_asset_and_total_costs_when_finished() {
     let rendered = flat(&app);
     assert!(
         rendered.contains("whilst → Example with whilst.  $.0808")
-            && rendered.contains("meta.json          1 B  $.0015")
-            && rendered.contains("audio.wav          1 B  $.0100")
-            && rendered.contains("scene.json         1 B  $.0020")
-            && rendered.contains("picture.jpg        1 B  $.0673")
+            && rendered.contains("meta.json           1 B  $.0015")
+            && rendered.contains("audio.wav           1 B  $.0100")
+            && rendered.contains("scene.json          1 B  $.0020")
+            && rendered.contains("picture.jpg         1 B  $.0673")
             && rendered.contains("$0.08")
             && !rendered.contains("total cost"),
         "finished cards must show detailed costs and a simplified total in dollars: {rendered}"
@@ -249,7 +281,7 @@ fn your_cards_marks_cached_artifacts_next_to_the_file_metadata() {
     let app = seeded(vec![draft("whilst", cached_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("meta.json          1 B  cached"),
+        rendered.contains("meta.json           1 B  cached"),
         "cached artifact rows must say cached in the same dim metadata slot as prices: {rendered}"
     );
 }
@@ -301,6 +333,36 @@ fn retry_state_shows_retrying_count_inline_inside_the_card_row() {
     assert!(
         rendered.contains("retry 1/3") && rendered.contains("$.1234") && rendered.contains("$0.12"),
         "retrying state must be rendered inline without leaving the your cards screen: {rendered}"
+    );
+}
+
+#[test]
+fn artifact_prices_stay_aligned_and_rejected_counts_follow_them() {
+    let costs = ArtifactCosts::default()
+        .charged(Artifact::Picture, GenerationCost::from_nanos(173_800_000));
+    let recovered = draft("whilst", recovered_picture_artifacts());
+    let retrying = draft("commodity", rejected_picture_artifacts_with(3)).with_costs(costs);
+    let failed = draft("move on", rejected_picture_artifacts_with(4)).with_costs(costs);
+    let app = seeded(vec![recovered, retrying, failed]).cards_running(Some((1, Artifact::Picture)));
+    let rendered = flat(&app);
+    let ready = row_containing(&rendered, "picture.jpg");
+    let retry = row_containing(&rendered, "retry 3/3");
+    let failed = row_containing(&rendered, "gave up after 3 retries");
+    let ready_price = column_of(ready, "$.0673");
+    let ready_rejected = column_of(ready, "1 rejected");
+    let retry_price = column_of(retry, "$.1738");
+    let retry_rejected = column_of(retry, "3 rejected");
+    let failed_price = column_of(failed, "$.1738");
+    let failed_rejected = column_of(failed, "4 rejected");
+    assert_eq!(
+        (
+            retry_price,
+            ready_price < ready_rejected,
+            retry_price < retry_rejected,
+            failed_price < failed_rejected,
+        ),
+        (ready_price, true, true, true),
+        "artifact prices drifted between ready and retry rows or put rejected before the price: {rendered}"
     );
 }
 

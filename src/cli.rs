@@ -8,6 +8,7 @@
 mod batch;
 mod bridge;
 mod console;
+mod contract;
 mod error;
 mod host;
 mod jobs;
@@ -19,29 +20,45 @@ mod wiring;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches, Parser};
 
-const SCHEMA_HELP: &str = "\
+const SHORT_CONTRACT_HELP: &str =
+    "Agent or script? Run `kamishibai agent-contract` for this binary's console contract.";
+const SCHEMA_HELP: &str = concat!(
+    "\
 AGENT CONTRACT:
-  Driving this from a script or agent? The full console contract — every
-  command, flag, JSON shape, and exit code — is llms.txt at the repo root.
-  Fetch and read it before integrating:
-  https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/llms.txt
+  Run `kamishibai agent-contract` first. It prints the complete contract
+  embedded in this binary, including its matching application version.
+  The same release-pinned document is available at:
+  https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v",
+    env!("CARGO_PKG_VERSION"),
+    "/llms.txt
+
+FIRST-TIME HEADLESS SETUP:
+  known = my/source language; learning = target language.
+  For a personal machine, save known plus a verified key:
+
+  kamishibai config --known RU --json
+  printf '%s' \"$GEMINI_API_KEY\" | kamishibai config --key - --json
+  kamishibai config --json
+
+  For CI/shared/ephemeral agents, do not save the key:
+
+  GEMINI_API_KEY=\"$SECRET\" kamishibai new --word chat --known RU --learning FR --json
 
 EXAMPLES:
   kamishibai                                       open the interactive TUI
-  kamishibai new --word bank --learning en         understand words, create a session
-  kamishibai select --card bank --sense 2          keep only the 2nd sense of a card
-  kamishibai exclude --card spring                 drop one card from the plan
-  kamishibai generate                              generate + publish in the background
-  kamishibai status                                progress (no Gemini)
-  kamishibai result                                the finished cards + deck/pdf paths
+  kamishibai agent-contract                        print this binary's agent contract
+  kamishibai new --word bank --learning EN --json  understand words, create a session
+  kamishibai select --card bank --sense 2 --json   keep only the 2nd sense of a card
+  kamishibai exclude --card spring --json          drop one card from the plan
+  kamishibai generate --json                       generate + publish in the background
+  kamishibai status --json                         progress (no Gemini)
   kamishibai result --json                         the paths/cards as JSON (for scripts)
-  kamishibai regenerate --failed                   retry the cards that did not finish
-  kamishibai regenerate --card bank --note \"…\"     re-roll one card from an instruction
-  kamishibai new --build cards.json --generate     import a cards JSON and start at once
+  kamishibai regenerate --failed --json            retry cards that did not finish
+  kamishibai new --build cards.json --json         import a cards JSON without Gemini intake
   kamishibai cards.json                            open the TUI on a prebuilt batch
-  kamishibai cache-path                            print the cache directory
+  kamishibai cache-path --json                     print the cache directory
 
   The session id is optional everywhere: an omitted id means the only session,
   or the only unfinished one; with several candidates the command lists the
@@ -60,6 +77,9 @@ EXIT CODES:
 ENVIRONMENT:
   GEMINI_API_KEY   the Gemini API key; it wins over a key saved through the
                    Welcome screen, and need not be set when a saved key exists
+  KAMISHIBAI_DATA  platform data home override; appends kamishibai/preferences.json
+  KAMISHIBAI_CACHE exact cache-root override
+  KAMISHIBAI_OUTPUT exact output-root override; relative values resolve from cwd
 
 WORDS_JSON format (for `new --build`; all fields required, unknown fields rejected):
 {
@@ -82,7 +102,8 @@ WORDS_JSON format (for `new --build`; all fields required, unknown fields reject
   ]
 }
 A `new --build` session uses these fields to generate an Anki .apkg, a printable PDF,
-native-speaker audio, and manga-style illustrations.";
+native-speaker audio, and manga-style illustrations."
+);
 
 /// Turn a list of words into an illustrated Anki deck — sentences,
 /// native-speaker audio, and manga-style art.
@@ -91,7 +112,7 @@ native-speaker audio, and manga-style illustrations.";
     name = "kamishibai",
     version,
     about = "Turn a list of words into an illustrated Anki deck — sentences, native-speaker audio, manga-style art.",
-    after_help = "Agent or script? Read the console contract: https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/main/llms.txt",
+    after_help = SHORT_CONTRACT_HELP,
     after_long_help = SCHEMA_HELP,
     args_conflicts_with_subcommands = true
 )]
@@ -107,6 +128,20 @@ struct Cli {
     command: Option<session::Command>,
 }
 
+/// Build the clap command used by the binary and contract grammar checks.
+#[must_use]
+pub fn command() -> clap::Command {
+    Cli::command()
+}
+
+fn parse() -> Result<Cli, clap::Error> {
+    let mut matches = command().try_get_matches()?;
+    Cli::from_arg_matches_mut(&mut matches).map_err(|failure| {
+        let mut grammar = command();
+        failure.format(&mut grammar)
+    })
+}
+
 /// Parse arguments and execute the selected flow, returning a process exit code.
 ///
 /// Every refusal carries its exit code (`error.rs`): 2 — the invocation is
@@ -117,7 +152,28 @@ struct Cli {
 /// always appears, and `--json` additionally prints the machine-readable
 /// envelope on stdout.
 pub fn run() -> u8 {
-    let cli = Cli::parse();
+    let cli = match parse() {
+        Ok(cli) => cli,
+        Err(failure) => {
+            let json =
+                std::env::args_os().any(|argument| argument == std::ffi::OsStr::new("--json"));
+            if !failure.use_stderr() {
+                failure
+                    .print()
+                    .expect("invariant: clap help and version output must print");
+                return 0;
+            }
+            let message = failure.to_string();
+            failure
+                .print()
+                .expect("invariant: clap usage error output must print");
+            if json {
+                println!("{}", error::json_line(&error::usage(message.trim())));
+            }
+            return u8::try_from(failure.exit_code())
+                .expect("invariant: clap process exit codes fit in u8");
+        }
+    };
     match execute(&cli) {
         Ok(()) => 0,
         Err(error) => {
@@ -140,6 +196,14 @@ fn execute(cli: &Cli) -> Result<()> {
         session::Render::Text
     };
     match &cli.command {
+        Some(session::Command::AgentContract) => {
+            if cli.json {
+                return Err(error::usage(
+                    "agent-contract is a text document; --json does not apply",
+                ));
+            }
+            contract::print()
+        }
         Some(command) => session::handle(command, render, &bridge::TuiOpener),
         None => {
             if cli.json {
@@ -158,7 +222,6 @@ fn execute(cli: &Cli) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
     use session::Command;
 
     fn parse(args: &[&str]) -> Cli {
@@ -191,6 +254,77 @@ mod tests {
                 Some(Command::New(_))
             ),
             "new must parse to the New command"
+        );
+    }
+
+    #[test]
+    fn agent_contract_parses_to_the_contract_command() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "agent-contract"]).command,
+                Some(Command::AgentContract)
+            ),
+            "agent-contract must parse to the embedded contract command"
+        );
+    }
+
+    #[test]
+    fn first_time_agent_commands_keep_the_documented_grammar() {
+        let normalize = |document: &str| {
+            document
+                .split_whitespace()
+                .filter(|word| *word != "\\")
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let documents = [
+            ("llms.txt", normalize(include_str!("../llms.txt"))),
+            ("README.md", normalize(include_str!("../README.md"))),
+            (
+                "docs/cards-json.md",
+                normalize(include_str!("../docs/cards-json.md")),
+            ),
+            ("root --help", normalize(SCHEMA_HELP)),
+        ];
+        let checks = [
+            (0, "kamishibai agent-contract"),
+            (0, "kamishibai config --json"),
+            (0, "kamishibai config --known RU --json"),
+            (0, "kamishibai config --key - --json"),
+            (
+                0,
+                "kamishibai new --word chat --known RU --learning FR --json",
+            ),
+            (0, "kamishibai generate --json"),
+            (0, "kamishibai status --json"),
+            (0, "kamishibai result --json"),
+            (1, "kamishibai agent-contract"),
+            (2, "kamishibai new --build cards.json --json"),
+            (2, "kamishibai generate --wait --json"),
+            (2, "kamishibai result --json"),
+            (3, "kamishibai agent-contract"),
+            (3, "kamishibai config --known RU --json"),
+            (3, "kamishibai config --key - --json"),
+            (
+                3,
+                "kamishibai new --word chat --known RU --learning FR --json",
+            ),
+            (3, "kamishibai generate --json"),
+            (3, "kamishibai status --json"),
+            (3, "kamishibai result --json"),
+            (3, "kamishibai new --build cards.json --json"),
+        ];
+        let failures = checks
+            .iter()
+            .filter(|(document, command)| {
+                !documents[*document].1.contains(*command)
+                    || Cli::try_parse_from(command.split_whitespace()).is_err()
+            })
+            .map(|(document, command)| (documents[*document].0, *command))
+            .collect::<Vec<_>>();
+        assert!(
+            failures.is_empty(),
+            "documented first-time commands no longer parse: {failures:?}"
         );
     }
 
@@ -328,10 +462,7 @@ mod tests {
             parse(&["kamishibai", "__run", "fr-1"]).command,
             Some(Command::Worker(_))
         );
-        let hidden = !Cli::command()
-            .render_long_help()
-            .to_string()
-            .contains("__run");
+        let hidden = !command().render_long_help().to_string().contains("__run");
         assert!(
             parsed && hidden,
             "__run must parse but never appear in the help"
@@ -341,7 +472,7 @@ mod tests {
     #[test]
     fn long_help_documents_the_cards_json_schema() {
         assert!(
-            Cli::command()
+            command()
                 .render_long_help()
                 .to_string()
                 .contains("WORDS_JSON format"),
@@ -352,7 +483,7 @@ mod tests {
     #[test]
     fn version_reports_the_release_version() {
         assert_eq!(
-            Cli::command().get_version(),
+            command().get_version(),
             Some(env!("CARGO_PKG_VERSION")),
             "the CLI must report the current release version"
         );

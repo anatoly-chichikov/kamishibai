@@ -16,7 +16,7 @@ use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
     Artifact, ArtifactAttempt, ArtifactCosts, CardArtifacts, CardDraft, GenerationCost,
-    RawInputBatch, SessionEngine,
+    LearningTarget, RawInputBatch, SessionEngine,
 };
 use crate::tui::{App, AppEvent, BusyKind, KeySource, Screen, Side, WelcomeStage, transit};
 
@@ -111,11 +111,14 @@ impl Shell<GeminiCardWorkflow, GeminiKeyValidation> {
     /// Build a live card shell for an interactive empty session.
     pub(super) fn new(app: App, session: Option<TuiSession>) -> Result<Self> {
         let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
-        let output = Locations::new(LocationArgs::default(), SystemContext).output()?;
         crate::report::warm_fonts_async();
         let session = match session {
             Some(session) => session,
             None => TuiSession::fresh()?,
+        };
+        let output = match session.stored_output() {
+            Some(output) => output,
+            None => Locations::new(LocationArgs::default(), SystemContext).output()?,
         };
         let costs = session.cost_scope();
         let (workflow, keys) = interactive_application(cache, output.clone(), costs).into_parts();
@@ -576,7 +579,12 @@ where
                 Ok(()) => {
                     let language = self.app.pair().known().to_string();
                     let key = self.app.welcome().key.clone();
-                    self.persist_preferences(move |prefs| prefs.adopt(language).with_api_key(key));
+                    if let Err(error) = self
+                        .persist_preferences(move |prefs| prefs.adopt(language).with_api_key(key))
+                    {
+                        self.app = self.app.clone().welcome_notice(error.to_string());
+                        return;
+                    }
                     if self.app.cards().is_empty() {
                         self.app = self.app.clone().with_screen(Screen::YourWords);
                     } else {
@@ -603,7 +611,11 @@ where
                 let known = self.app.pair().known().to_string();
                 let workflow = self.workflow.clone();
                 self.start_text(BusyKind::Understanding, move || {
-                    TextOutcome::Understanding(workflow.understand(&raw, known.as_str()))
+                    TextOutcome::Understanding(workflow.understand(
+                        &raw,
+                        known.as_str(),
+                        &LearningTarget::Detect,
+                    ))
                 })?;
             }
             Side::StartGeneration => {
@@ -633,12 +645,16 @@ where
                 })?;
             }
             Side::PersistMyLanguageAndRunUnderstanding(code) => {
-                self.persist_preferences(|prefs| prefs.adopt(code));
+                self.persist_preferences(|prefs| prefs.adopt(code))?;
                 let raw = RawInputBatch::new(self.app.blob());
                 let known = self.app.pair().known().to_string();
                 let workflow = self.workflow.clone();
                 self.start_text(BusyKind::Understanding, move || {
-                    TextOutcome::Understanding(workflow.understand(&raw, known.as_str()))
+                    TextOutcome::Understanding(workflow.understand(
+                        &raw,
+                        known.as_str(),
+                        &LearningTarget::Detect,
+                    ))
                 })?;
             }
             Side::RunCardCorrection(comment) => {
@@ -676,7 +692,7 @@ where
                 self.start_publish()?;
             }
             Side::PersistMyLanguage(code) => {
-                self.persist_preferences(|prefs| prefs.adopt(code));
+                self.persist_preferences(|prefs| prefs.adopt(code))?;
             }
             Side::ValidateKey(key) => {
                 let keys = self.keys.clone();
@@ -708,13 +724,16 @@ where
 
     /// Persist a preference update to this shell's own store. Tests inject a
     /// throwaway store, so the suite never mutates the real user preferences.
-    fn persist_preferences(&self, update: impl FnOnce(Preferences) -> Preferences) {
-        let prefs = update(self.store.read().unwrap_or_default());
-        let _ = self.store.write(&prefs);
+    fn persist_preferences(&self, update: impl FnOnce(Preferences) -> Preferences) -> Result<()> {
+        self.store.update(update)?;
+        Ok(())
     }
 
     fn recover_key_rejection(&mut self) {
-        clear_saved_key_in(&self.store);
+        if let Err(error) = clear_saved_key_in(&self.store) {
+            self.app = self.app.clone().error_shown(error.to_string());
+            return;
+        }
         self.engine = None;
         self.started = None;
         let env_available = super::terminal::env_has_gemini_key();
@@ -934,9 +953,9 @@ fn artifact_rejects_key(outcome: &ArtifactOutcome) -> bool {
     }
 }
 
-fn clear_saved_key_in(store: &PreferenceStore) {
-    let prefs = store.read().unwrap_or_default().without_api_key();
-    let _ = store.write(&prefs);
+fn clear_saved_key_in(store: &PreferenceStore) -> Result<()> {
+    store.update(|prefs| prefs.without_api_key())?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -974,6 +993,7 @@ mod tests {
         failure: Option<TestFailure>,
         publish_fails: bool,
         calls: Option<Arc<AtomicUsize>>,
+        _directory: Option<Arc<tempfile::TempDir>>,
     }
 
     impl TestWorkflow {
@@ -982,6 +1002,7 @@ mod tests {
                 failure: None,
                 publish_fails: false,
                 calls: None,
+                _directory: None,
             }
         }
 
@@ -990,6 +1011,7 @@ mod tests {
                 failure: None,
                 publish_fails: true,
                 calls: None,
+                _directory: None,
             }
         }
 
@@ -998,6 +1020,7 @@ mod tests {
                 failure: Some(TestFailure::Internal),
                 publish_fails: false,
                 calls: None,
+                _directory: None,
             }
         }
 
@@ -1006,6 +1029,7 @@ mod tests {
                 failure: Some(TestFailure::Key),
                 publish_fails: false,
                 calls: None,
+                _directory: None,
             }
         }
 
@@ -1014,6 +1038,7 @@ mod tests {
                 failure: None,
                 publish_fails: false,
                 calls: Some(calls),
+                _directory: None,
             }
         }
 
@@ -1054,7 +1079,12 @@ mod tests {
     }
 
     impl Understanding for TestWorkflow {
-        fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
+        fn understand(
+            &self,
+            raw: &RawInputBatch,
+            my: &str,
+            _target: &LearningTarget,
+        ) -> Result<Understood> {
             self.ready()?;
             let guess = ScriptDetection.detect(raw.text(), &catalog_for_detection())?;
             let candidates = raw
@@ -1262,6 +1292,10 @@ mod tests {
     }
 
     fn shell_with(app: App, workflow: TestWorkflow) -> Shell<TestWorkflow, TestWorkflow> {
+        let directory = Arc::new(tempfile::tempdir().expect("preference tempdir must exist"));
+        let store = PreferenceStore::at(directory.path().join("preferences.json"));
+        let mut workflow = workflow;
+        workflow._directory = Some(directory);
         Shell {
             app,
             engine: None,
@@ -1272,9 +1306,7 @@ mod tests {
             quit_armed_at: None,
             workflow: workflow.clone(),
             keys: workflow,
-            store: PreferenceStore::at(
-                std::env::temp_dir().join("kamishibai-shell-test-prefs.json"),
-            ),
+            store,
             session: None,
             output: std::env::temp_dir(),
         }
@@ -1663,8 +1695,9 @@ mod tests {
                 shell.app.candidates().len(),
                 shell.app.cards().is_empty(),
                 shell.engine.is_none(),
+                shell.app.welcome().notice.clone(),
             ),
-            (Screen::YourWords, 1, true, true),
+            (Screen::YourWords, 1, true, true, None),
             "a precommit key check started generation or discarded the reviewed candidate"
         );
     }
@@ -1961,7 +1994,7 @@ mod tests {
         store
             .write(&Preferences::new("ru").with_api_key("123456789012345678901234567890"))
             .expect("seed preferences");
-        clear_saved_key_in(&store);
+        clear_saved_key_in(&store).expect("clearing the saved key must succeed");
         let restored = store.read().expect("reload preferences");
         assert_eq!(
             (

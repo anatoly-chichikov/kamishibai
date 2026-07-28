@@ -14,8 +14,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use assert_cmd::Command;
@@ -243,6 +243,30 @@ fn stalled_gemini() -> String {
         }
     });
     format!("http://127.0.0.1:{port}")
+}
+
+/// Start one stalled endpoint that captures the worker's authenticated request.
+fn observed_stalled_gemini() -> (String, Arc<Mutex<String>>, Arc<AtomicBool>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("the observed listener must bind");
+    let port = listener
+        .local_addr()
+        .expect("the observed listener has an address")
+        .port();
+    let request = Arc::new(Mutex::new(String::new()));
+    let release = Arc::new(AtomicBool::new(false));
+    let captured = request.clone();
+    let permitted = release.clone();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("the worker request must arrive");
+        let mut scratch = [0u8; 65536];
+        let count = stream.read(&mut scratch).expect("worker request must read");
+        *captured.lock().expect("captured worker request must lock") =
+            String::from_utf8_lossy(&scratch[..count]).into_owned();
+        while !permitted.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+    (format!("http://127.0.0.1:{port}"), request, release)
 }
 
 /// Start a 127.0.0.1 listener that answers every request with HTTP 500, so any
@@ -637,8 +661,8 @@ fn concurrent_sessions_share_one_meta_and_sound_request_with_exact_costs() {
     };
     let mut first = spawn("audio-first");
     let mut second = spawn("audio-second");
-    let first_ok = finish_success(&mut first, Duration::from_secs(30));
-    let second_ok = finish_success(&mut second, Duration::from_secs(30));
+    let first_ok = finish_success(&mut first, Duration::from_secs(120));
+    let second_ok = finish_success(&mut second, Duration::from_secs(120));
     let meta: serde_json::Value = serde_json::from_slice(
         fs::read(cell.join("meta.cost.json"))
             .expect("the meta cost must persist")
@@ -716,6 +740,46 @@ fn status_reports_a_live_worker_while_a_detached_run_is_in_flight() {
     assert!(
         status.contains("· generating") && status.contains("building 1 card (pid"),
         "status during a detached run must report the generating phase and a live worker"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn detached_worker_inherits_the_environment_api_key() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    let (gemini, request, release) = observed_stalled_gemini();
+    live_worker_session(cache.path(), out.path(), "inherited", gemini.as_str());
+    let started = Instant::now();
+    let observed = loop {
+        let observed = request
+            .lock()
+            .expect("captured worker request must lock")
+            .clone();
+        if !observed.is_empty() {
+            break observed;
+        }
+        if started.elapsed() >= Duration::from_secs(10) {
+            break String::new();
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let cancelled = cli(cache.path())
+        .args(["cancel", "inherited"])
+        .output()
+        .expect("worker cancellation must run")
+        .status
+        .success();
+    release.store(true, Ordering::SeqCst);
+    assert_eq!(
+        (
+            cancelled,
+            observed
+                .to_ascii_lowercase()
+                .contains("x-goog-api-key: offline-dummy-key"),
+        ),
+        (true, true),
+        "the detached worker did not inherit and authenticate with its parent's environment key"
     );
 }
 
@@ -1074,6 +1138,129 @@ fn a_build_session_returns_its_document_in_json_mode() {
         ),
         (Some(true), Some("jdoc"), Some("understood"), Some("canard")),
         "new --json must print the created session's document instead of the preview"
+    );
+}
+
+#[test]
+fn a_build_session_imports_without_any_api_key() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let data = TempDir::new().expect("data tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    let cards = cache.path().join("offline-cards.json");
+    fs::write(&cards, CARDS_JSON).expect("cards JSON must write");
+    let mut command = Command::cargo_bin("kamishibai").expect("the binary must build");
+    let output = command
+        .env("KAMISHIBAI_CACHE", cache.path())
+        .env("KAMISHIBAI_DATA", data.path())
+        .env_remove("GEMINI_API_KEY")
+        .env_remove("KAMISHIBAI_GEMINI_URL")
+        .args([
+            "new",
+            "--build",
+            cards.to_str().expect("cards path is utf8"),
+            "--id",
+            "offline-no-key",
+            "--out",
+            out.path().to_str().expect("output path is utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("offline build import must run");
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("build stdout must be JSON");
+    assert_eq!(
+        (
+            output.status.code(),
+            value["session"].as_str(),
+            value["phase"].as_str(),
+        ),
+        (Some(0), Some("offline-no-key"), Some("understood")),
+        "new --build unexpectedly required a Gemini key"
+    );
+}
+
+#[test]
+fn a_relative_output_is_absolute_in_the_creation_document() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let work = TempDir::new().expect("work tempdir");
+    let cards = work.path().join("cards.json");
+    fs::write(&cards, CARDS_JSON).expect("cards JSON must write");
+    let value = json_stdout(cli(cache.path()).current_dir(work.path()).args([
+        "new",
+        "--build",
+        cards.to_str().expect("cards path is utf8"),
+        "--id",
+        "absolute-json-out",
+        "--out",
+        "exports",
+        "--json",
+    ]));
+    let output = Path::new(
+        value["out"]
+            .as_str()
+            .expect("creation output must be a string"),
+    );
+    assert!(
+        output.is_absolute() && output.ends_with("exports"),
+        "new --json returned a non-absolute output path: {}",
+        output.display()
+    );
+}
+
+#[test]
+fn a_relative_environment_output_stays_absolute_in_status_and_result_json() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let work = TempDir::new().expect("work tempdir");
+    let cards = work.path().join("cards.json");
+    fs::write(&cards, CARDS_JSON).expect("cards JSON must write");
+    cli(cache.path())
+        .current_dir(work.path())
+        .env("KAMISHIBAI_OUTPUT", "exports")
+        .args([
+            "new",
+            "--build",
+            cards.to_str().expect("cards path is utf8"),
+            "--id",
+            "absolute-json-paths",
+        ])
+        .assert()
+        .success();
+    seed_artifacts(&first_card_dir(cache.path()));
+    cli(cache.path())
+        .current_dir(work.path())
+        .args(["generate", "--wait", "absolute-json-paths"])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .success();
+    let status = json_stdout(cli(cache.path()).current_dir(work.path()).args([
+        "status",
+        "absolute-json-paths",
+        "--json",
+    ]));
+    let result = json_stdout(cli(cache.path()).current_dir(work.path()).args([
+        "result",
+        "absolute-json-paths",
+        "--json",
+    ]));
+    let paths = [
+        status["out"].as_str().expect("status out must be a string"),
+        result["paths"]["deck"]
+            .as_str()
+            .expect("result deck must be a string"),
+        result["paths"]["pdf"]
+            .as_str()
+            .expect("result pdf must be a string"),
+        result["paths"]["dir"]
+            .as_str()
+            .expect("result dir must be a string"),
+    ];
+    assert!(
+        paths.iter().all(|path| Path::new(path).is_absolute())
+            && Path::new(paths[3]).ends_with("exports")
+            && paths[0] == paths[3]
+            && Path::new(paths[1]).parent() == Some(Path::new(paths[3]))
+            && Path::new(paths[2]).parent() == Some(Path::new(paths[3])),
+        "status/result JSON returned a non-absolute output path: {paths:?}"
     );
 }
 

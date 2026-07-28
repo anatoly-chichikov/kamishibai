@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use super::GeminiAccess;
-use crate::application::{BulkCorrection, Understanding};
+use crate::application::{BulkCorrection, LearningTarget, Understanding};
 use crate::session::{
     CachedUnderstanding, LanguagePair, RawInputBatch, SenseCorrection, Understood, WordCandidate,
 };
@@ -26,8 +26,14 @@ impl GeminiUnderstanding {
 }
 
 impl Understanding for GeminiUnderstanding {
-    fn understand(&self, raw: &RawInputBatch, known: &str) -> Result<Understood> {
-        CachedUnderstanding::new(self.access.client()?, self.cache.clone()).understand(raw, known)
+    fn understand(
+        &self,
+        raw: &RawInputBatch,
+        known: &str,
+        target: &LearningTarget,
+    ) -> Result<Understood> {
+        CachedUnderstanding::new(self.access.client()?, self.cache.clone())
+            .understand(raw, known, target)
     }
 }
 

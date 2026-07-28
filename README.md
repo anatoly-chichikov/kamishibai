@@ -49,7 +49,7 @@ kamishibai
 
 kamishibai asks once — your language and your Gemini key, on the welcome screen — and remembers both. If `GEMINI_API_KEY` is set, the welcome screen offers to load it.
 
-The TUI walks you from raw words through review to finished cards, and writes the `.apkg` plus a printable PDF into `./kamishibai-out`.
+The TUI walks you from raw words through review to finished cards, and writes the `.apkg` plus a printable PDF into `Kamishibai` under your platform Documents folder.
 
 ![demo](docs/tui-states/live/capture.gif)
 
@@ -71,15 +71,15 @@ Import the deck into Anki, and the cards look roughly like this on your phone:
 
 ## Console
 
-The same flow runs headless — kamishibai understands the words, builds the deck in the background, and writes it into the same `./kamishibai-out`. Sessions persist across invocations, so an agent can drive the whole flow:
+The same flow runs headless without opening the TUI. Start with the
+version-matched contract embedded in the installed binary:
 
 ```bash
-kamishibai new --word flâner --word canard   # creates a session; the language is autodetected
-kamishibai generate --wait                   # generate + publish, blocking until done
-kamishibai result                            # the finished cards + the deck and PDF paths
+kamishibai agent-contract
 ```
 
-Set your language and Gemini key once — through the TUI's welcome screen or `kamishibai config`. Building an agent? [llms.txt](llms.txt) is the full console contract.
+It covers first-time setup, JSON commands and errors, key handling, polling,
+and output paths. The repository copy is [llms.txt](llms.txt).
 
 ## Bring Your Own JSON
 
@@ -87,7 +87,8 @@ You don't have to let Gemini write the cards. The card format is plain, strict J
 
 ```bash
 kamishibai cards.json                # review and build in the TUI
-kamishibai new --build cards.json    # or headless, as usual
+kamishibai new --build cards.json --json
+kamishibai generate --json
 ```
 
 Decks round-trip, too: `kamishibai result --json` returns the finished cards in the same schema, ready to edit and feed back in. See [the contract](docs/cards-json.md) for what each field is and where it lands on the card.

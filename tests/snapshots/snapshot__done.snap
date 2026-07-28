@@ -1,16 +1,17 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 224
 expression: render(&app)
 ---
                                                                                 
      your cards   all done                                            RU → …    
                                                                                 
+    │ ↓ FOLDER  ~/Documents/Kamishibai                                          
+    │ ↓ APKG    RU_cards.apkg                                                   
+    │ ↓ PDF     RU_cards.pdf                                                    
+                                                                                
     no cards in this batch                                                      
-                                                                                
-                                                                                
-                                                                                
-                                                                                
                                                                                 
                                       ai may be wrong, please verify results    
                                                                                 
-    step 3/3  0/0 ready                                        [Ctrl+C] quit
+    step 3/3  0/0 ready                                        [Ctrl+C] quit    

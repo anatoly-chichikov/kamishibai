@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::application::Understanding;
+use crate::application::{LearningTarget, Understanding};
 use crate::generation::artifact_cache::{Cache, META_FILE};
 use crate::languages::catalog;
 
@@ -16,7 +16,7 @@ use super::{
     Sense, Understood, WordCandidate,
 };
 
-const UNDERSTANDING_VERSION: &str = "v5";
+const UNDERSTANDING_VERSION: &str = "v6";
 const META_POLICY: &str = "v2-language-local-prompt-examples";
 
 /// Caching decorator for the first-pass understanding contract.
@@ -24,6 +24,23 @@ const META_POLICY: &str = "v2-language-local-prompt-examples";
 pub struct CachedUnderstanding<T> {
     inner: T,
     root: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct UnderstandingScope<'a> {
+    known: &'a str,
+    identity: &'a str,
+    target: &'a LearningTarget,
+}
+
+impl<'a> UnderstandingScope<'a> {
+    fn new(known: &'a str, identity: &'a str, target: &'a LearningTarget) -> Self {
+        Self {
+            known,
+            identity,
+            target,
+        }
+    }
 }
 
 impl<T> CachedUnderstanding<T> {
@@ -41,10 +58,25 @@ where
     T: Understanding,
 {
     /// Normalise raw words into reviewed rows, reusing a prior result for the same input.
-    fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
-        let target = ScriptDetection.detect(raw.text(), &catalog())?;
+    fn understand(
+        &self,
+        raw: &RawInputBatch,
+        known: &str,
+        target: &LearningTarget,
+    ) -> Result<Understood> {
+        let detected = match target {
+            LearningTarget::Detect => ScriptDetection.detect(raw.text(), &catalog())?,
+            LearningTarget::Explicit(code) => LearningGuess::new(code.to_string(), true),
+        };
+        let known = known.to_uppercase();
+        let target_code = detected.code().to_uppercase();
+        let target_identity = match target {
+            LearningTarget::Detect => format!("detect:{target_code}"),
+            LearningTarget::Explicit(code) => format!("explicit:{code}"),
+        };
+        let scope = UnderstandingScope::new(known.as_str(), target_identity.as_str(), target);
         let cache = Cache::new(
-            format!("understanding/{my}-{}", target.code()),
+            format!("understanding/{known}-{target_code}"),
             self.root.clone(),
         );
         let entries = normalized_entries(raw);
@@ -52,7 +84,7 @@ where
         let mut misses = Vec::new();
         let mut guess = None;
         for (index, entry) in entries.iter().enumerate() {
-            let filename = self.entry_filename(entry, my, target.code());
+            let filename = self.entry_filename(entry, scope.known, scope.identity);
             if cache.exists(filename.as_str()) {
                 let record: EntryRecord = read_json(&cache, filename.as_str())?;
                 guess = guess.or_else(|| Some(record.guess()));
@@ -62,9 +94,9 @@ where
             }
         }
         if !misses.is_empty() {
-            let (detected, candidates) =
-                self.missing(&cache, my, target.code(), raw, entries.as_slice(), misses)?;
-            guess = Some(detected);
+            let (returned, candidates) =
+                self.missing(&cache, scope, raw, entries.as_slice(), misses)?;
+            guess = Some(returned);
             for (index, candidate) in candidates {
                 merged[index] = Some(candidate);
             }
@@ -76,10 +108,11 @@ where
                 candidate.ok_or_else(|| anyhow!("understanding cache left entry {index} empty"))
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(Understood::new(
-            guess.unwrap_or_else(|| LearningGuess::new(target.code(), target.confident())),
-            candidates,
-        ))
+        let guess = match target {
+            LearningTarget::Detect => guess.unwrap_or(detected),
+            LearningTarget::Explicit(code) => LearningGuess::new(code.to_string(), true),
+        };
+        Ok(Understood::new(guess, candidates))
     }
 }
 
@@ -94,8 +127,7 @@ impl<T> CachedUnderstanding<T> {
     fn missing(
         &self,
         cache: &Cache,
-        my: &str,
-        target: &str,
+        scope: UnderstandingScope<'_>,
         raw: &RawInputBatch,
         entries: &[String],
         misses: Vec<EntryMiss>,
@@ -110,14 +142,18 @@ impl<T> CachedUnderstanding<T> {
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
-        let understood = self.inner.understand(&missing_raw, my)?;
+        let understood = self
+            .inner
+            .understand(&missing_raw, scope.known, scope.target)?;
+        enforce_target(&understood, scope.target)?;
         if understood.candidates().len() != misses.len() {
-            let full = self.inner.understand(raw, my)?;
-            self.store_entries(cache, my, target, entries, &full)?;
+            let full = self.inner.understand(raw, scope.known, scope.target)?;
+            enforce_target(&full, scope.target)?;
+            self.store_entries(cache, scope, entries, &full)?;
             return Ok(indexed(full));
         }
         for (miss, candidate) in misses.iter().zip(understood.candidates()) {
-            let filename = self.entry_filename(miss.entry(), my, target);
+            let filename = self.entry_filename(miss.entry(), scope.known, scope.identity);
             write_json(
                 cache,
                 filename.as_str(),
@@ -130,8 +166,7 @@ impl<T> CachedUnderstanding<T> {
     fn store_entries(
         &self,
         cache: &Cache,
-        my: &str,
-        target: &str,
+        scope: UnderstandingScope<'_>,
         entries: &[String],
         understood: &Understood,
     ) -> Result<()> {
@@ -139,7 +174,7 @@ impl<T> CachedUnderstanding<T> {
             return Ok(());
         }
         for (entry, candidate) in entries.iter().zip(understood.candidates()) {
-            let filename = self.entry_filename(entry, my, target);
+            let filename = self.entry_filename(entry, scope.known, scope.identity);
             write_json(
                 cache,
                 filename.as_str(),
@@ -148,6 +183,22 @@ impl<T> CachedUnderstanding<T> {
         }
         Ok(())
     }
+}
+
+fn enforce_target(understood: &Understood, target: &LearningTarget) -> Result<()> {
+    if let LearningTarget::Explicit(expected) = target
+        && !understood
+            .guess()
+            .code()
+            .eq_ignore_ascii_case(expected.as_ref())
+    {
+        return Err(anyhow!(
+            "understanding target '{}' violates required target '{}'",
+            understood.guess().code(),
+            expected
+        ));
+    }
+    Ok(())
 }
 
 /// Persistent cache for Gemini card-meta payloads.
@@ -521,14 +572,23 @@ mod tests {
     }
 
     impl Understanding for ChangingUnderstanding {
-        fn understand(&self, raw: &RawInputBatch, _my: &str) -> Result<Understood> {
+        fn understand(
+            &self,
+            raw: &RawInputBatch,
+            _known: &str,
+            target: &LearningTarget,
+        ) -> Result<Understood> {
             let current = *self.calls.borrow();
             *self.calls.borrow_mut() = current + 1;
             let candidates = normalized_entries(raw)
                 .into_iter()
                 .map(|entry| WordCandidate::new(entry, format!("variant {current}"), true))
                 .collect();
-            Ok(Understood::new(LearningGuess::new("en", true), candidates))
+            let guess = match target {
+                LearningTarget::Detect => LearningGuess::new("en", true),
+                LearningTarget::Explicit(code) => LearningGuess::new(code.to_string(), true),
+            };
+            Ok(Understood::new(guess, candidates))
         }
     }
 
@@ -553,10 +613,18 @@ mod tests {
         let cache =
             CachedUnderstanding::new(ChangingUnderstanding::new(calls.clone()), directory.path());
         let first = cache
-            .understand(&RawInputBatch::new(" lantern \n"), "ru")
+            .understand(
+                &RawInputBatch::new(" lantern \n"),
+                "ru",
+                &LearningTarget::Detect,
+            )
             .expect("first understanding must succeed");
         let second = cache
-            .understand(&RawInputBatch::new("lantern"), "ru")
+            .understand(
+                &RawInputBatch::new("lantern"),
+                "ru",
+                &LearningTarget::Detect,
+            )
             .expect("second understanding must succeed");
         assert_eq!(
             (
@@ -570,15 +638,15 @@ mod tests {
     }
 
     #[test]
-    fn language_local_examples_use_the_version_five_understanding_identity() {
+    fn combined_intake_contract_uses_the_version_six_understanding_identity() {
         let cache = CachedUnderstanding::new(
             ChangingUnderstanding::new(Rc::new(RefCell::new(0))),
             "/tmp/kamishibai-understanding-version-test",
         );
         assert_eq!(
-            cache.entry_filename("lantern", "ru", "en"),
-            "614dca79c87e.json",
-            "language-local prompt examples reused an earlier understanding contract"
+            cache.entry_filename("lantern", "RU", "detect:EN"),
+            "594e83a91b56.json",
+            "language-local examples and explicit-target intake reused an earlier understanding contract"
         );
     }
 
@@ -589,15 +657,58 @@ mod tests {
         let cache =
             CachedUnderstanding::new(ChangingUnderstanding::new(calls.clone()), directory.path());
         cache
-            .understand(&RawInputBatch::new("lantern"), "ru")
+            .understand(
+                &RawInputBatch::new("lantern"),
+                "ru",
+                &LearningTarget::Detect,
+            )
             .expect("first understanding must succeed");
         let second = cache
-            .understand(&RawInputBatch::new("lantern"), "el")
+            .understand(
+                &RawInputBatch::new("lantern"),
+                "el",
+                &LearningTarget::Detect,
+            )
             .expect("second understanding must succeed");
         assert_eq!(
             (*calls.borrow(), second.candidates()[0].understanding()),
             (2, "variant 1"),
             "understanding cache no longer separates different support languages"
+        );
+    }
+
+    #[test]
+    fn explicit_languages_and_autodetection_have_distinct_cache_identities() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let calls = Rc::new(RefCell::new(0));
+        let cache =
+            CachedUnderstanding::new(ChangingUnderstanding::new(calls.clone()), directory.path());
+        let french =
+            LearningTarget::Explicit(catalog().resolve("fr").expect("French must resolve"));
+        let english =
+            LearningTarget::Explicit(catalog().resolve("EN").expect("English must resolve"));
+        let first = cache
+            .understand(&RawInputBatch::new("chat"), "RU", &french)
+            .expect("explicit French understanding must succeed");
+        let second = cache
+            .understand(&RawInputBatch::new("chat"), "RU", &english)
+            .expect("explicit English understanding must succeed");
+        let third = cache
+            .understand(&RawInputBatch::new("chat"), "RU", &LearningTarget::Detect)
+            .expect("autodetected understanding must succeed");
+        let repeated = cache
+            .understand(&RawInputBatch::new("chat"), "RU", &french)
+            .expect("explicit French cache lookup must succeed");
+        assert_eq!(
+            (
+                *calls.borrow(),
+                first.candidates()[0].understanding(),
+                second.candidates()[0].understanding(),
+                third.candidates()[0].understanding(),
+                repeated.candidates()[0].understanding(),
+            ),
+            (3, "variant 0", "variant 1", "variant 2", "variant 0"),
+            "explicit EN, explicit FR, and autodetection reused one understanding identity"
         );
     }
 
@@ -608,10 +719,14 @@ mod tests {
         let cache =
             CachedUnderstanding::new(ChangingUnderstanding::new(calls.clone()), directory.path());
         cache
-            .understand(&RawInputBatch::new("catdog"), "ru")
+            .understand(&RawInputBatch::new("catdog"), "ru", &LearningTarget::Detect)
             .expect("first understanding must succeed");
         let second = cache
-            .understand(&RawInputBatch::new("catdog\nflower"), "ru")
+            .understand(
+                &RawInputBatch::new("catdog\nflower"),
+                "ru",
+                &LearningTarget::Detect,
+            )
             .expect("second understanding must succeed");
         let candidates = second
             .candidates()

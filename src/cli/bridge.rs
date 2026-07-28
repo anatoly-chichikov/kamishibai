@@ -13,7 +13,7 @@
 
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 
@@ -224,6 +224,13 @@ impl TuiSession {
     /// Share this TUI run's late-bound journal with cloned Gemini workflows.
     pub(super) fn cost_scope(&self) -> SessionCostScope {
         self.costs.clone()
+    }
+
+    /// Return the output directory already bound to a resumed session.
+    pub(super) fn stored_output(&self) -> Option<PathBuf> {
+        self.written
+            .as_ref()
+            .map(|record| PathBuf::from(record.out.as_str()))
     }
 
     fn hydrate(&self, record: &SessionRecord) -> Result<SessionRecord> {
@@ -539,6 +546,28 @@ mod tests {
                 Screen::Done,
             ),
             "a published session must reopen on the done summary with no startup batch"
+        );
+    }
+
+    #[test]
+    fn a_resumed_session_keeps_its_stored_output() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let record = app_to_record(
+            &understood_app(),
+            String::from("fr-1"),
+            String::from("t"),
+            "tui",
+            "primary",
+            "/legacy/kamishibai-out",
+            None,
+        );
+        let session =
+            TuiSession::resuming_in(&record, store).expect("session must resume from its record");
+        assert_eq!(
+            session.stored_output(),
+            Some(PathBuf::from("/legacy/kamishibai-out")),
+            "resuming a session replaced its stored output with the new default"
         );
     }
 

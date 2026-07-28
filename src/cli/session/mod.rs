@@ -56,11 +56,11 @@ use crate::generation::artifact_cache::{
 };
 use crate::generation::restart_picture_request_series;
 use crate::generation::visual_revision;
-use crate::languages::catalog;
+use crate::languages::{LanguageCode, catalog};
 use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{CardCell, CardMetaCache, LanguagePair};
 
-use super::error::{self, usage};
+use super::error::{self, usage, usage_hint};
 
 /// Port through which `open` hands a checked session to the interactive
 /// surface; the TUI side implements it, so this layer never links the TUI.
@@ -86,6 +86,7 @@ pub(super) enum Render {
 pub(super) fn handle(command: &Command, render: Render, opener: &dyn SessionOpener) -> Result<()> {
     refuse_json_conflicts(command, render)?;
     match command {
+        Command::AgentContract => super::contract::print(),
         Command::New(args) => new::new(args, render),
         Command::Open(args) => open(args, render, opener),
         Command::Select(args) => curate::select(args, render),
@@ -250,28 +251,40 @@ pub(in crate::cli::session) fn refuse_if_live(
 
 /// Fail fast when no Gemini API key is reachable, before any flow that needs one.
 pub(in crate::cli::session) fn preflight_key() -> Result<()> {
-    let saved = default_store(&SystemContext)
-        .ok()
-        .and_then(|store| store.read().ok())
-        .and_then(|prefs| prefs.api_key)
-        .filter(|key| !key.is_empty());
     let env = std::env::var("GEMINI_API_KEY")
         .ok()
         .filter(|key| !key.trim().is_empty());
-    if env.is_none() && saved.is_none() {
-        return Err(usage(
-            "no Gemini API key found — save one with 'kamishibai config --key', set GEMINI_API_KEY, or paste one on the TUI Welcome",
+    if env.is_some() {
+        return Ok(());
+    }
+    let saved = default_store(&SystemContext)?
+        .read()?
+        .api_key
+        .filter(|key| !key.trim().is_empty());
+    if saved.is_none() {
+        return Err(usage_hint(
+            "no Gemini API key found",
+            "Set GEMINI_API_KEY for this command or run: kamishibai config --key - --json",
         ));
     }
     Ok(())
 }
 
+/// Resolve a supported language or refuse with every accepted canonical code.
+pub(in crate::cli::session) fn resolve_language(code: &str) -> Result<LanguageCode> {
+    let languages = catalog();
+    languages.resolve(code).map_err(|_| {
+        let supported = languages.codes().map(str::to_uppercase).join(", ");
+        usage_hint(
+            format!("unknown language '{code}'"),
+            format!("Supported languages: {supported}"),
+        )
+    })
+}
+
 /// Refuse an unknown language code before it is used or persisted.
 pub(in crate::cli::session) fn validate_language(code: &str) -> Result<()> {
-    if catalog().item(code).is_err() {
-        return Err(usage(format!("unknown language '{code}'")));
-    }
-    Ok(())
+    resolve_language(code).map(|_| ())
 }
 
 /// Reset a session to understood, clearing any worker/result/error/progress so

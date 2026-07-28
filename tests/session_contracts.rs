@@ -5,14 +5,20 @@
 use anyhow::Result;
 use kamishibai::session::{
     Artifact, ArtifactFile, BulkCorrection, CardArtifacts, CardDraft, CardMeta, GenerationCost,
-    LanguagePair, LearningDetection, LearningGuess, RawInputBatch, ScriptDetection, Sense,
-    SenseCorrection, SessionState, Understanding, Understood, WordCandidate, to_document, to_entry,
+    LanguagePair, LearningDetection, LearningGuess, LearningTarget, RawInputBatch, ScriptDetection,
+    Sense, SenseCorrection, SessionState, Understanding, Understood, WordCandidate, to_document,
+    to_entry,
 };
 
 struct FakeUnderstanding;
 
 impl Understanding for FakeUnderstanding {
-    fn understand(&self, _raw: &RawInputBatch, _my: &str) -> Result<Understood> {
+    fn understand(
+        &self,
+        _raw: &RawInputBatch,
+        _my: &str,
+        _target: &LearningTarget,
+    ) -> Result<Understood> {
         Ok(Understood::new(
             LearningGuess::new("en", false),
             vec![
@@ -75,7 +81,7 @@ fn your_words_to_what_i_understood_flow_builds_session_with_confirmed_candidates
         .expect("detection must succeed");
     let pair = LanguagePair::new(guess.code(), "ru");
     let understood = FakeUnderstanding
-        .understand(&raw, pair.known())
+        .understand(&raw, pair.known(), &LearningTarget::Detect)
         .expect("understanding must succeed");
     let session =
         SessionState::starting(pair.clone(), raw).confirming(understood.candidates().to_vec());
@@ -94,7 +100,11 @@ fn your_words_to_what_i_understood_flow_builds_session_with_confirmed_candidates
 fn bulk_correction_pass_replaces_candidate_metadata_without_touching_pair() {
     let pair = LanguagePair::new("en", "ru");
     let before = FakeUnderstanding
-        .understand(&RawInputBatch::new("whilst\nwreck"), pair.known())
+        .understand(
+            &RawInputBatch::new("whilst\nwreck"),
+            pair.known(),
+            &LearningTarget::Detect,
+        )
         .expect("understanding must succeed")
         .candidates()
         .to_vec();
@@ -116,7 +126,11 @@ fn bulk_correction_pass_replaces_candidate_metadata_without_touching_pair() {
 fn what_i_understood_to_your_cards_flow_bridges_drafts_into_vocabulary_document() {
     let pair = LanguagePair::new("en", "ru");
     let candidates = FakeUnderstanding
-        .understand(&RawInputBatch::new("whilst\nwreck"), pair.known())
+        .understand(
+            &RawInputBatch::new("whilst\nwreck"),
+            pair.known(),
+            &LearningTarget::Detect,
+        )
         .expect("understanding must succeed")
         .candidates()
         .to_vec();

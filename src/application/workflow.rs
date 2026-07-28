@@ -3,8 +3,8 @@
 use anyhow::Result;
 
 use super::{
-    BulkCorrection, CardCorrection, CardMetaGeneration, CardProduction, PublishProgress,
-    PublishedStudyPackage, StudyPublishing, Understanding, WordUnderstanding,
+    BulkCorrection, CardCorrection, CardMetaGeneration, CardProduction, LearningTarget,
+    PublishProgress, PublishedStudyPackage, StudyPublishing, Understanding, WordUnderstanding,
 };
 use crate::session::{
     ArtifactAttempt, ArtifactFile, CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch,
@@ -40,8 +40,13 @@ impl<U, P, S> Understanding for CardWorkflow<U, P, S>
 where
     U: Understanding,
 {
-    fn understand(&self, raw: &RawInputBatch, known: &str) -> Result<Understood> {
-        self.understanding.understand(raw, known)
+    fn understand(
+        &self,
+        raw: &RawInputBatch,
+        known: &str,
+        target: &LearningTarget,
+    ) -> Result<Understood> {
+        self.understanding.understand(raw, known, target)
     }
 }
 

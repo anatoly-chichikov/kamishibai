@@ -55,7 +55,7 @@ jobs:
       - run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
   tests:
-    name: tests
+    name: Linux tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -86,7 +86,7 @@ jobs:
       - run: cargo test --all-targets --all-features --locked
 
   windows:
-    name: windows
+    name: Windows tests
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v6.0.2
@@ -106,3 +106,5 @@ jobs:
           env-vars: "CARGO CC CFLAGS CXX CMAKE LIBCLANG_PATH PKG_CONFIG RUST"
           save-if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
       - run: cargo check --all-targets --all-features --locked
+      - name: Test Windows preferences and paths
+        run: cargo test --locked --test config --test config_cli --test paths

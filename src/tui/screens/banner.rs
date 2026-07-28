@@ -10,6 +10,7 @@ use std::path::Path;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use crate::runtime::locations::compact_path;
 use crate::tui::app::App;
 use crate::tui::palette;
 
@@ -79,7 +80,7 @@ pub fn basename(path: &str) -> String {
 #[must_use]
 pub fn display(label: &str, path: &str) -> String {
     if label == "FOLDER" {
-        return String::from(path);
+        return compact_path(Path::new(path));
     }
     basename(path)
 }

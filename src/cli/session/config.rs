@@ -4,11 +4,12 @@
 //! state; `--known`/`--key` save. The key value is never printed back.
 
 use std::io::Read;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::cli::error::usage;
+use crate::cli::error::{operational_hint, operational_retryable_hint, usage_hint};
 use crate::config::{PreferenceStore, Preferences, default_store};
 use crate::gemini::{GeminiClient, HttpTransport};
 use crate::runtime::locations::SystemContext;
@@ -23,10 +24,10 @@ pub(super) fn config(args: &ConfigArgs, render: Render) -> Result<()> {
     let prefs = if setting {
         apply(args, &store)?
     } else {
-        store.read().unwrap_or_default()
+        store.read()?
     };
     if matches!(render, Render::Json) {
-        return json::emit(&ConfigDoc::of(&prefs));
+        return json::emit(&ConfigDoc::of(&prefs, store.path()));
     }
     if setting {
         report_set(args, &prefs);
@@ -38,29 +39,77 @@ pub(super) fn config(args: &ConfigArgs, render: Render) -> Result<()> {
 
 /// Read current preferences, apply each supplied flag, and persist once.
 fn apply(args: &ConfigArgs, store: &PreferenceStore) -> Result<Preferences> {
-    let mut prefs = store.read().unwrap_or_default();
-    if let Some(code) = args.known.as_deref() {
-        validate_language(code)?;
-        prefs = prefs.adopt(code.to_uppercase());
-    }
-    if let Some(key) = args.key.as_deref() {
-        prefs = apply_key(prefs, key)?;
-    }
-    store.write(&prefs)?;
-    Ok(prefs)
+    let known = match args.known.as_deref() {
+        Some(code) => {
+            validate_language(code)?;
+            Some(code.to_uppercase())
+        }
+        None => None,
+    };
+    store.read()?;
+    let key = KeyChange::resolve(args.key.as_deref())?;
+    Ok(store.update(|prefs| {
+        let prefs = match known.as_deref() {
+            Some(code) => prefs.adopt(code),
+            None => prefs,
+        };
+        key.apply(prefs)
+    })?)
 }
 
-/// Apply one `--key` value: empty clears the saved key, otherwise the key is
-/// verified against Gemini before it is stored (a rejected key is refused).
-fn apply_key(prefs: Preferences, key: &str) -> Result<Preferences> {
-    let key = read_key(key)?;
-    if key.is_empty() {
-        return Ok(prefs.without_api_key());
+enum KeyChange {
+    Unchanged,
+    Clear,
+    Save(String),
+}
+
+impl KeyChange {
+    fn resolve(key: Option<&str>) -> Result<Self> {
+        let Some(key) = key else {
+            return Ok(Self::Unchanged);
+        };
+        let key = read_key(key)?;
+        if key.is_empty() {
+            return Ok(Self::Clear);
+        }
+        GeminiClient::new(key.as_str(), HttpTransport::credential())
+            .probe_key()
+            .map_err(credential_error)?;
+        Ok(Self::Save(key))
     }
-    GeminiClient::new(key.as_str(), HttpTransport::new())
-        .validate_key()
-        .map_err(|error| usage(format!("could not verify Gemini key: {error}")))?;
-    Ok(prefs.with_api_key(key))
+
+    fn apply(&self, prefs: Preferences) -> Preferences {
+        match self {
+            Self::Unchanged => prefs,
+            Self::Clear => prefs.without_api_key(),
+            Self::Save(key) => prefs.with_api_key(key.as_str()),
+        }
+    }
+}
+
+fn credential_error(error: crate::gemini::CredentialProbeError) -> anyhow::Error {
+    if error.rejects_key() {
+        return usage_hint(
+            error.to_string(),
+            "Check the key and retry with: kamishibai config --key - --json",
+        );
+    }
+    if error.retryable() {
+        return operational_retryable_hint(
+            error.to_string(),
+            "Retry later without changing the saved preferences",
+        );
+    }
+    if error.model_unavailable() {
+        return operational_hint(
+            error.to_string(),
+            "Update Kamishibai or verify that the configured model is enabled",
+        );
+    }
+    operational_hint(
+        error.to_string(),
+        "Retry after checking Gemini service availability",
+    )
 }
 
 /// Resolve a `--key` argument to its literal value, reading stdin for `-` so the
@@ -119,24 +168,57 @@ fn report_show(prefs: &Preferences) {
 }
 
 /// The `--json` projection of the saved preferences: the canonical uppercase
-/// `known` (omitted until one is saved) and `key_saved`, never the key value.
+/// `known` (`null` until one is saved) and `key_saved`, never the key value.
 #[derive(Serialize)]
 struct ConfigDoc {
     ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     known: Option<String>,
     key_saved: bool,
+    credential_source: CredentialSource,
+    credential_present: bool,
+    preferences_path: String,
 }
 
 impl ConfigDoc {
     /// Project current preferences into the JSON document.
-    fn of(prefs: &Preferences) -> Self {
+    fn of(prefs: &Preferences, path: &Path) -> Self {
+        let key_saved = prefs
+            .api_key
+            .as_deref()
+            .is_some_and(|key| !key.trim().is_empty());
+        let credential_source = CredentialSource::of(key_saved);
         Self {
             ok: true,
             known: (!prefs.requires_language_choice())
                 .then(|| prefs.startup_language().to_uppercase()),
-            key_saved: prefs.api_key.is_some(),
+            key_saved,
+            credential_present: !matches!(credential_source, CredentialSource::None),
+            credential_source,
+            preferences_path: path.to_string_lossy().into_owned(),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum CredentialSource {
+    Environment,
+    Saved,
+    None,
+}
+
+impl CredentialSource {
+    fn of(key_saved: bool) -> Self {
+        if std::env::var("GEMINI_API_KEY")
+            .ok()
+            .is_some_and(|key| !key.trim().is_empty())
+        {
+            return Self::Environment;
+        }
+        if key_saved {
+            return Self::Saved;
+        }
+        Self::None
     }
 }
 
@@ -206,10 +288,28 @@ mod tests {
     fn the_document_never_exposes_the_key_value() {
         let prefs = Preferences::new("ru").with_api_key("super-secret");
         let document =
-            serde_json::to_string(&ConfigDoc::of(&prefs)).expect("serialize must succeed");
+            serde_json::to_string(&ConfigDoc::of(&prefs, Path::new("/preferences.json")))
+                .expect("serialize must succeed");
         assert!(
             !document.contains("super-secret"),
             "the config document must report key_saved, never the key value"
+        );
+    }
+
+    #[test]
+    fn config_arguments_debug_redacts_the_literal_key() {
+        let args = ConfigArgs {
+            known: Some(String::from("en")),
+            key: Some(String::from("debug-secret-argument")),
+        };
+        let rendered = format!("{args:?}");
+        assert_eq!(
+            (
+                rendered.contains("debug-secret-argument"),
+                rendered.contains("[REDACTED]")
+            ),
+            (false, true),
+            "ConfigArgs Debug exposed the literal API key"
         );
     }
 }

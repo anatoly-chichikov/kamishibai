@@ -1,7 +1,26 @@
+use std::fmt::{Display, Formatter, Result as FmtResult};
+
 use anyhow::{Result, anyhow};
 
 use super::prompt_examples::{LanguagePromptExamples, examples};
 use super::{DeckNaming, FALLBACK_OCR, LanguageProfile, UiLabels};
+
+/// One supported language code in the canonical uppercase form.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct LanguageCode(String);
+
+impl AsRef<str> for LanguageCode {
+    fn as_ref(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl Display for LanguageCode {
+    /// Write the canonical language code.
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
+        formatter.write_str(self.0.as_str())
+    }
+}
 
 /// Registry for supported language profiles.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -21,6 +40,11 @@ impl LanguageCatalog {
             .ok_or_else(|| anyhow!("Unsupported language '{code}'"))
     }
 
+    /// Resolve one accepted spelling into a supported canonical code.
+    pub fn resolve(&self, code: &str) -> Result<LanguageCode> {
+        Ok(LanguageCode(self.item(code)?.code.to_uppercase()))
+    }
+
     /// Return the supported language codes in stable order.
     pub fn codes(&self) -> [&'static str; 11] {
         profile_codes()
@@ -37,8 +61,8 @@ impl LanguageCatalog {
         Ok(examples(profile.code))
     }
 
-    /// Resolve either a supported code or its prompt display name.
-    pub(crate) fn resolve(&self, value: &str) -> Result<LanguageProfile> {
+    /// Identify a profile from either its supported code or prompt display name.
+    pub(crate) fn identify(&self, value: &str) -> Result<LanguageProfile> {
         self.item(value).or_else(|_| {
             profiles()
                 .into_iter()
@@ -164,5 +188,17 @@ mod tests {
                 .item(code)
                 .expect("code should resolve to a profile");
         }
+    }
+
+    #[test]
+    fn resolve_normalises_a_supported_code_to_uppercase() {
+        assert_eq!(
+            catalog()
+                .resolve("fR")
+                .expect("French must resolve")
+                .as_ref(),
+            "FR",
+            "the language catalog returned a non-canonical supported code"
+        );
     }
 }

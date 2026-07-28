@@ -13,11 +13,14 @@ kamishibai cards.json                # review and build in the TUI
 Or headless:
 
 ```bash
-kamishibai new --build cards.json
-kamishibai generate --wait
+kamishibai new --build cards.json --json
+kamishibai generate --wait --json
+kamishibai result --json
 ```
 
-Finished decks round-trip: `kamishibai result --json` returns the cards in this same schema, so what comes out can be edited and fed back in.
+Importing the JSON is offline and does not need a key. Generation still calls Gemini for audio and illustrations, so it needs `GEMINI_API_KEY` or a key saved with `config --key -`. Finished decks round-trip: `result --json` returns the cards in this same schema, so what comes out can be edited and fed back in.
+
+New sessions write the `.apkg` and PDF under the platform Documents folder's `Kamishibai` directory by default. `--out DIR` has highest priority; `KAMISHIBAI_OUTPUT` is the exact output root when `--out` is absent.
 
 ## The document
 

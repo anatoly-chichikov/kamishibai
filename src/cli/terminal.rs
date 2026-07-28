@@ -41,7 +41,7 @@ const CURSOR_BLINK_ON: &[u8] = b"\x1b[?12h";
 /// Open the interactive TUI on a fresh app derived from saved preferences.
 pub(super) fn start() -> Result<()> {
     let store = default_store(&SystemContext)?;
-    let preferences = store.read().unwrap_or_default();
+    let preferences = store.read()?;
     let app = startup_app(&preferences);
     run_tui(app, None, None)
 }

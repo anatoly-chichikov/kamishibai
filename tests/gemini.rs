@@ -6,7 +6,10 @@ use std::rc::Rc;
 use anyhow::Result;
 use kamishibai::gemini::{GeminiClient, Transport, TransportResponse, rejects_key};
 use kamishibai::generation::manga::{HiddenRecall, RecallCard, ShownRecall};
-use kamishibai::session::{CardDraft, CardMeta, LanguagePair, RawInputBatch, WordCandidate};
+use kamishibai::languages::catalog;
+use kamishibai::session::{
+    CardDraft, CardMeta, LanguagePair, LearningTarget, RawInputBatch, WordCandidate,
+};
 use serde_json::{Value, json};
 
 /// Fake transport that records requests and replays fixed responses.
@@ -27,6 +30,14 @@ impl FakeTransport {
 }
 
 impl Transport for FakeTransport {
+    /// Record one GET request and return the next queued response.
+    fn get(&self, url: &str, _key: &str) -> Result<TransportResponse> {
+        self.requests
+            .borrow_mut()
+            .push((String::from(url), String::from("GET")));
+        self.responses.borrow_mut().remove(0)
+    }
+
     /// Record one request and return the next queued response.
     fn post(&self, url: &str, _key: &str, body: &str) -> Result<TransportResponse> {
         self.requests
@@ -54,6 +65,11 @@ impl ComposerSchemaRejectingTransport {
 }
 
 impl Transport for ComposerSchemaRejectingTransport {
+    /// Reject an unexpected credential request on the scene-only fake.
+    fn get(&self, _url: &str, _key: &str) -> Result<TransportResponse> {
+        anyhow::bail!("scene transport cannot list models")
+    }
+
     /// Accept typed analysis while rejecting a schema-bearing composer request.
     fn post(&self, _url: &str, _key: &str, body: &str) -> Result<TransportResponse> {
         let request = serde_json::from_str::<Value>(body)?;
@@ -397,7 +413,11 @@ fn understanding_uses_flash_and_returns_sense_rows() -> Result<()> {
     }))?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let understood = client.understand(&RawInputBatch::new("wrecked\nокно"), "ru")?;
+    let understood = client.understand(
+        &RawInputBatch::new("wrecked\nокно"),
+        "ru",
+        &LearningTarget::Detect,
+    )?;
     let prompt = recorded_prompt(&requests)?;
     assert_eq!(
         (
@@ -423,6 +443,59 @@ fn understanding_uses_flash_and_returns_sense_rows() -> Result<()> {
             false,
         ),
         "understanding must use Flash, return human-language sense rows, and mark off-language rows ok=false"
+    );
+    Ok(())
+}
+
+/// An explicit learning language becomes a mandatory intake constraint.
+#[test]
+fn understanding_prompt_requires_the_explicit_target_language() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"target_lang\":\"FR\",\"items\":[{\"term\":\"chat\",\"senses\":[{\"understanding\":\"Сущ. «кот», домашнее животное.\",\"tag\":null}],\"selected\":0,\"ok\":true}]}"
+                }]
+            }
+        }]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let target = LearningTarget::Explicit(catalog().resolve("fr")?);
+    let understood = client.understand(&RawInputBatch::new("chat"), "RU", &target)?;
+    let prompt = recorded_prompt(&requests)?;
+    assert_eq!(
+        (
+            prompt.contains("The required target language is FR (French)"),
+            prompt.contains("Do not detect or choose another target language"),
+            understood.guess().code(),
+        ),
+        (true, true, "FR"),
+        "explicit intake no longer pins the requested target language"
+    );
+    Ok(())
+}
+
+/// An explicit target cannot be silently relabelled after Gemini chose another language.
+#[test]
+fn understanding_rejects_a_model_target_mismatch() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"target_lang\":\"EN\",\"items\":[{\"term\":\"chat\",\"senses\":[{\"understanding\":\"Сущ. разговор в интернете.\",\"tag\":null}],\"selected\":0,\"ok\":true}]}"
+                }]
+            }
+        }]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let target = LearningTarget::Explicit(catalog().resolve("FR")?);
+    let result = client.understand(&RawInputBatch::new("chat"), "RU", &target);
+    assert_eq!(
+        (result.is_err(), requests.borrow().len()),
+        (true, 1),
+        "Gemini changed an explicit target without a provider-contract failure"
     );
     Ok(())
 }
@@ -558,6 +631,26 @@ fn missing_api_keys_surface_a_setup_hint() {
     );
 }
 
+/// Gemini client debug output never includes its credential.
+#[test]
+fn gemini_client_debug_redacts_the_key() {
+    let rendered = format!(
+        "{:?}",
+        GeminiClient::new(
+            "debug-secret-client",
+            FakeTransport::new(Vec::<Result<TransportResponse>>::new())
+        )
+    );
+    assert_eq!(
+        (
+            rendered.contains("debug-secret-client"),
+            rendered.contains("[REDACTED]")
+        ),
+        (false, true),
+        "GeminiClient Debug exposed its API key"
+    );
+}
+
 /// Invalid API-key responses are classified without treating all 403s as key failures.
 #[test]
 fn api_key_errors_are_classified_narrowly() {
@@ -574,10 +667,10 @@ fn api_key_errors_are_classified_narrowly() {
         ),
     })]);
     let invalid_error = GeminiClient::new("key", invalid)
-        .understand(&RawInputBatch::new("wreck"), "ru")
+        .understand(&RawInputBatch::new("wreck"), "ru", &LearningTarget::Detect)
         .unwrap_err();
     let generic_error = GeminiClient::new("key", generic)
-        .understand(&RawInputBatch::new("wreck"), "ru")
+        .understand(&RawInputBatch::new("wreck"), "ru", &LearningTarget::Detect)
         .unwrap_err();
     assert_eq!(
         (rejects_key(&invalid_error), rejects_key(&generic_error)),
@@ -586,12 +679,18 @@ fn api_key_errors_are_classified_narrowly() {
     );
 }
 
-/// Key validation accepts any 2xx and flags a rejected key without parsing the body.
+/// Key validation lists models without generation and requires generateContent support.
 #[test]
-fn validate_key_accepts_2xx_and_flags_rejected_keys() {
+fn validate_key_lists_models_and_flags_rejected_keys() {
     let valid = FakeTransport::new(vec![Ok(TransportResponse {
         status: 200,
-        body: String::from("{}"),
+        body: json!({
+            "models": [{
+                "name": "models/gemini-3.6-flash",
+                "supportedGenerationMethods": ["generateContent"]
+            }]
+        })
+        .to_string(),
     })]);
     let requests = valid.requests.clone();
     let rejected = FakeTransport::new(vec![Ok(TransportResponse {
@@ -609,13 +708,129 @@ fn validate_key_accepts_2xx_and_flags_rejected_keys() {
             valid_ok,
             rejects_key(&rejected_error),
             requests.borrow()[0].0.as_str(),
+            requests.borrow()[0].1.as_str(),
         ),
         (
             true,
             true,
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+            "GET",
         ),
-        "key validation must pass on any 2xx and flag an invalid-key response as a rejected key"
+        "key validation must use models.list and flag an invalid-key response"
+    );
+}
+
+/// Credential probes classify transient and model-availability failures separately.
+#[test]
+fn credential_probe_failures_have_stable_retry_semantics() {
+    let transient = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(TransportResponse {
+            status: 429,
+            body: String::from("{}"),
+        })]),
+    )
+    .probe_key()
+    .expect_err("quota failure must be rejected");
+    let unavailable = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(TransportResponse {
+            status: 404,
+            body: String::from("{}"),
+        })]),
+    )
+    .probe_key()
+    .expect_err("missing model catalog must be rejected");
+    let absent = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(TransportResponse {
+            status: 200,
+            body: String::from("{\"models\":[]}"),
+        })]),
+    )
+    .probe_key()
+    .expect_err("absent configured model must be rejected");
+    let transport = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Err(anyhow::anyhow!("DNS unavailable"))]),
+    )
+    .probe_key()
+    .expect_err("transport failure must be rejected");
+    assert_eq!(
+        (
+            transient.retryable(),
+            transient.rejects_key(),
+            unavailable.model_unavailable(),
+            unavailable.rejects_key(),
+            absent.model_unavailable(),
+            transport.retryable(),
+        ),
+        (true, false, true, false, true, true),
+        "credential probe failures collapsed transient, model, and key classifications"
+    );
+}
+
+/// Credential validation distinguishes malformed keys from non-auth request errors.
+#[test]
+fn credential_probe_classifies_only_auth_failures_as_bad_keys() {
+    let api_key = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(TransportResponse {
+            status: 400,
+            body: String::from(
+                "{\"error\":{\"status\":\"INVALID_ARGUMENT\",\"details\":[{\"reason\":\"API_KEY_INVALID\"}]}}",
+            ),
+        })]),
+    )
+    .probe_key()
+    .expect_err("API_KEY_INVALID must be rejected");
+    let argument = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(TransportResponse {
+            status: 400,
+            body: String::from("{\"error\":{\"status\":\"INVALID_ARGUMENT\"}}"),
+        })]),
+    )
+    .probe_key()
+    .expect_err("generic INVALID_ARGUMENT must be rejected");
+    let precondition = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(TransportResponse {
+            status: 400,
+            body: String::from("{\"error\":{\"status\":\"FAILED_PRECONDITION\"}}"),
+        })]),
+    )
+    .probe_key()
+    .expect_err("FAILED_PRECONDITION must be rejected");
+    let malformed = GeminiClient::new(
+        "secret\nheader",
+        FakeTransport::new(Vec::<Result<TransportResponse>>::new()),
+    )
+    .probe_key()
+    .expect_err("malformed header key must be rejected before transport");
+    let empty_unauthorized = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(TransportResponse {
+            status: 401,
+            body: String::from("{}"),
+        })]),
+    )
+    .probe_key()
+    .expect_err("unclassified 401 must be rejected");
+    assert_eq!(
+        (
+            api_key.rejects_key(),
+            argument.rejects_key(),
+            argument.retryable(),
+            precondition.rejects_key(),
+            precondition.retryable(),
+            malformed.rejects_key(),
+            malformed.retryable(),
+            empty_unauthorized.rejects_key(),
+            empty_unauthorized.retryable(),
+        ),
+        (true, false, false, false, false, true, false, true, false),
+        "credential classification treated a provider/config error as an invalid key"
     );
 }
 
