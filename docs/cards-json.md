@@ -14,7 +14,7 @@ Or headless:
 
 ```bash
 kamishibai new --build cards.json --json
-GEMINI_API_KEY="$SECRET" kamishibai generate --wait --json
+kamishibai generate --wait --json
 kamishibai result --json
 ```
 

@@ -88,7 +88,7 @@ You don't have to let Gemini write the cards. The card format is plain, strict J
 ```bash
 kamishibai cards.json                # review and build in the TUI
 kamishibai new --build cards.json --json
-GEMINI_API_KEY="$SECRET" kamishibai generate --json
+kamishibai generate --json
 ```
 
 Decks round-trip, too: `kamishibai result --json` returns the finished cards in the same schema, ready to edit and feed back in. See [the contract](docs/cards-json.md) for what each field is and where it lands on the card.
