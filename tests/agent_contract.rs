@@ -23,6 +23,79 @@ fn release(document: &str) -> &str {
         .expect("agent contract must declare its release")
 }
 
+fn bash_lines(document: &str) -> Vec<String> {
+    let mut bash = false;
+    let mut pending = String::new();
+    let mut lines = Vec::new();
+    for line in document.lines() {
+        let trimmed = line.trim();
+        if trimmed == "```bash" {
+            bash = true;
+            continue;
+        }
+        if trimmed == "```" && bash {
+            bash = false;
+            continue;
+        }
+        if !bash || trimmed.is_empty() {
+            continue;
+        }
+        if let Some(part) = trimmed.strip_suffix('\\') {
+            pending.push_str(part.trim_end());
+            pending.push(' ');
+            continue;
+        }
+        pending.push_str(trimmed);
+        lines.push(std::mem::take(&mut pending));
+    }
+    lines
+}
+
+fn command_argv(line: &str) -> Result<Option<Vec<String>>, String> {
+    let start = line.match_indices("kamishibai").find_map(|(start, name)| {
+        let before = line[..start].chars().next_back();
+        let after = line[start + name.len()..].chars().next();
+        let begins = match before {
+            Some(character) => !character.is_alphanumeric() && character != '_' && character != '-',
+            None => true,
+        };
+        let ends = after.is_none() || after.is_some_and(char::is_whitespace);
+        (begins && ends).then_some(start)
+    });
+    let Some(start) = start else {
+        return Ok(None);
+    };
+    let words = shlex::split(&line[start..]).ok_or_else(|| line.to_owned())?;
+    let argv = words
+        .into_iter()
+        .take_while(|word| !word.starts_with(['|', '>', '<', ';', '&']))
+        .collect::<Vec<_>>();
+    Ok(Some(argv))
+}
+
+#[test]
+fn every_contract_bash_command_parses_with_the_binary_grammar() {
+    let commands = bash_lines(include_str!("../llms.txt"))
+        .into_iter()
+        .filter_map(|line| command_argv(&line).transpose().map(|argv| (line, argv)))
+        .collect::<Vec<_>>();
+    let failures = commands
+        .iter()
+        .filter(|(_, argv)| match argv {
+            Ok(argv) => kamishibai::cli::command()
+                .try_get_matches_from(argv)
+                .is_err(),
+            Err(_) => true,
+        })
+        .map(|(line, _)| line)
+        .collect::<Vec<_>>();
+    assert!(
+        commands.len() == 14 && failures.is_empty(),
+        "documented bash commands no longer parse or one was skipped: found {}, failures: {failures:?}",
+        commands.len()
+    );
+}
+
 #[test]
 fn agent_contract_prints_the_exact_embedded_document() {
     let output = Command::cargo_bin("kamishibai")

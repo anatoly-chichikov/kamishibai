@@ -169,261 +169,101 @@ not renamed or removed.
 
 Commands
 
+Per-verb flags and signatures: run `kamishibai <verb> --help`.
+
 `agent-contract`
 
-Purpose: print the exact console contract embedded in the installed binary.
-The output includes the matching application version in `Release`.
-
-Signature:
-
-```bash
-kamishibai agent-contract
-```
-
-This command is text-only and refuses `--json` with exit 2.
+Prints the exact contract embedded in the installed binary, including its
+matching application version in `Release`. It is text-only and refuses
+`--json` with exit 2.
 
 `new`
 
-Purpose: understand each word with Gemini and create a session in the
-`understood` stage.
-
-Signature:
-
-```bash
-kamishibai new (--word W [--word W ...] | --words FILE | --build FILE) \
-  [--learning L] [--known L] [--senses primary|all] [--out DIR] [--id NAME] \
-  [--generate] --json
-```
-
-Exactly one input form is allowed:
-
-- `--word W`, repeated once per card
-- `--words FILE`, one word per line, with `-` for stdin
-- `--build FILE`, a strict cards JSON path or `-` for stdin
-
-`--build` skips understanding and carries the language pair, so it rejects
-`--known`, `--learning`, and `--senses`.
-
-`--learning` is autodetected from the words unless passed explicitly. An
-explicit value is normalized and validated before credential lookup, Gemini,
-cache writes, or session creation; it constrains understanding and must match
-Gemini's returned target. Explicit `FR`, explicit `EN`, and autodetect have
-different understanding-cache identities.
-
-`--known` resolves from saved config and is required when it has never been set;
-save it once with `config --known`. `--senses` sets the initial selection:
-`primary` keeps only the top sense, and `all` keeps every sense. `select` can
-override this later. `--out` sets the exact output root. Without it, precedence
-is `KAMISHIBAI_OUTPUT`, then the platform Documents directory. `--generate`
-commits the plan and starts the worker immediately.
-
-Returns a session document.
+Word intake completes Gemini understanding before creating an `understood`
+session; a cards JSON import skips understanding and takes its language pair
+from the entries. An explicit `--learning` value is normalized and validated
+before credential lookup, Gemini, cache writes, or session creation. It
+constrains Gemini understanding to that target and must match Gemini's returned
+target. Every explicit target and autodetection use separate understanding-cache
+identities. `--known` falls back to saved config; without either value, the
+command refuses and points to `config --known`.
 
 `select`
 
-Purpose: pick which 1-based senses of a card become cards, and re-include a
-previously excluded card.
-
-Signature:
-
-```bash
-kamishibai select [<id>] --card TERM --sense 1,3 --json
-```
-
-Sense numbers are the 1-based positions in the candidate's `senses` array.
-Resets the session to `understood`. Returns a session document.
+Selection re-includes a previously excluded card and resets the session to
+`understood`.
 
 `exclude`
 
-Purpose: drop a card from the plan while keeping it visible in the understanding.
-
-Signature:
-
-```bash
-kamishibai exclude [<id>] --card TERM --json
-```
-
-Resets the session to `understood`. Returns a session document.
+The excluded card stays visible in the understanding, and the session resets to
+`understood`.
 
 `correct`
 
-Purpose: ask Gemini to add senses to a card from a free-text instruction.
-
-Signature:
-
-```bash
-kamishibai correct [<id>] --card TERM --note "..." --json
-```
-
-Resets the session to `understood`. Returns a session document.
+Calls Gemini synchronously to add senses, then resets the session to
+`understood`.
 
 `generate`
 
-Purpose: commit the curated plan, then generate and publish the deck.
-
-Signature:
-
-```bash
-kamishibai generate [<id>] [--wait] --json
-```
-
-Detached by default: returns immediately with `phase` set to `generating`; poll
-`status`. With `--wait`, blocks until terminal state, streams NDJSON events on
-stderr, and returns the terminal document. If every card fails, exits 1 with the
-error envelope. Exits 2 when nothing is selected. Returns a session document.
+Commits the curated plan. Detached generation returns immediately with `phase`
+set to `generating`; poll `status`. Waiting blocks until terminal state, streams
+NDJSON events on stderr, and returns the terminal document. If every card fails,
+it exits 1 with the error envelope; if nothing is selected, it exits 2.
 
 `status`
 
-Purpose: read current state from the cache. No Gemini call; use it for polling
-generation and inspecting curation.
-
-Signature:
-
-```bash
-kamishibai status [<id>] --json
-```
-
-Returns a session document. Before a plan is committed, the document contains
-candidates. After commit, it contains per-card artifact state.
+Reads only the cache and never calls Gemini. Before a plan is committed, the
+session document contains candidates; after commit, it contains per-card
+artifact state.
 
 `open`
 
-Purpose: open the session in the interactive TUI, resuming from the cache.
-
-Signature:
-
-```bash
-kamishibai open [<id>]
-```
-
-This is interactive and not for agents. It refuses `--json` with exit 2.
+Resumes the session in the interactive TUI. It is not for agents and refuses
+`--json` with exit 2.
 
 `result`
 
-Purpose: read the finished deck paths plus full per-card data as round-trippable
-cards JSON entries.
-
-Signature:
-
-```bash
-kamishibai result [<id>] --json
-```
-
 Ready when `phase` is `published` or `partial`; otherwise exits 4. Returns a
-result document.
+result document with deck paths and full per-card data that round-trips through
+cards JSON.
 
 `regenerate`
 
-Purpose: re-roll committed cards by dropping their cached artifacts, rebuilding,
-and republishing.
-
-Signature:
-
-```bash
-kamishibai regenerate [<id>] (--failed | --card TERM [--note "..."]) [--wait] --json
-```
-
-`--failed` re-rolls every unfinished card. `--card` re-rolls one card. With
-`--card --note`, Gemini first rewrites that card from the instruction, then the
-worker runs exactly like `generate`. Returns a session document.
+Drops the targeted committed artifacts, rebuilds them, and republishes. With a
+rewrite note, Gemini first rewrites that card; the worker then follows the same
+lifecycle as `generate`.
 
 `cancel`
 
-Purpose: stop the running worker. Cached artifacts survive, so a later
-`generate` resumes.
-
-Signature:
-
-```bash
-kamishibai cancel [<id>] --json
-```
-
-Always exits 0 with the correct final phase, even when racing a finishing worker.
-Gate on `phase`, not `ok`. Returns a session document.
+Stops the running worker but preserves cached artifacts for a later resume. It
+always exits 0 with the correct final phase, even when racing a finishing
+worker; gate on `phase`, not `ok`.
 
 `ls`
 
-Purpose: list sessions.
-
-Signature:
-
-```bash
-kamishibai ls --json
-```
-
-Returns:
-
-```json
-{"ok": true, "sessions": []}
-```
+Returns `{"ok": true, "sessions": []}` with an item for every session.
 
 `rm`
 
-Purpose: delete a session. With `--cache`, also delete cached card folders.
-
-Signature:
-
-```bash
-kamishibai rm [<id>] [--cache] --json
-```
-
-Returns:
-
-```json
-{"ok": true, "removed": "<id>"}
-```
+Returns `{"ok": true, "removed": "<id>"}` after deletion.
 
 `cache-path`
 
-Purpose: print the cache directory.
-
-Signature:
-
-```bash
-kamishibai cache-path --json
-```
-
-Returns:
-
-```json
-{"ok": true, "cache": "/..."}
-```
+Returns `{"ok": true, "cache": "/..."}` with the resolved cache directory.
 
 `config`
 
-Purpose: save console defaults so `new` needs fewer flags.
+The known language is validated against the catalog and saved uppercase. A key
+is verified through the authenticated model-list endpoint with a short timeout,
+including `generateContent` support, without generating content. It is saved
+only after a successful probe and is never printed back.
 
-Signature:
-
-```bash
-kamishibai config [--known L] [--key K] --json
-```
-
-`--known` is validated against the catalog and saved uppercase. `--key` is
-verified against Gemini before saving; `-` reads from stdin, and an empty value
-clears the saved key. Verification uses the authenticated model-list endpoint
-with a short timeout and confirms that the configured model supports
-`generateContent`; it does not generate content. The key is saved only after a
-successful probe and is never printed back.
-
-Returns:
-
-```json
-{
-  "ok": true,
-  "known": "RU",
-  "key_saved": false,
-  "credential_source": "environment",
-  "credential_present": true,
-  "preferences_path": "/Users/example/Library/Application Support/kamishibai/preferences.json"
-}
-```
-
-`credential_source` is `environment`, `saved`, or `none`. Environment wins over
-saved. `credential_present` means a non-empty value is available; it does not
-perform a network check. `key_saved` reports whether a saved fallback exists
-even when environment wins. The `known` key is always present and is `null`
-until one is saved.
+The result contains `ok: true`, `known`, `key_saved`, `credential_source`,
+`credential_present`, and `preferences_path`. `credential_source` is
+`environment`, `saved`, or `none`, with environment winning. Presence means a
+non-empty key is available, not that a network check ran; `key_saved` reports
+the fallback even when environment wins. `known` is always present and is
+`null` until saved.
 
 JSON documents
 

@@ -20,7 +20,7 @@ mod wiring;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches, Parser};
 
 const SHORT_CONTRACT_HELP: &str =
     "Agent or script? Run `kamishibai agent-contract` for this binary's console contract.";
@@ -128,6 +128,20 @@ struct Cli {
     command: Option<session::Command>,
 }
 
+/// Build the clap command used by the binary and contract grammar checks.
+#[must_use]
+pub fn command() -> clap::Command {
+    Cli::command()
+}
+
+fn parse() -> Result<Cli, clap::Error> {
+    let mut matches = command().try_get_matches()?;
+    Cli::from_arg_matches_mut(&mut matches).map_err(|failure| {
+        let mut grammar = command();
+        failure.format(&mut grammar)
+    })
+}
+
 /// Parse arguments and execute the selected flow, returning a process exit code.
 ///
 /// Every refusal carries its exit code (`error.rs`): 2 — the invocation is
@@ -138,7 +152,7 @@ struct Cli {
 /// always appears, and `--json` additionally prints the machine-readable
 /// envelope on stdout.
 pub fn run() -> u8 {
-    let cli = match Cli::try_parse() {
+    let cli = match parse() {
         Ok(cli) => cli,
         Err(failure) => {
             let json =
@@ -208,7 +222,6 @@ fn execute(cli: &Cli) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
     use session::Command;
 
     fn parse(args: &[&str]) -> Cli {
@@ -449,10 +462,7 @@ mod tests {
             parse(&["kamishibai", "__run", "fr-1"]).command,
             Some(Command::Worker(_))
         );
-        let hidden = !Cli::command()
-            .render_long_help()
-            .to_string()
-            .contains("__run");
+        let hidden = !command().render_long_help().to_string().contains("__run");
         assert!(
             parsed && hidden,
             "__run must parse but never appear in the help"
@@ -462,7 +472,7 @@ mod tests {
     #[test]
     fn long_help_documents_the_cards_json_schema() {
         assert!(
-            Cli::command()
+            command()
                 .render_long_help()
                 .to_string()
                 .contains("WORDS_JSON format"),
@@ -473,7 +483,7 @@ mod tests {
     #[test]
     fn version_reports_the_release_version() {
         assert_eq!(
-            Cli::command().get_version(),
+            command().get_version(),
             Some(env!("CARGO_PKG_VERSION")),
             "the CLI must report the current release version"
         );

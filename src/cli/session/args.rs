@@ -28,8 +28,8 @@ pub(in crate::cli) enum Command {
     Generate(GenerateArgs),
     /// Print a session's phase and per-card progress (no Gemini).
     Status(StatusArgs),
-    /// Drop committed cards' cached artifacts (with --note, Gemini first
-    /// rewrites the card) so the next generate rebuilds them.
+    /// Drop committed cards' cached artifacts, then regenerate and republish
+    /// them (with --note, Gemini first rewrites the card).
     Regenerate(RegenerateArgs),
     /// Print a session's published cards and artifact paths.
     Result(ResultArgs),
@@ -59,7 +59,8 @@ pub(in crate::cli) struct NewArgs {
     /// Read words from this file (one per line), or `-` for stdin.
     #[arg(long, value_name = "FILE")]
     pub(super) words: Option<String>,
-    /// Import a strict cards JSON path (or `-` for stdin) and skip understanding.
+    /// Import a strict cards JSON path (or `-` for stdin) and skip
+    /// understanding; conflicts with --known, --learning, and --senses.
     #[arg(long, value_name = "FILE", conflicts_with_all = ["known", "learning", "senses"])]
     pub(super) build: Option<PathBuf>,
     /// Language you already know and explain from (defaults to your saved preference).
@@ -71,7 +72,8 @@ pub(in crate::cli) struct NewArgs {
     /// How many senses of each word are selected initially.
     #[arg(long, value_name = "WHICH", default_value = "primary")]
     pub(super) senses: SensePolicy,
-    /// Output directory for the deck and report (defaults to Documents/Kamishibai).
+    /// Output directory for the deck and report (defaults from
+    /// KAMISHIBAI_OUTPUT, then Documents/Kamishibai).
     #[arg(short, long, value_name = "DIR")]
     pub(super) out: Option<PathBuf>,
     /// Use this session id instead of a minted one.
@@ -197,7 +199,8 @@ pub(in crate::cli) struct RegenerateArgs {
     /// Regenerate one card by its term.
     #[arg(long, value_name = "TERM")]
     pub(super) card: Option<String>,
-    /// Ask Gemini to rewrite the card from this instruction first.
+    /// With --card, ask Gemini to rewrite the card from this instruction first
+    /// (requires --card; conflicts with --failed).
     #[arg(
         long,
         value_name = "NOTE",
