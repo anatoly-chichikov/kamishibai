@@ -32,7 +32,7 @@ const HINT_DONE: &str = "all done";
 const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
 const STEP_LABEL_COL_CHARS: usize = 14;
-const STEP_SIZE_COL_CHARS: usize = 8;
+const STEP_DETAIL_COL_CHARS: usize = 9;
 const STEPS: [(&str, Artifact); 4] = [
     ("meta", Artifact::Meta),
     ("audio", Artifact::Sound),
@@ -359,7 +359,7 @@ fn step_state<'a>(
         let mut note: Vec<Span<'a>> = Vec::new();
         if let Some(file) = slot.file() {
             note.push(Span::styled(
-                pad_left(file.size(), STEP_SIZE_COL_CHARS),
+                pad_left(file.size(), STEP_DETAIL_COL_CHARS),
                 palette::dim(),
             ));
         }
@@ -387,24 +387,25 @@ fn step_state<'a>(
             format!("gave up after {retries} retries"),
             palette::dim(),
         )];
-        push_rejected_chip(&mut note, slot);
         push_slot_cost(&mut note, slot);
+        push_rejected_chip(&mut note, slot);
         return (String::from("✗"), row_fg, row_fg, note);
     }
     if let Some(retry) = slot.tally().retry() {
-        let label = if active {
-            format!("retry {retry}/{retries}")
-        } else {
-            format!("retry {retry}/{retries} paused")
-        };
+        let label = format!("retry {retry}/{retries}");
+        let label = pad_right_to(&label, STEP_DETAIL_COL_CHARS);
         let glyph = if active {
             String::from(SPINNER_FRAMES[spinner_frame])
         } else {
             String::from("·")
         };
         let mut note = vec![Span::styled(label, palette::dim())];
-        push_rejected_chip(&mut note, slot);
         push_slot_cost(&mut note, slot);
+        if !active {
+            note.push(Span::styled("  ", palette::dim()));
+            note.push(Span::styled("paused", palette::dim2()));
+        }
+        push_rejected_chip(&mut note, slot);
         return (glyph, row_fg, row_fg, note);
     }
     if active {
@@ -480,6 +481,11 @@ fn pad_left(text: &str, width: usize) -> String {
         return String::from(text);
     }
     format!("{}{}", " ".repeat(width - len), text)
+}
+
+fn pad_right_to(text: &str, width: usize) -> String {
+    let len = text.chars().count();
+    format!("{text}{}", " ".repeat(width.saturating_sub(len)))
 }
 
 /// The expanded card body together with the row its rejected block starts on.
