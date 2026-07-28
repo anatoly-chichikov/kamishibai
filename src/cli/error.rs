@@ -3,30 +3,31 @@
 //! A [`Refusal`] marks an error whose exit code carries meaning for scripts:
 //! `2` — the invocation itself is wrong ([`usage`]), `3` — the named session
 //! does not exist ([`not_found_hint`]), `4` — the session is not in the right
-//! lifecycle state yet ([`not_ready_hint`], the only retryable refusal), `5` —
-//! an omitted session id matched several sessions ([`ambiguous`], which carries
-//! the candidates for the JSON envelope). Anything else is an operational
-//! failure and exits `1`. The top-level runner maps an error to its code
-//! through [`exit_code`] and, in JSON mode, to its stdout envelope through
-//! [`json_line`], keeping the code↔meaning table in one place.
+//! lifecycle state yet ([`not_ready_hint`], a retryable refusal), `5` — an
+//! omitted session id matched several sessions ([`ambiguous`], which carries
+//! the candidates for the JSON envelope). Operational failures exit `1` and
+//! explicitly say whether retrying can help. The top-level runner maps an error
+//! to its code through [`exit_code`] and, in JSON mode, to its stdout envelope
+//! through [`json_line`], keeping the code↔meaning table in one place.
 
 use std::error::Error;
 use std::fmt;
 
 use serde::Serialize;
 
+use crate::config::PreferenceStoreError;
+
 /// A refusal carrying its process exit code: the caller must change the
 /// invocation (2), the session id (3), wait for the session (4), or pick one
 /// of several sessions (5, with the candidates attached for the envelope).
 ///
-/// `hint` is the single plain-language next-step line printed under the
-/// `kamishibai:` line in text mode; it never enters the JSON envelope, which
-/// carries only the structured `message`.
+/// `hint` is the single plain-language next-step printed in both render modes.
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::cli) struct Refusal {
     exit: u8,
     message: String,
     hint: Option<String>,
+    retryable: bool,
     sessions: Option<serde_json::Value>,
 }
 
@@ -40,7 +41,7 @@ impl Error for Refusal {}
 
 /// Build an `anyhow` error for a malformed invocation (process exit code 2).
 pub(in crate::cli) fn usage(message: impl Into<String>) -> anyhow::Error {
-    refusal(2, message.into(), None, None)
+    refusal(2, message.into(), None, false, None)
 }
 
 /// Build a usage refusal (exit 2) with a plain-language next-step hint.
@@ -48,7 +49,7 @@ pub(in crate::cli) fn usage_hint(
     message: impl Into<String>,
     hint: impl Into<String>,
 ) -> anyhow::Error {
-    refusal(2, message.into(), Some(hint.into()), None)
+    refusal(2, message.into(), Some(hint.into()), false, None)
 }
 
 /// Build a not-found refusal (exit 3) with a next-step hint.
@@ -56,7 +57,7 @@ pub(in crate::cli) fn not_found_hint(
     message: impl Into<String>,
     hint: impl Into<String>,
 ) -> anyhow::Error {
-    refusal(3, message.into(), Some(hint.into()), None)
+    refusal(3, message.into(), Some(hint.into()), false, None)
 }
 
 /// Build a not-ready refusal (exit 4) with a next-step hint.
@@ -64,7 +65,7 @@ pub(in crate::cli) fn not_ready_hint(
     message: impl Into<String>,
     hint: impl Into<String>,
 ) -> anyhow::Error {
-    refusal(4, message.into(), Some(hint.into()), None)
+    refusal(4, message.into(), Some(hint.into()), true, None)
 }
 
 /// Build an operational failure (exit 1) with a clean message and a next-step
@@ -73,7 +74,15 @@ pub(in crate::cli) fn operational_hint(
     message: impl Into<String>,
     hint: impl Into<String>,
 ) -> anyhow::Error {
-    refusal(1, message.into(), Some(hint.into()), None)
+    refusal(1, message.into(), Some(hint.into()), false, None)
+}
+
+/// Build a retryable operational failure (exit 1) with one recovery hint.
+pub(in crate::cli) fn operational_retryable_hint(
+    message: impl Into<String>,
+    hint: impl Into<String>,
+) -> anyhow::Error {
+    refusal(1, message.into(), Some(hint.into()), true, None)
 }
 
 /// Build an `anyhow` error for an omitted id matching several sessions (exit
@@ -84,7 +93,7 @@ pub(in crate::cli) fn ambiguous(
     hint: impl Into<String>,
     sessions: serde_json::Value,
 ) -> anyhow::Error {
-    refusal(5, message.into(), Some(hint.into()), Some(sessions))
+    refusal(5, message.into(), Some(hint.into()), false, Some(sessions))
 }
 
 /// Assemble one refusal error from its parts.
@@ -92,12 +101,14 @@ fn refusal(
     exit: u8,
     message: String,
     hint: Option<String>,
+    retryable: bool,
     sessions: Option<serde_json::Value>,
 ) -> anyhow::Error {
     anyhow::Error::new(Refusal {
         exit,
         message,
         hint,
+        retryable,
         sessions,
     })
 }
@@ -108,6 +119,11 @@ pub(in crate::cli) fn hint_of(error: &anyhow::Error) -> Option<String> {
     error
         .downcast_ref::<Refusal>()
         .and_then(|refusal| refusal.hint.clone())
+        .or_else(|| {
+            error
+                .downcast_ref::<PreferenceStoreError>()
+                .map(|failure| failure.hint().to_string())
+        })
 }
 
 /// Return the refusal exit code an error carries, or None for an operational
@@ -142,11 +158,13 @@ struct ErrorDoc {
     code: &'static str,
     exit: u8,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<String>,
+    retryable: bool,
 }
 
 /// Render one error as the single-line JSON envelope `--json` mode prints on
-/// stdout: `{"ok":false,"error":{"code":…,"exit":…,"message":…}}`, plus a
-/// top-level `sessions` array on the ambiguous refusal.
+/// stdout, including its optional recovery hint and retry classification.
 #[must_use]
 pub(in crate::cli) fn json_line(error: &anyhow::Error) -> String {
     let exit = exit_code(error).unwrap_or(1);
@@ -156,6 +174,10 @@ pub(in crate::cli) fn json_line(error: &anyhow::Error) -> String {
             code: code_word(exit),
             exit,
             message: format!("{error:#}"),
+            hint: hint_of(error),
+            retryable: error
+                .downcast_ref::<Refusal>()
+                .is_some_and(|refusal| refusal.retryable),
         },
         sessions: error
             .downcast_ref::<Refusal>()
@@ -210,7 +232,7 @@ mod tests {
     #[test]
     fn a_refusal_renders_as_a_machine_readable_envelope() {
         let parsed: serde_json::Value = serde_json::from_str(
-            json_line(&not_found_hint("no session 'ghost'", "see ls")).as_str(),
+            json_line(&usage_hint("no known language set", "run config")).as_str(),
         )
         .expect("the envelope must be valid JSON");
         assert_eq!(
@@ -219,14 +241,18 @@ mod tests {
                 parsed["error"]["code"].as_str(),
                 parsed["error"]["exit"].as_u64(),
                 parsed["error"]["message"].as_str(),
+                parsed["error"]["hint"].as_str(),
+                parsed["error"]["retryable"].as_bool(),
             ),
             (
                 Some(false),
-                Some("not_found"),
-                Some(3),
-                Some("no session 'ghost'")
+                Some("usage"),
+                Some(2),
+                Some("no known language set"),
+                Some("run config"),
+                Some(false),
             ),
-            "a refusal must render as the ok:false envelope with its code word and exit"
+            "a refusal must render its code, exit, hint, and retry semantics"
         );
     }
 
@@ -281,10 +307,38 @@ mod tests {
         assert_eq!(
             (
                 parsed["error"]["code"].as_str(),
-                parsed["error"]["exit"].as_u64()
+                parsed["error"]["exit"].as_u64(),
+                parsed["error"]["retryable"].as_bool(),
             ),
-            (Some("operational"), Some(1)),
-            "an operational error must render code operational with exit 1"
+            (Some("operational"), Some(1), Some(false)),
+            "an untyped operational error must default to non-retryable exit 1"
+        );
+    }
+
+    #[test]
+    fn a_retryable_operational_error_is_explicit_in_json() {
+        let parsed: serde_json::Value = serde_json::from_str(
+            json_line(&operational_retryable_hint(
+                "Gemini unavailable",
+                "retry later",
+            ))
+            .as_str(),
+        )
+        .expect("the envelope must be valid JSON");
+        assert_eq!(
+            (
+                parsed["error"]["code"].as_str(),
+                parsed["error"]["exit"].as_u64(),
+                parsed["error"]["hint"].as_str(),
+                parsed["error"]["retryable"].as_bool(),
+            ),
+            (
+                Some("operational"),
+                Some(1),
+                Some("retry later"),
+                Some(true),
+            ),
+            "a retryable operational refusal lost its machine-readable classification"
         );
     }
 }

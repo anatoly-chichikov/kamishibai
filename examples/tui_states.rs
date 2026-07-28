@@ -447,7 +447,7 @@ fn build_states() -> Vec<(String, App)> {
         .done_published(
             "fr_2026-06-01_183029.apkg",
             "fr_2026-06-01_183029.pdf",
-            "kamishibai-out/",
+            "~/Documents/Kamishibai",
         );
 
     let welcome_no_env = App::new(pair())

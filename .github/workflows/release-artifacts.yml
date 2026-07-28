@@ -90,22 +90,27 @@ jobs:
         run: |
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             target/release/kamishibai.exe --version
+            target/release/kamishibai.exe agent-contract > embedded-llms.txt
           else
             target/release/kamishibai --version
+            target/release/kamishibai agent-contract > embedded-llms.txt
           fi
+          cmp llms.txt embedded-llms.txt
       - name: Package Unix binary
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
           cp target/release/kamishibai dist/kamishibai
-          tar -C dist -czf "${KAMISHIBAI_ARCHIVE}" kamishibai
+          cp llms.txt dist/llms.txt
+          tar -C dist -czf "${KAMISHIBAI_ARCHIVE}" kamishibai llms.txt
       - name: Package Windows binary
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist
           Copy-Item target\release\kamishibai.exe dist\kamishibai.exe
-          Compress-Archive -Path dist\kamishibai.exe -DestinationPath "${env:KAMISHIBAI_ARCHIVE}"
+          Copy-Item llms.txt dist\llms.txt
+          Compress-Archive -Path dist\kamishibai.exe, dist\llms.txt -DestinationPath "${env:KAMISHIBAI_ARCHIVE}"
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:

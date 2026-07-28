@@ -7,7 +7,7 @@ Supported target languages:
 Support language for explanations:
 {support_language}
 
-Choose exactly one dominant target language for the whole batch. One non-trivial item is enough to fix the language; treat the whole batch as that language.
+{target_instruction}
 
 For each non-empty input line, return one item with four fields.
 

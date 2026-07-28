@@ -1,6 +1,6 @@
 [package]
 name = "kamishibai"
-version = "1.5.2"
+version = "1.6.0"
 edition = "2024"
 rust-version = "1.95.0"
 description = "Turn a list of words into an illustrated Anki deck with native-speaker audio"
@@ -14,6 +14,7 @@ anyhow = "=1.0.102"
 clap = { version = "=4.6.1", features = ["derive"] }
 console = "=0.16.3"
 crossterm = "=0.29.0"
+dirs = "=6.0.0"
 image = "=0.25.10"
 md5 = "=0.8.0"
 ocr-rs = "=2.2.2"

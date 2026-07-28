@@ -110,6 +110,37 @@ fn done_screen_lists_short_artifact_labels_and_quit_hint() {
 }
 
 #[test]
+fn done_screen_shortens_the_home_directory_in_its_folder_path() {
+    let home = dirs::home_dir().expect("test user home must be available");
+    let output = home.join("Documents").join("Kamishibai");
+    let app = published().done_published(
+        output.join("deck.apkg").to_string_lossy(),
+        output.join("cards.pdf").to_string_lossy(),
+        output.to_string_lossy(),
+    );
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("~/Documents/Kamishibai")
+            && !rendered.contains(output.to_string_lossy().as_ref()),
+        "Done did not shorten its output folder to a compact home-relative path: {rendered}"
+    );
+}
+
+#[test]
+fn a_long_output_path_does_not_displace_later_done_rows() {
+    let output = format!("/mnt/{}", "very-long-output-segment/".repeat(12));
+    let rendered = flat(&published().done_published(
+        format!("{output}deck.apkg"),
+        format!("{output}cards.pdf"),
+        output,
+    ));
+    assert!(
+        rendered.contains("APKG") && rendered.contains("PDF") && rendered.contains("[Ctrl+C]"),
+        "a long output folder displaced the remaining Done layout: {rendered}"
+    );
+}
+
+#[test]
 fn done_footer_shows_simplified_subdollar_total() {
     let rendered = flat(&priced_published());
     assert!(

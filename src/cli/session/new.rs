@@ -8,11 +8,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::application::{CardProduction, WordUnderstanding};
+use crate::application::{CardProduction, LearningTarget, WordUnderstanding};
 use crate::cli::console::{self, SensePolicy};
 use crate::cli::error::{usage, usage_hint};
 use crate::config::{PreferenceStore, default_store};
-use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
+use crate::runtime::locations::{LocationArgs, Locations, OutputUnavailable, SystemContext};
 use crate::session::{
     CandidateRecord, LanguagePair, RawInputBatch, WordCandidate, drafts_from_document,
 };
@@ -21,12 +21,13 @@ use crate::vocabulary::VocabularyDocument;
 use super::args::NewArgs;
 use super::generate::run_session;
 use super::store::{SessionRecord, SessionStore, mint_id, now, valid_id};
-use super::{Render, json, preflight_key, validate_language, view};
+use super::{Render, json, preflight_key, resolve_language, validate_language, view};
 
 /// Understand the requested words (or import a cards JSON) and create a session.
 pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
-    let store = SessionStore::system()?;
+    let target = learning_target(args.learning.as_deref())?;
     let out = output_dir(args.out.as_deref())?;
+    let store = SessionStore::system()?;
     let workflow = console::workflow(out.clone())?;
     let session = match args.build.as_deref() {
         Some(path) => build_session(&workflow, path)?,
@@ -34,7 +35,7 @@ pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
             let prefs_store = default_store(&SystemContext)?;
             let known = resolve_known(args.known.as_deref(), &prefs_store)?;
             preflight_key()?;
-            word_session(&workflow, args, known.as_str())?
+            word_session(&workflow, args, known.as_str(), &target)?
         }
     };
     if session.candidates.is_empty() {
@@ -88,18 +89,15 @@ fn word_session(
     workflow: &impl WordUnderstanding,
     args: &NewArgs,
     known: &str,
+    target: &LearningTarget,
 ) -> Result<Prepared> {
     let words = words_lines(args)?;
     let raw = RawInputBatch::new(words.join("\n"));
     if !raw.has_content() {
         return Err(usage("no words to learn: input was empty"));
     }
-    let understood = workflow.understand(&raw, known)?;
-    let learning = args
-        .learning
-        .clone()
-        .unwrap_or_else(|| understood.guess().code().to_string())
-        .to_uppercase();
+    let understood = workflow.understand(&raw, known, target)?;
+    let learning = understood.guess().code().to_uppercase();
     let pair = LanguagePair::new(learning.as_str(), known.to_uppercase());
     let candidates = understood
         .candidates()
@@ -114,6 +112,13 @@ fn word_session(
         candidates,
         source: "words",
     })
+}
+
+fn learning_target(explicit: Option<&str>) -> Result<LearningTarget> {
+    let Some(code) = explicit else {
+        return Ok(LearningTarget::Detect);
+    };
+    resolve_language(code).map(LearningTarget::Explicit)
 }
 
 /// Apply the `--senses` policy as the candidate's initial sense selection so
@@ -176,23 +181,37 @@ fn words_lines(args: &NewArgs) -> Result<Vec<String>> {
 fn resolve_known(explicit: Option<&str>, store: &PreferenceStore) -> Result<String> {
     if let Some(code) = explicit {
         validate_language(code)?;
-        return Ok(String::from(code));
+        return Ok(code.to_uppercase());
     }
-    let prefs = store.read().unwrap_or_default();
+    let prefs = store.read()?;
     if prefs.requires_language_choice() {
         return Err(usage_hint(
             "no known language set — can't pick which sense of each word you need",
-            "Set it once: kamishibai config --known en (or add --known en just this run)",
+            "Run: kamishibai config --known EN --json (or add --known EN just this run)",
         ));
     }
-    Ok(prefs.startup_language().to_string())
+    Ok(prefs.startup_language().to_uppercase())
 }
 
 fn output_dir(out: Option<&Path>) -> Result<PathBuf> {
-    match out {
-        Some(dir) => Ok(dir.to_path_buf()),
-        None => Locations::new(LocationArgs::default(), SystemContext).output(),
-    }
+    let output = Locations::new(
+        LocationArgs {
+            path: None,
+            output: out.map(Path::to_path_buf),
+            cache: None,
+        },
+        SystemContext,
+    )
+    .output();
+    output.map_err(|error| {
+        if error.downcast_ref::<OutputUnavailable>().is_some() {
+            return usage_hint(
+                "default output directory cannot be determined",
+                "Pass --out DIR or set KAMISHIBAI_OUTPUT",
+            );
+        }
+        error
+    })
 }
 
 fn read_input(source: &str) -> Result<String> {

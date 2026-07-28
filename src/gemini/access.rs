@@ -40,19 +40,28 @@ impl GeminiAccess {
 
     /// Open a client after resolving the latest saved preferences.
     pub(crate) fn client(&self) -> Result<GeminiClient<HttpTransport>> {
-        let saved_key = default_store(&SystemContext)
-            .ok()
-            .and_then(|store| store.read().ok())
-            .and_then(|preferences| preferences.api_key);
         match self.keys {
-            KeyLookup::Saved => GeminiClient::from_saved(saved_key.as_deref()),
-            KeyLookup::Environment => GeminiClient::from_env_or_saved(saved_key.as_deref()),
+            KeyLookup::Saved => {
+                let saved = default_store(&SystemContext)?.read()?.api_key;
+                GeminiClient::from_saved(saved.as_deref())
+            }
+            KeyLookup::Environment if env_key_present() => GeminiClient::from_env_or_saved(None),
+            KeyLookup::Environment => {
+                let saved = default_store(&SystemContext)?.read()?.api_key;
+                GeminiClient::from_env_or_saved(saved.as_deref())
+            }
         }
     }
 }
 
+fn env_key_present() -> bool {
+    std::env::var("GEMINI_API_KEY")
+        .ok()
+        .is_some_and(|key| !key.trim().is_empty())
+}
+
 impl KeyValidation for GeminiAccess {
     fn check_key(&self, key: &str) -> Result<()> {
-        GeminiClient::new(key, HttpTransport::new()).validate_key()
+        GeminiClient::new(key, HttpTransport::credential()).validate_key()
     }
 }

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde_json::json;
 
+use crate::application::LearningTarget;
 use crate::languages::LanguageCatalog;
 use crate::prompt::PromptTemplate;
 use crate::session::{CardDraft, CardMeta, LanguagePair, WordCandidate};
@@ -13,16 +14,18 @@ const CARD_PROMPT: &str = include_str!("../../assets/gemini_card_prompt.txt");
 /// Render the human-in-the-loop intake prompt.
 pub(super) fn render_intake_prompt(
     raw: &str,
-    my: &str,
+    known: &str,
+    target: &LearningTarget,
     catalog: &LanguageCatalog,
 ) -> Result<String> {
-    let support = catalog.item(my)?;
+    let support = catalog.item(known)?;
     let examples = catalog.prompts(support.code)?;
     render(
         INTAKE_PROMPT,
         &[
             ("{supported_languages}", language_choices(catalog)?),
             ("{support_language}", language_label(catalog, support.code)?),
+            ("{target_instruction}", target_instruction(target, catalog)?),
             (
                 "{understanding_length}",
                 String::from(examples.understanding_length()),
@@ -147,6 +150,21 @@ fn language_choices(catalog: &LanguageCatalog) -> Result<String> {
     Ok(items.join(", "))
 }
 
+fn target_instruction(target: &LearningTarget, catalog: &LanguageCatalog) -> Result<String> {
+    match target {
+        LearningTarget::Detect => Ok(String::from(
+            "Choose exactly one dominant target language for the whole batch. One non-trivial item is enough to fix the language; treat the whole batch as that language.",
+        )),
+        LearningTarget::Explicit(code) => {
+            let profile = catalog.item(code.as_ref())?;
+            Ok(format!(
+                "The required target language is {code} ({}). Use exactly this target for the whole batch. Do not detect or choose another target language.",
+                profile.prompt
+            ))
+        }
+    }
+}
+
 fn language_label(catalog: &LanguageCatalog, code: &str) -> Result<String> {
     let item = catalog.item(code)?;
     Ok(format!("{} ({})", item.code, item.prompt))
@@ -161,12 +179,13 @@ mod tests {
     use super::{
         render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
     };
+    use crate::application::LearningTarget;
     use crate::languages::catalog;
     use crate::session::{CardDraft, LanguagePair, WordCandidate};
 
     #[test]
     fn english_intake_cannot_embed_russian_support_examples() {
-        let prompt = render_intake_prompt("râler", "en", &catalog())
+        let prompt = render_intake_prompt("râler", "en", &LearningTarget::Detect, &catalog())
             .expect("english intake prompt must render");
         assert!(
             prompt.contains("\"fin.\"")
@@ -247,7 +266,7 @@ mod tests {
 
     #[test]
     fn cjk_prompts_use_lexical_length_rules_without_artificial_spaces() {
-        let chinese = render_intake_prompt("批准", "zh", &catalog())
+        let chinese = render_intake_prompt("批准", "zh", &LearningTarget::Detect, &catalog())
             .expect("chinese intake prompt must render");
         let japanese = render_card_meta_prompt(
             "承認",
@@ -256,7 +275,7 @@ mod tests {
             &catalog(),
         )
         .expect("japanese card prompt must render");
-        let english = render_intake_prompt("râler", "en", &catalog())
+        let english = render_intake_prompt("râler", "en", &LearningTarget::Detect, &catalog())
             .expect("english intake prompt must render");
         assert!(
             chinese.contains("without artificial spaces")
@@ -271,7 +290,7 @@ mod tests {
         let catalog = catalog();
         let candidate = WordCandidate::new("term", "one precise sense", true);
         let complete = catalog.codes().into_iter().all(|known| {
-            render_intake_prompt("term", known, &catalog).is_ok()
+            render_intake_prompt("term", known, &LearningTarget::Detect, &catalog).is_ok()
                 && catalog.codes().into_iter().all(|learning| {
                     let pair = LanguagePair::new(learning, known);
                     let draft = CardDraft::new("term", "one precise sense", pair.clone());

@@ -1,9 +1,11 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use super::DEFAULT_MY_LANGUAGE;
 
 /// Persisted setup choices loaded before the TUI starts.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct Preferences {
     /// User-facing support language code last confirmed by the user.
@@ -12,6 +14,17 @@ pub struct Preferences {
     pub my_language_confirmed: bool,
     /// Saved Gemini API key, when the user chose local persistence.
     pub api_key: Option<String>,
+}
+
+impl fmt::Debug for Preferences {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Preferences")
+            .field("my_language", &self.my_language)
+            .field("my_language_confirmed", &self.my_language_confirmed)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 impl Default for Preferences {

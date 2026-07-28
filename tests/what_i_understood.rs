@@ -7,7 +7,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::session::LearningGuess;
 use kamishibai::session::{
-    LanguagePair, RawInputBatch, Sense, Understanding, Understood, WordCandidate,
+    LanguagePair, LearningTarget, RawInputBatch, Sense, Understanding, Understood, WordCandidate,
 };
 use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, draw, to_app, transit};
 use ratatui::Terminal;
@@ -119,7 +119,12 @@ fn single_candidate() -> WordCandidate {
 struct FakeUnderstanding;
 
 impl Understanding for FakeUnderstanding {
-    fn understand(&self, _raw: &RawInputBatch, _my: &str) -> Result<Understood> {
+    fn understand(
+        &self,
+        _raw: &RawInputBatch,
+        _my: &str,
+        _target: &LearningTarget,
+    ) -> Result<Understood> {
         Ok(Understood::new(
             LearningGuess::new("en", true),
             vec![
@@ -151,7 +156,11 @@ impl Understanding for FakeUnderstanding {
 
 fn run_understanding(app: App) -> App {
     let result = FakeUnderstanding
-        .understand(&RawInputBatch::new(app.blob()), app.pair().known())
+        .understand(
+            &RawInputBatch::new(app.blob()),
+            app.pair().known(),
+            &LearningTarget::Detect,
+        )
         .expect("fake understanding must succeed");
     app.with_screen(Screen::WhatIUnderstood)
         .confirmed_learning(result.guess().code())
@@ -183,7 +192,7 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
         .confirmed_learning("en")
         .understood(
             FakeUnderstanding
-                .understand(&RawInputBatch::new("whilst"), "ru")
+                .understand(&RawInputBatch::new("whilst"), "ru", &LearningTarget::Detect)
                 .expect("fake must succeed")
                 .candidates()
                 .to_vec(),
@@ -574,7 +583,11 @@ fn what_i_understood_styles_selected_row_distinctly_from_others() {
         .confirmed_learning("en")
         .understood(
             FakeUnderstanding
-                .understand(&RawInputBatch::new("sincerely"), "ru")
+                .understand(
+                    &RawInputBatch::new("sincerely"),
+                    "ru",
+                    &LearningTarget::Detect,
+                )
                 .expect("fake must succeed")
                 .candidates()
                 .to_vec(),

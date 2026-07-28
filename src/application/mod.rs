@@ -13,5 +13,5 @@ pub(crate) use study_publishing::{
     PublishPhase, PublishProgress, PublishedStudyPackage, StudyPublishing,
 };
 pub(crate) use understanding::WordUnderstanding;
-pub use understanding::{BulkCorrection, Understanding};
+pub use understanding::{BulkCorrection, LearningTarget, Understanding};
 pub(crate) use workflow::{CardUseCases, CardWorkflow};

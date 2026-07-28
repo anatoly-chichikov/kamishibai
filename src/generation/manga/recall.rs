@@ -82,7 +82,7 @@ impl RecallCard {
     pub(crate) fn prompt(&self) -> Result<String> {
         let catalog = catalog();
         let language = catalog
-            .resolve(self.hidden.hidden_target_language.as_str())
+            .identify(self.hidden.hidden_target_language.as_str())
             .or_else(|_| catalog.item("en"))?;
         let examples = catalog.prompts(language.code)?;
         PromptTemplate::new(picture_recall_judge_prompt()).render(&[

@@ -2,12 +2,27 @@
 
 use anyhow::Result;
 
+use crate::languages::LanguageCode;
 use crate::session::{LanguagePair, RawInputBatch, SenseCorrection, Understood, WordCandidate};
+
+/// How the understanding pass chooses the language being learned.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LearningTarget {
+    /// Detect one target language from the raw batch.
+    Detect,
+    /// Require the supplied supported language without detecting another.
+    Explicit(LanguageCode),
+}
 
 /// Understand one raw input batch before the learner curates it.
 pub trait Understanding {
-    /// Normalise a raw batch into candidate senses and a learning-language guess.
-    fn understand(&self, raw: &RawInputBatch, known: &str) -> Result<Understood>;
+    /// Normalise a raw batch under one required target-language policy.
+    fn understand(
+        &self,
+        raw: &RawInputBatch,
+        known: &str,
+        target: &LearningTarget,
+    ) -> Result<Understood>;
 }
 
 /// Refine the senses of one candidate from a learner correction.

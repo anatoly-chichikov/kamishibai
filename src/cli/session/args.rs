@@ -2,6 +2,7 @@
 //! argument struct. Behaviour lives in `mod.rs` and `curate.rs`; this file is
 //! only the parse surface, so its fields are `pub(super)` for the handlers to read.
 
+use std::fmt;
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Subcommand};
@@ -11,6 +12,8 @@ use crate::cli::console::SensePolicy;
 /// One non-interactive session operation.
 #[derive(Debug, Subcommand)]
 pub(in crate::cli) enum Command {
+    /// Print the version-matched console contract embedded in this binary.
+    AgentContract,
     /// Understand `--word`s (or import a cards JSON) and create a session.
     New(NewArgs),
     /// Open an existing session in the interactive TUI.
@@ -68,7 +71,7 @@ pub(in crate::cli) struct NewArgs {
     /// How many senses of each word are selected initially.
     #[arg(long, value_name = "WHICH", default_value = "primary")]
     pub(super) senses: SensePolicy,
-    /// Output directory for the deck and report (defaults to ./kamishibai-out).
+    /// Output directory for the deck and report (defaults to Documents/Kamishibai).
     #[arg(short, long, value_name = "DIR")]
     pub(super) out: Option<PathBuf>,
     /// Use this session id instead of a minted one.
@@ -92,7 +95,7 @@ pub(in crate::cli) struct GenerateArgs {
 /// Arguments for `config`: with no flags it shows the saved preferences; with
 /// `--known`/`--key` it saves them. `--key -` reads the key from stdin; an
 /// empty `--key ""` clears the saved key.
-#[derive(Debug, Args)]
+#[derive(Args)]
 pub(in crate::cli) struct ConfigArgs {
     /// Save this as your known (native) language, validated against the catalog.
     #[arg(long, value_name = "LANG")]
@@ -100,6 +103,16 @@ pub(in crate::cli) struct ConfigArgs {
     /// Save this Gemini API key (`-` reads it from stdin, empty clears it).
     #[arg(long, value_name = "KEY")]
     pub(super) key: Option<String>,
+}
+
+impl fmt::Debug for ConfigArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConfigArgs")
+            .field("known", &self.known)
+            .field("key", &self.key.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 /// Arguments for `select`.

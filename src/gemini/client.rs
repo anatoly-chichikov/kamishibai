@@ -1,4 +1,5 @@
 use std::env;
+use std::fmt;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -8,7 +9,9 @@ use reqwest::blocking::Client;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::Value;
+use thiserror::Error;
 
+use crate::application::LearningTarget;
 use crate::generation::layout::{LayoutRegistry, feature_prompt_data, render_feature_prompt};
 use crate::generation::manga::{RecallCard, RecallReview};
 use crate::generation::prompts::layout_scene_prompt;
@@ -31,6 +34,7 @@ use super::scene::compose;
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(300);
+const CREDENTIAL_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Return the Gemini API base URL, honoring a non-empty `KAMISHIBAI_GEMINI_URL`
 /// override (offline tests point it at a local listener; proxies can too).
@@ -40,6 +44,17 @@ fn base_url() -> String {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| String::from(BASE_URL))
 }
+
+fn model_catalog_url() -> String {
+    let base = base_url();
+    catalog_url(base.as_str())
+}
+
+fn catalog_url(base: &str) -> String {
+    let separator = if base.contains('?') { '&' } else { '?' };
+    format!("{base}{separator}pageSize=1000")
+}
+
 const TEXT_MODEL: &str = "gemini-3.6-flash";
 const META_MODEL: &str = TEXT_MODEL;
 const FEATURE_MODEL: &str = "gemini-3.5-flash-lite";
@@ -91,8 +106,13 @@ pub struct TransportResponse {
     pub body: String,
 }
 
-/// Execute one POST request for the Gemini API.
+/// Execute HTTP requests for the Gemini API.
 pub trait Transport {
+    /// Execute one authenticated GET request and return the raw response.
+    fn get(&self, _url: &str, _key: &str) -> Result<TransportResponse> {
+        bail!("authenticated GET is not supported by this transport")
+    }
+
     /// Execute one JSON request and return the raw response.
     fn post(&self, url: &str, key: &str, body: &str) -> Result<TransportResponse>;
 }
@@ -107,6 +127,11 @@ impl HttpTransport {
     /// Create one HTTP transport.
     pub fn new() -> Self {
         Self::with_timeout(HTTP_TIMEOUT)
+    }
+
+    /// Create one HTTP transport bounded for credential validation.
+    pub(crate) fn credential() -> Self {
+        Self::with_timeout(CREDENTIAL_TIMEOUT)
     }
 
     fn with_timeout(timeout: Duration) -> Self {
@@ -127,6 +152,17 @@ impl Default for HttpTransport {
 }
 
 impl Transport for HttpTransport {
+    /// Execute one authenticated GET request and return the raw response.
+    fn get(&self, url: &str, key: &str) -> Result<TransportResponse> {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-goog-api-key", HeaderValue::from_str(key)?);
+        let response = self.client.get(url).headers(headers).send()?;
+        Ok(TransportResponse {
+            status: response.status().as_u16(),
+            body: response.text()?,
+        })
+    }
+
     /// Execute one JSON request and return the raw response.
     fn post(&self, url: &str, key: &str, body: &str) -> Result<TransportResponse> {
         let mut headers = HeaderMap::new();
@@ -145,18 +181,114 @@ impl Transport for HttpTransport {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CredentialFailure {
+    Invalid,
+    ModelUnavailable,
+    Retryable,
+    Operational,
+}
+
+/// One sanitized credential-probe failure with stable retry semantics.
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+#[error("{message}")]
+pub struct CredentialProbeError {
+    failure: CredentialFailure,
+    message: &'static str,
+}
+
+impl CredentialProbeError {
+    fn new(failure: CredentialFailure, message: &'static str) -> Self {
+        Self { failure, message }
+    }
+
+    /// Return whether Gemini rejected the supplied credential.
+    #[must_use]
+    pub fn rejects_key(&self) -> bool {
+        matches!(self.failure, CredentialFailure::Invalid)
+    }
+
+    /// Return whether the configured generation model is unavailable.
+    #[must_use]
+    pub fn model_unavailable(&self) -> bool {
+        matches!(self.failure, CredentialFailure::ModelUnavailable)
+    }
+
+    /// Return whether retrying after a transient provider failure can help.
+    #[must_use]
+    pub fn retryable(&self) -> bool {
+        matches!(self.failure, CredentialFailure::Retryable)
+    }
+}
+
+#[derive(Deserialize)]
+struct ModelCatalog {
+    #[serde(default)]
+    models: Vec<ModelDescription>,
+}
+
+impl ModelCatalog {
+    fn supports(&self, model: &str, method: &str) -> bool {
+        let name = format!("models/{model}");
+        self.models.iter().any(|candidate| {
+            candidate.name == name
+                && candidate
+                    .supported_generation_methods
+                    .iter()
+                    .any(|candidate| candidate == method)
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct ModelDescription {
+    name: String,
+    #[serde(default, rename = "supportedGenerationMethods")]
+    supported_generation_methods: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct CredentialErrorEnvelope {
+    error: CredentialErrorBody,
+}
+
+#[derive(Deserialize)]
+struct CredentialErrorBody {
+    status: Option<String>,
+    #[serde(default)]
+    details: Vec<CredentialErrorDetail>,
+}
+
+#[derive(Deserialize)]
+struct CredentialErrorDetail {
+    reason: Option<String>,
+}
+
 /// Direct Gemini client with a pluggable transport.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GeminiClient<T> {
     key: String,
     transport: T,
+}
+
+impl<T> fmt::Debug for GeminiClient<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GeminiClient")
+            .field("key", &"[REDACTED]")
+            .field("transport", &self.transport)
+            .finish()
+    }
 }
 
 impl GeminiClient<HttpTransport> {
     /// Build the live Gemini client from a saved key.
     pub fn from_saved(saved: Option<&str>) -> Result<Self> {
         let key = saved
-            .filter(|value| !value.is_empty())
+            .filter(|value| !value.trim().is_empty())
             .map(String::from)
             .ok_or_else(|| {
                 anyhow!(
@@ -173,9 +305,13 @@ impl GeminiClient<HttpTransport> {
     pub fn from_env_or_saved(saved: Option<&str>) -> Result<Self> {
         let env_key = env::var("GEMINI_API_KEY")
             .ok()
-            .filter(|value| !value.is_empty());
+            .filter(|value| !value.trim().is_empty());
         let key = env_key
-            .or_else(|| saved.filter(|value| !value.is_empty()).map(String::from))
+            .or_else(|| {
+                saved
+                    .filter(|value| !value.trim().is_empty())
+                    .map(String::from)
+            })
             .ok_or_else(|| {
                 anyhow!(
                     "no Gemini API key found — save one with 'kamishibai config --key', \
@@ -292,32 +428,76 @@ where
         Ok(raw)
     }
 
-    /// Probe the API with one tiny request to confirm the key is accepted.
-    ///
-    /// Any `2xx` counts as a valid key — the body is not parsed, so a thin or
-    /// unusual completion still passes. A non-`2xx` is mapped through
-    /// `api_error`, so the caller can tell a rejected key (`rejects_key`) from a
-    /// transport or quota failure and message accordingly.
+    /// List available models to confirm the key and configured text model.
     pub fn validate_key(&self) -> Result<()> {
-        let url = format!("{}/{TEXT_MODEL}:generateContent", base_url());
-        let body = serde_json::to_string(&Request::text(String::from("ping"), None, None))?;
+        self.probe_key().map_err(anyhow::Error::from)
+    }
+
+    /// Probe credentials without billable generation and classify every failure.
+    pub fn probe_key(&self) -> std::result::Result<(), CredentialProbeError> {
+        if self.key.trim().is_empty() || HeaderValue::from_str(self.key.as_str()).is_err() {
+            return Err(CredentialProbeError::new(
+                CredentialFailure::Invalid,
+                "the supplied Gemini API key has an invalid format",
+            ));
+        }
         let response = self
             .transport
-            .post(url.as_str(), self.key.as_str(), body.as_str())?;
-        if (200..300).contains(&response.status) {
-            return Ok(());
+            .get(model_catalog_url().as_str(), self.key.as_str())
+            .map_err(|_| {
+                CredentialProbeError::new(
+                    CredentialFailure::Retryable,
+                    "could not reach Gemini while checking the API key",
+                )
+            })?;
+        if !(200..300).contains(&response.status) {
+            return Err(credential_status(response.status, response.body.as_str()));
         }
-        Err(api_error(response.status, response.body.as_str()))
+        let catalog =
+            serde_json::from_str::<ModelCatalog>(response.body.as_str()).map_err(|_| {
+                CredentialProbeError::new(
+                    CredentialFailure::Operational,
+                    "Gemini returned an unreadable model catalog",
+                )
+            })?;
+        if !catalog.supports(TEXT_MODEL, "generateContent") {
+            return Err(CredentialProbeError::new(
+                CredentialFailure::ModelUnavailable,
+                "the configured Gemini text model is unavailable for this API key",
+            ));
+        }
+        Ok(())
     }
 
     /// Resolve raw user input into reviewed rows using the Flash text model.
-    pub fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
+    pub fn understand(
+        &self,
+        raw: &RawInputBatch,
+        known: &str,
+        target: &LearningTarget,
+    ) -> Result<Understood> {
         let catalog = catalog();
-        let prompt = render_intake_prompt(raw.text(), my, &catalog)?;
+        let prompt = render_intake_prompt(raw.text(), known, target, &catalog)?;
         let decoded: IntakeResponse =
             serde_json::from_str(unfence(self.text(TEXT_MODEL, prompt)?.trim()))?;
+        let guess = match target {
+            LearningTarget::Detect => LearningGuess::new(decoded.target_lang, true),
+            LearningTarget::Explicit(expected) => {
+                let returned = catalog
+                    .resolve(decoded.target_lang.as_str())
+                    .context("Gemini understanding returned an unsupported target language")?;
+                if returned.as_ref() != expected.as_ref() {
+                    bail!(
+                        "Gemini understanding target '{}' violates required target '{}'",
+                        returned,
+                        expected
+                    );
+                }
+                LearningGuess::new(expected.to_string(), true)
+            }
+        };
         Ok(Understood::new(
-            LearningGuess::new(decoded.target_lang, true),
+            guess,
             decoded
                 .items
                 .into_iter()
@@ -685,6 +865,58 @@ fn schema_rejected(error: &anyhow::Error) -> bool {
         .is_some_and(GeminiApiError::rejects_schema)
 }
 
+fn credential_status(status: u16, body: &str) -> CredentialProbeError {
+    match status {
+        401 => CredentialProbeError::new(
+            CredentialFailure::Invalid,
+            "Gemini rejected the supplied API key",
+        ),
+        400 | 403 if credential_rejected(body) => CredentialProbeError::new(
+            CredentialFailure::Invalid,
+            "Gemini rejected the supplied API key",
+        ),
+        404 => CredentialProbeError::new(
+            CredentialFailure::ModelUnavailable,
+            "the Gemini model catalog is unavailable",
+        ),
+        408 | 429 | 500..=599 => CredentialProbeError::new(
+            CredentialFailure::Retryable,
+            "Gemini credential validation is temporarily unavailable",
+        ),
+        _ => CredentialProbeError::new(
+            CredentialFailure::Operational,
+            "Gemini credential validation failed",
+        ),
+    }
+}
+
+fn credential_rejected(body: &str) -> bool {
+    let Ok(envelope) = serde_json::from_str::<CredentialErrorEnvelope>(body) else {
+        return false;
+    };
+    if envelope
+        .error
+        .status
+        .as_deref()
+        .is_some_and(credential_rejection_code)
+    {
+        return true;
+    }
+    envelope
+        .error
+        .details
+        .iter()
+        .filter_map(|detail| detail.reason.as_deref())
+        .any(credential_rejection_code)
+}
+
+fn credential_rejection_code(code: &str) -> bool {
+    matches!(
+        code,
+        "API_KEY_INVALID" | "UNAUTHENTICATED" | "PERMISSION_DENIED"
+    )
+}
+
 fn render_layout_scene(
     language: &str,
     term: &str,
@@ -929,6 +1161,11 @@ mod tests {
     }
 
     impl Transport for FakeTransport {
+        fn get(&self, _url: &str, _key: &str) -> Result<TransportResponse> {
+            self.requests.borrow_mut().push(String::from("GET"));
+            self.responses.borrow_mut().remove(0)
+        }
+
         fn post(&self, _url: &str, _key: &str, body: &str) -> Result<TransportResponse> {
             self.requests.borrow_mut().push(String::from(body));
             self.responses.borrow_mut().remove(0)
@@ -1107,6 +1344,27 @@ mod tests {
                 .downcast_ref::<reqwest::Error>()
                 .is_some_and(reqwest::Error::is_timeout)),
             "HTTP transport ignored the configured request timeout"
+        );
+    }
+
+    #[test]
+    fn credential_validation_uses_a_shorter_timeout() {
+        assert_eq!(
+            (
+                CREDENTIAL_TIMEOUT <= Duration::from_secs(20),
+                CREDENTIAL_TIMEOUT < HTTP_TIMEOUT,
+            ),
+            (true, true),
+            "credential validation must not inherit the five-minute generation timeout"
+        );
+    }
+
+    #[test]
+    fn credential_catalog_preserves_override_queries() {
+        assert_eq!(
+            catalog_url("http://127.0.0.1/models?fixture=available"),
+            "http://127.0.0.1/models?fixture=available&pageSize=1000",
+            "credential catalog pagination replaced an existing override query"
         );
     }
 

@@ -214,7 +214,13 @@ fn your_cards_snapshot_locks_work_screen() {
 
 #[test]
 fn done_snapshot_locks_final_screen() {
-    let app = App::new(LanguagePair::new("en", "ru")).with_screen(Screen::Done);
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::Done)
+        .done_published(
+            "~/Documents/Kamishibai/RU_cards.apkg",
+            "~/Documents/Kamishibai/RU_cards.pdf",
+            "~/Documents/Kamishibai",
+        );
     insta::assert_snapshot!("done", render(&app));
 }
 

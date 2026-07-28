@@ -1,3 +1,4 @@
+use std::fmt;
 use std::time::Duration;
 
 use crate::session::{Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, WordCandidate};
@@ -25,7 +26,7 @@ pub struct App {
 
 /// First-run welcome state: stage, typed key, source of that key, focused
 /// control on the key step, and whether `GEMINI_API_KEY` is offered from env.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct WelcomeView {
     pub stage: WelcomeStage,
     pub key: String,
@@ -33,6 +34,20 @@ pub struct WelcomeView {
     pub notice: Option<String>,
     pub focus: WelcomeFocus,
     pub env_available: bool,
+}
+
+impl fmt::Debug for WelcomeView {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WelcomeView")
+            .field("stage", &self.stage)
+            .field("key", &"[REDACTED]")
+            .field("source", &self.source)
+            .field("notice", &self.notice)
+            .field("focus", &self.focus)
+            .field("env_available", &self.env_available)
+            .finish()
+    }
 }
 
 impl Default for WelcomeView {

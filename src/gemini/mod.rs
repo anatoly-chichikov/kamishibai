@@ -10,14 +10,16 @@ mod scene;
 mod understanding;
 
 pub(crate) use access::GeminiAccess;
-pub use client::{GeminiClient, HttpTransport, Transport, TransportResponse};
+pub use client::{CredentialProbeError, GeminiClient, HttpTransport, Transport, TransportResponse};
 pub use protocol::{GeminiApiError, RejectedReply};
 pub(crate) use scene::validate_cached as validate_cached_scene;
 pub(crate) use understanding::GeminiUnderstanding;
 
 use anyhow::Result;
 
-use crate::application::{BulkCorrection, CardCorrection, CardMetaGeneration, Understanding};
+use crate::application::{
+    BulkCorrection, CardCorrection, CardMetaGeneration, LearningTarget, Understanding,
+};
 use crate::generation::SceneSource;
 use crate::generation::Speaker;
 use crate::session::{
@@ -29,8 +31,13 @@ use crate::session::{
 #[must_use]
 pub fn rejects_key(error: &anyhow::Error) -> bool {
     error
-        .downcast_ref::<GeminiApiError>()
-        .map(GeminiApiError::rejects_key)
+        .downcast_ref::<CredentialProbeError>()
+        .map(CredentialProbeError::rejects_key)
+        .or_else(|| {
+            error
+                .downcast_ref::<GeminiApiError>()
+                .map(GeminiApiError::rejects_key)
+        })
         .unwrap_or(false)
 }
 
@@ -68,8 +75,13 @@ where
     T: Transport,
 {
     /// Return one reviewed candidate list from the raw user blob.
-    fn understand(&self, raw: &RawInputBatch, my: &str) -> Result<Understood> {
-        GeminiClient::<T>::understand(self, raw, my)
+    fn understand(
+        &self,
+        raw: &RawInputBatch,
+        known: &str,
+        target: &LearningTarget,
+    ) -> Result<Understood> {
+        GeminiClient::<T>::understand(self, raw, known, target)
     }
 }
 
