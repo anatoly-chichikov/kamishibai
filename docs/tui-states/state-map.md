@@ -158,7 +158,7 @@ target sentence` and all four artifact rows stay together above it. The
 collapsed inline summary disappears; exactly one blank row separates `picture`
 from the editor, which renders below the complete artifact block, before the
 expanded metadata and never beside the artifacts. Its three carousel questions
-are `how should it sound?`, `what kind of phrase?`, and `what's your level?`.
+are `how should it sound?`, `what kind of phrase?`, and `what's the desired level?`.
 The following note row is labelled `one more thing` and uses the single-line
 `TextField` with the placeholder `say what should change`.
 

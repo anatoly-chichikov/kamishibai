@@ -447,7 +447,7 @@ Contract(
                                 Bind(DataPath("SentenceLabelsEditor register selection and choices")),
                                 Static(" >\nwhat kind of phrase? < "),
                                 Bind(DataPath("SentenceLabelsEditor sentence-type selection and choices")),
-                                Static(" >\nwhat's your level? < "),
+                                Static(" >\nwhat's the desired level? < "),
                                 Bind(DataPath("SentenceLabelsEditor lowercase CEFR selection and choices")),
                                 Static(" >"),
                             ]),

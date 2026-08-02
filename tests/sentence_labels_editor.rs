@@ -270,7 +270,7 @@ fn both_r_keys_are_inert_while_sentence_tags_and_space_open_the_live_editor() {
                 .is_some_and(|editor| editor.row() == LabelEditorRow::Register)
             && opened.modal().is_none()
             && rendered.contains("how should it sound?")
-            && rendered.contains("what's your level?")
+            && rendered.contains("what's the desired level?")
             && rendered.contains("what kind of phrase?")
             && rendered.contains("one more thing")
             && !rendered.contains("what feels wrong?")
@@ -313,7 +313,7 @@ fn every_carousel_surrounds_its_visible_choice_with_direction_chevrons() {
     let ordered = [
         ("how should it sound?", "casual"),
         ("what kind of phrase?", "request"),
-        ("what's your level?", "b1"),
+        ("what's the desired level?", "b1"),
     ]
     .into_iter()
     .all(|(question, choice)| {
@@ -1025,7 +1025,7 @@ fn legacy_editor_keeps_its_questions_visible_around_empty_axes() {
     assert_eq!(
         (
             rendered.contains("what kind of phrase?"),
-            rendered.contains("what's your level?"),
+            rendered.contains("what's the desired level?"),
             buffer[question].fg,
         ),
         (true, true, Color::Rgb(0xe6, 0xe3, 0xda)),

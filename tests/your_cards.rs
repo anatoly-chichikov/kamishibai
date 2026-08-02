@@ -796,7 +796,7 @@ fn expanded_editor_replaces_the_chip_grid_with_focused_question_carousels() {
     let buffer = rendered_buffer(&app);
     let sound = position_of(&buffer, "how should it sound?");
     let kind = position_of(&buffer, "what kind of phrase?");
-    let level = position_of(&buffer, "what's your level?");
+    let level = position_of(&buffer, "what's the desired level?");
     let note = position_of(&buffer, "one more thing");
     let casual = position_of(&buffer, "casual");
     let b1 = position_of(&buffer, "b1");
@@ -1252,7 +1252,7 @@ fn expanded_sentence_editor_starts_below_the_complete_artifact_block() {
     let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
     let (sound_column, sound_row) = position_of(&buffer, "how should it sound?");
     let (kind_column, kind_row) = position_of(&buffer, "what kind of phrase?");
-    let (level_column, level_row) = position_of(&buffer, "what's your level?");
+    let (level_column, level_row) = position_of(&buffer, "what's the desired level?");
     let (note_column, note_row) = position_of(&buffer, "one more thing");
     let section_has_no_pipe =
         (meta_row..=note_row).all(|row| !row_text(&buffer, row).contains('│'));
@@ -1321,7 +1321,7 @@ fn narrow_expanded_sentence_editor_starts_below_the_artifact_block() {
     let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
     let (sound_column, sound_row) = position_of(&buffer, "how should it sound?");
     let (kind_column, kind_row) = position_of(&buffer, "what kind of phrase?");
-    let (level_column, level_row) = position_of(&buffer, "what's your level?");
+    let (level_column, level_row) = position_of(&buffer, "what's the desired level?");
     let (_, statement_row) = position_of(&buffer, "statement");
     let (_, b1_row) = position_of(&buffer, "b1");
     let (note_column, note_row) = position_of(&buffer, "one more thing");

@@ -131,10 +131,12 @@ it are produced by three VHS tapes in `docs/tui-states/`:
   narrow S10 sentence-label screenshot; VHS accepts geometry only at the top of a tape.
 
 The README gif itself is then assembled deterministically by `encode.sh` from `timings.conf`
-(the single source of truth for section windows/durations); it emits `timings.timeline.txt`
-and splices the finale caption PNG (`live/caption.png`). Only `live/capture.gif` is committed; pass
-`MAKE_HIRES=1` to `encode.sh` if you want a local-only hi-res `capture.hires.mp4` master. The
-generation keyboard contract is `Ctrl+G`.
+(the single source of truth for section windows, durations, and raw source); it emits
+`timings.timeline.txt` and splices the finale caption PNG (`live/caption.png`). A window reads
+`RAW` when its source is `main` and `ADJUST_RAW` when its source is `adjust`, so a supplementary
+interaction recording can be cut together with the original without transcoding either raw.
+Only `live/capture.gif` is committed; pass `MAKE_HIRES=1` to `encode.sh` if you want a local-only
+hi-res `capture.hires.mp4` master. The generation keyboard contract is `Ctrl+G`.
 
 ### Why no manual chord patch is required
 
@@ -181,8 +183,8 @@ From the repo root:
    the same `EnterKey` stage: `00-welcome.png` has no `GEMINI_API_KEY` (just the `submit`
    button), `00b-welcome-env.png` has it set (adds the focused `load from env` chip).
 
-4. **Record the live-binary flow** (real Gemini run, ~2 minutes wall-clock with a warm
-   cache, ~4 minutes cold):
+4. **Record the live-binary flow** (real Gemini run, roughly 5–7 minutes wall-clock because
+   the tape starts with an empty cache and later regenerates one tuned card):
 
    ```bash
    vhs capture.tape
@@ -190,20 +192,22 @@ From the repo root:
 
    Writes `live/01-your-words.png`, `live/01b-busy.png`, `live/02-what-i-understood.png`,
    `live/02a-nav.png`, `live/03-senses.png`, `live/03b-senses-toggled.png`,
-  `live/04-your-cards.png`, `live/08-done.png`, `live/09-card-open.png`,
-  `live/10-card-scroll-end.png`, and a raw
-   `live/capture.gif` that is roughly two minutes long.
+   `live/04-your-cards.png`, `live/08-done.png`, `live/09-card-adjusting.png`,
+   `live/09a-level-raised.png`, `live/09b-card-regenerating.png`,
+   `live/09-card-open.png`, `live/10-card-scroll-end.png`, and the full raw
+   `live/capture.gif`.
 
 5. **Stash the raw recording** before any post-processing — keep it around as `/tmp/raw.gif`
-   so you can redo the slice/encode pass without re-running VHS. The raw is 1–5 min long and
-   ~1 MB; the README payload is built on top of it.
+   so you can redo the slice/encode pass without re-running VHS or Gemini. If an interaction
+   is recorded separately, preserve that complete take as `/tmp/adjust-raw.gif`; windows in
+   `timings.conf` can name `main` or `adjust`. The README payload is built on top of these raws.
 
    ```bash
    cp live/capture.gif /tmp/raw.gif
    ```
 
-   Do NOT delete `/tmp/raw.gif` until you've reviewed the final gif and decided you don't
-   need another iteration.
+   Do NOT delete either raw until you've reviewed the final gif and decided you don't need
+   another timing iteration.
 
 6. **Detect scene transitions** automatically — never assume the time windows from a previous
    recording apply. Gemini latency varies wildly between runs (this session swung between
@@ -239,15 +243,17 @@ From the repo root:
    | --- | --- | --- |
    | **workflow** | user-driven step or new content (typing, candidates land, Done lands) | `fps=25` on the section's natural window; preserve real-time animation |
    | **read** | a state that's only briefly visible in the recording but the viewer needs time to read (e.g. WhatIUnderstood gets click-through via `Ctrl+G` after ~1 s) | static splice from the matching `live/NN-…png` for 2–3 s — duplicate frames; do NOT use the raw window |
-   | **indicator-wait** | spinner / progress bar; visually static minus the rotating indicator (Gemini text pass, generation queue) | compress aggressively. `fps = output_frames / source_duration`. Budget 1–2 s output total no matter how long the source is |
+   | **indicator-wait** | spinner / progress bar; visually static minus the rotating indicator (Gemini text pass, generation queue) | take short real-time windows at 25 fps from meaningful milestones; never resample one long wait into a time-lapse |
    | **transition** | a fast cross-fade between two states, < 1 s | usually skipped or rolled into the neighbouring section |
 
    For the standard kamishibai flow the typical mapping is:
    - `0s → first_busy`: A typing (workflow, 1.5 s output)
    - `first_busy → candidates_appear`: B busy understanding (indicator-wait, 1.2 s output)
-   - candidates window: C `02-what-i-understood.png` static splice (read, 2.5 s output)
-   - `building_starts → all_done`: D generation (indicator-wait, 1.5–2 s output)
-   - `all_done → end`: E done (workflow, 1 s output)
+   - candidates window: C `02-what-i-understood.png` static splice (read, 1–3 s output)
+   - `building_starts → all_done`: D short 25 fps generation milestones
+   - first `all_done`: E navigate to `chouette`, open the editor, focus level, and move `a2 → b1`
+   - `1 pending → all_done`: F `Ctrl+G`, short 25 fps one-card regeneration milestones
+   - final `all_done → end`: G reopen the rewritten `b1` card and hold the finale
 
    New states (e.g. an extra confirmation step, a style picker) will surface as additional
    transitions — slot them into a type by inspecting the cut frame, don't drop them.
@@ -257,34 +263,24 @@ From the repo root:
    green light, then encode. Sample sketch:
 
    ```
-   Section          Type             Source           fps         Output
-   A typing         workflow         1.0 → 2.5 s      25          1.5 s   (38 frames)
-   B busy           indicator-wait   2.56 → 3.76 s    25          1.2 s   (30 frames)
-   C candidates     read (splice)    static PNG       —           2.5 s   (62 frames)
-   D generation    indicator-wait   11 → 405 s       0.114       1.8 s   (45 frames)
-   E done           workflow         404.76 → 405.76  25          1.0 s   (25 frames)
-   Total                                                          8.0 s   (200 frames)
+   Section             Type             Source                 fps     Output
+   A typing            workflow         main 0.24 → 1.80 s     25      1.56 s
+   B review            read (splice)    static PNG             —       1.40 s
+   C first generation  indicator-wait   four short windows     25      2.52 s
+   D raise level       workflow         adjust 13.84 → 17.32   25      3.48 s
+   E regenerate        indicator-wait   five short windows     25      2.08 s
+   F reopen result     workflow         adjust 42.40 → 45.52   25      3.12 s
+   Total                                                               19.00 s
    ```
 
 10. **Encode** once the plan is approved:
 
     ```bash
-    mkdir -p /tmp/seq && rm -f /tmp/seq/*.png
-    i=1
-    # Repeat per section: ffmpeg -ss <start> -t <dur> -i /tmp/raw.gif -vf "fps=<rate>" /tmp/x-%03d.png
-    # then: for f in /tmp/x-*.png; do cp "$f" /tmp/seq/$(printf %04d $i).png; i=$((i+1)); done
-    # For static splices: cp the chosen live/NN-…png N times into /tmp/seq/
-
-    ffmpeg -y -framerate 25 -i /tmp/seq/%04d.png \
-      -filter_complex "[0:v]palettegen=max_colors=64[p]" -map "[p]" /tmp/palette.png
-    ffmpeg -y -framerate 25 -i /tmp/seq/%04d.png -i /tmp/palette.png \
-      -filter_complex "[0:v][1:v]paletteuse" -loop 0 live/capture.gif
-
-    rm -rf /tmp/seq /tmp/palette.png /tmp/cuts /tmp/transitions.txt
+    RAW=/tmp/raw.gif ADJUST_RAW=/tmp/adjust-raw.gif ./encode.sh
     ```
 
-    Final gif is ~8–10 s, ~300–500 KB at 1152×864. `/tmp/raw.gif` stays on disk for the next
-    iteration.
+    `encode.sh` prints the exact final duration and writes every section boundary to
+    `timings.timeline.txt`. Both raw recordings stay on disk for the next iteration.
 
 ### Common pitfalls — read before recording
 
@@ -299,14 +295,14 @@ From the repo root:
 - **Never count transitions in advance.** New states get added to the flow over time —
   scene-detect surfaces them automatically; classify by inspecting `cut-NN.png`, don't drop
   unknown sections.
-- **Never delete `/tmp/raw.gif` until you've decided you don't need another slice pass.**
-  Re-recording costs a few minutes of Gemini wall-clock; re-slicing is seconds.
+- **Never delete `/tmp/raw.gif` or `/tmp/adjust-raw.gif` until you've decided you don't need
+  another slice pass.** Re-recording costs a few minutes of Gemini wall-clock; re-slicing is
+  local and preserves the original takes.
 - **Don't try to "fix" an already-post-processed gif by duplicating its frames.** A
   derivative gif has already lost spinner sampling fidelity; you have to go back to the raw.
 
 11. **Confirm** with `git status` that only the regenerated assets and intentional docs/code
-    changes are staged. Once you're sure you don't need another slice pass,
-    `rm /tmp/raw.gif`.
+    changes are staged. Keep the raws when the operator wants room for later timing changes.
 
 ### Demo input
 
@@ -315,7 +311,10 @@ header reads **`EN → FR`**. The tape types seven French words on `YourWords`: 
 `flâner`, `canard`, `chouette`, `râler`, `terroir`, `bof` — a mix of untranslatable nouns, a
 verb, and colloquialisms (`canard` doubles as "duck" and "newspaper hoax"); all yield strong
 manga panels and interesting English glosses. The synthetic `examples/tui_states.rs` walker
-mirrors this EN→FR flow with the first four of those words.
+mirrors this EN→FR flow with the first four of those words. After the first complete build,
+the tape opens the simple `chouette` card, moves its level exactly one step from `a2` to `b1`,
+waits until the footer proves there is exactly `1 pending`, and presses `Ctrl+G`; this keeps
+the regeneration story scoped to one card.
 
 ### Synthetic and edge-case shots
 
@@ -360,7 +359,7 @@ tags use a white background with dark letters and no bold. An approximately
 fulfilled pinned tag keeps that white treatment and adds an `≈` prefix.
 
 The editor's three carousel questions are `how should it sound?`, `what kind of
-phrase?`, and `what's your level?`. The note label is `one more thing`, and its
+phrase?`, and `what's the desired level?`. The note label is `one more thing`, and its
 placeholder is `say what should change`. The active carousel question is white
 and bold, and the selected chip has a white background. Every carousel is
 permanently bracketed by the two-cell direction controls `< ` and ` >`; both

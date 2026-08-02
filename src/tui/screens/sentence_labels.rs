@@ -8,7 +8,6 @@ use crate::tui::palette;
 use crate::tui::sentence_editor::{LabelEditorRow, SentenceLabelsEditor};
 use crate::tui::text_field::TextField;
 
-const QUESTION_COLUMN: usize = 22;
 const MARKER_WIDTH: usize = 2;
 const CHEVRON_WIDTH: usize = 2;
 const NOTE_PLACEHOLDER: &str = "say what should change";
@@ -284,7 +283,7 @@ fn editor_layout(
         chips.append(&mut regions);
     }
     let note_row = lines.len();
-    let note_start = indent + QUESTION_COLUMN;
+    let note_start = indent + question_column();
     let mut note = row_prefix(
         row_label(LabelEditorRow::Note),
         editor.row() == LabelEditorRow::Note,
@@ -310,7 +309,7 @@ fn editor_layout(
 }
 
 fn widest_selector_width(editor: &SentenceLabelsEditor) -> usize {
-    QUESTION_COLUMN + selector_width(editor)
+    question_column() + selector_width(editor)
 }
 
 fn selector_width(editor: &SentenceLabelsEditor) -> usize {
@@ -356,7 +355,7 @@ fn axis_lines(
     let mut lines = Vec::new();
     let mut regions = Vec::new();
     let mut spans = row_prefix(row_label(row), editor.row() == row, indent);
-    let mut used = indent + QUESTION_COLUMN;
+    let mut used = indent + question_column();
     let mut screen_row = first_row;
     let track_width = selector_width(editor);
     let selected_text = selected
@@ -527,9 +526,23 @@ fn row_label(row: LabelEditorRow) -> &'static str {
     match row {
         LabelEditorRow::Register => "how should it sound?",
         LabelEditorRow::Type => "what kind of phrase?",
-        LabelEditorRow::Level => "what's your level?",
+        LabelEditorRow::Level => "what's the desired level?",
         LabelEditorRow::Note => "one more thing",
     }
+}
+
+fn question_column() -> usize {
+    [
+        LabelEditorRow::Register,
+        LabelEditorRow::Type,
+        LabelEditorRow::Level,
+    ]
+    .into_iter()
+    .map(row_label)
+    .map(super::common::display_width)
+    .max()
+    .expect("invariant: sentence-label editor must expose at least one question")
+    .saturating_add(2)
 }
 
 fn row_prefix(label: &str, focused: bool, indent: usize) -> Vec<Span<'static>> {
@@ -540,7 +553,7 @@ fn row_prefix(label: &str, focused: bool, indent: usize) -> Vec<Span<'static>> {
     };
     vec![
         Span::styled(" ".repeat(indent), palette::base()),
-        Span::styled(super::common::pad_right(label, QUESTION_COLUMN), style),
+        Span::styled(super::common::pad_right(label, question_column()), style),
     ]
 }
 

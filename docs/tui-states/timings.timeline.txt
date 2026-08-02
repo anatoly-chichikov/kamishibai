@@ -4,12 +4,21 @@
 
 action                 kind     out_start    out_end   out_dur   source
 ---------------------- ------- ---------- ---------- ---------   ----------------------
-type_words             window       0.00s      2.20s     2.20s   raw 1.24s → 4.80s  (3.56s @ 15.4494fps)
-understanding          window       2.20s      4.00s     1.80s   raw 4.80s → 6.60s  (1.8s @ 25fps)
-review                 window       4.00s      6.60s     2.60s   raw 12.08s → 17.84s  (5.76s @ 11.2847fps)
-review_selected        window       6.60s      7.60s     1.00s   raw 17.84s → 18.40s  (0.56s @ 44.6429fps)
-generating             window       7.60s     10.80s     3.20s   raw 18.48s → 251.48s  (233s @ 0.343348fps)
-card_flow              window      10.80s     14.64s     3.84s   raw 251.48s → 258.40s  (6.92s @ 13.8728fps)
-open_card_finale       fade        14.64s     17.96s     3.32s   fade live/09-card-open.png  (split y=310, hold 1.10s, fade 0.8s, hold-black 1.4s, caption)
+type_words             window       0.00s      1.56s     1.56s   main 0.24s → 1.80s  (1.56s @ 25fps)
+understanding          window       1.56s      2.36s     0.80s   main 1.80s → 2.60s  (0.8s @ 25fps)
+review                 splice       2.36s      3.76s     1.40s   splice live/02-what-i-understood.png
+choose_and_generate    window       3.76s      5.36s     1.60s   main 19.60s → 21.20s  (1.6s @ 25fps)
+initial_meta           window       5.36s      5.96s     0.60s   main 21.20s → 21.80s  (0.6s @ 25fps)
+initial_progress_1     window       5.96s      6.32s     0.36s   main 94.56s → 94.92s  (0.36s @ 25fps)
+initial_progress_2     window       6.32s      6.68s     0.36s   main 193.28s → 193.64s  (0.36s @ 25fps)
+initial_done           window       6.68s      7.88s     1.20s   main 297.80s → 299.00s  (1.2s @ 25fps)
+open_and_raise_level   window       7.88s     11.36s     3.48s   adjust 13.84s → 17.32s  (3.48s @ 25fps)
+regenerate_meta        window      11.36s     11.96s     0.60s   adjust 17.36s → 17.96s  (0.6s @ 25fps)
+regenerate_audio       window      11.96s     12.32s     0.36s   adjust 25.84s → 26.20s  (0.36s @ 25fps)
+regenerate_scene       window      12.32s     12.68s     0.36s   adjust 27.64s → 28.00s  (0.36s @ 25fps)
+regenerate_picture     window      12.68s     13.04s     0.36s   adjust 35.28s → 35.64s  (0.36s @ 25fps)
+regenerate_done        window      13.04s     13.44s     0.40s   adjust 42.00s → 42.40s  (0.4s @ 25fps)
+reopen_result          window      13.44s     16.56s     3.12s   adjust 42.40s → 45.52s  (3.12s @ 25fps)
+open_card_finale       fade        16.56s     19.00s     2.44s   fade live/09-card-open.png  (split y=310, hold 0.70s, fade 0.70s, hold-black 1.00s, caption)
 
-# total: 449 frames = 17.96s
+# total: 475 frames = 19.00s

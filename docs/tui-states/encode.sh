@@ -11,13 +11,15 @@
 # Tuning loop: read timings.timeline.txt, decide "shift this" / "squeeze that",
 # edit the matching out_s (or src window) in timings.conf, re-run ./encode.sh.
 #
-# Requires: a raw recording at the path named by RAW below (default /tmp/raw.gif),
-# and the static splice PNGs under live/.
+# Requires: the main raw recording at RAW (default /tmp/raw.gif), an optional
+# adjustment recording at ADJUST_RAW (default /tmp/adjust-raw.gif), and the
+# static splice PNGs under live/.
 set -euo pipefail
 export LC_ALL=C
 
 cd "$(dirname "$0")"
 RAW="${RAW:-/tmp/raw.gif}"
+ADJUST_RAW="${ADJUST_RAW:-/tmp/adjust-raw.gif}"
 CONF="${CONF:-timings.conf}"
 OUT="${OUT:-live/capture.gif}"
 TIMELINE="timings.timeline.txt"
@@ -75,7 +77,7 @@ out_frame=0
   printf '%-22s %-7s %10s %10s %9s   %s\n' "----------------------" "-------" "----------" "----------" "---------" "----------------------"
 } >> "$TIMELINE"
 
-while IFS='|' read -r id kind a b out_s cap; do
+while IFS='|' read -r id kind a b out_s cap source; do
   id="$(echo "$id" | xargs)"; kind="$(echo "$kind" | xargs)"
   a="$(echo "$a" | xargs)";   b="$(echo "$b" | xargs)"; out_s="$(echo "$out_s" | xargs)"
   cap="$(echo "${cap:-}" | xargs)"
@@ -84,6 +86,12 @@ while IFS='|' read -r id kind a b out_s cap; do
   capy="$(echo "$cap" | cut -d, -f3)"
   capfin="$(echo "$cap" | cut -d, -f4)"
   capfout="$(echo "$cap" | cut -d, -f5)"
+  source="$(echo "${source:-main}" | xargs)"
+  case "$source" in
+    ''|main) input="$RAW";;
+    adjust) input="$ADJUST_RAW";;
+    *) input="$source";;
+  esac
   case "$id" in ''|'#'*) continue;; esac
 
   nframes="$(round "$(awk -v s="$out_s" -v f="$FPS" 'BEGIN{print s*f}')")"
@@ -97,9 +105,10 @@ while IFS='|' read -r id kind a b out_s cap; do
       cp "$a" "$(printf '%s/%05d.png' "$SEQ" "$seq_i")"; seq_i=$((seq_i+1))
     done
   elif [ "$kind" = "window" ]; then
+    [ -f "$input" ] || { echo "encode.sh: window source not found: $input" >&2; exit 1; }
     dur="$(awk -v a="$a" -v b="$b" 'BEGIN{print b-a}')"
     rate="$(awk -v n="$nframes" -v d="$dur" 'BEGIN{print (d>0)? n/d : 25}')"
-    src_desc="raw ${a}s → ${b}s  (${dur}s @ ${rate}fps)"
+    src_desc="${source} ${a}s → ${b}s  (${dur}s @ ${rate}fps)"
     [ -n "$capfile" ] && src_desc="$src_desc  + caption $capfile"
     tmp="$(mktemp -d)"
     if [ -n "$capfile" ] && [ -f "$capfile" ]; then
@@ -122,11 +131,11 @@ while IFS='|' read -r id kind a b out_s cap; do
         fos="$(awk -v d="$dur" -v fod="$fod" 'BEGIN{printf "%.4f", d-fod}')"
         capflt="${capflt},fade=t=out:st=${fos}:d=${fod}:alpha=1"
       fi
-      ffmpeg -nostdin -y -loglevel error -i "$RAW" -loop 1 -i "$capfile" \
+      ffmpeg -nostdin -y -loglevel error -i "$input" -loop 1 -i "$capfile" \
         -filter_complex "[0:v]trim=start=${a}:end=${end},setpts=PTS-STARTPTS,fps=${rate}[v];[1:v]${capflt}[c];[v][c]overlay=${cx}:${cy}:shortest=1" \
         "$tmp/w-%04d.png"
     else
-      ffmpeg -nostdin -y -loglevel error -i "$RAW" -ss "$a" -t "$dur" -vf "fps=$rate" "$tmp/w-%04d.png"
+      ffmpeg -nostdin -y -loglevel error -i "$input" -ss "$a" -t "$dur" -vf "fps=$rate" "$tmp/w-%04d.png"
     fi
     frames=()
     while IFS= read -r line; do frames+=("$line"); done < <(ls "$tmp"/w-*.png | sort)
