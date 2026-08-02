@@ -17,8 +17,9 @@ use crate::generation::manga::{RecallCard, RecallReview};
 use crate::generation::prompts::layout_scene_prompt;
 use crate::languages::catalog;
 use crate::session::{
-    CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair, LearningGuess, RawInputBatch,
-    Sense, SenseCorrection, Understood, WordCandidate,
+    AxisSet, CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair, LearningGuess,
+    RawInputBatch, Register, Sense, SenseCorrection, SentenceAxis, SentenceKind,
+    SentenceLabelSelection, SentenceLabels, SentenceLevel, Understood, WordCandidate,
 };
 
 use super::codec::{decode, encode};
@@ -583,12 +584,7 @@ where
         let prompt = render_card_prompt(draft, comment, pair, &catalog)?;
         let (raw, cost) = self.text_metered(META_MODEL, prompt)?;
         let decoded: CardCorrectionResponse = serde_json::from_str(unfence(raw.trim()))?;
-        let term = decoded.term.clone();
-        let understanding = decoded.understanding.clone();
-        Ok((
-            CardRevision::new(term, understanding, decoded.into_meta()),
-            cost,
-        ))
+        Ok((decoded.into_revision(label_selection(draft))?, cost))
     }
 
     /// Recompose one card draft and report usage before local JSON decoding.
@@ -606,9 +602,7 @@ where
         let prompt = render_card_prompt(draft, comment, pair, &catalog)?;
         let raw = self.text_observed(META_MODEL, prompt, &mut observe)?;
         let decoded: CardCorrectionResponse = serde_json::from_str(unfence(raw.trim()))?;
-        let term = decoded.term.clone();
-        let understanding = decoded.understanding.clone();
-        Ok(CardRevision::new(term, understanding, decoded.into_meta()))
+        decoded.into_revision(label_selection(draft))
     }
 
     /// Render one compiled prose prompt into raw image bytes.
@@ -953,7 +947,18 @@ fn response_text(response: &Response) -> String {
 
 fn card_meta_from_raw(raw: &str) -> Result<CardMeta> {
     let decoded: CardMetaResponse = serde_json::from_str(unfence(raw.trim()))?;
-    Ok(decoded.into_meta())
+    decoded.into_meta()
+}
+
+fn label_selection(draft: &CardDraft) -> SentenceLabelSelection {
+    if let Some(rewrite) = draft.rewrite() {
+        return rewrite.selection().clone();
+    }
+    draft
+        .meta()
+        .and_then(CardMeta::sentence_labels)
+        .map(SentenceLabelSelection::from_labels)
+        .unwrap_or_default()
 }
 
 fn image_from_response(response: &Response) -> Result<Vec<u8>> {
@@ -1060,6 +1065,7 @@ impl SenseCorrectionResponse {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CardMetaResponse {
     pronunciation: String,
     transcription: String,
@@ -1070,11 +1076,16 @@ struct CardMetaResponse {
     source_hint: String,
     source_context: String,
     target_sentence: String,
+    labels: SentenceLabelsResponse,
 }
 
 impl CardMetaResponse {
-    fn into_meta(self) -> CardMeta {
-        CardMeta::new(
+    fn into_meta(self) -> Result<CardMeta> {
+        let labels = self.labels.into_labels()?;
+        if !labels.approx().is_empty() {
+            bail!("initial sentence labels cannot report approximate axes");
+        }
+        Ok(CardMeta::new(
             self.pronunciation,
             self.transcription,
             self.meaning,
@@ -1085,10 +1096,12 @@ impl CardMetaResponse {
             self.source_context,
             self.target_sentence,
         )
+        .with_sentence_labels(labels))
     }
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CardCorrectionResponse {
     term: String,
     understanding: String,
@@ -1101,11 +1114,20 @@ struct CardCorrectionResponse {
     source_hint: String,
     source_context: String,
     target_sentence: String,
+    labels: SentenceLabelsResponse,
 }
 
 impl CardCorrectionResponse {
-    fn into_meta(self) -> CardMeta {
-        CardMeta::new(
+    fn into_revision(self, selection: SentenceLabelSelection) -> Result<CardRevision> {
+        let labels = self.labels.into_labels()?;
+        if labels.approx().len() != labels.approx().intersecting(selection.pinned()).len() {
+            bail!("approximate sentence labels must name only changed axes");
+        }
+        if !selection.accepts(&labels) {
+            bail!("sentence labels changed the requested preset");
+        }
+        let labels = selection.reconciled(labels);
+        let meta = CardMeta::new(
             self.pronunciation,
             self.transcription,
             self.meaning,
@@ -1116,6 +1138,58 @@ impl CardCorrectionResponse {
             self.source_context,
             self.target_sentence,
         )
+        .with_sentence_labels(labels);
+        Ok(CardRevision::new(self.term, self.understanding, meta))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SentenceLabelsResponse {
+    register: Register,
+    level: SentenceLevelProfile,
+    #[serde(rename = "type")]
+    kind: SentenceKind,
+    approx: Vec<SentenceAxis>,
+}
+
+impl SentenceLabelsResponse {
+    fn into_labels(self) -> Result<SentenceLabels> {
+        let approx = AxisSet::from_axes(self.approx.iter().copied());
+        if approx.len() != self.approx.len() {
+            bail!("approximate sentence labels cannot contain duplicate axes");
+        }
+        Ok(SentenceLabels::new(
+            self.register,
+            self.level.level(),
+            self.kind,
+            AxisSet::default(),
+            approx,
+        ))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SentenceLevelProfile {
+    A1,
+    A2,
+    B1,
+    B2,
+    C1,
+    C2,
+}
+
+impl SentenceLevelProfile {
+    fn level(self) -> SentenceLevel {
+        match self {
+            Self::A1 => SentenceLevel::A1,
+            Self::A2 => SentenceLevel::A2,
+            Self::B1 => SentenceLevel::B1,
+            Self::B2 => SentenceLevel::B2,
+            Self::C1 => SentenceLevel::C1,
+            Self::C2 => SentenceLevel::C2,
+        }
     }
 }
 
@@ -1189,6 +1263,72 @@ mod tests {
                 "totalTokenCount": 150
             }
         }))
+    }
+
+    fn sentence_labels_response(
+        register: &str,
+        level: &str,
+        kind: &str,
+        approx: Vec<&str>,
+    ) -> Value {
+        json!({
+            "register": register,
+            "level": level,
+            "type": kind,
+            "approx": approx
+        })
+    }
+
+    fn card_meta_response(labels: Value) -> Value {
+        json!({
+            "pronunciation": "ka.naʁ",
+            "transcription": "lə ka.naʁ naʒ",
+            "meaning": "a duck",
+            "importance": 5,
+            "source_sentence": "The duck swims",
+            "source_highlight": "duck",
+            "source_hint": "Think of a pond",
+            "source_context": "A concrete noun",
+            "target_sentence": "Le canard nage",
+            "labels": labels
+        })
+    }
+
+    fn card_correction_response(labels: Value) -> Value {
+        json!({
+            "term": "canard",
+            "understanding": "a duck",
+            "pronunciation": "ka.naʁ",
+            "transcription": "lə ka.naʁ naʒ",
+            "meaning": "a duck",
+            "importance": 5,
+            "source_sentence": "The duck swims",
+            "source_highlight": "duck",
+            "source_hint": "Think of a pond",
+            "source_context": "A concrete noun",
+            "target_sentence": "Le canard nage",
+            "labels": labels
+        })
+    }
+
+    fn changed_register_selection() -> SentenceLabelSelection {
+        SentenceLabelSelection::from_labels(&SentenceLabels::new(
+            Register::Formal,
+            SentenceLevel::B1,
+            SentenceKind::Statement,
+            AxisSet::from_axes([SentenceAxis::Register]),
+            AxisSet::default(),
+        ))
+    }
+
+    fn preserved_selection() -> SentenceLabelSelection {
+        SentenceLabelSelection::from_labels(&SentenceLabels::new(
+            Register::Neutral,
+            SentenceLevel::B1,
+            SentenceKind::Statement,
+            AxisSet::default(),
+            AxisSet::default(),
+        ))
     }
 
     fn coverage_audit(panel_count: usize) -> Value {
@@ -1374,7 +1514,7 @@ mod tests {
             "candidates": [{
                 "content": {
                     "parts": [{
-                        "text": "{\"term\":\"wound\",\"understanding\":\"verb sense\",\"pronunciation\":\"waʊnd\",\"transcription\":\"aɪ waʊnd ðə klɒk\",\"meaning\":\"завести\",\"importance\":6,\"source_sentence\":\"Я завел часы.\",\"source_highlight\":\"завел\",\"source_hint\":\"Поворачивал что-то круглое.\",\"source_context\":\"Глагол про часы.\",\"target_sentence\":\"I wound the clock.\"}"
+                        "text": "{\"term\":\"wound\",\"understanding\":\"verb sense\",\"pronunciation\":\"waʊnd\",\"transcription\":\"aɪ waʊnd ðə klɒk\",\"meaning\":\"завести\",\"importance\":6,\"source_sentence\":\"Я завел часы.\",\"source_highlight\":\"завел\",\"source_hint\":\"Поворачивал что-то круглое.\",\"source_context\":\"Глагол про часы.\",\"target_sentence\":\"I wound the clock.\",\"labels\":{\"register\":\"neutral\",\"level\":\"b1\",\"type\":\"statement\",\"approx\":[]}}"
                     }]
                 }
             }],
@@ -1394,6 +1534,249 @@ mod tests {
             cost.cost().nanos(),
             525_000,
             "card correction must preserve Gemini usage cost for the regenerated meta"
+        );
+    }
+
+    #[test]
+    fn card_responses_reject_fields_outside_the_exact_contract() {
+        let meta = serde_json::from_value::<CardMetaResponse>(json!({
+            "pronunciation": "ka.naʁ",
+            "transcription": "lə ka.naʁ naʒ",
+            "meaning": "a duck",
+            "importance": 5,
+            "source_sentence": "The duck swims",
+            "source_highlight": "duck",
+            "source_hint": "Think of a pond",
+            "source_context": "A concrete noun",
+            "target_sentence": "Le canard nage",
+            "labels": {
+                "register": "neutral",
+                "level": "b1",
+                "type": "statement",
+                "approx": []
+            },
+            "unexpected": true
+        }));
+        let correction = serde_json::from_value::<CardCorrectionResponse>(json!({
+            "term": "canard",
+            "understanding": "a duck",
+            "pronunciation": "ka.naʁ",
+            "transcription": "lə ka.naʁ naʒ",
+            "meaning": "a duck",
+            "importance": 5,
+            "source_sentence": "The duck swims",
+            "source_highlight": "duck",
+            "source_hint": "Think of a pond",
+            "source_context": "A concrete noun",
+            "target_sentence": "Le canard nage",
+            "labels": {
+                "register": "neutral",
+                "level": "b1",
+                "type": "statement",
+                "approx": []
+            },
+            "unexpected": true
+        }));
+        assert_eq!(
+            (meta.is_err(), correction.is_err()),
+            (true, true),
+            "card responses accepted fields outside their exact JSON contracts"
+        );
+    }
+
+    #[test]
+    fn sentence_labels_reject_unknown_tokens() {
+        let response = serde_json::from_value::<CardMetaResponse>(card_meta_response(
+            sentence_labels_response("ceremonial", "b1", "statement", Vec::new()),
+        ));
+        assert!(
+            response.is_err(),
+            "sentence labels accepted a token outside the closed register vocabulary"
+        );
+    }
+
+    #[test]
+    fn sentence_labels_reject_legacy_effort_tokens_on_the_model_wire() {
+        let rejected = [
+            "easy",
+            "takes practice",
+            "balanced",
+            "challenging",
+            "stretch",
+            "simplified",
+            "default",
+            "extended",
+        ]
+        .map(|level| {
+            serde_json::from_value::<CardMetaResponse>(card_meta_response(
+                sentence_labels_response("neutral", level, "statement", Vec::new()),
+            ))
+            .is_err()
+        });
+        assert_eq!(
+            rejected,
+            [true, true, true, true, true, true, true, true],
+            "Gemini labels accepted a legacy effort token"
+        );
+    }
+
+    #[test]
+    fn sentence_labels_map_every_lowercase_cefr_token() {
+        let levels = ["a1", "a2", "b1", "b2", "c1", "c2"].map(|level| {
+            serde_json::from_value::<CardMetaResponse>(card_meta_response(
+                sentence_labels_response("neutral", level, "statement", Vec::new()),
+            ))
+            .expect("lowercase CEFR labels must decode")
+            .into_meta()
+            .expect("lowercase CEFR labels must validate")
+        });
+        assert_eq!(
+            levels.map(|meta| {
+                meta.sentence_labels()
+                    .map(SentenceLabels::level)
+                    .expect("CEFR response must keep labels")
+            }),
+            [
+                SentenceLevel::A1,
+                SentenceLevel::A2,
+                SentenceLevel::B1,
+                SentenceLevel::B2,
+                SentenceLevel::C1,
+                SentenceLevel::C2,
+            ],
+            "lowercase CEFR tokens failed to map onto the visible level scale"
+        );
+    }
+
+    #[test]
+    fn sentence_labels_reject_the_removed_grammar_field() {
+        let mut labels = sentence_labels_response("neutral", "b1", "statement", Vec::new());
+        labels
+            .as_object_mut()
+            .expect("label response must be a JSON object")
+            .insert(String::from("grammar"), Value::Null);
+        let response = serde_json::from_value::<CardMetaResponse>(card_meta_response(labels));
+        assert!(
+            response.is_err(),
+            "sentence labels retained a compatibility path for the removed grammar field"
+        );
+    }
+
+    #[test]
+    fn initial_sentence_labels_reject_approximate_axes() {
+        let response = serde_json::from_value::<CardMetaResponse>(card_meta_response(
+            sentence_labels_response("neutral", "b1", "statement", vec!["register"]),
+        ))
+        .expect("initial labels must decode before semantic validation");
+        assert!(
+            response.into_meta().is_err(),
+            "initial sentence labels accepted an approximate axis"
+        );
+    }
+
+    #[test]
+    fn correction_rejects_a_changed_label_mismatch_without_approximation() {
+        let response = serde_json::from_value::<CardCorrectionResponse>(card_correction_response(
+            sentence_labels_response("casual", "b1", "statement", Vec::new()),
+        ))
+        .expect("correction labels must decode before semantic validation");
+        assert!(
+            response
+                .into_revision(changed_register_selection())
+                .is_err(),
+            "card correction accepted a mismatched changed register without approximation"
+        );
+    }
+
+    #[test]
+    fn correction_rejects_drift_on_an_unchanged_label_axis() {
+        let response = serde_json::from_value::<CardCorrectionResponse>(card_correction_response(
+            sentence_labels_response("formal", "b2", "statement", Vec::new()),
+        ))
+        .expect("correction labels must decode before semantic validation");
+        assert!(
+            response
+                .into_revision(changed_register_selection())
+                .is_err(),
+            "card correction changed the preserved CEFR label"
+        );
+    }
+
+    #[test]
+    fn correction_preserves_unchanged_axes_without_pinning_them() {
+        let response = serde_json::from_value::<CardCorrectionResponse>(card_correction_response(
+            sentence_labels_response("formal", "b1", "statement", Vec::new()),
+        ))
+        .expect("correction labels must decode before semantic validation");
+        let revision = response
+            .into_revision(changed_register_selection())
+            .expect("matching unchanged axes must be accepted");
+        let labels = revision
+            .meta()
+            .sentence_labels()
+            .expect("accepted correction must keep labels");
+        assert_eq!(
+            (
+                labels.register(),
+                labels.level(),
+                labels.kind(),
+                labels.pinned().iter().collect::<Vec<_>>(),
+            ),
+            (
+                Register::Formal,
+                SentenceLevel::B1,
+                SentenceKind::Statement,
+                vec![SentenceAxis::Register],
+            ),
+            "card correction changed or pinned an unchanged label axis"
+        );
+    }
+
+    #[test]
+    fn correction_reconciles_an_approximate_changed_label_to_the_requested_value() {
+        let response = serde_json::from_value::<CardCorrectionResponse>(card_correction_response(
+            sentence_labels_response("casual", "b1", "statement", vec!["register"]),
+        ))
+        .expect("correction labels must decode before semantic validation");
+        let revision = response
+            .into_revision(changed_register_selection())
+            .expect("approximate changed mismatch must be accepted");
+        let labels = revision
+            .meta()
+            .sentence_labels()
+            .expect("reconciled revision must keep labels");
+        assert_eq!(
+            (
+                labels.register(),
+                labels.pinned().contains(SentenceAxis::Register),
+                labels.approx().contains(SentenceAxis::Register),
+            ),
+            (Register::Formal, true, true),
+            "approximate changed register was not restored to the requested display value"
+        );
+    }
+
+    #[test]
+    fn correction_rejects_approximation_on_a_preserved_axis() {
+        let response = serde_json::from_value::<CardCorrectionResponse>(card_correction_response(
+            sentence_labels_response("neutral", "b1", "statement", vec!["level"]),
+        ))
+        .expect("correction labels must decode before semantic validation");
+        assert!(
+            response.into_revision(preserved_selection()).is_err(),
+            "card correction accepted approximation on a preserved label axis"
+        );
+    }
+
+    #[test]
+    fn sentence_labels_reject_duplicate_approximate_axes() {
+        let response = serde_json::from_value::<CardMetaResponse>(card_meta_response(
+            sentence_labels_response("neutral", "b1", "statement", vec!["register", "register"]),
+        ))
+        .expect("duplicate approximate axes must decode before semantic validation");
+        assert!(
+            response.into_meta().is_err(),
+            "sentence labels accepted duplicate approximate axes"
         );
     }
 

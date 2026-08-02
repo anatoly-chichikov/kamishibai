@@ -20,6 +20,8 @@ pub const GUTTER: u16 = 4;
 pub const TOP_MARGIN: u16 = 1;
 /// Breathing room between the header and the body content.
 pub const HEADER_GAP: u16 = 1;
+/// Body-local column shared by artifact labels and sentence-label controls.
+pub(crate) const CARD_DETAIL_COLUMN: usize = 6;
 const AI_DISCLAIMER: &str = "ai may be wrong, please verify results";
 
 /// Describes the rows of a fullscreen screen: header, body, AI disclaimer,

@@ -3,6 +3,7 @@
 mod attempt_archive;
 mod cost_accounting;
 mod gemini_media;
+mod invalidation;
 mod metadata;
 mod picture_recovery;
 mod picture_requests;
@@ -31,6 +32,8 @@ use sound::SoundProduction;
 use visual::VisualProduction;
 #[cfg(test)]
 use visual::production_renderer;
+
+pub(crate) use invalidation::invalidate_card;
 
 /// Produces card metadata and media through focused Gemini adapters.
 #[derive(Clone)]
@@ -114,6 +117,26 @@ impl CardProduction for GeminiCardProduction {
             .generate(term, understanding, pair, Some(slot))
     }
 
+    fn generate_draft_meta_in(
+        &self,
+        slot: usize,
+        draft: &CardDraft,
+    ) -> ArtifactAttempt<(CardRevision, Option<ArtifactFile>)> {
+        if draft.rewrite().is_some() {
+            return self.metadata.rewrite(draft, slot);
+        }
+        let term = draft.term().to_string();
+        let understanding = draft.understanding().to_string();
+        self.metadata
+            .generate(
+                draft.term(),
+                draft.understanding(),
+                draft.pair(),
+                Some(slot),
+            )
+            .map(|(meta, file)| (CardRevision::new(term, understanding, meta), file))
+    }
+
     fn generate_scene_in(&self, slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
         self.visual.scene(slot, draft)
     }
@@ -124,16 +147,6 @@ impl CardProduction for GeminiCardProduction {
 
     fn generate_sound_in(&self, slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
         self.sound.generate(slot, draft)
-    }
-
-    fn correct_card_in(
-        &self,
-        slot: usize,
-        draft: &CardDraft,
-        comment: &str,
-        pair: &LanguagePair,
-    ) -> ArtifactAttempt<CardRevision> {
-        self.metadata.correct(draft, comment, pair, Some(slot))
     }
 
     fn store_card_meta(

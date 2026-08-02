@@ -86,7 +86,7 @@ Within the card-workflow boundary, direct dependencies point inward: CLI deliver
 
 ## Attempts
 
-An artifact gets one plain try plus three retries on top of it — `ARTIFACT_ATTEMPT_CEILING` (4) attempts, which is also the durable picture-request series ceiling. **The first try is never numbered**: while it runs the step row just says `ai is working…`, and only a retry carries a number (`AttemptTally::retry`, `1..=retries`). Every spent attempt records **why** it was spent: `src/session/attempt.rs` pairs the `AttemptTally` with one `AttemptFault` per failure (`category` slug, user-facing `reason`, and the archived picture when the provider drew one). The production adapter supplies the renderer's real verdict; anything else — transport error, cache lease, exhausted request budget — is diagnosed by the engine from the error text under category `error`. Both surfaces number retries the same way, so at one moment the TUI row and the NDJSON line agree: `retry 2/3` means two tries are gone and the second retry is under way. The TUI step row also carries a muted `N rejected` note — plain text, not a control — and it **outlives the retries**: a `✓` row keeps showing what the artifact cost to reach, so a finished card still tells the story of its rejections. The expanded card shows the meta preview first and then, below a dashed rule, a `rejected attempts` block; each row names the try, whatever that try produced before being thrown away, and the gate that rejected it. Both stages leave something behind: a picture attempt archives the rejected frame, and a scene attempt archives the model reply it failed to decode (`RejectedReply` carries the body out of `src/gemini`, `attempt_archive::archived_reply` writes it as `scene-NNNN.json` when it parses as JSON and `scene-NNNN.txt` when it never was JSON). Both are muted underlined links that open with the system handler. A failure that never reached the model — transport, cache lease — archives nothing and leaves that column blank. Rejected frames are never deleted by a run — only `drop_artifacts` / `drop_incomplete_artifacts` clear them.
+An artifact gets one plain try plus three retries on top of it — `ARTIFACT_ATTEMPT_CEILING` (4) attempts, which is also the durable picture-request series ceiling. `AttemptTally::retry` still numbers machine-facing retry events from `1..=retries`, but the TUI deliberately does not expose that number on an artifact row. Every active attempt, whether the first try or a retry, renders the same spinner plus `ai is working…`; an inactive retry renders only a dot, its artifact label, and any known artifact cost. A terminal row keeps its leading `✗`, says only `gave up`, and then shows any known cost. Every spent attempt records **why** it was spent: `src/session/attempt.rs` pairs the `AttemptTally` with one `AttemptFault` per failure (`category` slug, user-facing `reason`, and the archived picture when the provider drew one). The production adapter supplies the renderer's real verdict; anything else — transport error, cache lease, exhausted request budget — is diagnosed by the engine from the error text under category `error`. Retry history is summarized once on the card head as `  ↻N`, after the displayed total cost when one exists and omitted at zero. `N` sums `min(tally.done(), tally.retries())` across meta, audio, scene, and picture, so a terminal four-attempt artifact contributes `↻3`; unmetered and undiagnosed spent attempts still count. The expanded card shows the meta preview first and then, below a dashed rule, a `rejected attempts` block; each row names the try, whatever that try produced before being thrown away, and the gate that rejected it. Both stages leave something behind: a picture attempt archives the rejected frame, and a scene attempt archives the model reply it failed to decode (`RejectedReply` carries the body out of `src/gemini`, `attempt_archive::archived_reply` writes it as `scene-NNNN.json` when it parses as JSON and `scene-NNNN.txt` when it never was JSON). Both are muted underlined links that open with the system handler. A failure that never reached the model — transport, cache lease — archives nothing and leaves that column blank. Rejected frames are never deleted by a run — only `drop_artifacts` / `drop_incomplete_artifacts` clear them. The `YourCards` footer does not duplicate the terminal-card count.
 
 ## Cache layout
 
@@ -121,12 +121,14 @@ Homebrew is a separate, manual follow-up in the tap repository **`anatoly-chichi
 ## Recording the demo GIF and screenshots
 
 `docs/tui-states/live/capture.gif` (linked from `README.md`) and the per-screen PNGs next to
-it are produced by two VHS tapes in `docs/tui-states/`:
+it are produced by three VHS tapes in `docs/tui-states/`:
 
 - `capture.tape` runs the **live binary** (real Gemini) and writes the happy-path screenshots
   plus the raw `live/capture.gif`.
 - `states.tape` drives the `examples/tui_states` **state-walker** (no Gemini) to write the
   synthetic edge-case / modal / Welcome screenshots that the live run cannot reach.
+- `states-narrow.tape` drives the same state-walker at 1200 px to write the intentionally
+  narrow S10 sentence-label screenshot; VHS accepts geometry only at the top of a tape.
 
 The README gif itself is then assembled deterministically by `encode.sh` from `timings.conf`
 (the single source of truth for section windows/durations); it emits `timings.timeline.txt`
@@ -161,18 +163,23 @@ From the repo root:
    ```bash
    cd docs/tui-states
    vhs states.tape
-   rm -f states-throwaway.gif
+   vhs states-narrow.tape
+   rm -f states-throwaway.gif states-narrow-throwaway.gif
    ```
 
-   Writes `live/00-welcome.png`, `live/00b-welcome-env.png`,
-   `live/03-change-something-modal.png`, `live/05-change-this-card-modal.png`,
-   `live/06-your-cards-retrying.png`, and `live/07-your-cards-couldnt-finish.png` at 2x. The
-   tape jumps to each state by **absolute index** (`Type "<n>"` then `Space`) and keeps a
-   uniform 800 ms settle after each jump so VHS never captures a mid-repaint frame. Absolute
-   jumps are immune to keystroke coalescing and to the stray Return the shell injects when it
-   launches the binary — `Enter` in the walker only clears the queued digits. The two Welcome
-   shots are the same `EnterKey` stage: `00-welcome.png` has no `GEMINI_API_KEY` (just the
-   `submit` button), `00b-welcome-env.png` has it set (adds the focused `load from env` chip).
+   Writes the six environment/failure/retry shots (`live/00-welcome.png`,
+   `live/00b-welcome-env.png`, `live/03-change-something-modal.png`,
+   `live/06-your-cards-retrying.png`, `live/06b-your-cards-retry-stress.png`,
+   `live/07-your-cards-couldnt-finish.png`) plus the
+   twelve sentence-label S1–S12 PNGs from `live/11-s1-label-tags.png` through
+   `live/22-s12-label-legacy-meta.png`. All are 2x except S10, whose intentionally narrow
+   frame comes from `states-narrow.tape` at 1200 px. Both synthetic tapes jump to each state
+   by **absolute index** (`Type "<n>"` then `Space`) and keep a uniform 800 ms settle after
+   each jump so VHS never captures a mid-repaint frame. Absolute jumps are immune to
+   keystroke coalescing and to the stray Return the shell injects when it launches the
+   binary — `Enter` in the walker only clears the queued digits. The two Welcome shots are
+   the same `EnterKey` stage: `00-welcome.png` has no `GEMINI_API_KEY` (just the `submit`
+   button), `00b-welcome-env.png` has it set (adds the focused `load from env` chip).
 
 4. **Record the live-binary flow** (real Gemini run, ~2 minutes wall-clock with a warm
    cache, ~4 minutes cold):
@@ -310,14 +317,72 @@ verb, and colloquialisms (`canard` doubles as "duck" and "newspaper hoax"); all 
 manga panels and interesting English glosses. The synthetic `examples/tui_states.rs` walker
 mirrors this EN→FR flow with the first four of those words.
 
-### Edge-case shots
+### Synthetic and edge-case shots
 
-The six PNGs that need modal interaction or environment/failure injection
-(`00-welcome.png`, `00b-welcome-env.png`, `03-change-something-modal.png`,
-`05-change-this-card-modal.png`, `06-your-cards-retrying.png`, `07-your-cards-couldnt-finish.png`)
-are not produced by `capture.tape`. They are produced reproducibly by `states.tape` (step 3),
-which drives `examples/tui_states.rs` through the same EN→FR flow at 2x. When the design
-changes, edit the demo data in `examples/tui_states.rs` and re-run `vhs states.tape`. If you
-add or reorder states in the vector, update the absolute indices in `states.tape` and in the
-`pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells` test (it jumps to the
-`Your cards` and `Done` indices by number).
+The six environment/modal/failure/retry PNGs and twelve sentence-label scenario PNGs listed in
+step 3 are not produced by `capture.tape`. They are produced reproducibly by `states.tape`
+and `states-narrow.tape`, which drive `examples/tui_states.rs` through the same EN→FR flow
+without Gemini. The sentence-label scenarios keep the established indices 0–10 intact: S1
+is index 6, S2 replaces the removed per-card modal at index 7, S3–S9 are indices 11–17,
+S10–S12 are indices 18–20, and the retry stress gallery is index 21. When the design changes, edit the demo data in
+`examples/tui_states.rs` and re-run both synthetic tapes. If you add or reorder states in
+the vector, update the absolute indices in both tapes and in the
+`pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells` test (it jumps to
+the `Your cards` and `Done` indices by number).
+
+The level chips are the lowercase operational CEFR bands `a1`, `a2`, `b1`,
+`b2`, `c1`, and `c2`. They classify only the language surrounding the target
+term; the target term itself is exempt, and the estimate is not an official
+proficiency assessment. Fresh cards first get the natural sentence required by
+their approved understanding and only then receive a descriptive level; initial
+generation never targets a band. A level becomes a rewrite constraint only
+after the user explicitly changes it. Legacy `easy`, `takes practice`/`balanced`,
+and `challenging`/`stretch` cache values reopen as `a2`, `b1`, and `b2`
+respectively.
+
+The artifact rows stay together in one left column: `meta`, `audio`, `scene`,
+then `picture`. `meta` begins immediately after the last line of the card head's
+target sentence, including when that sentence wraps. A collapsed card leaves
+the `meta` row alone and renders no `sentence:` heading or separator glyph
+anywhere. Register, type, and level appear as three consecutive tags in one
+fixed column on the `audio` row, separated by spaces; `ai is working…`, ready,
+cached, inactive retry, and recovered audio keep that same anchor. Active
+audio always shows the same `ai is working…` text, and retry history lives on
+the card head instead of adding volatile status beside the tags. At narrow
+widths whole tags may continue at the same tag-column on the `scene` and
+`picture` rows; if a wrapped tag or an audio tail would collide, the complete
+inline summary is hidden and the card head remains the mouse entry into tuning.
+Opening the card removes that compact summary and puts the already-open
+editor below all four artifact rows, separated from `picture` by exactly one
+blank row, before the expanded metadata and never to the artifacts' right.
+Unchanged tags use a gray background; explicitly changed or previously pinned
+tags use a white background with dark letters and no bold. An approximately
+fulfilled pinned tag keeps that white treatment and adds an `≈` prefix.
+
+The editor's three carousel questions are `how should it sound?`, `what kind of
+phrase?`, and `what's your level?`. The note label is `one more thing`, and its
+placeholder is `say what should change`. The active carousel question is white
+and bold, and the selected chip has a white background. Every carousel is
+permanently bracketed by the two-cell direction controls `< ` and ` >`; both
+cells are clickable, focus that control's own row, and move one adjacent choice
+without wrapping past either boundary. All three tracks use one render-time
+width derived from the widest choice and the largest choice count across the axes,
+so both chevrons share columns. Inside that fixed track the selected chip's
+visual centre moves proportionally from the leading edge to the trailing edge
+as its choice index increases. Every adjacent step transfers one hidden-choice
+segment from the trailing rail to the leading rail. Segment widths differ by at most one cell,
+spare cells go nearest the selected chip on each side, and every cell of a
+segment belongs to the same clickable target. The nearest marker uses
+`DIM2`, the next farther marker uses `RULE`, and every marker farther away uses
+`HL`, saturating at `HL`. A legacy axis with no selected value shows `—` with
+one two-cell marker on each side inside the shared track; both cells of either
+marker are clickable.
+
+Regeneration carries the complete current three-axis preset. Every unedited
+axis must keep its current value exactly. Only an explicitly changed or already
+pinned axis may differ from the requested value, and only when the result marks
+that axis as approximate.
+
+Expanded metadata uses statement and noun labels: `the phrase`, `in your
+language`, `a visual clue`, `word meaning`, `word pronunciation`, `phrase
+pronunciation`, `worth learning`, and, when context exists, `the right context`.

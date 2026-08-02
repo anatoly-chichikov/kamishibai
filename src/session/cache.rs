@@ -13,7 +13,7 @@ use crate::languages::catalog;
 use super::vault::{CardCell, digest};
 use super::{
     CardMeta, LanguagePair, LearningDetection, LearningGuess, RawInputBatch, ScriptDetection,
-    Sense, Understood, WordCandidate,
+    Sense, SentenceLabels, Understood, WordCandidate,
 };
 
 const UNDERSTANDING_VERSION: &str = "v6";
@@ -407,6 +407,8 @@ struct MetaRecord {
     source_hint: String,
     source_context: String,
     target_sentence: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    labels: Option<SentenceLabels>,
 }
 
 impl MetaRecord {
@@ -426,6 +428,7 @@ impl MetaRecord {
             source_hint: meta.source_hint().to_string(),
             source_context: meta.source_context().to_string(),
             target_sentence: meta.target_sentence().to_string(),
+            labels: meta.sentence_labels().cloned(),
         }
     }
 
@@ -434,7 +437,7 @@ impl MetaRecord {
     }
 
     fn meta(self) -> CardMeta {
-        CardMeta::new(
+        let meta = CardMeta::new(
             self.pronunciation,
             self.transcription,
             self.meaning,
@@ -444,7 +447,11 @@ impl MetaRecord {
             self.source_hint,
             self.source_context,
             self.target_sentence,
-        )
+        );
+        match self.labels {
+            Some(labels) => meta.with_sentence_labels(labels),
+            None => meta,
+        }
     }
 }
 

@@ -16,8 +16,8 @@ use super::session::SessionCostScope;
 use super::wiring::{GeminiCardWorkflow, console_workflow, session_workflow};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    Artifact, ArtifactCosts, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, LanguagePair,
-    SessionEngine, WordCandidate,
+    Artifact, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, LanguagePair, SessionEngine,
+    WordCandidate,
 };
 
 use std::path::PathBuf;
@@ -117,14 +117,7 @@ pub(super) trait Reporter {
     /// Announce that generation started for `cards` cards.
     fn generating(&self, cards: usize);
     /// Report one artifact step for one card.
-    fn step(
-        &self,
-        card: usize,
-        term: &str,
-        artifact: Artifact,
-        outcome: StepOutcome<'_>,
-        costs: ArtifactCosts,
-    );
+    fn step(&self, card: usize, draft: &CardDraft, artifact: Artifact, outcome: StepOutcome<'_>);
     /// Announce that the deck and report are being written.
     fn publishing(&self);
     /// Report the final artifacts once the run completes.
@@ -190,10 +183,9 @@ where
         }
         reporter.step(
             card,
-            term.as_str(),
+            &engine.drafts()[card],
             artifact,
             outcome_of(&engine, card, artifact),
-            ArtifactCosts::from_artifacts(engine.drafts()[card].artifacts()),
         );
     }
     let drafts = engine.drafts().to_vec();
@@ -227,10 +219,9 @@ where
 {
     match artifact {
         Artifact::Meta => {
-            let attempt =
-                workflow.generate_meta_in(card, draft.term(), draft.understanding(), draft.pair());
+            let attempt = workflow.generate_draft_meta_in(card, draft);
             let error = attempt.error().map(|error| format!("{error:#}"));
-            engine.applied_meta_attempt(card, attempt);
+            engine.applied_revision_attempt(card, attempt);
             error
         }
         Artifact::Scene => {
@@ -307,14 +298,8 @@ pub(super) struct HumanReporter;
 impl Reporter for HumanReporter {
     fn generating(&self, _cards: usize) {}
 
-    fn step(
-        &self,
-        _card: usize,
-        term: &str,
-        artifact: Artifact,
-        outcome: StepOutcome<'_>,
-        _costs: ArtifactCosts,
-    ) {
+    fn step(&self, _card: usize, draft: &CardDraft, artifact: Artifact, outcome: StepOutcome<'_>) {
+        let term = draft.term();
         let label = human_label(artifact);
         match outcome {
             StepOutcome::Ready { cached: true } => eprintln!("  {term} · {label} (cached)"),
@@ -366,15 +351,7 @@ pub(super) struct QuietReporter;
 impl Reporter for QuietReporter {
     fn generating(&self, _cards: usize) {}
 
-    fn step(
-        &self,
-        _card: usize,
-        _term: &str,
-        _artifact: Artifact,
-        _outcome: StepOutcome,
-        _costs: ArtifactCosts,
-    ) {
-    }
+    fn step(&self, _card: usize, _draft: &CardDraft, _artifact: Artifact, _outcome: StepOutcome) {}
 
     fn publishing(&self) {}
 
@@ -432,14 +409,8 @@ impl Reporter for JsonReporter {
         stream(&Event::Generating { cards });
     }
 
-    fn step(
-        &self,
-        _card: usize,
-        term: &str,
-        artifact: Artifact,
-        outcome: StepOutcome<'_>,
-        _costs: ArtifactCosts,
-    ) {
+    fn step(&self, _card: usize, draft: &CardDraft, artifact: Artifact, outcome: StepOutcome<'_>) {
+        let term = draft.term();
         let (status, retry, retries, fault) = match outcome {
             StepOutcome::Ready { cached: true } => ("cache", None, None, None),
             StepOutcome::Ready { cached: false } => ("ok", None, None, None),
@@ -567,16 +538,6 @@ mod tests {
             ArtifactAttempt::unmetered(Ok(local_file(draft.term(), "sound")))
         }
 
-        fn correct_card_in(
-            &self,
-            _slot: usize,
-            draft: &CardDraft,
-            comment: &str,
-            pair: &LanguagePair,
-        ) -> ArtifactAttempt<CardRevision> {
-            ArtifactAttempt::unmetered(self.correct_card(draft, comment, pair))
-        }
-
         fn store_card_meta(
             &self,
             _term: &str,
@@ -666,16 +627,6 @@ mod tests {
             LocalWorkflow.generate_sound_in(slot, draft)
         }
 
-        fn correct_card_in(
-            &self,
-            _slot: usize,
-            draft: &CardDraft,
-            comment: &str,
-            pair: &LanguagePair,
-        ) -> ArtifactAttempt<CardRevision> {
-            ArtifactAttempt::unmetered(self.correct_card(draft, comment, pair))
-        }
-
         fn store_card_meta(
             &self,
             term: &str,
@@ -715,14 +666,13 @@ mod tests {
         fn step(
             &self,
             _card: usize,
-            term: &str,
+            draft: &CardDraft,
             artifact: Artifact,
             outcome: StepOutcome<'_>,
-            _costs: ArtifactCosts,
         ) {
             self.steps
                 .borrow_mut()
-                .push(format!("{term}:{}", artifact.label()));
+                .push(format!("{}:{}", draft.term(), artifact.label()));
             let fault = match outcome {
                 StepOutcome::Retry { fault, .. } | StepOutcome::Failed { fault, .. } => fault,
                 StepOutcome::Ready { .. } => None,

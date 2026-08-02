@@ -119,6 +119,14 @@ where
             .generate_meta_in(slot, term, understanding, pair)
     }
 
+    fn generate_draft_meta_in(
+        &self,
+        slot: usize,
+        draft: &CardDraft,
+    ) -> ArtifactAttempt<(CardRevision, Option<ArtifactFile>)> {
+        self.production.generate_draft_meta_in(slot, draft)
+    }
+
     fn generate_scene_in(&self, slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
         self.production.generate_scene_in(slot, draft)
     }
@@ -129,16 +137,6 @@ where
 
     fn generate_sound_in(&self, slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
         self.production.generate_sound_in(slot, draft)
-    }
-
-    fn correct_card_in(
-        &self,
-        slot: usize,
-        draft: &CardDraft,
-        comment: &str,
-        pair: &LanguagePair,
-    ) -> ArtifactAttempt<CardRevision> {
-        self.production.correct_card_in(slot, draft, comment, pair)
     }
 
     fn store_card_meta(

@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.6.0
+Release: 1.7.0
 
 Overview
 
@@ -21,7 +21,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.6.0/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.7.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -208,7 +208,17 @@ Calls Gemini synchronously to add senses, then resets the session to
 Commits the curated plan. Detached generation returns immediately with `phase`
 set to `generating`; poll `status`. Waiting blocks until terminal state, streams
 NDJSON events on stderr, and returns the terminal document. If every card fails,
-it exits 1 with the error envelope; if nothing is selected, it exits 2.
+it exits 1 with the error envelope; if nothing is selected, it exits 2. A
+session carrying sentence edits staged by the interactive TUI refuses before
+spawning a worker: open that session and press `Ctrl+G` to activate its pending
+batch.
+
+Fresh card metadata first writes the natural sentence required by the approved
+understanding and only then assigns its descriptive register, type, and
+lowercase `a1`–`c2` level. Initial generation does not target a CEFR band. A
+level becomes a rewrite constraint only after the user explicitly changes it;
+when an exact band would make the accepted use unnatural, the closest natural
+result marks `level` as approximate.
 
 `status`
 
@@ -229,9 +239,13 @@ cards JSON.
 
 `regenerate`
 
-Drops the targeted committed artifacts, rebuilds them, and republishes. With a
-rewrite note, Gemini first rewrites that card; the worker then follows the same
-lifecycle as `generate`.
+Drops the targeted committed artifacts, rebuilds them, and republishes. Every
+full-card reroll, including `--card T --note "..."`, carries the complete
+current sentence-label preset. Every unedited axis must keep its current value
+exactly. Only an explicitly changed or already pinned axis may differ from its
+requested value, and that response must mark the axis `approx`. With a rewrite
+note, Gemini also applies the note while rewriting that card; the worker then
+follows the same lifecycle as `generate`.
 
 `cancel`
 

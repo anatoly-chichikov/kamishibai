@@ -13,7 +13,7 @@ use ratatui::layout::Rect;
 use crate::languages::catalog;
 
 use super::app::App;
-use super::links::{language_chip_at, link_at, welcome_control_at};
+use super::links::{language_chip_at, link_at, sentence_label_event_at, welcome_control_at};
 use super::screen::ModalKind;
 use super::screens::modals::picker_geometry;
 
@@ -85,6 +85,7 @@ fn clickable_at(app: &App, terminal: Rect, column: u16, row: u16) -> bool {
     }
     language_chip_at(app, terminal, column, row)
         || welcome_control_at(app, terminal, column, row).is_some()
+        || sentence_label_event_at(app, terminal, column, row).is_some()
         || link_at(app, terminal, column, row).is_some()
 }
 
@@ -196,12 +197,12 @@ mod tests {
             .cards_started(vec![card("whilst")]);
         assert_eq!(
             (
-                mouse_pointer_at(&app, terminal(), 9, 4),
-                mouse_pointer_at(&app, terminal(), 10, 4),
-                mouse_pointer_at(&app, terminal(), 18, 4),
-                mouse_pointer_at(&app, terminal(), 19, 4),
-                mouse_pointer_at(&app, terminal(), 33, 4),
-                mouse_pointer_at(&app, terminal(), 7, 4),
+                mouse_pointer_at(&app, terminal(), 9, 5),
+                mouse_pointer_at(&app, terminal(), 10, 5),
+                mouse_pointer_at(&app, terminal(), 18, 5),
+                mouse_pointer_at(&app, terminal(), 19, 5),
+                mouse_pointer_at(&app, terminal(), 33, 5),
+                mouse_pointer_at(&app, terminal(), 7, 5),
                 mouse_pointer_at(&app, terminal(), 10, 3),
             ),
             (
@@ -211,9 +212,9 @@ mod tests {
                 MousePointer::Arrow,
                 MousePointer::Arrow,
                 MousePointer::Arrow,
-                MousePointer::Arrow,
+                MousePointer::Hand,
             ),
-            "file-backed artifact rows must use the hand only on the visible file name and arrow outside it"
+            "file-backed rows and the legacy tuning head must use the hand while inert cells keep the arrow"
         );
     }
 

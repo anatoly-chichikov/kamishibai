@@ -477,6 +477,7 @@ mod tests {
             term: String::from("canard"),
             understanding: String::from("a duck"),
             costs: crate::session::ArtifactCosts::default(),
+            rewrite: None,
         }];
         let cell = CardCell::new(
             home.path(),

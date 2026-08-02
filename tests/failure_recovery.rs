@@ -113,35 +113,33 @@ fn your_cards_surfaces_failure_banner_when_any_card_fails_terminally() {
 }
 
 #[test]
-fn ctrl_g_emits_regenerate_current_when_any_card_failed_terminally() {
+fn ctrl_g_emits_regenerate_cards_when_any_card_failed_terminally() {
     let app = seeded();
     let (_, side) = transit(app, AppEvent::Generate);
     assert_eq!(
         side,
-        Side::RegenerateCurrent,
+        Side::RegenerateCards,
         "Ctrl+G on Your cards must regenerate the current card state even when failures are visible"
     );
 }
 
 #[test]
-fn lowercase_r_opens_change_this_card_even_with_failures_present() {
+fn lowercase_r_is_inert_even_with_failures_present() {
     let app = seeded();
-    let (after, _) = transit(app, AppEvent::KeyChar('r'));
-    assert_eq!(
-        after.modal(),
-        Some(kamishibai::tui::ModalKind::ChangeThisCard),
-        "lowercase r must open Change this card even when a failure banner is visible"
+    let (after, side) = transit(app, AppEvent::KeyChar('r'));
+    assert!(
+        !after.card_expanded() && after.sentence_editor().is_none() && side == Side::None,
+        "lowercase r opened the sentence editor or emitted an action after the shortcut was removed"
     );
 }
 
 #[test]
-fn uppercase_r_opens_change_this_card_even_with_failures_present() {
+fn uppercase_r_is_inert_even_with_failures_present() {
     let app = seeded();
-    let (after, _) = transit(app, AppEvent::KeyChar('R'));
-    assert_eq!(
-        after.modal(),
-        Some(kamishibai::tui::ModalKind::ChangeThisCard),
-        "uppercase R must still open Change this card even when a failure banner is visible"
+    let (after, side) = transit(app, AppEvent::KeyChar('R'));
+    assert!(
+        !after.card_expanded() && after.sentence_editor().is_none() && side == Side::None,
+        "uppercase R opened the sentence editor or emitted an action after the shortcut was removed"
     );
 }
 

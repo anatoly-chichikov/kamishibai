@@ -429,8 +429,6 @@ fn metered_generation_gemini() -> (String, Arc<GenerationCalls>) {
                     serde_json::json!({"inlineData": {"data": "AAA="}})
                 } else {
                     serde_json::json!({"text": serde_json::json!({
-                        "term": "canard",
-                        "understanding": "a duck",
                         "pronunciation": "ka.naʁ",
                         "transcription": "lə ka.naʁ",
                         "meaning": "a duck",
@@ -439,7 +437,13 @@ fn metered_generation_gemini() -> (String, Arc<GenerationCalls>) {
                         "source_highlight": "duck",
                         "source_hint": "a water bird",
                         "source_context": "animals and nature",
-                        "target_sentence": "Le canard a nagé dans l'étang."
+                        "target_sentence": "Le canard a nagé dans l'étang.",
+                        "labels": {
+                            "register": "neutral",
+                            "level": "b1",
+                            "type": "statement",
+                            "approx": []
+                        }
                     }).to_string()})
                 };
                 let body = serde_json::json!({
@@ -993,6 +997,74 @@ fn regenerate_before_generate_is_refused() {
         value["phase"].as_str(),
         Some("understood"),
         "regenerate before any generate must be refused, leaving the session understood"
+    );
+}
+
+#[test]
+fn generate_refuses_a_persisted_staged_rewrite_before_worker_or_provider_work() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "staged", CARDS_JSON);
+    let session_path = cache.path().join("sessions/staged/session.json");
+    let mut session: serde_json::Value = serde_json::from_slice(
+        fs::read(&session_path)
+            .expect("the staged session must read")
+            .as_slice(),
+    )
+    .expect("the staged session must decode");
+    session["drafts"] = serde_json::json!([{
+        "term": "canard",
+        "understanding": "a duck",
+        "rewrite": {
+            "previous": null,
+            "selection": {
+                "values": {
+                    "register": "formal",
+                    "level": null,
+                    "kind": null
+                },
+                "pinned": ["register"],
+                "approx": []
+            },
+            "note": "make it formal",
+            "started": false
+        }
+    }]);
+    let staged = serde_json::to_vec_pretty(&session).expect("the staged session must encode");
+    fs::write(&session_path, &staged).expect("the staged session must persist");
+    let (gemini, calls) = metered_bulk_correction_gemini();
+    let output = cli_at(cache.path(), gemini.as_str())
+        .args(["generate", "staged"])
+        .output()
+        .expect("the staged generate command must exit");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let preserved = fs::read(&session_path).expect("the refused session must remain readable");
+    let record: serde_json::Value =
+        serde_json::from_slice(&preserved).expect("the refused session must remain valid");
+    assert_eq!(
+        (
+            output.status.code(),
+            stderr.contains("staged card changes waiting for Ctrl+G"),
+            stderr.contains("kamishibai open staged"),
+            stderr.contains("press Ctrl+G"),
+            preserved == staged,
+            calls.load(Ordering::SeqCst),
+            record["phase"].as_str(),
+            record["worker"].is_null(),
+            record["drafts"][0]["rewrite"]["started"].as_bool(),
+        ),
+        (
+            Some(2),
+            true,
+            true,
+            true,
+            true,
+            0,
+            Some("understood"),
+            true,
+            Some(false),
+        ),
+        "generate crossed the staged-rewrite preflight or mutated its pending session"
     );
 }
 

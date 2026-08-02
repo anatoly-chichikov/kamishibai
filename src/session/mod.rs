@@ -8,6 +8,7 @@ mod cost;
 mod detection;
 mod draft;
 mod engine;
+mod labels;
 mod pair;
 mod pass;
 mod state;
@@ -27,9 +28,13 @@ pub use cost::{CostRecord, GenerationCost};
 pub use detection::{LearningDetection, LearningGuess, ScriptDetection};
 pub use draft::{
     Artifact, ArtifactAttempt, ArtifactCosts, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft,
-    CardMeta,
+    CardMeta, CardRewrite,
 };
 pub use engine::{EngineEvent, SessionEngine};
+pub use labels::{
+    AxisSet, Register, SentenceAxis, SentenceKind, SentenceLabelSelection, SentenceLabels,
+    SentenceLevel,
+};
 pub use pair::LanguagePair;
 pub use pass::{CardRevision, SenseCorrection, Understood};
 pub use state::SessionState;

@@ -526,11 +526,11 @@ fn off_language_rows_ignore_enter_and_change_but_can_be_dropped() {
             false,
         )]);
     let after_enter = transit(app.clone(), AppEvent::KeyEnter).0;
-    let after_change = transit(app.clone(), AppEvent::RequestChange).0;
+    let after_r = transit(app.clone(), AppEvent::KeyChar('R')).0;
     let after_drop = transit(app, AppEvent::KeyChar('D')).0;
     assert!(
         after_enter.modal().is_none()
-            && after_change.modal().is_none()
+            && after_r.modal().is_none()
             && after_drop.candidates().is_empty(),
         "off-language rows must ignore Enter/R and still allow D to drop them"
     );

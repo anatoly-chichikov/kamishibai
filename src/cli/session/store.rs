@@ -33,7 +33,7 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::generation::artifact_cache::Cache;
 use crate::runtime::locations::{SystemContext, cache_root};
-use crate::session::{ArtifactCosts, CandidateRecord};
+use crate::session::{ArtifactCosts, CandidateRecord, CardRewrite};
 
 use super::cost_journal::SessionCostJournal;
 use super::liveness;
@@ -78,6 +78,8 @@ pub(in crate::cli) struct DraftRecord {
     pub understanding: String,
     #[serde(default, skip_serializing_if = "ArtifactCosts::is_empty")]
     pub costs: ArtifactCosts,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewrite: Option<CardRewrite>,
 }
 
 /// The last artifact the worker reported working on (advisory heartbeat).
@@ -382,6 +384,7 @@ mod tests {
             term: String::from("canard"),
             understanding: String::from("a duck"),
             costs: ArtifactCosts::default(),
+            rewrite: None,
         }];
         record
     }

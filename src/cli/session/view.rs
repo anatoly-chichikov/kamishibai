@@ -57,6 +57,22 @@ pub(super) fn probe_artifacts(
     ]
 }
 
+fn probe_draft(cache_root: &Path, pair: &LanguagePair, draft: &DraftRecord) -> [bool; 4] {
+    if draft
+        .rewrite
+        .as_ref()
+        .is_some_and(crate::session::CardRewrite::started)
+    {
+        return [false; 4];
+    }
+    probe_artifacts(
+        cache_root,
+        pair,
+        draft.term.as_str(),
+        draft.understanding.as_str(),
+    )
+}
+
 /// Probe every committed draft against the cache, in plan order.
 pub(super) fn cards(record: &SessionRecord, cache_root: &Path) -> Vec<CardView> {
     let pair = pair_of(record);
@@ -64,8 +80,7 @@ pub(super) fn cards(record: &SessionRecord, cache_root: &Path) -> Vec<CardView> 
         .drafts
         .iter()
         .map(|draft| {
-            let [meta, sound, scene, picture] =
-                probe_artifacts(cache_root, &pair, &draft.term, &draft.understanding);
+            let [meta, sound, scene, picture] = probe_draft(cache_root, &pair, draft);
             CardView {
                 term: draft.term.clone(),
                 understanding: draft.understanding.clone(),
@@ -120,7 +135,7 @@ pub(super) fn incomplete_drafts<'a>(
         .drafts
         .iter()
         .filter(|draft| {
-            probe_artifacts(cache_root, &pair, &draft.term, &draft.understanding)
+            probe_draft(cache_root, &pair, draft)
                 .iter()
                 .any(|present| !present)
         })
@@ -412,7 +427,9 @@ mod tests {
 
     use super::*;
     use crate::generation::artifact_cache::{META_FILE, SCENE_FILE};
-    use crate::session::{CardCell, CardMeta, CardMetaCache};
+    use crate::session::{
+        CardCell, CardDraft, CardMeta, CardMetaCache, CardRewrite, SentenceLabelSelection,
+    };
 
     fn store_meta(home: &TempDir) {
         let meta = CardMeta::new(
@@ -431,6 +448,34 @@ mod tests {
             .expect("valid meta fixture must be stored");
     }
 
+    fn store_artifacts(home: &TempDir) {
+        store_meta(home);
+        let pair = LanguagePair::new("fr", "en");
+        let cache = CardCell::new(home.path(), &pair, "canard", "a duck").cache();
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        fs::write(
+            cache.filepath(VOICE_FILE).expect("voice path must resolve"),
+            b"x",
+        )
+        .expect("voice written");
+        fs::write(
+            visual
+                .filepath(SCENE_FILE)
+                .expect("scene path must resolve"),
+            include_bytes!("../../../tests/fixtures/production-scene.json"),
+        )
+        .expect("scene written");
+        fs::write(
+            visual
+                .filepath(ILLUSTRATION_FILE)
+                .expect("picture path must resolve"),
+            b"x",
+        )
+        .expect("picture written");
+    }
+
     fn record() -> SessionRecord {
         let mut record = SessionRecord::understood(
             String::from("fr-1"),
@@ -447,6 +492,7 @@ mod tests {
             term: String::from("canard"),
             understanding: String::from("a duck"),
             costs: crate::session::ArtifactCosts::default(),
+            rewrite: None,
         }];
         record
     }
@@ -548,6 +594,39 @@ mod tests {
         assert!(
             status.contains("canard meaning · audio · scene ✓ picture ✓"),
             "status must advertise visual artifacts from the current policy revision"
+        );
+    }
+
+    #[test]
+    fn an_activated_rewrite_hides_stale_artifacts_and_remains_retryable() {
+        let home = TempDir::new().expect("tempdir must be created");
+        store_artifacts(&home);
+        let mut record = record();
+        record.drafts[0].rewrite =
+            Some(CardRewrite::new(None, SentenceLabelSelection::empty(), ""));
+        let projected = cards(&record, home.path());
+        let incomplete = incomplete_drafts(&record, home.path());
+        assert_eq!(
+            (projected[0].ready(), incomplete.len()),
+            (false, 1),
+            "a queued rewrite exposed stale readiness or disappeared from failed retry"
+        );
+    }
+
+    #[test]
+    fn a_staged_rewrite_preserves_cached_readiness_until_batch_start() {
+        let home = TempDir::new().expect("tempdir must be created");
+        store_artifacts(&home);
+        let staged = CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en"))
+            .staging_rewrite(SentenceLabelSelection::empty(), "make it formal");
+        let mut record = record();
+        record.drafts[0].rewrite = staged.rewrite().cloned();
+        let projected = cards(&record, home.path());
+        let incomplete = incomplete_drafts(&record, home.path());
+        assert_eq!(
+            (projected[0].ready(), incomplete.len()),
+            (true, 0),
+            "a staged rewrite hid current cache readiness before batch activation"
         );
     }
 

@@ -3,10 +3,11 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 
 use super::artifact_file;
 use super::cost_accounting::CostAccounting;
+use super::invalidate_card;
 use crate::gemini::GeminiAccess;
 use crate::generation::artifact_cache::{
     Cache, ROOT_STAGE_LOCK_TIMEOUT, RootStage, VOICE_COST_FILE, VOICE_FILE,
@@ -103,6 +104,43 @@ impl MetadataProduction {
         }
     }
 
+    /// Rewrite and replace one draft through the metadata artifact retry boundary.
+    pub(super) fn rewrite(
+        &self,
+        draft: &CardDraft,
+        slot: usize,
+    ) -> ArtifactAttempt<(CardRevision, Option<ArtifactFile>)> {
+        let Some(rewrite) = draft.rewrite() else {
+            return ArtifactAttempt::unmetered(Err(anyhow!(
+                "metadata rewrite requires a queued card rewrite"
+            )));
+        };
+        let client = match self.access.client() {
+            Ok(client) => client,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
+        let cache = CardCell::new(
+            self.cache.clone(),
+            draft.pair(),
+            draft.term(),
+            draft.understanding(),
+        )
+        .cache();
+        let costs = self.costs.recorder(cache, Artifact::Meta, Some(slot));
+        let result = client
+            .correct_card_observed(draft, rewrite.note(), draft.pair(), |cost| {
+                costs.push_correction(cost)
+            })
+            .and_then(|revision| {
+                self.replace(draft, &revision)
+                    .map(|file| (revision, Some(file)))
+            });
+        match costs.current(false) {
+            Ok(delta) => ArtifactAttempt::new(result, delta),
+            Err(error) => ArtifactAttempt::unmetered(Err(error)),
+        }
+    }
+
     /// Persist supplied metadata under the stable card identity.
     pub(super) fn store(
         &self,
@@ -137,6 +175,23 @@ impl MetadataProduction {
         }
         let (filename, path, cached) = self.meta_cache().store(term, understanding, pair, meta)?;
         Ok(artifact_file(filename, path, cached, None))
+    }
+
+    fn replace(&self, draft: &CardDraft, revision: &CardRevision) -> Result<ArtifactFile> {
+        invalidate_card(
+            self.cache.as_path(),
+            draft.pair(),
+            draft.term(),
+            draft.understanding(),
+            false,
+            true,
+        )?;
+        self.store(
+            revision.term(),
+            revision.understanding(),
+            draft.pair(),
+            revision.meta(),
+        )
     }
 
     fn meta_cache(&self) -> CardMetaCache {

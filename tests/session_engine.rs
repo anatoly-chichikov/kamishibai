@@ -7,8 +7,9 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use kamishibai::session::{
-    Artifact, ArtifactAttempt, ArtifactFile, CardDraft, CardMeta, EngineEvent, GenerationCost,
-    LanguagePair, SessionEngine,
+    Artifact, ArtifactAttempt, ArtifactFile, ArtifactSlot, AxisSet, CardArtifacts, CardDraft,
+    CardMeta, CardRevision, EngineEvent, GenerationCost, LanguagePair, Register, SentenceAxis,
+    SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel, SessionEngine,
 };
 
 fn draft(term: &str) -> CardDraft {
@@ -30,6 +31,25 @@ fn meta_for(term: &str) -> CardMeta {
         format!("hint for {term}"),
         format!("context for {term}"),
         format!("Example with {term}."),
+    )
+}
+
+fn labeled_meta_for(term: &str) -> CardMeta {
+    meta_for(term).with_sentence_labels(SentenceLabels::new(
+        Register::Neutral,
+        SentenceLevel::B1,
+        SentenceKind::Statement,
+        AxisSet::default(),
+        AxisSet::default(),
+    ))
+}
+
+fn ready_artifacts() -> CardArtifacts {
+    CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        ArtifactSlot::fresh(Artifact::Picture).succeeded(),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
     )
 }
 
@@ -258,5 +278,157 @@ fn metered_meta_failure_keeps_its_cumulative_cost() {
         engine.drafts()[0].artifacts().meta().cost(),
         Some(GenerationCost::from_nanos(8_000_000)),
         "meta retry accounting vanished at the engine boundary"
+    );
+}
+
+#[test]
+fn staged_rewrite_preserves_current_card_until_batch_start() {
+    let current = draft("whilst")
+        .with_meta(labeled_meta_for("whilst"), None)
+        .with_artifacts(ready_artifacts());
+    let selection = SentenceLabelSelection::from_labels(
+        current
+            .meta()
+            .and_then(CardMeta::sentence_labels)
+            .expect("labeled metadata must expose its baseline"),
+    )
+    .choosing(SentenceAxis::Register, 2);
+    let staged = current.staging_rewrite(selection, "make it official");
+    let started = staged.clone().starting_rewrite();
+    assert_eq!(
+        (
+            staged.meta().map(CardMeta::target_sentence),
+            staged.artifacts().all_ready(),
+            staged
+                .rewrite()
+                .and_then(|rewrite| rewrite.previous())
+                .map(CardMeta::target_sentence),
+            started.meta().is_none(),
+            started.artifacts().meta().complete(),
+            started.artifacts().sound().complete(),
+            started.artifacts().scene().complete(),
+            started.artifacts().picture().complete(),
+            started.rewrite().is_some(),
+        ),
+        (
+            Some("Example with whilst."),
+            true,
+            Some("Example with whilst."),
+            true,
+            false,
+            false,
+            false,
+            false,
+            true,
+        ),
+        "staging invalidated the current card early or batch start failed to enqueue its full rewrite"
+    );
+}
+
+#[test]
+fn returning_to_baseline_with_a_blank_note_removes_the_staged_rewrite() {
+    let current = draft("whilst")
+        .with_meta(
+            meta_for("whilst").with_sentence_labels(SentenceLabels::new(
+                Register::Neutral,
+                SentenceLevel::B1,
+                SentenceKind::Statement,
+                AxisSet::from_axes([SentenceAxis::Register]),
+                AxisSet::from_axes([SentenceAxis::Register]),
+            )),
+            None,
+        )
+        .with_artifacts(ready_artifacts());
+    let baseline = SentenceLabelSelection::from_labels(
+        current
+            .meta()
+            .and_then(CardMeta::sentence_labels)
+            .expect("labeled metadata must expose its baseline"),
+    );
+    let changed = baseline.choosing(SentenceAxis::Register, 2);
+    let staged = current.staging_rewrite(changed, "make it official");
+    let same_token = staged
+        .clone()
+        .staging_rewrite(baseline.choosing(SentenceAxis::Register, 0), " \n ");
+    let restored = same_token.clone().staging_rewrite(baseline.clone(), " \n ");
+    assert_eq!(
+        (
+            same_token.rewrite().is_some(),
+            same_token
+                .rewrite()
+                .map(|rewrite| rewrite.selection().approx().is_empty()),
+            restored.rewrite(),
+            restored.meta().map(CardMeta::target_sentence),
+            restored.artifacts().all_ready(),
+        ),
+        (true, Some(true), None, Some("Example with whilst."), true),
+        "auto-unstage ignored baseline pin state or failed after full label restoration"
+    );
+}
+
+#[test]
+fn staged_rewrite_holds_a_ready_engine_until_batch_start() {
+    let staged = draft("whilst")
+        .with_meta(labeled_meta_for("whilst"), None)
+        .with_artifacts(ready_artifacts())
+        .staging_rewrite(SentenceLabelSelection::default(), "make it official");
+    let engine = SessionEngine::start(vec![staged]);
+    assert_eq!(
+        (engine.next_target(), engine.batch_state()),
+        (None, None),
+        "a staged rewrite let the engine publish before Ctrl+G activated the batch"
+    );
+}
+
+#[test]
+fn restoring_a_legacy_axis_can_return_the_selection_to_none() {
+    let baseline = SentenceLabelSelection::empty();
+    let changed = baseline.choosing(SentenceAxis::Register, 2);
+    let restored = changed.restoring(SentenceAxis::Register, &baseline);
+    assert_eq!(
+        (
+            restored.token(SentenceAxis::Register),
+            restored.pinned().contains(SentenceAxis::Register),
+            restored.approx().contains(SentenceAxis::Register),
+        ),
+        (None, false, false),
+        "legacy axis restoration retained a value, pin, or approximation"
+    );
+}
+
+#[test]
+fn revision_meta_success_replaces_identity_and_clears_the_queued_rewrite() {
+    let queued = draft("whilst")
+        .with_meta(meta_for("whilst"), None)
+        .staging_rewrite(SentenceLabelSelection::default(), "make it shorter")
+        .starting_rewrite();
+    let mut engine = SessionEngine::start(vec![queued]);
+    let revision = CardRevision::new(
+        "while",
+        "during the time that, in a shorter form",
+        meta_for("while"),
+    );
+    let event =
+        engine.applied_revision_attempt(0, ArtifactAttempt::unmetered(Ok((revision, None))));
+    let revised = &engine.drafts()[0];
+    assert_eq!(
+        (
+            event,
+            revised.term(),
+            revised.understanding(),
+            revised.rewrite(),
+            revised.artifacts().meta().ready(),
+        ),
+        (
+            EngineEvent::ArtifactReady {
+                card: 0,
+                artifact: Artifact::Meta,
+            },
+            "while",
+            "during the time that, in a shorter form",
+            None,
+            true,
+        ),
+        "revision meta success kept stale identity, rewrite state, or pending metadata"
     );
 }

@@ -17,6 +17,7 @@ pub mod common;
 pub mod done;
 pub mod error;
 pub mod modals;
+pub mod sentence_labels;
 pub mod welcome;
 pub mod what_i_understood;
 pub mod your_cards;
