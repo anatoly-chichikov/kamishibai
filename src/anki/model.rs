@@ -21,6 +21,9 @@ const CARD_STYLE: &str = r#".card {
   --kamishibai-context: #aaa;
   --kamishibai-context-background: rgba(255, 255, 255, 0.05);
 }
+.card:not(.nightMode):not(.night_mode) img {
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14);
+}
 .kamishibai-hint {
   color: var(--kamishibai-hint);
 }
@@ -203,6 +206,16 @@ mod tests {
         assert!(
             CARD_STYLE.contains(dark),
             "the theme stylesheet no longer preserves the published dark-mode palette"
+        );
+    }
+
+    /// The illustration outline separates its white matte only from a light card.
+    #[test]
+    fn the_illustration_outline_only_separates_its_white_matte_from_a_light_card() {
+        let light = ".card:not(.nightMode):not(.night_mode) img {\n  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14);\n}";
+        assert!(
+            CARD_STYLE.contains(light),
+            "the illustration outline no longer belongs exclusively to the light theme"
         );
     }
 
