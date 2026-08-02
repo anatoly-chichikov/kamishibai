@@ -194,20 +194,21 @@ From the repo root:
    `live/02a-nav.png`, `live/03-senses.png`, `live/03b-senses-toggled.png`,
    `live/04-your-cards.png`, `live/08-done.png`, `live/09-card-adjusting.png`,
    `live/09a-level-raised.png`, `live/09b-card-regenerating.png`,
-   `live/09-card-open.png`, `live/10-card-scroll-end.png`, and the full raw
-   `live/capture.gif`.
+   `live/09c-card-regenerated.png`, `live/09-card-open.png`,
+   `live/10-card-scroll-end.png`, and the full raw `live/capture.gif`.
 
 5. **Stash the raw recording** before any post-processing — keep it around as `/tmp/raw.gif`
    so you can redo the slice/encode pass without re-running VHS or Gemini. If an interaction
-   is recorded separately, preserve that complete take as `/tmp/adjust-raw.gif`; windows in
-   `timings.conf` can name `main` or `adjust`. The README payload is built on top of these raws.
+   is recorded separately, preserve complete takes as `/tmp/adjust-raw.gif` and
+   `/tmp/nav-adjust-raw.gif`; windows in `timings.conf` can name `main`, `adjust`, or `nav`.
+   The README payload is built on top of these raws.
 
    ```bash
    cp live/capture.gif /tmp/raw.gif
    ```
 
-   Do NOT delete either raw until you've reviewed the final gif and decided you don't need
-   another timing iteration.
+   Do NOT delete any raw until you've reviewed the final gif and decided you don't need another
+   timing iteration.
 
 6. **Detect scene transitions** automatically — never assume the time windows from a previous
    recording apply. Gemini latency varies wildly between runs (this session swung between
@@ -250,10 +251,14 @@ From the repo root:
    - `0s → first_busy`: A typing (workflow, 1.5 s output)
    - `first_busy → candidates_appear`: B busy understanding (indicator-wait, 1.2 s output)
    - candidates window: C `02-what-i-understood.png` static splice (read, 1–3 s output)
-   - `building_starts → all_done`: D short 25 fps generation milestones
+   - `building_starts → all_done`: D 0.2 s real-time windows around each visible redraw,
+     including retry ticks, until the fifth card fills the viewport; then one 0.6 s publish
+     transition jumps to the completed batch
    - first `all_done`: E navigate to `chouette`, open the editor, focus level, and move `a2 → b1`
-   - `1 pending → all_done`: F `Ctrl+G`, short 25 fps one-card regeneration milestones
-   - final `all_done → end`: G reopen the rewritten `b1` card and hold the finale
+   - `1 pending → all_done`: F hold the struck sentence, press `Ctrl+G`, then show each
+     one-card regeneration artifact for one consistent 0.6 s beat
+   - final `all_done → end`: G hold the rewritten collapsed `b1` card; the gif does not
+     reopen the editor after regeneration
 
    New states (e.g. an extra confirmation step, a style picker) will surface as additional
    transitions — slot them into a type by inspecting the cut frame, don't drop them.
@@ -263,24 +268,26 @@ From the repo root:
    green light, then encode. Sample sketch:
 
    ```
-   Section             Type             Source                 fps     Output
-   A typing            workflow         main 0.24 → 1.80 s     25      1.56 s
-   B review            read (splice)    static PNG             —       1.40 s
-   C first generation  indicator-wait   four short windows     25      2.52 s
-   D raise level       workflow         adjust 13.84 → 17.32   25      3.48 s
-   E regenerate        indicator-wait   five short windows     25      2.08 s
-   F reopen result     workflow         adjust 42.40 → 45.52   25      3.12 s
-   Total                                                               19.00 s
+   Section             Type             Source                  fps     Output
+   A typing            workflow         main 0.24 → 1.92 s      25      1.68 s
+   B understand/review mixed            main + static PNG       25/—    2.40 s
+   C senses            workflow         main event windows      25      5.00 s
+   D first generation  indicator-wait   20 × 0.2 s + publish    25      4.60 s
+   E navigate + raise  workflow         nav event windows       25/—    5.36 s
+   F regenerate        indicator-wait   five 0.6 s windows      25      3.00 s
+   G result            fade             collapsed result PNG    —       3.24 s
+   Total                                                               25.28 s
    ```
 
 10. **Encode** once the plan is approved:
 
     ```bash
-    RAW=/tmp/raw.gif ADJUST_RAW=/tmp/adjust-raw.gif ./encode.sh
+    RAW=/tmp/raw.gif ADJUST_RAW=/tmp/adjust-raw.gif \
+      NAV_RAW=/tmp/nav-adjust-raw.gif ./encode.sh
     ```
 
     `encode.sh` prints the exact final duration and writes every section boundary to
-    `timings.timeline.txt`. Both raw recordings stay on disk for the next iteration.
+    `timings.timeline.txt`. All raw recordings stay on disk for the next iteration.
 
 ### Common pitfalls — read before recording
 
@@ -295,9 +302,9 @@ From the repo root:
 - **Never count transitions in advance.** New states get added to the flow over time —
   scene-detect surfaces them automatically; classify by inspecting `cut-NN.png`, don't drop
   unknown sections.
-- **Never delete `/tmp/raw.gif` or `/tmp/adjust-raw.gif` until you've decided you don't need
-  another slice pass.** Re-recording costs a few minutes of Gemini wall-clock; re-slicing is
-  local and preserves the original takes.
+- **Never delete `/tmp/raw.gif`, `/tmp/adjust-raw.gif`, or `/tmp/nav-adjust-raw.gif` until
+  you've decided you don't need another slice pass.** Re-recording costs a few minutes of
+  Gemini wall-clock; re-slicing is local and preserves the original takes.
 - **Don't try to "fix" an already-post-processed gif by duplicating its frames.** A
   derivative gif has already lost spinner sampling fidelity; you have to go back to the raw.
 
@@ -314,7 +321,8 @@ manga panels and interesting English glosses. The synthetic `examples/tui_states
 mirrors this EN→FR flow with the first four of those words. After the first complete build,
 the tape opens the simple `chouette` card, moves its level exactly one step from `a2` to `b1`,
 waits until the footer proves there is exactly `1 pending`, and presses `Ctrl+G`; this keeps
-the regeneration story scoped to one card.
+the regeneration story scoped to one card. The README gif ends on the rewritten collapsed
+card. The tape may continue afterward to capture the separate open-card screenshots.
 
 ### Synthetic and edge-case shots
 
@@ -353,7 +361,10 @@ widths whole tags may continue at the same tag-column on the `scene` and
 inline summary is hidden and the card head remains the mouse entry into tuning.
 Opening the card removes that compact summary and puts the already-open
 editor below all four artifact rows, separated from `picture` by exactly one
-blank row, before the expanded metadata and never to the artifacts' right.
+blank row, before the expanded metadata and never to the artifacts' right. If
+the focused editor block fits the viewport, opening it anchors the selected card
+head at the top of the body; shorter viewports instead scroll only far enough to
+keep the focused row visible.
 Unchanged tags use a gray background; explicitly changed or previously pinned
 tags use a white background with dark letters and no bold. An approximately
 fulfilled pinned tag keeps that white treatment and adds an `≈` prefix.

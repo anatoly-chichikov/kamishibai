@@ -436,7 +436,9 @@ impl App {
     /// Used after text edits and keyboard navigation so wheel-scrolled content
     /// follows the active text cursor, review candidate, or card selection.
     /// `body_width` is the body rect width in chars; passed through so the
-    /// `YourCards` snap math agrees with the renderer's wrapped head rows.
+    /// `YourCards` snap math agrees with the renderer's wrapped head rows. An
+    /// open card editor whose focused range fits anchors its card head at the
+    /// viewport top; smaller viewports retain the focused-row fallback.
     pub fn body_scroll_to_selection(mut self, viewport: u16, body_width: u16) -> Self {
         let Some((top, height)) = self.focused_body_range(body_width) else {
             return self;
@@ -446,7 +448,9 @@ impl App {
             .saturating_sub(viewport);
         let bottom = top.saturating_add(height);
         let mut next = self.body_scroll;
-        if top < next {
+        let anchor_editor =
+            self.screen == Screen::YourCards && self.cards.editor.is_some() && height <= viewport;
+        if anchor_editor || top < next {
             next = top;
         } else if bottom > next.saturating_add(viewport) {
             next = bottom.saturating_sub(viewport);

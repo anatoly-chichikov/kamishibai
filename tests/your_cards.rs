@@ -726,7 +726,39 @@ fn right_and_enter_open_the_editor_while_enter_inside_is_inert_and_escape_collap
 }
 
 #[test]
-fn expanding_a_card_scrolls_just_enough_to_reveal_the_editor_below_its_assets() {
+fn opening_an_editor_anchors_the_card_head_when_focused_content_fits() {
+    let terminal = Rect::new(0, 0, 120, 18);
+    let start = seeded(
+        ["one", "two", "three", "four", "five", "six"]
+            .into_iter()
+            .map(|term| draft(term, ready_artifacts()))
+            .collect(),
+    );
+    let viewport = scroll_viewport(&start, terminal);
+    let body_width = scroll_body_width(terminal);
+    let selected = (0..4).fold(start, |app, _| {
+        transit(app, AppEvent::NavNext)
+            .0
+            .body_scroll_to_selection(viewport, body_width)
+    });
+    let opened = transit(selected, AppEvent::KeyEnter)
+        .0
+        .body_scroll_to_selection(viewport, body_width);
+    let buffer = rendered_buffer_at(&opened, terminal.width, terminal.height);
+    let (_, card_row) = position_of(&buffer, "five");
+    assert_eq!(
+        (
+            card_row,
+            opened.card_expanded(),
+            opened.sentence_editor().is_some(),
+        ),
+        (3, true, true),
+        "an editor that fits opened with its card head stranded near the viewport bottom"
+    );
+}
+
+#[test]
+fn expanding_a_card_keeps_the_focused_editor_row_visible_when_it_cannot_fit() {
     let start = seeded(
         ["one", "two", "three", "four", "five", "six"]
             .into_iter()
@@ -736,12 +768,12 @@ fn expanding_a_card_scrolls_just_enough_to_reveal_the_editor_below_its_assets() 
     let selected = (0..5).fold(start, |app, _| {
         transit(app, AppEvent::NavNext)
             .0
-            .body_scroll_to_selection(8, 120)
+            .body_scroll_to_selection(6, 120)
     });
     let before = selected.body_scroll();
     let expanded = transit(selected, AppEvent::KeyEnter)
         .0
-        .body_scroll_to_selection(8, 120);
+        .body_scroll_to_selection(6, 120);
     assert_eq!(
         (
             expanded.body_scroll(),
@@ -749,7 +781,7 @@ fn expanding_a_card_scrolls_just_enough_to_reveal_the_editor_below_its_assets() 
             expanded.sentence_editor().is_some(),
         ),
         (before.saturating_add(2), true, true),
-        "expanding did not reveal the editor newly placed below the artifact block"
+        "an editor taller than the viewport did not retain focused-row scroll fallback"
     );
 }
 

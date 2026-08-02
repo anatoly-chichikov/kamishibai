@@ -48,6 +48,9 @@ Screenshot "live/01b-busy.png"
 
 Wait+Screen@2m /—/
 Sleep 2s
+# Keep the read-state and the following navigation on the same first row.
+Up
+Sleep 250ms
 Screenshot "live/02-what-i-understood.png"
 
 # smooth tick-tick navigation down to canard (row 3)
@@ -84,7 +87,7 @@ Sleep 1500ms
 Screenshot "live/08-done.png"
 
 # final beat: raise the simple chouette card by exactly one CEFR step, regenerate,
-# then reopen the result so the tune -> Ctrl+G -> changed card story is visible
+# capture the collapsed result for the gif, then reopen it for separate detail screenshots
 Down
 Sleep 650ms
 Down
@@ -113,6 +116,7 @@ Screenshot "live/09b-card-regenerating.png"
 
 Wait+Screen@15m /all done/
 Sleep 1500ms
+Screenshot "live/09c-card-regenerated.png"
 Enter
 Sleep 800ms
 Down
