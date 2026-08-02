@@ -10,6 +10,7 @@
     "3": "179104d071c6.jpg"
   },
   "model": {
+    "css": ".card {\n  --kamishibai-hint: #666;\n  --kamishibai-phonetics: #5f6368;\n  --kamishibai-term: #333;\n  --kamishibai-meaning: #555;\n  --kamishibai-importance: #666;\n  --kamishibai-context: #555;\n  --kamishibai-context-background: rgba(0, 0, 0, 0.045);\n}\n.card.nightMode,\n.card.night_mode {\n  --kamishibai-hint: #888;\n  --kamishibai-phonetics: #aaa;\n  --kamishibai-term: #ddd;\n  --kamishibai-meaning: #bbb;\n  --kamishibai-importance: #999;\n  --kamishibai-context: #aaa;\n  --kamishibai-context-background: rgba(255, 255, 255, 0.05);\n}\n.kamishibai-hint {\n  color: var(--kamishibai-hint);\n}\n.kamishibai-phonetics {\n  color: var(--kamishibai-phonetics);\n}\n.kamishibai-term {\n  color: var(--kamishibai-term);\n}\n.kamishibai-meaning {\n  color: var(--kamishibai-meaning);\n}\n.kamishibai-importance {\n  color: var(--kamishibai-importance);\n}\n.kamishibai-context {\n  color: var(--kamishibai-context);\n  background-color: var(--kamishibai-context-background);\n}",
     "fields": [
       "SourceSentence",
       "Term",
@@ -26,7 +27,7 @@
     "id": 2020582289,
     "name": "Kamishibai Vocabulary Model",
     "template": {
-      "afmt": "{{FrontSide}}<hr id=\"answer\"><div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;\">{{Audio}}<div style=\"font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;\">{{TargetSentence}}</div>{{#PronunciationAll}}<div style=\"font-size: 13px; color: #aaa; margin-top: 4px;\">{{PronunciationAll}}</div>{{/PronunciationAll}}<div style=\"font-size: 17px; margin-top: 15px;\"><strong style=\"color: #ddd;\">{{Term}}</strong> <span style=\"color: #aaa;\">{{Pronunciation}}</span></div><div style=\"font-size: 15px; color: #bbb; margin-top: 3px;\">{{Meaning}}</div><div style=\"font-size: 13px; color: #999; margin-top: 8px;\">{{Importance}}/10</div>{{#Context}}<div style=\"font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; text-align: left;\">{{Context}}</div>{{/Context}}</div>",
+      "afmt": "{{FrontSide}}<hr id=\"answer\"><div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;\">{{Audio}}<div style=\"font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;\">{{TargetSentence}}</div>{{#PronunciationAll}}<div class=\"kamishibai-phonetics\" style=\"font-size: 13px; margin-top: 4px;\">{{PronunciationAll}}</div>{{/PronunciationAll}}<div style=\"font-size: 17px; margin-top: 15px;\"><strong class=\"kamishibai-term\">{{Term}}</strong> <span class=\"kamishibai-phonetics\">{{Pronunciation}}</span></div><div class=\"kamishibai-meaning\" style=\"font-size: 15px; margin-top: 3px;\">{{Meaning}}</div><div class=\"kamishibai-importance\" style=\"font-size: 13px; margin-top: 8px;\">{{Importance}}/10</div>{{#Context}}<div class=\"kamishibai-context\" style=\"font-size: 14px; margin-top: 12px; padding: 10px; border-radius: 5px; text-align: left;\">{{Context}}</div>{{/Context}}</div>",
       "bafmt": "",
       "bfont": "",
       "bqfmt": "",
@@ -34,7 +35,7 @@
       "did": null,
       "name": "Card 1",
       "ord": 0,
-      "qfmt": "<div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;\">{{Illustration}}<div style=\"font-size: 20px; margin-top: 15px;\">{{SourceSentence}}</div>{{#Hint}}<div style=\"font-size: 14px; color: #888; margin-top: 8px; font-style: italic;\">{{Hint}}</div>{{/Hint}}</div>"
+      "qfmt": "<div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;\">{{Illustration}}<div style=\"font-size: 20px; margin-top: 15px;\">{{SourceSentence}}</div>{{#Hint}}<div class=\"kamishibai-hint\" style=\"font-size: 14px; margin-top: 8px; font-style: italic;\">{{Hint}}</div>{{/Hint}}</div>"
     }
   },
   "notes": [

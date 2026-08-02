@@ -115,6 +115,7 @@ fn manifest(path: &Path) -> Result<Value> {
         },
         "media": serde_json::from_str::<Value>(media.as_str())?,
         "model": {
+            "css": model["css"],
             "fields": model["flds"].as_array().expect("model fields must exist").iter().map(|item| item["name"].clone()).collect::<Vec<_>>(),
             "id": model["id"].as_str().expect("model id must exist").parse::<i64>().expect("model id must be numeric"),
             "name": model["name"],

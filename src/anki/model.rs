@@ -2,6 +2,44 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 const MODEL_NAME: &str = "Kamishibai Vocabulary Model";
+const CARD_STYLE: &str = r#".card {
+  --kamishibai-hint: #666;
+  --kamishibai-phonetics: #5f6368;
+  --kamishibai-term: #333;
+  --kamishibai-meaning: #555;
+  --kamishibai-importance: #666;
+  --kamishibai-context: #555;
+  --kamishibai-context-background: rgba(0, 0, 0, 0.045);
+}
+.card.nightMode,
+.card.night_mode {
+  --kamishibai-hint: #888;
+  --kamishibai-phonetics: #aaa;
+  --kamishibai-term: #ddd;
+  --kamishibai-meaning: #bbb;
+  --kamishibai-importance: #999;
+  --kamishibai-context: #aaa;
+  --kamishibai-context-background: rgba(255, 255, 255, 0.05);
+}
+.kamishibai-hint {
+  color: var(--kamishibai-hint);
+}
+.kamishibai-phonetics {
+  color: var(--kamishibai-phonetics);
+}
+.kamishibai-term {
+  color: var(--kamishibai-term);
+}
+.kamishibai-meaning {
+  color: var(--kamishibai-meaning);
+}
+.kamishibai-importance {
+  color: var(--kamishibai-importance);
+}
+.kamishibai-context {
+  color: var(--kamishibai-context);
+  background-color: var(--kamishibai-context-background);
+}"#;
 
 /// Derive a deterministic 31-bit identifier from one name.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,7 +92,7 @@ impl Model {
     /// Return the serialized Anki model representation.
     pub(crate) fn json(&self, timestamp: i64) -> Value {
         json!({
-            "css": "",
+            "css": CARD_STYLE,
             "did": Value::Null,
             "flds": self.fields.iter().enumerate().map(|(index, name)| {
                 json!({
@@ -130,7 +168,7 @@ impl CardModel {
             name: self.name.clone(),
             template: Template {
                 afmt: String::from(
-                    "{{FrontSide}}<hr id=\"answer\"><div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;\">{{Audio}}<div style=\"font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;\">{{TargetSentence}}</div>{{#PronunciationAll}}<div style=\"font-size: 13px; color: #aaa; margin-top: 4px;\">{{PronunciationAll}}</div>{{/PronunciationAll}}<div style=\"font-size: 17px; margin-top: 15px;\"><strong style=\"color: #ddd;\">{{Term}}</strong> <span style=\"color: #aaa;\">{{Pronunciation}}</span></div><div style=\"font-size: 15px; color: #bbb; margin-top: 3px;\">{{Meaning}}</div><div style=\"font-size: 13px; color: #999; margin-top: 8px;\">{{Importance}}/10</div>{{#Context}}<div style=\"font-size: 14px; color: #aaa; margin-top: 12px; padding: 10px; background-color: rgba(255,255,255,0.05); border-radius: 5px; text-align: left;\">{{Context}}</div>{{/Context}}</div>",
+                    "{{FrontSide}}<hr id=\"answer\"><div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;\">{{Audio}}<div style=\"font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;\">{{TargetSentence}}</div>{{#PronunciationAll}}<div class=\"kamishibai-phonetics\" style=\"font-size: 13px; margin-top: 4px;\">{{PronunciationAll}}</div>{{/PronunciationAll}}<div style=\"font-size: 17px; margin-top: 15px;\"><strong class=\"kamishibai-term\">{{Term}}</strong> <span class=\"kamishibai-phonetics\">{{Pronunciation}}</span></div><div class=\"kamishibai-meaning\" style=\"font-size: 15px; margin-top: 3px;\">{{Meaning}}</div><div class=\"kamishibai-importance\" style=\"font-size: 13px; margin-top: 8px;\">{{Importance}}/10</div>{{#Context}}<div class=\"kamishibai-context\" style=\"font-size: 14px; margin-top: 12px; padding: 10px; border-radius: 5px; text-align: left;\">{{Context}}</div>{{/Context}}</div>",
                 ),
                 bafmt: String::new(),
                 bfont: String::new(),
@@ -140,7 +178,7 @@ impl CardModel {
                 name: String::from("Card 1"),
                 ord: 0,
                 qfmt: String::from(
-                    "<div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;\">{{Illustration}}<div style=\"font-size: 20px; margin-top: 15px;\">{{SourceSentence}}</div>{{#Hint}}<div style=\"font-size: 14px; color: #888; margin-top: 8px; font-style: italic;\">{{Hint}}</div>{{/Hint}}</div>",
+                    "<div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;\">{{Illustration}}<div style=\"font-size: 20px; margin-top: 15px;\">{{SourceSentence}}</div>{{#Hint}}<div class=\"kamishibai-hint\" style=\"font-size: 14px; margin-top: 8px; font-style: italic;\">{{Hint}}</div>{{/Hint}}</div>",
                 ),
             },
         }
@@ -151,5 +189,34 @@ impl Default for CardModel {
     /// Return the frozen vocabulary card model builder.
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CARD_STYLE, CardModel};
+
+    /// The theme stylesheet keeps every published dark-mode color unchanged.
+    #[test]
+    fn the_theme_stylesheet_keeps_every_published_dark_mode_color_unchanged() {
+        let dark = ".card.nightMode,\n.card.night_mode {\n  --kamishibai-hint: #888;\n  --kamishibai-phonetics: #aaa;\n  --kamishibai-term: #ddd;\n  --kamishibai-meaning: #bbb;\n  --kamishibai-importance: #999;\n  --kamishibai-context: #aaa;\n  --kamishibai-context-background: rgba(255, 255, 255, 0.05);\n}";
+        assert!(
+            CARD_STYLE.contains(dark),
+            "the theme stylesheet no longer preserves the published dark-mode palette"
+        );
+    }
+
+    /// Theme-sensitive template content delegates every color to the stylesheet.
+    #[test]
+    fn theme_sensitive_template_content_delegates_every_color_to_the_stylesheet() {
+        let template = CardModel::new().model().template;
+        assert!(
+            !template.afmt.contains("color:")
+                && !template.afmt.contains("background-color:")
+                && !template.qfmt.contains("color:")
+                && template.afmt.contains("kamishibai-context")
+                && template.qfmt.contains("kamishibai-hint"),
+            "theme-sensitive template content still bypasses the stylesheet"
+        );
     }
 }
