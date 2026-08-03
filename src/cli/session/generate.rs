@@ -1,6 +1,7 @@
 //! The generation verbs: `generate` (commit the plan and run the worker) and
-//! `regenerate` (retry only missing stages with `--failed`, or fully re-roll one
-//! card with `--card`; with `--note`, Gemini first rewrites that card).
+//! `regenerate` (activate staged adjustments with `--pending`, retry only
+//! missing stages with `--failed`, or fully re-roll one card with `--card`;
+//! with `--note`, Gemini first rewrites that card).
 //!
 //! `run_session` is the shared commit-and-run step `new --generate` reuses.
 
@@ -24,7 +25,7 @@ use super::{
 pub(super) fn generate(args: &GenerateArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
     let record = resolve(&store, args.id.as_deref(), render)?;
-    run_session(&store, record.id.as_str(), args.wait, render, None)
+    run_session(&store, record.id.as_str(), args.wait, render, None, true)
 }
 
 /// Commit the plan (deriving it from the curation when none exists) and run the
@@ -32,18 +33,22 @@ pub(super) fn generate(args: &GenerateArgs, render: Render) -> Result<()> {
 /// optional note (regenerate's "re-rolling …") printed under the header in plain
 /// mode. In JSON mode the one stdout document is the session as the command
 /// leaves it: freshly generating for a detached run, terminal after `--wait`.
+/// A direct `generate` may resume an older cancelled session; continuations
+/// from another verb preserve a cancellation that raced in after their setup.
 pub(super) fn run_session(
     store: &SessionStore,
     id: &str,
     wait: bool,
     render: Render,
     intro: Option<String>,
+    resume_cancelled: bool,
 ) -> Result<()> {
     refuse_staged_rewrites(&store.open(id)?)?;
     preflight_key()?;
     store.update(id, |record| {
         refuse_staged_rewrites(record)?;
         refuse_if_live(store, record)?;
+        resume(record, resume_cancelled);
         ensure_plan(record);
         if record.drafts.is_empty() {
             return Err(usage(
@@ -65,6 +70,12 @@ pub(super) fn run_session(
     Ok(())
 }
 
+fn resume(record: &mut SessionRecord, permitted: bool) {
+    if permitted && matches!(record.phase, Phase::Cancelled) {
+        reset_to_understood(record);
+    }
+}
+
 fn refuse_staged_rewrites(record: &SessionRecord) -> Result<()> {
     if record.drafts.iter().any(|draft| {
         draft
@@ -74,13 +85,10 @@ fn refuse_staged_rewrites(record: &SessionRecord) -> Result<()> {
     }) {
         return Err(usage_hint(
             format!(
-                "session '{}' has staged card changes waiting for Ctrl+G",
+                "session '{}' has staged card changes waiting for regeneration",
                 record.id
             ),
-            format!(
-                "Open it with: kamishibai open {}, then press Ctrl+G",
-                record.id
-            ),
+            format!("Run: kamishibai regenerate {} --pending", record.id),
         ));
     }
     Ok(())
@@ -137,40 +145,130 @@ fn ensure_plan(record: &mut SessionRecord) {
         .collect();
 }
 
-/// Retry unfinished committed cards from their first missing stage (`--failed`)
-/// or fully re-roll one card (`--card`), optionally rewriting it from `--note`
-/// first, then immediately regenerate and republish the deck. Returns like
+/// Activate every staged adjustment (`--pending`), retry unfinished committed
+/// cards from their first missing stage (`--failed`), or fully re-roll one card
+/// (`--card`), then immediately regenerate and republish the deck. Returns like
 /// `generate`: the id for a detached run, the terminal state after `--wait`.
 pub(super) fn regenerate(args: &RegenerateArgs, render: Render) -> Result<()> {
     let store = SessionStore::system()?;
     let record = resolve(&store, args.id.as_deref(), render)?;
     refuse_if_live(&store, &record)?;
+    refuse_if_starting(&record)?;
     if record.drafts.is_empty() {
         return Err(usage_hint(
             "no committed plan to regenerate",
             "Generate it first: kamishibai generate",
         ));
     }
+    if args.pending {
+        refuse_without_staged(&record)?;
+    } else {
+        refuse_staged_rewrites(&record)?;
+    }
     preflight_key()?;
-    let intro = match args.card.as_deref() {
-        Some(card) if record.source == "cards" && args.note.is_none() => {
-            drop_imported_card(&store, &record, card)?;
-            reroll_note(&[String::from(card)], &record, false)
-        }
-        Some(card) => {
-            queue_rewrite(&store, &record, card, args.note.as_deref().unwrap_or(""))?;
-            if args.note.is_some() {
-                rewrite_note(card, &record)
-            } else {
+    let intro = if args.pending {
+        let updated = activate_pending(&store, record.id.as_str())?;
+        pending_note(&updated)
+    } else {
+        match args.card.as_deref() {
+            Some(card) if record.source == "cards" && args.note.is_none() => {
+                drop_imported_card(&store, &record, card)?;
                 reroll_note(&[String::from(card)], &record, false)
             }
-        }
-        None => {
-            let (_record, targets) = drop_targets(&store, &record)?;
-            reroll_note(&targets, &record, true)
+            Some(card) => {
+                queue_rewrite(&store, &record, card, args.note.as_deref().unwrap_or(""))?;
+                if args.note.is_some() {
+                    rewrite_note(card, &record)
+                } else {
+                    reroll_note(&[String::from(card)], &record, false)
+                }
+            }
+            None => {
+                let (_record, targets) = drop_targets(&store, &record)?;
+                reroll_note(&targets, &record, true)
+            }
         }
     };
-    run_session(&store, record.id.as_str(), args.wait, render, Some(intro))
+    let result = run_session(
+        &store,
+        record.id.as_str(),
+        args.wait,
+        render,
+        Some(intro),
+        false,
+    );
+    if args.pending && result.is_err() {
+        settle_unclaimed_pending(&store, record.id.as_str());
+    }
+    result
+}
+
+fn refuse_without_staged(record: &SessionRecord) -> Result<()> {
+    if record.drafts.iter().any(|draft| {
+        draft
+            .rewrite
+            .as_ref()
+            .is_some_and(|rewrite| !rewrite.started())
+    }) {
+        return Ok(());
+    }
+    Err(usage("no pending card adjustments to regenerate"))
+}
+
+fn refuse_if_starting(record: &SessionRecord) -> Result<()> {
+    if matches!(record.phase, Phase::Generating) && record.worker.is_none() {
+        return Err(usage(format!(
+            "session '{}' is starting generation; wait or cancel it first",
+            record.id
+        )));
+    }
+    Ok(())
+}
+
+fn activate_pending(store: &SessionStore, id: &str) -> Result<SessionRecord> {
+    store.update(id, |record| {
+        refuse_if_live(store, record)?;
+        refuse_without_staged(record)?;
+        for draft in &mut record.drafts {
+            if draft
+                .rewrite
+                .as_ref()
+                .is_some_and(|rewrite| !rewrite.started())
+            {
+                draft.rewrite = draft.rewrite.take().map(CardRewrite::activate);
+            }
+        }
+        record.phase = Phase::Generating;
+        record.worker = None;
+        record.progress = None;
+        record.result = None;
+        record.error = None;
+        Ok(())
+    })
+}
+
+fn pending_note(record: &SessionRecord) -> String {
+    let targets = record
+        .drafts
+        .iter()
+        .filter(|draft| draft.rewrite.as_ref().is_some_and(CardRewrite::started))
+        .map(|draft| draft.term.as_str())
+        .collect::<Vec<_>>();
+    format!(
+        "Applying pending sentence changes to {}.",
+        targets.join(", ")
+    )
+}
+
+fn settle_unclaimed_pending(store: &SessionStore, id: &str) {
+    let _ = store.update(id, |record| {
+        refuse_if_live(store, record)?;
+        if matches!(record.phase, Phase::Generating) && record.worker.is_none() {
+            record.phase = Phase::Failed;
+            record.error = Some(String::from("pending regeneration could not start"));
+        }
+        Ok(())
+    });
 }
 
 fn drop_imported_card(
@@ -186,16 +284,18 @@ fn drop_imported_card(
         .enumerate()
         .find(|(_slot, draft)| draft.term == card)
         .ok_or_else(|| usage(format!("no card '{card}' in session '{}'", record.id)))?;
-    drop_artifacts(
-        root.as_path(),
-        &pair,
-        current.term.as_str(),
-        current.understanding.as_str(),
-        true,
-    )?;
     store.update(record.id.as_str(), |fresh| {
         refuse_if_live(store, fresh)?;
+        refuse_if_starting(fresh)?;
+        refuse_staged_rewrites(fresh)?;
         cancel_imported_rewrite(fresh, slot, current.term.as_str())?;
+        drop_artifacts(
+            root.as_path(),
+            &pair,
+            current.term.as_str(),
+            current.understanding.as_str(),
+            true,
+        )?;
         reset_to_understood(fresh);
         Ok(())
     })
@@ -289,6 +389,8 @@ fn queue_rewrite(
     let rewrite = CardRewrite::new(previous, selection, note);
     store.update(record.id.as_str(), |fresh| {
         refuse_if_live(store, fresh)?;
+        refuse_if_starting(fresh)?;
+        refuse_staged_rewrites(fresh)?;
         let draft = fresh
             .drafts
             .get_mut(slot)
@@ -314,27 +416,30 @@ fn drop_targets(
 ) -> Result<(SessionRecord, Vec<String>)> {
     let root = cache_root(&SystemContext)?;
     let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
-    let targets: Vec<DraftRecord> = view::incomplete_drafts(record, root.as_path())
-        .into_iter()
-        .cloned()
-        .collect();
-    if targets.is_empty() {
-        return Err(usage("no matching cards to regenerate"));
-    }
-    for draft in &targets {
-        drop_incomplete_artifacts(
-            root.as_path(),
-            &pair,
-            draft.term.as_str(),
-            draft.understanding.as_str(),
-        )?;
-    }
+    let mut terms = Vec::new();
     let updated = store.update(record.id.as_str(), |fresh| {
         refuse_if_live(store, fresh)?;
+        refuse_if_starting(fresh)?;
+        refuse_staged_rewrites(fresh)?;
+        let targets: Vec<DraftRecord> = view::incomplete_drafts(fresh, root.as_path())
+            .into_iter()
+            .cloned()
+            .collect();
+        if targets.is_empty() {
+            return Err(usage("no matching cards to regenerate"));
+        }
+        for draft in &targets {
+            drop_incomplete_artifacts(
+                root.as_path(),
+                &pair,
+                draft.term.as_str(),
+                draft.understanding.as_str(),
+            )?;
+        }
+        terms = targets.iter().map(|draft| draft.term.clone()).collect();
         reset_to_understood(fresh);
         Ok(())
     })?;
-    let terms = targets.iter().map(|draft| draft.term.clone()).collect();
     Ok((updated, terms))
 }
 
@@ -393,8 +498,8 @@ impl MutedStdout {
 
 #[cfg(test)]
 mod tests {
-    use super::cancel_imported_rewrite;
-    use crate::cli::session::store::{DraftRecord, SessionRecord};
+    use super::{cancel_imported_rewrite, resume};
+    use crate::cli::session::store::{DraftRecord, Phase, SessionRecord};
     use crate::session::{ArtifactCosts, CardRewrite, SentenceLabelSelection};
 
     #[test]
@@ -425,6 +530,28 @@ mod tests {
         assert_eq!(
             record.drafts[0].rewrite, None,
             "an imported no-note reroll repeated an earlier failed correction"
+        );
+    }
+
+    #[test]
+    fn a_regeneration_continuation_preserves_a_racing_cancellation() {
+        let mut record = SessionRecord::understood(
+            String::from("fr-cancelled"),
+            String::from("created"),
+            String::from("EN"),
+            String::from("FR"),
+            String::from("/out"),
+            String::from("primary"),
+            String::from("words"),
+            Vec::new(),
+            Vec::new(),
+        );
+        record.phase = Phase::Cancelled;
+        resume(&mut record, false);
+        assert_eq!(
+            record.phase,
+            Phase::Cancelled,
+            "a pending regeneration continuation resurrected a cancelled session"
         );
     }
 }

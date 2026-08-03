@@ -22,6 +22,7 @@
 //! then visual. Gemini workflows hold only one of those leases at a time, so a
 //! cleanup can wait for active work without introducing a nested lock cycle.
 
+mod adjust;
 mod args;
 mod config;
 mod cost_journal;
@@ -93,6 +94,7 @@ pub(super) fn handle(command: &Command, render: Render, opener: &dyn SessionOpen
         Command::Correct(args) => curate::correct(args, render),
         Command::Generate(args) => generate::generate(args, render),
         Command::Status(args) => result::status(args, render),
+        Command::Adjust(args) => adjust::adjust(args, render),
         Command::Regenerate(args) => generate::regenerate(args, render),
         Command::Result(args) => result::result(args, render),
         Command::Cancel(args) => maintenance::cancel(args, render),

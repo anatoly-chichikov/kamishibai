@@ -79,6 +79,41 @@ const TWO_CARDS_JSON: &str = r#"{
   ]
 }"#;
 
+const DUPLICATE_TERM_JSON: &str = r#"{
+  "entries": [
+    {
+      "term": "bank",
+      "meaning": "a financial institution",
+      "pronunciation": "bæŋk",
+      "transcription": "ðə bæŋk ɪz kloʊzd",
+      "importance": 5,
+      "source": {
+        "sentence": "The bank is closed.",
+        "lang": "en",
+        "highlight": "bank",
+        "hint": "where money is kept",
+        "context": "financial services"
+      },
+      "target": { "sentence": "La banque est fermée.", "lang": "fr" }
+    },
+    {
+      "term": "bank",
+      "meaning": "the land beside a river",
+      "pronunciation": "bæŋk",
+      "transcription": "wi sɛt ɑn ðə bæŋk",
+      "importance": 4,
+      "source": {
+        "sentence": "We sat on the river bank.",
+        "lang": "en",
+        "highlight": "bank",
+        "hint": "land beside water",
+        "context": "rivers and landscapes"
+      },
+      "target": { "sentence": "Nous nous sommes assis sur la rive.", "lang": "fr" }
+    }
+  ]
+}"#;
+
 fn cli(cache: &Path) -> Command {
     let mut command = Command::cargo_bin("kamishibai").expect("the binary must build");
     command
@@ -149,6 +184,59 @@ fn cell_of(cache: &Path, term: &str) -> PathBuf {
     panic!("no cached cell mentions '{term}'");
 }
 
+/// Add complete sentence labels to one imported card's cached metadata.
+fn label_meta(cache: &Path, term: &str, register: &str, level: &str, kind: &str) {
+    let path = cell_of(cache, term).join("meta.json");
+    let mut record: serde_json::Value = serde_json::from_slice(
+        fs::read(&path)
+            .expect("the cached metadata must read")
+            .as_slice(),
+    )
+    .expect("the cached metadata must decode");
+    record["labels"] = serde_json::json!({
+        "register": register,
+        "level": level,
+        "type": kind,
+        "pinned": [],
+        "approx": []
+    });
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(&record).expect("the labeled metadata must encode"),
+    )
+    .expect("the labeled metadata must persist");
+}
+
+/// Build and publish one labeled imported session entirely from cached artifacts.
+fn published_labeled_session(cache: &Path, out: &Path, id: &str, json: &str) {
+    understood_session(cache, out, id, json);
+    for cell in card_dirs(cache) {
+        let text = fs::read_to_string(cell.join("meta.json")).expect("cached metadata must read");
+        let term = if text.contains("lanterne") {
+            "lanterne"
+        } else {
+            "canard"
+        };
+        label_meta(cache, term, "neutral", "b1", "statement");
+        seed_artifacts(&cell);
+    }
+    cli(cache)
+        .args(["generate", "--wait", id])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .success();
+}
+
+/// Return one card item from a session JSON document by term.
+fn card_named<'a>(document: &'a serde_json::Value, term: &str) -> &'a serde_json::Value {
+    document["cards"]["items"]
+        .as_array()
+        .expect("the session document must carry cards")
+        .iter()
+        .find(|card| card["term"].as_str() == Some(term))
+        .expect("the named card must be present")
+}
+
 fn fixture_jpeg() -> PathBuf {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/hero/hero.jpg");
     assert!(path.is_file(), "missing JPEG fixture for the offline test");
@@ -171,6 +259,17 @@ fn seed_visual_artifacts(cell: &Path) {
     )
     .expect("seed scene");
     fs::copy(fixture_jpeg(), visual.join("picture.jpg")).expect("seed picture");
+}
+
+/// Read every generated artifact of one card for no-mutation assertions.
+fn artifact_snapshot(cell: &Path) -> [Vec<u8>; 4] {
+    let visual = cell.join(VISUAL_DIRECTORY).join(visual_revision());
+    [
+        fs::read(cell.join("meta.json")).expect("cached metadata must read"),
+        fs::read(cell.join("audio.wav")).expect("cached audio must read"),
+        fs::read(visual.join("scene.json")).expect("cached scene must read"),
+        fs::read(visual.join("picture.jpg")).expect("cached picture must read"),
+    ]
 }
 
 /// Poll `status --json` until its `phase` field satisfies the predicate,
@@ -809,6 +908,34 @@ fn cancelling_a_live_worker_marks_the_session_cancelled() {
 
 #[cfg(unix)]
 #[test]
+fn a_later_generate_resumes_a_cancelled_session() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    let gemini = stalled_gemini();
+    live_worker_session(cache.path(), out.path(), "resume", gemini.as_str());
+    cli(cache.path())
+        .args(["cancel", "resume"])
+        .assert()
+        .success();
+    poll_quiet_status(cache.path(), "resume", Duration::from_secs(10), |phase| {
+        phase == "cancelled"
+    });
+    let value =
+        json_stdout(cli_at(cache.path(), gemini.as_str()).args(["generate", "resume", "--json"]));
+    let phase = value["phase"].as_str().map(String::from);
+    cli(cache.path())
+        .args(["cancel", "resume"])
+        .assert()
+        .success();
+    assert_eq!(
+        phase.as_deref(),
+        Some("generating"),
+        "a fresh generate command could not resume an earlier cancelled session"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn a_killed_worker_reads_interrupted_not_generating() {
     let cache = TempDir::new().expect("cache tempdir");
     let out = TempDir::new().expect("output tempdir");
@@ -908,6 +1035,55 @@ fn concurrent_edits_to_different_cards_both_survive() {
     assert!(
         all_succeeded && canard_excluded && lanterne_selected,
         "concurrent edits to different cards must both succeed and both land in the record"
+    );
+}
+
+#[test]
+fn concurrent_adjustments_to_different_cards_both_survive() {
+    use std::process::{Command as Process, Stdio};
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    published_labeled_session(cache.path(), out.path(), "adjust-race", TWO_CARDS_JSON);
+    let binary = env!("CARGO_BIN_EXE_kamishibai");
+    let racers: Vec<_> = [
+        vec!["adjust", "adjust-race", "--card", "canard", "--level", "b2"],
+        vec![
+            "adjust",
+            "adjust-race",
+            "--card",
+            "lanterne",
+            "--register",
+            "formal",
+        ],
+    ]
+    .into_iter()
+    .map(|args| {
+        Process::new(binary)
+            .args(args)
+            .env("KAMISHIBAI_CACHE", cache.path())
+            .env("GEMINI_API_KEY", "offline-dummy-key")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("a concurrent adjustment must spawn")
+    })
+    .collect();
+    let all_succeeded = racers.into_iter().all(|mut racer| {
+        racer
+            .wait()
+            .expect("an adjuster must be reapable")
+            .success()
+    });
+    let value = json_stdout(cli(cache.path()).args(["status", "adjust-race", "--json"]));
+    assert_eq!(
+        (
+            all_succeeded,
+            value["cards"]["pending"].as_u64(),
+            card_named(&value, "canard")["adjustment"]["labels"]["level"].as_str(),
+            card_named(&value, "lanterne")["adjustment"]["labels"]["register"].as_str(),
+        ),
+        (true, Some(2), Some("b2"), Some("formal")),
+        "concurrent adjustments lost one card's serialized update"
     );
 }
 
@@ -1044,9 +1220,8 @@ fn generate_refuses_a_persisted_staged_rewrite_before_worker_or_provider_work() 
     assert_eq!(
         (
             output.status.code(),
-            stderr.contains("staged card changes waiting for Ctrl+G"),
-            stderr.contains("kamishibai open staged"),
-            stderr.contains("press Ctrl+G"),
+            stderr.contains("staged card changes waiting for regeneration"),
+            stderr.contains("kamishibai regenerate staged --pending"),
             preserved == staged,
             calls.load(Ordering::SeqCst),
             record["phase"].as_str(),
@@ -1058,13 +1233,400 @@ fn generate_refuses_a_persisted_staged_rewrite_before_worker_or_provider_work() 
             true,
             true,
             true,
-            true,
             0,
             Some("understood"),
             true,
             Some(false),
         ),
         "generate crossed the staged-rewrite preflight or mutated its pending session"
+    );
+}
+
+#[test]
+fn ordinary_regenerate_targets_refuse_staged_adjustments_without_mutation() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    published_labeled_session(cache.path(), out.path(), "guarded", CARDS_JSON);
+    cli(cache.path())
+        .args(["adjust", "guarded", "--card", "canard", "--level", "b2"])
+        .assert()
+        .success();
+    let session = cache.path().join("sessions/guarded/session.json");
+    let cell = cell_of(cache.path(), "canard");
+    let before_session = fs::read(&session).expect("the staged session must read");
+    let before_artifacts = artifact_snapshot(&cell);
+    let reroll = cli(cache.path())
+        .args(["regenerate", "guarded", "--card", "canard"])
+        .output()
+        .expect("the guarded reroll must exit");
+    let retry = cli(cache.path())
+        .args(["regenerate", "guarded", "--failed"])
+        .output()
+        .expect("the guarded retry must exit");
+    assert_eq!(
+        (
+            reroll.status.code(),
+            String::from_utf8_lossy(&reroll.stderr)
+                .contains("kamishibai regenerate guarded --pending"),
+            retry.status.code(),
+            String::from_utf8_lossy(&retry.stderr)
+                .contains("kamishibai regenerate guarded --pending"),
+            fs::read(session).expect("the refused session must read"),
+            artifact_snapshot(&cell),
+        ),
+        (
+            Some(2),
+            true,
+            Some(2),
+            true,
+            before_session,
+            before_artifacts,
+        ),
+        "an ordinary regenerate target crossed the staged-adjustment guard"
+    );
+}
+
+#[test]
+fn adjust_returns_current_labels_and_a_separate_pending_adjustment() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    published_labeled_session(cache.path(), out.path(), "tuned", CARDS_JSON);
+    let published = json_stdout(cli(cache.path()).args(["status", "tuned", "--json"]));
+    let value = json_stdout(cli(cache.path()).args([
+        "adjust",
+        "tuned",
+        "--card",
+        "canard",
+        "--level",
+        "b2",
+        "--kind",
+        "request",
+        "--note",
+        "keep it natural",
+        "--json",
+    ]));
+    let card = card_named(&value, "canard");
+    assert_eq!(
+        (
+            value["phase"].as_str(),
+            value["result"].clone(),
+            value["cards"]["pending"].as_u64(),
+            card["artifacts"]["picture"].as_bool(),
+            (
+                card["labels"]["register"].as_str(),
+                card["labels"]["level"].as_str(),
+                card["labels"]["kind"].as_str(),
+            ),
+            (
+                card["adjustment"]["state"].as_str(),
+                card["adjustment"]["labels"]["register"].as_str(),
+                card["adjustment"]["labels"]["level"].as_str(),
+                card["adjustment"]["labels"]["kind"].as_str(),
+                card["adjustment"]["labels"]["pinned"].as_array(),
+                card["adjustment"]["note"].as_str(),
+            ),
+        ),
+        (
+            Some("published"),
+            published["result"].clone(),
+            Some(1),
+            Some(true),
+            (Some("neutral"), Some("b1"), Some("statement")),
+            (
+                Some("pending"),
+                Some("neutral"),
+                Some("b2"),
+                Some("request"),
+                serde_json::json!(["level", "kind"]).as_array(),
+                Some("keep it natural"),
+            ),
+        ),
+        "adjust must preserve the published card while exposing current and pending sentence labels separately"
+    );
+}
+
+#[test]
+fn successive_adjust_calls_patch_the_existing_pending_preset() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    published_labeled_session(cache.path(), out.path(), "patched", CARDS_JSON);
+    cli(cache.path())
+        .args([
+            "adjust", "patched", "--card", "canard", "--level", "b2", "--note", "shorter",
+        ])
+        .assert()
+        .success();
+    let value = json_stdout(cli(cache.path()).args([
+        "adjust",
+        "patched",
+        "--card",
+        "canard",
+        "--register",
+        "formal",
+        "--json",
+    ]));
+    let adjustment = &card_named(&value, "canard")["adjustment"];
+    assert_eq!(
+        (
+            adjustment["labels"]["register"].as_str(),
+            adjustment["labels"]["level"].as_str(),
+            adjustment["labels"]["kind"].as_str(),
+            adjustment["labels"]["pinned"].as_array(),
+            adjustment["note"].as_str(),
+        ),
+        (
+            Some("formal"),
+            Some("b2"),
+            Some("statement"),
+            serde_json::json!(["register", "level"]).as_array(),
+            Some("shorter"),
+        ),
+        "a later adjust call reset an omitted pending axis or note"
+    );
+}
+
+#[test]
+fn restoring_all_axes_and_clearing_the_note_removes_the_pending_adjustment() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    published_labeled_session(cache.path(), out.path(), "restored", CARDS_JSON);
+    cli(cache.path())
+        .args([
+            "adjust", "restored", "--card", "canard", "--level", "b2", "--note", "shorter",
+        ])
+        .assert()
+        .success();
+    let value = json_stdout(cli(cache.path()).args([
+        "adjust",
+        "restored",
+        "--card",
+        "canard",
+        "--restore",
+        "all",
+        "--note",
+        "",
+        "--json",
+    ]));
+    assert_eq!(
+        (
+            value["phase"].as_str(),
+            value["cards"]["pending"].as_u64(),
+            card_named(&value, "canard").get("adjustment"),
+        ),
+        (Some("published"), Some(0), None),
+        "restoring the generated preset and clearing its note left a phantom pending rewrite"
+    );
+}
+
+#[test]
+fn adjust_requires_understanding_when_a_term_has_multiple_committed_senses() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(
+        cache.path(),
+        out.path(),
+        "ambiguous-card",
+        DUPLICATE_TERM_JSON,
+    );
+    for cell in card_dirs(cache.path()) {
+        seed_artifacts(&cell);
+    }
+    cli(cache.path())
+        .args(["generate", "--wait", "ambiguous-card"])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .success();
+    let refused = cli(cache.path())
+        .args([
+            "adjust",
+            "ambiguous-card",
+            "--card",
+            "bank",
+            "--level",
+            "b2",
+        ])
+        .output()
+        .expect("ambiguous adjustment must exit");
+    let accepted = cli(cache.path())
+        .args([
+            "adjust",
+            "ambiguous-card",
+            "--card",
+            "bank",
+            "--understanding",
+            "the land beside a river",
+            "--level",
+            "b2",
+        ])
+        .output()
+        .expect("disambiguated adjustment must exit");
+    let value = json_stdout(cli(cache.path()).args(["status", "ambiguous-card", "--json"]));
+    let cards = value["cards"]["items"]
+        .as_array()
+        .expect("the duplicate-term session must carry cards");
+    let financial = cards
+        .iter()
+        .find(|card| card["understanding"].as_str() == Some("a financial institution"))
+        .expect("the financial card must remain");
+    let river = cards
+        .iter()
+        .find(|card| card["understanding"].as_str() == Some("the land beside a river"))
+        .expect("the river card must remain");
+    assert_eq!(
+        (
+            refused.status.code(),
+            accepted.status.code(),
+            financial.get("adjustment"),
+            river["adjustment"]["labels"]["level"].as_str(),
+        ),
+        (Some(2), Some(0), None, Some("b2")),
+        "adjust silently picked one sense or rejected an exact term-and-understanding identity"
+    );
+}
+
+#[test]
+fn regenerate_pending_activates_every_staged_card_in_one_batch() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    published_labeled_session(cache.path(), out.path(), "batch-tuned", TWO_CARDS_JSON);
+    cli(cache.path())
+        .args(["adjust", "batch-tuned", "--card", "canard", "--level", "b2"])
+        .assert()
+        .success();
+    cli(cache.path())
+        .args([
+            "adjust",
+            "batch-tuned",
+            "--card",
+            "lanterne",
+            "--register",
+            "formal",
+        ])
+        .assert()
+        .success();
+    let gemini = stalled_gemini();
+    let value = json_stdout(cli_at(cache.path(), gemini.as_str()).args([
+        "regenerate",
+        "batch-tuned",
+        "--pending",
+        "--json",
+    ]));
+    let canard = card_named(&value, "canard");
+    let lanterne = card_named(&value, "lanterne");
+    let verdict = (
+        value["phase"].as_str(),
+        value["cards"]["pending"].as_u64(),
+        canard["adjustment"]["state"].as_str(),
+        lanterne["adjustment"]["state"].as_str(),
+    );
+    cli(cache.path())
+        .args(["cancel", "batch-tuned"])
+        .assert()
+        .success();
+    assert_eq!(
+        verdict,
+        (Some("generating"), Some(0), Some("active"), Some("active")),
+        "regenerate --pending did not activate the entire staged batch before starting its worker"
+    );
+}
+
+#[test]
+fn regenerate_pending_keeps_an_untouched_card_ready() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    published_labeled_session(cache.path(), out.path(), "one-tuned", TWO_CARDS_JSON);
+    cli(cache.path())
+        .args(["adjust", "one-tuned", "--card", "canard", "--level", "b2"])
+        .assert()
+        .success();
+    let untouched_cell = cell_of(cache.path(), "lanterne");
+    let before = artifact_snapshot(&untouched_cell);
+    let gemini = stalled_gemini();
+    let value = json_stdout(cli_at(cache.path(), gemini.as_str()).args([
+        "regenerate",
+        "one-tuned",
+        "--pending",
+        "--json",
+    ]));
+    let untouched = card_named(&value, "lanterne");
+    let verdict = (
+        untouched["artifacts"]["meta"].as_bool(),
+        untouched["artifacts"]["sound"].as_bool(),
+        untouched["artifacts"]["scene"].as_bool(),
+        untouched["artifacts"]["picture"].as_bool(),
+        untouched.get("adjustment").is_none(),
+        artifact_snapshot(&untouched_cell),
+    );
+    cli(cache.path())
+        .args(["cancel", "one-tuned"])
+        .assert()
+        .success();
+    assert_eq!(
+        verdict,
+        (Some(true), Some(true), Some(true), Some(true), true, before),
+        "regenerate --pending invalidated or marked an untouched ready card"
+    );
+}
+
+#[test]
+fn regenerate_pending_without_adjustments_is_refused_without_mutation() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    published_labeled_session(cache.path(), out.path(), "no-pending", CARDS_JSON);
+    let path = cache.path().join("sessions/no-pending/session.json");
+    let before = fs::read(&path).expect("the session must read before refusal");
+    let output = cli(cache.path())
+        .args(["regenerate", "no-pending", "--pending"])
+        .output()
+        .expect("the pending regeneration must exit");
+    let after = fs::read(path).expect("the session must read after refusal");
+    assert_eq!(
+        (output.status.code(), after),
+        (Some(2), before),
+        "regenerate --pending without staged adjustments mutated the session"
+    );
+}
+
+#[test]
+fn regenerate_pending_without_a_key_preserves_the_staged_session_and_cache() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let data = TempDir::new().expect("data tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    published_labeled_session(cache.path(), out.path(), "offline-pending", CARDS_JSON);
+    cli(cache.path())
+        .args([
+            "adjust",
+            "offline-pending",
+            "--card",
+            "canard",
+            "--level",
+            "b2",
+        ])
+        .assert()
+        .success();
+    let session = cache.path().join("sessions/offline-pending/session.json");
+    let cell = cell_of(cache.path(), "canard");
+    let before_session = fs::read(&session).expect("the staged session must read");
+    let before_artifacts = artifact_snapshot(&cell);
+    let mut command = Command::cargo_bin("kamishibai").expect("the binary must build");
+    let output = command
+        .env("KAMISHIBAI_CACHE", cache.path())
+        .env("KAMISHIBAI_DATA", data.path())
+        .env_remove("GEMINI_API_KEY")
+        .args(["regenerate", "offline-pending", "--pending", "--json"])
+        .output()
+        .expect("the keyless pending command must exit");
+    let error: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("the key refusal must be JSON");
+    assert_eq!(
+        (
+            output.status.code(),
+            error["error"]["code"].as_str(),
+            fs::read(session).expect("the refused session must read"),
+            artifact_snapshot(&cell),
+        ),
+        (Some(2), Some("usage"), before_session, before_artifacts,),
+        "a missing key activated or invalidated a staged pending batch"
     );
 }
 

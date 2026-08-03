@@ -380,8 +380,10 @@ pub(super) fn start_background(store: &SessionStore, id: &str) -> Result<Session
     let record = prepare_background(store, id)?;
     if let Err(error) = spawn_detached(exe, id, log) {
         let _ = store.update(id, |record| {
-            record.phase = Phase::Failed;
-            record.error = Some(format!("failed to start worker: {error:#}"));
+            if !matches!(record.phase, Phase::Cancelled) {
+                record.phase = Phase::Failed;
+                record.error = Some(format!("failed to start worker: {error:#}"));
+            }
             Ok(())
         });
         return Err(error);
@@ -392,6 +394,9 @@ pub(super) fn start_background(store: &SessionStore, id: &str) -> Result<Session
 fn prepare_background(store: &SessionStore, id: &str) -> Result<SessionRecord> {
     let record = store.update(id, |record| {
         ensure_record_rewrites_started(record)?;
+        if matches!(record.phase, Phase::Cancelled) {
+            bail!("session '{id}' was cancelled before generation started");
+        }
         record.worker = None;
         record.phase = Phase::Generating;
         record.progress = None;
@@ -836,7 +841,7 @@ mod tests {
     }
 
     #[test]
-    fn claiming_a_cancelled_session_is_refused() {
+    fn preparing_or_claiming_a_cancelled_session_is_refused() {
         let home = TempDir::new().expect("tempdir");
         let store = SessionStore::new(home.path());
         generating_session(&store, 1);
@@ -847,9 +852,11 @@ mod tests {
                 Ok(())
             })
             .expect("cancel the session");
+        let prepared = prepare_background(&store, "fr-1");
+        let claimed = claim_self(&store, "fr-1");
         assert!(
-            claim_self(&store, "fr-1").is_err(),
-            "a worker claiming a session cancelled before its start must be refused"
+            prepared.is_err() && claimed.is_err(),
+            "a worker prepared or claimed a session cancelled before its start"
         );
     }
 

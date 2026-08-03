@@ -639,7 +639,9 @@ impl CardRewrite {
         self
     }
 
-    fn starting(mut self) -> Self {
+    /// Return this durable rewrite activated for the next generation batch.
+    #[must_use]
+    pub fn activate(mut self) -> Self {
         self.started = true;
         self
     }
@@ -813,7 +815,7 @@ impl CardDraft {
             understanding: self.understanding,
             pair: self.pair,
             meta: None,
-            rewrite: self.rewrite.map(CardRewrite::starting),
+            rewrite: self.rewrite.map(CardRewrite::activate),
             artifacts: costs.hydrate(fresh),
         }
     }

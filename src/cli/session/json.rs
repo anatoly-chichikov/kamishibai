@@ -14,7 +14,10 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::runtime::locations::{SystemContext, cache_root};
-use crate::session::{CardDraft, CardMetaCache, LanguagePair};
+use crate::session::{
+    AxisSet, CardDraft, CardMetaCache, LanguagePair, SentenceAxis, SentenceLabelSelection,
+    SentenceLabels,
+};
 use crate::vocabulary::VocabularyEntry;
 
 use super::store::{Phase, ResultRecord, SessionRecord};
@@ -121,6 +124,7 @@ struct SenseDoc {
 
 #[derive(Serialize)]
 struct CardsDoc {
+    pending: usize,
     items: Vec<CardDoc>,
 }
 
@@ -129,6 +133,10 @@ struct CardDoc {
     term: String,
     understanding: String,
     artifacts: ArtifactsDoc,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    labels: Option<LabelsDoc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    adjustment: Option<AdjustmentDoc>,
 }
 
 #[derive(Serialize)]
@@ -137,6 +145,60 @@ struct ArtifactsDoc {
     sound: bool,
     scene: bool,
     picture: bool,
+}
+
+#[derive(Serialize)]
+struct LabelsDoc {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    register: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'static str>,
+    pinned: Vec<&'static str>,
+    approx: Vec<&'static str>,
+}
+
+impl LabelsDoc {
+    fn current(labels: &SentenceLabels) -> Self {
+        Self {
+            register: labels.token(SentenceAxis::Register),
+            level: labels.token(SentenceAxis::Level),
+            kind: labels.token(SentenceAxis::Type),
+            pinned: axes(labels.pinned()),
+            approx: axes(labels.approx()),
+        }
+    }
+
+    fn requested(labels: &SentenceLabelSelection) -> Self {
+        Self {
+            register: labels.token(SentenceAxis::Register),
+            level: labels.token(SentenceAxis::Level),
+            kind: labels.token(SentenceAxis::Type),
+            pinned: axes(labels.pinned()),
+            approx: axes(labels.approx()),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct AdjustmentDoc {
+    state: &'static str,
+    labels: LabelsDoc,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+}
+
+fn axes(axes: &AxisSet) -> Vec<&'static str> {
+    axes.iter().map(axis).collect()
+}
+
+fn axis(axis: SentenceAxis) -> &'static str {
+    match axis {
+        SentenceAxis::Register => "register",
+        SentenceAxis::Level => "level",
+        SentenceAxis::Type => "kind",
+    }
 }
 
 #[derive(Serialize)]
@@ -215,20 +277,63 @@ fn cards_doc(record: &SessionRecord, cache_root: &Path) -> Option<CardsDoc> {
     if record.drafts.is_empty() {
         return None;
     }
-    let items = view::cards(record, cache_root)
+    let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
+    let cache = CardMetaCache::new(cache_root);
+    let pending = record
+        .drafts
         .iter()
-        .map(|card| CardDoc {
-            term: card.term.clone(),
-            understanding: card.understanding.clone(),
+        .filter(|draft| {
+            draft
+                .rewrite
+                .as_ref()
+                .is_some_and(|rewrite| !rewrite.started())
+        })
+        .count();
+    let items = record
+        .drafts
+        .iter()
+        .zip(view::cards(record, cache_root))
+        .map(|(draft, card)| CardDoc {
+            term: card.term,
+            understanding: card.understanding,
             artifacts: ArtifactsDoc {
                 meta: card.meta,
                 sound: card.sound,
                 scene: card.scene,
                 picture: card.picture,
             },
+            labels: current_labels(draft, &cache, &pair),
+            adjustment: draft.rewrite.as_ref().map(|rewrite| AdjustmentDoc {
+                state: if rewrite.started() {
+                    "active"
+                } else {
+                    "pending"
+                },
+                labels: LabelsDoc::requested(rewrite.selection()),
+                note: (!rewrite.note().trim().is_empty()).then(|| rewrite.note().to_string()),
+            }),
         })
         .collect();
-    Some(CardsDoc { items })
+    Some(CardsDoc { pending, items })
+}
+
+fn current_labels(
+    draft: &super::store::DraftRecord,
+    cache: &CardMetaCache,
+    pair: &LanguagePair,
+) -> Option<LabelsDoc> {
+    if let Some(previous) = draft
+        .rewrite
+        .as_ref()
+        .and_then(crate::session::CardRewrite::previous)
+    {
+        return previous.sentence_labels().map(LabelsDoc::current);
+    }
+    cache
+        .load(draft.term.as_str(), draft.understanding.as_str(), pair)
+        .ok()
+        .flatten()
+        .and_then(|meta| meta.sentence_labels().map(LabelsDoc::current))
 }
 
 /// The `result --json` document: the published paths plus every card with
@@ -401,10 +506,11 @@ mod tests {
     use super::*;
     use crate::generation::artifact_cache::VOICE_FILE;
     use crate::session::{
-        CandidateRecord, CardCell, CardMeta, CardMetaCache, Sense, WordCandidate,
+        CandidateRecord, CardCell, CardMeta, CardMetaCache, CardRewrite, Register, Sense,
+        SentenceKind, SentenceLevel, WordCandidate,
     };
 
-    fn fixture_meta() -> CardMeta {
+    fn unlabeled_meta() -> CardMeta {
         CardMeta::new(
             "/ka.naʁ/",
             "/lə ka.naʁ naʒ/",
@@ -416,6 +522,37 @@ mod tests {
             "A common concrete noun",
             "Le canard nage",
         )
+    }
+
+    fn fixture_meta() -> CardMeta {
+        unlabeled_meta().with_sentence_labels(SentenceLabels::new(
+            Register::Neutral,
+            SentenceLevel::B1,
+            SentenceKind::Statement,
+            AxisSet::default(),
+            AxisSet::default(),
+        ))
+    }
+
+    fn labeled_meta(register: Register, level: SentenceLevel, kind: SentenceKind) -> CardMeta {
+        CardMeta::new(
+            "/ka.naʁ/",
+            "/lə ka.naʁ naʒ/",
+            "a duck",
+            5,
+            "The duck swims",
+            "duck",
+            "Think of a pond",
+            "A common concrete noun",
+            "Le canard nage",
+        )
+        .with_sentence_labels(SentenceLabels::new(
+            register,
+            level,
+            kind,
+            AxisSet::default(),
+            AxisSet::default(),
+        ))
     }
 
     fn record() -> SessionRecord {
@@ -501,9 +638,158 @@ mod tests {
                 value["cards"]["items"][0]["artifacts"]["meta"].as_bool(),
                 value["cards"]["items"][0]["artifacts"]["scene"].as_bool(),
                 value["cards"]["items"][0].get("state"),
+                value["cards"]["pending"].as_u64(),
+                value["cards"]["items"][0]["labels"].clone(),
             ),
-            (Some(true), Some(false), None),
-            "a committed document must carry per-card artifact booleans (no derived state) probed from the cache"
+            (
+                Some(true),
+                Some(false),
+                None,
+                Some(0),
+                serde_json::json!({
+                    "register": "neutral",
+                    "level": "b1",
+                    "kind": "statement",
+                    "pinned": [],
+                    "approx": []
+                }),
+            ),
+            "a committed document must carry cache-derived artifacts and current labels without a pending adjustment"
+        );
+    }
+
+    #[test]
+    fn a_staged_adjustment_separates_current_labels_from_the_requested_selection() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let pair = LanguagePair::new("fr", "en");
+        let previous = fixture_meta();
+        let baseline = SentenceLabelSelection::from_labels(
+            previous
+                .sentence_labels()
+                .expect("the current metadata must carry labels"),
+        );
+        let requested = baseline.choosing(SentenceAxis::Level, 3);
+        let staged = CardDraft::new("canard", "a duck", pair.clone())
+            .with_meta(previous, None)
+            .staging_rewrite(requested, "keep it natural");
+        let mut record = record();
+        record.drafts = vec![DraftRecord {
+            term: String::from("canard"),
+            understanding: String::from("a duck"),
+            costs: crate::session::ArtifactCosts::default(),
+            rewrite: staged.rewrite().cloned(),
+        }];
+        CardMetaCache::new(home.path())
+            .store(
+                "canard",
+                "a duck",
+                &pair,
+                &labeled_meta(Register::Casual, SentenceLevel::A2, SentenceKind::Question),
+            )
+            .expect("different cached labels must store");
+        let value = value_of(&record, home.path());
+        assert_eq!(
+            (
+                value["cards"]["pending"].as_u64(),
+                value["cards"]["items"][0]["labels"].clone(),
+                value["cards"]["items"][0]["adjustment"].clone(),
+            ),
+            (
+                Some(1),
+                serde_json::json!({
+                    "register": "neutral",
+                    "level": "b1",
+                    "kind": "statement",
+                    "pinned": [],
+                    "approx": []
+                }),
+                serde_json::json!({
+                    "state": "pending",
+                    "labels": {
+                        "register": "neutral",
+                        "level": "b2",
+                        "kind": "statement",
+                        "pinned": ["level"],
+                        "approx": []
+                    },
+                    "note": "keep it natural"
+                }),
+            ),
+            "a staged adjustment merged requested labels into the current attribution or lost its pending state"
+        );
+    }
+
+    #[test]
+    fn an_active_adjustment_keeps_previous_labels_without_cached_metadata_or_nulls() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let previous = fixture_meta();
+        let requested = SentenceLabelSelection::empty().choosing(SentenceAxis::Type, 1);
+        let mut record = record();
+        record.drafts = vec![DraftRecord {
+            term: String::from("canard"),
+            understanding: String::from("a duck"),
+            costs: crate::session::ArtifactCosts::default(),
+            rewrite: Some(CardRewrite::new(Some(previous), requested, " \n ")),
+        }];
+        let value = value_of(&record, home.path());
+        assert_eq!(
+            (
+                value["cards"]["pending"].as_u64(),
+                value["cards"]["items"][0]["labels"].clone(),
+                value["cards"]["items"][0]["adjustment"].clone(),
+                nulls_in(&value),
+            ),
+            (
+                Some(0),
+                serde_json::json!({
+                    "register": "neutral",
+                    "level": "b1",
+                    "kind": "statement",
+                    "pinned": [],
+                    "approx": []
+                }),
+                serde_json::json!({
+                    "state": "active",
+                    "labels": {
+                        "kind": "question",
+                        "pinned": ["kind"],
+                        "approx": []
+                    }
+                }),
+                0,
+            ),
+            "an active adjustment lost its previous labels, exposed a blank note, or serialized absent fields as null"
+        );
+    }
+
+    #[test]
+    fn a_legacy_previous_snapshot_cannot_borrow_labels_from_shared_cache() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let pair = LanguagePair::new("fr", "en");
+        CardMetaCache::new(home.path())
+            .store(
+                "canard",
+                "a duck",
+                &pair,
+                &labeled_meta(Register::Formal, SentenceLevel::B2, SentenceKind::Question),
+            )
+            .expect("shared labeled metadata must store");
+        let mut record = record();
+        record.drafts = vec![DraftRecord {
+            term: String::from("canard"),
+            understanding: String::from("a duck"),
+            costs: crate::session::ArtifactCosts::default(),
+            rewrite: Some(CardRewrite::new(
+                Some(unlabeled_meta()),
+                SentenceLabelSelection::empty().choosing(SentenceAxis::Level, 2),
+                "",
+            )),
+        }];
+        let value = value_of(&record, home.path());
+        assert_eq!(
+            value["cards"]["items"][0].get("labels"),
+            None,
+            "a legacy rewrite snapshot leaked labels written later into shared cache"
         );
     }
 
