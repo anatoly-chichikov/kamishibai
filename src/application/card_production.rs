@@ -57,20 +57,23 @@ pub(crate) trait CardProduction:
         understanding: &str,
         pair: &LanguagePair,
     ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)>;
+    /// Generate or rewrite metadata for the complete draft at one stable slot.
+    fn generate_draft_meta_in(
+        &self,
+        slot: usize,
+        draft: &CardDraft,
+    ) -> ArtifactAttempt<(CardRevision, Option<ArtifactFile>)> {
+        let term = draft.term().to_string();
+        let understanding = draft.understanding().to_string();
+        self.generate_meta_in(slot, draft.term(), draft.understanding(), draft.pair())
+            .map(|(meta, file)| (CardRevision::new(term, understanding, meta), file))
+    }
     /// Generate a scene attributed to one stable card slot.
     fn generate_scene_in(&self, slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile>;
     /// Generate a picture attributed to one stable card slot.
     fn generate_picture_in(&self, slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile>;
     /// Generate sound attributed to one stable card slot.
     fn generate_sound_in(&self, slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile>;
-    /// Correct one card attributed to one stable card slot.
-    fn correct_card_in(
-        &self,
-        slot: usize,
-        draft: &CardDraft,
-        comment: &str,
-        pair: &LanguagePair,
-    ) -> ArtifactAttempt<CardRevision>;
     /// Persist supplied metadata under the stable card identity.
     fn store_card_meta(
         &self,

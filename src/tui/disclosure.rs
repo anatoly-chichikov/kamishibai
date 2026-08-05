@@ -51,11 +51,6 @@ impl DisclosureControls {
         }
     }
 
-    /// Return the primary footer hint for the open/close toggle.
-    pub(crate) fn primary_toggle(self) -> FooterHint {
-        FooterHint::primary(self.toggle_key(), "toggle")
-    }
-
     /// Return the secondary footer hint for the open/close toggle.
     pub(crate) fn secondary_toggle(self) -> FooterHint {
         FooterHint::secondary(self.toggle_key(), "toggle")

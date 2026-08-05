@@ -68,7 +68,7 @@ pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
     );
     store.create(&record)?;
     if args.generate {
-        return run_session(&store, record.id.as_str(), false, render, None);
+        return run_session(&store, record.id.as_str(), false, render, None, false);
     }
     if matches!(render, Render::Json) {
         return json::emit_session(&record);

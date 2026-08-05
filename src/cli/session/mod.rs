@@ -22,6 +22,7 @@
 //! then visual. Gemini workflows hold only one of those leases at a time, so a
 //! cleanup can wait for active work without introducing a nested lock cycle.
 
+mod adjust;
 mod args;
 mod config;
 mod cost_journal;
@@ -49,11 +50,10 @@ use anyhow::Result;
 
 use crate::config::default_store;
 use crate::generation::artifact_cache::{
-    Cache, ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, IMAGE_ATTEMPTS_DIRECTORY,
-    LEGACY_VISUAL_REVISION_FILE, META_COST_FILE, META_FILE, PICTURE_REQUESTS_FILE,
-    ROOT_STAGE_LOCK_TIMEOUT, RootStage, RootStageGuard, SCENE_ATTEMPT_FILE, SCENE_COST_FILE,
-    SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE, VisualGuard,
+    Cache, ILLUSTRATION_FILE, LEGACY_VISUAL_REVISION_FILE, META_FILE, ROOT_STAGE_LOCK_TIMEOUT,
+    RootStage, RootStageGuard, SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_FILE, VisualGuard,
 };
+use crate::generation::invalidate_card;
 use crate::generation::restart_picture_request_series;
 use crate::generation::visual_revision;
 use crate::languages::{LanguageCode, catalog};
@@ -94,6 +94,7 @@ pub(super) fn handle(command: &Command, render: Render, opener: &dyn SessionOpen
         Command::Correct(args) => curate::correct(args, render),
         Command::Generate(args) => generate::generate(args, render),
         Command::Status(args) => result::status(args, render),
+        Command::Adjust(args) => adjust::adjust(args, render),
         Command::Regenerate(args) => generate::regenerate(args, render),
         Command::Result(args) => result::result(args, render),
         Command::Cancel(args) => maintenance::cancel(args, render),
@@ -306,62 +307,18 @@ pub(in crate::cli::session) fn drop_artifacts(
     understanding: &str,
     keep_meta: bool,
 ) -> Result<()> {
-    drop_artifacts_with_meta(root, pair, term, understanding, keep_meta, keep_meta)
+    invalidate_card(root, pair, term, understanding, keep_meta, keep_meta)
 }
 
 /// Delete one corrected card's stale artifacts while retaining its billed correction cost.
+#[cfg(test)]
 pub(in crate::cli::session) fn drop_corrected_artifacts(
     root: &Path,
     pair: &LanguagePair,
     term: &str,
     understanding: &str,
 ) -> Result<()> {
-    drop_artifacts_with_meta(root, pair, term, understanding, false, true)
-}
-
-fn drop_artifacts_with_meta(
-    root: &Path,
-    pair: &LanguagePair,
-    term: &str,
-    understanding: &str,
-    keep_meta: bool,
-    keep_meta_cost: bool,
-) -> Result<()> {
-    let cache = CardCell::new(root.to_path_buf(), pair, term, understanding).cache();
-    let visual = cache.visual(visual_revision())?;
-    let _guards = hold_artifacts(&cache, &visual)?;
-    remove_cached_files(
-        &visual,
-        &[
-            SCENE_FILE,
-            SCENE_ATTEMPT_FILE,
-            SCENE_COST_FILE,
-            ILLUSTRATION_FILE,
-            ILLUSTRATION_COST_FILE,
-            PICTURE_REQUESTS_FILE,
-        ],
-    )?;
-    remove_attempt_journal(&visual)?;
-    remove_cached_files(
-        &cache,
-        &[
-            VOICE_FILE,
-            VOICE_COST_FILE,
-            SCENE_FILE,
-            SCENE_COST_FILE,
-            ILLUSTRATION_FILE,
-            ILLUSTRATION_COST_FILE,
-            PICTURE_REQUESTS_FILE,
-            LEGACY_VISUAL_REVISION_FILE,
-        ],
-    )?;
-    if !keep_meta {
-        remove_cached_files(&cache, &[META_FILE])?;
-    }
-    if !keep_meta_cost {
-        remove_cached_files(&cache, &[META_COST_FILE])?;
-    }
-    Ok(())
+    invalidate_card(root, pair, term, understanding, false, true)
 }
 
 /// Delete only missing stages and their dependants, retaining every valid
@@ -451,14 +408,6 @@ fn remove_cached_files(cache: &Cache, files: &[&str]) -> Result<()> {
     Ok(())
 }
 
-fn remove_attempt_journal(cache: &Cache) -> Result<()> {
-    let attempts = cache.path().join(IMAGE_ATTEMPTS_DIRECTORY);
-    if attempts.exists() {
-        fs::remove_dir_all(attempts)?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::process::{Child, Command as ProcessCommand, Stdio};
@@ -468,6 +417,10 @@ mod tests {
 
     use super::store::WorkerHandle;
     use super::*;
+    use crate::generation::artifact_cache::{
+        ILLUSTRATION_COST_FILE, IMAGE_ATTEMPTS_DIRECTORY, META_COST_FILE, PICTURE_REQUESTS_FILE,
+        SCENE_ATTEMPT_FILE, SCENE_COST_FILE, VOICE_COST_FILE,
+    };
     use crate::generation::reserve_picture_request;
     use crate::session::{CardMeta, CardMetaCache};
 

@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.6.1
+Release: 1.7.0
 
 Overview
 
@@ -21,7 +21,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.6.1/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.7.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -76,7 +76,7 @@ A session is the persistent unit of work. It is created by `new` and stored on
 disk. It holds the words, proposed senses, curation choices, committed plan,
 worker state, and result. Create one session per batch of words and reuse it.
 Do not call `new` again to re-read or rebuild the same batch; use `status`,
-`result`, or `regenerate`.
+`result`, `adjust`, or `regenerate`.
 
 Every stateful verb takes an optional `<id>`, but a single-batch workflow usually
 omits it. kamishibai resolves a lone session, or the lone unfinished one,
@@ -208,13 +208,61 @@ Calls Gemini synchronously to add senses, then resets the session to
 Commits the curated plan. Detached generation returns immediately with `phase`
 set to `generating`; poll `status`. Waiting blocks until terminal state, streams
 NDJSON events on stderr, and returns the terminal document. If every card fails,
-it exits 1 with the error envelope; if nothing is selected, it exits 2.
+it exits 1 with the error envelope; if nothing is selected, it exits 2. A
+session carrying staged sentence adjustments refuses before spawning a worker;
+activate the whole pending batch with `regenerate --pending`.
+
+Fresh card metadata first writes the natural sentence required by the approved
+understanding and only then assigns its descriptive register, phrase kind, and
+lowercase `a1`–`c2` level. Initial generation does not target a CEFR band. A
+level becomes a rewrite constraint only after the user explicitly changes it;
+when an exact band would make the accepted use unnatural, the closest natural
+result marks `level` as approximate.
 
 `status`
 
 Reads only the cache and never calls Gemini. Before a plan is committed, the
 session document contains candidates; after commit, it contains per-card
 artifact state.
+
+`adjust`
+
+Stages one committed card's sentence rewrite without calling Gemini, deleting
+artifacts, starting a worker, or changing the session phase or published
+result. Its grammar is:
+
+```text
+kamishibai adjust [<id>] --card TERM [--understanding TEXT]
+  [--register neutral|casual|formal|literary|archaic]
+  [--kind statement|question|request|exclamation|dialogue]
+  [--level a1|a2|b1|b2|c1|c2]
+  [--restore register|level|kind|all] [--note TEXT]
+```
+
+At least one of `--register`, `--kind`, `--level`, `--restore`, or `--note`
+is required. `--restore` is repeatable and comma-delimited: both
+`--restore register --restore level` and `--restore register,level` are valid.
+`all` means all three label axes. Restoring an axis copies that axis from the
+card's current baseline, including its pin and approximation state; on legacy
+metadata without labels it restores the axis to unknown. Restore never changes
+the note. If a value and `--restore` name the same axis in one call, the
+explicit value is applied after the restore and wins.
+
+Every flag is a patch. An omitted axis or note preserves the card's already
+staged value. An explicitly empty `--note ''` clears the note. If all three
+axes equal the current baseline and the note is blank, the card has no pending
+adjustment. Repeated calls may accumulate adjustments on several cards before
+one generation run.
+
+`--card` must identify exactly one committed card. It is enough when the term
+is unique. If selected senses produced several cards with the same term, add
+the exact `understanding` shown by `status` as `--understanding TEXT`; an
+ambiguous term is refused rather than silently selecting the first card.
+
+An imported `new --build` card can have current metadata without sentence
+labels. Adjusting such a card is supported: its pending selection contains only
+the explicitly chosen axes, and the first successful rewrite attributes the
+other axes. `adjust` is offline and never requires a Gemini key.
 
 `open`
 
@@ -229,9 +277,29 @@ cards JSON.
 
 `regenerate`
 
-Drops the targeted committed artifacts, rebuilds them, and republishes. With a
-rewrite note, Gemini first rewrites that card; the worker then follows the same
-lifecycle as `generate`.
+Takes exactly one target: `--failed`, `--card T`, or `--pending`. `--failed`
+retries incomplete cards from their first missing stages. `--card` fully
+re-rolls one committed card and may carry `--note "..."` for an immediate
+rewrite. Both rebuild and republish through the same worker as `generate`.
+
+`--pending` atomically activates every adjustment staged by `adjust` or the
+interactive editor, then starts one worker. It is the headless equivalent of
+`Ctrl+G`: several cards remain pending until this command, and all start
+together. A detached call returns with `phase: "generating"`; `--wait` streams
+the ordinary generation events and returns the terminal session document. On a
+partial session, the same run also resumes other missing artifact stages before
+republishing; it never discards a valid artifact from an untouched card.
+`generate`, `regenerate --failed`, and `regenerate --card` refuse while staged
+adjustments exist, before provider work or cache invalidation, and point to
+`regenerate --pending`.
+
+Every full-card rewrite carries the complete current sentence-label preset.
+Every unedited axis must keep its current value exactly. Only an explicitly
+changed or already pinned axis may differ from its requested value, and that
+response must mark the axis `approx`. With a rewrite note, Gemini also applies
+the note while rewriting that card. A successful rewrite replaces `labels`
+and removes `adjustment`; an interrupted or failed rewrite keeps an active
+adjustment so a later `generate` can resume it.
 
 `cancel`
 
@@ -269,9 +337,9 @@ JSON documents
 
 Session document
 
-Returned by `new`, `select`, `exclude`, `correct`, `generate`, `regenerate`,
-`cancel`, and `status`. Mutating verbs return the post-mutation state, so no
-follow-up `status` call is required.
+Returned by `new`, `select`, `exclude`, `correct`, `adjust`, `generate`,
+`regenerate`, `cancel`, and `status`. Mutating verbs return the post-mutation
+state, so no follow-up `status` call is required.
 
 Presence rules:
 
@@ -289,6 +357,17 @@ Presence rules:
   then `picture`
 - all four artifacts set to `true` means the card is in the deck
 - the first false artifact is where the card stands or failed
+- `cards.pending` is always present after commit and counts staged, not active,
+  adjustments
+- `labels` is the card's current complete attribution and is omitted only when
+  current metadata has no labels
+- `adjustment` is present while a rewrite is staged or active; `state` is
+  `pending` before `regenerate --pending` and `active` after activation
+- `adjustment.labels` is a selection: `register`, `kind`, and `level` are each
+  omitted when a legacy baseline has not attributed that axis; `pinned` and
+  `approx` are always arrays
+- `adjustment.note` is present only when non-empty
+- `approx` is always a subset of `pinned`; all tokens and axes are lowercase
 
 Example:
 
@@ -301,9 +380,7 @@ Example:
   "senses": "primary",
   "source": "words",
   "out": "/abs/out",
-  "phase": "generating",
-  "worker": {"pid": 4242, "alive": true},
-  "progress": {"term": "canard", "artifact": "scene"},
+  "phase": "published",
   "candidates": {
     "items": [
       {
@@ -316,7 +393,13 @@ Example:
       }
     ]
   },
+  "result": {
+    "deck": "/abs/out/FR.apkg",
+    "pdf": "/abs/out/FR.pdf",
+    "dir": "/abs/out"
+  },
   "cards": {
+    "pending": 1,
     "items": [
       {
         "term": "canard",
@@ -324,8 +407,25 @@ Example:
         "artifacts": {
           "meta": true,
           "sound": true,
-          "scene": false,
-          "picture": false
+          "scene": true,
+          "picture": true
+        },
+        "labels": {
+          "register": "neutral",
+          "kind": "statement",
+          "level": "a2",
+          "pinned": [],
+          "approx": []
+        },
+        "adjustment": {
+          "state": "pending",
+          "labels": {
+            "register": "neutral",
+            "kind": "statement",
+            "level": "b1",
+            "pinned": ["level"],
+            "approx": []
+          }
         }
       }
     ]
@@ -425,8 +525,8 @@ Commands that call Gemini require a Gemini API key: `new --word`, `new --words`,
 `correct`, `generate`, `regenerate`, and `config --key`.
 
 Offline commands that do not need a key: `status`, `result`, `ls`, `rm`,
-`cache-path`, `select`, `exclude`, `cancel`, and `new --build`. A later
-generation for a `new --build` session still needs a key.
+`cache-path`, `select`, `exclude`, `adjust`, `cancel`, and `new --build`. A
+later generation for a `new --build` session still needs a key.
 
 Set `GEMINI_API_KEY`, which wins, or save a key with `config --key -`. A saved
 key means `GEMINI_API_KEY` does not need to be set. On Unix, the preferences

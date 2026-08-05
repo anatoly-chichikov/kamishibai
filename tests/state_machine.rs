@@ -4,7 +4,7 @@
 //! path `YourWords -> WhatIUnderstood -> YourCards -> Done`. No UI rendering,
 //! no network, no Gemini.
 
-use kamishibai::session::{LanguagePair, WordCandidate};
+use kamishibai::session::{CardDraft, CardMeta, LanguagePair, WordCandidate};
 use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, transit};
 
 fn fake_candidates() -> Vec<WordCandidate> {
@@ -86,21 +86,51 @@ fn add_more_modal_returns_bulk_correction_and_stays_open_while_running() {
 }
 
 #[test]
-fn change_this_card_modal_returns_card_correction_and_stays_open_while_running() {
-    let start = App::new(LanguagePair::new("en", "ru")).with_screen(Screen::YourCards);
-    let (opened, _) = transit(start, AppEvent::RequestChange);
-    let (running, side) = transit(
-        opened.clone(),
-        AppEvent::SendCorrection(String::from("другое значение")),
-    );
+fn sentence_label_editor_queues_a_durable_card_rewrite() {
+    let pair = LanguagePair::new("en", "ru");
+    let start = App::new(pair.clone())
+        .with_screen(Screen::YourCards)
+        .cards_started(vec![CardDraft::new("a", "letter A", pair).with_meta(
+            CardMeta::new(
+                "/a/",
+                "/a sentence/",
+                "letter A",
+                5,
+                "source a",
+                "a",
+                "hint",
+                "context",
+                "Example with a.",
+            ),
+            None,
+        )])
+        .sentence_editor_opened_for_note();
+    let typed = "другое значение"
+        .chars()
+        .fold(start.clone(), |app, symbol| {
+            transit(app, AppEvent::KeyChar(symbol)).0
+        });
+    let (running, side) = transit(typed.clone(), AppEvent::Generate);
     assert_eq!(
-        (opened.modal(), running.modal(), side),
         (
-            Some(ModalKind::ChangeThisCard),
-            Some(ModalKind::ChangeThisCard),
-            Side::RunCardCorrection(String::from("другое значение")),
+            start.sentence_editor().is_some(),
+            typed.cards()[0]
+                .rewrite()
+                .map(kamishibai::session::CardRewrite::note),
+            running.sentence_editor(),
+            running.cards()[0]
+                .rewrite()
+                .map(kamishibai::session::CardRewrite::note),
+            side,
         ),
-        "Change this card modal must open, request per-card correction, and stay visible while the request runs"
+        (
+            true,
+            Some("другое значение"),
+            None,
+            Some("другое значение"),
+            Side::RegenerateCards,
+        ),
+        "the inline sentence editor failed to stage live input for bulk regeneration"
     );
 }
 

@@ -81,17 +81,11 @@ fn app_to_record(
             term: draft.term().to_string(),
             understanding: draft.understanding().to_string(),
             costs: crate::session::ArtifactCosts::from_artifacts(draft.artifacts()),
+            rewrite: draft.rewrite().cloned(),
         })
         .collect();
     let done = app.done_artifacts();
-    if let Some(pid) = worker_pid {
-        record.phase = Phase::Generating;
-        record.worker = Some(WorkerHandle {
-            pid,
-            started: created,
-        });
-    } else if !done.deck.is_empty() {
-        record.phase = Phase::Published;
+    if !done.deck.is_empty() {
         record.result = Some(ResultRecord {
             deck: done.deck.clone(),
             report: done.report.clone(),
@@ -99,6 +93,15 @@ fn app_to_record(
             cards: record.drafts.len(),
             failed: 0,
         });
+    }
+    if let Some(pid) = worker_pid {
+        record.phase = Phase::Generating;
+        record.worker = Some(WorkerHandle {
+            pid,
+            started: created,
+        });
+    } else if record.result.is_some() {
+        record.phase = Phase::Published;
     }
     record
 }
@@ -133,23 +136,25 @@ fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
                 draft.understanding.as_str(),
                 pair.clone(),
             )
+            .with_rewrite(draft.rewrite.clone())
             .with_costs(draft.costs)
         })
         .collect();
-    if let (Phase::Published, Some(result)) = (record.phase, record.result.as_ref()) {
-        let app = app
-            .cards_started(drafts)
-            .done_published(
-                result.deck.clone(),
-                result.report.clone(),
-                result.output.clone(),
-            )
-            .with_screen(Screen::Done);
-        return (app, None);
+    let mut app = app.cards_started(drafts.clone());
+    if let Some(result) = record.result.as_ref() {
+        app = app.done_published(
+            result.deck.clone(),
+            result.report.clone(),
+            result.output.clone(),
+        );
     }
-    let app = app
-        .with_screen(Screen::YourCards)
-        .cards_started(drafts.clone());
+    if record.phase == Phase::Published
+        && record.result.is_some()
+        && !drafts.iter().any(|draft| draft.staged_rewrite().is_some())
+    {
+        return (app.with_screen(Screen::Done), None);
+    }
+    let app = app.with_screen(Screen::YourCards);
     if matches!(
         record.phase,
         Phase::Failed | Phase::Cancelled | Phase::Partial
@@ -231,6 +236,21 @@ impl TuiSession {
         self.written
             .as_ref()
             .map(|record| PathBuf::from(record.out.as_str()))
+    }
+
+    /// Detach from a completed record so the same TUI can mint a fresh session.
+    pub(super) fn start_next_batch(&mut self) -> Result<()> {
+        if self.lock.is_some() {
+            bail!("the completed session still holds its generation lock");
+        }
+        self.costs.reset()?;
+        self.id = None;
+        self.created = None;
+        self.source = String::from("tui");
+        self.senses = String::from("custom");
+        self.written = None;
+        self.fingerprint = None;
+        Ok(())
     }
 
     fn hydrate(&self, record: &SessionRecord) -> Result<SessionRecord> {
@@ -428,6 +448,7 @@ fn fingerprint(app: &App, generating: bool) -> u64 {
     for draft in app.cards() {
         draft.term().hash(&mut hasher);
         draft.understanding().hash(&mut hasher);
+        draft.rewrite().hash(&mut hasher);
         for artifact in [
             crate::session::Artifact::Meta,
             crate::session::Artifact::Sound,
@@ -460,7 +481,10 @@ fn screen_tag(screen: Screen) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{Artifact, ArtifactSlot, CardArtifacts, GenerationCost, Sense};
+    use crate::session::{
+        Artifact, ArtifactSlot, CardArtifacts, CardMeta, GenerationCost, Sense,
+        SentenceLabelSelection, SessionEngine,
+    };
 
     fn understood_app() -> App {
         App::new(LanguagePair::new("fr", "en"))
@@ -568,6 +592,84 @@ mod tests {
             session.stored_output(),
             Some(PathBuf::from("/legacy/kamishibai-out")),
             "resuming a session replaced its stored output with the new default"
+        );
+    }
+
+    #[test]
+    fn a_completed_tui_session_rotates_identity_and_cost_scope_for_the_next_batch() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let record = app_to_record(
+            &published_app(),
+            String::from("fr-old"),
+            String::from("created-old"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        store
+            .create(&record)
+            .expect("published session must persist");
+        let old_journal = store.cost_journal(&record);
+        old_journal
+            .seed(record_costs(&record).as_slice())
+            .expect("old cost journal must seed");
+        old_journal
+            .charge(0, Artifact::Meta, GenerationCost::from_nanos(700))
+            .expect("old provider spend must persist");
+        let mut session =
+            TuiSession::resuming_in(&record, store.clone()).expect("session must resume");
+        let costs = session.cost_scope();
+        let old_cost = costs
+            .absolute(0, crate::session::ArtifactCosts::default())
+            .expect("old cost must be readable")
+            .cost(Artifact::Meta);
+        session
+            .start_next_batch()
+            .expect("completed session must detach");
+        let pair = LanguagePair::new("fr", "en");
+        let next = App::new(pair.clone())
+            .confirmed_learning("fr")
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![CardDraft::new("chouette", "great", pair)]);
+        let claimed = session
+            .claim_and_save(&next, Path::new("/o"))
+            .expect("next batch must claim");
+        let new_id = session.id.clone().expect("next batch must mint an id");
+        let fresh_cost = costs
+            .absolute(0, crate::session::ArtifactCosts::default())
+            .expect("new cost journal must open empty")
+            .cost(Artifact::Meta);
+        let old: SessionRecord = serde_json::from_slice(
+            std::fs::read(
+                home.path()
+                    .join("sessions")
+                    .join("fr-old")
+                    .join("session.json"),
+            )
+            .expect("old session must remain readable")
+            .as_slice(),
+        )
+        .expect("old session must decode");
+        assert_eq!(
+            (
+                claimed,
+                old_cost,
+                fresh_cost,
+                new_id != "fr-old",
+                old.phase,
+                old.result.map(|result| result.deck),
+            ),
+            (
+                true,
+                Some(GenerationCost::from_nanos(700)),
+                None,
+                true,
+                Phase::Published,
+                Some(String::from("/o/deck.apkg")),
+            ),
+            "the next TUI batch reused the published session identity or provider spend"
         );
     }
 
@@ -698,6 +800,200 @@ mod tests {
             fingerprint(&plain, true),
             fingerprint(&priced, true),
             "a cost-only UI update was debounced instead of being saved for reopen"
+        );
+    }
+
+    #[test]
+    fn a_queued_rewrite_is_saved_while_generation_is_already_active() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let pair = LanguagePair::new("fr", "en");
+        let app = App::new(pair.clone())
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![CardDraft::new("canard", "a duck", pair)]);
+        let record = app_to_record(
+            &app,
+            String::from("fr-rewrite"),
+            String::from("created-a"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        store.create(&record).expect("the session must persist");
+        let mut session =
+            TuiSession::resuming_in(&record, store.clone()).expect("the session must resume");
+        session
+            .claim_and_save(&app, Path::new("/o"))
+            .expect("generation must be claimed");
+        let rewritten = app.cards()[0]
+            .clone()
+            .rewriting(SentenceLabelSelection::empty(), "make it formal");
+        session
+            .save(&app.cards_replaced(vec![rewritten]), Path::new("/o"), true)
+            .expect("queued rewrite must save");
+        let stored: SessionRecord = serde_json::from_str(
+            std::fs::read_to_string(
+                home.path()
+                    .join("sessions")
+                    .join("fr-rewrite")
+                    .join("session.json"),
+            )
+            .expect("saved session must reopen")
+            .as_str(),
+        )
+        .expect("saved session must deserialize");
+        assert_eq!(
+            stored.drafts[0]
+                .rewrite
+                .as_ref()
+                .map(|rewrite| rewrite.note()),
+            Some("make it formal"),
+            "the active-session fingerprint debounced a queued rewrite"
+        );
+    }
+
+    #[test]
+    fn a_staged_rewrite_reopens_with_previous_meta_without_starting_correction() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let pair = LanguagePair::new("fr", "en");
+        let meta = CardMeta::new(
+            "/ka.naʁ/",
+            "/lə ka.naʁ naʒ/",
+            "a duck",
+            5,
+            "The duck swims",
+            "duck",
+            "Think of a pond",
+            "A common concrete noun",
+            "Le canard nage",
+        );
+        let draft = CardDraft::new("canard", "a duck", pair.clone())
+            .with_meta(meta, None)
+            .staging_rewrite(SentenceLabelSelection::empty(), "make it formal");
+        let record = app_to_record(
+            &App::new(pair)
+                .with_screen(Screen::YourCards)
+                .cards_started(vec![draft])
+                .done_published("/o/deck.apkg", "/o/deck.pdf", "/o"),
+            String::from("fr-staged"),
+            String::from("created-a"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        let (reopened, startup) = record_to_app(&record);
+        let engine = SessionEngine::start(startup.expect("staged session must hydrate cache rows"));
+        store
+            .create(&record)
+            .expect("published session must persist");
+        let mut hydration =
+            TuiSession::resuming_in(&record, store.clone()).expect("published session must resume");
+        hydration
+            .claim_and_save(&reopened, Path::new("/o"))
+            .expect("cache hydration must claim the session");
+        drop(hydration);
+        let path = home.path().join("sessions/fr-staged/session.json");
+        let claimed: SessionRecord = serde_json::from_slice(
+            std::fs::read(&path)
+                .expect("claimed session must read")
+                .as_slice(),
+        )
+        .expect("claimed session must decode");
+        let (crashed, crash_startup) = record_to_app(&claimed);
+        let active = crashed
+            .clone()
+            .cards_replaced(
+                crashed
+                    .cards()
+                    .iter()
+                    .cloned()
+                    .map(CardDraft::starting_rewrite)
+                    .collect(),
+            )
+            .publication_cleared();
+        let mut generation =
+            TuiSession::resuming_in(&claimed, store).expect("crashed session must resume");
+        generation
+            .claim_and_save(&active, Path::new("/o"))
+            .expect("Ctrl+G generation must claim the session");
+        let cleared: SessionRecord = serde_json::from_slice(
+            std::fs::read(path)
+                .expect("started session must read")
+                .as_slice(),
+        )
+        .expect("started session must decode");
+        assert_eq!(
+            (
+                record.phase,
+                reopened.screen(),
+                reopened.cards_pending(),
+                reopened.done_artifacts().deck.as_str(),
+                reopened.cards()[0].meta().map(CardMeta::target_sentence),
+                reopened.cards()[0]
+                    .rewrite()
+                    .map(crate::session::CardRewrite::started),
+                engine.next_target(),
+                engine.drafts()[0].rewrite().is_some(),
+                (
+                    claimed.phase,
+                    claimed.result.as_ref().map(|result| {
+                        (
+                            result.deck.as_str(),
+                            result.report.as_str(),
+                            result.output.as_str(),
+                        )
+                    }),
+                    claimed
+                        .drafts
+                        .first()
+                        .and_then(|draft| draft.rewrite.as_ref())
+                        .map(crate::session::CardRewrite::started),
+                ),
+                (
+                    crashed.screen(),
+                    crashed.cards_pending(),
+                    (
+                        crashed.done_artifacts().deck.as_str(),
+                        crashed.done_artifacts().report.as_str(),
+                        crashed.done_artifacts().output.as_str(),
+                    ),
+                    crash_startup.is_some(),
+                ),
+                (
+                    cleared.result.is_none(),
+                    cleared
+                        .drafts
+                        .first()
+                        .and_then(|draft| draft.rewrite.as_ref())
+                        .map(crate::session::CardRewrite::started),
+                ),
+            ),
+            (
+                Phase::Published,
+                Screen::YourCards,
+                1,
+                "/o/deck.apkg",
+                Some("Le canard nage"),
+                Some(false),
+                Some((0, Artifact::Sound)),
+                true,
+                (
+                    Phase::Generating,
+                    Some(("/o/deck.apkg", "/o/deck.pdf", "/o")),
+                    Some(false),
+                ),
+                (
+                    Screen::YourCards,
+                    1,
+                    ("/o/deck.apkg", "/o/deck.pdf", "/o"),
+                    true,
+                ),
+                (true, Some(true)),
+            ),
+            "startup hydration lost published output or Ctrl+G failed to clear it transactionally"
         );
     }
 

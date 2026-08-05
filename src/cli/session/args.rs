@@ -5,7 +5,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use clap::{ArgGroup, Args, Subcommand};
+use clap::{ArgAction, ArgGroup, Args, Subcommand, ValueEnum};
 
 use crate::cli::console::SensePolicy;
 
@@ -28,8 +28,10 @@ pub(in crate::cli) enum Command {
     Generate(GenerateArgs),
     /// Print a session's phase and per-card progress (no Gemini).
     Status(StatusArgs),
-    /// Drop committed cards' cached artifacts, then regenerate and republish
-    /// them (with --note, Gemini first rewrites the card).
+    /// Stage sentence-label or note changes on one generated card.
+    Adjust(AdjustArgs),
+    /// Apply staged changes, retry missing artifacts, or re-roll one card, then
+    /// regenerate and republish (with --note, Gemini first rewrites the card).
     Regenerate(RegenerateArgs),
     /// Print a session's published cards and artifact paths.
     Result(ResultArgs),
@@ -150,6 +152,107 @@ pub(in crate::cli) struct StatusArgs {
     pub(super) id: Option<String>,
 }
 
+/// Exact lowercase sentence-register values accepted by `adjust`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(super) enum AdjustRegister {
+    /// Stylistically unmarked language.
+    Neutral,
+    /// Conversational language.
+    Casual,
+    /// Official language.
+    Formal,
+    /// Bookish written language.
+    Literary,
+    /// Obsolete or historical language.
+    Archaic,
+}
+
+/// Exact lowercase phrase-kind values accepted by `adjust`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(super) enum AdjustKind {
+    /// A declarative statement.
+    Statement,
+    /// A direct question.
+    Question,
+    /// An instruction or polite request.
+    Request,
+    /// An exclamation.
+    Exclamation,
+    /// Two short linked utterances.
+    Dialogue,
+}
+
+/// Exact lowercase CEFR values accepted by `adjust`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(super) enum AdjustLevel {
+    /// Basic high-frequency surrounding language.
+    A1,
+    /// A familiar everyday situation.
+    A2,
+    /// One connected adult idea.
+    B1,
+    /// Dense nonspecialist language.
+    B2,
+    /// Flexible advanced language.
+    C1,
+    /// Layered near-native language.
+    C2,
+}
+
+/// Sentence-label baseline axes accepted by `adjust --restore`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(super) enum RestoreAxis {
+    /// Restore only register.
+    Register,
+    /// Restore only CEFR level.
+    Level,
+    /// Restore only phrase kind.
+    Kind,
+    /// Restore all three sentence-label axes.
+    All,
+}
+
+/// Arguments for staging one card's sentence-label or note changes.
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("change")
+        .required(true)
+        .multiple(true)
+        .args(["register", "kind", "level", "restore", "note"])
+))]
+pub(in crate::cli) struct AdjustArgs {
+    /// The session id (omit it to use the only — or only unfinished — session).
+    pub(super) id: Option<String>,
+    /// The term of the card to adjust.
+    #[arg(long, value_name = "TERM")]
+    pub(super) card: String,
+    /// The understanding that disambiguates repeated terms.
+    #[arg(long, value_name = "TEXT")]
+    pub(super) understanding: Option<String>,
+    /// Stage this stylistic register.
+    #[arg(long, value_enum)]
+    pub(super) register: Option<AdjustRegister>,
+    /// Stage this phrase kind.
+    #[arg(long, value_enum)]
+    pub(super) kind: Option<AdjustKind>,
+    /// Stage this surrounding-language CEFR level.
+    #[arg(long, value_enum)]
+    pub(super) level: Option<AdjustLevel>,
+    /// Restore one or more axes to their current baseline.
+    #[arg(
+        long,
+        value_name = "AXIS",
+        value_enum,
+        value_delimiter = ',',
+        num_args = 1..,
+        action = ArgAction::Append
+    )]
+    pub(super) restore: Vec<RestoreAxis>,
+    /// Stage a free-form rewrite note; an explicit empty value clears it.
+    #[arg(long, value_name = "TEXT")]
+    pub(super) note: Option<String>,
+}
+
 /// Arguments for `result`.
 #[derive(Debug, Args)]
 pub(in crate::cli) struct ResultArgs {
@@ -186,26 +289,30 @@ pub(in crate::cli) struct CardArg {
 #[derive(Debug, Args)]
 pub(in crate::cli) struct LsArgs {}
 
-/// Arguments for `regenerate`: every unfinished card with `--failed`, or one
-/// card by `--card` — optionally rewritten by Gemini first with `--note`.
+/// Arguments for `regenerate`: every unfinished card with `--failed`, every
+/// staged adjustment with `--pending`, or one card by `--card` — optionally
+/// rewritten by Gemini first with `--note`.
 #[derive(Debug, Args)]
-#[command(group(ArgGroup::new("target").required(true).args(["failed", "card"])))]
+#[command(group(ArgGroup::new("target").required(true).args(["failed", "pending", "card"])))]
 pub(in crate::cli) struct RegenerateArgs {
     /// The session id (omit it to use the only — or only unfinished — session).
     pub(super) id: Option<String>,
     /// Regenerate every card that has not finished.
     #[arg(long)]
     pub(super) failed: bool,
+    /// Activate every staged card adjustment and regenerate them as one batch.
+    #[arg(long)]
+    pub(super) pending: bool,
     /// Regenerate one card by its term.
     #[arg(long, value_name = "TERM")]
     pub(super) card: Option<String>,
     /// With --card, ask Gemini to rewrite the card from this instruction first
-    /// (requires --card; conflicts with --failed).
+    /// (requires --card; conflicts with --failed and --pending).
     #[arg(
         long,
         value_name = "NOTE",
         requires = "card",
-        conflicts_with = "failed"
+        conflicts_with_all = ["failed", "pending"]
     )]
     pub(super) note: Option<String>,
     /// Run in the foreground, streaming progress, instead of detaching.

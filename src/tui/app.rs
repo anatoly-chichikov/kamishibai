@@ -1,9 +1,12 @@
 use std::fmt;
 use std::time::Duration;
 
-use crate::session::{Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, WordCandidate};
+use crate::session::{
+    Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, SentenceLabelSelection, WordCandidate,
+};
 
 use super::screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
+use super::sentence_editor::{LabelEditorRow, NoteDraft, SentenceLabelsEditor};
 
 /// The immutable shell state carried between transitions.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -21,6 +24,7 @@ pub struct App {
     welcome: WelcomeView,
     body_scroll: u16,
     quit_pending: bool,
+    new_batch_pending: bool,
     picker_cursor: usize,
 }
 
@@ -68,7 +72,6 @@ impl Default for WelcomeView {
 pub enum BusyKind {
     Understanding,
     BulkCorrection,
-    CardCorrection,
     /// Welcome key step: probing Gemini to confirm the entered key is accepted.
     CheckingKey,
     /// Phase 1 of `publish`: building the Anki .apkg container.
@@ -83,7 +86,6 @@ impl BusyKind {
         match self {
             BusyKind::Understanding => "understanding your words",
             BusyKind::BulkCorrection => "adding missing meanings",
-            BusyKind::CardCorrection => "updating this card",
             BusyKind::CheckingKey => "checking your key",
             BusyKind::PublishingDeck => "building your anki deck",
             BusyKind::PublishingReport => "rendering your printable pdf",
@@ -139,6 +141,7 @@ pub struct CardsView {
     pub expanded: bool,
     pub elapsed: Duration,
     pub running: Option<(usize, Artifact)>,
+    editor: Option<SentenceLabelsEditor>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -192,6 +195,7 @@ impl App {
             welcome: WelcomeView::default(),
             body_scroll: 0,
             quit_pending: false,
+            new_batch_pending: false,
             picker_cursor: 0,
         }
     }
@@ -206,6 +210,38 @@ impl App {
     pub fn with_quit_pending(mut self, pending: bool) -> Self {
         self.quit_pending = pending;
         self
+    }
+
+    /// Return whether a first Escape has armed the final-screen new-batch gesture.
+    pub fn new_batch_pending(&self) -> bool {
+        self.new_batch_pending
+    }
+
+    /// Return the app with the new-batch confirmation flag updated.
+    pub fn with_new_batch_pending(mut self, pending: bool) -> Self {
+        self.new_batch_pending = pending;
+        self
+    }
+
+    /// Return whether a finished batch can be replaced from the final screen.
+    pub fn can_start_new_batch(&self) -> bool {
+        let terminal = !self.cards.drafts.is_empty()
+            && self
+                .cards
+                .drafts
+                .iter()
+                .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed());
+        matches!(self.screen, Screen::YourCards | Screen::Done)
+            && (!self.done.deck.is_empty() || terminal)
+            && self.modal.is_none()
+            && self.busy.is_none()
+            && self.error.is_none()
+            && self.cards.editor.is_none()
+    }
+
+    /// Start a clean batch while preserving the user's current language direction.
+    pub fn starting_new_batch(self) -> Self {
+        Self::new(self.pair)
     }
 
     /// Return the app rerouted onto the first-run Welcome screen starting
@@ -381,6 +417,7 @@ impl App {
         self.screen = next;
         self.modal = None;
         self.input.modal.clear();
+        self.cards.editor = None;
         self.body_scroll = 0;
         self
     }
@@ -433,7 +470,9 @@ impl App {
     /// Used after text edits and keyboard navigation so wheel-scrolled content
     /// follows the active text cursor, review candidate, or card selection.
     /// `body_width` is the body rect width in chars; passed through so the
-    /// `YourCards` snap math agrees with the renderer's wrapped head rows.
+    /// `YourCards` snap math agrees with the renderer's wrapped head rows. An
+    /// open card editor whose focused range fits anchors its card head at the
+    /// viewport top; smaller viewports retain the focused-row fallback.
     pub fn body_scroll_to_selection(mut self, viewport: u16, body_width: u16) -> Self {
         let Some((top, height)) = self.focused_body_range(body_width) else {
             return self;
@@ -443,7 +482,9 @@ impl App {
             .saturating_sub(viewport);
         let bottom = top.saturating_add(height);
         let mut next = self.body_scroll;
-        if top < next {
+        let anchor_editor =
+            self.screen == Screen::YourCards && self.cards.editor.is_some() && height <= viewport;
+        if anchor_editor || top < next {
             next = top;
         } else if bottom > next.saturating_add(viewport) {
             next = bottom.saturating_sub(viewport);
@@ -810,6 +851,31 @@ impl App {
         self.cards.drafts.as_slice()
     }
 
+    /// Return how many cards carry a live pending rewrite.
+    #[must_use]
+    pub fn cards_pending(&self) -> usize {
+        self.cards
+            .drafts
+            .iter()
+            .filter(|draft| draft.staged_rewrite().is_some())
+            .count()
+    }
+
+    /// Return whether the focused card can open its sentence-label editor.
+    #[must_use]
+    pub fn card_tunable(&self) -> bool {
+        self.card_tunable_at(self.cards.selected)
+    }
+
+    /// Return whether one card can open its sentence-label editor.
+    #[must_use]
+    pub fn card_tunable_at(&self, card: usize) -> bool {
+        self.cards.drafts.get(card).is_some_and(|draft| {
+            draft.meta().is_some()
+                && (draft.rewrite().is_none() || draft.staged_rewrite().is_some())
+        })
+    }
+
     /// Return the currently focused card index.
     pub fn card_selected(&self) -> usize {
         self.cards.selected
@@ -820,6 +886,142 @@ impl App {
         self.cards.expanded
     }
 
+    /// Return the open sentence-label editor for the focused card.
+    #[must_use]
+    pub fn sentence_editor(&self) -> Option<&SentenceLabelsEditor> {
+        self.cards.editor.as_ref()
+    }
+
+    /// Return the app with the focused card expanded and its note row editing.
+    #[must_use]
+    pub fn sentence_editor_opened_for_note(self) -> Self {
+        self.sentence_editor_opened(LabelEditorRow::Note)
+    }
+
+    /// Return the app with the focused card expanded and its register row editing.
+    #[must_use]
+    pub fn sentence_editor_opened_for_register(self) -> Self {
+        self.sentence_editor_opened(LabelEditorRow::Register)
+    }
+
+    /// Return the app with the sentence-label editor and focused card collapsed.
+    #[must_use]
+    pub fn sentence_editor_closed(mut self) -> Self {
+        self.cards.editor = None;
+        self.cards.expanded = false;
+        self
+    }
+
+    /// Return the app with the sentence-label editor focused on one row.
+    #[must_use]
+    pub fn sentence_editor_focused(mut self, row: LabelEditorRow) -> Self {
+        if let Some(editor) = self.cards.editor.take() {
+            self.cards.editor = Some(editor.focused(row));
+        }
+        self
+    }
+
+    /// Return the app with the sentence-label editor moved to its previous row.
+    #[must_use]
+    pub fn sentence_editor_row_previous(mut self) -> Self {
+        if let Some(editor) = self.cards.editor.take() {
+            self.cards.editor = Some(editor.row_previous());
+        }
+        self
+    }
+
+    /// Return the app with the sentence-label editor moved to its next row.
+    #[must_use]
+    pub fn sentence_editor_row_next(mut self) -> Self {
+        if let Some(editor) = self.cards.editor.take() {
+            self.cards.editor = Some(editor.row_next());
+        }
+        self
+    }
+
+    /// Return the app with the focused sentence-label axis moved one chip.
+    #[must_use]
+    pub fn sentence_editor_axis_advanced(mut self, forward: bool) -> Self {
+        if let Some(editor) = self.cards.editor.take() {
+            self.cards.editor = Some(editor.axis_advanced(forward));
+            self.stage_sentence_editor();
+        }
+        self
+    }
+
+    /// Return the app with one chip selected on the focused sentence-label axis.
+    #[must_use]
+    pub fn sentence_editor_axis_chosen(mut self, index: usize) -> Self {
+        if let Some(editor) = self.cards.editor.take() {
+            self.cards.editor = Some(editor.axis_chosen(index));
+            self.stage_sentence_editor();
+        }
+        self
+    }
+
+    /// Return the app with one character inserted into the focused rewrite note.
+    #[must_use]
+    pub fn sentence_editor_typed(mut self, symbol: char) -> Self {
+        if let Some(editor) = self.cards.editor.take() {
+            self.cards.editor = Some(editor.typed(symbol));
+            self.stage_sentence_editor();
+        }
+        self
+    }
+
+    /// Return the app with one character removed from the focused rewrite note.
+    #[must_use]
+    pub fn sentence_editor_rubbed(mut self) -> Self {
+        if let Some(editor) = self.cards.editor.take() {
+            self.cards.editor = Some(editor.rubbed());
+            self.stage_sentence_editor();
+        }
+        self
+    }
+
+    /// Return the app with the focused rewrite-note cursor moved left.
+    #[must_use]
+    pub fn sentence_editor_cursor_left(mut self) -> Self {
+        if let Some(editor) = self.cards.editor.take() {
+            self.cards.editor = Some(editor.cursor_left());
+        }
+        self
+    }
+
+    /// Return the app with the focused rewrite-note cursor moved right.
+    #[must_use]
+    pub fn sentence_editor_cursor_right(mut self) -> Self {
+        if let Some(editor) = self.cards.editor.take() {
+            self.cards.editor = Some(editor.cursor_right());
+        }
+        self
+    }
+
+    fn sentence_editor_opened(mut self, row: LabelEditorRow) -> Self {
+        if !self.card_tunable() {
+            return self;
+        }
+        let Some(draft) = self.cards.drafts.get(self.cards.selected) else {
+            return self;
+        };
+        let (baseline, selection, note) = sentence_editor_seed(draft);
+        self.cards.editor = Some(SentenceLabelsEditor::new(baseline, selection, row, note));
+        self.cards.expanded = true;
+        self
+    }
+
+    fn stage_sentence_editor(&mut self) {
+        let Some(editor) = self.cards.editor.as_ref() else {
+            return;
+        };
+        let selection = editor.selection().clone();
+        let note = editor.note().value().to_string();
+        let Some(draft) = self.cards.drafts.get(self.cards.selected).cloned() else {
+            return;
+        };
+        self.cards.drafts[self.cards.selected] = draft.staging_rewrite(selection, note);
+    }
+
     /// Return the app with a new card session installed.
     pub fn cards_started(mut self, drafts: Vec<CardDraft>) -> Self {
         self.cards = CardsView {
@@ -828,6 +1030,7 @@ impl App {
             expanded: false,
             elapsed: Duration::ZERO,
             running: None,
+            editor: None,
         };
         self
     }
@@ -847,6 +1050,9 @@ impl App {
     /// Return the app with card drafts replaced while preserving UI cursor state.
     pub fn cards_replaced(mut self, drafts: Vec<CardDraft>) -> Self {
         let selected = self.cards.selected.min(drafts.len().saturating_sub(1));
+        if selected != self.cards.selected || drafts.is_empty() {
+            self.cards.editor = None;
+        }
         self.cards.drafts = drafts;
         self.cards.selected = selected;
         if self.cards.drafts.is_empty() {
@@ -857,6 +1063,7 @@ impl App {
 
     /// Return the app with card cursor moved down (saturates).
     pub fn card_selected_next(mut self) -> Self {
+        self.cards.editor = None;
         if !self.cards.drafts.is_empty() {
             let last = self.cards.drafts.len() - 1;
             if self.cards.selected < last {
@@ -869,6 +1076,7 @@ impl App {
 
     /// Return the app with card cursor moved up (saturates).
     pub fn card_selected_previous(mut self) -> Self {
+        self.cards.editor = None;
         if self.cards.selected > 0 {
             self.cards.selected -= 1;
             self.cards.expanded = false;
@@ -876,16 +1084,29 @@ impl App {
         self
     }
 
-    /// Return the app with the focused card toggled between expanded and collapsed.
+    /// Toggle the focused card, opening its editor immediately when it can be tuned.
     pub fn card_toggle_expanded(mut self) -> Self {
-        self.cards.expanded = !self.cards.expanded;
+        if self.cards.expanded {
+            self.cards.editor = None;
+            self.cards.expanded = false;
+            return self;
+        }
+        if self.card_tunable() {
+            return self.sentence_editor_opened_for_register();
+        }
+        self.cards.expanded = true;
         self
     }
 
     /// Return the app with one card focused and expanded (clicked disclosure).
     pub fn card_revealed(mut self, card: usize) -> Self {
         if card < self.cards.drafts.len() {
+            self.cards.editor = None;
             self.cards.selected = card;
+            self.cards.expanded = false;
+            if self.card_tunable() {
+                return self.sentence_editor_opened_for_register();
+            }
             self.cards.expanded = true;
         }
         self
@@ -1099,6 +1320,24 @@ impl App {
     }
 }
 
+fn sentence_editor_seed(
+    draft: &CardDraft,
+) -> (SentenceLabelSelection, SentenceLabelSelection, NoteDraft) {
+    let baseline = draft
+        .meta()
+        .and_then(|meta| meta.sentence_labels())
+        .map(SentenceLabelSelection::from_labels)
+        .unwrap_or_else(SentenceLabelSelection::empty);
+    if let Some(rewrite) = draft.staged_rewrite() {
+        return (
+            baseline,
+            rewrite.selection().clone(),
+            NoteDraft::new(rewrite.note()),
+        );
+    }
+    (baseline.clone(), baseline, NoteDraft::default())
+}
+
 fn boundary_at_or_before(text: &str, cursor: usize) -> usize {
     if cursor >= text.len() {
         return text.len();
@@ -1243,4 +1482,138 @@ fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {
         return "retrying";
     }
     "queued"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::App;
+    use crate::session::{
+        AxisSet, CardDraft, CardMeta, LanguagePair, Register, SentenceAxis, SentenceKind,
+        SentenceLabelSelection, SentenceLabels, SentenceLevel,
+    };
+    use crate::tui::LabelEditorRow;
+
+    fn generated(term: &str, understanding: &str, pair: LanguagePair) -> CardDraft {
+        CardDraft::new(term, understanding, pair).with_meta(
+            CardMeta::new(
+                format!("/{term}/"),
+                format!("/{term} sentence/"),
+                format!("meaning of {term}"),
+                5,
+                format!("source with {term}"),
+                term,
+                format!("hint for {term}"),
+                format!("context for {term}"),
+                format!("Example with {term}."),
+            )
+            .with_sentence_labels(SentenceLabels::new(
+                Register::Neutral,
+                SentenceLevel::B1,
+                SentenceKind::Statement,
+                AxisSet::default(),
+                AxisSet::default(),
+            )),
+            None,
+        )
+    }
+
+    fn cards() -> App {
+        let pair = LanguagePair::new("fr", "en");
+        App::new(pair.clone()).cards_started(vec![
+            generated("flâner", "to stroll", pair.clone()),
+            generated("canard", "a duck", pair),
+        ])
+    }
+
+    #[test]
+    fn closing_the_editor_retains_the_live_pending_note() {
+        let opened = cards().sentence_editor_opened_for_note();
+        let changed = opened.clone().sentence_editor_typed('x');
+        let closed = changed.clone().sentence_editor_closed();
+        assert_eq!(
+            (
+                opened.card_expanded(),
+                opened.sentence_editor().map(|editor| editor.row()),
+                opened.cards()[0].rewrite(),
+                changed.cards()[0].rewrite().map(|rewrite| rewrite.note()),
+                closed.sentence_editor(),
+                closed.cards()[0].rewrite().map(|rewrite| rewrite.note()),
+            ),
+            (
+                true,
+                Some(LabelEditorRow::Note),
+                None,
+                Some("x"),
+                None,
+                Some("x")
+            ),
+            "closing the live editor rolled its pending note back"
+        );
+    }
+
+    #[test]
+    fn every_chip_and_note_edit_updates_the_selected_pending_draft() {
+        let changed = cards()
+            .sentence_editor_opened_for_register()
+            .sentence_editor_axis_chosen(1)
+            .sentence_editor_focused(LabelEditorRow::Note)
+            .sentence_editor_typed('é');
+        let rewrite = changed.cards()[0]
+            .rewrite()
+            .expect("the selected card must carry its rewrite");
+        assert_eq!(
+            (
+                rewrite.selection().register(),
+                rewrite
+                    .selection()
+                    .pinned()
+                    .contains(SentenceAxis::Register),
+                rewrite.note(),
+                changed.sentence_editor().is_some(),
+                changed.card_expanded(),
+            ),
+            (Some(Register::Casual), true, "é", true, true),
+            "live editing lost its label pin, note, or expanded editor"
+        );
+    }
+
+    #[test]
+    fn card_navigation_closes_the_editor() {
+        let navigated = cards()
+            .sentence_editor_opened_for_note()
+            .card_selected_next();
+        assert_eq!(
+            (
+                navigated.card_selected(),
+                navigated.card_expanded(),
+                navigated.sentence_editor(),
+            ),
+            (1, false, None),
+            "card navigation kept an editor attached to the previous selection"
+        );
+    }
+
+    #[test]
+    fn reopening_a_queued_rewrite_restores_its_note_and_selection() {
+        let draft = generated("flâner", "to stroll", LanguagePair::new("fr", "en"))
+            .staging_rewrite(
+                SentenceLabelSelection::empty().choosing(SentenceAxis::Register, 2),
+                "shorter",
+            );
+        let opened = App::new(LanguagePair::new("fr", "en"))
+            .cards_started(vec![draft])
+            .sentence_editor_opened_for_register();
+        let editor = opened
+            .sentence_editor()
+            .expect("the queued rewrite editor must open");
+        assert_eq!(
+            (
+                editor.selection().register(),
+                editor.note().value(),
+                editor.row(),
+            ),
+            (Some(Register::Formal), "shorter", LabelEditorRow::Register),
+            "reopening a queued rewrite lost its pending request"
+        );
+    }
 }

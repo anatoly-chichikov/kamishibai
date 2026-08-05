@@ -1,11 +1,11 @@
 use super::screen::{ModalKind, WelcomeFocus};
+use super::sentence_editor::LabelEditorRow;
 
 /// Identifies which text editor currently owns keystrokes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EditingOwner {
     RawBlob,
     BulkComment,
-    CardComment,
 }
 
 /// All user and session-engine events the transition function accepts.
@@ -19,8 +19,14 @@ pub enum AppEvent {
     KeyEnter,
     /// User asked to back out of a modal or go back a screen.
     Cancel,
-    /// User pressed R — requests bulk or per-card correction depending on context.
-    RequestChange,
+    /// Mouse selected one card and opened its inline sentence-label editor.
+    SentenceLabelOpen(usize, LabelEditorRow),
+    /// Mouse focus moved to one row of the inline sentence-label editor.
+    SentenceLabelFocus(LabelEditorRow),
+    /// Mouse picked one chip on one row of the inline sentence-label editor.
+    SentenceLabelChoose(LabelEditorRow, usize),
+    /// Mouse moved one row of the inline sentence-label editor by one choice.
+    SentenceLabelAdvance(LabelEditorRow, bool),
     /// User confirmed the comment of the currently open modal.
     SendCorrection(String),
     /// User asked to quit the app from Done.
@@ -50,8 +56,6 @@ pub enum AppEvent {
     UnderstandingReady,
     /// Session engine emitted bulk correction result.
     BulkCorrectionReady,
-    /// Session engine emitted per-card correction result.
-    CardCorrectionReady,
     /// Session engine reported that every artifact for every card is ready.
     BatchReady,
     /// Session engine reported that the queue fully drained, possibly with failures.

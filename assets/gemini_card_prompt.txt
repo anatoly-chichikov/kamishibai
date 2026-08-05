@@ -15,16 +15,31 @@ Current understanding (in source language):
 Current card meta:
 {current_meta}
 
+Requested label preset (changed: user-selected, exact when possible; preserve: must remain exact):
+{requested_labels}
+
 User correction:
 {user_correction}
 
 Produce a single JSON object with exactly these fields and no others, no prose, no code fences:
 
-{"term":"<possibly revised term>","understanding":"<possibly revised understanding>","pronunciation":"<IPA of term, no slashes>","transcription":"<IPA of target_sentence, no slashes>","meaning":"<short translation in source language>","importance":<integer 1..10>,"source_sentence":"<translation of target_sentence>","source_highlight":"<exact substring of source_sentence translating term>","source_hint":"<one contrastive source-language sentence following the length policy below; never mentions term>","source_context":"<four mentor-voice sections in source language; see source_context rules>","target_sentence":"<natural example sentence in target language using term>"}
+{"term":"<possibly revised term>","understanding":"<possibly revised understanding>","pronunciation":"<IPA of term, no slashes>","transcription":"<IPA of target_sentence, no slashes>","meaning":"<short translation in source language>","importance":<integer 1..10>,"source_sentence":"<translation of target_sentence>","source_highlight":"<exact substring of source_sentence translating term>","source_hint":"<one contrastive source-language sentence following the length policy below; never mentions term>","source_context":"<four mentor-voice sections in source language; see source_context rules>","target_sentence":"<natural example sentence in target language using term>","labels":{"register":"<neutral|casual|formal|literary|archaic>","type":"<statement|question|request|exclamation|dialogue>","level":"<a1|a2|b1|b2|c1|c2>","approx":["<changed axis fulfilled only approximately>"]}}
 
 Rules:
 
 - If the user's correction implies a different sense, a different morphological form, or a typo fix, update `term` and/or `understanding` accordingly. Otherwise keep both unchanged.
+
+- Treat every value in the requested label preset as a constraint. A value marked changed was explicitly selected by the user: satisfy it exactly when possible; if it cannot be fulfilled exactly, still return the best sentence and put that axis token in `approx`. A value marked preserve must remain exact even when the correction conflicts; never put a preserve axis in `approx`. The correction may rewrite the sentence but cannot override a preserve value. Attribute the final sentence honestly with the same closed contracts below.
+
+- If level is the only changed axis, rescale only the surrounding language. Keep `term` and its form and sense, the same situation, actors, action, tense, register, and type, and reuse as much wording as possible. Make the smallest edit that reaches the requested CEFR level; a move to an adjacent CEFR level must feel incremental, not like a newly invented sentence. Never replace the target term to satisfy `level`. Do not change sentence length merely to signal a level. Naturalness is never negotiable. If the exact requested level would make the accepted term, sense, form, construction, collocation, register, or type unnatural, return the closest natural rewrite and put `level` in `approx`. Never put a preserved axis in `approx`.
+
+  Register: neutral is unmarked; casual is conversational and may use mild slang; formal is official with full forms and no conversational contractions; literary is bookish and may use imagery; archaic sounds obsolete or historical but remains understandable.
+
+  Type: statement is declarative; question is a direct question; request is an instruction or polite request; exclamation is exclamatory; dialogue is two short utterances on one line separated by dashes (`— …? — …`), with the second answering the first.
+
+  Level: `level` is a lowercase operational CEFR band for the language surrounding `term`, not an official proficiency assessment of the learner or of `term` itself. Pretend the learner already knows `term`: the target term is exempt, so ignore its frequency, conceptual difficulty, spelling, pronunciation, and required inflection. Judge the remaining vocabulary, grammar, clause linkage, information density, and pragmatic inference. Naturally required collocations, argument structure, abstract setting, and surrounding syntax still count because they affect processing demand. A rare target term inside basic surrounding language can still be `a1`. Keep every level natural and useful. Raise it through authentic syntax, discourse, and nuance, never by padding the sentence with unrelated rare, technical, archaic, or academic words. Sentence length alone is not evidence of level. `a1` uses the most basic high-frequency surrounding vocabulary and forms with explicit relationships. `a2` uses familiar everyday vocabulary and common patterns with readily inferred relationships. `b1` supports connected everyday meaning through common collocations, subordination, or discourse links. `b2` uses precise nonspecialist vocabulary or less predictable collocation, flexible clause relations, or implicit stance and contrast. `c1` uses broad nuanced vocabulary, flexible complex syntax, abstract or implicit linkage, or substantial pragmatic inference. `c2` is highly idiomatic, elliptical, compact, or layered, with subtle relationships requiring near-native control, never obscurity for its own sake.
+
+  Calibrate levels within the target language itself, using its own CEFR-aligned learning progression. Do not transfer English-specific word counts, tense inventories, clause templates, cognate assumptions, or script difficulty. Assume the learner can read the target script. If the language or curriculum has no standard CEFR mapping, choose the closest functional level by communicative and grammatical demand.
 
 - Whenever you regenerate a field, follow the same rules as the original card-meta author:
   - target_sentence is natural and uses `term` in the chosen sense/form.

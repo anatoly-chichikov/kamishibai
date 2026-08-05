@@ -4,6 +4,7 @@ use super::app::App;
 use super::disclosure::{DisclosureControls, DisclosureIntent};
 use super::event::AppEvent;
 use super::screen::{ModalKind, Screen, WelcomeFocus, WelcomeStage};
+use super::sentence_editor::LabelEditorRow;
 
 /// A side effect requested by a transition. The shell interprets it outside the pure function.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,10 +13,9 @@ pub enum Side {
     RunUnderstanding,
     RunBulkCorrection(String),
     PersistMyLanguageAndRunUnderstanding(String),
-    RunCardCorrection(String),
     StartGeneration,
     RegenerateFailed,
-    RegenerateCurrent,
+    RegenerateCards,
     PersistMyLanguage(String),
     /// Welcome key step: probe Gemini with the entered key. The shell runs the
     /// check off-thread, persists language + key only on success, then moves to
@@ -110,7 +110,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         {
             (app.sense_next(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::RequestChange) => (app, Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('d'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('D')) => {
             let next = app.dropped_selected();
@@ -180,8 +179,82 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (_, Some(ModalKind::PickMyLanguage), AppEvent::Cancel) => (app.close_modal(), Side::None),
         (_, Some(ModalKind::PickMyLanguage), _) => (app, Side::None),
-        (Screen::YourCards, None, AppEvent::RequestChange) => {
-            (app.with_modal(ModalKind::ChangeThisCard), Side::None)
+        (Screen::YourCards, None, AppEvent::Cancel) if app.sentence_editor().is_some() => {
+            (app.sentence_editor_closed(), Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::SentenceLabelOpen(card, row))
+            if app.card_tunable_at(card) =>
+        {
+            (
+                app.card_revealed(card).sentence_editor_focused(row),
+                Side::None,
+            )
+        }
+        (Screen::YourCards, None, AppEvent::SentenceLabelFocus(row)) if app.card_tunable() => {
+            let next = if app.sentence_editor().is_some() {
+                app.sentence_editor_focused(row)
+            } else {
+                app.sentence_editor_opened_for_register()
+                    .sentence_editor_focused(row)
+            };
+            (next, Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::SentenceLabelChoose(row, index))
+            if app.sentence_editor().is_some() =>
+        {
+            (
+                app.sentence_editor_focused(row)
+                    .sentence_editor_axis_chosen(index),
+                Side::None,
+            )
+        }
+        (Screen::YourCards, None, AppEvent::SentenceLabelAdvance(row, forward))
+            if app.sentence_editor().is_some() =>
+        {
+            (
+                app.sentence_editor_focused(row)
+                    .sentence_editor_axis_advanced(forward),
+                Side::None,
+            )
+        }
+        (Screen::YourCards, None, AppEvent::NavPrev) if app.sentence_editor().is_some() => {
+            (app.sentence_editor_row_previous(), Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::NavNext) if app.sentence_editor().is_some() => {
+            (app.sentence_editor_row_next(), Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::CursorLeft) if app.sentence_editor().is_some() => {
+            let next = if sentence_note_focused(&app) {
+                app.sentence_editor_cursor_left()
+            } else {
+                app.sentence_editor_axis_advanced(false)
+            };
+            (next, Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::CursorRight) if app.sentence_editor().is_some() => {
+            let next = if sentence_note_focused(&app) {
+                app.sentence_editor_cursor_right()
+            } else {
+                app.sentence_editor_axis_advanced(true)
+            };
+            (next, Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::KeyChar(symbol)) if app.sentence_editor().is_some() => {
+            (app.sentence_editor_typed(symbol), Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::KeyBackspace) if app.sentence_editor().is_some() => {
+            (app.sentence_editor_rubbed(), Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::Submit | AppEvent::KeyEnter)
+            if app.sentence_editor().is_some() =>
+        {
+            (app, Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::Generate) if app.sentence_editor().is_some() => {
+            (app.sentence_editor_closed(), Side::RegenerateCards)
+        }
+        (Screen::YourCards, None, AppEvent::KeyChar(' ')) if app.card_tunable() => {
+            (app.sentence_editor_opened_for_register(), Side::None)
         }
         (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_selected_previous(), Side::None),
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
@@ -194,28 +267,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (app.card_toggle_expanded(), Side::None)
         }
         (Screen::YourCards, None, AppEvent::Generate) if !app.cards().is_empty() => {
-            (app, Side::RegenerateCurrent)
-        }
-        (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::SendCorrection(text)) => {
-            (app, Side::RunCardCorrection(text))
-        }
-        (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::Submit)
-        | (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::KeyEnter) => {
-            let text = app.modal_buffer().to_string();
-            if text.chars().any(|c| !c.is_whitespace()) {
-                (app, Side::RunCardCorrection(text))
-            } else {
-                (app, Side::None)
-            }
-        }
-        (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::Cancel) => {
-            (app.close_modal(), Side::None)
-        }
-        (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::KeyChar(symbol)) => {
-            (app.typed(symbol), Side::None)
-        }
-        (Screen::YourCards, Some(ModalKind::ChangeThisCard), AppEvent::KeyBackspace) => {
-            (app.rubbed(), Side::None)
+            (app, Side::RegenerateCards)
         }
         (Screen::YourCards, None, AppEvent::BatchReady) => (app, Side::StartPublish),
         (Screen::YourCards, None, AppEvent::BatchDone { failed: _ }) => (app, Side::StartPublish),
@@ -235,6 +287,11 @@ fn sense_controls(app: &App) -> DisclosureControls {
     } else {
         controls
     }
+}
+
+fn sentence_note_focused(app: &App) -> bool {
+    app.sentence_editor()
+        .is_some_and(|editor| editor.row() == LabelEditorRow::Note)
 }
 
 fn start_generation(app: App) -> (App, Side) {
@@ -330,10 +387,6 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         {
             AppEvent::WelcomeNextLanguage
         }
-        (Screen::WhatIUnderstood, AppEvent::KeyChar('r'))
-        | (Screen::WhatIUnderstood, AppEvent::KeyChar('R')) => AppEvent::RequestChange,
-        (Screen::YourCards, AppEvent::KeyChar('R'))
-        | (Screen::YourCards, AppEvent::KeyChar('r')) => AppEvent::RequestChange,
         _ => event,
     }
 }
@@ -399,7 +452,7 @@ fn next_known(current: &str, direction: i32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::LanguagePair;
+    use crate::session::{CardDraft, CardMeta, LanguagePair};
     use crate::tui::screen::{KeySource, WelcomeFocus};
 
     fn enter_key(env_available: bool) -> App {
@@ -503,6 +556,36 @@ mod tests {
             (app.welcome().key.clone(), app.welcome().focus),
             (String::from("A"), WelcomeFocus::Submit),
             "typing fills the always-editable field and leaves focus on the button"
+        );
+    }
+
+    #[test]
+    fn typing_r_inside_the_sentence_note_does_not_reopen_the_editor() {
+        let pair = LanguagePair::new("fr", "en");
+        let opened = App::new(pair.clone())
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![CardDraft::new("canard", "a duck", pair).with_meta(
+                CardMeta::new(
+                    "/canard/",
+                    "/canard sentence/",
+                    "duck",
+                    5,
+                    "source with canard",
+                    "canard",
+                    "hint",
+                    "context",
+                    "Example with canard.",
+                ),
+                None,
+            )])
+            .sentence_editor_opened_for_note();
+        let typed = "rewrite".chars().fold(opened, |app, symbol| {
+            transit(app, AppEvent::KeyChar(symbol)).0
+        });
+        assert_eq!(
+            typed.sentence_editor().map(|editor| editor.note().value()),
+            Some("rewrite"),
+            "the R shortcut swallowed or reset an r typed inside the sentence note"
         );
     }
 }

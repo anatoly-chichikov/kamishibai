@@ -14,11 +14,39 @@ Understanding (in source language; the parsed sense, form, register, or note the
 
 Produce a single JSON object with exactly these fields, in this order, no extra fields, no prose, no code fences:
 
-{"pronunciation":"<IPA of term, no slashes>","transcription":"<IPA of the full target_sentence, no slashes>","meaning":"<one short translation of term in source language; comma-separated alternates allowed>","importance":<integer 1..10>,"source_sentence":"<translation of target_sentence into source language>","source_highlight":"<exact substring of source_sentence that translates term, in the form it appears there>","source_hint":"<one contrastive sentence in source language following the length policy below>","source_context":"<four mentor-voice sections in source language; see source_context rules>","target_sentence":"<a natural example sentence in target language using term in the chosen sense and form>"}
+{"pronunciation":"<IPA of term, no slashes>","transcription":"<IPA of the full target_sentence, no slashes>","meaning":"<one short translation of term in source language; comma-separated alternates allowed>","importance":<integer 1..10>,"source_sentence":"<translation of target_sentence into source language>","source_highlight":"<exact substring of source_sentence that translates term, in the form it appears there>","source_hint":"<one contrastive sentence in source language following the length policy below>","source_context":"<four mentor-voice sections in source language; see source_context rules>","target_sentence":"<a natural example sentence in target language using term in the chosen sense and form>","labels":{"register":"<neutral|casual|formal|literary|archaic>","type":"<statement|question|request|exclamation|dialogue>","level":"<a1|a2|b1|b2|c1|c2>","approx":[]}}
 
 Field rules:
 
-- target_sentence: the seed for image and audio. Write a natural sentence that uses `term` in the sense and form established by the understanding. Do not artificially insert the dictionary form if the understanding said the user wants the inflected form.
+- target_sentence: the seed for image and audio. Write a natural sentence that uses `term` in the sense and form established by the understanding. Choose surrounding language that is natural for the accepted sense and register. Preserve any construction, collocation, and situation naturally required by the accepted use. Do not simplify, modernize, or neutralize an advanced or marked use to fit a label. Do not artificially insert the dictionary form if the understanding said the user wants the inflected form.
+
+- labels: First finalize `target_sentence` under the rule above, without aiming for any register, type, or level beyond what the approved understanding itself requires. Only then attribute the finished sentence. During initial generation these labels are descriptive and must never trigger a rewrite. `approx` is always an empty array. The register must agree with the register accepted in the understanding; a colloquial or slang-marked sense is `casual`, not `neutral`.
+
+  Register contract:
+  - neutral: stylistically unmarked and appropriate in ordinary contexts.
+  - casual: conversational speech; colloquial language and mild slang are allowed.
+  - formal: official or businesslike language, full forms, no conversational contractions.
+  - literary: bookish written language where imagery is allowed.
+  - archaic: obsolete or historical sounding but understandable to a modern reader.
+
+  Type contract:
+  - statement: a declarative statement.
+  - question: a direct question.
+  - request: an instruction or polite request.
+  - exclamation: an exclamation.
+  - dialogue: two short utterances on one line separated by dashes (`— …? — …`); the second answers the first and one voice reads both.
+
+  Level contract: classify only the already-final sentence. `level` is a lowercase operational CEFR band for the language surrounding `term`, not an official proficiency assessment of the learner or of `term` itself. For classification, pretend the learner already knows `term`: the target term is exempt, so ignore its frequency, conceptual difficulty, spelling, pronunciation, and required inflection. Judge the remaining vocabulary, grammar, clause linkage, information density, and pragmatic inference. Naturally required collocations, argument structure, abstract setting, and surrounding syntax still count because they affect processing demand. A rare target term inside basic surrounding language can therefore still be `a1`.
+
+  There is no default initial level. Classify the sentence you actually wrote. Do not lengthen, shorten, simplify, or complicate it to reach any band. Sentence length alone is not evidence of level: a short idiom may be advanced, while a long explicit sentence may be basic.
+  - a1: the surrounding language uses the most basic high-frequency vocabulary and forms, with roles and relationships stated explicitly.
+  - a2: the surrounding language uses familiar everyday vocabulary and common patterns, with simple coordination or modification and readily inferred relationships.
+  - b1: the surrounding language supports connected everyday meaning through common collocations, subordination, or discourse links without dense processing.
+  - b2: the surrounding language uses precise nonspecialist vocabulary or less predictable collocation, flexible clause relations, or implicit stance and contrast.
+  - c1: the surrounding language uses broad nuanced vocabulary, flexible complex syntax, abstract or implicit linkage, or substantial pragmatic inference.
+  - c2: the surrounding language is highly idiomatic, elliptical, compact, or layered, with subtle relationships requiring near-native control; never obscurity for its own sake.
+
+  Calibrate levels within the target language itself, using its own CEFR-aligned learning progression. Do not transfer English-specific word counts, tense inventories, clause templates, cognate assumptions, or script difficulty. Assume the learner can read the target script. If the language or curriculum has no standard CEFR mapping, choose the closest functional level by communicative and grammatical demand.
 
 - pronunciation: International Phonetic Alphabet for `term`. No slashes, no brackets, no stress digits. Use the standard pronunciation for the chosen sense and target dialect.
 

@@ -1,5 +1,4 @@
-//! Retry state must show inline inside `Your cards`, as in
-//! `docs/tui-states/current-pdf/06-your-cards-retrying.png`.
+//! Retry state must stay inside `Your cards` with history summarized by card.
 
 use anyhow::{Result, anyhow};
 use kamishibai::session::{
@@ -54,7 +53,7 @@ fn file_for(term: &str, kind: Artifact) -> ArtifactFile {
 }
 
 #[test]
-fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() -> Result<()> {
+fn engine_retry_event_renders_only_a_card_head_attempt_summary() -> Result<()> {
     let mut engine = SessionEngine::start(vec![draft("in the end")]);
     engine.applied_meta(0, Ok((meta_for("in the end"), None)));
     engine.applied_media(
@@ -87,11 +86,12 @@ fn engine_retry_event_renders_as_inline_retrying_marker_on_your_cards() -> Resul
         .cards_started(drafts);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("retry 1/3")
-            && rendered.contains("1 rejected")
-            && rendered.contains("$.1234")
+        rendered.contains("$.1234  ↻1")
+            && !rendered.contains("retry 1/3")
+            && !rendered.contains("1 ✗")
+            && !rendered.contains("paused")
             && rendered.contains("$0.12"),
-        "your cards must surface the numbered retry and its rejected predecessor inline: {rendered}"
+        "your cards must summarize retry history once on its card head: {rendered}"
     );
     Ok(())
 }

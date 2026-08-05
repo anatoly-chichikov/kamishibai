@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use super::GenerationCost;
 use super::attempt::{ARTIFACT_ATTEMPT_CEILING, AttemptFault, AttemptLog, AttemptTally};
+use super::labels::{SentenceLabelSelection, SentenceLabels};
 use super::pair::LanguagePair;
+use super::pass::CardRevision;
 
 /// Artifact type produced for each card.
 ///
@@ -104,6 +106,17 @@ impl<T> ArtifactAttempt<T> {
     /// Consume the operation and discard its accounting metadata.
     pub fn into_result(self) -> Result<T> {
         self.result
+    }
+
+    /// Transform the successful payload while retaining spend and failure context.
+    #[must_use]
+    pub fn map<U>(self, transform: impl FnOnce(T) -> U) -> ArtifactAttempt<U> {
+        ArtifactAttempt {
+            result: self.result.map(transform),
+            cost: self.cost,
+            related: self.related,
+            fault: self.fault,
+        }
     }
 }
 
@@ -466,9 +479,9 @@ impl CardArtifacts {
 /// The rich card content produced by the Gemini meta-generation pass.
 ///
 /// Mirrors the `VocabularyEntry` schema. Filled once per draft after the user
-/// confirms the understanding pass, and updated when the user opens
-/// `change this card` to refine a single card.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// confirms the understanding pass, and updated when the learner submits the
+/// inline sentence editor to refine a single card.
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct CardMeta {
     pronunciation: String,
     transcription: String,
@@ -479,6 +492,8 @@ pub struct CardMeta {
     source_hint: String,
     source_context: String,
     target_sentence: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    labels: Option<SentenceLabels>,
 }
 
 impl CardMeta {
@@ -506,6 +521,7 @@ impl CardMeta {
             source_hint: source_hint.into(),
             source_context: source_context.into(),
             target_sentence: target_sentence.into(),
+            labels: None,
         }
     }
 
@@ -553,6 +569,86 @@ impl CardMeta {
     pub fn target_sentence(&self) -> &str {
         self.target_sentence.as_str()
     }
+
+    /// Return the optional generated sentence attribution.
+    #[must_use]
+    pub fn sentence_labels(&self) -> Option<&SentenceLabels> {
+        self.labels.as_ref()
+    }
+
+    /// Return the metadata with generated sentence attribution installed.
+    #[must_use]
+    pub fn with_sentence_labels(mut self, labels: SentenceLabels) -> Self {
+        self.labels = Some(labels);
+        self
+    }
+}
+
+/// A durable full-card rewrite queued as the metadata step of generation.
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct CardRewrite {
+    previous: Option<CardMeta>,
+    selection: SentenceLabelSelection,
+    note: String,
+    #[serde(default = "rewrite_started")]
+    started: bool,
+}
+
+impl CardRewrite {
+    /// Create an activated rewrite from the prior metadata, working labels, and free note.
+    #[must_use]
+    pub fn new(
+        previous: Option<CardMeta>,
+        selection: SentenceLabelSelection,
+        note: impl Into<String>,
+    ) -> Self {
+        Self {
+            previous,
+            selection,
+            note: note.into(),
+            started: true,
+        }
+    }
+
+    /// Return the metadata visible before the rewrite started.
+    #[must_use]
+    pub fn previous(&self) -> Option<&CardMeta> {
+        self.previous.as_ref()
+    }
+
+    /// Return the changed and preserved values requested for the rewrite.
+    #[must_use]
+    pub fn selection(&self) -> &SentenceLabelSelection {
+        &self.selection
+    }
+
+    /// Return the learner's optional free-form correction.
+    #[must_use]
+    pub fn note(&self) -> &str {
+        self.note.as_str()
+    }
+
+    /// Return whether batch generation has activated this rewrite.
+    #[must_use]
+    pub fn started(&self) -> bool {
+        self.started
+    }
+
+    fn staging(mut self) -> Self {
+        self.started = false;
+        self
+    }
+
+    /// Return this durable rewrite activated for the next generation batch.
+    #[must_use]
+    pub fn activate(mut self) -> Self {
+        self.started = true;
+        self
+    }
+}
+
+fn rewrite_started() -> bool {
+    true
 }
 
 /// One card draft inside the current batch.
@@ -565,6 +661,7 @@ pub struct CardDraft {
     understanding: String,
     pair: LanguagePair,
     meta: Option<CardMeta>,
+    rewrite: Option<CardRewrite>,
     artifacts: CardArtifacts,
 }
 
@@ -580,6 +677,7 @@ impl CardDraft {
             understanding: understanding.into(),
             pair,
             meta: None,
+            rewrite: None,
             artifacts: CardArtifacts::default(),
         }
     }
@@ -602,6 +700,18 @@ impl CardDraft {
     /// Return the rich meta if it has been generated.
     pub fn meta(&self) -> Option<&CardMeta> {
         self.meta.as_ref()
+    }
+
+    /// Return the queued full-card rewrite when metadata must be regenerated.
+    #[must_use]
+    pub fn rewrite(&self) -> Option<&CardRewrite> {
+        self.rewrite.as_ref()
+    }
+
+    /// Return the queued rewrite only while it still waits for batch activation.
+    #[must_use]
+    pub fn staged_rewrite(&self) -> Option<&CardRewrite> {
+        self.rewrite.as_ref().filter(|rewrite| !rewrite.started())
     }
 
     /// Return the per-artifact state.
@@ -629,8 +739,113 @@ impl CardDraft {
             understanding: self.understanding,
             pair: self.pair,
             meta: Some(meta),
+            rewrite: None,
             artifacts,
         }
+    }
+
+    /// Return the draft with a metadata revision installed after a rewrite attempt.
+    #[must_use]
+    pub fn with_revision(self, revision: CardRevision, file: Option<ArtifactFile>) -> Self {
+        let (term, understanding, meta) = revision.into_parts();
+        let meta_slot = match file {
+            Some(file) => self.artifacts.meta().clone().succeeded_with(file),
+            None => self.artifacts.meta().clone().succeeded(),
+        };
+        let artifacts = CardArtifacts::from_parts(
+            meta_slot,
+            self.artifacts.scene().clone(),
+            self.artifacts.picture().clone(),
+            self.artifacts.sound().clone(),
+        );
+        Self {
+            term,
+            understanding,
+            pair: self.pair,
+            meta: Some(meta),
+            rewrite: None,
+            artifacts,
+        }
+    }
+
+    /// Return the draft with a rewrite staged beside its current metadata and artifacts.
+    #[must_use]
+    pub fn staging_rewrite(
+        self,
+        selection: SentenceLabelSelection,
+        note: impl Into<String>,
+    ) -> Self {
+        let note = note.into();
+        let previous = self
+            .rewrite
+            .as_ref()
+            .and_then(|rewrite| rewrite.previous.clone())
+            .or_else(|| self.meta.clone());
+        let baseline = previous
+            .as_ref()
+            .and_then(CardMeta::sentence_labels)
+            .map(SentenceLabelSelection::from_labels)
+            .unwrap_or_default();
+        let unchanged = selection == baseline;
+        let rewrite = (!unchanged || !note.trim().is_empty())
+            .then(|| CardRewrite::new(previous, selection, note).staging());
+        Self {
+            term: self.term,
+            understanding: self.understanding,
+            pair: self.pair,
+            meta: self.meta,
+            rewrite,
+            artifacts: self.artifacts,
+        }
+    }
+
+    /// Return the draft with its staged rewrite activated as a fresh metadata run.
+    #[must_use]
+    pub fn starting_rewrite(self) -> Self {
+        let Some(rewrite) = self.rewrite.as_ref() else {
+            return self;
+        };
+        if rewrite.started() {
+            return self;
+        }
+        let costs = ArtifactCosts::from_artifacts(&self.artifacts);
+        let fresh = CardArtifacts::default();
+        Self {
+            term: self.term,
+            understanding: self.understanding,
+            pair: self.pair,
+            meta: None,
+            rewrite: self.rewrite.map(CardRewrite::activate),
+            artifacts: costs.hydrate(fresh),
+        }
+    }
+
+    /// Return the draft immediately queued for a full rewrite through metadata retries.
+    #[must_use]
+    pub fn rewriting(self, selection: SentenceLabelSelection, note: impl Into<String>) -> Self {
+        self.staging_rewrite(selection, note).starting_rewrite()
+    }
+
+    /// Return the draft with a durable rewrite request restored from a session.
+    #[must_use]
+    pub fn with_rewrite(mut self, rewrite: Option<CardRewrite>) -> Self {
+        if let Some(previous) = rewrite
+            .as_ref()
+            .filter(|request| !request.started())
+            .and_then(CardRewrite::previous)
+            .cloned()
+        {
+            let artifacts = CardArtifacts::from_parts(
+                self.artifacts.meta().clone().succeeded(),
+                self.artifacts.scene().clone(),
+                self.artifacts.picture().clone(),
+                self.artifacts.sound().clone(),
+            );
+            self.meta = Some(previous);
+            self.artifacts = artifacts;
+        }
+        self.rewrite = rewrite;
+        self
     }
 
     /// Return the draft after a per-card correction.
@@ -662,6 +877,7 @@ impl CardDraft {
             understanding: understanding.into(),
             pair: self.pair,
             meta: Some(meta),
+            rewrite: None,
             artifacts,
         }
     }
@@ -673,6 +889,7 @@ impl CardDraft {
             understanding: self.understanding,
             pair: self.pair,
             meta: self.meta,
+            rewrite: self.rewrite,
             artifacts,
         }
     }
@@ -686,6 +903,7 @@ impl CardDraft {
             understanding: self.understanding,
             pair: self.pair,
             meta: self.meta,
+            rewrite: self.rewrite,
             artifacts,
         }
     }

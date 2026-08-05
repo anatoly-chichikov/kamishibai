@@ -15,8 +15,7 @@ use crate::config::{PreferenceStore, Preferences, default_store};
 use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    Artifact, ArtifactAttempt, ArtifactCosts, CardArtifacts, CardDraft, GenerationCost,
-    LearningTarget, RawInputBatch, SessionEngine,
+    Artifact, ArtifactAttempt, CardDraft, LearningTarget, RawInputBatch, SessionEngine,
 };
 use crate::tui::{App, AppEvent, BusyKind, KeySource, Screen, Side, WelcomeStage, transit};
 
@@ -25,16 +24,8 @@ const IDLE_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
 const BACKGROUND_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
 const FAST_JOB_POLL: Duration = Duration::from_millis(25);
 const FAST_JOB_WINDOW: Duration = Duration::from_millis(50);
-const QUIT_WINDOW: Duration = Duration::from_millis(1000);
+const CONFIRMATION_WINDOW: Duration = Duration::from_millis(1000);
 const KEY_REJECTED_MESSAGE: &str = "Gemini rejected this API key; saved key was cleared";
-
-fn correction_costs(artifacts: &CardArtifacts, delta: Option<GenerationCost>) -> ArtifactCosts {
-    let costs = ArtifactCosts::from_artifacts(artifacts);
-    match delta {
-        Some(delta) => costs.charged(Artifact::Meta, delta),
-        None => costs,
-    }
-}
 
 struct PendingJob<T> {
     receiver: Receiver<T>,
@@ -98,8 +89,10 @@ pub(super) struct Shell<P, K> {
     text: Option<PendingJob<TextOutcome>>,
     artifact_job: Option<PendingArtifactJob>,
     publish_job: Option<PendingJob<StudyPublishMessage>>,
+    regeneration_pending: bool,
     started: Option<Instant>,
     quit_armed_at: Option<Instant>,
+    new_batch_armed_at: Option<Instant>,
     workflow: P,
     keys: K,
     store: PreferenceStore,
@@ -128,8 +121,10 @@ impl Shell<GeminiCardWorkflow, GeminiKeyValidation> {
             text: None,
             artifact_job: None,
             publish_job: None,
+            regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow,
             keys,
             store: default_store(&SystemContext)?,
@@ -168,12 +163,7 @@ where
     /// to touch it. A persistence failure surfaces as a dismissable error instead
     /// of aborting the interactive run; the next edit retries the save.
     pub(super) fn persist(&mut self) {
-        let correcting = self.text.is_some()
-            && self
-                .app
-                .busy()
-                .is_some_and(|busy| busy.kind() == BusyKind::CardCorrection);
-        let generating = self.engine.is_some() || self.publish_job.is_some() || correcting;
+        let generating = self.engine.is_some() || self.publish_job.is_some();
         let failure = match self.session.as_mut() {
             Some(session) => session
                 .save(&self.app, self.output.as_path(), generating)
@@ -275,7 +265,7 @@ where
     pub(super) fn arm_quit(&mut self) -> bool {
         let now = Instant::now();
         if let Some(armed) = self.quit_armed_at
-            && now.duration_since(armed) <= QUIT_WINDOW
+            && now.duration_since(armed) <= CONFIRMATION_WINDOW
         {
             return true;
         }
@@ -299,11 +289,70 @@ where
     /// Expire the quit confirmation window when the user pauses too long.
     pub(super) fn refresh_quit_pending(&mut self) -> bool {
         if let Some(armed) = self.quit_armed_at
-            && armed.elapsed() > QUIT_WINDOW
+            && armed.elapsed() > CONFIRMATION_WINDOW
         {
             return self.disarm_quit();
         }
         false
+    }
+
+    /// Consume Escape on a finished final screen, arming or confirming a fresh batch.
+    pub(super) fn handle_new_batch_escape(&mut self) -> Result<bool> {
+        if !self.can_start_new_batch() {
+            return Ok(false);
+        }
+        let now = Instant::now();
+        if let Some(armed) = self.new_batch_armed_at
+            && now.duration_since(armed) <= CONFIRMATION_WINDOW
+        {
+            self.start_new_batch()?;
+            return Ok(true);
+        }
+        self.new_batch_armed_at = Some(now);
+        if !self.app.new_batch_pending() {
+            self.app = self.app.clone().with_new_batch_pending(true);
+        }
+        Ok(true)
+    }
+
+    /// Clear any pending new-batch confirmation state.
+    pub(super) fn disarm_new_batch(&mut self) -> bool {
+        self.new_batch_armed_at = None;
+        if self.app.new_batch_pending() {
+            self.app = self.app.clone().with_new_batch_pending(false);
+            return true;
+        }
+        false
+    }
+
+    /// Expire the final-screen Escape confirmation window after a pause.
+    pub(super) fn refresh_new_batch_pending(&mut self) -> bool {
+        if let Some(armed) = self.new_batch_armed_at
+            && armed.elapsed() > CONFIRMATION_WINDOW
+        {
+            return self.disarm_new_batch();
+        }
+        false
+    }
+
+    fn can_start_new_batch(&self) -> bool {
+        self.app.can_start_new_batch()
+            && self.engine.is_none()
+            && self.text.is_none()
+            && self.artifact_job.is_none()
+            && self.publish_job.is_none()
+    }
+
+    fn start_new_batch(&mut self) -> Result<()> {
+        if let Some(session) = self.session.as_mut() {
+            session.start_next_batch()?;
+        }
+        self.app = self.app.clone().starting_new_batch();
+        self.regeneration_pending = false;
+        self.started = None;
+        self.quit_armed_at = None;
+        self.new_batch_armed_at = None;
+        Ok(())
     }
 
     /// Apply one app event and start any resulting side effect.
@@ -332,6 +381,7 @@ where
         if self.publish_job.is_some() {
             return Ok(changed);
         }
+        changed |= self.resume_regeneration()?;
         changed |= self.advance_engine()?;
         Ok(changed)
     }
@@ -368,6 +418,9 @@ where
             self.spawn_artifact(card, kind)?;
             return Ok(true);
         }
+        if self.app.cards_pending() > 0 {
+            return Ok(false);
+        }
         if let Some(event) = engine.batch_state() {
             let app_event = match event {
                 crate::session::EngineEvent::BatchReady => Some(AppEvent::BatchReady),
@@ -394,13 +447,10 @@ where
             return Ok(());
         };
         let draft = engine.drafts()[card].clone();
-        let pair = draft.pair().clone();
-        let term = draft.term().to_string();
-        let understanding = draft.understanding().to_string();
         let workflow = self.workflow.clone();
         let job = PendingJob::spawn(move || match artifact {
             Artifact::Meta => {
-                ArtifactOutcome::Meta(workflow.generate_meta_in(card, &term, &understanding, &pair))
+                ArtifactOutcome::Meta(Box::new(workflow.generate_draft_meta_in(card, &draft)))
             }
             Artifact::Scene => ArtifactOutcome::Media(workflow.generate_scene_in(card, &draft)),
             Artifact::Picture => ArtifactOutcome::Media(workflow.generate_picture_in(card, &draft)),
@@ -439,7 +489,7 @@ where
                 let synthetic = anyhow!("background artifact task disconnected");
                 let outcome = match job.artifact {
                     Artifact::Meta => {
-                        ArtifactOutcome::Meta(ArtifactAttempt::unmetered(Err(synthetic)))
+                        ArtifactOutcome::Meta(Box::new(ArtifactAttempt::unmetered(Err(synthetic))))
                     }
                     _ => ArtifactOutcome::Media(ArtifactAttempt::unmetered(Err(synthetic))),
                 };
@@ -459,17 +509,32 @@ where
             self.recover_key_rejection();
             return;
         }
+        let requests = self
+            .app
+            .cards()
+            .iter()
+            .map(|draft| draft.staged_rewrite().cloned())
+            .collect::<Vec<_>>();
         let Some(engine) = self.engine.as_mut() else {
             self.app = self.app.clone().cards_running(None);
             return;
         };
         let _event = match outcome {
-            ArtifactOutcome::Meta(attempt) => engine.applied_meta_attempt(card, attempt),
+            ArtifactOutcome::Meta(attempt) => engine.applied_revision_attempt(card, *attempt),
             ArtifactOutcome::Media(attempt) => {
                 engine.applied_media_attempt(card, artifact, attempt)
             }
         };
-        let drafts = engine.drafts().to_vec();
+        let drafts = engine
+            .drafts()
+            .iter()
+            .cloned()
+            .zip(requests)
+            .map(|(draft, request)| match request {
+                Some(request) => draft.staging_rewrite(request.selection().clone(), request.note()),
+                None => draft,
+            })
+            .collect();
         self.app = self.app.clone().cards_replaced(drafts).cards_running(None);
     }
 
@@ -545,36 +610,6 @@ where
                     self.app = self.app.clone().error_shown(error.to_string());
                 }
             },
-            TextOutcome::CardCorrection(result, delta) => match result {
-                Ok(payload) => {
-                    let (revision, file) = *payload;
-                    let (term, understanding, meta) = revision.into_parts();
-                    let Some(current) = self.app.cards().get(self.app.card_selected()).cloned()
-                    else {
-                        return;
-                    };
-                    let costs = correction_costs(current.artifacts(), delta);
-                    let updated = current
-                        .recomposed(term, understanding, meta, file)
-                        .with_costs(costs);
-                    self.app = self.app.clone().close_modal().card_replaced(updated);
-                    self.start_engine();
-                }
-                Err(error) => {
-                    if delta.is_some()
-                        && let Some(current) =
-                            self.app.cards().get(self.app.card_selected()).cloned()
-                    {
-                        let costs = correction_costs(current.artifacts(), delta);
-                        self.app = self.app.clone().card_replaced(current.with_costs(costs));
-                    }
-                    if rejects_key(&error) {
-                        self.recover_key_rejection();
-                        return;
-                    }
-                    self.app = self.app.clone().error_shown(error.to_string());
-                }
-            },
             TextOutcome::KeyCheck(result) => match result {
                 Ok(()) => {
                     let language = self.app.pair().known().to_string();
@@ -627,8 +662,8 @@ where
                 self.app = self.app.clone().cards_reset_failures();
                 self.start_engine();
             }
-            Side::RegenerateCurrent => {
-                self.regenerate_current()?;
+            Side::RegenerateCards => {
+                self.regenerate_cards()?;
             }
             Side::RunBulkCorrection(comment) => {
                 let Some(focused) = self.app.candidates().get(self.app.selected()).cloned() else {
@@ -655,37 +690,6 @@ where
                         known.as_str(),
                         &LearningTarget::Detect,
                     ))
-                })?;
-            }
-            Side::RunCardCorrection(comment) => {
-                let slot = self.app.card_selected();
-                if self.app.cards().get(slot).is_none()
-                    || !self.hydrate_session_costs()
-                    || !self.claim_session()
-                {
-                    return Ok(());
-                }
-                let draft = self.app.cards()[slot].clone();
-                let pair = self.app.pair().clone();
-                let workflow = self.workflow.clone();
-                self.start_text(BusyKind::CardCorrection, move || {
-                    let (result, delta) = workflow
-                        .correct_card_in(slot, &draft, comment.as_str(), &pair)
-                        .into_parts();
-                    let result = result.and_then(|revision| {
-                        let file = workflow.store_card_meta(
-                            revision.term(),
-                            revision.understanding(),
-                            &pair,
-                            revision.meta(),
-                        )?;
-                        let file = Some(match delta {
-                            Some(delta) => file.with_cost(delta),
-                            None => file,
-                        });
-                        Ok(Box::new((revision, file)))
-                    });
-                    TextOutcome::CardCorrection(result, delta)
                 })?;
             }
             Side::StartPublish => {
@@ -730,6 +734,7 @@ where
     }
 
     fn recover_key_rejection(&mut self) {
+        self.regeneration_pending = false;
         if let Err(error) = clear_saved_key_in(&self.store) {
             self.app = self.app.clone().error_shown(error.to_string());
             return;
@@ -764,17 +769,67 @@ where
         Ok(())
     }
 
-    fn regenerate_current(&mut self) -> Result<()> {
-        if self.artifact_job.is_some() || self.publish_job.is_some() || self.app.cards().is_empty()
-        {
+    fn regenerate_cards(&mut self) -> Result<()> {
+        if self.app.cards().is_empty() {
+            return Ok(());
+        }
+        if self.artifact_job.is_some() || self.publish_job.is_some() {
+            self.regeneration_pending = true;
+            return Ok(());
+        }
+        self.restart_regeneration()
+    }
+
+    fn resume_regeneration(&mut self) -> Result<bool> {
+        if !self.regeneration_pending {
+            return Ok(false);
+        }
+        self.regeneration_pending = false;
+        self.restart_regeneration()?;
+        Ok(true)
+    }
+
+    fn restart_regeneration(&mut self) -> Result<()> {
+        let previous_app = self.app.clone();
+        let previous_engine = self.engine.clone();
+        let previous_started = self.started;
+        self.engine = None;
+        self.started = None;
+        let staged = self
+            .app
+            .cards()
+            .iter()
+            .any(|draft| draft.staged_rewrite().is_some());
+        if staged {
+            let drafts = self
+                .app
+                .cards()
+                .iter()
+                .cloned()
+                .map(CardDraft::starting_rewrite)
+                .collect();
+            self.app = self.app.clone().cards_replaced(drafts);
+        }
+        self.app = self
+            .app
+            .clone()
+            .busy_finished()
+            .cards_running(None)
+            .publication_cleared()
+            .error_cleared();
+        if staged {
+            if !self.start_engine() {
+                self.rollback(previous_app, previous_engine, previous_started);
+            }
             return Ok(());
         }
         if self.app.cards_failed() > 0 {
             self.app = self.app.clone().cards_reset_failures();
-            self.start_engine();
+            if !self.start_engine() {
+                self.rollback(previous_app, previous_engine, previous_started);
+            }
             return Ok(());
         }
-        self.app = self.app.clone().publication_cleared();
         if self
             .app
             .cards()
@@ -782,10 +837,28 @@ where
             .all(|draft| draft.artifacts().all_ready())
         {
             self.start_publish()?;
-        } else {
-            self.start_engine();
+            if self.publish_job.is_none() {
+                self.rollback(previous_app, previous_engine, previous_started);
+            }
+        } else if !self.start_engine() {
+            self.rollback(previous_app, previous_engine, previous_started);
         }
         Ok(())
+    }
+
+    fn rollback(
+        &mut self,
+        previous_app: App,
+        previous_engine: Option<SessionEngine>,
+        previous_started: Option<Instant>,
+    ) {
+        let error = self.app.error().map(String::from);
+        self.app = match error {
+            Some(error) => previous_app.error_shown(error),
+            None => previous_app,
+        };
+        self.engine = previous_engine;
+        self.started = previous_started;
     }
 
     fn start_engine(&mut self) -> bool {
@@ -973,13 +1046,14 @@ mod tests {
 
     use super::super::jobs::TextOutcome;
     use super::*;
-    use crate::cli::session::{DraftRecord, Phase, SessionRecord, SessionStore};
+    use crate::cli::session::{DraftRecord, Phase, ResultRecord, SessionRecord, SessionStore};
     use crate::session::{
-        ArtifactFile, CandidateRecord, CardMeta, CardRevision, GenerationCost, LanguagePair,
-        LearningDetection, RawInputBatch, ScriptDetection, Sense, SenseCorrection, Understood,
+        ARTIFACT_ATTEMPT_CEILING, ArtifactCosts, ArtifactFile, ArtifactSlot, CandidateRecord,
+        CardArtifacts, CardMeta, CardRevision, GenerationCost, LanguagePair, LearningDetection,
+        RawInputBatch, ScriptDetection, Sense, SenseCorrection, SentenceLabelSelection, Understood,
         WordCandidate, catalog_for_detection,
     };
-    use crate::tui::ModalKind;
+    use crate::tui::{LabelEditorRow, ModalKind};
     use anyhow::Result;
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1175,6 +1249,33 @@ mod tests {
             ArtifactAttempt::unmetered(result)
         }
 
+        fn generate_draft_meta_in(
+            &self,
+            slot: usize,
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<(CardRevision, Option<ArtifactFile>)> {
+            let Some(rewrite) = draft.rewrite() else {
+                let term = draft.term().to_string();
+                let understanding = draft.understanding().to_string();
+                return self
+                    .generate_meta_in(slot, draft.term(), draft.understanding(), draft.pair())
+                    .map(|(meta, file)| (CardRevision::new(term, understanding, meta), file));
+            };
+            let (result, cost) = self
+                .correct_card_accounted(draft, rewrite.note(), draft.pair())
+                .into_parts();
+            let result = result.and_then(|revision| {
+                let file = self.store_card_meta(
+                    revision.term(),
+                    revision.understanding(),
+                    draft.pair(),
+                    revision.meta(),
+                )?;
+                Ok((revision, Some(file)))
+            });
+            ArtifactAttempt::new(result, cost)
+        }
+
         fn generate_scene_in(
             &self,
             _slot: usize,
@@ -1206,16 +1307,6 @@ mod tests {
                 self.ready()
                     .and_then(|()| local_artifact(draft, Artifact::Sound)),
             )
-        }
-
-        fn correct_card_in(
-            &self,
-            _slot: usize,
-            draft: &CardDraft,
-            comment: &str,
-            pair: &LanguagePair,
-        ) -> ArtifactAttempt<CardRevision> {
-            CardCorrection::correct_card_accounted(self, draft, comment, pair)
         }
 
         fn store_card_meta(
@@ -1302,8 +1393,10 @@ mod tests {
             text: None,
             artifact_job: None,
             publish_job: None,
+            regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow: workflow.clone(),
             keys: workflow,
             store,
@@ -1329,6 +1422,35 @@ mod tests {
             .with_screen(Screen::WhatIUnderstood)
             .confirmed_learning("en")
             .understood(vec![candidate("whilst")])
+    }
+
+    fn finished(screen: Screen) -> App {
+        let pair = pair();
+        App::new(pair.clone())
+            .confirmed_learning("en")
+            .with_screen(screen)
+            .cards_started(vec![CardDraft::new("whilst", "although", pair)])
+            .done_published("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp")
+    }
+
+    fn failed_without_publication() -> App {
+        let pair = pair();
+        let mut picture = ArtifactSlot::fresh(Artifact::Picture);
+        for _ in 0..ARTIFACT_ATTEMPT_CEILING {
+            picture = picture.attempted();
+        }
+        let artifacts = CardArtifacts::from_parts(
+            ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+            ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+            picture,
+            ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+        );
+        App::new(pair.clone())
+            .confirmed_learning("en")
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![
+                CardDraft::new("whilst", "although", pair).with_artifacts(artifacts),
+            ])
     }
 
     fn settle_shell<P, K>(shell: &mut Shell<P, K>, max_ticks: usize)
@@ -1365,6 +1487,143 @@ mod tests {
             ),
             (Screen::WhatIUnderstood, 2, "whilst, in the end"),
             "first pass must split only by lines and keep commas literal"
+        );
+    }
+
+    #[test]
+    fn first_escape_on_published_cards_only_arms_a_new_batch() {
+        let mut shell = shell(finished(Screen::YourCards));
+        let consumed = shell
+            .handle_new_batch_escape()
+            .expect("first Escape must be handled");
+        assert_eq!(
+            (
+                consumed,
+                shell.app.screen(),
+                shell.app.new_batch_pending(),
+                shell.app.cards().len(),
+                shell.app.done_artifacts().deck.as_str(),
+            ),
+            (true, Screen::YourCards, true, 1, "/tmp/cards.apkg"),
+            "first Escape reset a completed batch without confirmation"
+        );
+    }
+
+    #[test]
+    fn second_escape_on_reopened_done_starts_clean_words_in_place() {
+        let mut shell = shell(finished(Screen::Done));
+        let output = shell.output.clone();
+        shell
+            .handle_new_batch_escape()
+            .expect("first Escape must arm the reset");
+        shell
+            .handle_new_batch_escape()
+            .expect("second Escape must confirm the reset");
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.pair().known(),
+                shell.app.learning_pending(),
+                shell.app.blob(),
+                shell.app.cards().len(),
+                shell.app.done_artifacts().deck.as_str(),
+                shell.app.new_batch_pending(),
+                shell.output.as_path(),
+            ),
+            (
+                Screen::YourWords,
+                "ru",
+                true,
+                "",
+                0,
+                "",
+                false,
+                output.as_path()
+            ),
+            "confirmed Escape did not replace Done with a clean batch in the same output"
+        );
+    }
+
+    #[test]
+    fn new_batch_confirmation_expires_after_the_quit_window() {
+        let mut shell = shell(finished(Screen::YourCards));
+        shell
+            .handle_new_batch_escape()
+            .expect("first Escape must arm the reset");
+        shell.new_batch_armed_at =
+            Some(Instant::now() - CONFIRMATION_WINDOW - Duration::from_millis(1));
+        let changed = shell.refresh_new_batch_pending();
+        assert_eq!(
+            (
+                changed,
+                shell.app.new_batch_pending(),
+                shell.new_batch_armed_at
+            ),
+            (true, false, None),
+            "an expired Escape confirmation remained armed"
+        );
+    }
+
+    #[test]
+    fn another_action_disarms_the_new_batch_confirmation() {
+        let mut shell = shell(finished(Screen::YourCards));
+        shell
+            .handle_new_batch_escape()
+            .expect("first Escape must arm the reset");
+        let changed = shell.disarm_new_batch();
+        assert_eq!(
+            (changed, shell.app.new_batch_pending(), shell.app.screen()),
+            (true, false, Screen::YourCards),
+            "another action left the destructive Escape confirmation armed"
+        );
+    }
+
+    #[test]
+    fn escape_closes_an_open_sentence_editor_before_arming_a_new_batch() {
+        let mut shell = shell(review());
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        settle_shell(&mut shell, 200);
+        shell
+            .handle(AppEvent::SentenceLabelFocus(LabelEditorRow::Register))
+            .expect("sentence editor must open");
+        let intercepted = shell
+            .handle_new_batch_escape()
+            .expect("Escape eligibility must be checked");
+        let side = shell
+            .handle(AppEvent::Cancel)
+            .expect("Escape must close the editor");
+        assert_eq!(
+            (
+                intercepted,
+                side,
+                shell.app.sentence_editor().is_none(),
+                shell.app.screen(),
+                shell.app.done_artifacts().deck.is_empty(),
+            ),
+            (false, Side::None, true, Screen::YourCards, false),
+            "Escape armed or cleared a published batch while its sentence editor was open"
+        );
+    }
+
+    #[test]
+    fn double_escape_starts_over_after_every_card_gives_up_before_publication() {
+        let mut shell = shell(failed_without_publication());
+        shell
+            .handle_new_batch_escape()
+            .expect("first Escape must arm the reset");
+        shell
+            .handle_new_batch_escape()
+            .expect("second Escape must reset the failed batch");
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.cards().len(),
+                shell.app.done_artifacts().deck.as_str(),
+            ),
+            (Screen::YourWords, 0, ""),
+            "a terminally failed unpublished batch still required an app restart"
         );
     }
 
@@ -1439,65 +1698,294 @@ mod tests {
     }
 
     #[test]
-    fn card_correction_keeps_modal_during_request_and_closes_after_success() {
-        let draft = CardDraft::new("whilst", "local understanding", pair());
-        let mut shell = shell(
-            App::new(pair())
-                .with_screen(Screen::YourCards)
-                .cards_started(vec![draft])
-                .with_modal(ModalKind::ChangeThisCard)
-                .typed('x'),
-        );
+    fn ctrl_g_starts_every_staged_rewrite_and_keeps_unmodified_cards_ready() {
+        let mut shell = shell(review().understood(vec![
+            candidate("alpha"),
+            candidate("beta"),
+            candidate("gamma"),
+        ]));
         shell
-            .handle(AppEvent::Submit)
-            .expect("card correction must start");
-        let during = (shell.app.modal(), shell.app.busy().map(|busy| busy.kind()));
-        settle_shell(&mut shell, 200);
+            .handle(AppEvent::Generate)
+            .expect("initial generation must start");
+        settle_shell(&mut shell, 300);
+        let original = shell.app.cards().to_vec();
+        let drafts = vec![
+            original[0]
+                .clone()
+                .staging_rewrite(SentenceLabelSelection::empty(), "rewrite alpha"),
+            original[1].clone(),
+            original[2]
+                .clone()
+                .staging_rewrite(SentenceLabelSelection::empty(), "rewrite gamma"),
+        ];
+        shell.app = shell.app.clone().cards_replaced(drafts);
+        let side = shell
+            .handle(AppEvent::Generate)
+            .expect("batch rewrite must start");
+        let engine = shell
+            .engine
+            .as_ref()
+            .expect("batch rewrite must install an engine");
         assert_eq!(
             (
-                during,
-                shell.app.modal(),
-                shell.app.busy().is_none(),
-                shell.app.cards()[0].understanding().contains("change: x"),
-                shell.app.cards()[0].artifacts().meta().cost(),
+                side,
+                engine.drafts()[0]
+                    .rewrite()
+                    .map(crate::session::CardRewrite::started),
+                engine.drafts()[0].meta().is_none(),
+                engine.drafts()[1] == original[1],
+                engine.drafts()[2]
+                    .rewrite()
+                    .map(crate::session::CardRewrite::started),
+                engine.drafts()[2].meta().is_none(),
+                engine.next_target(),
             ),
             (
-                (
-                    Some(ModalKind::ChangeThisCard),
-                    Some(BusyKind::CardCorrection)
-                ),
-                None,
+                Side::RegenerateCards,
+                Some(true),
                 true,
                 true,
-                Some(GenerationCost::from_nanos(123_000)),
+                Some(true),
+                true,
+                Some((0, Artifact::Meta)),
             ),
-            "card correction lost its exact cost or broke the modal lifecycle"
+            "Ctrl+G failed to activate every staged rewrite or mutated an unmodified card"
         );
     }
 
     #[test]
-    fn failed_card_correction_keeps_its_billed_delta_in_the_ui_ledger() {
+    fn ctrl_g_runs_a_staged_sentence_rewrite_inside_the_artifact_engine() {
+        let draft = CardDraft::new("whilst", "local understanding", pair())
+            .with_meta(
+                TestWorkflow::local_meta("whilst", "local understanding"),
+                None,
+            )
+            .staging_rewrite(SentenceLabelSelection::empty(), "x");
+        let mut shell = shell(
+            App::new(pair())
+                .with_screen(Screen::YourCards)
+                .cards_started(vec![draft]),
+        );
+        shell
+            .handle(AppEvent::Generate)
+            .expect("sentence rewrite batch must start");
+        let during = (shell.app.busy().is_none(), shell.engine.is_some());
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                during,
+                shell.app.cards()[0].understanding().contains("change: x"),
+                shell.app.cards()[0].rewrite().is_none(),
+                shell.app.cards()[0].artifacts().all_ready(),
+                shell.app.cards()[0].artifacts().meta().cost(),
+            ),
+            (
+                (true, true),
+                true,
+                true,
+                true,
+                Some(GenerationCost::from_nanos(123_000)),
+            ),
+            "staged sentence rewrite escaped the Ctrl+G artifact-engine batch"
+        );
+    }
+
+    #[test]
+    fn sentence_rewrite_waits_for_an_active_artifact_without_losing_the_request() {
+        let draft = CardDraft::new("whilst", "local understanding", pair());
+        let app = App::new(pair())
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![
+                draft
+                    .clone()
+                    .staging_rewrite(SentenceLabelSelection::empty(), "make it formal"),
+            ])
+            .cards_running(Some((0, Artifact::Meta)));
+        let mut shell = shell(app);
+        shell.engine = Some(SessionEngine::start(vec![draft]));
+        let settled = TestWorkflow::local_meta("whilst", "settled understanding");
+        let sentence = settled.target_sentence().to_string();
+        let (release, waiting) = channel();
+        shell.artifact_job = Some(PendingArtifactJob {
+            job: PendingJob::spawn(move || {
+                waiting
+                    .recv_timeout(Duration::from_secs(1))
+                    .expect("old artifact job must be released");
+                ArtifactOutcome::Meta(Box::new(ArtifactAttempt::new(
+                    Ok((
+                        CardRevision::new("whilst", "settled understanding", settled),
+                        None,
+                    )),
+                    Some(GenerationCost::from_nanos(77_000)),
+                )))
+            }),
+            card: 0,
+            artifact: Artifact::Meta,
+        });
+        shell
+            .handle(AppEvent::Generate)
+            .expect("sentence rewrite must queue");
+        release.send(()).expect("old artifact job must resume");
+        for _ in 0..50 {
+            shell.tick().expect("shell must advance the queued rewrite");
+            if !shell.regeneration_pending
+                && shell.app.cards_running_target() == Some((0, Artifact::Meta))
+                && shell.app.cards()[0]
+                    .rewrite()
+                    .and_then(|rewrite| rewrite.previous())
+                    .is_some()
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            (
+                shell.app.cards()[0]
+                    .rewrite()
+                    .and_then(|rewrite| rewrite.previous())
+                    .map(CardMeta::target_sentence),
+                shell.app.cards()[0].artifacts().meta().cost(),
+                shell.app.cards_running_target(),
+            ),
+            (
+                Some(sentence.as_str()),
+                Some(GenerationCost::from_nanos(77_000)),
+                Some((0, Artifact::Meta)),
+            ),
+            "an active artifact outcome replaced or bypassed the queued sentence rewrite"
+        );
+    }
+
+    #[test]
+    fn staged_rewrite_survives_another_cards_artifact_outcome_without_ctrl_g() {
+        let first = CardDraft::new("alpha", "first understanding", pair());
+        let second = CardDraft::new("beta", "second understanding", pair()).with_meta(
+            TestWorkflow::local_meta("beta", "second understanding"),
+            None,
+        );
+        let sentence = second
+            .meta()
+            .map(CardMeta::target_sentence)
+            .expect("second card must have current metadata")
+            .to_string();
+        let staged = second
+            .clone()
+            .staging_rewrite(SentenceLabelSelection::empty(), "make beta formal");
+        let app = App::new(pair())
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![first.clone(), staged])
+            .cards_running(Some((0, Artifact::Meta)));
+        let mut shell = shell(app);
+        shell.engine = Some(SessionEngine::start(vec![first, second]));
+        let settled = TestWorkflow::local_meta("alpha", "settled understanding");
+        shell.artifact_job = Some(PendingArtifactJob {
+            job: PendingJob::spawn(move || {
+                ArtifactOutcome::Meta(Box::new(ArtifactAttempt::new(
+                    Ok((
+                        CardRevision::new("alpha", "settled understanding", settled),
+                        None,
+                    )),
+                    Some(GenerationCost::from_nanos(81_000)),
+                )))
+            }),
+            card: 0,
+            artifact: Artifact::Meta,
+        });
+        for _ in 0..50 {
+            shell.tick().expect("shell must settle the other card");
+            if shell.app.cards()[0].meta().is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            (
+                shell.app.cards()[0].artifacts().meta().cost(),
+                shell.app.cards()[1].meta().map(CardMeta::target_sentence),
+                shell.app.cards()[1]
+                    .rewrite()
+                    .map(crate::session::CardRewrite::started),
+                shell.publish_job.is_none(),
+            ),
+            (
+                Some(GenerationCost::from_nanos(81_000)),
+                Some(sentence.as_str()),
+                Some(false),
+                true,
+            ),
+            "another card settling erased staged tuning, current metadata, or deferred publication"
+        );
+    }
+
+    #[test]
+    fn staged_app_cannot_publish_an_all_ready_baseline_engine_before_ctrl_g() {
+        let artifacts = CardArtifacts::from_parts(
+            ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+            ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+            ArtifactSlot::fresh(Artifact::Picture).succeeded(),
+            ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+        );
+        let baseline = CardDraft::new("alpha", "first understanding", pair())
+            .with_meta(
+                TestWorkflow::local_meta("alpha", "first understanding"),
+                None,
+            )
+            .with_artifacts(artifacts);
+        let staged = baseline
+            .clone()
+            .staging_rewrite(SentenceLabelSelection::empty(), "make it formal");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let app = App::new(pair())
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![staged]);
+        let mut shell = shell_with(app, TestWorkflow::counting(calls.clone()));
+        shell.engine = Some(SessionEngine::start(vec![baseline]));
+        for _ in 0..20 {
+            shell.tick().expect("staged shell must remain responsive");
+            if calls.load(Ordering::SeqCst) > 0 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            (
+                shell.app.cards_pending(),
+                calls.load(Ordering::SeqCst),
+                shell.publish_job.is_none(),
+                shell.artifact_job.is_none(),
+                shell.engine.is_some(),
+                shell.app.done_artifacts().deck.is_empty(),
+            ),
+            (1, 0, true, true, true, true),
+            "an all-ready baseline published while a newer staged edit still awaited Ctrl+G"
+        );
+    }
+
+    #[test]
+    fn failed_sentence_rewrite_keeps_every_retry_cost_in_the_ui_ledger() {
         let costs =
             ArtifactCosts::default().charged(Artifact::Meta, GenerationCost::from_nanos(45_000));
-        let draft = CardDraft::new("whilst", "local understanding", pair()).with_costs(costs);
+        let draft = CardDraft::new("whilst", "local understanding", pair())
+            .with_costs(costs)
+            .staging_rewrite(SentenceLabelSelection::empty(), "x");
         let mut shell = failing_shell(
             App::new(pair())
                 .with_screen(Screen::YourCards)
-                .cards_started(vec![draft])
-                .with_modal(ModalKind::ChangeThisCard)
-                .typed('x'),
+                .cards_started(vec![draft]),
         );
         shell
-            .handle(AppEvent::Submit)
-            .expect("card correction must start");
+            .handle(AppEvent::Generate)
+            .expect("sentence rewrite must start");
         settle_shell(&mut shell, 200);
         assert_eq!(
             (
                 shell.app.cards()[0].artifacts().meta().cost(),
-                shell.app.error().is_some(),
+                shell.app.cards()[0].artifacts().meta().failed_terminally(),
+                shell.app.cards()[0].rewrite().is_some(),
             ),
-            (Some(GenerationCost::from_nanos(168_000)), true),
-            "failed correction dropped its billed delta or hid its error"
+            (Some(GenerationCost::from_nanos(537_000)), true, true),
+            "failed sentence rewrite dropped retry spend or forgot its durable request"
         );
     }
 
@@ -1543,8 +2031,7 @@ mod tests {
         let original = drafts.clone();
         let app = App::new(pair())
             .with_screen(Screen::YourCards)
-            .cards_started(drafts)
-            .with_modal(ModalKind::ChangeThisCard);
+            .cards_started(drafts);
         let mut shell = key_rejecting_shell(app);
         shell.workflow.calls = Some(calls.clone());
         shell.start_engine();
@@ -1604,11 +2091,13 @@ mod tests {
                 term: String::from("alpha"),
                 understanding: String::from("first understanding"),
                 costs: first,
+                rewrite: None,
             },
             DraftRecord {
                 term: String::from("beta"),
                 understanding: String::from("second understanding"),
                 costs: second,
+                rewrite: None,
             },
         ];
         store
@@ -1626,8 +2115,10 @@ mod tests {
             text: None,
             artifact_job: None,
             publish_job: None,
+            regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow: TestWorkflow::local(),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -1775,8 +2266,10 @@ mod tests {
             text: None,
             artifact_job: None,
             publish_job: None,
+            regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -1832,7 +2325,20 @@ mod tests {
     fn a_stale_tui_cannot_correct_a_card_before_its_commit_succeeds() {
         let home = tempfile::tempdir().expect("temp home");
         let store = SessionStore::new(home.path());
-        let draft = CardDraft::new("alpha", "first understanding", pair());
+        let artifacts = CardArtifacts::from_parts(
+            ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+            ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+            ArtifactSlot::fresh(Artifact::Picture).succeeded(),
+            ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+        );
+        let draft = CardDraft::new("alpha", "first understanding", pair())
+            .with_meta(
+                TestWorkflow::local_meta("alpha", "first understanding"),
+                None,
+            )
+            .with_artifacts(artifacts)
+            .staging_rewrite(SentenceLabelSelection::empty(), "x");
+        let original = draft.clone();
         let mut record = SessionRecord::understood(
             String::from("correction-race"),
             String::from("created-a"),
@@ -1844,12 +2350,20 @@ mod tests {
             vec![String::from("alpha")],
             Vec::new(),
         );
-        record.phase = Phase::Failed;
+        record.phase = Phase::Published;
         record.drafts = vec![DraftRecord {
             term: String::from("alpha"),
             understanding: String::from("first understanding"),
             costs: ArtifactCosts::default(),
+            rewrite: None,
         }];
+        record.result = Some(ResultRecord {
+            deck: String::from("old.apkg"),
+            report: String::from("old.pdf"),
+            output: String::from("old-output"),
+            cards: 1,
+            failed: 0,
+        });
         store.create(&record).expect("the session must persist");
         let session =
             TuiSession::resuming_in(&record, store.clone()).expect("the session must resume");
@@ -1863,16 +2377,17 @@ mod tests {
         let app = App::new(pair())
             .with_screen(Screen::YourCards)
             .cards_started(vec![draft])
-            .with_modal(ModalKind::ChangeThisCard)
-            .typed('x');
+            .done_published("old.apkg", "old.pdf", "old-output");
         let mut shell = Shell {
             app,
             engine: None,
             text: None,
             artifact_job: None,
             publish_job: None,
+            regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -1880,7 +2395,7 @@ mod tests {
             output: home.path().to_path_buf(),
         };
         let side = shell
-            .handle(AppEvent::Submit)
+            .handle(AppEvent::Generate)
             .expect("the correction request must stay in the TUI");
         for _ in 0..3 {
             shell.tick().expect("an idle conflicted shell must tick");
@@ -1903,24 +2418,189 @@ mod tests {
             (
                 side,
                 calls.load(Ordering::SeqCst),
-                shell.text.is_none(),
-                shell.engine.is_none(),
-                stored.senses,
-                stored.drafts[0].understanding.clone(),
-                journal,
-                lock_released,
+                (
+                    shell.engine.is_none(),
+                    shell.publish_job.is_none(),
+                    shell.app.cards()[0] == original,
+                    shell.app.cards()[0]
+                        .staged_rewrite()
+                        .map(crate::session::CardRewrite::started),
+                ),
+                (
+                    shell.app.done_artifacts().deck.clone(),
+                    shell.app.done_artifacts().report.clone(),
+                    shell.app.error().map(String::from),
+                ),
+                (
+                    stored.phase,
+                    stored.senses,
+                    stored.drafts[0].understanding.clone(),
+                    stored
+                        .result
+                        .as_ref()
+                        .map(|result| (result.deck.clone(), result.report.clone())),
+                    journal,
+                    lock_released,
+                ),
             ),
             (
-                Side::RunCardCorrection(String::from("x")),
+                Side::RegenerateCards,
                 0,
-                true,
-                true,
-                String::from("all"),
-                String::from("first understanding"),
-                false,
-                true,
+                (true, true, true, Some(false)),
+                (
+                    String::from("old.apkg"),
+                    String::from("old.pdf"),
+                    Some(String::from(
+                        "could not claim the session: session 'correction-race' changed outside this window; reopen it to continue",
+                    )),
+                ),
+                (
+                    Phase::Published,
+                    String::from("all"),
+                    String::from("first understanding"),
+                    Some((String::from("old.apkg"), String::from("old.pdf"))),
+                    false,
+                    true,
+                ),
             ),
-            "a stale TUI corrected a card or poisoned its journal before winning the session claim"
+            "a failed rewrite claim mutated staged presentation, publication, storage, or provider state"
+        );
+    }
+
+    #[test]
+    fn a_stale_tui_cannot_clear_published_paths_before_its_publish_claim_succeeds() {
+        let home = tempfile::tempdir().expect("temp home");
+        let store = SessionStore::new(home.path());
+        let artifacts = CardArtifacts::from_parts(
+            ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+            ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+            ArtifactSlot::fresh(Artifact::Picture).succeeded(),
+            ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+        );
+        let draft = CardDraft::new("alpha", "first understanding", pair())
+            .with_meta(
+                TestWorkflow::local_meta("alpha", "first understanding"),
+                None,
+            )
+            .with_artifacts(artifacts);
+        let original = draft.clone();
+        let mut record = SessionRecord::understood(
+            String::from("publish-race"),
+            String::from("created-a"),
+            String::from("ru"),
+            String::from("en"),
+            home.path().to_string_lossy().into_owned(),
+            String::from("primary"),
+            String::from("tui"),
+            vec![String::from("alpha")],
+            Vec::new(),
+        );
+        record.phase = Phase::Published;
+        record.drafts = vec![DraftRecord {
+            term: String::from("alpha"),
+            understanding: String::from("first understanding"),
+            costs: ArtifactCosts::default(),
+            rewrite: None,
+        }];
+        record.result = Some(ResultRecord {
+            deck: String::from("old.apkg"),
+            report: String::from("old.pdf"),
+            output: String::from("old-output"),
+            cards: 1,
+            failed: 0,
+        });
+        store.create(&record).expect("the session must persist");
+        let session =
+            TuiSession::resuming_in(&record, store.clone()).expect("the session must resume");
+        store
+            .update("publish-race", |fresh| {
+                fresh.senses = String::from("all");
+                Ok(())
+            })
+            .expect("the competing edit must persist");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let app = App::new(pair())
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![draft])
+            .done_published("old.apkg", "old.pdf", "old-output");
+        let mut shell = Shell {
+            app,
+            engine: None,
+            text: None,
+            artifact_job: None,
+            publish_job: None,
+            regeneration_pending: false,
+            started: None,
+            quit_armed_at: None,
+            new_batch_armed_at: None,
+            workflow: TestWorkflow::counting(calls.clone()),
+            keys: TestWorkflow::local(),
+            store: PreferenceStore::at(home.path().join("preferences.json")),
+            session: Some(session),
+            output: home.path().to_path_buf(),
+        };
+        let side = shell
+            .handle(AppEvent::Generate)
+            .expect("the publish request must stay in the TUI");
+        let stored: SessionRecord = serde_json::from_slice(
+            std::fs::read(home.path().join("sessions/publish-race/session.json"))
+                .expect("the competing record must read")
+                .as_slice(),
+        )
+        .expect("the competing record must decode");
+        let journal = std::fs::read_dir(home.path().join("sessions/publish-race"))
+            .expect("the session directory must list")
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().starts_with("costs-"));
+        let lock_released = store
+            .hold("publish-race")
+            .expect("the lock probe must succeed")
+            .is_some();
+        assert_eq!(
+            (
+                side,
+                calls.load(Ordering::SeqCst),
+                (
+                    shell.engine.is_none(),
+                    shell.publish_job.is_none(),
+                    shell.app.cards()[0] == original,
+                ),
+                (
+                    shell.app.done_artifacts().deck.clone(),
+                    shell.app.done_artifacts().report.clone(),
+                    shell.app.error().map(String::from),
+                ),
+                (
+                    stored.phase,
+                    stored.senses,
+                    stored
+                        .result
+                        .as_ref()
+                        .map(|result| (result.deck.clone(), result.report.clone())),
+                    journal,
+                    lock_released,
+                ),
+            ),
+            (
+                Side::RegenerateCards,
+                0,
+                (true, true, true),
+                (
+                    String::from("old.apkg"),
+                    String::from("old.pdf"),
+                    Some(String::from(
+                        "could not claim the session: session 'publish-race' changed outside this window; reopen it to continue",
+                    )),
+                ),
+                (
+                    Phase::Published,
+                    String::from("all"),
+                    Some((String::from("old.apkg"), String::from("old.pdf"))),
+                    false,
+                    true,
+                ),
+            ),
+            "a failed publish claim cleared published paths or changed provider, storage, or lock state"
         );
     }
 
@@ -2070,11 +2750,7 @@ mod tests {
                 shell.app.done_artifacts().report.ends_with(".pdf"),
             ),
             (
-                (
-                    Side::RegenerateCurrent,
-                    Some(BusyKind::PublishingDeck),
-                    true
-                ),
+                (Side::RegenerateCards, Some(BusyKind::PublishingDeck), true),
                 true,
                 true,
             ),

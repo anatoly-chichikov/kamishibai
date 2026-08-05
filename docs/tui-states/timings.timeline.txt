@@ -2,14 +2,51 @@
 # Edit timings.conf instead, then re-run ./encode.sh.
 # output fps = 25
 
-action                 kind     out_start    out_end   out_dur   source
----------------------- ------- ---------- ---------- ---------   ----------------------
-type_words             window       0.00s      2.20s     2.20s   raw 1.24s → 4.80s  (3.56s @ 15.4494fps)
-understanding          window       2.20s      4.00s     1.80s   raw 4.80s → 6.60s  (1.8s @ 25fps)
-review                 window       4.00s      6.60s     2.60s   raw 12.08s → 17.84s  (5.76s @ 11.2847fps)
-review_selected        window       6.60s      7.60s     1.00s   raw 17.84s → 18.40s  (0.56s @ 44.6429fps)
-generating             window       7.60s     10.80s     3.20s   raw 18.48s → 251.48s  (233s @ 0.343348fps)
-card_flow              window      10.80s     14.64s     3.84s   raw 251.48s → 258.40s  (6.92s @ 13.8728fps)
-open_card_finale       fade        14.64s     17.96s     3.32s   fade live/09-card-open.png  (split y=310, hold 1.10s, fade 0.8s, hold-black 1.4s, caption)
+action                       kind     out_start    out_end   out_dur   source
+---------------------------- ------- ---------- ---------- ---------   ----------------------
+type_words                   window       0.00s      1.68s     1.68s   main 0.24s → 1.92s  (1.68s @ 25fps)
+understanding                window       1.68s      2.88s     1.20s   main 2.32s → 3.52s  (1.2s @ 25fps)
+review                       splice       2.88s      4.08s     1.20s   splice live/02-what-i-understood.png
+sense_cursor_to_canard       window       4.08s      5.40s     1.32s   main 16.20s → 17.52s  (1.32s @ 25fps)
+sense_open                   window       5.40s      6.24s     0.84s   main 17.52s → 18.36s  (0.84s @ 25fps)
+sense_cursor_second          window       6.24s      7.64s     1.40s   main 18.36s → 19.76s  (1.4s @ 25fps)
+sense_select_second          window       7.64s      8.40s     0.76s   main 19.76s → 20.52s  (0.76s @ 25fps)
+sense_close_and_generate     window       8.40s      9.08s     0.68s   main 20.52s → 21.20s  (0.68s @ 25fps)
+initial_fill_01              window       9.08s      9.28s     0.20s   main 21.16s → 21.36s  (0.2s @ 25fps)
+initial_fill_02              window       9.28s      9.48s     0.20s   main 33.68s → 33.88s  (0.2s @ 25fps)
+initial_fill_03              window       9.48s      9.68s     0.20s   main 36.32s → 36.52s  (0.2s @ 25fps)
+initial_fill_04              window       9.68s      9.88s     0.20s   main 47.48s → 47.68s  (0.2s @ 25fps)
+initial_retry_01             window       9.88s     10.08s     0.20s   main 55.32s → 55.52s  (0.2s @ 25fps)
+initial_retry_02             window      10.08s     10.28s     0.20s   main 63.68s → 63.88s  (0.2s @ 25fps)
+initial_fill_05              window      10.28s     10.48s     0.20s   main 85.20s → 85.40s  (0.2s @ 25fps)
+initial_fill_06              window      10.48s     10.68s     0.20s   main 94.52s → 94.72s  (0.2s @ 25fps)
+initial_fill_07              window      10.68s     10.88s     0.20s   main 97.04s → 97.24s  (0.2s @ 25fps)
+initial_fill_08              window      10.88s     11.08s     0.20s   main 109.64s → 109.84s  (0.2s @ 25fps)
+initial_fill_09              window      11.08s     11.28s     0.20s   main 117.56s → 117.76s  (0.2s @ 25fps)
+initial_fill_10              window      11.28s     11.48s     0.20s   main 123.84s → 124.04s  (0.2s @ 25fps)
+initial_fill_11              window      11.48s     11.68s     0.20s   main 125.76s → 125.96s  (0.2s @ 25fps)
+initial_fill_12              window      11.68s     11.88s     0.20s   main 134.76s → 134.96s  (0.2s @ 25fps)
+initial_retry_03             window      11.88s     12.08s     0.20s   main 141.40s → 141.60s  (0.2s @ 25fps)
+initial_fill_13              window      12.08s     12.28s     0.20s   main 149.72s → 149.92s  (0.2s @ 25fps)
+initial_fill_14              window      12.28s     12.48s     0.20s   main 163.68s → 163.88s  (0.2s @ 25fps)
+initial_fill_15              window      12.48s     12.68s     0.20s   main 165.76s → 165.96s  (0.2s @ 25fps)
+initial_fill_16              window      12.68s     12.88s     0.20s   main 175.64s → 175.84s  (0.2s @ 25fps)
+initial_fill_17              window      12.88s     13.08s     0.20s   main 183.60s → 183.80s  (0.2s @ 25fps)
+initial_publish              window      13.08s     13.68s     0.60s   main 297.76s → 298.36s  (0.6s @ 25fps)
+card_cursor_down_1           window      13.68s     14.20s     0.52s   nav 0.28s → 0.80s  (0.52s @ 25fps)
+card_cursor_down_2           window      14.20s     14.64s     0.44s   nav 0.80s → 1.24s  (0.44s @ 25fps)
+card_cursor_down_3           window      14.64s     15.04s     0.40s   nav 1.24s → 1.64s  (0.4s @ 25fps)
+card_cursor_down_4           window      15.04s     15.48s     0.44s   nav 1.64s → 2.08s  (0.44s @ 25fps)
+card_cursor_on_target        window      15.48s     16.00s     0.52s   nav 2.08s → 2.60s  (0.52s @ 25fps)
+card_open_at_top             window      16.00s     16.56s     0.56s   nav 2.60s → 3.16s  (0.56s @ 25fps)
+focus_phrase_type            window      16.56s     17.00s     0.44s   nav 3.16s → 3.60s  (0.44s @ 25fps)
+focus_level                  window      17.00s     17.44s     0.44s   nav 3.60s → 4.04s  (0.44s @ 25fps)
+level_b1_pending             splice      17.44s     19.04s     1.60s   splice live/09a-level-raised.png
+regenerate_meta_spin         window      19.04s     19.64s     0.60s   adjust 17.36s → 17.96s  (0.6s @ 25fps)
+regenerate_audio_spin        window      19.64s     20.24s     0.60s   adjust 25.84s → 26.44s  (0.6s @ 25fps)
+regenerate_scene_spin        window      20.24s     20.84s     0.60s   adjust 27.64s → 28.24s  (0.6s @ 25fps)
+regenerate_picture_spin      window      20.84s     21.44s     0.60s   adjust 35.28s → 35.88s  (0.6s @ 25fps)
+regenerate_publish           window      21.44s     22.04s     0.60s   adjust 41.92s → 42.52s  (0.6s @ 25fps)
+regenerated_card_finale      fade        22.04s     25.28s     3.24s   fade live/09c-card-regenerated.png  (split y=310, hold 1.50s, fade 0.70s, hold-black 1.00s, caption)
 
-# total: 449 frames = 17.96s
+# total: 632 frames = 25.28s

@@ -54,6 +54,8 @@ EXAMPLES:
   kamishibai exclude --card spring --json          drop one card from the plan
   kamishibai generate --json                       generate + publish in the background
   kamishibai status --json                         progress (no Gemini)
+  kamishibai adjust --card bank --level b1 --json  stage one sentence-label change
+  kamishibai regenerate --pending --json           apply every staged change as one batch
   kamishibai result --json                         the paths/cards as JSON (for scripts)
   kamishibai regenerate --failed --json            retry cards that did not finish
   kamishibai new --build cards.json --json         import a cards JSON without Gemini intake
@@ -311,6 +313,8 @@ mod tests {
             ),
             (3, "kamishibai generate --json"),
             (3, "kamishibai status --json"),
+            (3, "kamishibai adjust --card bank --level b1 --json"),
+            (3, "kamishibai regenerate --pending --json"),
             (3, "kamishibai result --json"),
             (3, "kamishibai new --build cards.json --json"),
         ];
@@ -371,6 +375,87 @@ mod tests {
     }
 
     #[test]
+    fn adjust_parses_all_sentence_changes_and_card_identity() {
+        assert!(
+            matches!(
+                parse(&[
+                    "kamishibai",
+                    "adjust",
+                    "fr-1",
+                    "--card",
+                    "bank",
+                    "--understanding",
+                    "a financial institution",
+                    "--register",
+                    "formal",
+                    "--kind",
+                    "statement",
+                    "--level",
+                    "b1",
+                    "--restore",
+                    "register,kind",
+                    "--restore",
+                    "level",
+                    "--note",
+                    ""
+                ])
+                .command,
+                Some(Command::Adjust(_))
+            ),
+            "adjust must parse every sentence-label input and an empty note"
+        );
+    }
+
+    #[test]
+    fn adjust_requires_at_least_one_change() {
+        assert!(
+            Cli::try_parse_from(["kamishibai", "adjust", "--card", "bank"]).is_err(),
+            "adjust without a label, restore, or note must fail at parse time"
+        );
+    }
+
+    #[test]
+    fn adjust_rejects_the_retired_type_flag() {
+        assert!(
+            Cli::try_parse_from([
+                "kamishibai",
+                "adjust",
+                "--card",
+                "bank",
+                "--type",
+                "request"
+            ])
+            .is_err(),
+            "adjust still accepted the retired --type flag"
+        );
+    }
+
+    #[test]
+    fn adjust_rejects_the_retired_type_restore_axis() {
+        assert!(
+            Cli::try_parse_from([
+                "kamishibai",
+                "adjust",
+                "--card",
+                "bank",
+                "--restore",
+                "type"
+            ])
+            .is_err(),
+            "adjust still accepted the retired type restore axis"
+        );
+    }
+
+    #[test]
+    fn adjust_rejects_noncanonical_label_case() {
+        assert!(
+            Cli::try_parse_from(["kamishibai", "adjust", "--card", "bank", "--level", "B1"])
+                .is_err(),
+            "adjust must accept only the documented lowercase label tokens"
+        );
+    }
+
+    #[test]
     fn regenerate_with_a_note_parses_to_the_regenerate_command() {
         assert!(
             matches!(
@@ -387,6 +472,26 @@ mod tests {
                 Some(Command::Regenerate(_))
             ),
             "regenerate with a note must parse to the Regenerate command"
+        );
+    }
+
+    #[test]
+    fn regenerate_pending_parses_to_the_regenerate_command() {
+        assert!(
+            matches!(
+                parse(&["kamishibai", "regenerate", "fr-1", "--pending"]).command,
+                Some(Command::Regenerate(_))
+            ),
+            "regenerate --pending must parse as the batch adjustment launch"
+        );
+    }
+
+    #[test]
+    fn regenerate_pending_conflicts_with_other_targets() {
+        assert!(
+            Cli::try_parse_from(["kamishibai", "regenerate", "fr-1", "--pending", "--failed"])
+                .is_err(),
+            "regenerate --pending must not combine with another target"
         );
     }
 

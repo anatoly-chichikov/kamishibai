@@ -537,7 +537,7 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"pronunciation\":\"ˈbɒrəʊ\",\"transcription\":\"kən aɪ ˈbɒrəʊ jɔː ˈpɛn\",\"meaning\":\"одолжить\",\"importance\":8,\"source_sentence\":\"Можно одолжить твою ручку?\",\"source_highlight\":\"одолжить\",\"source_hint\":\"Когда ручка не твоя, а надо записать — вежливо просишь на время.\",\"source_context\":\"Нейтрально-вежливый глагол.\",\"target_sentence\":\"Can I borrow your pen?\"}"
+                    "text": "{\"pronunciation\":\"ˈbɒrəʊ\",\"transcription\":\"kən aɪ ˈbɒrəʊ jɔː ˈpɛn\",\"meaning\":\"одолжить\",\"importance\":8,\"source_sentence\":\"Можно одолжить твою ручку?\",\"source_highlight\":\"одолжить\",\"source_hint\":\"Когда ручка не твоя, а надо записать — вежливо просишь на время.\",\"source_context\":\"Нейтрально-вежливый глагол.\",\"target_sentence\":\"Can I borrow your pen?\",\"labels\":{\"register\":\"formal\",\"level\":\"b1\",\"type\":\"question\",\"approx\":[]}}"
                 }]
             }
         }]
@@ -549,6 +549,9 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
         "verb sense — to take something temporarily",
         &LanguagePair::new("en", "ru"),
     )?;
+    let labels = meta_out
+        .sentence_labels()
+        .expect("fresh metadata must carry sentence labels");
     assert_eq!(
         (
             requests.borrow()[0].0.as_str(),
@@ -556,6 +559,10 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
             meta_out.target_sentence(),
             meta_out.source_highlight(),
             meta_out.importance(),
+            labels.register().token(),
+            labels.level().token(),
+            labels.kind().token(),
+            labels.approx().is_empty(),
         ),
         (
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
@@ -563,6 +570,10 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
             "Can I borrow your pen?",
             "одолжить",
             8,
+            "formal",
+            "b1",
+            "question",
+            true,
         ),
         "card-meta generation must hit the Flash model and decode every rich field"
     );
@@ -576,7 +587,7 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"term\":\"wound\",\"understanding\":\"verb: to wound someone — past tense of wind in another sense was wrong\",\"pronunciation\":\"waʊnd\",\"transcription\":\"aɪ waʊnd ðə klɒk\",\"meaning\":\"завести\",\"importance\":6,\"source_sentence\":\"Я завел часы.\",\"source_highlight\":\"завел\",\"source_hint\":\"Поворачивал что-то круглое, чтобы оно начало работать.\",\"source_context\":\"Глагол про механические часы.\",\"target_sentence\":\"I wound the clock.\"}"
+                    "text": "{\"term\":\"wound\",\"understanding\":\"verb: to wound someone — past tense of wind in another sense was wrong\",\"pronunciation\":\"waʊnd\",\"transcription\":\"aɪ waʊnd ðə klɒk\",\"meaning\":\"завести\",\"importance\":6,\"source_sentence\":\"Я завел часы.\",\"source_highlight\":\"завел\",\"source_hint\":\"Поворачивал что-то круглое, чтобы оно начало работать.\",\"source_context\":\"Глагол про механические часы.\",\"target_sentence\":\"I wound the clock.\",\"labels\":{\"register\":\"neutral\",\"level\":\"b1\",\"type\":\"statement\",\"approx\":[]}}"
                 }]
             }
         }]
@@ -601,6 +612,9 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
         &LanguagePair::new("en", "ru"),
     )?;
     let (term, understanding, meta_out) = revision.into_parts();
+    let labels = meta_out
+        .sentence_labels()
+        .expect("corrected metadata must carry sentence labels");
     assert_eq!(
         (
             term,
@@ -608,6 +622,8 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
             meta_out.target_sentence().to_string(),
             meta_out.source_highlight().to_string(),
             meta_out.importance(),
+            labels.register().token(),
+            labels.pinned().is_empty(),
         ),
         (
             String::from("wound"),
@@ -615,6 +631,8 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
             String::from("I wound the clock."),
             String::from("завел"),
             6,
+            "neutral",
+            true,
         ),
         "card correction must recompose term, understanding, and full meta from Flash JSON"
     );

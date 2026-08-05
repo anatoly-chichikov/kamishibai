@@ -3,9 +3,8 @@
 //! Two visual patterns share the same centred surround (solid border, padded
 //! content, action row):
 //!
-//! 1. The text modals (`ChangeSomething`, `ChangeThisCard`) — single
-//!    text-input field with an `[Esc] cancel · [Enter] send` row, used for the
-//!    missing-sense and per-card Gemini flows.
+//! 1. The text modal (`ChangeSomething`) — a single text-input field with an
+//!    `[Esc] cancel · [Enter] send` row for the missing-sense flow.
 //! 2. The language picker (`PickMyLanguage`) — horizontal row of language
 //!    chips with the currently active one inverted, an `[← →] pick · [Enter]
 //!    confirm · [Esc] cancel` row. No text input, no cursor.
@@ -36,9 +35,7 @@ const INPUT_LINE_OFFSET: u16 = 1;
 pub fn draw(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
     match kind {
         ModalKind::PickMyLanguage => draw_picker(frame, area, app),
-        ModalKind::ChangeSomething | ModalKind::ChangeThisCard => {
-            draw_text_modal(frame, area, kind, app)
-        }
+        ModalKind::ChangeSomething => draw_text_modal(frame, area, kind, app),
     }
 }
 
@@ -106,7 +103,6 @@ fn padded(inner: Rect) -> Rect {
 fn text_title(kind: ModalKind) -> &'static str {
     match kind {
         ModalKind::ChangeSomething => "what meanings did we miss?",
-        ModalKind::ChangeThisCard => "make this sentence different",
         ModalKind::PickMyLanguage => "your language",
     }
 }
@@ -118,7 +114,6 @@ fn text_field<'a>(kind: ModalKind, app: &'a App) -> TextField<'a> {
 fn text_placeholder(kind: ModalKind) -> &'static str {
     match kind {
         ModalKind::ChangeSomething => "write the missing meaning however you want",
-        ModalKind::ChangeThisCard => "write what to change, any way you like",
         ModalKind::PickMyLanguage => "",
     }
 }

@@ -48,6 +48,9 @@ Screenshot "live/01b-busy.png"
 
 Wait+Screen@2m /—/
 Sleep 2s
+# Keep the read-state and the following navigation on the same first row.
+Up
+Sleep 250ms
 Screenshot "live/02-what-i-understood.png"
 
 # smooth tick-tick navigation down to canard (row 3)
@@ -83,7 +86,10 @@ Wait+Screen@15m /(all done|make it)/
 Sleep 1500ms
 Screenshot "live/08-done.png"
 
-# final beat: step down to the canard "hoax / газетная утка" card (04) and linger
+# final beat: raise the simple chouette card by exactly one CEFR step, regenerate,
+# capture the collapsed result for the gif, then reopen it for separate detail screenshots
+Down
+Sleep 650ms
 Down
 Sleep 650ms
 Down
@@ -92,68 +98,33 @@ Down
 Sleep 750ms
 Enter
 Sleep 800ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 1400ms
-Screenshot "live/09-card-open.png"
+Down
+Sleep 650ms
+Down
+Sleep 900ms
+Screenshot "live/09-card-adjusting.png"
+
+Right
+Sleep 1200ms
+Screenshot "live/09a-level-raised.png"
+
+Wait+Screen /1 pending/
+Ctrl+G
+Wait+Screen@30s /ai is working/
 Sleep 800ms
+Screenshot "live/09b-card-regenerating.png"
+
+Wait+Screen@15m /all done/
+Sleep 1500ms
+Screenshot "live/09c-card-regenerated.png"
 Enter
-Sleep 700ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
-Ctrl+N
-Sleep 180ms
+Sleep 800ms
+Down
+Sleep 500ms
+Down
+Sleep 900ms
+Screenshot "live/09-card-open.png"
+
 Ctrl+N
 Sleep 180ms
 Ctrl+N

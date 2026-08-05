@@ -3,25 +3,18 @@
 use anyhow::Result;
 
 use crate::application::{PublishPhase, PublishedStudyPackage};
-use crate::session::{
-    ArtifactAttempt, ArtifactFile, CardMeta, CardRevision, GenerationCost, SenseCorrection,
-    Understood,
-};
+use crate::session::{ArtifactAttempt, ArtifactFile, CardRevision, SenseCorrection, Understood};
 
 /// Result produced by one background text pass.
 pub(super) enum TextOutcome {
     Understanding(Result<Understood>),
     BulkCorrection(Result<SenseCorrection>),
-    CardCorrection(
-        Result<Box<(CardRevision, Option<ArtifactFile>)>>,
-        Option<GenerationCost>,
-    ),
     KeyCheck(Result<()>),
 }
 
 /// Result produced by one background artifact pass.
 pub(super) enum ArtifactOutcome {
-    Meta(ArtifactAttempt<(CardMeta, Option<ArtifactFile>)>),
+    Meta(Box<ArtifactAttempt<(CardRevision, Option<ArtifactFile>)>>),
     Media(ArtifactAttempt<ArtifactFile>),
 }
 

@@ -9,16 +9,18 @@
 use ratatui::layout::Rect;
 
 use super::App;
+use super::event::AppEvent;
 use super::screen::{Screen, WelcomeFocus, WelcomeStage};
 use super::screens::banner;
-use super::screens::common::{GUTTER, TOP_MARGIN, frame_rects, language_chip};
+use super::screens::common::{CARD_DETAIL_COLUMN, GUTTER, TOP_MARGIN, frame_rects, language_chip};
+use super::screens::sentence_labels::EditorControl;
 use super::screens::welcome;
 use super::screens::your_cards::{
-    artifact_file_label, detail_pane_height, head_rows_for, rejected_attempts,
-    rejected_link_columns, rejected_rows_offset, step_rows_for,
+    artifact_file_label, card_range_at, detail_pane_height, head_rows_for, rejected_attempts,
+    rejected_link_columns, rejected_rows_offset, sentence_editor_control_at,
+    sentence_label_extra_rows, sentence_tag_hit_at, sentence_tags_visible, step_rows_for,
 };
-
-const STEP_FILE_LABEL_START: u16 = 6;
+use super::sentence_editor::LabelEditorRow;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct LinkRegion {
@@ -91,6 +93,89 @@ pub fn welcome_control_at(
     welcome::control_at(app, terminal, click_x, click_y)
 }
 
+/// Return the inline sentence-label action at one terminal cell.
+pub fn sentence_label_event_at(
+    app: &App,
+    terminal: Rect,
+    click_x: u16,
+    click_y: u16,
+) -> Option<AppEvent> {
+    if app.screen() != Screen::YourCards {
+        return None;
+    }
+    let frame = frame_rects(terminal);
+    let banner_rows = if banner_visible(app) {
+        banner::height(app)
+    } else {
+        0
+    };
+    let cards_y = frame.body.y.saturating_add(banner_rows);
+    let cards_height = frame.body.height.saturating_sub(banner_rows);
+    if click_x < frame.body.x
+        || click_x >= frame.body.x.saturating_add(frame.body.width)
+        || click_y < cards_y
+        || click_y >= cards_y.saturating_add(cards_height)
+    {
+        return None;
+    }
+    let width = usize::from(frame.body.width);
+    let column = usize::from(click_x.saturating_sub(frame.body.x));
+    let visible_row = usize::from(click_y.saturating_sub(cards_y));
+    let content_row = usize::from(app.body_scroll()).saturating_add(visible_row);
+    let (card, card_start, _) = card_range_at(app, width, content_row)?;
+    let draft = app.cards().get(card)?;
+    let labels = draft
+        .meta()
+        .and_then(crate::session::CardMeta::sentence_labels);
+    let staged = draft.staged_rewrite().map(|rewrite| rewrite.selection());
+    let selected = card == app.card_selected();
+    let editor = if selected {
+        app.sentence_editor()
+    } else {
+        None
+    };
+    let head_start = card_start;
+    let expanded = selected && app.card_expanded();
+    let head_height = head_rows_for(draft, width);
+    let head_end = head_start.saturating_add(head_height);
+    let running = app
+        .cards_running_target()
+        .and_then(|(running_card, artifact)| (running_card == card).then_some(artifact));
+    let steps = step_rows_for(draft, running);
+    let meta_row = head_end.saturating_add(
+        steps
+            .iter()
+            .position(|artifact| *artifact == crate::session::Artifact::Meta)?,
+    );
+    let attributed = labels.is_some()
+        || staged.is_some_and(crate::session::SentenceLabelSelection::attributed)
+        || editor.is_some_and(|editor| editor.selection().attributed());
+    if !expanded
+        && (!attributed
+            || !steps.contains(&crate::session::Artifact::Sound)
+            || !sentence_tags_visible(draft, running, width))
+        && app.card_tunable_at(card)
+        && content_row >= head_start
+        && content_row < head_end
+    {
+        return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
+    }
+    if !expanded {
+        let tag_row = content_row.checked_sub(meta_row)?;
+        if sentence_tag_hit_at(draft, running, width, tag_row, column) {
+            return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
+        }
+        return None;
+    }
+    let editor = editor?;
+    let editor_row = content_row.checked_sub(meta_row)?;
+    match sentence_editor_control_at(draft, running, editor, width, editor_row, column)? {
+        EditorControl::Chip(row, index) => Some(AppEvent::SentenceLabelChoose(row, index)),
+        EditorControl::Advance(row, forward) => Some(AppEvent::SentenceLabelAdvance(row, forward)),
+        EditorControl::Note => Some(AppEvent::SentenceLabelFocus(LabelEditorRow::Note)),
+    }
+}
+
 fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
     let mut links = Vec::new();
     if !matches!(app.screen(), Screen::YourCards | Screen::Done) {
@@ -118,15 +203,22 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
         let running = app
             .cards_running_target()
             .and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
+        let expanded = idx == app.card_selected() && app.card_expanded();
+        let editor = if idx == app.card_selected() {
+            app.sentence_editor()
+        } else {
+            None
+        };
         let head_height = head_rows_for(draft, width);
         let steps = step_rows_for(draft, running);
-        let detail = if idx == app.card_selected() && app.card_expanded() {
+        let detail = if expanded {
             detail_pane_height(draft, width)
         } else {
             0
         };
-        let trailing = usize::from(!steps.is_empty() || detail > 0);
-        let card_total = head_height + steps.len() + detail + trailing;
+        let labels = sentence_label_extra_rows(draft, running, editor, expanded, width);
+        let trailing = usize::from(!steps.is_empty() || detail > 0 || labels > 0);
+        let card_total = head_height + steps.len() + labels + detail + trailing;
         for (step_idx, artifact) in steps.iter().enumerate() {
             let absolute = content_row + head_height + step_idx;
             let Some(screen_row) = visible_content_row(
@@ -147,7 +239,9 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
                 continue;
             };
             let label = artifact_file_label(*artifact, file);
-            let label_start = body_x + STEP_FILE_LABEL_START;
+            let label_start = body_x
+                + u16::try_from(CARD_DETAIL_COLUMN)
+                    .expect("invariant: card detail column must fit in u16");
             let label_end = label_start
                 .saturating_add(u16::try_from(label.chars().count()).unwrap_or(u16::MAX));
             links.push(LinkRegion {
@@ -163,7 +257,7 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
                 body_x,
                 body_y + banner_rows,
                 body_height,
-                content_row + head_height + steps.len(),
+                content_row + head_height + steps.len() + labels,
                 app.body_scroll(),
                 width,
             ));

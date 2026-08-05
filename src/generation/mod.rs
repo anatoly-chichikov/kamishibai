@@ -13,7 +13,9 @@ pub mod manga;
 pub use artifact_cache::Cache;
 #[cfg(test)]
 pub(crate) use card_production::reserve_picture_request;
-pub(crate) use card_production::{GeminiCardProduction, restart_picture_request_series};
+pub(crate) use card_production::{
+    GeminiCardProduction, invalidate_card, restart_picture_request_series,
+};
 pub use catalog::SceneComposer;
 pub use contracts::SceneSource;
 pub use prompts::{audio_prompt, manga_template, render_audio_prompt, visual_revision};

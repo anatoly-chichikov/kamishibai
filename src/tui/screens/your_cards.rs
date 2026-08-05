@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -24,6 +24,7 @@ use crate::session::{
 use crate::tui::app::App;
 use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
+use crate::tui::sentence_editor::SentenceLabelsEditor;
 
 const HEADLINE_WORKING: &str = "building your cards";
 const HEADLINE_DONE: &str = "your cards";
@@ -33,6 +34,15 @@ const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
 const STEP_LABEL_COL_CHARS: usize = 14;
 const STEP_DETAIL_COL_CHARS: usize = 9;
+const STEP_AUX_COL_CHARS: usize = 8;
+const SENTENCE_TAG_GAP: usize = 3;
+const SENTENCE_TAG_START: usize = super::common::CARD_DETAIL_COLUMN
+    + STEP_LABEL_COL_CHARS
+    + STEP_DETAIL_COL_CHARS
+    + STEP_AUX_COL_CHARS
+    + SENTENCE_TAG_GAP;
+const SECTION_GAP_ROWS: usize = 1;
+const FACT_LABEL_COLUMN: usize = 29;
 const STEPS: [(&str, Artifact); 4] = [
     ("meta", Artifact::Meta),
     ("audio", Artifact::Sound),
@@ -40,6 +50,45 @@ const STEPS: [(&str, Artifact); 4] = [
     ("picture", Artifact::Picture),
 ];
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
+
+struct CollapsedLabels {
+    tags: super::sentence_labels::HeadTagsLayout,
+    start: usize,
+}
+
+struct ArtifactLine<'a> {
+    core: Vec<Span<'a>>,
+    tail: Vec<Span<'a>>,
+}
+
+impl<'a> ArtifactLine<'a> {
+    fn core_width(&self) -> usize {
+        spans_width(self.core.as_slice())
+    }
+
+    fn tail_width(&self) -> usize {
+        spans_width(self.tail.as_slice())
+    }
+
+    fn into_line(mut self) -> Line<'a> {
+        self.core.append(&mut self.tail);
+        Line::from(self.core)
+    }
+
+    fn muted(mut self) -> Self {
+        for span in self.core.iter_mut().chain(self.tail.iter_mut()) {
+            span.style = span.style.fg(palette::DIM);
+        }
+        self
+    }
+}
+
+struct StepState<'a> {
+    glyph: String,
+    status_style: Style,
+    label_style: Style,
+    line: ArtifactLine<'a>,
+}
 
 /// `ScreenView` handle for the `your cards` / generating screen. Title and
 /// hint switch from the `building` copy to the `done` copy once every card
@@ -78,22 +127,21 @@ impl ScreenView for YourCards {
         } else {
             0
         };
-        if banner_rows == 0 {
-            frame.render_widget(
-                cards_paragraph(app, area.width as usize).scroll((app.body_scroll(), 0)),
-                area,
-            );
-            return;
-        }
-        let split = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(banner_rows), Constraint::Min(0)])
-            .split(area);
-        frame.render_widget(super::banner::widget(app), split[0]);
+        let cards_area = if banner_rows == 0 {
+            area
+        } else {
+            let split = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(banner_rows), Constraint::Min(0)])
+                .split(area);
+            frame.render_widget(super::banner::widget(app), split[0]);
+            split[1]
+        };
         frame.render_widget(
             cards_paragraph(app, area.width as usize).scroll((app.body_scroll(), 0)),
-            split[1],
+            cards_area,
         );
+        paint_sentence_editor_cursor(frame, cards_area, app);
     }
 }
 
@@ -117,6 +165,7 @@ fn cards_paragraph(app: &App, width: usize) -> Paragraph<'_> {
             index,
             focused,
             expanded,
+            if focused { app.sentence_editor() } else { None },
             width,
             running_for_card,
             spinner_frame,
@@ -125,35 +174,175 @@ fn cards_paragraph(app: &App, width: usize) -> Paragraph<'_> {
     Paragraph::new(lines).style(palette::base())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn card_block<'a>(
     draft: &'a CardDraft,
     idx: usize,
     focused: bool,
     expanded: bool,
+    editor: Option<&SentenceLabelsEditor>,
     width: usize,
     running: Option<Artifact>,
     spinner_frame: usize,
 ) -> Vec<Line<'a>> {
     let artifacts = draft.artifacts();
-    let progressed = card_progressed(artifacts, running);
+    let steps = step_rows_for(draft, running);
+    let progressed = !steps.is_empty();
+    let pending = draft.staged_rewrite().is_some();
     let mut lines: Vec<Line<'a>> = Vec::new();
-    lines.extend(card_head(draft, idx, focused, expanded, progressed, width));
-    if progressed {
-        for &(_, kind) in &STEPS {
-            let slot = slot_for(artifacts, kind);
-            if !slot_visible(slot, kind, running) {
-                continue;
-            }
-            lines.push(step_line(kind, slot, running, spinner_frame));
+    lines.extend(card_head(
+        draft, idx, focused, expanded, progressed, pending, width,
+    ));
+    let step_lines = steps
+        .iter()
+        .map(|kind| {
+            let slot = slot_for(artifacts, *kind);
+            let line = artifact_line(
+                *kind,
+                slot,
+                running,
+                spinner_frame,
+                *kind == Artifact::Meta && draft.meta().is_some(),
+            );
+            (*kind, if pending { line.muted() } else { line })
+        })
+        .collect::<Vec<_>>();
+    if expanded {
+        lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
+        if let Some(editor) = editor {
+            lines.push(Line::from(""));
+            lines.extend(super::sentence_labels::editor_lines(
+                editor,
+                width,
+                super::common::CARD_DETAIL_COLUMN,
+                super::common::CARD_DETAIL_COLUMN,
+            ));
         }
+    } else if let Some(labels) = collapsed_labels(draft, running, width) {
+        lines.extend(collapsed_step_lines(step_lines, labels));
+    } else {
+        lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
     }
     if expanded {
-        lines.extend(detail_pane(draft, width).lines);
+        lines.extend(detail_pane(draft, width, pending).lines);
     }
     if progressed || expanded {
         lines.push(Line::from(""));
     }
     lines
+}
+
+fn collapsed_labels(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+    width: usize,
+) -> Option<CollapsedLabels> {
+    let steps = step_rows_for(draft, running);
+    if !steps.contains(&Artifact::Sound) {
+        return None;
+    }
+    let sound = artifact_line(
+        Artifact::Sound,
+        draft.artifacts().sound(),
+        running,
+        0,
+        false,
+    );
+    let start = SENTENCE_TAG_START;
+    if sound.core_width() > start {
+        return None;
+    }
+    let unwrapped = summary_tags_layout(draft, usize::MAX)?;
+    if sound.tail_width() > 0 {
+        if start
+            .saturating_add(unwrapped.row_width(0))
+            .saturating_add(sound.tail_width())
+            > width
+        {
+            return None;
+        }
+        return Some(CollapsedLabels {
+            tags: unwrapped,
+            start,
+        });
+    }
+    let content_width = width.saturating_sub(start);
+    if unwrapped.minimum_width() > content_width {
+        return None;
+    }
+    let tags = summary_tags_layout(draft, content_width)?;
+    if [Artifact::Sound, Artifact::Scene, Artifact::Picture]
+        .into_iter()
+        .enumerate()
+        .any(|(row, artifact)| {
+            tags.occupies(row)
+                && (!steps.contains(&artifact)
+                    || artifact_line_width(draft, running, artifact) > start)
+        })
+    {
+        return None;
+    }
+    Some(CollapsedLabels { tags, start })
+}
+
+fn collapsed_step_lines<'a>(
+    steps: Vec<(Artifact, ArtifactLine<'a>)>,
+    labels: CollapsedLabels,
+) -> Vec<Line<'a>> {
+    steps
+        .into_iter()
+        .map(|(artifact, line)| {
+            let Some(row) = sentence_tag_row(artifact) else {
+                return line.into_line();
+            };
+            if !labels.tags.occupies(row) {
+                return line.into_line();
+            }
+            if artifact == Artifact::Sound {
+                let mut spans = line.core;
+                spans.push(Span::styled(
+                    " ".repeat(labels.start.saturating_sub(spans_width(spans.as_slice()))),
+                    palette::base(),
+                ));
+                spans.extend(labels.tags.spans_from(row, 0, palette::base()));
+                spans.extend(line.tail);
+                return Line::from(spans);
+            }
+            let mut full = line.into_line();
+            full.spans.push(Span::styled(
+                " ".repeat(labels.start.saturating_sub(full.width())),
+                palette::base(),
+            ));
+            full.spans
+                .extend(labels.tags.spans_from(row, 0, palette::base()));
+            full
+        })
+        .collect()
+}
+
+fn paint_sentence_editor_cursor(frame: &mut Frame, area: Rect, app: &App) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let Some((column, row)) = sentence_editor_cursor_for(app, usize::from(area.width)) else {
+        return;
+    };
+    let scroll_row = usize::from(app.body_scroll());
+    if row < scroll_row {
+        return;
+    }
+    let visible_row = row - scroll_row;
+    if visible_row >= usize::from(area.height) {
+        return;
+    }
+    let column = column.min(usize::from(area.width.saturating_sub(1)));
+    let x = area
+        .x
+        .saturating_add(u16::try_from(column).unwrap_or(u16::MAX));
+    let y = area
+        .y
+        .saturating_add(u16::try_from(visible_row).unwrap_or(u16::MAX));
+    frame.set_cursor_position((x, y));
 }
 
 const HEAD_PREFIX_CHARS: usize = 7;
@@ -166,6 +355,7 @@ fn card_head<'a>(
     focused: bool,
     expanded: bool,
     progressed: bool,
+    pending: bool,
     width: usize,
 ) -> Vec<Line<'a>> {
     let row_style = if focused {
@@ -182,73 +372,97 @@ fn card_head<'a>(
     } else {
         " "
     };
-    let glyph_style = if focused {
+    let glyph_style = if focused && !pending {
         palette::highlight().add_modifier(Modifier::BOLD)
+    } else if focused {
+        palette::highlight_dim()
     } else {
         palette::dim2()
     };
-    let num_style = if focused {
+    let num_style = if focused && !pending {
         palette::highlight()
+    } else if focused {
+        palette::highlight_dim()
     } else {
         palette::dim2()
     };
-    let term_style = match (progressed, focused) {
-        (true, true) => palette::highlight().add_modifier(Modifier::BOLD),
-        (true, false) => palette::base(),
-        (false, true) => palette::highlight_dim(),
-        (false, false) => palette::dim2(),
+    let term_style = if pending {
+        if focused {
+            palette::highlight_dim()
+        } else {
+            palette::dim()
+        }
+    } else {
+        match (progressed, focused) {
+            (true, true) => palette::highlight().add_modifier(Modifier::BOLD),
+            (true, false) => palette::base(),
+            (false, true) => palette::highlight_dim(),
+            (false, false) => palette::dim2(),
+        }
     };
-    let sentence_style = if focused {
+    let sentence_base = if focused {
         palette::highlight_dim()
     } else {
         palette::dim()
     };
-    let term_chars = draft.term().chars().count();
-    let head_used = HEAD_PREFIX_CHARS + term_chars;
+    let sentence_style = if pending {
+        sentence_base.add_modifier(Modifier::CROSSED_OUT)
+    } else {
+        sentence_base
+    };
+    let term_width = super::common::display_width(draft.term());
+    let head_used = HEAD_PREFIX_CHARS + term_width;
     let mut head_spans: Vec<Span<'a>> = Vec::new();
     head_spans.push(Span::styled(format!(" {glyph} "), glyph_style));
     head_spans.push(Span::styled(format!("{:0>2}  ", idx + 1), num_style));
     head_spans.push(Span::styled(String::from(draft.term()), term_style));
+    let suffix_style = if focused {
+        palette::highlight_dim()
+    } else {
+        palette::dim2()
+    };
     let Some(meta) = draft.meta() else {
-        let pad = width.saturating_sub(head_used);
+        let suffix = visible_card_head_suffix(draft, head_used, width);
+        let suffix_width = suffix
+            .as_ref()
+            .map(|label| super::common::display_width(label))
+            .unwrap_or(0);
+        if let Some(label) = suffix {
+            head_spans.push(Span::styled(label, suffix_style));
+        }
+        let pad = width.saturating_sub(head_used.saturating_add(suffix_width));
         if pad > 0 {
             head_spans.push(Span::styled(" ".repeat(pad), row_style));
         }
         return vec![Line::from(head_spans)];
     };
-    let row1_used = head_used + HEAD_ARROW_CHARS;
-    let cost_label = visible_card_cost_label(draft, row1_used, width);
-    let cost_chars = cost_label
+    let sentence_start = head_used + HEAD_ARROW_CHARS;
+    let suffix = visible_card_head_suffix(draft, sentence_start, width);
+    let suffix_width = suffix
         .as_ref()
-        .map(|label| label.chars().count())
+        .map(|label| super::common::display_width(label))
         .unwrap_or(0);
-    let avail_first = width.saturating_sub(row1_used + cost_chars);
-    let chunks = wrap_sentence(meta.target_sentence(), avail_first, avail_first);
-    let first = chunks.first().cloned().unwrap_or_default();
-    head_spans.push(Span::styled(HEAD_ARROW, sentence_style));
-    let first_len = first.chars().count();
+    let chunks = sentence_chunks(meta, sentence_start, suffix_width, width);
+    let mut chunks = chunks.into_iter();
+    let first = chunks.next().unwrap_or_default();
+    let first_width = super::common::display_width(first.as_str());
+    head_spans.push(Span::styled(HEAD_ARROW, sentence_base));
     head_spans.push(Span::styled(first, sentence_style));
-    if let Some(label) = cost_label {
-        let cost_style = if focused {
-            palette::highlight_dim()
-        } else {
-            palette::dim2()
-        };
-        head_spans.push(Span::styled(label, cost_style));
+    let mut first_used = sentence_start + first_width;
+    if let Some(label) = suffix.as_ref() {
+        head_spans.push(Span::styled(label.clone(), suffix_style));
+        first_used += suffix_width;
     }
-    let pad = width.saturating_sub(row1_used + first_len + cost_chars);
+    let pad = width.saturating_sub(first_used);
     if pad > 0 {
         head_spans.push(Span::styled(" ".repeat(pad), row_style));
     }
-    let mut lines: Vec<Line<'a>> = Vec::with_capacity(chunks.len().max(1));
-    lines.push(Line::from(head_spans));
-    let cont_indent: String = " ".repeat(row1_used);
-    for chunk in chunks.into_iter().skip(1) {
-        let chunk_len = chunk.chars().count();
-        let mut spans: Vec<Span<'a>> = Vec::new();
-        spans.push(Span::styled(cont_indent.clone(), row_style));
+    let mut lines: Vec<Line<'a>> = vec![Line::from(head_spans)];
+    for chunk in chunks {
+        let chunk_width = super::common::display_width(chunk.as_str());
+        let mut spans: Vec<Span<'a>> = vec![Span::styled(" ".repeat(sentence_start), row_style)];
         spans.push(Span::styled(chunk, sentence_style));
-        let pad = width.saturating_sub(row1_used + chunk_len);
+        let pad = width.saturating_sub(sentence_start + chunk_width);
         if pad > 0 {
             spans.push(Span::styled(" ".repeat(pad), row_style));
         }
@@ -261,29 +475,98 @@ fn wrap_sentence(sentence: &str, first_avail: usize, cont_avail: usize) -> Vec<S
     super::common::wrap_words(sentence, first_avail, cont_avail)
 }
 
+fn summary_tags_layout(
+    draft: &CardDraft,
+    width: usize,
+) -> Option<super::sentence_labels::HeadTagsLayout> {
+    let labels = draft.meta().and_then(CardMeta::sentence_labels);
+    let staged = draft.staged_rewrite().map(|rewrite| rewrite.selection());
+    super::sentence_labels::head_tags_layout(labels, staged, None, width)
+}
+
+fn sentence_tag_row(artifact: Artifact) -> Option<usize> {
+    match artifact {
+        Artifact::Meta => None,
+        Artifact::Sound => Some(0),
+        Artifact::Scene => Some(1),
+        Artifact::Picture => Some(2),
+    }
+}
+
+fn artifact_line_width(draft: &CardDraft, running: Option<Artifact>, kind: Artifact) -> usize {
+    let artifacts = draft.artifacts();
+    artifact_line(
+        kind,
+        slot_for(artifacts, kind),
+        running,
+        0,
+        kind == Artifact::Meta && draft.meta().is_some(),
+    )
+    .into_line()
+    .width()
+}
+
+fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans
+        .iter()
+        .map(|span| super::common::display_width(span.content.as_ref()))
+        .sum()
+}
+
+fn sentence_chunks(
+    meta: &CardMeta,
+    sentence_start: usize,
+    cost_width: usize,
+    width: usize,
+) -> Vec<String> {
+    let first = width.saturating_sub(sentence_start + cost_width);
+    let continuation = width.saturating_sub(sentence_start);
+    wrap_sentence(meta.target_sentence(), first, continuation)
+}
+
 fn head_rows(draft: &CardDraft, width: usize) -> usize {
     let Some(meta) = draft.meta() else {
         return 1;
     };
-    let term_chars = draft.term().chars().count();
-    let row1_used = HEAD_PREFIX_CHARS + term_chars + HEAD_ARROW_CHARS;
-    let cost_chars = visible_card_cost_label(draft, row1_used, width)
+    let sentence_start =
+        HEAD_PREFIX_CHARS + super::common::display_width(draft.term()) + HEAD_ARROW_CHARS;
+    let suffix_width = visible_card_head_suffix(draft, sentence_start, width)
         .as_ref()
-        .map(|label| label.chars().count())
+        .map(|label| super::common::display_width(label))
         .unwrap_or(0);
-    let avail = width.saturating_sub(row1_used + cost_chars);
-    wrap_sentence(meta.target_sentence(), avail, avail)
+    sentence_chunks(meta, sentence_start, suffix_width, width)
         .len()
         .max(1)
 }
 
-fn visible_card_cost_label(draft: &CardDraft, row_used: usize, width: usize) -> Option<String> {
-    let label = card_cost(draft).map(|cost| format!("  {}", cost.dollars()))?;
-    let label_len = label.chars().count();
-    if width.saturating_sub(row_used) < label_len + 8 {
+fn visible_card_head_suffix(draft: &CardDraft, row_used: usize, width: usize) -> Option<String> {
+    let cost = card_cost(draft).map(|cost| cost.dollars());
+    let retries = card_retry_count(draft);
+    let label = match (cost, retries) {
+        (Some(cost), 0) => format!("  {cost}"),
+        (Some(cost), retries) => format!("  {cost}  ↻{retries}"),
+        (None, retries) if retries > 0 => format!("  ↻{retries}"),
+        (None, _) => return None,
+    };
+    let label_width = super::common::display_width(label.as_str());
+    let sentence_breathing = if draft.meta().is_some() { 8 } else { 0 };
+    if width.saturating_sub(row_used) < label_width.saturating_add(sentence_breathing) {
         return None;
     }
     Some(label)
+}
+
+fn card_retry_count(draft: &CardDraft) -> u16 {
+    let artifacts = draft.artifacts();
+    [
+        artifacts.meta(),
+        artifacts.sound(),
+        artifacts.scene(),
+        artifacts.picture(),
+    ]
+    .into_iter()
+    .map(|slot| u16::from(slot.tally().done().min(slot.tally().retries())))
+    .sum()
 }
 
 fn card_finished(draft: &CardDraft) -> bool {
@@ -308,31 +591,39 @@ fn slot_visible(slot: &ArtifactSlot, kind: Artifact, running: Option<Artifact>) 
         || running == Some(kind)
 }
 
-fn card_progressed(artifacts: &CardArtifacts, running: Option<Artifact>) -> bool {
-    if running.is_some() {
-        return true;
-    }
-    STEPS
-        .iter()
-        .any(|&(_, kind)| slot_visible(slot_for(artifacts, kind), kind, None))
-}
-
-fn step_line<'a>(
+fn artifact_line<'a>(
     kind: Artifact,
     slot: &'a ArtifactSlot,
     running: Option<Artifact>,
     spinner_frame: usize,
-) -> Line<'a> {
+    stored: bool,
+) -> ArtifactLine<'a> {
     let active = running == Some(kind);
     let label = step_label(kind, slot);
-    let (glyph, status_style, label_style, note_spans) = step_state(slot, active, spinner_frame);
-    let mut spans: Vec<Span<'a>> = Vec::new();
-    spans.push(Span::styled("    ", palette::base()));
-    spans.push(Span::styled(format!("{glyph} "), status_style));
-    spans.push(Span::styled(label.clone(), label_style));
-    spans.push(Span::styled(" ".repeat(label_gap(&label)), palette::dim()));
-    spans.extend(note_spans);
-    Line::from(spans)
+    let state = step_state(slot, active, spinner_frame, stored);
+    let mut core: Vec<Span<'a>> = Vec::new();
+    core.push(Span::styled(
+        " ".repeat(super::common::CARD_DETAIL_COLUMN.saturating_sub(2)),
+        palette::base(),
+    ));
+    core.push(Span::styled(
+        format!("{} ", state.glyph),
+        state.status_style,
+    ));
+    core.push(Span::styled(label.clone(), state.label_style));
+    core.push(Span::styled(" ".repeat(label_gap(&label)), palette::dim()));
+    core.extend(state.line.core);
+    ArtifactLine {
+        core,
+        tail: state.line.tail,
+    }
+}
+
+fn muted_line(mut line: Line<'_>) -> Line<'_> {
+    for span in &mut line.spans {
+        span.style = span.style.fg(palette::DIM);
+    }
+    line
 }
 
 fn step_label(kind: Artifact, slot: &ArtifactSlot) -> String {
@@ -346,97 +637,99 @@ fn step_state<'a>(
     slot: &'a ArtifactSlot,
     active: bool,
     spinner_frame: usize,
-) -> (
-    String,
-    ratatui::style::Style,
-    ratatui::style::Style,
-    Vec<Span<'a>>,
-) {
+    stored: bool,
+) -> StepState<'a> {
     let row_dim = palette::dim();
     let row_dim2 = palette::dim2();
     let row_fg = palette::base();
-    if slot.ready() {
-        let mut note: Vec<Span<'a>> = Vec::new();
+    if slot.ready() || stored {
+        let mut core: Vec<Span<'a>> = Vec::new();
+        let mut tail: Vec<Span<'a>> = Vec::new();
         if let Some(file) = slot.file() {
-            note.push(Span::styled(
+            core.push(Span::styled(
                 pad_left(file.size(), STEP_DETAIL_COL_CHARS),
                 palette::dim(),
             ));
         }
-        push_slot_cost(&mut note, slot);
+        push_slot_cost(&mut core, slot);
         if let Some(file) = slot.file()
             && file.cached()
         {
-            note.push(Span::styled("  ", palette::dim()));
-            note.push(Span::styled("cached", palette::dim2()));
+            if slot.cost().is_some() {
+                push_cached(&mut tail);
+            } else {
+                push_cached(&mut core);
+            }
         }
-        push_rejected_chip(&mut note, slot);
-        return (String::from("✓"), row_fg, palette::link(), note);
+        return StepState {
+            glyph: String::from("✓"),
+            status_style: row_fg,
+            label_style: palette::link(),
+            line: ArtifactLine { core, tail },
+        };
     }
     if slot.discarded() {
-        return (
-            String::from("⊘"),
-            row_dim,
-            row_dim,
-            vec![Span::styled(String::from("discarded"), palette::dim())],
-        );
-    }
-    let retries = slot.tally().retries();
-    if slot.failed_terminally() {
-        let mut note = vec![Span::styled(
-            format!("gave up after {retries} retries"),
-            palette::dim(),
-        )];
-        push_slot_cost(&mut note, slot);
-        push_rejected_chip(&mut note, slot);
-        return (String::from("✗"), row_fg, row_fg, note);
-    }
-    if let Some(retry) = slot.tally().retry() {
-        let label = format!("retry {retry}/{retries}");
-        let label = pad_right_to(&label, STEP_DETAIL_COL_CHARS);
-        let glyph = if active {
-            String::from(SPINNER_FRAMES[spinner_frame])
-        } else {
-            String::from("·")
+        return StepState {
+            glyph: String::from("⊘"),
+            status_style: row_dim,
+            label_style: row_dim,
+            line: ArtifactLine {
+                core: vec![Span::styled(String::from("discarded"), palette::dim())],
+                tail: Vec::new(),
+            },
         };
-        let mut note = vec![Span::styled(label, palette::dim())];
-        push_slot_cost(&mut note, slot);
-        if !active {
-            note.push(Span::styled("  ", palette::dim()));
-            note.push(Span::styled("paused", palette::dim2()));
-        }
-        push_rejected_chip(&mut note, slot);
-        return (glyph, row_fg, row_fg, note);
+    }
+    if slot.failed_terminally() {
+        let mut core = vec![Span::styled(String::from("gave up"), palette::dim())];
+        push_slot_cost(&mut core, slot);
+        return StepState {
+            glyph: String::from("✗"),
+            status_style: row_fg,
+            label_style: row_fg,
+            line: ArtifactLine {
+                core,
+                tail: Vec::new(),
+            },
+        };
     }
     if active {
-        return (
-            String::from(SPINNER_FRAMES[spinner_frame]),
-            row_fg,
-            row_fg,
-            vec![Span::styled(String::from("ai is working…"), palette::dim())],
-        );
+        return StepState {
+            glyph: String::from(SPINNER_FRAMES[spinner_frame]),
+            status_style: row_fg,
+            label_style: row_fg,
+            line: ArtifactLine {
+                core: vec![Span::styled(String::from("ai is working…"), palette::dim())],
+                tail: Vec::new(),
+            },
+        };
     }
-    (
-        String::from("○"),
-        row_dim2,
-        row_dim2,
-        vec![Span::styled(String::from("queued"), palette::dim())],
-    )
+    if slot.tally().retry().is_some() {
+        let mut core = Vec::new();
+        push_slot_cost(&mut core, slot);
+        return StepState {
+            glyph: String::from("·"),
+            status_style: row_fg,
+            label_style: row_fg,
+            line: ArtifactLine {
+                core,
+                tail: Vec::new(),
+            },
+        };
+    }
+    StepState {
+        glyph: String::from("○"),
+        status_style: row_dim2,
+        label_style: row_dim2,
+        line: ArtifactLine {
+            core: vec![Span::styled(String::from("queued"), palette::dim())],
+            tail: Vec::new(),
+        },
+    }
 }
 
-/// Append the `N rejected` tally. It is a plain muted note, not a control, and
-/// it outlives the retries: a finished artifact keeps showing what it cost to
-/// get there. The rejected attempts themselves live in the expanded card.
-fn push_rejected_chip<'a>(note: &mut Vec<Span<'a>>, slot: &ArtifactSlot) {
-    let rejected = slot.faults().len();
-    if rejected == 0 {
-        return;
-    }
+fn push_cached(note: &mut Vec<Span<'_>>) {
     note.push(Span::styled("  ", palette::dim()));
-    note.push(Span::styled(
-        format!("{rejected} rejected"),
-        palette::dim2(),
-    ));
+    note.push(Span::styled("cached", palette::dim2()));
 }
 
 fn push_slot_cost<'a>(note: &mut Vec<Span<'a>>, slot: &ArtifactSlot) {
@@ -483,11 +776,6 @@ fn pad_left(text: &str, width: usize) -> String {
     format!("{}{}", " ".repeat(width - len), text)
 }
 
-fn pad_right_to(text: &str, width: usize) -> String {
-    let len = text.chars().count();
-    format!("{text}{}", " ".repeat(width.saturating_sub(len)))
-}
-
 /// The expanded card body together with the row its rejected block starts on.
 struct DetailPane<'a> {
     lines: Vec<Line<'a>>,
@@ -496,12 +784,12 @@ struct DetailPane<'a> {
 
 /// Render the expanded card: the meta preview first, then — below the card and
 /// behind a dashed rule — the attempts that were rejected on the way to it.
-fn detail_pane(draft: &CardDraft, width: usize) -> DetailPane<'_> {
+fn detail_pane(draft: &CardDraft, width: usize, pending: bool) -> DetailPane<'_> {
     let mut lines: Vec<Line<'_>> = Vec::new();
     let indent = "      ";
     lines.push(Line::from(""));
     if let Some(meta) = draft.meta() {
-        lines.extend(meta_preview(meta, indent, width));
+        lines.extend(meta_preview(meta, indent, width, pending));
     } else {
         lines.push(Line::from(vec![
             Span::styled(indent, palette::base()),
@@ -509,30 +797,32 @@ fn detail_pane(draft: &CardDraft, width: usize) -> DetailPane<'_> {
         ]));
     }
     let attempts = rejected_attempts(draft);
-    if attempts.is_empty() {
-        return DetailPane {
-            lines,
-            rejected_start: None,
-        };
+    let rejected_start = if attempts.is_empty() {
+        None
+    } else {
+        lines.push(Line::from(""));
+        lines.push(super::common::dashed_line(
+            super::common::display_width(indent),
+            width.saturating_sub(super::common::display_width(indent)),
+        ));
+        lines.push(Line::from(vec![
+            Span::styled(indent, palette::base()),
+            Span::styled("rejected attempts", palette::dim2()),
+        ]));
+        let start = lines.len();
+        lines.extend(
+            attempts
+                .into_iter()
+                .map(|attempt| rejected_row(attempt, width).line),
+        );
+        Some(start)
+    };
+    if pending {
+        lines = lines.into_iter().map(muted_line).collect();
     }
-    lines.push(Line::from(""));
-    lines.push(super::common::dashed_line(
-        super::common::display_width(indent),
-        width.saturating_sub(super::common::display_width(indent)),
-    ));
-    lines.push(Line::from(vec![
-        Span::styled(indent, palette::base()),
-        Span::styled("rejected attempts", palette::dim2()),
-    ]));
-    let rejected_start = lines.len();
-    lines.extend(
-        attempts
-            .into_iter()
-            .map(|attempt| rejected_row(attempt, width).line),
-    );
     DetailPane {
         lines,
-        rejected_start: Some(rejected_start),
+        rejected_start,
     }
 }
 
@@ -686,7 +976,12 @@ fn clip(text: &str, width: usize) -> String {
     format!("{kept}…")
 }
 
-fn meta_preview<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -> Vec<Line<'a>> {
+fn meta_preview<'a>(
+    meta: &'a CardMeta,
+    indent: &'static str,
+    width: usize,
+    pending: bool,
+) -> Vec<Line<'a>> {
     let mut lines: Vec<Line<'a>> = Vec::new();
     let label = |text: &'static str| {
         Line::from(vec![
@@ -694,18 +989,22 @@ fn meta_preview<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -> V
             Span::styled(text, palette::dim2()),
         ])
     };
-    lines.push(label("target"));
+    lines.push(label("the phrase"));
     lines.extend(value_lines(
         meta.target_sentence(),
         indent,
         width,
-        palette::base(),
+        if pending {
+            palette::base().add_modifier(Modifier::CROSSED_OUT)
+        } else {
+            palette::base()
+        },
     ));
     lines.push(Line::from(""));
-    lines.push(label("source"));
+    lines.push(label("in your language"));
     lines.extend(highlight_lines(meta, indent, width));
     lines.push(Line::from(""));
-    lines.push(label("hint"));
+    lines.push(label("a visual clue"));
     lines.extend(value_lines(
         meta.source_hint(),
         indent,
@@ -713,25 +1012,33 @@ fn meta_preview<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -> V
         palette::base(),
     ));
     lines.push(Line::from(""));
-    lines.push(label(
-        "meaning · pronunciation · transcription · importance",
-    ));
-    lines.extend(value_lines(
-        format!(
-            "{} · /{}/ · /{}/ · {}/10",
-            meta.meaning(),
-            meta.pronunciation(),
-            meta.transcription(),
-            meta.importance(),
-        )
-        .as_str(),
+    lines.extend(fact_lines(
+        "word meaning",
+        String::from(meta.meaning()),
         indent,
         width,
-        palette::base(),
+    ));
+    lines.extend(fact_lines(
+        "word pronunciation",
+        format!("/{}/", meta.pronunciation()),
+        indent,
+        width,
+    ));
+    lines.extend(fact_lines(
+        "phrase pronunciation",
+        format!("/{}/", meta.transcription()),
+        indent,
+        width,
+    ));
+    lines.extend(fact_lines(
+        "worth learning",
+        format!("{}/10", meta.importance()),
+        indent,
+        width,
     ));
     if !meta.source_context().trim().is_empty() {
         lines.push(Line::from(""));
-        lines.push(label("context"));
+        lines.push(label("the right context"));
         let indent_w = super::common::display_width(indent);
         let inner = width.saturating_sub(indent_w).max(20);
         for line in to_ratatui(&parse_markdown(meta.source_context())) {
@@ -741,6 +1048,52 @@ fn meta_preview<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -> V
         }
     }
     lines
+}
+
+fn fact_lines(
+    label: &'static str,
+    value: String,
+    indent: &'static str,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let indent_width = super::common::display_width(indent);
+    let inline = width >= indent_width + FACT_LABEL_COLUMN + 12;
+    let value_width = if inline {
+        width.saturating_sub(indent_width + FACT_LABEL_COLUMN)
+    } else {
+        width.saturating_sub(indent_width)
+    }
+    .max(1);
+    let values = super::common::wrap_words(value.as_str(), value_width, value_width);
+    if !inline {
+        let mut lines = vec![Line::from(vec![
+            Span::styled(indent, palette::base()),
+            Span::styled(label, palette::dim2()),
+        ])];
+        lines.extend(values.into_iter().map(|value| {
+            Line::from(vec![
+                Span::styled(indent, palette::base()),
+                Span::styled(value, palette::base()),
+            ])
+        }));
+        return lines;
+    }
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let label = if index == 0 {
+                super::common::pad_right(label, FACT_LABEL_COLUMN)
+            } else {
+                " ".repeat(FACT_LABEL_COLUMN)
+            };
+            Line::from(vec![
+                Span::styled(indent, palette::base()),
+                Span::styled(label, palette::dim2()),
+                Span::styled(value, palette::base()),
+            ])
+        })
+        .collect()
 }
 
 fn value_lines<'a>(
@@ -919,6 +1272,30 @@ fn all_finished(app: &App) -> bool {
             .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed())
 }
 
+/// Return the card and its content range at one scrolling-body row.
+#[must_use]
+pub(crate) fn card_range_at(app: &App, width: usize, row: usize) -> Option<(usize, usize, usize)> {
+    let running_target = app.cards_running_target();
+    let mut offset = 0usize;
+    for (index, draft) in app.cards().iter().enumerate() {
+        let running =
+            running_target.and_then(|(card, artifact)| (card == index).then_some(artifact));
+        let expanded = index == app.card_selected() && app.card_expanded();
+        let editor = if index == app.card_selected() {
+            app.sentence_editor()
+        } else {
+            None
+        };
+        let (rows, trailing) = card_layout(draft, running, expanded, editor, width);
+        let end = offset.saturating_add(rows);
+        if row >= offset && row < end {
+            return Some((index, offset, end));
+        }
+        offset = end.saturating_add(trailing);
+    }
+    None
+}
+
 /// Row offset and height of the currently focused card inside the scrolling
 /// card list, in body-rect rows. Returns `None` when there are no cards yet.
 /// Mirrors the per-card layout used by `cards_paragraph` so scroll-snapping
@@ -933,11 +1310,28 @@ pub(crate) fn focused_card_range(app: &App, width: usize) -> Option<(u16, u16)> 
         let running_for_card =
             running_target.and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
         let expanded = idx == app.card_selected() && app.card_expanded();
-        let (rows, trailing) = card_layout(draft, running_for_card, expanded, width);
+        let editor = if idx == app.card_selected() {
+            app.sentence_editor()
+        } else {
+            None
+        };
+        let (rows, trailing) = card_layout(draft, running_for_card, expanded, editor, width);
         if idx == app.card_selected() {
             let focus_rows = if expanded {
-                head_rows(draft, width)
-                    .saturating_add(step_rows_for(draft, running_for_card).len())
+                let base = head_rows(draft, width)
+                    .saturating_add(step_rows_for(draft, running_for_card).len());
+                editor
+                    .map(|editor| {
+                        base.saturating_add(SECTION_GAP_ROWS).saturating_add(
+                            super::sentence_labels::editor_focus_end(
+                                editor,
+                                width,
+                                super::common::CARD_DETAIL_COLUMN,
+                                super::common::CARD_DETAIL_COLUMN,
+                            ),
+                        )
+                    })
+                    .unwrap_or(base)
                     .max(1)
             } else {
                 rows
@@ -954,11 +1348,10 @@ pub(crate) fn focused_card_range(app: &App, width: usize) -> Option<(u16, u16)> 
 
 /// Total number of lines `cards_paragraph` will produce for the current state
 /// of `app`. Mirrors the per-card layout: head rows (one or more, depending on
-/// how the term + meta sentence wrap) + visible step rows + optional detail
-/// pane (only on the focused, expanded card) + trailing blank line for any
-/// card that emitted extra rows. Used by both the scroll clamp in `tui::app`
-/// and the click hit tester in `tui::links`, so they stay in lockstep with the
-/// renderer. `width` is the body-rect width in chars.
+/// how the term + meta sentence wrap) + visible artifact rows + the editor and
+/// optional detail pane + trailing blank line. Used by both the scroll clamp in
+/// `tui::app` and the click hit tester in `tui::links`, so they stay in lockstep
+/// with the renderer. `width` is the body-rect width in chars.
 pub(crate) fn content_height(app: &App, width: usize) -> u16 {
     if app.cards().is_empty() {
         return 0;
@@ -969,7 +1362,12 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
         let running_for_card =
             running_target.and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
         let expanded = idx == app.card_selected() && app.card_expanded();
-        let (rows, trailing) = card_layout(draft, running_for_card, expanded, width);
+        let editor = if idx == app.card_selected() {
+            app.sentence_editor()
+        } else {
+            None
+        };
+        let (rows, trailing) = card_layout(draft, running_for_card, expanded, editor, width);
         total = total.saturating_add(rows + trailing);
     }
     u16::try_from(total).unwrap_or(u16::MAX)
@@ -982,16 +1380,81 @@ pub(crate) fn head_rows_for(draft: &CardDraft, width: usize) -> usize {
     head_rows(draft, width)
 }
 
+/// Return whether one cell relative to the meta row belongs to a summary tag.
+#[must_use]
+pub(crate) fn sentence_tag_hit_at(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+    width: usize,
+    row: usize,
+    column: usize,
+) -> bool {
+    let Some(meta) = meta_step_index(draft, running) else {
+        return false;
+    };
+    let Some(labels) = collapsed_labels(draft, running, width) else {
+        return false;
+    };
+    let steps = step_rows_for(draft, running);
+    let Some(artifact) = steps.get(meta.saturating_add(row)).copied() else {
+        return false;
+    };
+    let Some(row) = sentence_tag_row(artifact) else {
+        return false;
+    };
+    let Some(column) = column.checked_sub(labels.start) else {
+        return false;
+    };
+    labels.tags.hit_at(row, column)
+}
+
+/// Return whether the complete collapsed tag sequence fits beside the artifacts.
+#[must_use]
+pub(crate) fn sentence_tags_visible(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+    width: usize,
+) -> bool {
+    collapsed_labels(draft, running, width).is_some()
+}
+
+/// Return the expanded sentence-editor control at one cell relative to the
+/// card's meta row.
+pub(crate) fn sentence_editor_control_at(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+    editor: &SentenceLabelsEditor,
+    width: usize,
+    row: usize,
+    column: usize,
+) -> Option<super::sentence_labels::EditorControl> {
+    let meta = meta_step_index(draft, running)?;
+    let steps = step_rows_for(draft, running);
+    let row = row.checked_sub(
+        steps
+            .len()
+            .saturating_sub(meta)
+            .saturating_add(SECTION_GAP_ROWS),
+    )?;
+    super::sentence_labels::editor_control_at(
+        editor,
+        width,
+        column,
+        row,
+        super::common::CARD_DETAIL_COLUMN,
+        super::common::CARD_DETAIL_COLUMN,
+    )
+}
+
 /// Return the artifact step rows visible for one card.
 pub(crate) fn step_rows_for(draft: &CardDraft, running: Option<Artifact>) -> Vec<Artifact> {
     let artifacts = draft.artifacts();
-    if !card_progressed(artifacts, running) {
-        return Vec::new();
-    }
     STEPS
         .iter()
         .filter_map(|&(_, kind)| {
-            if slot_visible(slot_for(artifacts, kind), kind, running) {
+            if kind == Artifact::Meta && draft.meta().is_some()
+                || slot_visible(slot_for(artifacts, kind), kind, running)
+            {
                 Some(kind)
             } else {
                 None
@@ -1004,23 +1467,93 @@ fn card_layout(
     draft: &CardDraft,
     running: Option<Artifact>,
     expanded: bool,
+    editor: Option<&SentenceLabelsEditor>,
     width: usize,
 ) -> (usize, usize) {
     let steps = step_rows_for(draft, running);
-    let mut rows = head_rows(draft, width);
-    rows += steps.len();
+    let labels = sentence_label_extra_rows(draft, running, editor, expanded, width);
+    let mut rows = head_rows(draft, width)
+        .saturating_add(steps.len())
+        .saturating_add(labels);
     if expanded {
         rows = rows.saturating_add(detail_pane_height(draft, width));
     }
-    let trailing = if !steps.is_empty() || expanded { 1 } else { 0 };
+    let trailing = usize::from(!steps.is_empty() || labels > 0 || expanded);
     (rows, trailing)
+}
+
+/// Number of rows added to the artifact block by the sentence pane.
+pub(crate) fn sentence_label_extra_rows(
+    _draft: &CardDraft,
+    _running: Option<Artifact>,
+    editor: Option<&SentenceLabelsEditor>,
+    expanded: bool,
+    width: usize,
+) -> usize {
+    if !expanded {
+        return 0;
+    }
+    editor
+        .map(|editor| {
+            SECTION_GAP_ROWS.saturating_add(
+                super::sentence_labels::editor_lines(
+                    editor,
+                    width,
+                    super::common::CARD_DETAIL_COLUMN,
+                    super::common::CARD_DETAIL_COLUMN,
+                )
+                .len(),
+            )
+        })
+        .unwrap_or(0)
+}
+
+fn meta_step_index(draft: &CardDraft, running: Option<Artifact>) -> Option<usize> {
+    step_rows_for(draft, running)
+        .iter()
+        .position(|artifact| *artifact == Artifact::Meta)
+}
+
+/// Locate the sentence editor cursor inside the complete scrolling card
+/// content.
+pub(crate) fn sentence_editor_cursor_for(app: &App, width: usize) -> Option<(usize, usize)> {
+    let editor = app.sentence_editor()?;
+    let selected = app.card_selected();
+    let running_target = app.cards_running_target();
+    let mut offset = 0usize;
+    for (index, draft) in app.cards().iter().enumerate() {
+        let running =
+            running_target.and_then(|(card, artifact)| (card == index).then_some(artifact));
+        if index == selected {
+            let steps = step_rows_for(draft, running);
+            let (column, row) = super::sentence_labels::editor_cursor(
+                editor,
+                width,
+                super::common::CARD_DETAIL_COLUMN,
+                super::common::CARD_DETAIL_COLUMN,
+            )?;
+            return Some((
+                column,
+                offset
+                    .saturating_add(head_rows(draft, width))
+                    .saturating_add(steps.len())
+                    .saturating_add(SECTION_GAP_ROWS)
+                    .saturating_add(row),
+            ));
+        }
+        let (rows, trailing) = card_layout(draft, running, false, None, width);
+        offset = offset.saturating_add(rows).saturating_add(trailing);
+    }
+    None
 }
 
 /// Number of body-rect rows the expanded meta-preview pane consumes for one
 /// card. Verbatim mirror of `detail_pane` / `meta_preview` so callers can keep
 /// scroll offsets and click hit-tests aligned with the rendered output.
 pub(crate) fn detail_pane_height(draft: &CardDraft, width: usize) -> usize {
-    detail_pane(draft, width).lines.len()
+    detail_pane(draft, width, draft.staged_rewrite().is_some())
+        .lines
+        .len()
 }
 
 /// Row offset of the first rejected-attempt row inside the expanded detail
@@ -1028,7 +1561,7 @@ pub(crate) fn detail_pane_height(draft: &CardDraft, width: usize) -> usize {
 /// itself, so the click hit-tester cannot drift from the rejected block that
 /// sits below the card.
 pub(crate) fn rejected_rows_offset(draft: &CardDraft, width: usize) -> Option<usize> {
-    detail_pane(draft, width).rejected_start
+    detail_pane(draft, width, draft.staged_rewrite().is_some()).rejected_start
 }
 
 /// Click targets on one rejected row: the archived frame and its scene.
@@ -1069,13 +1602,13 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         format!("/{} ready", app.cards().len()),
         palette::dim(),
     ));
-    if app.cards_failed() > 0 {
+    if app.cards_pending() > 0 {
         left.push(super::common::status_sep());
         left.push(Span::styled(
-            app.cards_failed().to_string(),
+            app.cards_pending().to_string(),
             palette::base().add_modifier(Modifier::BOLD),
         ));
-        left.push(Span::styled(" gave up", palette::dim()));
+        left.push(Span::styled(" pending", palette::dim()));
     }
     if let Some(cost) = total_cost(app) {
         left.push(super::common::status_sep());
@@ -1086,14 +1619,29 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     }
     left.push(super::common::status_sep());
     left.push(Span::styled(elapsed(app), palette::dim2()));
-    let controls = DisclosureControls::new(app.card_expanded());
-    let hints = vec![
-        controls.primary_toggle(),
-        super::common::FooterHint::secondary("R", "change"),
-        super::common::FooterHint::secondary("Ctrl+G", "regenerate"),
-        super::common::FooterHint::ghost("↑↓", "nav"),
-        super::common::quit_hint(app.quit_pending()),
-    ];
+    let hints = if app.sentence_editor().is_some() {
+        vec![
+            super::common::FooterHint::primary("Ctrl+G", "regenerate"),
+            super::common::FooterHint::secondary("← →", "pick"),
+            super::common::FooterHint::ghost("↑ ↓", "row"),
+            super::common::FooterHint::ghost("Esc", "close"),
+        ]
+    } else {
+        let controls = DisclosureControls::new(app.card_expanded());
+        let mut hints = Vec::new();
+        hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
+        if app.card_tunable() {
+            hints.push(super::common::FooterHint::secondary("Enter/→", "tune"));
+        } else {
+            hints.push(controls.secondary_toggle());
+        }
+        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        if app.can_start_new_batch() {
+            hints.push(super::common::new_batch_hint(app.new_batch_pending()));
+        }
+        hints.push(super::common::quit_hint(app.quit_pending()));
+        hints
+    };
     super::common::footer_bar(left, hints, width)
 }
 

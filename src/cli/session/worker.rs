@@ -90,14 +90,8 @@ impl Reporter for SessionReporter {
         self.inner.generating(cards);
     }
 
-    fn step(
-        &self,
-        card: usize,
-        term: &str,
-        artifact: Artifact,
-        outcome: StepOutcome<'_>,
-        costs: ArtifactCosts,
-    ) {
+    fn step(&self, card: usize, settled: &CardDraft, artifact: Artifact, outcome: StepOutcome<'_>) {
+        let costs = ArtifactCosts::from_artifacts(settled.artifacts());
         let costs = match self.costs.absolute(card, costs) {
             Ok(costs) => costs,
             Err(error) => {
@@ -111,7 +105,7 @@ impl Reporter for SessionReporter {
         };
         let pid = self.pid;
         let progress = Progress {
-            term: String::from(term),
+            term: String::from(settled.term()),
             artifact: String::from(artifact.label()),
         };
         match self.store.update(self.id.as_str(), |record| {
@@ -120,23 +114,36 @@ impl Reporter for SessionReporter {
                     .drafts
                     .get_mut(card)
                     .ok_or_else(|| anyhow::anyhow!("worker card index {card} escaped the plan"))?;
-                if draft.term != term {
+                let same =
+                    draft.term == settled.term() && draft.understanding == settled.understanding();
+                let rewritten = artifact == Artifact::Meta
+                    && matches!(outcome, StepOutcome::Ready { .. })
+                    && draft.rewrite.is_some()
+                    && settled.rewrite().is_none();
+                if !same && !rewritten {
                     bail!(
-                        "worker card index {card} names '{}' instead of '{term}'",
-                        draft.term
+                        "worker card index {card} names '{}' instead of '{}'",
+                        draft.term,
+                        settled.term()
                     );
                 }
+                draft.term = String::from(settled.term());
+                draft.understanding = String::from(settled.understanding());
                 draft.costs = costs;
+                draft.rewrite = settled.rewrite().cloned();
                 record.progress = Some(progress);
             }
             Ok(())
         }) {
             Ok(fresh) => self.revoked.set(!owned_by(&fresh, pid)),
-            Err(error) => self
-                .inner
-                .warn(format!("worker: failed to persist progress: {error:#}").as_str()),
+            Err(error) => {
+                self.revoked.set(true);
+                *self.persist_failure.borrow_mut() = Some(format!("{error:#}"));
+                self.inner
+                    .warn(format!("worker: failed to persist progress: {error:#}").as_str());
+            }
         }
-        self.inner.step(card, term, artifact, outcome, costs);
+        self.inner.step(card, settled, artifact, outcome);
     }
 
     fn publishing(&self) {
@@ -215,6 +222,7 @@ fn execute(store: &SessionStore, id: &str, inner: Box<dyn Reporter>) -> Result<S
     let journal = store.cost_journal(&record);
     let costs = SessionCostScope::bound(journal.clone());
     let drafts = drafts_with_costs(&record, &pair, &journal)?;
+    ensure_rewrites_started(drafts.as_slice())?;
     let workflow = workflow_for_session(PathBuf::from(record.out), costs.clone())?;
     let pid = i32::try_from(std::process::id())?;
     let reporter = SessionReporter::new(store.clone(), String::from(id), pid, inner, costs);
@@ -267,9 +275,29 @@ fn drafts_with_costs(
                 draft.understanding.as_str(),
                 pair.clone(),
             )
+            .with_rewrite(draft.rewrite.clone())
             .with_costs(costs))
         })
         .collect()
+}
+
+fn ensure_rewrites_started(drafts: &[CardDraft]) -> Result<()> {
+    if drafts.iter().any(|draft| draft.staged_rewrite().is_some()) {
+        bail!("staged card rewrites require Ctrl+G before worker generation");
+    }
+    Ok(())
+}
+
+fn ensure_record_rewrites_started(record: &SessionRecord) -> Result<()> {
+    if record.drafts.iter().any(|draft| {
+        draft
+            .rewrite
+            .as_ref()
+            .is_some_and(|rewrite| !rewrite.started())
+    }) {
+        bail!("staged card rewrites require Ctrl+G before worker generation");
+    }
+    Ok(())
 }
 
 /// Claim the session for this process: record our own pid as the worker and
@@ -282,6 +310,7 @@ fn claim_self(store: &SessionStore, id: &str) -> Result<()> {
     let pid = i32::try_from(std::process::id())?;
     let started = now()?;
     store.update(id, |record| {
+        ensure_record_rewrites_started(record)?;
         if matches!(record.phase, Phase::Cancelled) {
             bail!("session '{id}' was cancelled before generation started");
         }
@@ -345,9 +374,29 @@ pub(super) fn run_foreground(
 /// finishes and saves `published` first can never be clobbered by a late parent
 /// save reverting it to `generating`.
 pub(super) fn start_background(store: &SessionStore, id: &str) -> Result<SessionRecord> {
+    ensure_record_rewrites_started(&store.open(id)?)?;
     let log = File::create(store.log_path(id))?;
     let exe = std::env::current_exe()?;
+    let record = prepare_background(store, id)?;
+    if let Err(error) = spawn_detached(exe, id, log) {
+        let _ = store.update(id, |record| {
+            if !matches!(record.phase, Phase::Cancelled) {
+                record.phase = Phase::Failed;
+                record.error = Some(format!("failed to start worker: {error:#}"));
+            }
+            Ok(())
+        });
+        return Err(error);
+    }
+    Ok(record)
+}
+
+fn prepare_background(store: &SessionStore, id: &str) -> Result<SessionRecord> {
     let record = store.update(id, |record| {
+        ensure_record_rewrites_started(record)?;
+        if matches!(record.phase, Phase::Cancelled) {
+            bail!("session '{id}' was cancelled before generation started");
+        }
         record.worker = None;
         record.phase = Phase::Generating;
         record.progress = None;
@@ -355,14 +404,6 @@ pub(super) fn start_background(store: &SessionStore, id: &str) -> Result<Session
         record.error = None;
         Ok(())
     })?;
-    if let Err(error) = spawn_detached(exe, id, log) {
-        let _ = store.update(id, |record| {
-            record.phase = Phase::Failed;
-            record.error = Some(format!("failed to start worker: {error:#}"));
-            Ok(())
-        });
-        return Err(error);
-    }
     Ok(record)
 }
 
@@ -417,6 +458,7 @@ mod tests {
             term: String::from("canard"),
             understanding: String::from("a duck"),
             costs: crate::session::ArtifactCosts::default(),
+            rewrite: None,
         }];
         record.phase = Phase::Generating;
         record.worker = Some(WorkerHandle {
@@ -500,12 +542,12 @@ mod tests {
         let home = TempDir::new().expect("tempdir");
         let store = SessionStore::new(home.path());
         generating_session(&store, 1);
+        let draft = CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en"));
         reporter(&store, 1).step(
             0,
-            "canard",
+            &draft,
             Artifact::Scene,
             StepOutcome::Ready { cached: false },
-            ArtifactCosts::default(),
         );
         assert_eq!(
             store
@@ -519,6 +561,69 @@ mod tests {
     }
 
     #[test]
+    fn successful_rewrite_meta_persists_the_new_identity_and_clears_the_request() {
+        let home = TempDir::new().expect("tempdir");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        let previous = crate::session::CardMeta::new(
+            "/canard/",
+            "/canard/",
+            "a duck",
+            5,
+            "The duck swims.",
+            "duck",
+            "water bird",
+            "animals",
+            "Le canard nage.",
+        );
+        store
+            .update("fr-1", |record| {
+                record.drafts[0].rewrite = Some(crate::session::CardRewrite::new(
+                    Some(previous),
+                    crate::session::SentenceLabelSelection::default(),
+                    "use the newspaper sense",
+                ));
+                Ok(())
+            })
+            .expect("rewrite must queue");
+        let settled = CardDraft::new(
+            "canard",
+            "a false newspaper story",
+            LanguagePair::new("fr", "en"),
+        )
+        .with_meta(
+            crate::session::CardMeta::new(
+                "/canard/",
+                "/canard/",
+                "a hoax",
+                7,
+                "The newspaper ran a hoax.",
+                "hoax",
+                "a false story",
+                "journalism",
+                "Ce canard a trompé tout le monde.",
+            ),
+            None,
+        );
+        reporter(&store, 1).step(
+            0,
+            &settled,
+            Artifact::Meta,
+            StepOutcome::Ready { cached: false },
+        );
+        let saved = store.open("fr-1").expect("session must reopen");
+        assert_eq!(
+            (
+                saved.drafts[0].term.as_str(),
+                saved.drafts[0].understanding.as_str(),
+                saved.drafts[0].rewrite.is_none(),
+            ),
+            ("canard", "a false newspaper story", true),
+            "successful rewrite metadata did not replace the durable draft identity"
+        );
+    }
+
+    #[test]
     fn each_step_persists_the_sessions_current_artifact_costs() {
         let home = TempDir::new().expect("tempdir");
         let store = SessionStore::new(home.path());
@@ -527,6 +632,8 @@ mod tests {
             Artifact::Picture,
             crate::session::GenerationCost::from_nanos(420_000_000),
         );
+        let draft =
+            CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en")).with_costs(costs);
         let record = store.open("fr-1").expect("session must open");
         store
             .cost_journal(&record)
@@ -538,14 +645,13 @@ mod tests {
             .expect("provider observer must journal spend before progress");
         reporter(&store, 1).step(
             0,
-            "canard",
+            &draft,
             Artifact::Picture,
             StepOutcome::Retry {
                 retry: 1,
                 retries: 3,
                 fault: None,
             },
-            costs,
         );
         assert_eq!(
             store.open("fr-1").expect("reopen").drafts[0]
@@ -591,17 +697,142 @@ mod tests {
     }
 
     #[test]
+    fn a_worker_refuses_a_persisted_staged_rewrite_before_production() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let mut record = generating_session(&store, 1);
+        let staged = CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en"))
+            .staging_rewrite(
+                crate::session::SentenceLabelSelection::empty(),
+                "make it formal",
+            );
+        record.drafts[0].rewrite = staged.rewrite().cloned();
+        let journal = store.cost_journal(&record);
+        journal
+            .seed(
+                record
+                    .drafts
+                    .iter()
+                    .map(|draft| draft.costs)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
+            .expect("journal must seed");
+        let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
+        let draft = drafts_with_costs(&record, &pair, &journal)
+            .expect("worker drafts must hydrate")
+            .remove(0);
+        assert_eq!(
+            (
+                draft.rewrite().map(crate::session::CardRewrite::started),
+                ensure_rewrites_started(&[draft]).is_err(),
+            ),
+            (Some(false), true),
+            "worker production activated or accepted a rewrite that Ctrl+G never started"
+        );
+    }
+
+    #[test]
+    fn a_staged_edit_between_preflight_and_claim_cannot_start_worker_or_provider_work() {
+        let home = TempDir::new().expect("tempdir");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        store
+            .update("fr-1", |record| {
+                record.phase = Phase::Published;
+                record.worker = None;
+                record.result = Some(ResultRecord {
+                    deck: String::from("/out/old.apkg"),
+                    report: String::from("/out/old.pdf"),
+                    output: String::from("/out"),
+                    cards: 1,
+                    failed: 0,
+                });
+                Ok(())
+            })
+            .expect("published session must persist");
+        ensure_record_rewrites_started(&store.open("fr-1").expect("preflight record must open"))
+            .expect("initial preflight must pass");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let concurrent = store.clone();
+        let released = barrier.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            released.wait();
+            let staged = CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en"))
+                .staging_rewrite(
+                    crate::session::SentenceLabelSelection::empty(),
+                    "make it formal",
+                );
+            let result = concurrent.update("fr-1", |record| {
+                record.drafts[0].rewrite = staged.rewrite().cloned();
+                Ok(())
+            });
+            let _ = sender.send(result);
+        });
+        barrier.wait();
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("concurrent staged edit must finish before its deadline")
+            .expect("concurrent staged edit must persist");
+        writer.join().expect("concurrent editor must exit");
+        let inserted = store.open("fr-1").expect("staged record must open");
+        let provider_calls = std::sync::atomic::AtomicUsize::new(0);
+        let background = prepare_background(&store, "fr-1");
+        if background.is_ok() {
+            provider_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        let claimed = claim_self(&store, "fr-1");
+        if claimed.is_ok() {
+            provider_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        let after = store.open("fr-1").expect("refused record must open");
+        assert_eq!(
+            (
+                background.is_err(),
+                claimed.is_err(),
+                provider_calls.load(std::sync::atomic::Ordering::SeqCst),
+                after.phase,
+                after.worker.is_none(),
+                after.result.as_ref().map(|result| {
+                    (
+                        result.deck.as_str(),
+                        result.report.as_str(),
+                        result.output.as_str(),
+                    )
+                }),
+                after.drafts[0]
+                    .rewrite
+                    .as_ref()
+                    .map(crate::session::CardRewrite::started),
+                after == inserted,
+            ),
+            (
+                true,
+                true,
+                0,
+                Phase::Published,
+                true,
+                Some(("/out/old.apkg", "/out/old.pdf", "/out")),
+                Some(false),
+                true,
+            ),
+            "a staged race crossed worker claim or mutated the published session"
+        );
+    }
+
+    #[test]
     fn a_step_after_the_session_stops_naming_this_worker_flags_revocation() {
         let home = TempDir::new().expect("tempdir");
         let store = SessionStore::new(home.path());
         generating_session(&store, 1);
         let revoked = reporter(&store, 2);
+        let draft = CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en"));
         revoked.step(
             0,
-            "canard",
+            &draft,
             Artifact::Scene,
             StepOutcome::Ready { cached: false },
-            ArtifactCosts::default(),
         );
         assert!(
             revoked.revoked(),
@@ -610,7 +841,7 @@ mod tests {
     }
 
     #[test]
-    fn claiming_a_cancelled_session_is_refused() {
+    fn preparing_or_claiming_a_cancelled_session_is_refused() {
         let home = TempDir::new().expect("tempdir");
         let store = SessionStore::new(home.path());
         generating_session(&store, 1);
@@ -621,9 +852,11 @@ mod tests {
                 Ok(())
             })
             .expect("cancel the session");
+        let prepared = prepare_background(&store, "fr-1");
+        let claimed = claim_self(&store, "fr-1");
         assert!(
-            claim_self(&store, "fr-1").is_err(),
-            "a worker claiming a session cancelled before its start must be refused"
+            prepared.is_err() && claimed.is_err(),
+            "a worker prepared or claimed a session cancelled before its start"
         );
     }
 

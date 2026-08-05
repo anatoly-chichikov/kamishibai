@@ -13,6 +13,7 @@ use super::attempt::AttemptFault;
 use super::draft::{
     Artifact, ArtifactAttempt, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta,
 };
+use super::pass::CardRevision;
 
 /// One step emitted by the engine for the outer shell to consume.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,6 +54,10 @@ impl SessionEngine {
     /// Return the next pending artifact to work on, if any.
     pub fn next_target(&self) -> Option<(usize, Artifact)> {
         for (index, draft) in self.drafts.iter().enumerate() {
+            let staged = draft.staged_rewrite().is_some();
+            if staged && draft.meta().is_none() {
+                continue;
+            }
             let artifacts = draft.artifacts();
             for kind in [
                 Artifact::Meta,
@@ -60,6 +65,9 @@ impl SessionEngine {
                 Artifact::Scene,
                 Artifact::Picture,
             ] {
+                if staged && kind == Artifact::Meta {
+                    continue;
+                }
                 let current = slot(artifacts, kind);
                 if !current.complete() {
                     return Some((index, kind));
@@ -84,6 +92,29 @@ impl SessionEngine {
         card: usize,
         attempt: ArtifactAttempt<(CardMeta, Option<ArtifactFile>)>,
     ) -> EngineEvent {
+        let term = self.drafts[card].term().to_string();
+        let understanding = self.drafts[card].understanding().to_string();
+        self.applied_revision_attempt(
+            card,
+            attempt.map(|(meta, file)| (CardRevision::new(term, understanding, meta), file)),
+        )
+    }
+
+    /// Apply an unmetered metadata revision that may change card identity.
+    pub fn applied_revision(
+        &mut self,
+        card: usize,
+        result: Result<(CardRevision, Option<ArtifactFile>)>,
+    ) -> EngineEvent {
+        self.applied_revision_attempt(card, ArtifactAttempt::unmetered(result))
+    }
+
+    /// Apply a metadata revision together with its incremental spend.
+    pub fn applied_revision_attempt(
+        &mut self,
+        card: usize,
+        attempt: ArtifactAttempt<(CardRevision, Option<ArtifactFile>)>,
+    ) -> EngineEvent {
         let attempt_before = slot(self.drafts[card].artifacts(), Artifact::Meta)
             .tally()
             .done()
@@ -91,8 +122,8 @@ impl SessionEngine {
         let (result, cost, related, fault) = attempt.into_accounted_parts();
         let fault = diagnosed(result.as_ref().err(), fault);
         match result {
-            Ok((meta, file)) => {
-                let updated = self.drafts[card].clone().with_meta(meta, file);
+            Ok((revision, file)) => {
+                let updated = self.drafts[card].clone().with_revision(revision, file);
                 let artifacts = mark_related_costs(
                     mark_cost(updated.artifacts().clone(), Artifact::Meta, cost),
                     related,
@@ -201,6 +232,13 @@ impl SessionEngine {
 
     /// Return BatchReady or BatchDone if all per-card work is complete; otherwise None.
     pub fn batch_state(&self) -> Option<EngineEvent> {
+        if self
+            .drafts
+            .iter()
+            .any(|draft| draft.staged_rewrite().is_some())
+        {
+            return None;
+        }
         if !self.fully_drained() {
             return None;
         }

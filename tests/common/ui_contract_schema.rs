@@ -53,11 +53,10 @@ pub enum ScreenId {
     Done,
 }
 
-/// One of the two correction modals.
+/// The bulk-correction modal represented in the UI inventory.
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum ModalId {
     ChangeSomething,
-    ChangeThisCard,
 }
 
 /// A fullscreen screen, with the states it can render and the regions it paints.
@@ -77,6 +76,8 @@ pub enum ScreenState {
     Empty(EmptyCause),
     Retrying,
     Failed,
+    EditingLabels,
+    Regenerating,
 }
 
 /// Why an Empty state is being shown.
