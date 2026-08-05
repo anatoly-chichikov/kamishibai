@@ -422,6 +422,15 @@ pub fn quit_hint(pending: bool) -> FooterHint {
     }
 }
 
+/// The finished-screen Escape action and its armed confirmation state.
+pub fn new_batch_hint(pending: bool) -> FooterHint {
+    if pending {
+        FooterHint::with("Esc", "again", Tier::Primary, 4)
+    } else {
+        FooterHint::with("Esc", "new cards", Tier::Ghost, 2)
+    }
+}
+
 /// One and only entry point for drawing a fullscreen screen.
 ///
 /// Paints the background, computes the standard chrome layout, draws the
@@ -682,6 +691,33 @@ mod tests {
         assert!(
             line.contains("Ctrl+G"),
             "the bright primary action must be the last hint kept on a cramped bar, got: {line}"
+        );
+    }
+
+    #[test]
+    fn armed_new_batch_confirmation_outlives_every_regular_action() {
+        let hints = vec![
+            new_batch_hint(true),
+            FooterHint::primary("Ctrl+G", "regenerate"),
+            FooterHint::secondary("Enter/→", "tune"),
+            FooterHint::ghost("↑↓", "nav"),
+            quit_hint(false),
+        ];
+        let line = joined(&footer_spans(short_status(), hints, 30));
+        assert!(
+            line.contains("[Esc] again") && !line.contains("Ctrl+G"),
+            "a cramped footer hid the armed Escape confirmation behind a regular action: {line}"
+        );
+    }
+
+    #[test]
+    fn idle_new_cards_hint_uses_the_same_color_as_quit() {
+        let new_cards = new_batch_hint(false).spans();
+        let quit = quit_hint(false).spans();
+        assert_eq!(
+            (new_cards[0].style, new_cards[1].style),
+            (quit[0].style, quit[1].style),
+            "idle new cards must have exactly the same muted treatment as quit"
         );
     }
 

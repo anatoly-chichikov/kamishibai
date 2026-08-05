@@ -242,17 +242,21 @@ is no per-card modal and `R` has no `YourCards` action.
         │       └─ [Esc] ──► close + collapse while retaining pending
         ├─ [Ctrl+G, pending > 0] ──► regenerate all pending cards in one batch
         ├─ [Ctrl+G, pending = 0] ──► existing retry/rebuild fallback
-        └─ queue drained and pending = 0 ──► (StartPublish: deck ──► report busy) ──► Done
+        └─ queue drained and pending = 0 ──► (StartPublish: deck ──► report busy) ──► published final
+                └─ [Esc] arm new batch ──► [Esc again within 1 s] ──► clean YourWords
 
-    Done
+    Done (reopened published session)
         ├─ [Ctrl+G, if failed cards > 0] ──► YourCards (regenerate failed)
-        └─ [Ctrl+C] ──► exit
+        ├─ [Esc] arm new batch ──► [Esc again within 1 s] ──► clean YourWords
+        └─ [Ctrl+C] twice within 1 s ──► exit
 ```
 
 Note: there is no `Esc`-to-go-back from `WhatIUnderstood`, and `R` has no action
-on `WhatIUnderstood` or `YourCards` (the bulk modal is reached only through the `+ add more` row). The only path back to
-`YourWords` is dropping the last remaining candidate. Publishing the deck/PDF is automatic
-once the generation queue drains — it is not a key the user presses.
+on `WhatIUnderstood` or `YourCards` (the bulk modal is reached only through the `+ add more` row). Before publication,
+the only path back to `YourWords` is dropping the last remaining candidate. Once a
+batch is published, double `Esc` starts a clean batch without restarting the app.
+Publishing the deck/PDF is automatic once the generation queue drains — it is
+not a key the user presses.
 
 ## Keyboard contract (per state)
 
@@ -265,17 +269,25 @@ once the generation queue drains — it is not a key the user presses.
 | `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter`/`←` done · `Enter` on `+ add more` opens ChangeSomething  |
 | `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
 | `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` tune · `↑↓` nav (`Space` is an unadvertised alias) |
+| `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
 | `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row · text editing under `one more thing` · `Esc` close (`Enter` inert) |
 | `PickMyLanguage`            | `←/→`/`↑↓` move · `Enter` confirm · `Esc` cancel                                                             |
-| `Done`                      | `Ctrl+G` regenerate failed (only when failures) · `Ctrl+C` quit · file paths stay visible                   |
+| `Done`                      | `Ctrl+G` regenerate failed (only when failures) · `[Esc] new cards` · twice within 1 s starts a clean batch · `Ctrl+C` quit |
 
-`Ctrl+C` quits from every screen (a second press confirms when a `quit_pending` prompt shows).
+The new-batch and quit confirmations are independent one-second windows. On a
+finished final, the footer permanently shows muted `[Esc] new cards` immediately
+before `[Ctrl+C] quit`. The first `Esc` changes it to the high-priority `[Esc]
+again` hint, and the second press resets to an empty `YourWords`.
+Any other action or a timeout disarms it. If the sentence-label editor is open,
+its first `Esc` closes the editor instead of arming a reset. `Ctrl+C` retains its
+separate double-press quit confirmation on every screen.
 
 ## Event ownership
 
 Events are divided between the app shell and individual screens:
 
-- **Shell owns**: terminal `Resize`, pumping the session-engine channel, and the final quit.
+- **Shell owns**: terminal `Resize`, pumping the session-engine channel, the
+  published-batch double-`Esc` confirmation/reset, and the independent final quit.
 - **Transition owns**: every key in the table above, modal dismissal (`Esc` → `Cancel`),
   live sentence-label staging, text editing, list navigation, row expansion.
 - **Session engine emits** (fed back into the transition as `AppEvent`s):
@@ -329,20 +341,26 @@ not forwarded to card generation.
 - `footer` renders the active screen's keyboard hints as a tiered, width-aware
   status bar: the primary action leads in bright ink, secondary actions follow,
   and conventional keys (navigation, quit) are dimmed. When the row is too narrow
-  the dim hints are shed first — the primary action and quit never clip.
+  the dim hints are shed first — the primary action and quit never clip. The
+  finished final permanently shows `[Esc] new cards` in the same muted treatment
+  as quit and directly before it. The first `Esc` changes that action to `[Esc]
+  again` as the highest-priority hint for its one-second confirmation window.
 - The crossterm event loop reads `KeyEvent`, `ResizeEvent`, and the session-engine
   channel, then dispatches through the transition function below.
 
 ## Pure transition function
 
-The state machine is the pure function `transit(app, event) -> (App, Side)` in
+The screen state machine is the pure function `transit(app, event) -> (App, Side)` in
 `src/tui/transition.rs`: no IO, no Gemini calls. It returns the next `App` plus a
 `Side` effect the shell runs outside the function (`RunUnderstanding`,
 `RunBulkCorrection`, `StartGeneration`, `RegenerateCards`, `RegenerateFailed`,
 `StartPublish`, `ValidateKey`, `LoadEnvKey`,
 `PersistMyLanguage…`, `ExitApp`). Tests drive it with fabricated events to verify
-the full path `YourWords → WhatIUnderstood → YourCards → Done` without touching the
-network.
+the live path `YourWords → WhatIUnderstood → YourCards → published YourCards`
+without touching the network; `Done` is the final view when a published session
+is reopened. The time-bounded new-batch and quit confirmations belong to the
+shell: the second eligible `Esc` replaces the published app state with a clean
+`YourWords` batch, while keeping the process running.
 
 This map documents the state machine only. Widget rendering lives in
 `src/tui/screens/`; the real Gemini passes and the artifact pipeline live in

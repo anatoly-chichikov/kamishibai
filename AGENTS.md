@@ -396,6 +396,18 @@ axis must keep its current value exactly. Only an explicitly changed or already
 pinned axis may differ from the requested value, and only when the result marks
 that axis as approximate.
 
+A successfully published live batch remains on `YourCards`; reopening that
+published session uses `Done`. Both final views permanently show the muted
+`[Esc] new cards` immediately before `[Ctrl+C] quit`. The first `Esc` arms a
+one-second confirmation and changes its hint to the highest-priority `[Esc]
+again`; the second starts a clean `YourWords` batch in the same process,
+preserving preferences and output location while rotating the persistent
+session identity and cost journal. Any other action or timeout disarms the
+confirmation. An open sentence-label editor consumes its first `Esc` to close,
+and `Ctrl+C` keeps an independent double-press quit confirmation. The same
+reset remains available after every card terminally gives up and no package can
+be published, once the publication error has been dismissed.
+
 Expanded metadata uses statement and noun labels: `the phrase`, `in your
 language`, `a visual clue`, `word meaning`, `word pronunciation`, `phrase
 pronunciation`, `worth learning`, and, when context exists, `the right context`.

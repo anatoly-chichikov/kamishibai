@@ -14,4 +14,4 @@ expression: render(&app)
                                                                                 
                                       ai may be wrong, please verify results    
                                                                                 
-    step 3/3  0/0 ready                                        [Ctrl+C] quit    
+    step 3/3  0/0 ready                       [Esc] new cards  [Ctrl+C] quit

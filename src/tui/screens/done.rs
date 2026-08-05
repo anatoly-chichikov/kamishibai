@@ -122,6 +122,9 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     if app.cards_failed() > 0 {
         hints.push(super::common::FooterHint::primary("Ctrl+G", "Regenerate"));
     }
+    if app.can_start_new_batch() {
+        hints.push(super::common::new_batch_hint(app.new_batch_pending()));
+    }
     hints.push(super::common::quit_hint(app.quit_pending()));
     super::common::footer_bar(left, hints, width)
 }

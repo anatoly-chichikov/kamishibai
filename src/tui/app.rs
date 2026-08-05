@@ -24,6 +24,7 @@ pub struct App {
     welcome: WelcomeView,
     body_scroll: u16,
     quit_pending: bool,
+    new_batch_pending: bool,
     picker_cursor: usize,
 }
 
@@ -194,6 +195,7 @@ impl App {
             welcome: WelcomeView::default(),
             body_scroll: 0,
             quit_pending: false,
+            new_batch_pending: false,
             picker_cursor: 0,
         }
     }
@@ -208,6 +210,38 @@ impl App {
     pub fn with_quit_pending(mut self, pending: bool) -> Self {
         self.quit_pending = pending;
         self
+    }
+
+    /// Return whether a first Escape has armed the final-screen new-batch gesture.
+    pub fn new_batch_pending(&self) -> bool {
+        self.new_batch_pending
+    }
+
+    /// Return the app with the new-batch confirmation flag updated.
+    pub fn with_new_batch_pending(mut self, pending: bool) -> Self {
+        self.new_batch_pending = pending;
+        self
+    }
+
+    /// Return whether a finished batch can be replaced from the final screen.
+    pub fn can_start_new_batch(&self) -> bool {
+        let terminal = !self.cards.drafts.is_empty()
+            && self
+                .cards
+                .drafts
+                .iter()
+                .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed());
+        matches!(self.screen, Screen::YourCards | Screen::Done)
+            && (!self.done.deck.is_empty() || terminal)
+            && self.modal.is_none()
+            && self.busy.is_none()
+            && self.error.is_none()
+            && self.cards.editor.is_none()
+    }
+
+    /// Start a clean batch while preserving the user's current language direction.
+    pub fn starting_new_batch(self) -> Self {
+        Self::new(self.pair)
     }
 
     /// Return the app rerouted onto the first-run Welcome screen starting

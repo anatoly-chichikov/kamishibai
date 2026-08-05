@@ -24,7 +24,7 @@ const IDLE_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
 const BACKGROUND_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
 const FAST_JOB_POLL: Duration = Duration::from_millis(25);
 const FAST_JOB_WINDOW: Duration = Duration::from_millis(50);
-const QUIT_WINDOW: Duration = Duration::from_millis(1000);
+const CONFIRMATION_WINDOW: Duration = Duration::from_millis(1000);
 const KEY_REJECTED_MESSAGE: &str = "Gemini rejected this API key; saved key was cleared";
 
 struct PendingJob<T> {
@@ -92,6 +92,7 @@ pub(super) struct Shell<P, K> {
     regeneration_pending: bool,
     started: Option<Instant>,
     quit_armed_at: Option<Instant>,
+    new_batch_armed_at: Option<Instant>,
     workflow: P,
     keys: K,
     store: PreferenceStore,
@@ -123,6 +124,7 @@ impl Shell<GeminiCardWorkflow, GeminiKeyValidation> {
             regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow,
             keys,
             store: default_store(&SystemContext)?,
@@ -263,7 +265,7 @@ where
     pub(super) fn arm_quit(&mut self) -> bool {
         let now = Instant::now();
         if let Some(armed) = self.quit_armed_at
-            && now.duration_since(armed) <= QUIT_WINDOW
+            && now.duration_since(armed) <= CONFIRMATION_WINDOW
         {
             return true;
         }
@@ -287,11 +289,70 @@ where
     /// Expire the quit confirmation window when the user pauses too long.
     pub(super) fn refresh_quit_pending(&mut self) -> bool {
         if let Some(armed) = self.quit_armed_at
-            && armed.elapsed() > QUIT_WINDOW
+            && armed.elapsed() > CONFIRMATION_WINDOW
         {
             return self.disarm_quit();
         }
         false
+    }
+
+    /// Consume Escape on a finished final screen, arming or confirming a fresh batch.
+    pub(super) fn handle_new_batch_escape(&mut self) -> Result<bool> {
+        if !self.can_start_new_batch() {
+            return Ok(false);
+        }
+        let now = Instant::now();
+        if let Some(armed) = self.new_batch_armed_at
+            && now.duration_since(armed) <= CONFIRMATION_WINDOW
+        {
+            self.start_new_batch()?;
+            return Ok(true);
+        }
+        self.new_batch_armed_at = Some(now);
+        if !self.app.new_batch_pending() {
+            self.app = self.app.clone().with_new_batch_pending(true);
+        }
+        Ok(true)
+    }
+
+    /// Clear any pending new-batch confirmation state.
+    pub(super) fn disarm_new_batch(&mut self) -> bool {
+        self.new_batch_armed_at = None;
+        if self.app.new_batch_pending() {
+            self.app = self.app.clone().with_new_batch_pending(false);
+            return true;
+        }
+        false
+    }
+
+    /// Expire the final-screen Escape confirmation window after a pause.
+    pub(super) fn refresh_new_batch_pending(&mut self) -> bool {
+        if let Some(armed) = self.new_batch_armed_at
+            && armed.elapsed() > CONFIRMATION_WINDOW
+        {
+            return self.disarm_new_batch();
+        }
+        false
+    }
+
+    fn can_start_new_batch(&self) -> bool {
+        self.app.can_start_new_batch()
+            && self.engine.is_none()
+            && self.text.is_none()
+            && self.artifact_job.is_none()
+            && self.publish_job.is_none()
+    }
+
+    fn start_new_batch(&mut self) -> Result<()> {
+        if let Some(session) = self.session.as_mut() {
+            session.start_next_batch()?;
+        }
+        self.app = self.app.clone().starting_new_batch();
+        self.regeneration_pending = false;
+        self.started = None;
+        self.quit_armed_at = None;
+        self.new_batch_armed_at = None;
+        Ok(())
     }
 
     /// Apply one app event and start any resulting side effect.
@@ -987,12 +1048,12 @@ mod tests {
     use super::*;
     use crate::cli::session::{DraftRecord, Phase, ResultRecord, SessionRecord, SessionStore};
     use crate::session::{
-        ArtifactCosts, ArtifactFile, ArtifactSlot, CandidateRecord, CardArtifacts, CardMeta,
-        CardRevision, GenerationCost, LanguagePair, LearningDetection, RawInputBatch,
-        ScriptDetection, Sense, SenseCorrection, SentenceLabelSelection, Understood, WordCandidate,
-        catalog_for_detection,
+        ARTIFACT_ATTEMPT_CEILING, ArtifactCosts, ArtifactFile, ArtifactSlot, CandidateRecord,
+        CardArtifacts, CardMeta, CardRevision, GenerationCost, LanguagePair, LearningDetection,
+        RawInputBatch, ScriptDetection, Sense, SenseCorrection, SentenceLabelSelection, Understood,
+        WordCandidate, catalog_for_detection,
     };
-    use crate::tui::ModalKind;
+    use crate::tui::{LabelEditorRow, ModalKind};
     use anyhow::Result;
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1335,6 +1396,7 @@ mod tests {
             regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow: workflow.clone(),
             keys: workflow,
             store,
@@ -1360,6 +1422,35 @@ mod tests {
             .with_screen(Screen::WhatIUnderstood)
             .confirmed_learning("en")
             .understood(vec![candidate("whilst")])
+    }
+
+    fn finished(screen: Screen) -> App {
+        let pair = pair();
+        App::new(pair.clone())
+            .confirmed_learning("en")
+            .with_screen(screen)
+            .cards_started(vec![CardDraft::new("whilst", "although", pair)])
+            .done_published("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp")
+    }
+
+    fn failed_without_publication() -> App {
+        let pair = pair();
+        let mut picture = ArtifactSlot::fresh(Artifact::Picture);
+        for _ in 0..ARTIFACT_ATTEMPT_CEILING {
+            picture = picture.attempted();
+        }
+        let artifacts = CardArtifacts::from_parts(
+            ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+            ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+            picture,
+            ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+        );
+        App::new(pair.clone())
+            .confirmed_learning("en")
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![
+                CardDraft::new("whilst", "although", pair).with_artifacts(artifacts),
+            ])
     }
 
     fn settle_shell<P, K>(shell: &mut Shell<P, K>, max_ticks: usize)
@@ -1396,6 +1487,143 @@ mod tests {
             ),
             (Screen::WhatIUnderstood, 2, "whilst, in the end"),
             "first pass must split only by lines and keep commas literal"
+        );
+    }
+
+    #[test]
+    fn first_escape_on_published_cards_only_arms_a_new_batch() {
+        let mut shell = shell(finished(Screen::YourCards));
+        let consumed = shell
+            .handle_new_batch_escape()
+            .expect("first Escape must be handled");
+        assert_eq!(
+            (
+                consumed,
+                shell.app.screen(),
+                shell.app.new_batch_pending(),
+                shell.app.cards().len(),
+                shell.app.done_artifacts().deck.as_str(),
+            ),
+            (true, Screen::YourCards, true, 1, "/tmp/cards.apkg"),
+            "first Escape reset a completed batch without confirmation"
+        );
+    }
+
+    #[test]
+    fn second_escape_on_reopened_done_starts_clean_words_in_place() {
+        let mut shell = shell(finished(Screen::Done));
+        let output = shell.output.clone();
+        shell
+            .handle_new_batch_escape()
+            .expect("first Escape must arm the reset");
+        shell
+            .handle_new_batch_escape()
+            .expect("second Escape must confirm the reset");
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.pair().known(),
+                shell.app.learning_pending(),
+                shell.app.blob(),
+                shell.app.cards().len(),
+                shell.app.done_artifacts().deck.as_str(),
+                shell.app.new_batch_pending(),
+                shell.output.as_path(),
+            ),
+            (
+                Screen::YourWords,
+                "ru",
+                true,
+                "",
+                0,
+                "",
+                false,
+                output.as_path()
+            ),
+            "confirmed Escape did not replace Done with a clean batch in the same output"
+        );
+    }
+
+    #[test]
+    fn new_batch_confirmation_expires_after_the_quit_window() {
+        let mut shell = shell(finished(Screen::YourCards));
+        shell
+            .handle_new_batch_escape()
+            .expect("first Escape must arm the reset");
+        shell.new_batch_armed_at =
+            Some(Instant::now() - CONFIRMATION_WINDOW - Duration::from_millis(1));
+        let changed = shell.refresh_new_batch_pending();
+        assert_eq!(
+            (
+                changed,
+                shell.app.new_batch_pending(),
+                shell.new_batch_armed_at
+            ),
+            (true, false, None),
+            "an expired Escape confirmation remained armed"
+        );
+    }
+
+    #[test]
+    fn another_action_disarms_the_new_batch_confirmation() {
+        let mut shell = shell(finished(Screen::YourCards));
+        shell
+            .handle_new_batch_escape()
+            .expect("first Escape must arm the reset");
+        let changed = shell.disarm_new_batch();
+        assert_eq!(
+            (changed, shell.app.new_batch_pending(), shell.app.screen()),
+            (true, false, Screen::YourCards),
+            "another action left the destructive Escape confirmation armed"
+        );
+    }
+
+    #[test]
+    fn escape_closes_an_open_sentence_editor_before_arming_a_new_batch() {
+        let mut shell = shell(review());
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        settle_shell(&mut shell, 200);
+        shell
+            .handle(AppEvent::SentenceLabelFocus(LabelEditorRow::Register))
+            .expect("sentence editor must open");
+        let intercepted = shell
+            .handle_new_batch_escape()
+            .expect("Escape eligibility must be checked");
+        let side = shell
+            .handle(AppEvent::Cancel)
+            .expect("Escape must close the editor");
+        assert_eq!(
+            (
+                intercepted,
+                side,
+                shell.app.sentence_editor().is_none(),
+                shell.app.screen(),
+                shell.app.done_artifacts().deck.is_empty(),
+            ),
+            (false, Side::None, true, Screen::YourCards, false),
+            "Escape armed or cleared a published batch while its sentence editor was open"
+        );
+    }
+
+    #[test]
+    fn double_escape_starts_over_after_every_card_gives_up_before_publication() {
+        let mut shell = shell(failed_without_publication());
+        shell
+            .handle_new_batch_escape()
+            .expect("first Escape must arm the reset");
+        shell
+            .handle_new_batch_escape()
+            .expect("second Escape must reset the failed batch");
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.cards().len(),
+                shell.app.done_artifacts().deck.as_str(),
+            ),
+            (Screen::YourWords, 0, ""),
+            "a terminally failed unpublished batch still required an app restart"
         );
     }
 
@@ -1890,6 +2118,7 @@ mod tests {
             regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow: TestWorkflow::local(),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -2040,6 +2269,7 @@ mod tests {
             regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -2157,6 +2387,7 @@ mod tests {
             regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -2301,6 +2532,7 @@ mod tests {
             regeneration_pending: false,
             started: None,
             quit_armed_at: None,
+            new_batch_armed_at: None,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),

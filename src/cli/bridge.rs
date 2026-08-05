@@ -238,6 +238,21 @@ impl TuiSession {
             .map(|record| PathBuf::from(record.out.as_str()))
     }
 
+    /// Detach from a completed record so the same TUI can mint a fresh session.
+    pub(super) fn start_next_batch(&mut self) -> Result<()> {
+        if self.lock.is_some() {
+            bail!("the completed session still holds its generation lock");
+        }
+        self.costs.reset()?;
+        self.id = None;
+        self.created = None;
+        self.source = String::from("tui");
+        self.senses = String::from("custom");
+        self.written = None;
+        self.fingerprint = None;
+        Ok(())
+    }
+
     fn hydrate(&self, record: &SessionRecord) -> Result<SessionRecord> {
         let mut hydrated = record.clone();
         apply_costs(
@@ -577,6 +592,84 @@ mod tests {
             session.stored_output(),
             Some(PathBuf::from("/legacy/kamishibai-out")),
             "resuming a session replaced its stored output with the new default"
+        );
+    }
+
+    #[test]
+    fn a_completed_tui_session_rotates_identity_and_cost_scope_for_the_next_batch() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let record = app_to_record(
+            &published_app(),
+            String::from("fr-old"),
+            String::from("created-old"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        store
+            .create(&record)
+            .expect("published session must persist");
+        let old_journal = store.cost_journal(&record);
+        old_journal
+            .seed(record_costs(&record).as_slice())
+            .expect("old cost journal must seed");
+        old_journal
+            .charge(0, Artifact::Meta, GenerationCost::from_nanos(700))
+            .expect("old provider spend must persist");
+        let mut session =
+            TuiSession::resuming_in(&record, store.clone()).expect("session must resume");
+        let costs = session.cost_scope();
+        let old_cost = costs
+            .absolute(0, crate::session::ArtifactCosts::default())
+            .expect("old cost must be readable")
+            .cost(Artifact::Meta);
+        session
+            .start_next_batch()
+            .expect("completed session must detach");
+        let pair = LanguagePair::new("fr", "en");
+        let next = App::new(pair.clone())
+            .confirmed_learning("fr")
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![CardDraft::new("chouette", "great", pair)]);
+        let claimed = session
+            .claim_and_save(&next, Path::new("/o"))
+            .expect("next batch must claim");
+        let new_id = session.id.clone().expect("next batch must mint an id");
+        let fresh_cost = costs
+            .absolute(0, crate::session::ArtifactCosts::default())
+            .expect("new cost journal must open empty")
+            .cost(Artifact::Meta);
+        let old: SessionRecord = serde_json::from_slice(
+            std::fs::read(
+                home.path()
+                    .join("sessions")
+                    .join("fr-old")
+                    .join("session.json"),
+            )
+            .expect("old session must remain readable")
+            .as_slice(),
+        )
+        .expect("old session must decode");
+        assert_eq!(
+            (
+                claimed,
+                old_cost,
+                fresh_cost,
+                new_id != "fr-old",
+                old.phase,
+                old.result.map(|result| result.deck),
+            ),
+            (
+                true,
+                Some(GenerationCost::from_nanos(700)),
+                None,
+                true,
+                Phase::Published,
+                Some(String::from("/o/deck.apkg")),
+            ),
+            "the next TUI batch reused the published session identity or provider spend"
         );
     }
 

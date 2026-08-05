@@ -395,8 +395,11 @@ fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
         draft("at the end", ready_artifacts()),
         draft("in the end", ready_artifacts()),
         draft("wreck", ready_artifacts()),
-    ]);
+    ])
+    .done_published("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp");
     let rendered = flat(&app);
+    let new_cards = rendered.find("[Esc] new cards").unwrap_or(usize::MAX);
+    let quit = rendered.find("[Ctrl+C] quit").unwrap_or(usize::MAX);
     assert!(
         rendered.contains("your cards")
             && rendered.contains("all done")
@@ -406,10 +409,11 @@ fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
             && !rendered.contains("[Space] tune")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
-            && !rendered.contains("new batch")
+            && rendered.contains("[Esc] new cards")
+            && new_cards < quit
             && !rendered.contains("[D] drop")
             && !rendered.contains("ai is working…"),
-        "all-done footer must offer one tune hint plus regenerate and no stale toggle, Space, or drop hooks: {rendered}"
+        "published footer must offer new cards before quit and omit stale toggle, Space, or drop hooks: {rendered}"
     );
 }
 

@@ -341,8 +341,8 @@ Contract(
             // ── 04 · YourCards (cards + inline sentence-label editor) ───
             Screen(
                 id: YourCards,
-                purpose: "show artifact progress and let the user inspect or rewrite one generated sentence",
-                states: [Default, Retrying, Failed, EditingLabels, Regenerating],
+                purpose: "show artifact progress, let the user inspect or rewrite one generated sentence, and start a clean batch after publication",
+                states: [Default, Pending, Retrying, Failed, EditingLabels, Regenerating],
                 regions: [
                     Region(kind: Body, elements: [
                         Element(
@@ -696,7 +696,7 @@ Contract(
                             id: ElementId("yc.footer_tune_card"),
                             kind: KeyHint(Footer),
                             text: Literal("[Enter/→] tune"),
-                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 866),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 1634),
                             purpose: "advertise the only visible tuning hint: expand the focused card and open its editor on how should it sound?",
                             importance: 5,
                             usefulness: 5,
@@ -751,10 +751,21 @@ Contract(
                             id: ElementId("yc.footer_keep_going"),
                             kind: KeyHint(Footer),
                             text: Literal("[Enter/→] tune"),
-                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 866),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 1634),
                             purpose: "keep the same visible tuning action when failures exist",
                             importance: 5,
                             usefulness: 4,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.footer_new_batch"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[Esc] new cards  |  [Esc] again while confirmation is armed"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 1640),
+                            purpose: "after publication or terminal failure, permanently show the new-cards action immediately before quit in exactly the same muted style; the first Esc changes it to the highest-priority one-second confirmation, the second starts a clean YourWords batch, another action or timeout restores new cards, and an open editor consumes Esc to close first",
+                            importance: 5,
+                            usefulness: 5,
                             health: Working,
                             issues: [],
                         ),
@@ -766,7 +777,7 @@ Contract(
             Screen(
                 id: Done,
                 purpose: "summarize produced artifacts and offer next batch / quit",
-                states: [Default],
+                states: [Default, Pending],
                 regions: [
                     Region(kind: Body, elements: [
                         Element(
@@ -814,10 +825,10 @@ Contract(
                     ]),
                     Region(kind: Footer, elements: [
                         Element(
-                            id: ElementId("done.footer_new_batch"),
+                            id: ElementId("done.footer_regenerate_failed"),
                             kind: KeyHint(Footer),
                             text: Literal("[Ctrl+G] Regenerate  (only when failures > 0)"),
-                            source: SourceRef(file: "src/tui/screens/done.rs", line: 15),
+                            source: SourceRef(file: "src/tui/screens/done.rs", line: 123),
                             purpose: "restart generation for failed cards from the final view",
                             importance: 4,
                             usefulness: 4,
@@ -825,11 +836,22 @@ Contract(
                             issues: [],
                         ),
                         Element(
+                            id: ElementId("done.footer_new_batch"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[Esc] new cards  |  [Esc] again while confirmation is armed"),
+                            source: SourceRef(file: "src/tui/screens/done.rs", line: 126),
+                            purpose: "from a reopened published session, permanently show the new-cards action immediately before quit in exactly the same muted style; the first Esc changes it to the highest-priority one-second confirmation, the second starts a clean YourWords batch, and another action or timeout restores new cards",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
                             id: ElementId("done.footer_quit"),
                             kind: KeyHint(Footer),
-                            text: Literal("[Ctrl+C] quit"),
-                            source: SourceRef(file: "src/tui/screens/done.rs", line: 15),
-                            purpose: "graceful exit from the only screen with no other natural exit",
+                            text: Literal("[Ctrl+C] quit  |  [Ctrl+C] again while its separate confirmation is armed"),
+                            source: SourceRef(file: "src/tui/screens/done.rs", line: 128),
+                            purpose: "keep the one-second double-press quit confirmation independent from the new-batch Escape confirmation",
                             importance: 5,
                             usefulness: 5,
                             health: Working,

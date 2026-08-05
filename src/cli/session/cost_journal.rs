@@ -101,6 +101,16 @@ impl SessionCostScope {
         Ok(())
     }
 
+    /// Clear the completed run binding before the same TUI starts another batch.
+    pub(in crate::cli) fn reset(&self) -> Result<()> {
+        let mut current = self
+            .journal
+            .lock()
+            .map_err(|_| anyhow::anyhow!("session cost scope lock is poisoned"))?;
+        *current = None;
+        Ok(())
+    }
+
     /// Overlay the journal's absolute totals over a record or app snapshot.
     pub(in crate::cli) fn overlay(&self, fallback: &[ArtifactCosts]) -> Result<Vec<ArtifactCosts>> {
         self.journal()?.overlay(fallback)

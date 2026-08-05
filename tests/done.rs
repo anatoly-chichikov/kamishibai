@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use kamishibai::session::{
     Artifact, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, GenerationCost,
-    LanguagePair,
+    LanguagePair, WordCandidate,
 };
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
@@ -97,15 +97,66 @@ fn priced_published() -> App {
 #[test]
 fn done_screen_lists_short_artifact_labels_and_quit_hint() {
     let rendered = flat(&published());
+    let new_cards = rendered.find("[Esc] new cards").unwrap_or(usize::MAX);
+    let quit = rendered.find("[Ctrl+C]").unwrap_or(usize::MAX);
     assert!(
         rendered.contains("your cards")
             && rendered.contains("all done")
             && rendered.contains("APKG")
             && rendered.contains("PDF")
+            && rendered.contains("[Esc] new cards")
             && rendered.contains("[Ctrl+C]")
             && rendered.contains("RU → EN")
-            && !rendered.contains("new batch"),
-        "Done must show APKG/PDF labels, quit hint, and the language chip — no new-batch hook"
+            && new_cards < quit,
+        "Done must show APKG/PDF labels, new-cards and quit hints, and the language chip"
+    );
+}
+
+#[test]
+fn armed_done_screen_asks_for_escape_again() {
+    let rendered = flat(&published().with_new_batch_pending(true));
+    assert!(
+        rendered.contains("[Esc] again") && !rendered.contains("new cards"),
+        "armed Done must make the second Escape confirmation visible: {rendered}"
+    );
+}
+
+#[test]
+fn starting_a_new_batch_clears_finished_work_but_keeps_the_language_direction() {
+    let reset = failed_published()
+        .seeded_blob("old words")
+        .understood(vec![WordCandidate::new("wreck", "damage", true)])
+        .with_quit_pending(true)
+        .with_new_batch_pending(true)
+        .starting_new_batch();
+    assert_eq!(
+        (
+            reset.screen(),
+            reset.pair().learning(),
+            reset.pair().known(),
+            reset.learning_pending(),
+            reset.blob(),
+            reset.candidates().len(),
+            reset.cards().len(),
+            reset.cards_failed(),
+            reset.done_artifacts().deck.as_str(),
+            reset.quit_pending(),
+            reset.new_batch_pending(),
+        ),
+        (
+            Screen::YourWords,
+            "en",
+            "ru",
+            true,
+            "",
+            0,
+            0,
+            0,
+            "",
+            false,
+            false,
+        ),
+        "a new batch retained finished cards or discarded the user's language direction"
     );
 }
 

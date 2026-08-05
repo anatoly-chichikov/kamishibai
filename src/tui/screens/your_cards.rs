@@ -1628,13 +1628,17 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         ]
     } else {
         let controls = DisclosureControls::new(app.card_expanded());
-        let mut hints = vec![super::common::FooterHint::primary("Ctrl+G", "regenerate")];
+        let mut hints = Vec::new();
+        hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
         if app.card_tunable() {
             hints.push(super::common::FooterHint::secondary("Enter/→", "tune"));
         } else {
             hints.push(controls.secondary_toggle());
         }
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        if app.can_start_new_batch() {
+            hints.push(super::common::new_batch_hint(app.new_batch_pending()));
+        }
         hints.push(super::common::quit_hint(app.quit_pending()));
         hints
     };
