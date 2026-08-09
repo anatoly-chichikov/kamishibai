@@ -211,6 +211,7 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
             && rendered.contains("[Enter/→] toggle")
             && rendered.contains("[Ctrl+G]")
             && rendered.contains("generate")
+            && rendered.contains("[Esc] back")
             && !rendered.contains("[R] change"),
         "sense check must render the new mono header, gloss list, and key hints: {rendered}"
     );

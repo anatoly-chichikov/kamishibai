@@ -25,6 +25,7 @@ pub struct App {
     body_scroll: u16,
     quit_pending: bool,
     new_batch_pending: bool,
+    word_clear_pending: bool,
     picker_cursor: usize,
 }
 
@@ -142,6 +143,16 @@ pub struct CardsView {
     pub elapsed: Duration,
     pub running: Option<(usize, Artifact)>,
     editor: Option<SentenceLabelsEditor>,
+    stop: GenerationStopState,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum GenerationStopState {
+    #[default]
+    Inactive,
+    Pending,
+    Stopping,
+    Cancelling,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -149,6 +160,8 @@ pub struct DoneArtifacts {
     pub deck: String,
     pub report: String,
     pub output: String,
+    pub cards: usize,
+    pub failed: usize,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -196,6 +209,7 @@ impl App {
             body_scroll: 0,
             quit_pending: false,
             new_batch_pending: false,
+            word_clear_pending: false,
             picker_cursor: 0,
         }
     }
@@ -223,20 +237,82 @@ impl App {
         self
     }
 
+    /// Return whether a first Escape has armed clearing the words field.
+    pub fn word_clear_pending(&self) -> bool {
+        self.word_clear_pending
+    }
+
+    /// Return the app with the words-clear confirmation flag updated.
+    pub fn with_word_clear_pending(mut self, pending: bool) -> Self {
+        self.word_clear_pending = pending;
+        self
+    }
+
+    /// Return whether a first Escape has armed stopping card generation.
+    pub fn generation_stop_pending(&self) -> bool {
+        self.cards.stop == GenerationStopState::Pending
+    }
+
+    /// Return whether the shell is draining the last in-flight artifact.
+    pub fn generation_stopping(&self) -> bool {
+        matches!(
+            self.cards.stop,
+            GenerationStopState::Stopping | GenerationStopState::Cancelling
+        )
+    }
+
+    /// Return whether a stopped run is waiting for durable cancellation.
+    pub fn generation_cancelling(&self) -> bool {
+        self.cards.stop == GenerationStopState::Cancelling
+    }
+
+    /// Return the app with generation-stop confirmation armed or disarmed.
+    pub fn with_generation_stop_pending(mut self, pending: bool) -> Self {
+        if pending {
+            self.cards.stop = GenerationStopState::Pending;
+        } else if self.cards.stop == GenerationStopState::Pending {
+            self.cards.stop = GenerationStopState::Inactive;
+        }
+        self
+    }
+
+    /// Return the app while it drains the current artifact before stopping.
+    pub fn generation_stop_started(mut self) -> Self {
+        self.cards.stop = GenerationStopState::Stopping;
+        self
+    }
+
+    /// Return the app while its stopped run is being closed without publication.
+    pub fn generation_cancellation_started(mut self) -> Self {
+        self.cards.stop = GenerationStopState::Cancelling;
+        self
+    }
+
+    /// Return the app with all transient generation-stop state cleared.
+    pub fn generation_stop_finished(mut self) -> Self {
+        self.cards.stop = GenerationStopState::Inactive;
+        self
+    }
+
     /// Return whether a finished batch can be replaced from the final screen.
     pub fn can_start_new_batch(&self) -> bool {
-        let terminal = !self.cards.drafts.is_empty()
-            && self
-                .cards
-                .drafts
-                .iter()
-                .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed());
         matches!(self.screen, Screen::YourCards | Screen::Done)
-            && (!self.done.deck.is_empty() || terminal)
+            && self.batch_settled()
             && self.modal.is_none()
             && self.busy.is_none()
             && self.error.is_none()
             && self.cards.editor.is_none()
+    }
+
+    /// Return whether generation has reached a terminal or published view.
+    pub fn batch_settled(&self) -> bool {
+        !self.done.deck.is_empty()
+            || (!self.cards.drafts.is_empty()
+                && self
+                    .cards
+                    .drafts
+                    .iter()
+                    .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed()))
     }
 
     /// Start a clean batch while preserving the user's current language direction.
@@ -1031,8 +1107,16 @@ impl App {
             elapsed: Duration::ZERO,
             running: None,
             editor: None,
+            stop: GenerationStopState::Inactive,
         };
         self
+    }
+
+    /// Return to review after a stopped run while preserving words and curation.
+    pub fn generation_cancelled_to_review(mut self) -> Self {
+        self.cards = CardsView::default();
+        self.done = DoneArtifacts::default();
+        self.with_screen(Screen::WhatIUnderstood)
     }
 
     /// Return the app with the currently-running artifact recorded so the UI can
@@ -1125,16 +1209,33 @@ impl App {
 
     /// Return the app with Done artifacts installed for the final screen.
     pub fn done_published(
+        self,
+        deck: impl Into<String>,
+        report: impl Into<String>,
+        output: impl Into<String>,
+    ) -> Self {
+        let failed = self.cards_failed();
+        let cards = self.cards.drafts.len().saturating_sub(failed);
+        self.done_published_counted(deck, report, output, cards, failed)
+    }
+
+    /// Return the app with published paths and their durable card tally installed.
+    pub fn done_published_counted(
         mut self,
         deck: impl Into<String>,
         report: impl Into<String>,
         output: impl Into<String>,
+        cards: usize,
+        failed: usize,
     ) -> Self {
         self.done = DoneArtifacts {
             deck: deck.into(),
             report: report.into(),
             output: output.into(),
+            cards,
+            failed,
         };
+        self.cards.stop = GenerationStopState::Inactive;
         self
     }
 
@@ -1146,6 +1247,7 @@ impl App {
     /// Return the app with stale published output paths cleared.
     pub fn publication_cleared(mut self) -> Self {
         self.done = DoneArtifacts::default();
+        self.cards.stop = GenerationStopState::Inactive;
         self
     }
 

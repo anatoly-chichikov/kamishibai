@@ -114,9 +114,11 @@ fn done_screen_lists_short_artifact_labels_and_quit_hint() {
 
 #[test]
 fn armed_done_screen_asks_for_escape_again() {
-    let rendered = flat(&published().with_new_batch_pending(true));
+    let rendered = flat(&failed_published().with_new_batch_pending(true));
     assert!(
-        rendered.contains("[Esc] again") && !rendered.contains("new cards"),
+        rendered.contains("[Esc] again")
+            && !rendered.contains("new cards")
+            && !rendered.contains("[Ctrl+G] Regenerate"),
         "armed Done must make the second Escape confirmation visible: {rendered}"
     );
 }

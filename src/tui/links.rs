@@ -304,7 +304,7 @@ fn banner_visible(app: &App) -> bool {
     }
     match app.screen() {
         Screen::Done => true,
-        Screen::YourCards => all_finished(app),
+        Screen::YourCards => app.batch_settled(),
         _ => false,
     }
 }
@@ -329,14 +329,6 @@ fn banner_regions(app: &App, body_x: u16, body_y: u16) -> Vec<LinkRegion> {
             }
         })
         .collect()
-}
-
-fn all_finished(app: &App) -> bool {
-    !app.cards().is_empty()
-        && app
-            .cards()
-            .iter()
-            .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed())
 }
 
 fn visible_content_row(

@@ -63,6 +63,61 @@ fn language_pair_travels_untouched_through_the_full_flow() {
 }
 
 #[test]
+fn escape_on_words_requests_a_guarded_clear_without_touching_the_text() {
+    let start = App::new(LanguagePair::new("en", "ru")).seeded_blob("a\nb");
+    let (next, side) = transit(start, AppEvent::Cancel);
+    assert_eq!(
+        (next.blob(), side),
+        ("a\nb", Side::ClearWords),
+        "Escape on nonempty words bypassed the guarded clear"
+    );
+}
+
+#[test]
+fn escape_on_empty_words_does_nothing() {
+    let start = App::new(LanguagePair::new("en", "ru"));
+    let (next, side) = transit(start, AppEvent::Cancel);
+    assert_eq!(
+        (next.blob(), side),
+        ("", Side::None),
+        "Escape on empty words armed a destructive action"
+    );
+}
+
+#[test]
+fn escape_from_review_returns_to_the_preserved_words() {
+    let start = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob("a")
+        .with_screen(Screen::WhatIUnderstood)
+        .understood(fake_candidates());
+    let (next, side) = transit(start, AppEvent::Cancel);
+    assert_eq!(
+        (
+            next.screen(),
+            next.blob(),
+            next.candidates()[0].selected_senses(),
+            side,
+        ),
+        (Screen::YourWords, "a", &[0][..], Side::None),
+        "Escape from review lost the typed words or selected meaning"
+    );
+}
+
+#[test]
+fn escape_on_building_cards_requests_a_guarded_stop() {
+    let pair = LanguagePair::new("en", "ru");
+    let start = App::new(pair.clone())
+        .with_screen(Screen::YourCards)
+        .cards_started(vec![CardDraft::new("a", "letter A", pair)]);
+    let (next, side) = transit(start, AppEvent::Cancel);
+    assert_eq!(
+        (next.screen(), next.cards().len(), side),
+        (Screen::YourCards, 1, Side::StopGeneration),
+        "Escape on an unfinished card bypassed the guarded stop"
+    );
+}
+
+#[test]
 fn add_more_modal_returns_bulk_correction_and_stays_open_while_running() {
     let start = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)

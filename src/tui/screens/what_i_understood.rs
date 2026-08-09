@@ -617,6 +617,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
         hints.push(DisclosureControls::new(false).secondary_toggle());
+        hints.push(super::common::FooterHint::secondary("Esc", "back"));
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     }

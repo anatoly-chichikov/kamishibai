@@ -177,7 +177,8 @@ From the repo root:
    `live/06-your-cards-retrying.png`, `live/06b-your-cards-retry-stress.png`,
    `live/07-your-cards-couldnt-finish.png`) plus the
    twelve sentence-label S1–S12 PNGs from `live/11-s1-label-tags.png` through
-   `live/22-s12-label-legacy-meta.png`. All are 2x except S10, whose intentionally narrow
+   `live/22-s12-label-legacy-meta.png` and the five Esc lifecycle PNGs from
+   `live/23-esc-words-clear.png` through `live/27-generation-partial.png`. All are 2x except S10, whose intentionally narrow
    frame comes from `states-narrow.tape` at 1200 px. Both synthetic tapes jump to each state
    by **absolute index** (`Type "<n>"` then `Space`) and keep a uniform 800 ms settle after
    each jump so VHS never captures a mid-repaint frame. Absolute jumps are immune to
@@ -329,12 +330,13 @@ card. The tape may continue afterward to capture the separate open-card screensh
 
 ### Synthetic and edge-case shots
 
-The six environment/modal/failure/retry PNGs and twelve sentence-label scenario PNGs listed in
-step 3 are not produced by `capture.tape`. They are produced reproducibly by `states.tape`
+The six environment/modal/failure/retry PNGs, twelve sentence-label scenarios, and five Esc
+lifecycle PNGs listed in step 3 are not produced by `capture.tape`. They are produced reproducibly by `states.tape`
 and `states-narrow.tape`, which drive `examples/tui_states.rs` through the same EN→FR flow
 without Gemini. The sentence-label scenarios keep the established indices 0–10 intact: S1
 is index 6, S2 replaces the removed per-card modal at index 7, S3–S9 are indices 11–17,
-S10–S12 are indices 18–20, and the retry stress gallery is index 21. When the design changes, edit the demo data in
+S10–S12 are indices 18–20, the retry stress gallery is index 21, and the Esc clear/back/stop/drain/partial
+states are indices 22–26. When the design changes, edit the demo data in
 `examples/tui_states.rs` and re-run both synthetic tapes. If you add or reorder states in
 the vector, update the absolute indices in both tapes and in the
 `pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells` test (it jumps to
@@ -403,10 +405,17 @@ one-second confirmation and changes its hint to the highest-priority `[Esc]
 again`; the second starts a clean `YourWords` batch in the same process,
 preserving preferences and output location while rotating the persistent
 session identity and cost journal. Any other action or timeout disarms the
-confirmation. An open sentence-label editor consumes its first `Esc` to close,
-and `Ctrl+C` keeps an independent double-press quit confirmation. The same
-reset remains available after every card terminally gives up and no package can
-be published, once the publication error has been dismissed.
+confirmation. Everywhere else `Esc` closes exactly one layer from inside out:
+an error, a modal/editor/expanded sense list, then the current screen action.
+On nonempty `YourWords`, double `Esc` clears the field; on collapsed
+`WhatIUnderstood`, one `Esc` returns to the preserved words; during generation,
+double `Esc` stops after the current request finishes and launches no next
+request. A stop publishes the complete subset as `partial`, or, when no card is
+complete, closes the old run as `cancelled`, rotates identity and cost scope,
+and returns to the preserved review. While the current request drains the
+header says `stopping…`. The same reset remains available after every card
+terminally gives up and no package can be published, once the publication error
+has been dismissed. `Ctrl+C` keeps an independent double-press quit confirmation.
 
 Expanded metadata uses statement and noun labels: `the phrase`, `in your
 language`, `a visual clue`, `word meaning`, `word pronunciation`, `phrase
