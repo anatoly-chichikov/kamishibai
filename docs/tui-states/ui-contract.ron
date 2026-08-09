@@ -119,7 +119,7 @@ Contract(
             Screen(
                 id: YourWords,
                 purpose: "ingest a raw vocab blob and detect the target language",
-                states: [Default, Pending],
+                states: [Default, Pending, ConfirmingClear],
                 regions: [
                     Region(kind: Body, elements: [
                         Element(
@@ -176,6 +176,17 @@ Contract(
                             purpose: "let the user flip support language before running detection",
                             importance: 2,
                             usefulness: 3,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yw.footer_clear_words"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[Esc] again while nonempty-input clear is armed"),
+                            source: SourceRef(file: "src/tui/screens/your_words.rs", line: 209),
+                            purpose: "make the second destructive Escape the only bright action; another action or one-second timeout disarms without changing the words",
+                            importance: 5,
+                            usefulness: 5,
                             health: Working,
                             issues: [],
                         ),
@@ -335,6 +346,19 @@ Contract(
                             issues: [],
                         ),
                     ]),
+                    Region(kind: Footer, elements: [
+                        Element(
+                            id: ElementId("wu.footer_back"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[Esc] back"),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 620),
+                            purpose: "return to YourWords with the blob and selected senses intact when no inner layer is open",
+                            importance: 4,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                    ]),
                 ],
             ),
 
@@ -342,8 +366,21 @@ Contract(
             Screen(
                 id: YourCards,
                 purpose: "show artifact progress, let the user inspect or rewrite one generated sentence, and start a clean batch after publication",
-                states: [Default, Pending, Retrying, Failed, EditingLabels, Regenerating],
+                states: [Default, Pending, Retrying, Failed, EditingLabels, Regenerating, ConfirmingStop, Stopping, Partial],
                 regions: [
+                    Region(kind: Header, elements: [
+                        Element(
+                            id: ElementId("yc.stopping_hint"),
+                            kind: HeaderTagline,
+                            text: Literal("stopping…"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 111),
+                            purpose: "make the confirmed drain and durable cancellation visibly distinct from active generation",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                    ]),
                     Region(kind: Body, elements: [
                         Element(
                             id: ElementId("yc.section_cards"),
@@ -762,8 +799,37 @@ Contract(
                             id: ElementId("yc.footer_new_batch"),
                             kind: KeyHint(Footer),
                             text: Literal("[Esc] new cards  |  [Esc] again while confirmation is armed"),
-                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 1640),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 1646),
                             purpose: "after publication or terminal failure, permanently show the new-cards action immediately before quit in exactly the same muted style; the first Esc changes it to the highest-priority one-second confirmation, the second starts a clean YourWords batch, another action or timeout restores new cards, and an open editor consumes Esc to close first",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.footer_stop_generation"),
+                            kind: KeyHint(Footer),
+                            text: Literal("[Esc] again while stop is armed"),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 1641),
+                            purpose: "make confirmed stop exclusive: the active artifact drains, no next provider request starts, and regenerate/tune disappear while armed or stopping",
+                            importance: 5,
+                            usefulness: 5,
+                            health: Working,
+                            issues: [],
+                        ),
+                        Element(
+                            id: ElementId("yc.partial_tally"),
+                            kind: Hint,
+                            text: Template([
+                                Bind(DataPath("DoneArtifacts::cards")),
+                                Static("/"),
+                                Bind(DataPath("DoneArtifacts::cards + DoneArtifacts::failed")),
+                                Static(" ready · "),
+                                Bind(DataPath("DoneArtifacts::failed")),
+                                Static(" omitted"),
+                            ]),
+                            source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 1616),
+                            purpose: "keep a stopped subset visibly final and keep its APKG/PDF banner, scroll geometry, and session phase aligned",
                             importance: 5,
                             usefulness: 5,
                             health: Working,

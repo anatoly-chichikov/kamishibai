@@ -125,6 +125,36 @@ Type "21"
 Space
 Sleep 800ms
 Screenshot "live/06b-your-cards-retry-stress.png"
+
+# index 22 — first Esc on nonempty YourWords arms a guarded clear
+Type "22"
+Space
+Sleep 800ms
+Screenshot "live/23-esc-words-clear.png"
+
+# index 23 — collapsed review advertises the harmless Esc back action
+Type "23"
+Space
+Sleep 800ms
+Screenshot "live/24-esc-review-back.png"
+
+# index 24 — first Esc during generation arms a guarded stop
+Type "24"
+Space
+Sleep 800ms
+Screenshot "live/25-esc-generation-stop.png"
+
+# index 25 — confirmed stop drains the current artifact
+Type "25"
+Space
+Sleep 800ms
+Screenshot "live/26-generation-stopping.png"
+
+# index 26 — completed subset is published as a settled partial batch
+Type "26"
+Space
+Sleep 800ms
+Screenshot "live/27-generation-partial.png"
 Sleep 250ms
 
 Type "q"

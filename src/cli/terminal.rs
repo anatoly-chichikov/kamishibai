@@ -170,6 +170,7 @@ where
         shell.persist();
         dirty |= shell.refresh_quit_pending();
         dirty |= shell.refresh_new_batch_pending();
+        dirty |= shell.refresh_destructive_escape_pending();
         let rect = terminal_rect(terminal)?;
         let (viewport, body_width) = scroll_frame(shell.app(), rect);
         dirty |= shell.reclamp_scroll(viewport, body_width);
@@ -212,6 +213,7 @@ where
                     if let Some(delta) = delta {
                         shell.disarm_quit();
                         dirty |= shell.disarm_new_batch();
+                        dirty |= shell.disarm_destructive_escape();
                         dirty |= shell.scroll(delta, viewport, body_width);
                         dirty |= shell.tick()?;
                         continue;
@@ -220,11 +222,13 @@ where
                 let Some(event) = to_app(key) else {
                     if key.kind != KeyEventKind::Release {
                         dirty |= shell.disarm_new_batch();
+                        dirty |= shell.disarm_destructive_escape();
                     }
                     continue;
                 };
                 if matches!(event, AppEvent::Quit) {
                     shell.disarm_new_batch();
+                    shell.disarm_destructive_escape();
                     if shell.arm_quit() {
                         return Ok(());
                     }
@@ -233,6 +237,7 @@ where
                 }
                 shell.disarm_quit();
                 if matches!(event, AppEvent::Cancel) && shell.handle_new_batch_escape()? {
+                    shell.disarm_destructive_escape();
                     dirty = true;
                     continue;
                 }
@@ -259,12 +264,19 @@ where
                 dirty |= shell.tick()?;
             }
             Event::Mouse(mouse) => match mouse.kind {
-                MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+                MouseEventKind::Moved => {
+                    mouse_position = Some((mouse.column, mouse.row));
+                    write_pointer_at(terminal, shell.app(), rect, mouse_position);
+                }
+                MouseEventKind::Drag(_) => {
+                    dirty |= shell.disarm_new_batch();
+                    dirty |= shell.disarm_destructive_escape();
                     mouse_position = Some((mouse.column, mouse.row));
                     write_pointer_at(terminal, shell.app(), rect, mouse_position);
                 }
                 MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                     dirty |= shell.disarm_new_batch();
+                    dirty |= shell.disarm_destructive_escape();
                     mouse_position = Some((mouse.column, mouse.row));
                     write_pointer_at(terminal, shell.app(), rect, mouse_position);
                     let (viewport, body_width) = scroll_frame(shell.app(), rect);
@@ -277,6 +289,7 @@ where
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
                     dirty |= shell.disarm_new_batch();
+                    dirty |= shell.disarm_destructive_escape();
                     mouse_position = Some((mouse.column, mouse.row));
                     write_pointer_at(terminal, shell.app(), rect, mouse_position);
                     if shell.app().modal() == Some(ModalKind::PickMyLanguage) {

@@ -460,6 +460,74 @@ fn your_cards_footer_hides_total_cost_until_money_is_spent() {
 }
 
 #[test]
+fn armed_generation_stop_makes_escape_the_only_primary_action() {
+    let app = seeded(vec![draft("whilst", partial_priced_artifacts())])
+        .with_generation_stop_pending(true);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("[Esc] again")
+            && !rendered.contains("[Ctrl+G] regenerate")
+            && !rendered.contains("[Enter/→] tune"),
+        "armed generation stop competed with generation actions: {rendered}"
+    );
+}
+
+#[test]
+fn draining_generation_says_stopping_without_offering_more_work() {
+    let app = seeded(vec![draft("whilst", partial_priced_artifacts())]).generation_stop_started();
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("stopping…")
+            && !rendered.contains("[Ctrl+G] regenerate")
+            && !rendered.contains("[Enter/→] tune")
+            && !rendered.contains("[Esc] again"),
+        "draining generation looked active or offered another action: {rendered}"
+    );
+}
+
+#[test]
+fn partial_publish_is_a_settled_view_with_outputs_and_durable_tally() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("wreck", partial_priced_artifacts()),
+    ])
+    .done_published_counted("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp", 1, 1);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("your cards")
+            && rendered.contains("some cards didn't make it")
+            && rendered.contains("1/2 ready")
+            && rendered.contains("1 omitted")
+            && rendered.contains("APKG")
+            && rendered.contains("PDF")
+            && !rendered.contains("building your cards"),
+        "partial publish did not render as a settled output-bearing batch: {rendered}"
+    );
+}
+
+#[test]
+fn partial_publish_reserves_and_links_the_same_banner_rows() {
+    let terminal = Rect::new(0, 0, 120, 30);
+    let cards = vec![
+        draft("whilst", ready_artifacts()),
+        draft("wreck", partial_priced_artifacts()),
+    ];
+    let building = seeded(cards.clone());
+    let partial =
+        seeded(cards).done_published_counted("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp", 1, 1);
+    let buffer = rendered_buffer_at(&partial, terminal.width, terminal.height);
+    let (column, row) = position_of(&buffer, "APKG");
+    assert_eq!(
+        (
+            scroll_viewport(&building, terminal) - scroll_viewport(&partial, terminal),
+            link_at(&partial, terminal, column, row),
+        ),
+        (4, Some(String::from("/tmp/cards.apkg"))),
+        "partial banner rendering, scrolling, and hit geometry diverged"
+    );
+}
+
+#[test]
 fn your_cards_marks_cached_artifacts_next_to_the_file_metadata() {
     let app = seeded(vec![draft("whilst", cached_artifacts())]);
     let rendered = flat(&app);

@@ -15,10 +15,11 @@ All future work references this map instead of re-deriving transitions.
 | ----------------- | --------------------------------------------------------------------------------- | ------------------------------- |
 | `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `00-welcome.png` (no env key) · `00b-welcome-env.png` (`GEMINI_API_KEY` set) |
 | `YourWords`       | fullscreen                                                                        | `01-your-words.png`             |
-| `WhatIUnderstood` | fullscreen                                                                        | `02-what-i-understood.png`      |
+| `WhatIUnderstood` | fullscreen                                                                        | `02-what-i-understood.png` · `24-esc-review-back.png` (current Esc footer) |
 | `ChangeSomething` | modal over `WhatIUnderstood`, opened from the `+ add more` row in the sense picker | `03-change-something-modal.png` |
 | `YourCards`       | fullscreen                                                                        | `04-your-cards.png`             |
 | Retry stress      | synthetic `YourCards` gallery with active, inactive, recovered, and terminal attempts | `06b-your-cards-retry-stress.png` |
+| Esc lifecycle     | synthetic armed clear, review back, armed stop, draining stop, and partial-publish states | `23-esc-words-clear.png` through `27-generation-partial.png` |
 | Sentence labels   | collapsed three-tag summary starts inline on `audio` and wraps onto `scene` / `picture`; expanded question-led editor sits below every artifact | `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png` |
 | `Done`            | fullscreen                                                                        | `08-done.png`                   |
 | `PickMyLanguage`  | modal over `Welcome` / `YourWords` / `WhatIUnderstood`, opened with `Ctrl+L`      | header chip (no standalone shot) |
@@ -36,7 +37,8 @@ Sentence-label editing, retry, failure banner and recovery are inline within
 
 The synthetic PNGs (`00-welcome.png`, `00b-welcome-env.png`,
 `03-change-something-modal.png`, `06-your-cards-retrying.png`,
-`06b-your-cards-retry-stress.png`, `07-your-cards-couldnt-finish.png`, and the S1–S12 sentence-label set from
+`06b-your-cards-retry-stress.png`, `07-your-cards-couldnt-finish.png`, the Esc lifecycle set from
+`23-esc-words-clear.png` through `27-generation-partial.png`, and the S1–S12 sentence-label set from
 `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png`) require modal,
 editor, cache, width, or failure injection that the live-binary `capture.tape`
 does not exercise. They are produced reproducibly by `states.tape` plus the
@@ -53,7 +55,8 @@ target, so a dropped or coalesced keystroke cannot accumulate across the run and
 the stray Return the shell injects when it launches the binary cannot drift or
 contaminate the index.
 
-The retry stress gallery is index 21. Its six cards preserve valid pipeline
+The retry stress gallery is index 21. Esc lifecycle states are indices 22–26,
+appended so the established absolute indices remain stable. The stress gallery's six cards preserve valid pipeline
 order while showing the identical active-attempt copy (`ai is working…`),
 inactive retry rows with only their dot, artifact, and known cost, a recovered
 artifact, and a terminal `gave up` row together. Their card heads carry the
@@ -222,6 +225,7 @@ is no per-card modal and `R` has no `YourCards` action.
 
 ```
     YourWords ──[Ctrl+G, blob not blank]──► (Understanding busy) ──► WhatIUnderstood
+        └─ [Esc] arm clear ──► [Esc again within 1 s] ──► empty YourWords
 
     WhatIUnderstood
         ├─ [Enter]/[→] on a row ──► sense picker opens
@@ -230,6 +234,7 @@ is no per-card modal and `R` has no `YourCards` action.
         │                                                  ├─ [Enter] send ──► (BulkCorrection busy) ──► WhatIUnderstood
         │                                                  └─ [Esc] cancel ──► WhatIUnderstood
         ├─ [D] drop selected row ──► last row dropped returns to YourWords (blob cleared)
+        ├─ [Esc, no inner layer] ──► YourWords (blob and selected senses preserved)
         ├─ [Ctrl+L] ──► PickMyLanguage modal ──► re-runs understanding
         └─ [Ctrl+G, ≥1 ok row] ──► (StartGeneration) ──► YourCards
 
@@ -242,6 +247,9 @@ is no per-card modal and `R` has no `YourCards` action.
         │       └─ [Esc] ──► close + collapse while retaining pending
         ├─ [Ctrl+G, pending > 0] ──► regenerate all pending cards in one batch
         ├─ [Ctrl+G, pending = 0] ──► existing retry/rebuild fallback
+        ├─ [Esc] arm stop ──► [Esc again within 1 s] ──► drain current artifact, start no next request
+        │       ├─ no complete cards ──► old run Cancelled + rotated session ──► WhatIUnderstood
+        │       └─ ≥1 complete card ──► publish complete subset ──► Partial final
         └─ queue drained and pending = 0 ──► (StartPublish: deck ──► report busy) ──► published final
                 └─ [Esc] arm new batch ──► [Esc again within 1 s] ──► clean YourWords
 
@@ -251,10 +259,10 @@ is no per-card modal and `R` has no `YourCards` action.
         └─ [Ctrl+C] twice within 1 s ──► exit
 ```
 
-Note: there is no `Esc`-to-go-back from `WhatIUnderstood`, and `R` has no action
-on `WhatIUnderstood` or `YourCards` (the bulk modal is reached only through the `+ add more` row). Before publication,
-the only path back to `YourWords` is dropping the last remaining candidate. Once a
-batch is published, double `Esc` starts a clean batch without restarting the app.
+`Esc` always closes one layer from inside out: error, modal/editor/expanded
+senses, then the current screen action. `R` has no action on `WhatIUnderstood`
+or `YourCards` (the bulk modal is reached only through the `+ add more` row).
+Once a batch is published, double `Esc` starts a clean batch without restarting the app.
 Publishing the deck/PDF is automatic once the generation queue drains — it is
 not a key the user presses.
 
@@ -264,30 +272,30 @@ not a key the user presses.
 | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `Welcome` · pick language   | `←/→` cycle `my language` · `Enter` next · `Ctrl+C` quit                                                     |
 | `Welcome` · enter key       | type/`Cmd+V` paste key · `←/→` move focus (submit ↔ load-from-env, env only) · `Enter` submit · `Esc` back   |
-| `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `Ctrl+L` language |
-| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav · `Enter`/`→` pick meanings · `D` drop row · `Ctrl+G` make cards · `Ctrl+L` language        |
+| `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `Ctrl+L` language · double `Esc` clears nonempty input |
+| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav · `Enter`/`→` pick meanings · `D` drop row · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
 | `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter`/`←` done · `Enter` on `+ add more` opens ChangeSomething  |
 | `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
-| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` tune · `↑↓` nav (`Space` is an unadvertised alias) |
+| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` tune · `↑↓` nav (`Space` is an unadvertised alias) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
 | `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row · text editing under `one more thing` · `Esc` close (`Enter` inert) |
 | `PickMyLanguage`            | `←/→`/`↑↓` move · `Enter` confirm · `Esc` cancel                                                             |
 | `Done`                      | `Ctrl+G` regenerate failed (only when failures) · `[Esc] new cards` · twice within 1 s starts a clean batch · `Ctrl+C` quit |
 
-The new-batch and quit confirmations are independent one-second windows. On a
-finished final, the footer permanently shows muted `[Esc] new cards` immediately
-before `[Ctrl+C] quit`. The first `Esc` changes it to the high-priority `[Esc]
-again` hint, and the second press resets to an empty `YourWords`.
-Any other action or a timeout disarms it. If the sentence-label editor is open,
-its first `Esc` closes the editor instead of arming a reset. `Ctrl+C` retains its
-separate double-press quit confirmation on every screen.
+The words-clear, generation-stop, new-batch, and quit confirmations use
+independent one-second windows. A destructive first `Esc` changes the footer to
+the sole bright `[Esc] again` action; a different action or timeout disarms it.
+An open inner layer consumes `Esc` before a screen action can arm. While a
+confirmed generation stop drains the current provider request, the header says
+`stopping…`; no new request starts. `Ctrl+C` retains its separate double-press
+quit confirmation on every screen.
 
 ## Event ownership
 
 Events are divided between the app shell and individual screens:
 
-- **Shell owns**: terminal `Resize`, pumping the session-engine channel, the
-  published-batch double-`Esc` confirmation/reset, and the independent final quit.
+- **Shell owns**: terminal `Resize`, pumping the session-engine channel, every
+  timed destructive-`Esc` confirmation, stop draining/publication, and the independent final quit.
 - **Transition owns**: every key in the table above, modal dismissal (`Esc` → `Cancel`),
   live sentence-label staging, text editing, list navigation, row expansion.
 - **Session engine emits** (fed back into the transition as `AppEvent`s):
@@ -353,14 +361,19 @@ not forwarded to card generation.
 The screen state machine is the pure function `transit(app, event) -> (App, Side)` in
 `src/tui/transition.rs`: no IO, no Gemini calls. It returns the next `App` plus a
 `Side` effect the shell runs outside the function (`RunUnderstanding`,
-`RunBulkCorrection`, `StartGeneration`, `RegenerateCards`, `RegenerateFailed`,
+`RunBulkCorrection`, `ClearWords`, `StartGeneration`, `StopGeneration`, `RegenerateCards`, `RegenerateFailed`,
 `StartPublish`, `ValidateKey`, `LoadEnvKey`,
 `PersistMyLanguage…`, `ExitApp`). Tests drive it with fabricated events to verify
 the live path `YourWords → WhatIUnderstood → YourCards → published YourCards`
 without touching the network; `Done` is the final view when a published session
-is reopened. The time-bounded new-batch and quit confirmations belong to the
-shell: the second eligible `Esc` replaces the published app state with a clean
-`YourWords` batch, while keeping the process running.
+is reopened. All time-bounded confirmations belong to the shell. A second eligible
+`Esc` clears a nonempty input, drains one active artifact before stopping generation,
+or replaces a settled batch with clean `YourWords`; any other key, click, drag,
+scroll, or one-second timeout disarms it. During a confirmed stop the shell keeps
+the session lock and stop intent through the in-flight result and optional subset
+publication. No-output and failed-publication paths durably cancel the old run,
+rotate session identity and cost scope, then return the preserved words and curation
+to `WhatIUnderstood` without an automatic provider restart.
 
 This map documents the state machine only. Widget rendering lives in
 `src/tui/screens/`; the real Gemini passes and the artifact pipeline live in

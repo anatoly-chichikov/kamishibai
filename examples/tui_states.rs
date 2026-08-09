@@ -731,6 +731,24 @@ fn build_states() -> Vec<(String, App)> {
         .cards_running(Some((0, Artifact::Sound)))
         .with_elapsed(Duration::from_secs(142));
 
+    let words_clear = base_words.clone().with_word_clear_pending(true);
+    let review_back = review.clone();
+    let stop_armed = cards_seed
+        .clone()
+        .cards_running(Some((2, Artifact::Picture)))
+        .with_generation_stop_pending(true);
+    let stopping = cards_seed
+        .clone()
+        .cards_running(Some((2, Artifact::Picture)))
+        .generation_stop_started();
+    let partial = cards_seed.clone().done_published_counted(
+        "fr_2026-06-01_183029.apkg",
+        "fr_2026-06-01_183029.pdf",
+        "~/Documents/Kamishibai",
+        2,
+        2,
+    );
+
     let done = App::new(pair())
         .with_screen(Screen::Done)
         .confirmed_learning("fr")
@@ -824,6 +842,11 @@ fn build_states() -> Vec<(String, App)> {
             String::from("03e · Your cards · retry layout stress"),
             retry_stress,
         ),
+        (String::from("15 · Esc · clear words armed"), words_clear),
+        (String::from("16 · Esc · review back"), review_back),
+        (String::from("17 · Esc · generation stop armed"), stop_armed),
+        (String::from("18 · Esc · generation stopping"), stopping),
+        (String::from("19 · Esc · partial publish"), partial),
     ]
 }
 

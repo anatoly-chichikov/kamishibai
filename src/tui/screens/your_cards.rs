@@ -29,6 +29,7 @@ use crate::tui::sentence_editor::SentenceLabelsEditor;
 const HEADLINE_WORKING: &str = "building your cards";
 const HEADLINE_DONE: &str = "your cards";
 const HINT_WORKING: &str = "drawing each card one by one";
+const HINT_STOPPING: &str = "stopping…";
 const HINT_DONE: &str = "all done";
 const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
@@ -106,9 +107,11 @@ impl ScreenView for YourCards {
     }
 
     fn hint(&self, app: &App) -> Cow<'static, str> {
-        let copy = if !all_finished(app) {
+        let copy = if app.generation_stopping() {
+            HINT_STOPPING
+        } else if !all_finished(app) {
             HINT_WORKING
-        } else if app.cards_failed() > 0 {
+        } else if app.cards_failed() > 0 || app.done_artifacts().failed > 0 {
             HINT_DONE_FAILED
         } else {
             HINT_DONE
@@ -1265,11 +1268,7 @@ fn highlight_lines<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -
 }
 
 fn all_finished(app: &App) -> bool {
-    !app.cards().is_empty()
-        && app
-            .cards()
-            .iter()
-            .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed())
+    app.batch_settled()
 }
 
 /// Return the card and its content range at one scrolling-body row.
@@ -1591,17 +1590,33 @@ pub(crate) fn total_cost(app: &App) -> Option<GenerationCost> {
 }
 
 fn footer(app: &App, width: u16) -> Paragraph<'static> {
+    let done = app.done_artifacts();
+    let published = !done.deck.is_empty();
+    let ready = if published {
+        done.cards
+    } else {
+        app.cards_ready()
+    };
+    let total = if published {
+        done.cards.saturating_add(done.failed)
+    } else {
+        app.cards().len()
+    };
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 3/3", palette::dim2()));
     left.push(super::common::status_sep());
     left.push(Span::styled(
-        app.cards_ready().to_string(),
+        ready.to_string(),
         palette::base().add_modifier(Modifier::BOLD),
     ));
-    left.push(Span::styled(
-        format!("/{} ready", app.cards().len()),
-        palette::dim(),
-    ));
+    left.push(Span::styled(format!("/{total} ready"), palette::dim()));
+    if published && done.failed > 0 {
+        left.push(super::common::status_sep());
+        left.push(Span::styled(
+            format!("{} omitted", done.failed),
+            palette::dim(),
+        ));
+    }
     if app.cards_pending() > 0 {
         left.push(super::common::status_sep());
         left.push(Span::styled(
@@ -1619,7 +1634,19 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     }
     left.push(super::common::status_sep());
     left.push(Span::styled(elapsed(app), palette::dim2()));
-    let hints = if app.sentence_editor().is_some() {
+    let hints = if app.generation_stopping() {
+        vec![super::common::quit_hint(app.quit_pending())]
+    } else if app.generation_stop_pending() {
+        vec![
+            super::common::escape_again_hint(),
+            super::common::quit_hint(app.quit_pending()),
+        ]
+    } else if app.new_batch_pending() {
+        vec![
+            super::common::new_batch_hint(true),
+            super::common::quit_hint(app.quit_pending()),
+        ]
+    } else if app.sentence_editor().is_some() {
         vec![
             super::common::FooterHint::primary("Ctrl+G", "regenerate"),
             super::common::FooterHint::secondary("← →", "pick"),

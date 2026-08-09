@@ -13,7 +13,11 @@ pub enum Side {
     RunUnderstanding,
     RunBulkCorrection(String),
     PersistMyLanguageAndRunUnderstanding(String),
+    /// Ask the shell to arm or confirm clearing the nonempty words input.
+    ClearWords,
     StartGeneration,
+    /// Ask the shell to arm or confirm stopping the active card engine.
+    StopGeneration,
     RegenerateFailed,
     RegenerateCards,
     PersistMyLanguage(String),
@@ -63,9 +67,15 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourWords, None, AppEvent::OpenLanguagePicker) => {
             (open_language_picker(app), Side::None)
         }
+        (Screen::YourWords, None, AppEvent::Cancel) if !app.blob().is_empty() => {
+            (app, Side::ClearWords)
+        }
         (Screen::WhatIUnderstood, None, AppEvent::Generate) => start_generation(app),
         (Screen::WhatIUnderstood, None, AppEvent::Cancel) if app.expanded_sense().is_some() => {
             (app.senses_cancelled(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::Cancel) => {
+            (app.with_screen(Screen::YourWords), Side::None)
         }
         (Screen::WhatIUnderstood, None, event)
             if matches!(sense_controls(&app).intent(&event), DisclosureIntent::Close) =>
@@ -181,6 +191,11 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (_, Some(ModalKind::PickMyLanguage), _) => (app, Side::None),
         (Screen::YourCards, None, AppEvent::Cancel) if app.sentence_editor().is_some() => {
             (app.sentence_editor_closed(), Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::Cancel)
+            if !app.cards().is_empty() && !app.can_start_new_batch() =>
+        {
+            (app, Side::StopGeneration)
         }
         (Screen::YourCards, None, AppEvent::SentenceLabelOpen(card, row))
             if app.card_tunable_at(card) =>
