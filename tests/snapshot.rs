@@ -3,7 +3,9 @@
 //! Uses `ratatui::backend::TestBackend` + `insta` snapshot review. No real
 //! terminal, no Gemini calls, no background threads.
 
-use kamishibai::session::{LanguagePair, Sense, WordCandidate};
+use kamishibai::session::{
+    LanguagePair, Sense, SentenceBatchSettings, SentenceLevel, SentenceTypeMix, WordCandidate,
+};
 use kamishibai::tui::{App, AppEvent, BusyKind, KeySource, ModalKind, Screen, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -303,4 +305,22 @@ fn what_i_understood_multi_meaning_snapshot_locks_the_block() {
         .confirmed_learning("en")
         .understood(vec![candidate]);
     insta::assert_snapshot!("what_i_understood_multi_meaning", render(&app));
+}
+
+#[test]
+fn batch_sentence_settings_snapshot_locks_the_inline_editor() {
+    let app = App::new(LanguagePair::new("en", "fr"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("fr")
+        .understood(vec![WordCandidate::new(
+            "chouette",
+            "an owl or something excellent",
+            true,
+        )])
+        .with_sentence_settings(SentenceBatchSettings::new(
+            Some(SentenceLevel::B1),
+            SentenceTypeMix::Varied,
+        ))
+        .sentence_settings_opened();
+    insta::assert_snapshot!("batch_sentence_settings", render_sized(&app, 96, 16));
 }

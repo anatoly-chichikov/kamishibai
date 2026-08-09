@@ -23,6 +23,12 @@ Type "18"
 Space
 Sleep 800ms
 Screenshot "live/20-s10-label-tags-narrow.png"
+
+# index 22 — batch sentence settings wrap with the same mouse geometry at narrow width
+Type "22"
+Space
+Sleep 800ms
+Screenshot "live/24-batch-sentence-settings-narrow.png"
 Sleep 250ms
 
 Type "q"

@@ -501,7 +501,7 @@ struct GenerationCalls {
 }
 
 /// Start a metered stub whose delayed responses expose duplicate generators.
-fn metered_generation_gemini() -> (String, Arc<GenerationCalls>) {
+fn metered_generation_gemini(cell: PathBuf) -> (String, Arc<GenerationCalls>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("the audio listener must bind");
     let port = listener
         .local_addr()
@@ -512,6 +512,7 @@ fn metered_generation_gemini() -> (String, Arc<GenerationCalls>) {
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let counted = observed.clone();
+            let cell = cell.clone();
             std::thread::spawn(move || {
                 let mut stream = stream;
                 let mut scratch = [0u8; 65536];
@@ -558,6 +559,9 @@ fn metered_generation_gemini() -> (String, Arc<GenerationCalls>) {
                     "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                     body.len()
                 );
+                if sound {
+                    seed_visual_artifacts(cell.as_path());
+                }
                 let _ = stream.write_all(response.as_bytes());
             });
         }
@@ -749,8 +753,7 @@ fn concurrent_sessions_share_one_meta_and_sound_request_with_exact_costs() {
     understood_session(cache.path(), second_out.path(), "audio-second", CARDS_JSON);
     let cell = first_card_dir(cache.path());
     fs::remove_file(cell.join("meta.json")).expect("the shared meta must be absent");
-    seed_visual_artifacts(cell.as_path());
-    let (gemini, calls) = metered_generation_gemini();
+    let (gemini, calls) = metered_generation_gemini(cell.clone());
     let spawn = |id: &str| {
         std::process::Command::new(env!("CARGO_BIN_EXE_kamishibai"))
             .args(["generate", "--wait", id])

@@ -19,8 +19,17 @@ use crate::tui::app::App;
 use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
 
+use super::sentence_labels::BatchEditorControl;
+
 const HEADLINE: &str = "what i understood";
 const HINT: &str = "quick check before i build the cards";
+const SETTINGS_PREFIX: &str = "sentences: level ";
+
+/// One clickable surface in the batch sentence-settings block.
+pub(crate) enum SentenceSettingsControl {
+    Open,
+    Editor(BatchEditorControl),
+}
 
 /// `ScreenView` handle for the sense-check screen.
 pub struct WhatIUnderstood;
@@ -125,6 +134,14 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
             ));
         }
     }
+    lines.push(settings_summary_line(app));
+    if let Some(focused) = app.sentence_settings_editor() {
+        lines.extend(super::sentence_labels::batch_editor_lines(
+            app.sentence_settings(),
+            focused,
+            usize::from(width),
+        ));
+    }
     Paragraph::new(lines).style(palette::base())
 }
 
@@ -135,14 +152,20 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
     if !app.candidates().is_empty() {
         let expanded_row = app.expanded_sense().map(|item| item.row);
         let term_width = candidate_label_width(app.candidates(), 12);
-        let total: usize = app
-            .candidates()
-            .iter()
-            .enumerate()
-            .map(|(index, candidate)| {
-                candidate_rows(candidate, expanded_row == Some(index), term_width, width)
-            })
-            .sum();
+        let total = candidate_content_height(app, width, expanded_row, term_width)
+            .saturating_add(1)
+            .saturating_add(
+                app.sentence_settings_editor()
+                    .map(|focused| {
+                        super::sentence_labels::batch_editor_lines(
+                            app.sentence_settings(),
+                            focused,
+                            width,
+                        )
+                        .len()
+                    })
+                    .unwrap_or(0),
+            );
         return u16::try_from(total).unwrap_or(u16::MAX);
     }
     let typed = app
@@ -152,6 +175,64 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
         .filter(|line| !line.is_empty())
         .count();
     u16::try_from(typed).unwrap_or(u16::MAX)
+}
+
+fn settings_summary_line(app: &App) -> Line<'static> {
+    Line::from(Span::styled(settings_summary(app), palette::dim()))
+}
+
+fn settings_summary(app: &App) -> String {
+    let settings = app.sentence_settings();
+    let level = settings.level().map(|level| level.token()).unwrap_or("—");
+    format!(
+        "{SETTINGS_PREFIX}{level} · types {}",
+        settings.types().token()
+    )
+}
+
+fn candidate_content_height(
+    app: &App,
+    width: usize,
+    expanded_row: Option<usize>,
+    term_width: usize,
+) -> usize {
+    app.candidates()
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| {
+            candidate_rows(candidate, expanded_row == Some(index), term_width, width)
+        })
+        .sum()
+}
+
+/// Return the batch sentence-settings control occupying one body-content cell.
+pub(crate) fn sentence_settings_control_at(
+    app: &App,
+    width: usize,
+    column: usize,
+    row: usize,
+) -> Option<SentenceSettingsControl> {
+    if app.candidates().is_empty() {
+        return None;
+    }
+    let expanded = app.expanded_sense().map(|item| item.row);
+    let term_width = candidate_label_width(app.candidates(), 12);
+    let start = candidate_content_height(app, width, expanded, term_width);
+    if row == start {
+        let summary_width = super::common::display_width(settings_summary(app).as_str());
+        return (app.expanded_sense().is_none() && column < summary_width)
+            .then_some(SentenceSettingsControl::Open);
+    }
+    let focused = app.sentence_settings_editor()?;
+    let editor_row = row.checked_sub(start.saturating_add(1))?;
+    super::sentence_labels::batch_editor_control_at(
+        app.sentence_settings(),
+        focused,
+        width,
+        column,
+        editor_row,
+    )
+    .map(SentenceSettingsControl::Editor)
 }
 
 fn pending_line<'a>(index: usize, raw: &'a str, term_width: usize, width: u16) -> Line<'a> {
@@ -395,9 +476,21 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
     if app.candidates().is_empty() {
         return None;
     }
-    let selected = app.selected().min(app.candidates().len() - 1);
     let expanded_row = app.expanded_sense().map(|item| item.row);
     let term_width = candidate_label_width(app.candidates(), 12);
+    if let Some(focused) = app.sentence_settings_editor() {
+        let candidates = candidate_content_height(app, width, expanded_row, term_width);
+        let (start, height) = super::sentence_labels::batch_editor_focus_range(
+            app.sentence_settings(),
+            focused,
+            width,
+        );
+        return Some((
+            u16::try_from(candidates.saturating_add(1).saturating_add(start)).unwrap_or(u16::MAX),
+            u16::try_from(height).unwrap_or(u16::MAX),
+        ));
+    }
+    let selected = app.selected().min(app.candidates().len() - 1);
     let mut offset = 0usize;
     for (index, candidate) in app.candidates().iter().enumerate() {
         if index != selected {
@@ -598,7 +691,14 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         left.push(Span::styled(message.to_string(), palette::dim()));
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
-    if app.expanded_sense().is_some() {
+    if app.sentence_settings_editor().is_some() {
+        if count > 0 {
+            hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
+        }
+        hints.push(super::common::FooterHint::secondary("← →", "pick"));
+        hints.push(super::common::FooterHint::ghost("↑ ↓", "row"));
+        hints.push(super::common::FooterHint::ghost("Esc", "close"));
+    } else if app.expanded_sense().is_some() {
         let controls = if app.expanded_add_more_focused() {
             DisclosureControls::new(true).with_action("add")
         } else {
@@ -616,10 +716,15 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         if count > 0 {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
+        if !app.candidates().is_empty() {
+            hints.push(super::common::FooterHint::secondary("S", "sentences"));
+        }
         hints.push(DisclosureControls::new(false).secondary_toggle());
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     }
-    hints.push(super::common::quit_hint(app.quit_pending()));
+    if app.sentence_settings_editor().is_none() {
+        hints.push(super::common::quit_hint(app.quit_pending()));
+    }
     super::common::footer_bar(left, hints, width)
 }

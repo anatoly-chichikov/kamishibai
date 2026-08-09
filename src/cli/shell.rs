@@ -1004,7 +1004,8 @@ fn animation_elapsed(elapsed: Duration) -> Duration {
 }
 
 fn drafts_from(app: &App) -> Vec<CardDraft> {
-    app.candidates()
+    let drafts = app
+        .candidates()
         .iter()
         .filter(|candidate| candidate.ok())
         .flat_map(|candidate| {
@@ -1015,6 +1016,15 @@ fn drafts_from(app: &App) -> Vec<CardDraft> {
                 .map(|sense| {
                     CardDraft::new(candidate.term(), sense.understanding(), app.pair().clone())
                 })
+        })
+        .collect::<Vec<_>>();
+    let count = drafts.len();
+    drafts
+        .into_iter()
+        .zip(app.sentence_settings().selections(count))
+        .map(|(draft, request)| match request {
+            Some(request) => draft.requesting_meta(request),
+            None => draft,
         })
         .collect()
 }
@@ -1050,8 +1060,9 @@ mod tests {
     use crate::session::{
         ARTIFACT_ATTEMPT_CEILING, ArtifactCosts, ArtifactFile, ArtifactSlot, CandidateRecord,
         CardArtifacts, CardMeta, CardRevision, GenerationCost, LanguagePair, LearningDetection,
-        RawInputBatch, ScriptDetection, Sense, SenseCorrection, SentenceLabelSelection, Understood,
-        WordCandidate, catalog_for_detection,
+        RawInputBatch, ScriptDetection, Sense, SenseCorrection, SentenceBatchSettings,
+        SentenceLabelSelection, SentenceLevel, SentenceTypeMix, Understood, WordCandidate,
+        catalog_for_detection,
     };
     use crate::tui::{LabelEditorRow, ModalKind};
     use anyhow::Result;
@@ -1200,6 +1211,7 @@ mod tests {
             term: &str,
             understanding: &str,
             _pair: &LanguagePair,
+            _request: Option<&SentenceLabelSelection>,
         ) -> Result<CardMeta> {
             self.ready()?;
             Ok(Self::local_meta(term, understanding))
@@ -1239,9 +1251,10 @@ mod tests {
             term: &str,
             understanding: &str,
             pair: &LanguagePair,
+            request: Option<&SentenceLabelSelection>,
         ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
             let result = self
-                .generate_card_meta(term, understanding, pair)
+                .generate_card_meta(term, understanding, pair, request)
                 .and_then(|meta| {
                     self.store_card_meta(term, understanding, pair, &meta)
                         .map(|file| (meta, Some(file)))
@@ -1258,7 +1271,13 @@ mod tests {
                 let term = draft.term().to_string();
                 let understanding = draft.understanding().to_string();
                 return self
-                    .generate_meta_in(slot, draft.term(), draft.understanding(), draft.pair())
+                    .generate_meta_in(
+                        slot,
+                        draft.term(),
+                        draft.understanding(),
+                        draft.pair(),
+                        draft.meta_request(),
+                    )
                     .map(|(meta, file)| (CardRevision::new(term, understanding, meta), file));
             };
             let (result, cost) = self
@@ -1422,6 +1441,46 @@ mod tests {
             .with_screen(Screen::WhatIUnderstood)
             .confirmed_learning("en")
             .understood(vec![candidate("whilst")])
+    }
+
+    #[test]
+    fn drafts_expand_batch_sentence_settings_after_candidate_selection() {
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+        let app = App::new(pair())
+            .with_screen(Screen::WhatIUnderstood)
+            .confirmed_learning("en")
+            .understood(vec![
+                candidate("alpha"),
+                skipped("skip"),
+                candidate("beta"),
+                candidate("gamma"),
+                candidate("delta"),
+                candidate("epsilon"),
+            ])
+            .with_sentence_settings(settings);
+        let drafts = drafts_from(&app);
+        let requests = drafts
+            .iter()
+            .map(|draft| draft.meta_request().cloned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests,
+            settings.selections(5),
+            "generation drafts must receive the exact per-card allocation after excluded rows are removed"
+        );
+    }
+
+    #[test]
+    fn default_batch_sentence_settings_leave_generation_requests_empty() {
+        let requests = drafts_from(&review())
+            .iter()
+            .map(|draft| draft.meta_request().cloned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests,
+            vec![None],
+            "natural unlevelled batches must preserve the existing unconstrained metadata request"
+        );
     }
 
     fn finished(screen: Screen) -> App {
@@ -2091,12 +2150,14 @@ mod tests {
                 term: String::from("alpha"),
                 understanding: String::from("first understanding"),
                 costs: first,
+                meta_request: None,
                 rewrite: None,
             },
             DraftRecord {
                 term: String::from("beta"),
                 understanding: String::from("second understanding"),
                 costs: second,
+                meta_request: None,
                 rewrite: None,
             },
         ];
@@ -2355,6 +2416,7 @@ mod tests {
             term: String::from("alpha"),
             understanding: String::from("first understanding"),
             costs: ArtifactCosts::default(),
+            meta_request: None,
             rewrite: None,
         }];
         record.result = Some(ResultRecord {
@@ -2500,6 +2562,7 @@ mod tests {
             term: String::from("alpha"),
             understanding: String::from("first understanding"),
             costs: ArtifactCosts::default(),
+            meta_request: None,
             rewrite: None,
         }];
         record.result = Some(ResultRecord {

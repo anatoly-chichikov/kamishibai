@@ -12,7 +12,10 @@ use std::time::{Duration, Instant};
 use assert_cmd::Command;
 use kamishibai::generation::artifact_cache::{ILLUSTRATION_FILE, SCENE_FILE, VOICE_FILE};
 use kamishibai::generation::visual_revision;
-use kamishibai::session::{CardCell, CardMeta, CardMetaCache, LanguagePair};
+use kamishibai::session::{
+    CardCell, CardMeta, CardMetaCache, LanguagePair, SentenceAxis, SentenceBatchSettings,
+    SentenceLevel, SentenceTypeMix,
+};
 use tempfile::TempDir;
 
 /// Isolated directories shared by every invocation in one agent workflow.
@@ -91,6 +94,169 @@ fn intake_gemini() -> (String, Arc<AtomicUsize>, Arc<Mutex<String>>) {
             .expect("intake response must write");
     });
     (format!("http://127.0.0.1:{port}"), calls, request)
+}
+
+/// Start a local intake/meta/TTS endpoint for one configured waited generation.
+fn configured_generation_gemini(
+    cache: &Path,
+    understanding: &str,
+    kind: &str,
+) -> (String, Arc<AtomicUsize>, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("generation listener must bind");
+    let port = listener
+        .local_addr()
+        .expect("generation listener must have an address")
+        .port();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let observed = calls.clone();
+    let captured = requests.clone();
+    let cache = cache.to_path_buf();
+    let understanding = String::from(understanding);
+    let kind = String::from(kind);
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut stream = stream;
+            let request = read_request(&mut stream);
+            let call = observed.fetch_add(1, Ordering::SeqCst);
+            captured
+                .lock()
+                .expect("generation requests must lock")
+                .push(request);
+            let body = match call {
+                0 => intake_body(understanding.as_str()),
+                1 => meta_body(kind.as_str()),
+                _ => {
+                    seed_visual(cache.as_path(), understanding.as_str());
+                    tts_body()
+                }
+            };
+            write_response(&mut stream, body.as_str());
+        }
+    });
+    (format!("http://127.0.0.1:{port}"), calls, requests)
+}
+
+fn read_request(stream: &mut std::net::TcpStream) -> String {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("request timeout must configure");
+    let mut bytes = Vec::new();
+    loop {
+        let mut chunk = [0u8; 8192];
+        let size = stream.read(&mut chunk).expect("request must read");
+        if size == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..size]);
+        let text = String::from_utf8_lossy(bytes.as_slice());
+        let Some(header_end) = text.find("\r\n\r\n") else {
+            continue;
+        };
+        let length = text[..header_end]
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("content-length: ")
+                    .or_else(|| line.strip_prefix("Content-Length: "))
+            })
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        if bytes.len() >= header_end + 4 + length {
+            break;
+        }
+    }
+    String::from_utf8(bytes).expect("request must be UTF-8")
+}
+
+fn intake_body(understanding: &str) -> String {
+    let intake = serde_json::json!({
+        "target_lang": "FR",
+        "items": [{
+            "term": "chat",
+            "senses": [{"understanding": understanding, "tag": null}],
+            "selected": 0,
+            "ok": true
+        }]
+    });
+    serde_json::json!({
+        "candidates": [{"content": {"parts": [{"text": intake.to_string()}]}}]
+    })
+    .to_string()
+}
+
+fn meta_body(kind: &str) -> String {
+    let meta = serde_json::json!({
+        "pronunciation": "ʃa",
+        "transcription": "lə ʃa dɔʁ",
+        "meaning": "кот",
+        "importance": 8,
+        "source_sentence": "Кот спит.",
+        "source_highlight": "Кот",
+        "source_hint": "домашнее животное",
+        "source_context": "повседневное существительное",
+        "target_sentence": "Le chat dort.",
+        "labels": {
+            "register": "neutral",
+            "level": "b1",
+            "type": kind,
+            "approx": []
+        }
+    });
+    serde_json::json!({
+        "candidates": [{"content": {"parts": [{"text": meta.to_string()}]}}],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+        }
+    })
+    .to_string()
+}
+
+fn tts_body() -> String {
+    serde_json::json!({
+        "candidates": [{"content": {"parts": [{"inlineData": {"data": "AAA="}}]}}],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+        }
+    })
+    .to_string()
+}
+
+fn write_response(stream: &mut std::net::TcpStream, body: &str) {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(response.as_bytes())
+        .expect("generation response must write");
+}
+
+fn seed_visual(cache: &Path, understanding: &str) {
+    let root = CardCell::new(cache, &LanguagePair::new("FR", "RU"), "chat", understanding).cache();
+    let visual = root
+        .visual(visual_revision())
+        .expect("visual cache must resolve");
+    fs::write(
+        visual
+            .filepath(SCENE_FILE)
+            .expect("scene path must resolve"),
+        include_bytes!("fixtures/production-scene.json"),
+    )
+    .expect("scene must seed");
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs")
+            .join("hero")
+            .join("hero.jpg"),
+        visual
+            .filepath(ILLUSTRATION_FILE)
+            .expect("picture path must resolve"),
+    )
+    .expect("picture must seed");
 }
 
 /// Start one local model catalog for saved-key validation.
@@ -264,6 +430,83 @@ fn clean_env_only_agent_reaches_published_results_without_the_tui() {
             ),
         ),
         "the clean env-only agent workflow did not reach its published files"
+    );
+}
+
+#[test]
+fn configured_new_can_generate_and_wait_in_one_offline_call() {
+    let profile = Profile::new();
+    let understanding = "Сущ. «кот», домашнее животное.";
+    let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+    let selection = settings
+        .selections(1)
+        .into_iter()
+        .next()
+        .flatten()
+        .expect("varied settings must allocate one request");
+    let kind = selection
+        .token(SentenceAxis::Type)
+        .expect("varied request must pin a phrase kind");
+    let (gemini, calls, requests) =
+        configured_generation_gemini(profile.cache.path(), understanding, kind);
+    let (new_code, created) = json(
+        profile
+            .cli()
+            .env("GEMINI_API_KEY", "offline-agent-key")
+            .env("KAMISHIBAI_GEMINI_URL", &gemini)
+            .timeout(Duration::from_secs(120))
+            .args([
+                "new",
+                "--word",
+                "chat",
+                "--known",
+                "RU",
+                "--learning",
+                "FR",
+                "--level",
+                "b1",
+                "--types",
+                "varied",
+                "--generate",
+                "--wait",
+                "--json",
+            ]),
+    );
+    let (result_code, result) = json(profile.cli().args(["result", "--json"]));
+    let requests = requests.lock().expect("generation requests must lock");
+    let pinned = created["cards"]["items"][0]["labels"]["pinned"]
+        .as_array()
+        .expect("generated labels must carry pinned axes");
+    assert_eq!(
+        (
+            new_code,
+            created["phase"].as_str(),
+            created["sentences"].clone(),
+            created["cards"]["items"][0]["labels"]["level"].as_str(),
+            created["cards"]["items"][0]["labels"]["kind"].as_str(),
+            pinned.iter().any(|axis| axis.as_str() == Some("level")),
+            pinned.iter().any(|axis| axis.as_str() == Some("kind")),
+            result_code,
+            result["sentences"].clone(),
+            calls.load(Ordering::SeqCst),
+            requests
+                .get(1)
+                .is_some_and(|request| request.contains("Initial sentence preset")),
+        ),
+        (
+            Some(0),
+            Some("published"),
+            serde_json::json!({"level": "b1", "types": "varied"}),
+            Some("b1"),
+            Some(kind),
+            true,
+            true,
+            Some(0),
+            serde_json::json!({"level": "b1", "types": "varied"}),
+            3,
+            true,
+        ),
+        "configured new --generate --wait did not preserve settings through offline publication"
     );
 }
 

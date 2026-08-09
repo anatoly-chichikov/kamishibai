@@ -8,9 +8,9 @@ expression: render(&app)
     01  bank 2/3      multiple meanings:                                        
                          —  [фин.] Сущ. «банк», финансовое учреждение.          
                          —  Сущ. «берег» реки или водоёма.                      
-                                                                                
+    sentences: level — · types natural                                          
                                                                                 
                                                                                 
                                       ai may be wrong, please verify results    
                                                                                 
-    step 2/3  2 cards     [Ctrl+G] generate  [Enter/→] toggle  [Ctrl+C] quit
+    step 2/3  2 cards        [Ctrl+G] generate  [S] sentences  [Ctrl+C] quit

@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.7.0
+Release: 1.8.0
 
 Overview
 
@@ -21,7 +21,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.7.0/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.8.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -179,6 +179,13 @@ matching application version in `Release`. It is text-only and refuses
 
 `new`
 
+```text
+kamishibai new (--word W [--word W...] | --words FILE | --build FILE)
+  [--known L] [--learning L] [--senses primary|all]
+  [--level a1|a2|b1|b2|c1|c2] [--types natural|varied]
+  [--id NAME] [--out DIR] [--generate [--wait]]
+```
+
 Word intake completes Gemini understanding before creating an `understood`
 session; a cards JSON import skips understanding and takes its language pair
 from the entries. An explicit `--learning` value is normalized and validated
@@ -187,6 +194,27 @@ constrains Gemini understanding to that target and must match Gemini's returned
 target. Every explicit target and autodetection use separate understanding-cache
 identities. `--known` falls back to saved config; without either value, the
 command refuses and points to `config --known`.
+
+`--level` pins one lowercase operational CEFR band for the surrounding
+language on every card. Without it, metadata writes the natural sentence first
+and attributes its honest level afterward, exactly as before. `--types natural`
+leaves each phrase kind unconstrained; this is also the default. `--types
+varied` deterministically gives the selected cards a weighted mix of
+statements, questions, and dialogues; it never assigns requests or
+exclamations. The allocation is stable across retries and process restarts.
+
+These settings are initial metadata constraints, not a second rewrite pass:
+each card still makes at most the ordinary one metadata request per attempt.
+When neither a level nor varied types are requested, the rendered metadata
+prompt and provider-call shape are unchanged. This release advances the
+metadata policy, so a card carrying metadata from an older policy refreshes it
+once even under defaults. Explicit settings are accepted with both word intake
+and `--build`; an imported card whose cached metadata does not satisfy them is
+refreshed only when generation starts.
+
+`--generate` immediately commits and starts the session. Add `--wait` to run
+that generation in the same foreground process; `--wait` without `--generate`
+is a usage error.
 
 `select`
 
@@ -212,12 +240,12 @@ it exits 1 with the error envelope; if nothing is selected, it exits 2. A
 session carrying staged sentence adjustments refuses before spawning a worker;
 activate the whole pending batch with `regenerate --pending`.
 
-Fresh card metadata first writes the natural sentence required by the approved
-understanding and only then assigns its descriptive register, phrase kind, and
-lowercase `a1`–`c2` level. Initial generation does not target a CEFR band. A
-level becomes a rewrite constraint only after the user explicitly changes it;
-when an exact band would make the accepted use unnatural, the closest natural
-result marks `level` as approximate.
+By default, fresh card metadata first writes the natural sentence required by
+the approved understanding and only then assigns its descriptive register,
+phrase kind, and lowercase `a1`–`c2` level. Initial generation targets a band or
+phrase kind only when `new --level` or `new --types varied` requested it. When
+an exact requested value would make the accepted use unnatural, the closest
+natural result marks that pinned axis as approximate.
 
 `status`
 
@@ -350,6 +378,8 @@ Presence rules:
 - `candidates` and `cards` can appear together during and after generation
 - `worker`, `progress`, `result`, and `error` appear only when present
 - absent fields are omitted, never null
+- `sentences` is always present; `types` is `natural` or `varied`, while
+  `level` is omitted when the batch did not request one
 - `progress` appears only while generating
 - a sense's 1-based position in its `senses` array is its `select --sense`
   number
@@ -378,6 +408,7 @@ Example:
   "created": "2026-06-14T09:15:00Z",
   "pair": {"known": "EN", "learning": "FR"},
   "senses": "primary",
+  "sentences": {"level": "b1", "types": "varied"},
   "source": "words",
   "out": "/abs/out",
   "phase": "published",
@@ -437,7 +468,9 @@ Result document
 
 Returned by `result`. `items` are strict cards JSON entries, the exact
 `new --build` schema with uppercase `lang`, so they round-trip into a new
-session.
+session. The top-level `sentences` object repeats the batch setting that
+produced the result even though the strict card entries do not carry that
+session provenance.
 
 Example:
 
@@ -446,6 +479,7 @@ Example:
   "ok": true,
   "session": "FR-20260614_091500_ab3x",
   "pair": {"known": "EN", "learning": "FR"},
+  "sentences": {"level": "b1", "types": "varied"},
   "phase": "published",
   "paths": {"deck": "/o/FR.apkg", "pdf": "/o/FR.pdf", "dir": "/o"},
   "failed": 0,
@@ -657,7 +691,8 @@ every terminal phase, not just `published`, or it spins forever on a failed run.
 ```bash
 set -euo pipefail
 GEMINI_API_KEY="$SECRET" \
-  kamishibai new --word flâner --word canard --known EN --learning FR --json >/dev/null
+  kamishibai new --word flâner --word canard --known EN --learning FR \
+  --level b1 --types varied --json >/dev/null
 kamishibai exclude --card canard --json >/dev/null
 GEMINI_API_KEY="$SECRET" kamishibai generate --json >/dev/null
 while :; do

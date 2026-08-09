@@ -1,6 +1,113 @@
 //! Pure state for editing one card's sentence labels and rewrite note.
 
-use crate::session::{SentenceAxis, SentenceLabelSelection};
+use crate::session::{
+    SentenceAxis, SentenceBatchSettings, SentenceLabelSelection, SentenceLevel, SentenceTypeMix,
+};
+
+/// One focusable row inside the batch sentence-settings editor.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BatchSettingsRow {
+    /// The optional surrounding-language CEFR constraint.
+    Level,
+    /// The natural or varied sentence-type policy.
+    Types,
+}
+
+impl BatchSettingsRow {
+    /// Return the previous row, saturating at level.
+    #[must_use]
+    pub fn previous(self) -> Self {
+        match self {
+            Self::Level | Self::Types => Self::Level,
+        }
+    }
+
+    /// Return the next row, saturating at types.
+    #[must_use]
+    pub fn next(self) -> Self {
+        match self {
+            Self::Level => Self::Types,
+            Self::Types => Self::Types,
+        }
+    }
+
+    /// Return the number of choices displayed on this carousel.
+    #[must_use]
+    pub fn choice_count(self) -> usize {
+        match self {
+            Self::Level => 7,
+            Self::Types => 2,
+        }
+    }
+
+    /// Return one stable choice token by its carousel index.
+    #[must_use]
+    pub fn choice_token(self, index: usize) -> Option<&'static str> {
+        match (self, index) {
+            (Self::Level, 0) => Some("—"),
+            (Self::Level, 1) => Some("a1"),
+            (Self::Level, 2) => Some("a2"),
+            (Self::Level, 3) => Some("b1"),
+            (Self::Level, 4) => Some("b2"),
+            (Self::Level, 5) => Some("c1"),
+            (Self::Level, 6) => Some("c2"),
+            (Self::Types, 0) => Some("natural"),
+            (Self::Types, 1) => Some("varied"),
+            _ => None,
+        }
+    }
+
+    /// Return the active carousel index for the supplied batch settings.
+    #[must_use]
+    pub fn selected(self, settings: SentenceBatchSettings) -> usize {
+        match self {
+            Self::Level => match settings.level() {
+                None => 0,
+                Some(SentenceLevel::A1) => 1,
+                Some(SentenceLevel::A2) => 2,
+                Some(SentenceLevel::B1) => 3,
+                Some(SentenceLevel::B2) => 4,
+                Some(SentenceLevel::C1) => 5,
+                Some(SentenceLevel::C2) => 6,
+            },
+            Self::Types => match settings.types() {
+                SentenceTypeMix::Natural => 0,
+                SentenceTypeMix::Varied => 1,
+            },
+        }
+    }
+
+    /// Return batch settings with one explicit carousel choice installed.
+    #[must_use]
+    pub fn choosing(self, settings: SentenceBatchSettings, index: usize) -> SentenceBatchSettings {
+        match (self, index) {
+            (Self::Level, 0) => settings.with_level(None),
+            (Self::Level, 1) => settings.with_level(Some(SentenceLevel::A1)),
+            (Self::Level, 2) => settings.with_level(Some(SentenceLevel::A2)),
+            (Self::Level, 3) => settings.with_level(Some(SentenceLevel::B1)),
+            (Self::Level, 4) => settings.with_level(Some(SentenceLevel::B2)),
+            (Self::Level, 5) => settings.with_level(Some(SentenceLevel::C1)),
+            (Self::Level, 6) => settings.with_level(Some(SentenceLevel::C2)),
+            (Self::Types, 0) => settings.with_types(SentenceTypeMix::Natural),
+            (Self::Types, 1) => settings.with_types(SentenceTypeMix::Varied),
+            _ => settings,
+        }
+    }
+
+    /// Return batch settings moved one adjacent choice without wrapping.
+    #[must_use]
+    pub fn advanced(self, settings: SentenceBatchSettings, forward: bool) -> SentenceBatchSettings {
+        let current = self.selected(settings);
+        let next = if forward {
+            current
+                .saturating_add(1)
+                .min(self.choice_count().saturating_sub(1))
+        } else {
+            current.saturating_sub(1)
+        };
+        self.choosing(settings, next)
+    }
+}
 
 /// One focusable row inside the inline sentence-label editor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -268,8 +375,37 @@ fn previous_boundary(value: &str, cursor: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{LabelEditorRow, NoteDraft, SentenceLabelsEditor};
-    use crate::session::{Register, SentenceAxis, SentenceLabelSelection};
+    use super::{BatchSettingsRow, LabelEditorRow, NoteDraft, SentenceLabelsEditor};
+    use crate::session::{
+        Register, SentenceAxis, SentenceBatchSettings, SentenceLabelSelection, SentenceLevel,
+        SentenceTypeMix,
+    };
+
+    #[test]
+    fn batch_level_carousel_treats_the_dash_as_a_real_default_choice() {
+        let settings = BatchSettingsRow::Level
+            .advanced(SentenceBatchSettings::default(), true)
+            .with_types(SentenceTypeMix::Natural);
+        assert_eq!(
+            (settings.level(), BatchSettingsRow::Level.selected(settings)),
+            (Some(SentenceLevel::A1), 1),
+            "advancing from the batch dash failed to select the first CEFR band"
+        );
+    }
+
+    #[test]
+    fn batch_type_carousel_saturates_at_varied() {
+        let settings = BatchSettingsRow::Types.advanced(SentenceBatchSettings::default(), true);
+        let saturated = BatchSettingsRow::Types.advanced(settings, true);
+        assert_eq!(
+            (
+                saturated.types(),
+                BatchSettingsRow::Types.selected(saturated)
+            ),
+            (SentenceTypeMix::Varied, 1),
+            "the batch type carousel wrapped or moved past varied"
+        );
+    }
 
     #[test]
     fn note_cursor_edits_inside_multibyte_text() {

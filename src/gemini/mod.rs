@@ -23,8 +23,8 @@ use crate::application::{
 use crate::generation::SceneSource;
 use crate::generation::Speaker;
 use crate::session::{
-    CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch, SenseCorrection, Understood,
-    WordCandidate,
+    CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch, SenseCorrection,
+    SentenceLabelSelection, Understood, WordCandidate,
 };
 
 /// Return whether one error means Gemini rejected the configured API key.
@@ -110,8 +110,9 @@ where
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
+        request: Option<&SentenceLabelSelection>,
     ) -> Result<CardMeta> {
-        GeminiClient::<T>::generate_card_meta(self, term, understanding, pair)
+        GeminiClient::<T>::generate_card_meta(self, term, understanding, pair, request)
     }
 }
 

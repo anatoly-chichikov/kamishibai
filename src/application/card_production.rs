@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::session::{
     Artifact, ArtifactAttempt, ArtifactFile, CardDraft, CardMeta, CardRevision, GenerationCost,
-    LanguagePair,
+    LanguagePair, SentenceLabelSelection,
 };
 
 /// Generate the rich metadata consumed by all card artifacts.
@@ -15,6 +15,7 @@ pub trait CardMetaGeneration {
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
+        request: Option<&SentenceLabelSelection>,
     ) -> Result<CardMeta>;
 }
 
@@ -56,6 +57,7 @@ pub(crate) trait CardProduction:
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
+        request: Option<&SentenceLabelSelection>,
     ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)>;
     /// Generate or rewrite metadata for the complete draft at one stable slot.
     fn generate_draft_meta_in(
@@ -65,8 +67,14 @@ pub(crate) trait CardProduction:
     ) -> ArtifactAttempt<(CardRevision, Option<ArtifactFile>)> {
         let term = draft.term().to_string();
         let understanding = draft.understanding().to_string();
-        self.generate_meta_in(slot, draft.term(), draft.understanding(), draft.pair())
-            .map(|(meta, file)| (CardRevision::new(term, understanding, meta), file))
+        self.generate_meta_in(
+            slot,
+            draft.term(),
+            draft.understanding(),
+            draft.pair(),
+            draft.meta_request(),
+        )
+        .map(|(meta, file)| (CardRevision::new(term, understanding, meta), file))
     }
     /// Generate a scene attributed to one stable card slot.
     fn generate_scene_in(&self, slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile>;
