@@ -62,6 +62,7 @@ fn probe_draft(cache_root: &Path, pair: &LanguagePair, draft: &DraftRecord) -> [
         .rewrite
         .as_ref()
         .is_some_and(crate::session::CardRewrite::started)
+        || awaits_initial_meta(draft)
     {
         return [false; 4];
     }
@@ -71,6 +72,11 @@ fn probe_draft(cache_root: &Path, pair: &LanguagePair, draft: &DraftRecord) -> [
         draft.term.as_str(),
         draft.understanding.as_str(),
     )
+}
+
+/// Return whether a draft still needs its initial requested metadata.
+pub(super) fn awaits_initial_meta(draft: &DraftRecord) -> bool {
+    draft.rewrite.is_none() && draft.meta_request.is_some()
 }
 
 /// Probe every committed draft against the cache, in plan order.
@@ -428,7 +434,8 @@ mod tests {
     use super::*;
     use crate::generation::artifact_cache::{META_FILE, SCENE_FILE};
     use crate::session::{
-        CardCell, CardDraft, CardMeta, CardMetaCache, CardRewrite, SentenceLabelSelection,
+        CardCell, CardDraft, CardMeta, CardMetaCache, CardRewrite, SentenceAxis,
+        SentenceLabelSelection,
     };
 
     fn store_meta(home: &TempDir) {
@@ -493,6 +500,7 @@ mod tests {
             understanding: String::from("a duck"),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: None,
+            meta_request: None,
         }];
         record
     }
@@ -610,6 +618,25 @@ mod tests {
             (projected[0].ready(), incomplete.len()),
             (false, 1),
             "a queued rewrite exposed stale readiness or disappeared from failed retry"
+        );
+    }
+
+    #[test]
+    fn a_pending_initial_meta_request_hides_rollback_artifacts_and_remains_retryable() {
+        let home = TempDir::new().expect("tempdir must be created");
+        store_artifacts(&home);
+        let mut record = record();
+        record.drafts[0].meta_request =
+            Some(SentenceLabelSelection::empty().choosing(SentenceAxis::Level, 4));
+        let card = cards(&record, home.path()).remove(0);
+        let incomplete = incomplete_drafts(&record, home.path());
+        assert_eq!(
+            (
+                [card.meta, card.sound, card.scene, card.picture],
+                incomplete.len(),
+            ),
+            ([false; 4], 1),
+            "a failed initial metadata refresh exposed rollback artifacts or disappeared from failed retry"
         );
     }
 

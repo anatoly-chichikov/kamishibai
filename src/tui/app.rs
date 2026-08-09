@@ -2,11 +2,12 @@ use std::fmt;
 use std::time::Duration;
 
 use crate::session::{
-    Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, SentenceLabelSelection, WordCandidate,
+    Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, SentenceBatchSettings,
+    SentenceLabelSelection, WordCandidate,
 };
 
 use super::screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
-use super::sentence_editor::{LabelEditorRow, NoteDraft, SentenceLabelsEditor};
+use super::sentence_editor::{BatchSettingsRow, LabelEditorRow, NoteDraft, SentenceLabelsEditor};
 
 /// The immutable shell state carried between transitions.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,6 +20,8 @@ pub struct App {
     input: AppInput,
     blob_cursor: usize,
     review: Review,
+    sentence_settings: SentenceBatchSettings,
+    sentence_settings_row: Option<BatchSettingsRow>,
     cards: CardsView,
     done: DoneArtifacts,
     welcome: WelcomeView,
@@ -203,6 +206,8 @@ impl App {
             },
             blob_cursor: 0,
             review: Review::default(),
+            sentence_settings: SentenceBatchSettings::default(),
+            sentence_settings_row: None,
             cards: CardsView::default(),
             done: DoneArtifacts::default(),
             welcome: WelcomeView::default(),
@@ -353,6 +358,7 @@ impl App {
             focus: WelcomeFocus::Submit,
             env_available,
         };
+        self.sentence_settings_row = None;
         self
     }
 
@@ -494,6 +500,7 @@ impl App {
         self.modal = None;
         self.input.modal.clear();
         self.cards.editor = None;
+        self.sentence_settings_row = None;
         self.body_scroll = 0;
         self
     }
@@ -715,6 +722,86 @@ impl App {
     /// Return the short review notice, if any.
     pub fn review_notice(&self) -> Option<&str> {
         self.review.notice.as_deref()
+    }
+
+    /// Return the durable sentence preferences chosen for this reviewed batch.
+    #[must_use]
+    pub fn sentence_settings(&self) -> SentenceBatchSettings {
+        self.sentence_settings
+    }
+
+    /// Return the app carrying durable sentence preferences for this batch.
+    #[must_use]
+    pub fn with_sentence_settings(mut self, settings: SentenceBatchSettings) -> Self {
+        self.sentence_settings = settings;
+        self
+    }
+
+    /// Return the focused row of the open batch sentence-settings editor.
+    #[must_use]
+    pub fn sentence_settings_editor(&self) -> Option<BatchSettingsRow> {
+        self.sentence_settings_row
+    }
+
+    /// Return the app with batch sentence settings open on the level row.
+    #[must_use]
+    pub fn sentence_settings_opened(mut self) -> Self {
+        self.sentence_settings_row = Some(BatchSettingsRow::Level);
+        self.review.expanded = None;
+        self.review.notice = None;
+        self
+    }
+
+    /// Return the app with batch sentence settings closed and choices retained.
+    #[must_use]
+    pub fn sentence_settings_closed(mut self) -> Self {
+        self.sentence_settings_row = None;
+        self
+    }
+
+    /// Return the app with one batch sentence-settings row focused.
+    #[must_use]
+    pub fn sentence_settings_focused(mut self, row: BatchSettingsRow) -> Self {
+        if self.sentence_settings_row.is_some() {
+            self.sentence_settings_row = Some(row);
+        }
+        self
+    }
+
+    /// Return the app with batch sentence-settings focus moved one row up.
+    #[must_use]
+    pub fn sentence_settings_row_previous(mut self) -> Self {
+        if let Some(row) = self.sentence_settings_row {
+            self.sentence_settings_row = Some(row.previous());
+        }
+        self
+    }
+
+    /// Return the app with batch sentence-settings focus moved one row down.
+    #[must_use]
+    pub fn sentence_settings_row_next(mut self) -> Self {
+        if let Some(row) = self.sentence_settings_row {
+            self.sentence_settings_row = Some(row.next());
+        }
+        self
+    }
+
+    /// Return the app with the focused batch sentence choice moved one step.
+    #[must_use]
+    pub fn sentence_settings_advanced(mut self, forward: bool) -> Self {
+        if let Some(row) = self.sentence_settings_row {
+            self.sentence_settings = row.advanced(self.sentence_settings, forward);
+        }
+        self
+    }
+
+    /// Return the app with one batch sentence choice selected directly.
+    #[must_use]
+    pub fn sentence_settings_chosen(mut self, index: usize) -> Self {
+        if let Some(row) = self.sentence_settings_row {
+            self.sentence_settings = row.choosing(self.sentence_settings, index);
+        }
+        self
     }
 
     /// Return the app with a new set of understood candidates installed.
@@ -1100,6 +1187,7 @@ impl App {
 
     /// Return the app with a new card session installed.
     pub fn cards_started(mut self, drafts: Vec<CardDraft>) -> Self {
+        self.sentence_settings_row = None;
         self.cards = CardsView {
             drafts,
             selected: 0,
@@ -1590,10 +1678,10 @@ fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {
 mod tests {
     use super::App;
     use crate::session::{
-        AxisSet, CardDraft, CardMeta, LanguagePair, Register, SentenceAxis, SentenceKind,
-        SentenceLabelSelection, SentenceLabels, SentenceLevel,
+        AxisSet, CardDraft, CardMeta, LanguagePair, Register, SentenceAxis, SentenceBatchSettings,
+        SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel, SentenceTypeMix,
     };
-    use crate::tui::LabelEditorRow;
+    use crate::tui::{BatchSettingsRow, LabelEditorRow, Screen};
 
     fn generated(term: &str, understanding: &str, pair: LanguagePair) -> CardDraft {
         CardDraft::new(term, understanding, pair).with_meta(
@@ -1625,6 +1713,51 @@ mod tests {
             generated("flâner", "to stroll", pair.clone()),
             generated("canard", "a duck", pair),
         ])
+    }
+
+    #[test]
+    fn screen_changes_close_batch_settings_without_losing_their_choices() {
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+        let next = App::new(LanguagePair::new("fr", "en"))
+            .with_sentence_settings(settings)
+            .sentence_settings_opened()
+            .with_screen(Screen::YourWords);
+        assert_eq!(
+            (next.sentence_settings(), next.sentence_settings_editor()),
+            (settings, None),
+            "changing screens lost batch sentence choices or kept their editor open"
+        );
+    }
+
+    #[test]
+    fn starting_a_new_batch_resets_sentence_settings() {
+        let next = App::new(LanguagePair::new("fr", "en"))
+            .with_sentence_settings(SentenceBatchSettings::new(
+                Some(SentenceLevel::B1),
+                SentenceTypeMix::Varied,
+            ))
+            .sentence_settings_opened()
+            .starting_new_batch();
+        assert_eq!(
+            (next.sentence_settings(), next.sentence_settings_editor()),
+            (SentenceBatchSettings::default(), None),
+            "a clean batch inherited sentence settings from the previous one"
+        );
+    }
+
+    #[test]
+    fn opening_batch_settings_focuses_level_and_closes_the_sense_picker() {
+        let next = App::new(LanguagePair::new("fr", "en"))
+            .understood(vec![crate::session::WordCandidate::new(
+                "canard", "a duck", true,
+            )])
+            .senses_expanded()
+            .sentence_settings_opened();
+        assert_eq!(
+            (next.sentence_settings_editor(), next.expanded_sense()),
+            (Some(BatchSettingsRow::Level), None),
+            "opening sentence settings left another review layer open"
+        );
     }
 
     #[test]

@@ -73,7 +73,8 @@ fn app_to_record(
         source.to_string(),
         words,
         candidates,
-    );
+    )
+    .with_sentences(app.sentence_settings());
     record.drafts = app
         .cards()
         .iter()
@@ -82,6 +83,7 @@ fn app_to_record(
             understanding: draft.understanding().to_string(),
             costs: crate::session::ArtifactCosts::from_artifacts(draft.artifacts()),
             rewrite: draft.rewrite().cloned(),
+            meta_request: draft.meta_request().cloned(),
         })
         .collect();
     let done = app.done_artifacts();
@@ -121,6 +123,7 @@ fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
         .map(|stored| stored.clone().candidate())
         .collect();
     let mut app = App::new(pair.clone())
+        .with_sentence_settings(record.sentences)
         .seeded_blob(record.words.join("\n"))
         .confirmed_learning(record.learning.clone());
     if !candidates.is_empty() {
@@ -135,13 +138,18 @@ fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
         .drafts
         .iter()
         .map(|draft| {
-            CardDraft::new(
+            let hydrated = CardDraft::new(
                 draft.term.as_str(),
                 draft.understanding.as_str(),
                 pair.clone(),
-            )
-            .with_rewrite(draft.rewrite.clone())
-            .with_costs(draft.costs)
+            );
+            let hydrated = match &draft.meta_request {
+                Some(selection) => hydrated.requesting_meta(selection.clone()),
+                None => hydrated,
+            };
+            hydrated
+                .with_rewrite(draft.rewrite.clone())
+                .with_costs(draft.costs)
         })
         .collect();
     let mut app = app.cards_started(drafts.clone());
@@ -487,6 +495,7 @@ fn fingerprint(app: &App, generating: bool) -> u64 {
     app.blob().hash(&mut hasher);
     app.pair().known().hash(&mut hasher);
     app.pair().learning().hash(&mut hasher);
+    app.sentence_settings().hash(&mut hasher);
     for candidate in app.candidates() {
         candidate.term().hash(&mut hasher);
         candidate.ok().hash(&mut hasher);
@@ -496,6 +505,7 @@ fn fingerprint(app: &App, generating: bool) -> u64 {
     for draft in app.cards() {
         draft.term().hash(&mut hasher);
         draft.understanding().hash(&mut hasher);
+        draft.meta_request().hash(&mut hasher);
         draft.rewrite().hash(&mut hasher);
         for artifact in [
             crate::session::Artifact::Meta,
@@ -533,7 +543,8 @@ mod tests {
     use super::*;
     use crate::session::{
         Artifact, ArtifactSlot, CardArtifacts, CardMeta, GenerationCost, Sense,
-        SentenceLabelSelection, SessionEngine,
+        SentenceBatchSettings, SentenceLabelSelection, SentenceLevel, SentenceTypeMix,
+        SessionEngine,
     };
 
     fn understood_app() -> App {
@@ -591,6 +602,62 @@ mod tests {
                 true,
             ),
             "an understood app must survive the record round-trip with its curation intact"
+        );
+    }
+
+    #[test]
+    fn sentence_settings_round_trip_and_participate_in_the_save_fingerprint() {
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+        let plain = understood_app();
+        let configured = plain.clone().with_sentence_settings(settings);
+        let record = app_to_record(
+            &configured,
+            String::from("fr-settings"),
+            String::from("t"),
+            "tui",
+            "primary",
+            "/out",
+            None,
+        );
+        let (reopened, _) = record_to_app(&record);
+        assert_eq!(
+            (
+                record.sentences,
+                reopened.sentence_settings(),
+                fingerprint(&plain, false) != fingerprint(&configured, false),
+            ),
+            (settings, settings, true),
+            "TUI session projection lost sentence settings or debounced their change"
+        );
+    }
+
+    #[test]
+    fn an_initial_meta_request_round_trips_through_the_session_record() {
+        let pair = LanguagePair::new("fr", "en");
+        let request =
+            SentenceLabelSelection::empty().choosing(crate::session::SentenceAxis::Level, 2);
+        let app = App::new(pair.clone())
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![
+                CardDraft::new("canard", "a duck", pair).requesting_meta(request.clone()),
+            ]);
+        let record = app_to_record(
+            &app,
+            String::from("fr-request"),
+            String::from("t"),
+            "tui",
+            "primary",
+            "/out",
+            None,
+        );
+        let (reopened, _) = record_to_app(&record);
+        assert_eq!(
+            (
+                record.drafts[0].meta_request.as_ref(),
+                reopened.cards()[0].meta_request(),
+            ),
+            (Some(&request), Some(&request)),
+            "TUI session projection discarded a pending initial metadata request"
         );
     }
 
@@ -1055,6 +1122,23 @@ mod tests {
             fingerprint(&plain, true),
             fingerprint(&priced, true),
             "a cost-only UI update was debounced instead of being saved for reopen"
+        );
+    }
+
+    #[test]
+    fn session_fingerprint_changes_when_an_initial_meta_request_clears() {
+        let pair = LanguagePair::new("fr", "en");
+        let request =
+            SentenceLabelSelection::empty().choosing(crate::session::SentenceAxis::Level, 2);
+        let pending = App::new(pair.clone()).cards_started(vec![
+            CardDraft::new("canard", "a duck", pair.clone()).requesting_meta(request),
+        ]);
+        let cleared =
+            App::new(pair.clone()).cards_started(vec![CardDraft::new("canard", "a duck", pair)]);
+        assert_ne!(
+            fingerprint(&pending, true),
+            fingerprint(&cleared, true),
+            "clearing a zero-cost initial metadata request was debounced instead of saved"
         );
     }
 

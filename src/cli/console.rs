@@ -452,7 +452,8 @@ mod tests {
     use super::*;
     use crate::application::{CardCorrection, CardMetaGeneration, PublishedStudyPackage};
     use crate::session::{
-        ArtifactAttempt, ArtifactFile, CardMeta, CardRevision, Sense, WordCandidate,
+        ArtifactAttempt, ArtifactFile, CardMeta, CardRevision, Sense, SentenceLabelSelection,
+        WordCandidate,
     };
 
     #[derive(Clone, Default)]
@@ -469,6 +470,7 @@ mod tests {
             term: &str,
             understanding: &str,
             _pair: &LanguagePair,
+            _request: Option<&SentenceLabelSelection>,
         ) -> Result<CardMeta> {
             Ok(CardMeta::new(
                 format!("/{term}/"),
@@ -492,7 +494,7 @@ mod tests {
             _pair: &LanguagePair,
         ) -> Result<CardRevision> {
             let meta =
-                self.generate_card_meta(draft.term(), draft.understanding(), draft.pair())?;
+                self.generate_card_meta(draft.term(), draft.understanding(), draft.pair(), None)?;
             Ok(CardRevision::new(draft.term(), draft.understanding(), meta))
         }
     }
@@ -504,9 +506,10 @@ mod tests {
             term: &str,
             understanding: &str,
             pair: &LanguagePair,
+            request: Option<&SentenceLabelSelection>,
         ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
             let result = self
-                .generate_card_meta(term, understanding, pair)
+                .generate_card_meta(term, understanding, pair, request)
                 .and_then(|meta| {
                     self.store_card_meta(term, understanding, pair, &meta)
                         .map(|file| (meta, Some(file)))
@@ -575,8 +578,9 @@ mod tests {
             term: &str,
             understanding: &str,
             pair: &LanguagePair,
+            request: Option<&SentenceLabelSelection>,
         ) -> Result<CardMeta> {
-            LocalWorkflow.generate_card_meta(term, understanding, pair)
+            LocalWorkflow.generate_card_meta(term, understanding, pair, request)
         }
     }
 
@@ -598,8 +602,9 @@ mod tests {
             term: &str,
             understanding: &str,
             pair: &LanguagePair,
+            request: Option<&SentenceLabelSelection>,
         ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
-            LocalWorkflow.generate_meta_in(slot, term, understanding, pair)
+            LocalWorkflow.generate_meta_in(slot, term, understanding, pair, request)
         }
 
         fn generate_scene_in(

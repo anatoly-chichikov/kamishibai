@@ -15,8 +15,8 @@ use serde::Serialize;
 
 use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{
-    AxisSet, CardDraft, CardMetaCache, LanguagePair, SentenceAxis, SentenceLabelSelection,
-    SentenceLabels,
+    AxisSet, CardDraft, CardMetaCache, LanguagePair, SentenceAxis, SentenceBatchSettings,
+    SentenceLabelSelection, SentenceLabels,
 };
 use crate::vocabulary::VocabularyEntry;
 
@@ -57,6 +57,7 @@ pub(super) struct SessionDoc {
     created: String,
     pair: PairDoc,
     senses: String,
+    sentences: SentenceBatchSettings,
     source: String,
     out: String,
     phase: &'static str,
@@ -221,6 +222,7 @@ impl SessionDoc {
             created: record.created.clone(),
             pair: PairDoc::of(record),
             senses: record.senses.clone(),
+            sentences: record.sentences,
             source: record.source.clone(),
             out: record.out.clone(),
             phase: view::phase_label(phase),
@@ -322,6 +324,9 @@ fn current_labels(
     cache: &CardMetaCache,
     pair: &LanguagePair,
 ) -> Option<LabelsDoc> {
+    if view::awaits_initial_meta(draft) {
+        return None;
+    }
     if let Some(previous) = draft
         .rewrite
         .as_ref()
@@ -336,15 +341,16 @@ fn current_labels(
         .and_then(|meta| meta.sentence_labels().map(LabelsDoc::current))
 }
 
-/// The `result --json` document: the published paths plus every card with
-/// cached meta as a strict `VocabularyEntry`, exactly like the text render —
-/// the exact schema `new --build` imports, so items round-trip back into a
-/// new session.
+/// The `result --json` document: published paths plus every settled card with
+/// current cached meta as a strict `VocabularyEntry`, exactly like the text
+/// render. The entry schema is the one `new --build` imports, so items round-trip
+/// back into a new session.
 #[derive(Serialize)]
 pub(super) struct ResultDoc {
     ok: bool,
     session: String,
     pair: PairDoc,
+    sentences: SentenceBatchSettings,
     phase: &'static str,
     paths: PathsDoc,
     failed: usize,
@@ -359,10 +365,11 @@ struct PathsDoc {
 }
 
 impl ResultDoc {
-    /// Assemble the published document, loading each draft's meta from the
-    /// shared cache and bridging it through the same `to_entry` path the deck
-    /// itself is built from. Drafts without cached meta are skipped, exactly
-    /// like the text render.
+    /// Assemble the published document, loading each settled draft's meta from
+    /// the shared cache and bridging it through the same `to_entry` path the
+    /// deck itself is built from. Drafts without cached meta and drafts whose
+    /// initial metadata request is still pending are skipped because their
+    /// preserved cache is rollback material, exactly like the text render.
     pub(super) fn of(
         record: &SessionRecord,
         cache_root: &Path,
@@ -373,6 +380,9 @@ impl ResultDoc {
         let cache = CardMetaCache::new(cache_root.to_path_buf());
         let mut items = Vec::with_capacity(record.drafts.len());
         for draft in &record.drafts {
+            if view::awaits_initial_meta(draft) {
+                continue;
+            }
             if let Some(meta) =
                 cache.load(draft.term.as_str(), draft.understanding.as_str(), &pair)?
             {
@@ -389,6 +399,7 @@ impl ResultDoc {
             ok: true,
             session: record.id.clone(),
             pair: PairDoc::of(record),
+            sentences: record.sentences,
             phase: view::phase_label(phase),
             paths: PathsDoc {
                 deck: paths.deck.clone(),
@@ -504,10 +515,11 @@ mod tests {
 
     use super::super::store::{DraftRecord, WorkerHandle};
     use super::*;
-    use crate::generation::artifact_cache::VOICE_FILE;
+    use crate::generation::artifact_cache::{ILLUSTRATION_FILE, SCENE_FILE, VOICE_FILE};
+    use crate::generation::visual_revision;
     use crate::session::{
         CandidateRecord, CardCell, CardMeta, CardMetaCache, CardRewrite, Register, Sense,
-        SentenceKind, SentenceLevel, WordCandidate,
+        SentenceKind, SentenceLevel, SentenceTypeMix, WordCandidate,
     };
 
     fn unlabeled_meta() -> CardMeta {
@@ -555,6 +567,36 @@ mod tests {
         ))
     }
 
+    fn store_artifacts(home: &TempDir, term: &str, understanding: &str) {
+        let pair = LanguagePair::new("fr", "en");
+        CardMetaCache::new(home.path())
+            .store(term, understanding, &pair, &fixture_meta())
+            .expect("valid meta fixture must be stored");
+        let cache = CardCell::new(home.path(), &pair, term, understanding).cache();
+        let visual = cache
+            .visual(visual_revision())
+            .expect("production revision must be valid");
+        fs::write(
+            cache.filepath(VOICE_FILE).expect("voice path must resolve"),
+            b"x",
+        )
+        .expect("voice written");
+        fs::write(
+            visual
+                .filepath(SCENE_FILE)
+                .expect("scene path must resolve"),
+            include_bytes!("../../../tests/fixtures/production-scene.json"),
+        )
+        .expect("scene written");
+        fs::write(
+            visual
+                .filepath(ILLUSTRATION_FILE)
+                .expect("picture path must resolve"),
+            b"x",
+        )
+        .expect("picture written");
+    }
+
     fn record() -> SessionRecord {
         SessionRecord::understood(
             String::from("fr-1"),
@@ -600,9 +642,45 @@ mod tests {
                 value["candidates"]["items"][0]["senses"][1]["selected"].as_bool(),
                 value.get("cards"),
                 value["candidates"]["items"][0]["senses"][1].get("number"),
+                value["sentences"].clone(),
             ),
-            (Some("understood"), Some("a hoax"), Some(true), None, None),
-            "an understood document must carry candidate senses (no derived number) and omit the cards block"
+            (
+                Some("understood"),
+                Some("a hoax"),
+                Some(true),
+                None,
+                None,
+                serde_json::json!({"types": "natural"}),
+            ),
+            "an understood document must carry candidate senses and natural sentence settings while omitting the cards block"
+        );
+    }
+
+    #[test]
+    fn nondefault_sentence_settings_are_exposed_by_session_and_result_documents() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let record = record().with_sentences(SentenceBatchSettings::new(
+            Some(SentenceLevel::B1),
+            SentenceTypeMix::Varied,
+        ));
+        let session = value_of(&record, home.path());
+        let paths = ResultRecord {
+            deck: String::from("/out/cards.apkg"),
+            report: String::from("/out/cards.pdf"),
+            output: String::from("/out"),
+            cards: 0,
+            failed: 0,
+        };
+        let result = serde_json::to_value(
+            ResultDoc::of(&record, home.path(), Phase::Published, &paths)
+                .expect("result document must build"),
+        )
+        .expect("result document must serialize");
+        let expected = serde_json::json!({"level": "b1", "types": "varied"});
+        assert_eq!(
+            (session["sentences"].clone(), result["sentences"].clone()),
+            (expected.clone(), expected),
+            "session or result JSON omitted the configured batch sentence settings"
         );
     }
 
@@ -615,6 +693,7 @@ mod tests {
             understanding: String::from("a duck"),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: None,
+            meta_request: None,
         }];
         let cell = CardCell::new(
             home.path(),
@@ -659,6 +738,67 @@ mod tests {
     }
 
     #[test]
+    fn a_partial_result_hides_rollback_cache_while_initial_metadata_is_pending() {
+        let home = TempDir::new().expect("tempdir must be created");
+        store_artifacts(&home, "canard", "a duck");
+        store_artifacts(&home, "hibou", "an owl");
+        let mut record = record();
+        record.drafts = vec![
+            DraftRecord {
+                term: String::from("canard"),
+                understanding: String::from("a duck"),
+                costs: crate::session::ArtifactCosts::default(),
+                rewrite: None,
+                meta_request: Some(
+                    SentenceLabelSelection::empty().choosing(SentenceAxis::Level, 4),
+                ),
+            },
+            DraftRecord {
+                term: String::from("hibou"),
+                understanding: String::from("an owl"),
+                costs: crate::session::ArtifactCosts::default(),
+                rewrite: None,
+                meta_request: None,
+            },
+        ];
+        let session = value_of(&record, home.path());
+        let paths = ResultRecord {
+            deck: String::from("/out/cards.apkg"),
+            report: String::from("/out/cards.pdf"),
+            output: String::from("/out"),
+            cards: 1,
+            failed: 1,
+        };
+        let result = serde_json::to_value(
+            ResultDoc::of(&record, home.path(), Phase::Partial, &paths)
+                .expect("partial result document must build"),
+        )
+        .expect("partial result document must serialize");
+        let stale = &session["cards"]["items"][0];
+        assert_eq!(
+            (
+                stale["artifacts"]["meta"].as_bool(),
+                stale["artifacts"]["sound"].as_bool(),
+                stale["artifacts"]["scene"].as_bool(),
+                stale["artifacts"]["picture"].as_bool(),
+                stale.get("labels"),
+                result["items"].as_array().map(Vec::len),
+                result["items"][0]["term"].as_str(),
+            ),
+            (
+                Some(false),
+                Some(false),
+                Some(false),
+                Some(false),
+                None,
+                Some(1),
+                Some("hibou"),
+            ),
+            "pending initial metadata exposed rollback cache as current status or published result"
+        );
+    }
+
+    #[test]
     fn a_staged_adjustment_separates_current_labels_from_the_requested_selection() {
         let home = TempDir::new().expect("tempdir must be created");
         let pair = LanguagePair::new("fr", "en");
@@ -678,6 +818,7 @@ mod tests {
             understanding: String::from("a duck"),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: staged.rewrite().cloned(),
+            meta_request: None,
         }];
         CardMetaCache::new(home.path())
             .store(
@@ -730,6 +871,7 @@ mod tests {
             understanding: String::from("a duck"),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: Some(CardRewrite::new(Some(previous), requested, " \n ")),
+            meta_request: None,
         }];
         let value = value_of(&record, home.path());
         assert_eq!(
@@ -784,6 +926,7 @@ mod tests {
                 SentenceLabelSelection::empty().choosing(SentenceAxis::Level, 2),
                 "",
             )),
+            meta_request: None,
         }];
         let value = value_of(&record, home.path());
         assert_eq!(

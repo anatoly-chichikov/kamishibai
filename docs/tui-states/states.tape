@@ -36,6 +36,12 @@ Space
 Sleep 800ms
 Screenshot "live/00b-welcome-env.png"
 
+# index 4 — WhatIUnderstood with the closed batch sentence summary
+Type "4"
+Space
+Sleep 800ms
+Screenshot "live/02-what-i-understood.png"
+
 # index 5 — ChangeSomething modal over WhatIUnderstood
 Type "5"
 Space
@@ -155,6 +161,12 @@ Type "26"
 Space
 Sleep 800ms
 Screenshot "live/27-generation-partial.png"
+
+# index 27 — batch sentence settings retain b1 + varied in both inline carousels
+Type "27"
+Space
+Sleep 800ms
+Screenshot "live/28-batch-sentence-settings.png"
 Sleep 250ms
 
 Type "q"

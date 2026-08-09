@@ -16,6 +16,7 @@ All future work references this map instead of re-deriving transitions.
 | `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `00-welcome.png` (no env key) · `00b-welcome-env.png` (`GEMINI_API_KEY` set) |
 | `YourWords`       | fullscreen                                                                        | `01-your-words.png`             |
 | `WhatIUnderstood` | fullscreen                                                                        | `02-what-i-understood.png` · `24-esc-review-back.png` (current Esc footer) |
+| Batch sentence settings | inline editor below the reviewed candidates on `WhatIUnderstood`                    | `28-batch-sentence-settings.png` · `29-batch-sentence-settings-narrow.png` |
 | `ChangeSomething` | modal over `WhatIUnderstood`, opened from the `+ add more` row in the sense picker | `03-change-something-modal.png` |
 | `YourCards`       | fullscreen                                                                        | `04-your-cards.png`             |
 | Retry stress      | synthetic `YourCards` gallery with active, inactive, recovered, and terminal attempts | `06b-your-cards-retry-stress.png` |
@@ -38,11 +39,12 @@ Sentence-label editing, retry, failure banner and recovery are inline within
 The synthetic PNGs (`00-welcome.png`, `00b-welcome-env.png`,
 `03-change-something-modal.png`, `06-your-cards-retrying.png`,
 `06b-your-cards-retry-stress.png`, `07-your-cards-couldnt-finish.png`, the Esc lifecycle set from
-`23-esc-words-clear.png` through `27-generation-partial.png`, and the S1–S12 sentence-label set from
+`23-esc-words-clear.png` through `27-generation-partial.png`, the batch sentence-settings
+pair (`28-batch-sentence-settings.png` and `29-batch-sentence-settings-narrow.png`), and the S1–S12 sentence-label set from
 `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png`) require modal,
 editor, cache, width, or failure injection that the live-binary `capture.tape`
 does not exercise. They are produced reproducibly by `states.tape` plus the
-1200 px `states-narrow.tape` for S10; both drive `examples/tui_states.rs` (no
+1200 px `states-narrow.tape` for S10 and the narrow batch settings; both drive `examples/tui_states.rs` (no
 Gemini) through the same EN→FR French flow at 2x. Re-snap them with
 `vhs states.tape` and `vhs states-narrow.tape`. The two Welcome shots are the
 same `EnterKey` stage with the only difference being `GEMINI_API_KEY`: absent it
@@ -56,7 +58,8 @@ the stray Return the shell injects when it launches the binary cannot drift or
 contaminate the index.
 
 The retry stress gallery is index 21. Esc lifecycle states are indices 22–26,
-appended so the established absolute indices remain stable. The stress gallery's six cards preserve valid pipeline
+and the open batch sentence settings are index 27, appended so the established absolute
+indices remain stable. The stress gallery's six cards preserve valid pipeline
 order while showing the identical active-attempt copy (`ai is working…`),
 inactive retry rows with only their dot, artifact, and known cost, a recovered
 artifact, and a terminal `gave up` row together. Their card heads carry the
@@ -114,16 +117,44 @@ those sentences instead of maintaining a parallel taxonomy.
 proceed to card generation as separate cards, while `ok=false` rows stay visible
 with a struck-through term so the user can see what was rejected and why.
 
+## Batch sentence settings
+
+Every non-empty `WhatIUnderstood` review ends with the exact persistent summary
+`sentences: level — · types natural`. `S` or a click anywhere on that visible
+summary opens two inline carousels immediately below it: `what's the desired
+level?` with `—`, `a1`, `a2`, `b1`, `b2`, `c1`, `c2`, and `how to mix the
+types?` with `natural`, `varied`. They use the same fixed-track marker and
+two-cell `< ` / ` >` hit geometry as the per-card editor. The focused question
+is white and bold, the selected chip is inverted, and the entire block follows
+the ordinary body scroll so a short viewport brings the focused row into view.
+
+These are batch preferences, not a new screen or modal. `←/→` moves one
+adjacent choice without wrapping, `↑/↓` moves between the two rows, and `Esc`
+closes only this editor while retaining both choices. While it is open, its
+input ownership prevents `Enter`, `D`, `J`, `Space`, or other printable keys
+from leaking into candidate or sense controls. The choices survive sense
+re-review, screen changes, and session resume; only a new batch resets them to
+`level — · types natural`.
+
+`Ctrl+G` is valid with the editor open. At that boundary the settings expand
+once, after excluded candidates and selected senses have produced the final
+draft order. An optional level pins that level on every initial metadata
+request. `natural` leaves sentence type unconstrained, while `varied`
+deterministically allocates the supported statement, question, and dialogue
+mix across the drafts. This allocation adds no provider call of its own.
+
 ## Sentence-label surface
 
 Fresh generated metadata may attribute the sentence by register, type, and an
 operational CEFR band. The lowercase choices are `a1`, `a2`, `b1`, `b2`, `c1`,
 and `c2`. They classify only the language surrounding the target term; the
 target term itself is exempt, and the estimate is not an official proficiency
-assessment. A new card first gets the natural sentence required by its approved
-understanding and only then receives a descriptive level; initial generation
-never targets a band. The level becomes a rewrite constraint only after the
-user explicitly changes it. Every card head keeps `term → target sentence`.
+assessment. With the default batch level `—`, a new card first gets the natural
+sentence required by its approved understanding and only then receives a
+descriptive level; that default initial generation does not target a band. An
+explicit batch-level choice is the initial-generation exception and constrains
+every draft. A later per-card level change becomes a rewrite constraint. Every
+card head keeps `term → target sentence`.
 The artifacts begin immediately after the last line of that head, including
 when the target sentence wraps, and remain an uninterrupted left column in
 `meta`, `audio`, `scene`, `picture` order, including their size and final `$…`
@@ -233,6 +264,10 @@ is no per-card modal and `R` has no `YourCards` action.
         │       └─ [Enter] on the "+ add more" row ──► ChangeSomething (bulk modal)
         │                                                  ├─ [Enter] send ──► (BulkCorrection busy) ──► WhatIUnderstood
         │                                                  └─ [Esc] cancel ──► WhatIUnderstood
+        ├─ [S]/[click sentence summary] ──► batch sentence settings open
+        │       ├─ [←→] pick · [↑↓] row
+        │       ├─ [Esc] close while retaining choices
+        │       └─ [Ctrl+G, ≥1 ok row] ──► allocate initial requests ──► YourCards
         ├─ [D] drop selected row ──► last row dropped returns to YourWords (blob cleared)
         ├─ [Esc, no inner layer] ──► YourWords (blob and selected senses preserved)
         ├─ [Ctrl+L] ──► PickMyLanguage modal ──► re-runs understanding
@@ -273,8 +308,9 @@ not a key the user presses.
 | `Welcome` · pick language   | `←/→` cycle `my language` · `Enter` next · `Ctrl+C` quit                                                     |
 | `Welcome` · enter key       | type/`Cmd+V` paste key · `←/→` move focus (submit ↔ load-from-env, env only) · `Enter` submit · `Esc` back   |
 | `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `Ctrl+L` language · double `Esc` clears nonempty input |
-| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav · `Enter`/`→` pick meanings · `D` drop row · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
+| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav · `Enter`/`→` pick meanings · `D` drop row · `S` sentence settings · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
 | `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter`/`←` done · `Enter` on `+ add more` opens ChangeSomething  |
+| `WhatIUnderstood` sentence settings | `Ctrl+G` make cards · `←→` pick · `↑↓` row · `Esc` close (`Enter` and printable review keys inert) |
 | `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
 | `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` tune · `↑↓` nav (`Space` is an unadvertised alias) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
@@ -297,7 +333,8 @@ Events are divided between the app shell and individual screens:
 - **Shell owns**: terminal `Resize`, pumping the session-engine channel, every
   timed destructive-`Esc` confirmation, stop draining/publication, and the independent final quit.
 - **Transition owns**: every key in the table above, modal dismissal (`Esc` → `Cancel`),
-  live sentence-label staging, text editing, list navigation, row expansion.
+  batch sentence-settings input ownership, live sentence-label staging, text
+  editing, list navigation, row expansion.
 - **Session engine emits** (fed back into the transition as `AppEvent`s):
   `UnderstandingReady`, `BulkCorrectionReady`, `RetryStarted`, `RetryExhausted`,
   `BatchReady`, `BatchDone { failed }`.

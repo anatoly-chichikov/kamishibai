@@ -22,8 +22,9 @@ use crossterm::terminal::{
 };
 use kamishibai::session::{
     Artifact, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptFault, AxisSet, CardArtifacts,
-    CardDraft, CardMeta, GenerationCost, LanguagePair, Register, SentenceAxis, SentenceKind,
-    SentenceLabels, SentenceLevel, WordCandidate,
+    CardDraft, CardMeta, GenerationCost, LanguagePair, Register, SentenceAxis,
+    SentenceBatchSettings, SentenceKind, SentenceLabels, SentenceLevel, SentenceTypeMix,
+    WordCandidate,
 };
 use kamishibai::tui::{
     App, BusyKind, KeySource, ModalKind, MousePointer, Screen, draw, mouse_pointer_at,
@@ -548,6 +549,14 @@ fn build_states() -> Vec<(String, App)> {
         .confirmed_learning("fr")
         .understood(candidates.clone());
 
+    let batch_sentence_settings = review
+        .clone()
+        .with_sentence_settings(SentenceBatchSettings::new(
+            Some(SentenceLevel::B1),
+            SentenceTypeMix::Varied,
+        ))
+        .sentence_settings_opened();
+
     let change_something = review
         .clone()
         .with_modal(ModalKind::ChangeSomething)
@@ -847,6 +856,10 @@ fn build_states() -> Vec<(String, App)> {
         (String::from("17 · Esc · generation stop armed"), stop_armed),
         (String::from("18 · Esc · generation stopping"), stopping),
         (String::from("19 · Esc · partial publish"), partial),
+        (
+            String::from("02c · What I understood · batch sentence settings"),
+            batch_sentence_settings,
+        ),
     ]
 }
 
@@ -904,6 +917,35 @@ mod tests {
                 .all(|needle| !rendered.contains(needle))
                 && app.cards_running_target() == Some((0, Artifact::Sound)),
             "retry layout stress state leaked attempt history out of the card heads:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn batch_sentence_settings_state_keeps_both_carousels_visible() {
+        let states = build_states();
+        let (_, app) = states
+            .get(27)
+            .expect("batch sentence settings state must stay at index 27");
+        let backend = TestBackend::new(120, 50);
+        let mut terminal = Terminal::new(backend).expect("backend must initialize");
+        terminal
+            .draw(|frame| draw(frame, app))
+            .expect("batch sentence settings state must render");
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer[(column, row)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("sentences: level b1 · types varied")
+                && rendered.contains("what's the desired level?")
+                && rendered.contains("how to mix the types?")
+                && rendered.contains("[Esc] close"),
+            "synthetic batch sentence settings must show both retained choices and editor rows:\n{rendered}"
         );
     }
 }

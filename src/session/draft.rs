@@ -661,6 +661,7 @@ pub struct CardDraft {
     understanding: String,
     pair: LanguagePair,
     meta: Option<CardMeta>,
+    meta_request: Option<SentenceLabelSelection>,
     rewrite: Option<CardRewrite>,
     artifacts: CardArtifacts,
 }
@@ -677,6 +678,7 @@ impl CardDraft {
             understanding: understanding.into(),
             pair,
             meta: None,
+            meta_request: None,
             rewrite: None,
             artifacts: CardArtifacts::default(),
         }
@@ -700,6 +702,19 @@ impl CardDraft {
     /// Return the rich meta if it has been generated.
     pub fn meta(&self) -> Option<&CardMeta> {
         self.meta.as_ref()
+    }
+
+    /// Return the pending label request for this draft's first metadata pass.
+    #[must_use]
+    pub fn meta_request(&self) -> Option<&SentenceLabelSelection> {
+        self.meta_request.as_ref()
+    }
+
+    /// Return the draft carrying one label request for its first metadata pass.
+    #[must_use]
+    pub fn requesting_meta(mut self, selection: SentenceLabelSelection) -> Self {
+        self.meta_request = Some(selection);
+        self
     }
 
     /// Return the queued full-card rewrite when metadata must be regenerated.
@@ -739,6 +754,7 @@ impl CardDraft {
             understanding: self.understanding,
             pair: self.pair,
             meta: Some(meta),
+            meta_request: None,
             rewrite: None,
             artifacts,
         }
@@ -763,6 +779,7 @@ impl CardDraft {
             understanding,
             pair: self.pair,
             meta: Some(meta),
+            meta_request: None,
             rewrite: None,
             artifacts,
         }
@@ -794,6 +811,7 @@ impl CardDraft {
             understanding: self.understanding,
             pair: self.pair,
             meta: self.meta,
+            meta_request: None,
             rewrite,
             artifacts: self.artifacts,
         }
@@ -815,6 +833,7 @@ impl CardDraft {
             understanding: self.understanding,
             pair: self.pair,
             meta: None,
+            meta_request: None,
             rewrite: self.rewrite.map(CardRewrite::activate),
             artifacts: costs.hydrate(fresh),
         }
@@ -843,6 +862,9 @@ impl CardDraft {
             );
             self.meta = Some(previous);
             self.artifacts = artifacts;
+        }
+        if rewrite.is_some() {
+            self.meta_request = None;
         }
         self.rewrite = rewrite;
         self
@@ -877,6 +899,7 @@ impl CardDraft {
             understanding: understanding.into(),
             pair: self.pair,
             meta: Some(meta),
+            meta_request: None,
             rewrite: None,
             artifacts,
         }
@@ -889,6 +912,7 @@ impl CardDraft {
             understanding: self.understanding,
             pair: self.pair,
             meta: self.meta,
+            meta_request: self.meta_request,
             rewrite: self.rewrite,
             artifacts,
         }
@@ -903,6 +927,7 @@ impl CardDraft {
             understanding: self.understanding,
             pair: self.pair,
             meta: self.meta,
+            meta_request: self.meta_request,
             rewrite: self.rewrite,
             artifacts,
         }

@@ -139,9 +139,15 @@ fn ensure_plan(record: &mut SessionRecord) {
         .iter()
         .map(|stored| stored.clone().candidate())
         .collect();
-    record.drafts = drafts_for(&candidates, &pair)
-        .iter()
-        .map(record_of)
+    let drafts = drafts_for(&candidates, &pair);
+    let requests = record.sentences.selections(drafts.len());
+    record.drafts = drafts
+        .into_iter()
+        .zip(requests)
+        .map(|(draft, request)| match request {
+            Some(selection) => record_of(&draft.requesting_meta(selection)),
+            None => record_of(&draft),
+        })
         .collect();
 }
 
@@ -449,6 +455,7 @@ fn record_of(draft: &CardDraft) -> DraftRecord {
         understanding: String::from(draft.understanding()),
         costs: crate::session::ArtifactCosts::from_artifacts(draft.artifacts()),
         rewrite: draft.rewrite().cloned(),
+        meta_request: draft.meta_request().cloned(),
     }
 }
 
@@ -498,9 +505,45 @@ impl MutedStdout {
 
 #[cfg(test)]
 mod tests {
-    use super::{cancel_imported_rewrite, resume};
+    use super::{cancel_imported_rewrite, ensure_plan, resume};
     use crate::cli::session::store::{DraftRecord, Phase, SessionRecord};
-    use crate::session::{ArtifactCosts, CardRewrite, SentenceLabelSelection};
+    use crate::session::{
+        ArtifactCosts, CandidateRecord, CardRewrite, SentenceBatchSettings, SentenceLabelSelection,
+        SentenceLevel, SentenceTypeMix, WordCandidate,
+    };
+
+    #[test]
+    fn committing_a_plan_persists_each_allocated_meta_request() {
+        let mut record = SessionRecord::understood(
+            String::from("fr-settings"),
+            String::from("created"),
+            String::from("EN"),
+            String::from("FR"),
+            String::from("/out"),
+            String::from("primary"),
+            String::from("words"),
+            vec![String::from("canard"), String::from("chouette")],
+            vec![
+                CandidateRecord::from_candidate(&WordCandidate::new("canard", "a duck", true)),
+                CandidateRecord::from_candidate(&WordCandidate::new("chouette", "an owl", true)),
+            ],
+        )
+        .with_sentences(SentenceBatchSettings::new(
+            Some(SentenceLevel::B1),
+            SentenceTypeMix::Varied,
+        ));
+        let expected = record.sentences.selections(2);
+        ensure_plan(&mut record);
+        assert_eq!(
+            record
+                .drafts
+                .iter()
+                .map(|draft| draft.meta_request.clone())
+                .collect::<Vec<_>>(),
+            expected,
+            "committing a configured batch lost its allocated initial metadata requests"
+        );
+    }
 
     #[test]
     fn an_imported_reroll_without_a_note_cancels_the_failed_rewrite() {
@@ -524,6 +567,7 @@ mod tests {
                 SentenceLabelSelection::empty(),
                 "make it formal",
             )),
+            meta_request: None,
         }];
         cancel_imported_rewrite(&mut record, 0, "canard")
             .expect("the imported reroll must be reset");

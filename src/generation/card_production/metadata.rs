@@ -1,6 +1,5 @@
 //! Gemini metadata generation, correction, and stable cache persistence.
 
-use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
@@ -8,13 +7,13 @@ use anyhow::{Result, anyhow};
 use super::artifact_file;
 use super::cost_accounting::CostAccounting;
 use super::invalidate_card;
+use super::invalidation::{DependentGuards, clear_for_meta_refresh};
 use crate::gemini::GeminiAccess;
-use crate::generation::artifact_cache::{
-    Cache, ROOT_STAGE_LOCK_TIMEOUT, RootStage, VOICE_COST_FILE, VOICE_FILE,
-};
+use crate::generation::artifact_cache::{Cache, META_FILE, ROOT_STAGE_LOCK_TIMEOUT, RootStage};
+use crate::generation::visual_revision;
 use crate::session::{
     Artifact, ArtifactAttempt, ArtifactFile, CardCell, CardDraft, CardMeta, CardMetaCache,
-    CardRevision, LanguagePair,
+    CardRevision, LanguagePair, SentenceLabelSelection,
 };
 
 /// Produces and stores the metadata that identifies one card.
@@ -42,32 +41,51 @@ impl MetadataProduction {
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
+        request: Option<&SentenceLabelSelection>,
         slot: Option<usize>,
     ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
         let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
-        let _guard = match cache.hold_root_stage(RootStage::Meta, ROOT_STAGE_LOCK_TIMEOUT) {
-            Ok(guard) => guard,
+        let visual = match cache.visual(visual_revision()) {
+            Ok(visual) => visual,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
+        let _meta = match cache.hold_root_stage(RootStage::Meta, ROOT_STAGE_LOCK_TIMEOUT) {
+            Ok(meta) => meta,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
         match self.meta_cache().load_current(term, understanding, pair) {
-            Ok(Some(meta)) => {
+            Ok(Some(meta)) if request.is_none_or(|request| request.pinned().is_empty()) => {
                 let result = self
-                    .store_unlocked(term, understanding, pair, &meta)
+                    .cached_file(term, understanding, pair)
                     .map(|file| (meta, Some(file)));
                 return ArtifactAttempt::unmetered(result);
+            }
+            Ok(Some(meta)) => {
+                if let Some(meta) = requested_cached(meta, request) {
+                    let result = self
+                        .replace_cached(term, understanding, pair, &meta)
+                        .map(|file| (meta, Some(file)));
+                    return ArtifactAttempt::unmetered(result);
+                }
             }
             Ok(None) => {}
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         }
+        let _dependents = match DependentGuards::hold(&cache, &visual) {
+            Ok(dependents) => dependents,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
         let client = match self.access.client() {
             Ok(client) => client,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        let costs = self.costs.recorder(cache, Artifact::Meta, slot);
+        let costs = self.costs.recorder(cache.clone(), Artifact::Meta, slot);
         let result = client
-            .generate_card_meta_observed(term, understanding, pair, |record| costs.push(record))
+            .generate_card_meta_observed(term, understanding, pair, request, |record| {
+                costs.push(record)
+            })
             .and_then(|meta| {
-                self.store_unlocked(term, understanding, pair, &meta)
+                self.replace_generated(&cache, &visual, term, understanding, pair, &meta)
                     .map(|file| (meta, Some(file)))
             });
         match costs.cumulative(false) {
@@ -150,31 +168,17 @@ impl MetadataProduction {
         meta: &CardMeta,
     ) -> Result<ArtifactFile> {
         let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
-        let _guard = cache.hold_root_stage(RootStage::Meta, ROOT_STAGE_LOCK_TIMEOUT)?;
-        self.store_unlocked(term, understanding, pair, meta)
-    }
-
-    fn store_unlocked(
-        &self,
-        term: &str,
-        understanding: &str,
-        pair: &LanguagePair,
-        meta: &CardMeta,
-    ) -> Result<ArtifactFile> {
-        let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
-        let refresh = self
+        let visual = cache.visual(visual_revision())?;
+        let _meta = cache.hold_root_stage(RootStage::Meta, ROOT_STAGE_LOCK_TIMEOUT)?;
+        if self
             .meta_cache()
             .load_current(term, understanding, pair)?
-            .is_none();
-        let _voice = refresh
-            .then(|| cache.hold_root_stage(RootStage::Voice, ROOT_STAGE_LOCK_TIMEOUT))
-            .transpose()?;
-        if refresh {
-            remove_cached(&cache, VOICE_FILE)?;
-            remove_cached(&cache, VOICE_COST_FILE)?;
+            .is_some()
+        {
+            return self.cached_file(term, understanding, pair);
         }
-        let (filename, path, cached) = self.meta_cache().store(term, understanding, pair, meta)?;
-        Ok(artifact_file(filename, path, cached, None))
+        let _dependents = DependentGuards::hold(&cache, &visual)?;
+        self.replace_generated(&cache, &visual, term, understanding, pair, meta)
     }
 
     fn replace(&self, draft: &CardDraft, revision: &CardRevision) -> Result<ArtifactFile> {
@@ -194,15 +198,68 @@ impl MetadataProduction {
         )
     }
 
+    pub(super) fn replace_generated(
+        &self,
+        cache: &Cache,
+        visual: &Cache,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+        meta: &CardMeta,
+    ) -> Result<ArtifactFile> {
+        clear_for_meta_refresh(cache, visual)?;
+        self.replace_meta(term, understanding, pair, meta, false)
+    }
+
+    fn replace_cached(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+        meta: &CardMeta,
+    ) -> Result<ArtifactFile> {
+        self.replace_meta(term, understanding, pair, meta, true)
+    }
+
+    fn replace_meta(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+        meta: &CardMeta,
+        cached: bool,
+    ) -> Result<ArtifactFile> {
+        let (filename, path) = self.meta_cache().replace(term, understanding, pair, meta)?;
+        Ok(artifact_file(filename, path, cached, None))
+    }
+
+    fn cached_file(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+    ) -> Result<ArtifactFile> {
+        let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
+        Ok(artifact_file(
+            String::from(META_FILE),
+            cache.filepath(META_FILE)?,
+            true,
+            None,
+        ))
+    }
+
     fn meta_cache(&self) -> CardMetaCache {
         CardMetaCache::new(self.cache.clone())
     }
 }
 
-fn remove_cached(cache: &Cache, filename: &str) -> Result<()> {
-    let path = cache.path().join(filename);
-    if path.exists() {
-        fs::remove_file(path)?;
-    }
-    Ok(())
+fn requested_cached(meta: CardMeta, request: Option<&SentenceLabelSelection>) -> Option<CardMeta> {
+    let request = request?;
+    let labels = meta.sentence_labels()?.clone();
+    let matches = request.pinned().iter().all(|axis| {
+        request
+            .token(axis)
+            .is_some_and(|token| labels.token(axis) == Some(token))
+    });
+    matches.then(|| meta.with_sentence_labels(request.reconciled(labels)))
 }

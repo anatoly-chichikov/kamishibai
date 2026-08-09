@@ -17,7 +17,7 @@ use super::{
 };
 
 const UNDERSTANDING_VERSION: &str = "v6";
-const META_POLICY: &str = "v2-language-local-prompt-examples";
+const META_POLICY: &str = "v3-initial-sentence-preferences";
 
 /// Caching decorator for the first-pass understanding contract.
 #[derive(Clone, Debug)]
@@ -258,6 +258,23 @@ impl CardMetaCache {
         }
         let path = cache.filepath(META_FILE)?;
         Ok((META_FILE.to_string(), path, cached))
+    }
+
+    /// Atomically replace one metadata record even when its policy is current.
+    pub(crate) fn replace(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+        meta: &CardMeta,
+    ) -> Result<(String, PathBuf)> {
+        let cache = CardCell::new(self.root.clone(), pair, term, understanding).cache();
+        replace_json(
+            &cache,
+            META_FILE,
+            &MetaRecord::from_meta(term, understanding, pair, meta),
+        )?;
+        Ok((META_FILE.to_string(), cache.filepath(META_FILE)?))
     }
 
     fn record(

@@ -15,6 +15,7 @@ use super::screens::banner;
 use super::screens::common::{CARD_DETAIL_COLUMN, GUTTER, TOP_MARGIN, frame_rects, language_chip};
 use super::screens::sentence_labels::EditorControl;
 use super::screens::welcome;
+use super::screens::what_i_understood::{SentenceSettingsControl, sentence_settings_control_at};
 use super::screens::your_cards::{
     artifact_file_label, card_range_at, detail_pane_height, head_rows_for, rejected_attempts,
     rejected_link_columns, rejected_rows_offset, sentence_editor_control_at,
@@ -173,6 +174,43 @@ pub fn sentence_label_event_at(
         EditorControl::Chip(row, index) => Some(AppEvent::SentenceLabelChoose(row, index)),
         EditorControl::Advance(row, forward) => Some(AppEvent::SentenceLabelAdvance(row, forward)),
         EditorControl::Note => Some(AppEvent::SentenceLabelFocus(LabelEditorRow::Note)),
+    }
+}
+
+/// Return the batch sentence-settings action at one terminal cell.
+pub fn sentence_settings_event_at(
+    app: &App,
+    terminal: Rect,
+    click_x: u16,
+    click_y: u16,
+) -> Option<AppEvent> {
+    if app.screen() != Screen::WhatIUnderstood
+        || app.modal().is_some()
+        || app.busy().is_some()
+        || app.error().is_some()
+    {
+        return None;
+    }
+    let frame = frame_rects(terminal);
+    if click_x < frame.body.x
+        || click_x >= frame.body.x.saturating_add(frame.body.width)
+        || click_y < frame.body.y
+        || click_y >= frame.body.y.saturating_add(frame.body.height)
+    {
+        return None;
+    }
+    let width = usize::from(frame.body.width);
+    let column = usize::from(click_x.saturating_sub(frame.body.x));
+    let visible_row = usize::from(click_y.saturating_sub(frame.body.y));
+    let content_row = usize::from(app.body_scroll()).saturating_add(visible_row);
+    match sentence_settings_control_at(app, width, column, content_row)? {
+        SentenceSettingsControl::Open => Some(AppEvent::SentenceSettingsOpen),
+        SentenceSettingsControl::Editor(
+            super::screens::sentence_labels::BatchEditorControl::Chip(row, index),
+        ) => Some(AppEvent::SentenceSettingsChoose(row, index)),
+        SentenceSettingsControl::Editor(
+            super::screens::sentence_labels::BatchEditorControl::Advance(row, forward),
+        ) => Some(AppEvent::SentenceSettingsAdvance(row, forward)),
     }
 }
 

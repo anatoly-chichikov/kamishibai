@@ -80,6 +80,7 @@ pub enum ScreenState {
     Empty(EmptyCause),
     Retrying,
     Failed,
+    EditingSentenceSettings,
     EditingLabels,
     Regenerating,
 }

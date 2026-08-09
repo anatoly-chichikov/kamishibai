@@ -3,9 +3,9 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::session::{SentenceAxis, SentenceLabelSelection, SentenceLabels};
+use crate::session::{SentenceAxis, SentenceBatchSettings, SentenceLabelSelection, SentenceLabels};
 use crate::tui::palette;
-use crate::tui::sentence_editor::{LabelEditorRow, SentenceLabelsEditor};
+use crate::tui::sentence_editor::{BatchSettingsRow, LabelEditorRow, SentenceLabelsEditor};
 use crate::tui::text_field::TextField;
 
 const MARKER_WIDTH: usize = 2;
@@ -126,20 +126,53 @@ pub(crate) enum EditorControl {
     Note,
 }
 
+/// One clickable control inside the batch sentence-settings editor.
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ChipRegion {
+pub(crate) enum BatchEditorControl {
+    Chip(BatchSettingsRow, usize),
+    Advance(BatchSettingsRow, bool),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CarouselControl<Row> {
+    Chip(Row, usize),
+    Advance(Row, bool),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ChipRegion<Row> {
     row: usize,
     start: usize,
     end: usize,
-    control: EditorControl,
+    control: CarouselControl<Row>,
 }
 
 struct EditorLayout {
     lines: Vec<Line<'static>>,
-    chips: Vec<ChipRegion>,
+    chips: Vec<ChipRegion<LabelEditorRow>>,
     note_row: usize,
     note_start: usize,
     cursor: Option<(usize, usize)>,
+}
+
+struct BatchEditorLayout {
+    lines: Vec<Line<'static>>,
+    chips: Vec<ChipRegion<BatchSettingsRow>>,
+    ranges: Vec<(BatchSettingsRow, usize, usize)>,
+}
+
+struct CarouselAxis<Row> {
+    row: Row,
+    label: &'static str,
+    focused: bool,
+    selected: Option<usize>,
+}
+
+struct CarouselGeometry {
+    track_width: usize,
+    question_width: usize,
+    width: usize,
+    origin: (usize, usize),
 }
 
 /// Lay out the three generated or staged tags in one wrapping sequence.
@@ -215,7 +248,7 @@ pub(crate) fn editor_focus_end(
         .chips
         .iter()
         .filter_map(|region| match region.control {
-            EditorControl::Chip(row, _) if row == editor.row() => Some(region.row + 1),
+            CarouselControl::Chip(row, _) if row == editor.row() => Some(region.row + 1),
             _ => None,
         })
         .max()
@@ -247,7 +280,53 @@ pub(crate) fn editor_control_at(
         .chips
         .into_iter()
         .find(|region| row == region.row && column >= region.start && column < region.end)
-        .map(|region| region.control)
+        .map(|region| match region.control {
+            CarouselControl::Chip(row, index) => EditorControl::Chip(row, index),
+            CarouselControl::Advance(row, forward) => EditorControl::Advance(row, forward),
+        })
+}
+
+/// Render both rows of the batch sentence-settings editor.
+#[must_use]
+pub(crate) fn batch_editor_lines(
+    settings: SentenceBatchSettings,
+    focused: BatchSettingsRow,
+    width: usize,
+) -> Vec<Line<'static>> {
+    batch_editor_layout(settings, focused, width).lines
+}
+
+/// Return the focused batch editor row relative to its first rendered line.
+#[must_use]
+pub(crate) fn batch_editor_focus_range(
+    settings: SentenceBatchSettings,
+    focused: BatchSettingsRow,
+    width: usize,
+) -> (usize, usize) {
+    batch_editor_layout(settings, focused, width)
+        .ranges
+        .into_iter()
+        .find_map(|(row, start, end)| (row == focused).then_some((start, end - start)))
+        .unwrap_or((0, 1))
+}
+
+/// Return the batch sentence-settings control occupying one editor cell.
+#[must_use]
+pub(crate) fn batch_editor_control_at(
+    settings: SentenceBatchSettings,
+    focused: BatchSettingsRow,
+    width: usize,
+    column: usize,
+    row: usize,
+) -> Option<BatchEditorControl> {
+    batch_editor_layout(settings, focused, width)
+        .chips
+        .into_iter()
+        .find(|region| row == region.row && column >= region.start && column < region.end)
+        .map(|region| match region.control {
+            CarouselControl::Chip(row, index) => BatchEditorControl::Chip(row, index),
+            CarouselControl::Advance(row, forward) => BatchEditorControl::Advance(row, forward),
+        })
 }
 
 fn tag_style(pinned: bool) -> Style {
@@ -288,6 +367,7 @@ fn editor_layout(
         row_label(LabelEditorRow::Note),
         editor.row() == LabelEditorRow::Note,
         indent,
+        question_column(),
     );
     note.extend(TextField::new(editor.note().value(), NOTE_PLACEHOLDER).spans());
     lines.push(Line::from(note));
@@ -321,18 +401,15 @@ fn selector_width(editor: &SentenceLabelsEditor) -> usize {
     .into_iter()
     .map(|axis| {
         let count = editor.selection().choice_count(axis);
-        let chip = (0..count)
-            .map(|index| {
+        row_selector_width(
+            count,
+            (0..count).map(|index| {
                 editor
                     .selection()
                     .choice_token(axis, index)
                     .expect("invariant: every sentence-label axis must expose its declared choices")
-            })
-            .map(|token| super::common::display_width(token) + 2)
-            .max()
-            .expect("invariant: sentence-label axis must expose at least one choice");
-        chip.saturating_add(count.saturating_sub(1).saturating_mul(MARKER_WIDTH))
-            .saturating_add(2usize.saturating_mul(CHEVRON_WIDTH))
+            }),
+        )
     })
     .max()
     .expect("invariant: sentence-label editor must expose at least one axis")
@@ -344,7 +421,7 @@ fn axis_lines(
     width: usize,
     first_row: usize,
     indent: usize,
-) -> (Vec<Line<'static>>, Vec<ChipRegion>) {
+) -> (Vec<Line<'static>>, Vec<ChipRegion<LabelEditorRow>>) {
     let axis = row
         .axis()
         .expect("invariant: every rendered label row must own an axis");
@@ -352,15 +429,48 @@ fn axis_lines(
     let selected = editor.selection().token(axis).and_then(|token| {
         (0..count).find(|index| editor.selection().choice_token(axis, *index) == Some(token))
     });
+    carousel_lines(
+        CarouselAxis {
+            row,
+            label: row_label(row),
+            focused: editor.row() == row,
+            selected,
+        },
+        count,
+        |index| editor.selection().choice_token(axis, index),
+        CarouselGeometry {
+            track_width: selector_width(editor),
+            question_width: question_column(),
+            width,
+            origin: (first_row, indent),
+        },
+    )
+}
+
+fn carousel_lines<Row: Copy>(
+    axis: CarouselAxis<Row>,
+    count: usize,
+    choice_token: impl Fn(usize) -> Option<&'static str>,
+    geometry: CarouselGeometry,
+) -> (Vec<Line<'static>>, Vec<ChipRegion<Row>>) {
+    let CarouselAxis {
+        row,
+        label,
+        focused,
+        selected,
+    } = axis;
+    let CarouselGeometry {
+        track_width,
+        question_width,
+        width,
+        origin: (first_row, indent),
+    } = geometry;
     let mut lines = Vec::new();
     let mut regions = Vec::new();
-    let mut spans = row_prefix(row_label(row), editor.row() == row, indent);
-    let mut used = indent + question_column();
+    let mut spans = row_prefix(label, focused, indent, question_width);
+    let mut used = indent + question_width;
     let mut screen_row = first_row;
-    let track_width = selector_width(editor);
-    let selected_text = selected
-        .and_then(|index| editor.selection().choice_token(axis, index))
-        .unwrap_or("—");
+    let selected_text = selected.and_then(&choice_token).unwrap_or("—");
     let chip_width = super::common::display_width(selected_text) + 2;
     let rail_width = track_width
         .saturating_sub(chip_width)
@@ -371,7 +481,6 @@ fn axis_lines(
         used = indent;
         screen_row += 1;
     }
-    let focused = editor.row() == row;
     let (left, left_region) = chevron(row, screen_row, false, used, focused);
     spans.push(left);
     regions.push(left_region);
@@ -388,9 +497,7 @@ fn axis_lines(
             regions.push(region);
             used += width;
         }
-        let token = editor
-            .selection()
-            .choice_token(axis, current)
+        let token = choice_token(current)
             .expect("invariant: selected sentence-label choice must have a token");
         let chip = format!(" {token} ");
         let start = used;
@@ -403,7 +510,7 @@ fn axis_lines(
             row: screen_row,
             start,
             end: used,
-            control: EditorControl::Chip(row, current),
+            control: CarouselControl::Chip(row, current),
         });
         let remaining = count.saturating_sub(current + 1);
         for index in current + 1..count {
@@ -448,6 +555,87 @@ fn axis_lines(
     (lines, regions)
 }
 
+fn row_selector_width(count: usize, tokens: impl Iterator<Item = &'static str>) -> usize {
+    let chip = tokens
+        .map(|token| super::common::display_width(token) + 2)
+        .max()
+        .expect("invariant: sentence carousel must expose at least one choice");
+    chip.saturating_add(count.saturating_sub(1).saturating_mul(MARKER_WIDTH))
+        .saturating_add(2usize.saturating_mul(CHEVRON_WIDTH))
+}
+
+fn batch_editor_layout(
+    settings: SentenceBatchSettings,
+    focused: BatchSettingsRow,
+    width: usize,
+) -> BatchEditorLayout {
+    let mut lines = Vec::new();
+    let mut chips = Vec::new();
+    let mut ranges = Vec::new();
+    for row in [BatchSettingsRow::Level, BatchSettingsRow::Types] {
+        let start = lines.len();
+        let count = row.choice_count();
+        let (mut rendered, mut regions) = carousel_lines(
+            CarouselAxis {
+                row,
+                label: batch_row_label(row),
+                focused: row == focused,
+                selected: Some(row.selected(settings)),
+            },
+            count,
+            |index| row.choice_token(index),
+            CarouselGeometry {
+                track_width: batch_selector_width(),
+                question_width: batch_question_column(),
+                width,
+                origin: (start, 0),
+            },
+        );
+        lines.append(&mut rendered);
+        chips.append(&mut regions);
+        ranges.push((row, start, lines.len()));
+    }
+    BatchEditorLayout {
+        lines,
+        chips,
+        ranges,
+    }
+}
+
+fn batch_selector_width() -> usize {
+    [BatchSettingsRow::Level, BatchSettingsRow::Types]
+        .into_iter()
+        .map(|row| {
+            let count = row.choice_count();
+            row_selector_width(
+                count,
+                (0..count).map(|index| {
+                    row.choice_token(index)
+                        .expect("invariant: every batch sentence row must expose its choices")
+                }),
+            )
+        })
+        .max()
+        .expect("invariant: batch sentence editor must expose at least one row")
+}
+
+fn batch_question_column() -> usize {
+    [BatchSettingsRow::Level, BatchSettingsRow::Types]
+        .into_iter()
+        .map(batch_row_label)
+        .map(super::common::display_width)
+        .max()
+        .expect("invariant: batch sentence editor must expose at least one question")
+        .saturating_add(2)
+}
+
+fn batch_row_label(row: BatchSettingsRow) -> &'static str {
+    match row {
+        BatchSettingsRow::Level => "what's the desired level?",
+        BatchSettingsRow::Types => "how to mix the types?",
+    }
+}
+
 fn proportional_width(total: usize, slots: usize, occupied: usize) -> usize {
     assert!(
         slots > 0 && occupied <= slots,
@@ -460,13 +648,13 @@ fn proportional_width(total: usize, slots: usize, occupied: usize) -> usize {
         .saturating_add(occupied.min(remainder))
 }
 
-fn chevron(
-    row: LabelEditorRow,
+fn chevron<Row: Copy>(
+    row: Row,
     screen_row: usize,
     forward: bool,
     column: usize,
     focused: bool,
-) -> (Span<'static>, ChipRegion) {
+) -> (Span<'static>, ChipRegion<Row>) {
     let text = if forward { " >" } else { "< " };
     let style = if focused {
         palette::base()
@@ -479,26 +667,26 @@ fn chevron(
             row: screen_row,
             start: column,
             end: column + CHEVRON_WIDTH,
-            control: EditorControl::Advance(row, forward),
+            control: CarouselControl::Advance(row, forward),
         },
     )
 }
 
-fn marker(
-    row: LabelEditorRow,
+fn marker<Row: Copy>(
+    row: Row,
     screen_row: usize,
     index: usize,
     distance: usize,
     column: usize,
     width: usize,
-) -> (Span<'static>, ChipRegion) {
+) -> (Span<'static>, ChipRegion<Row>) {
     (
         Span::styled(" ".repeat(width), marker_style(distance)),
         ChipRegion {
             row: screen_row,
             start: column,
             end: column + width,
-            control: EditorControl::Chip(row, index),
+            control: CarouselControl::Chip(row, index),
         },
     )
 }
@@ -545,7 +733,12 @@ fn question_column() -> usize {
     .saturating_add(2)
 }
 
-fn row_prefix(label: &str, focused: bool, indent: usize) -> Vec<Span<'static>> {
+fn row_prefix(
+    label: &str,
+    focused: bool,
+    indent: usize,
+    question_width: usize,
+) -> Vec<Span<'static>> {
     let style = if focused {
         palette::base().add_modifier(Modifier::BOLD)
     } else {
@@ -553,7 +746,7 @@ fn row_prefix(label: &str, focused: bool, indent: usize) -> Vec<Span<'static>> {
     };
     vec![
         Span::styled(" ".repeat(indent), palette::base()),
-        Span::styled(super::common::pad_right(label, question_column()), style),
+        Span::styled(super::common::pad_right(label, question_width), style),
     ]
 }
 

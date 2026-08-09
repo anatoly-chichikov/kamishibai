@@ -33,7 +33,9 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::generation::artifact_cache::Cache;
 use crate::runtime::locations::{SystemContext, cache_root};
-use crate::session::{ArtifactCosts, CandidateRecord, CardRewrite};
+use crate::session::{
+    ArtifactCosts, CandidateRecord, CardRewrite, SentenceBatchSettings, SentenceLabelSelection,
+};
 
 use super::cost_journal::SessionCostJournal;
 use super::liveness;
@@ -80,6 +82,8 @@ pub(in crate::cli) struct DraftRecord {
     pub costs: ArtifactCosts,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewrite: Option<CardRewrite>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta_request: Option<SentenceLabelSelection>,
 }
 
 /// The last artifact the worker reported working on (advisory heartbeat).
@@ -116,6 +120,8 @@ pub(in crate::cli) struct SessionRecord {
     pub learning: String,
     pub out: String,
     pub senses: String,
+    #[serde(default)]
+    pub sentences: SentenceBatchSettings,
     pub source: String,
     pub phase: Phase,
     #[serde(default)]
@@ -156,6 +162,7 @@ impl SessionRecord {
             learning,
             out,
             senses,
+            sentences: SentenceBatchSettings::default(),
             source,
             phase: Phase::Understood,
             words,
@@ -166,6 +173,13 @@ impl SessionRecord {
             result: None,
             error: None,
         }
+    }
+
+    /// Return the record carrying this batch's sentence-generation settings.
+    #[must_use]
+    pub(in crate::cli) fn with_sentences(mut self, sentences: SentenceBatchSettings) -> Self {
+        self.sentences = sentences;
+        self
     }
 }
 
@@ -363,7 +377,7 @@ fn salt() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::WordCandidate;
+    use crate::session::{SentenceLevel, SentenceTypeMix, WordCandidate};
     use tempfile::TempDir;
 
     fn record(id: &str) -> SessionRecord {
@@ -385,6 +399,7 @@ mod tests {
             understanding: String::from("a duck"),
             costs: ArtifactCosts::default(),
             rewrite: None,
+            meta_request: None,
         }];
         record
     }
@@ -399,6 +414,25 @@ mod tests {
             store.open("fr-1").expect("session must reopen"),
             saved,
             "a created session no longer reads back identically"
+        );
+    }
+
+    #[test]
+    fn nondefault_sentence_settings_read_back_identically() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let saved = record("fr-settings").with_sentences(SentenceBatchSettings::new(
+            Some(SentenceLevel::B1),
+            SentenceTypeMix::Varied,
+        ));
+        store.create(&saved).expect("session must save");
+        assert_eq!(
+            store
+                .open("fr-settings")
+                .expect("session must reopen")
+                .sentences,
+            saved.sentences,
+            "nondefault sentence settings no longer survive a session round trip"
         );
     }
 
@@ -465,6 +499,27 @@ mod tests {
                 .to_string()
                 .contains("older build"),
             "a session from an older build must be refused with a remove-it hint"
+        );
+    }
+
+    #[test]
+    fn a_version_two_record_defaults_new_batch_and_draft_fields() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let dir = store.dir("legacy-2");
+        fs::create_dir_all(&dir).expect("session dir must be created");
+        fs::write(
+            dir.join("session.json"),
+            r#"{"version":2,"id":"legacy-2","created":"t","known":"EN","learning":"FR","out":"/out","senses":"primary","source":"words","phase":"understood","drafts":[{"term":"canard","understanding":"a duck"}]}"#,
+        )
+        .expect("version two session must be written");
+        let opened = store
+            .open("legacy-2")
+            .expect("version two session must open");
+        assert_eq!(
+            (opened.sentences, opened.drafts[0].meta_request.as_ref()),
+            (SentenceBatchSettings::default(), None),
+            "a compatible session did not default its new batch or draft fields"
         );
     }
 

@@ -71,6 +71,74 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (app, Side::ClearWords)
         }
         (Screen::WhatIUnderstood, None, AppEvent::Generate) => start_generation(app),
+        (Screen::WhatIUnderstood, None, AppEvent::Cancel)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_closed(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsOpen)
+            if app.expanded_sense().is_none() && !app.candidates().is_empty() =>
+        {
+            (app.sentence_settings_opened(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsFocus(row))
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_focused(row), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsChoose(row, index))
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (
+                app.sentence_settings_focused(row)
+                    .sentence_settings_chosen(index),
+                Side::None,
+            )
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsAdvance(row, forward))
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (
+                app.sentence_settings_focused(row)
+                    .sentence_settings_advanced(forward),
+                Side::None,
+            )
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_row_previous(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::NavNext)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_row_next(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorLeft)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_advanced(false), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorRight)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_advanced(true), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::Submit | AppEvent::KeyEnter)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app, Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar(_))
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app, Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('s' | 'S'))
+            if app.expanded_sense().is_none() && !app.candidates().is_empty() =>
+        {
+            (app.sentence_settings_opened(), Side::None)
+        }
         (Screen::WhatIUnderstood, None, AppEvent::Cancel) if app.expanded_sense().is_some() => {
             (app.senses_cancelled(), Side::None)
         }

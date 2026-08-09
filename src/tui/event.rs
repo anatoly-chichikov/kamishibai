@@ -1,5 +1,5 @@
 use super::screen::{ModalKind, WelcomeFocus};
-use super::sentence_editor::LabelEditorRow;
+use super::sentence_editor::{BatchSettingsRow, LabelEditorRow};
 
 /// Identifies which text editor currently owns keystrokes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,6 +19,14 @@ pub enum AppEvent {
     KeyEnter,
     /// User asked to back out of a modal or go back a screen.
     Cancel,
+    /// Mouse or keyboard opened batch sentence settings below the reviewed words.
+    SentenceSettingsOpen,
+    /// Mouse focus moved to one batch sentence-settings row.
+    SentenceSettingsFocus(BatchSettingsRow),
+    /// Mouse picked one batch sentence-settings choice.
+    SentenceSettingsChoose(BatchSettingsRow, usize),
+    /// Mouse moved one batch sentence-settings row by one adjacent choice.
+    SentenceSettingsAdvance(BatchSettingsRow, bool),
     /// Mouse selected one card and opened its inline sentence-label editor.
     SentenceLabelOpen(usize, LabelEditorRow),
     /// Mouse focus moved to one row of the inline sentence-label editor.

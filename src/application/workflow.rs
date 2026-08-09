@@ -8,7 +8,7 @@ use super::{
 };
 use crate::session::{
     ArtifactAttempt, ArtifactFile, CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch,
-    SenseCorrection, Understood, WordCandidate,
+    SenseCorrection, SentenceLabelSelection, Understood, WordCandidate,
 };
 
 /// Full set of card use cases required by interactive and console surfaces.
@@ -73,9 +73,10 @@ where
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
+        request: Option<&SentenceLabelSelection>,
     ) -> Result<CardMeta> {
         self.production
-            .generate_card_meta(term, understanding, pair)
+            .generate_card_meta(term, understanding, pair, request)
     }
 }
 
@@ -114,9 +115,10 @@ where
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
+        request: Option<&SentenceLabelSelection>,
     ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
         self.production
-            .generate_meta_in(slot, term, understanding, pair)
+            .generate_meta_in(slot, term, understanding, pair, request)
     }
 
     fn generate_draft_meta_in(
