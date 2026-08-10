@@ -101,18 +101,18 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
     for (index, candidate) in app.candidates().iter().enumerate() {
         let expanded = app.expanded_sense();
         if expanded.as_ref().map(|item| item.row) == Some(index) {
+            let expanded = expanded
+                .as_ref()
+                .expect("invariant: row is the expanded one");
             lines.extend(candidate_line(
                 index,
                 candidate,
                 selected,
-                true,
+                Some(expanded.selected.len()),
                 Gloss::Sentence(sense_text(candidate.sense())),
                 term_width,
                 width,
             ));
-            let expanded = expanded
-                .as_ref()
-                .expect("invariant: row is the expanded one");
             for (sense_index, sense) in candidate.senses().iter().enumerate() {
                 lines.extend(sense_line(
                     sense_index,
@@ -137,7 +137,7 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 index,
                 candidate,
                 selected,
-                false,
+                None,
                 Gloss::Sentence(sense_text(candidate.sense())),
                 term_width,
                 width,
@@ -279,11 +279,12 @@ fn candidate_line<'a>(
     index: usize,
     candidate: &'a WordCandidate,
     selected: usize,
-    expanded: bool,
+    expanded_count: Option<usize>,
     gloss: Gloss,
     term_width: usize,
     width: u16,
 ) -> Vec<Line<'a>> {
+    let expanded = expanded_count.is_some();
     let is_selected = index == selected && !expanded;
     let is_dimmed_parent = index == selected && expanded;
     let row_style = if is_selected {
@@ -320,7 +321,7 @@ fn candidate_line<'a>(
         palette::dim()
     };
     let label_width = candidate_label_len(candidate);
-    let indicator = inline_indicator(candidate);
+    let indicator = inline_indicator(candidate, expanded_count);
     let pad_after_label = term_width.saturating_sub(label_width);
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled(format!("{:0>2}  ", index + 1), num_style));
@@ -564,7 +565,7 @@ fn candidate_block<'a>(
         index,
         candidate,
         selected,
-        false,
+        None,
         Gloss::Heading(String::from(MEANINGS_LABEL)),
         term_width,
         width,
@@ -654,11 +655,11 @@ fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
     Line::from(spans)
 }
 
-fn inline_indicator(candidate: &WordCandidate) -> Option<String> {
+fn inline_indicator(candidate: &WordCandidate, selected_count: Option<usize>) -> Option<String> {
     if candidate.ok() && candidate.has_multiple_senses() {
         return Some(format!(
             "{}/{}",
-            candidate.selected_count(),
+            selected_count.unwrap_or_else(|| candidate.selected_count()),
             candidate.senses().len()
         ));
     }
@@ -675,7 +676,7 @@ fn candidate_label_width(candidates: &[WordCandidate], minimum: usize) -> usize 
 }
 
 fn candidate_label_len(candidate: &WordCandidate) -> usize {
-    let indicator = inline_indicator(candidate)
+    let indicator = inline_indicator(candidate, None)
         .map(|value| 1 + value.chars().count())
         .unwrap_or(0);
     candidate.term().chars().count() + indicator
@@ -685,12 +686,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 2/3", palette::dim2()));
     left.push(super::common::status_sep());
-    let count = app
-        .candidates()
-        .iter()
-        .filter(|candidate| candidate.ok())
-        .map(WordCandidate::selected_count)
-        .sum::<usize>();
+    let count = review_card_count(app);
     if count > 0 {
         left.push(Span::styled(
             count.to_string(),
@@ -743,4 +739,22 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         hints.push(super::common::quit_hint(app.quit_pending()));
     }
     super::common::footer_bar(left, hints, width)
+}
+
+fn review_card_count(app: &App) -> usize {
+    let expanded = app.expanded_sense();
+    app.candidates()
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| candidate.ok())
+        .map(|(row, candidate)| {
+            expanded
+                .as_ref()
+                .filter(|selection| selection.row == row)
+                .map_or_else(
+                    || candidate.selected_count(),
+                    |selection| selection.selected.len(),
+                )
+        })
+        .sum()
 }

@@ -354,6 +354,34 @@ fn space_toggles_the_focused_sense_and_enter_commits_the_selection() {
 }
 
 #[test]
+fn footer_card_count_updates_before_sense_picker_closes() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let second = transit(opened, AppEvent::NavNext).0;
+    let selected = transit(second, AppEvent::KeyChar(' ')).0;
+    let selected_footer = flat(&selected);
+    let deselected = transit(selected.clone(), AppEvent::KeyChar(' ')).0;
+    let deselected_footer = flat(&deselected);
+    assert_eq!(
+        (
+            selected.expanded_sense().is_some(),
+            selected.candidates()[0].selected_count(),
+            selected_footer.contains("2 cards"),
+            selected_footer.contains("2/3"),
+            deselected.expanded_sense().is_some(),
+            deselected.candidates()[0].selected_count(),
+            deselected_footer.contains("1 card"),
+            deselected_footer.contains("1/3"),
+        ),
+        (true, 1, true, true, true, 1, true, true),
+        "the footer must preview the open sense selection without committing it"
+    );
+}
+
+#[test]
 fn ctrl_g_from_expanded_senses_commits_selection_and_starts_generation() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
