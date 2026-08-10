@@ -286,7 +286,7 @@ fn candidate_line<'a>(
 ) -> Vec<Line<'a>> {
     let expanded = expanded_count.is_some();
     let is_selected = index == selected && !expanded;
-    let is_dimmed_parent = index == selected && expanded;
+    let is_expanded_parent = index == selected && expanded;
     let row_style = if is_selected {
         palette::highlight()
     } else {
@@ -299,8 +299,8 @@ fn candidate_line<'a>(
     };
     let term_style = if !candidate.ok() {
         palette::dim().add_modifier(Modifier::CROSSED_OUT)
-    } else if is_dimmed_parent {
-        palette::dim()
+    } else if is_expanded_parent {
+        palette::base()
     } else if is_selected {
         palette::highlight().add_modifier(Modifier::BOLD)
     } else {
@@ -308,12 +308,14 @@ fn candidate_line<'a>(
     };
     let dash_style = if !candidate.ok() {
         palette::dim2()
+    } else if is_expanded_parent {
+        palette::dim()
     } else if is_selected {
         palette::highlight_dim()
     } else {
         palette::dim2()
     };
-    let gloss_style = if !candidate.ok() || is_dimmed_parent {
+    let gloss_style = if !candidate.ok() || is_expanded_parent {
         palette::dim()
     } else if is_selected {
         palette::highlight_dim().add_modifier(Modifier::BOLD)
@@ -372,13 +374,12 @@ fn sense_line<'a>(
     width: u16,
 ) -> Vec<Line<'a>> {
     let focused = index == cursor;
-    let marker = if selected.contains(&index) {
-        "  ✓ "
-    } else {
-        "    "
-    };
+    let checked = selected.contains(&index);
+    let marker = if checked { "  ✓ " } else { "    " };
     let style = if focused {
-        palette::highlight_dim().add_modifier(Modifier::BOLD)
+        palette::highlight().add_modifier(Modifier::BOLD)
+    } else if checked {
+        palette::base()
     } else {
         palette::dim()
     };
@@ -634,7 +635,7 @@ fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
     let text = "+ add more";
     let used = indent + marker.chars().count() + text.chars().count();
     let style = if focused {
-        palette::highlight_dim().add_modifier(Modifier::BOLD)
+        palette::highlight().add_modifier(Modifier::BOLD)
     } else {
         palette::dim()
     };

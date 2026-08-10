@@ -6,26 +6,30 @@ action                       kind     out_start    out_end   out_dur   source
 ---------------------------- ------- ---------- ---------- ---------   ----------------------
 type_words                   window       0.00s      3.04s     3.04s   main 0.24s → 3.28s  (3.04s @ 25fps)
 understanding                window       3.04s      4.24s     1.20s   main 3.28s → 4.48s  (1.2s @ 25fps)
-review                       splice       4.24s      6.44s     2.20s   splice live/02-what-i-understood.png
-sense_cursor_to_canard       window       6.44s      7.60s     1.16s   main 22.48s → 23.64s  (1.16s @ 25fps)
-sense_open                   window       7.60s      8.00s     0.40s   main 24.12s → 24.52s  (0.4s @ 25fps)
-sense_cursor_second          window       8.00s      8.40s     0.40s   main 25.04s → 25.44s  (0.4s @ 25fps)
-sense_select_second          window       8.40s      8.80s     0.40s   main 26.60s → 27.00s  (0.4s @ 25fps)
-sense_close_and_generate     window       8.80s      9.96s     1.16s   main 27.44s → 28.60s  (1.16s @ 25fps)
-initial_fill_01              window       9.96s     10.16s     0.20s   main 42.26s → 42.46s  (0.2s @ 25fps)
-initial_fill_02              window      10.16s     10.36s     0.20s   main 78.58s → 78.78s  (0.2s @ 25fps)
-initial_fill_03              window      10.36s     10.56s     0.20s   main 122.90s → 123.10s  (0.2s @ 25fps)
-initial_fill_04              window      10.56s     10.76s     0.20s   main 150.70s → 150.90s  (0.2s @ 25fps)
-initial_fill_05              window      10.76s     10.96s     0.20s   main 184.74s → 184.94s  (0.2s @ 25fps)
-initial_publish              window      10.96s     11.56s     0.60s   main 282.78s → 283.38s  (0.6s @ 25fps)
-card_cursor_to_target        window      11.56s     13.60s     2.04s   main 283.56s → 285.60s  (2.04s @ 25fps)
-card_open_and_focus_level    window      13.60s     15.56s     1.96s   main 285.80s → 287.76s  (1.96s @ 25fps)
-level_b1_pending             splice      15.56s     17.16s     1.60s   splice live/09a-level-raised.png
-regenerate_meta_spin         window      17.16s     17.76s     0.60s   main 289.20s → 289.80s  (0.6s @ 25fps)
-regenerate_audio_spin        window      17.76s     18.36s     0.60s   main 295.10s → 295.70s  (0.6s @ 25fps)
-regenerate_scene_spin        window      18.36s     18.96s     0.60s   main 297.20s → 297.80s  (0.6s @ 25fps)
-regenerate_picture_spin      window      18.96s     19.56s     0.60s   main 308.00s → 308.60s  (0.6s @ 25fps)
-regenerate_publish           window      19.56s     20.16s     0.60s   main 315.00s → 315.60s  (0.6s @ 25fps)
-regenerated_card_finale      fade        20.16s     23.40s     3.24s   fade live/09c-card-regenerated.png  (split y=310, hold 1.50s, fade 0.70s, hold-black 1.00s, caption)
+review                       splice       4.24s      5.04s     0.80s   splice live/02-what-i-understood.png
+cursor_01_02                 window       5.04s      5.32s     0.28s   main 22.12s → 22.40s  (0.28s @ 25fps)
+cursor_02_03                 window       5.32s      5.60s     0.28s   main 22.88s → 23.16s  (0.28s @ 25fps)
+sense_open                   window       5.60s      6.00s     0.40s   main 23.72s → 24.12s  (0.4s @ 25fps)
+sense_cursor_second          window       6.00s      6.40s     0.40s   main 24.60s → 25.00s  (0.4s @ 25fps)
+sense_select_second          window       6.40s      6.84s     0.44s   main 25.36s → 25.80s  (0.44s @ 25fps)
+sense_close                  window       6.84s      7.16s     0.32s   main 26.16s → 26.48s  (0.32s @ 25fps)
+cursor_to_chouette           window       7.16s      7.48s     0.32s   main 27.00s → 27.32s  (0.32s @ 25fps)
+start_generation             window       7.48s      7.88s     0.40s   main 27.72s → 28.12s  (0.4s @ 25fps)
+initial_fill_01              window       7.88s      8.08s     0.20s   main 39.86s → 40.06s  (0.2s @ 25fps)
+initial_fill_02              window       8.08s      8.28s     0.20s   main 73.14s → 73.34s  (0.2s @ 25fps)
+initial_fill_03              window       8.28s      8.48s     0.20s   main 100.82s → 101.02s  (0.2s @ 25fps)
+initial_fill_04              window       8.48s      8.68s     0.20s   main 132.02s → 132.22s  (0.2s @ 25fps)
+initial_fill_05              window       8.68s      8.88s     0.20s   main 166.18s → 166.38s  (0.2s @ 25fps)
+initial_publish              window       8.88s      9.48s     0.60s   main 266.76s → 267.36s  (0.6s @ 25fps)
+card_cursor_to_target        window       9.48s     11.28s     1.80s   main 267.56s → 269.80s  (2.24s @ 20.0893fps)
+card_open                    window      11.28s     11.88s     0.60s   main 269.80s → 270.40s  (0.6s @ 25fps)
+card_focus_level             splice      11.88s     12.68s     0.80s   splice live/09-card-adjusting.png
+level_b1_pending             splice      12.68s     13.68s     1.00s   splice live/09a-level-raised.png
+regenerate_meta_spin         window      13.68s     14.28s     0.60s   main 274.00s → 274.60s  (0.6s @ 25fps)
+regenerate_audio_spin        window      14.28s     14.88s     0.60s   main 280.20s → 280.80s  (0.6s @ 25fps)
+regenerate_scene_spin        window      14.88s     15.48s     0.60s   main 282.20s → 282.80s  (0.6s @ 25fps)
+regenerate_picture_spin      window      15.48s     16.08s     0.60s   main 290.00s → 290.60s  (0.6s @ 25fps)
+regenerate_publish           window      16.08s     16.68s     0.60s   main 295.40s → 296.00s  (0.6s @ 25fps)
+regenerated_card_finale      fade        16.68s     19.92s     3.24s   fade live/09c-card-regenerated.png  (split y=310, hold 1.50s, fade 0.70s, hold-black 1.00s, caption)
 
-# total: 585 frames = 23.40s
+# total: 498 frames = 19.92s
