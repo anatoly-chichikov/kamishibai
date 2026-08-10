@@ -125,8 +125,9 @@ fn review_shows_the_exact_default_sentence_summary_and_open_hint() {
     let rendered = flat_at(&review(2), 120, 24);
     assert!(
         rendered.contains("sentences: level — · types natural")
-            && rendered.contains("[S] sentences"),
-        "the closed review must expose the exact batch sentence summary and its shortcut: {rendered}"
+            && rendered.contains("[S] sentences")
+            && rendered.contains("[Esc] back"),
+        "the closed review must expose the batch sentence summary, settings shortcut, and back action: {rendered}"
     );
 }
 

@@ -996,6 +996,82 @@ mod tests {
     }
 
     #[test]
+    fn configured_completed_batch_resets_fresh_settings_and_preserves_its_record() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::C1), SentenceTypeMix::Varied);
+        let completed = published_app().with_sentence_settings(settings);
+        let record = app_to_record(
+            &completed,
+            String::from("fr-configured"),
+            String::from("created-old"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        store
+            .create(&record)
+            .expect("configured published session must persist");
+        let mut session =
+            TuiSession::resuming_in(&record, store.clone()).expect("session must resume");
+        session
+            .start_next_batch()
+            .expect("completed session must detach");
+        let fresh = completed.starting_new_batch();
+        let fresh_settings = fresh.sentence_settings();
+        let next = fresh
+            .seeded_blob("chouette")
+            .confirmed_learning("fr")
+            .with_screen(Screen::WhatIUnderstood)
+            .understood(vec![WordCandidate::new("chouette", "great", true)]);
+        session
+            .save(&next, Path::new("/o"), false)
+            .expect("fresh review must persist under a new identity");
+        let new_id = session.id.clone().expect("fresh batch must mint an id");
+        let old: SessionRecord = serde_json::from_slice(
+            std::fs::read(home.path().join("sessions/fr-configured/session.json"))
+                .expect("published session must remain readable")
+                .as_slice(),
+        )
+        .expect("published session must decode");
+        let new: SessionRecord = serde_json::from_slice(
+            std::fs::read(
+                home.path()
+                    .join("sessions")
+                    .join(new_id.as_str())
+                    .join("session.json"),
+            )
+            .expect("fresh session must remain readable")
+            .as_slice(),
+        )
+        .expect("fresh session must decode");
+        assert_eq!(
+            (
+                old.sentences,
+                old.phase,
+                old.result.map(|result| result.deck),
+                new_id != old.id,
+                fresh_settings,
+                next.sentence_settings(),
+                new.sentences,
+                new.phase,
+            ),
+            (
+                settings,
+                Phase::Published,
+                Some(String::from("/o/deck.apkg")),
+                true,
+                SentenceBatchSettings::default(),
+                SentenceBatchSettings::default(),
+                SentenceBatchSettings::default(),
+                Phase::Understood,
+            ),
+            "new batch inherited completed settings or rewrote the published session record"
+        );
+    }
+
+    #[test]
     fn a_generating_app_records_this_process_as_the_worker() {
         let record = app_to_record(
             &published_app(),

@@ -2080,6 +2080,140 @@ mod tests {
     }
 
     #[test]
+    fn zero_ready_stop_retains_settings_across_rotation_and_recreates_requests() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+        let app = review()
+            .seeded_blob("whilst")
+            .with_sentence_settings(settings);
+        let record = SessionRecord::understood(
+            String::from("en-old"),
+            String::from("created-old"),
+            app.pair().known().to_string(),
+            app.pair().learning().to_string(),
+            std::env::temp_dir().to_string_lossy().into_owned(),
+            String::from("custom"),
+            String::from("tui"),
+            vec![String::from("whilst")],
+            app.candidates()
+                .iter()
+                .map(CandidateRecord::from_candidate)
+                .collect(),
+        )
+        .with_sentences(settings);
+        store.create(&record).expect("review session must persist");
+        let session =
+            TuiSession::resuming_in(&record, store.clone()).expect("review session must resume");
+        let mut shell = shell(app);
+        shell.session = Some(session);
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        shell
+            .tick()
+            .expect("zero-ready stop must rotate the session");
+        shell.persist();
+        let old: SessionRecord = serde_json::from_slice(
+            std::fs::read(home.path().join("sessions/en-old/session.json"))
+                .expect("cancelled session must remain")
+                .as_slice(),
+        )
+        .expect("cancelled session must decode");
+        let mut rotated = std::fs::read_dir(home.path().join("sessions"))
+            .expect("rotated sessions must remain readable")
+            .flatten()
+            .filter(|entry| entry.file_name() != "en-old")
+            .map(|entry| {
+                serde_json::from_slice::<SessionRecord>(
+                    std::fs::read(entry.path().join("session.json"))
+                        .expect("preserved review must remain")
+                        .as_slice(),
+                )
+                .expect("preserved review must decode")
+            })
+            .collect::<Vec<_>>();
+        let new = rotated
+            .pop()
+            .expect("preserved review must receive a new identity");
+        let expected = settings.selections(1);
+        let recreated = drafts_from(&shell.app)
+            .into_iter()
+            .map(|draft| draft.meta_request().cloned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (
+                old.phase,
+                old.sentences,
+                old.drafts[0].meta_request.clone(),
+                new.phase,
+                new.sentences,
+                new.drafts.len(),
+                shell.app.sentence_settings(),
+                recreated,
+                rotated.is_empty(),
+            ),
+            (
+                Phase::Cancelled,
+                settings,
+                expected[0].clone(),
+                Phase::Understood,
+                settings,
+                0,
+                settings,
+                expected,
+                true,
+            ),
+            "zero-ready stop lost batch settings or failed to recreate initial metadata requests after rotation"
+        );
+    }
+
+    #[test]
+    fn partial_stop_keeps_tally_settings_and_pending_initial_request() {
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B2), SentenceTypeMix::Varied);
+        let pending = settings.selections(2)[1]
+            .clone()
+            .expect("configured second card must receive a metadata request");
+        let language_pair = pair();
+        let first = CardDraft::new("alpha", "first understanding", language_pair.clone())
+            .with_artifacts(ready_artifacts());
+        let second = CardDraft::new("beta", "second understanding", language_pair.clone())
+            .requesting_meta(pending.clone());
+        let app = App::new(language_pair)
+            .with_sentence_settings(settings)
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![first.clone(), second.clone()]);
+        let mut shell = shell(app);
+        shell.engine = Some(SessionEngine::start(vec![first, second]));
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.done_artifacts().cards,
+                shell.app.done_artifacts().failed,
+                shell.app.sentence_settings(),
+                shell.app.cards()[0].meta_request().is_none(),
+                shell.app.cards()[1].meta_request().cloned(),
+                shell.app.generation_stopping(),
+                shell.engine.is_none(),
+            ),
+            (1, 1, settings, true, Some(pending), false, true),
+            "partial stop changed its publish tally, batch settings, or unfinished initial metadata request"
+        );
+    }
+
+    #[test]
     fn stop_applies_the_inflight_outcome_then_publishes_only_ready_cards() {
         let calls = Arc::new(AtomicUsize::new(0));
         let language_pair = pair();
@@ -2215,6 +2349,7 @@ mod tests {
                 term: draft.term().to_string(),
                 understanding: draft.understanding().to_string(),
                 costs: ArtifactCosts::default(),
+                meta_request: None,
                 rewrite: None,
             })
             .collect();
@@ -2322,6 +2457,7 @@ mod tests {
                 term: draft.term().to_string(),
                 understanding: draft.understanding().to_string(),
                 costs: ArtifactCosts::default(),
+                meta_request: None,
                 rewrite: None,
             })
             .collect();

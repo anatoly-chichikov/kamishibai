@@ -422,6 +422,16 @@ pub fn quit_hint(pending: bool) -> FooterHint {
     }
 }
 
+/// The review-screen back action, retained alongside quit on a crowded footer.
+pub fn back_hint() -> FooterHint {
+    FooterHint::with("Esc", "back", Tier::Secondary, 2)
+}
+
+/// The review-screen sentence settings action, retained on a crowded footer.
+pub fn sentence_settings_hint() -> FooterHint {
+    FooterHint::with("S", "sentences", Tier::Secondary, 2)
+}
+
 /// The finished-screen Escape action and its armed confirmation state.
 pub fn new_batch_hint(pending: bool) -> FooterHint {
     if pending {
