@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use kamishibai::session::{
-    LanguagePair, SentenceBatchSettings, SentenceLevel, SentenceTypeMix, WordCandidate,
+    LanguagePair, Sense, SentenceBatchSettings, SentenceLevel, SentenceTypeMix, WordCandidate,
 };
 use kamishibai::tui::{
     App, AppEvent, BatchSettingsRow, ModalKind, MousePointer, Screen, Side, draw, mouse_pointer_at,
@@ -12,6 +12,7 @@ use kamishibai::tui::{
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier};
 
 fn review(candidates: usize) -> App {
     App::new(LanguagePair::new("en", "fr"))
@@ -105,6 +106,28 @@ fn cell_of_on_line(
     panic!("the rendered screen never showed '{needle}' beside '{companion}'");
 }
 
+fn style_of(app: &App, needle: &str, width: u16, height: u16) -> (Color, Color, Modifier) {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("backend must be available");
+    terminal
+        .draw(|frame| draw(frame, app))
+        .expect("draw must succeed");
+    let buffer = terminal.backend().buffer();
+    for row in 0..buffer.area.height {
+        let mut rendered = String::new();
+        for column in 0..buffer.area.width {
+            rendered.push_str(buffer[(column, row)].symbol());
+        }
+        if let Some(start) = rendered.find(needle) {
+            let column = u16::try_from(rendered[..start].chars().count())
+                .expect("rendered column must fit the terminal");
+            let cell = &buffer[(column, row)];
+            return (cell.fg, cell.bg, cell.modifier);
+        }
+    }
+    panic!("the rendered screen never showed '{needle}'");
+}
+
 fn choices(app: &App, area: Rect, row: BatchSettingsRow) -> BTreeSet<usize> {
     let mut choices = BTreeSet::new();
     for screen_row in 0..area.height {
@@ -121,13 +144,131 @@ fn choices(app: &App, area: Rect, row: BatchSettingsRow) -> BTreeSet<usize> {
 }
 
 #[test]
-fn review_shows_the_exact_default_sentence_summary_and_open_hint() {
+fn review_places_quiet_sentence_labels_one_blank_row_above_words() {
     let rendered = flat_at(&review(2), 120, 24);
+    let lines = rendered.lines().collect::<Vec<_>>();
+    let summary = lines
+        .iter()
+        .position(|line| line.contains("sentences   default   natural"))
+        .expect("the review must expose the compact sentence labels");
+    let words = lines
+        .iter()
+        .position(|line| line.contains("01  term-01"))
+        .expect("the review must expose the first word");
     assert!(
-        rendered.contains("sentences: level — · types natural")
-            && rendered.contains("[S] sentences")
-            && rendered.contains("[Esc] back"),
-        "the closed review must expose the batch sentence summary, settings shortcut, and back action: {rendered}"
+        words == summary + 2
+            && lines[summary + 1].trim().is_empty()
+            && rendered.contains("[↑] sentences")
+            && !rendered.contains("[S] sentences"),
+        "sentence settings must read as a quiet list row above the words: {rendered}"
+    );
+}
+
+#[test]
+fn summary_reuses_muted_card_tags_and_brightens_only_explicit_choices() {
+    let area = terminal(120, 24);
+    let defaults = review(2);
+    let explicit = review(2).with_sentence_settings(SentenceBatchSettings::new(
+        Some(SentenceLevel::B1),
+        SentenceTypeMix::Varied,
+    ));
+    assert_eq!(
+        (
+            style_of(&defaults, "default", area.width, area.height),
+            style_of(&defaults, "natural", area.width, area.height),
+            style_of(&explicit, "b1", area.width, area.height),
+            style_of(&explicit, "varied", area.width, area.height),
+        ),
+        (
+            (
+                Color::Rgb(0x0e, 0x0e, 0x10),
+                Color::Rgb(0x8b, 0x8a, 0x83),
+                Modifier::empty(),
+            ),
+            (
+                Color::Rgb(0x0e, 0x0e, 0x10),
+                Color::Rgb(0x8b, 0x8a, 0x83),
+                Modifier::empty(),
+            ),
+            (
+                Color::Rgb(0x0e, 0x0e, 0x10),
+                Color::Rgb(0xe6, 0xe3, 0xda),
+                Modifier::empty(),
+            ),
+            (
+                Color::Rgb(0x0e, 0x0e, 0x10),
+                Color::Rgb(0xe6, 0xe3, 0xda),
+                Modifier::empty(),
+            ),
+        ),
+        "batch choices must share the generated-card tag hierarchy without competing with the title"
+    );
+}
+
+#[test]
+fn upward_list_navigation_opens_settings_and_downward_navigation_returns_to_words() {
+    let opened = transit(review(2), AppEvent::NavPrev).0;
+    let level = transit(opened, AppEvent::NavPrev).0;
+    let types = transit(level, AppEvent::NavNext).0;
+    let closed = transit(types, AppEvent::NavNext).0;
+    assert_eq!(
+        (
+            closed.sentence_settings_editor(),
+            closed.selected(),
+            closed.candidates().len(),
+        ),
+        (None, 0, 2),
+        "vertical navigation must leave the settings block through the first reviewed word"
+    );
+}
+
+#[test]
+fn upward_navigation_reaches_the_first_word_before_opening_settings() {
+    let second = review(2).selected_next();
+    let first = transit(second, AppEvent::NavPrev).0;
+    let opened = transit(first.clone(), AppEvent::NavPrev).0;
+    let opened_with_k = transit(first.clone(), AppEvent::KeyChar('k')).0;
+    assert_eq!(
+        (
+            first.selected(),
+            first.sentence_settings_editor(),
+            opened.sentence_settings_editor(),
+            opened_with_k.sentence_settings_editor(),
+        ),
+        (
+            0,
+            None,
+            Some(BatchSettingsRow::Types),
+            Some(BatchSettingsRow::Types),
+        ),
+        "settings must extend the candidate list instead of stealing an ordinary upward move"
+    );
+}
+
+#[test]
+fn expanded_senses_keep_ownership_of_upward_navigation_and_the_settings_alias() {
+    let app = App::new(LanguagePair::new("en", "fr"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("fr")
+        .understood(vec![WordCandidate::with_senses(
+            "bank",
+            vec![
+                Sense::plain("a financial institution"),
+                Sense::plain("a river edge"),
+            ],
+            0,
+            true,
+        )]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let up = transit(opened, AppEvent::NavPrev).0;
+    let alias = transit(up, AppEvent::KeyChar('S')).0;
+    assert_eq!(
+        (
+            alias.expanded_sense().map(|sense| sense.cursor),
+            alias.sentence_settings_editor(),
+        ),
+        (Some(0), None),
+        "the sense picker must not leak its top-boundary navigation into batch settings"
     );
 }
 
@@ -211,12 +352,15 @@ fn ctrl_g_commits_generation_while_the_editor_is_open() {
 fn summary_and_every_carousel_choice_share_mouse_hit_geometry() {
     let area = terminal(120, 24);
     let closed = review(1);
-    let summary = cell_of(&closed, "sentences:", area.width, area.height);
+    let summary = cell_of(&closed, "sentences   ", area.width, area.height);
+    let separator = (summary.0, summary.1 + 1);
     let open = closed.clone().sentence_settings_opened();
     assert_eq!(
         (
             sentence_settings_event_at(&closed, area, summary.0, summary.1),
             mouse_pointer_at(&closed, area, summary.0, summary.1),
+            sentence_settings_event_at(&closed, area, separator.0, separator.1),
+            mouse_pointer_at(&closed, area, separator.0, separator.1),
             mouse_pointer_at(&closed, area, 0, 0),
             choices(&open, area, BatchSettingsRow::Level),
             choices(&open, area, BatchSettingsRow::Types),
@@ -224,6 +368,8 @@ fn summary_and_every_carousel_choice_share_mouse_hit_geometry() {
         (
             Some(AppEvent::SentenceSettingsOpen),
             MousePointer::Hand,
+            None,
+            MousePointer::Arrow,
             MousePointer::Arrow,
             BTreeSet::from([0, 1, 2, 3, 4, 5, 6]),
             BTreeSet::from([0, 1]),
@@ -233,7 +379,7 @@ fn summary_and_every_carousel_choice_share_mouse_hit_geometry() {
 }
 
 #[test]
-fn opening_settings_scrolls_a_long_review_to_the_focused_carousel() {
+fn opening_settings_scrolls_a_long_review_to_the_top_carousels() {
     let area = terminal(140, 13);
     let viewport = scroll_viewport(&review(25), area);
     let width = scroll_body_width(area);
@@ -254,13 +400,13 @@ fn opening_settings_scrolls_a_long_review_to_the_focused_carousel() {
         area.height,
     );
     assert!(
-        app.body_scroll() > 0
+        app.body_scroll() == 0
             && rendered.contains("how to mix the types?")
-            && !rendered.contains("term-01")
+            && rendered.contains("term-01")
             && sentence_settings_event_at(&app, area, varied.0, varied.1)
                 == Some(AppEvent::SentenceSettingsChoose(BatchSettingsRow::Types, 1))
             && mouse_pointer_at(&app, area, varied.0, varied.1) == MousePointer::Hand,
-        "the focused batch carousel must scroll into a short viewport: {rendered}"
+        "the focused batch carousel must anchor above the review in a short viewport: {rendered}"
     );
 }
 
@@ -268,7 +414,7 @@ fn opening_settings_scrolls_a_long_review_to_the_focused_carousel() {
 fn modal_overlay_suppresses_underlying_sentence_settings_hits() {
     let area = terminal(120, 24);
     let app = review(1);
-    let summary = cell_of(&app, "sentences:", area.width, area.height);
+    let summary = cell_of(&app, "sentences   ", area.width, area.height);
     let covered = app.with_modal(ModalKind::PickMyLanguage);
     assert_eq!(
         sentence_settings_event_at(&covered, area, summary.0, summary.1),

@@ -23,7 +23,8 @@ use super::sentence_labels::BatchEditorControl;
 
 const HEADLINE: &str = "what i understood";
 const HINT: &str = "quick check before i build the cards";
-const SETTINGS_PREFIX: &str = "sentences: level ";
+const SETTINGS_LABEL: &str = "sentences";
+const DEFAULT_LEVEL_LABEL: &str = "default";
 
 /// One clickable surface in the batch sentence-settings block.
 pub(crate) enum SentenceSettingsControl {
@@ -83,14 +84,27 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
             .style(palette::base());
     }
     let term_width = candidate_label_width(app.candidates(), 12);
-    let mut lines = Vec::new();
+    let mut lines = vec![settings_summary_line(app)];
+    if let Some(focused) = app.sentence_settings_editor() {
+        lines.extend(super::sentence_labels::batch_editor_lines(
+            app.sentence_settings(),
+            focused,
+            usize::from(width),
+        ));
+    }
+    lines.push(Line::from(""));
+    let selected = if app.sentence_settings_editor().is_some() {
+        usize::MAX
+    } else {
+        app.selected()
+    };
     for (index, candidate) in app.candidates().iter().enumerate() {
         let expanded = app.expanded_sense();
         if expanded.as_ref().map(|item| item.row) == Some(index) {
             lines.extend(candidate_line(
                 index,
                 candidate,
-                app.selected(),
+                selected,
                 true,
                 Gloss::Sentence(sense_text(candidate.sense())),
                 term_width,
@@ -116,31 +130,19 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
             ));
         } else if candidate.ok() && candidate.selected_count() > 1 {
             lines.extend(candidate_block(
-                index,
-                candidate,
-                app.selected(),
-                term_width,
-                width,
+                index, candidate, selected, term_width, width,
             ));
         } else {
             lines.extend(candidate_line(
                 index,
                 candidate,
-                app.selected(),
+                selected,
                 false,
                 Gloss::Sentence(sense_text(candidate.sense())),
                 term_width,
                 width,
             ));
         }
-    }
-    lines.push(settings_summary_line(app));
-    if let Some(focused) = app.sentence_settings_editor() {
-        lines.extend(super::sentence_labels::batch_editor_lines(
-            app.sentence_settings(),
-            focused,
-            usize::from(width),
-        ));
     }
     Paragraph::new(lines).style(palette::base())
 }
@@ -153,19 +155,7 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
         let expanded_row = app.expanded_sense().map(|item| item.row);
         let term_width = candidate_label_width(app.candidates(), 12);
         let total = candidate_content_height(app, width, expanded_row, term_width)
-            .saturating_add(1)
-            .saturating_add(
-                app.sentence_settings_editor()
-                    .map(|focused| {
-                        super::sentence_labels::batch_editor_lines(
-                            app.sentence_settings(),
-                            focused,
-                            width,
-                        )
-                        .len()
-                    })
-                    .unwrap_or(0),
-            );
+            .saturating_add(review_prefix_height(app, width));
         return u16::try_from(total).unwrap_or(u16::MAX);
     }
     let typed = app
@@ -178,15 +168,35 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
 }
 
 fn settings_summary_line(app: &App) -> Line<'static> {
-    Line::from(Span::styled(settings_summary(app), palette::dim()))
+    let settings = app.sentence_settings();
+    let level = settings
+        .level()
+        .map(|level| level.token())
+        .unwrap_or(DEFAULT_LEVEL_LABEL);
+    Line::from(vec![
+        Span::styled(format!("{SETTINGS_LABEL}  "), palette::dim()),
+        Span::styled(
+            format!(" {level} "),
+            super::sentence_labels::tag_style(settings.level().is_some()),
+        ),
+        Span::styled(" ", palette::base()),
+        Span::styled(
+            format!(" {} ", settings.types().token()),
+            super::sentence_labels::tag_style(
+                settings.types() != crate::session::SentenceTypeMix::Natural,
+            ),
+        ),
+    ])
 }
 
-fn settings_summary(app: &App) -> String {
-    let settings = app.sentence_settings();
-    let level = settings.level().map(|level| level.token()).unwrap_or("—");
-    format!(
-        "{SETTINGS_PREFIX}{level} · types {}",
-        settings.types().token()
+fn review_prefix_height(app: &App, width: usize) -> usize {
+    2usize.saturating_add(
+        app.sentence_settings_editor()
+            .map(|focused| {
+                super::sentence_labels::batch_editor_lines(app.sentence_settings(), focused, width)
+                    .len()
+            })
+            .unwrap_or(0),
     )
 }
 
@@ -215,16 +225,13 @@ pub(crate) fn sentence_settings_control_at(
     if app.candidates().is_empty() {
         return None;
     }
-    let expanded = app.expanded_sense().map(|item| item.row);
-    let term_width = candidate_label_width(app.candidates(), 12);
-    let start = candidate_content_height(app, width, expanded, term_width);
-    if row == start {
-        let summary_width = super::common::display_width(settings_summary(app).as_str());
+    if row == 0 {
+        let summary_width = settings_summary_line(app).width();
         return (app.expanded_sense().is_none() && column < summary_width)
             .then_some(SentenceSettingsControl::Open);
     }
     let focused = app.sentence_settings_editor()?;
-    let editor_row = row.checked_sub(start.saturating_add(1))?;
+    let editor_row = row.checked_sub(1)?;
     super::sentence_labels::batch_editor_control_at(
         app.sentence_settings(),
         focused,
@@ -479,19 +486,18 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
     let expanded_row = app.expanded_sense().map(|item| item.row);
     let term_width = candidate_label_width(app.candidates(), 12);
     if let Some(focused) = app.sentence_settings_editor() {
-        let candidates = candidate_content_height(app, width, expanded_row, term_width);
         let (start, height) = super::sentence_labels::batch_editor_focus_range(
             app.sentence_settings(),
             focused,
             width,
         );
         return Some((
-            u16::try_from(candidates.saturating_add(1).saturating_add(start)).unwrap_or(u16::MAX),
+            u16::try_from(1usize.saturating_add(start)).unwrap_or(u16::MAX),
             u16::try_from(height).unwrap_or(u16::MAX),
         ));
     }
     let selected = app.selected().min(app.candidates().len() - 1);
-    let mut offset = 0usize;
+    let mut offset = review_prefix_height(app, width);
     for (index, candidate) in app.candidates().iter().enumerate() {
         if index != selected {
             offset = offset.saturating_add(candidate_rows(
@@ -716,7 +722,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         if count > 0 {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
-        if !app.candidates().is_empty() {
+        if !app.candidates().is_empty() && app.selected() == 0 {
             hints.push(super::common::sentence_settings_hint());
         }
         hints.push(DisclosureControls::new(false).secondary_toggle());

@@ -44,7 +44,7 @@ impl BatchSettingsRow {
     #[must_use]
     pub fn choice_token(self, index: usize) -> Option<&'static str> {
         match (self, index) {
-            (Self::Level, 0) => Some("—"),
+            (Self::Level, 0) => Some("default"),
             (Self::Level, 1) => Some("a1"),
             (Self::Level, 2) => Some("a2"),
             (Self::Level, 3) => Some("b1"),
@@ -382,14 +382,18 @@ mod tests {
     };
 
     #[test]
-    fn batch_level_carousel_treats_the_dash_as_a_real_default_choice() {
+    fn batch_level_carousel_names_the_unpinned_choice_default() {
         let settings = BatchSettingsRow::Level
             .advanced(SentenceBatchSettings::default(), true)
             .with_types(SentenceTypeMix::Natural);
         assert_eq!(
-            (settings.level(), BatchSettingsRow::Level.selected(settings)),
-            (Some(SentenceLevel::A1), 1),
-            "advancing from the batch dash failed to select the first CEFR band"
+            (
+                BatchSettingsRow::Level.choice_token(0),
+                settings.level(),
+                BatchSettingsRow::Level.selected(settings),
+            ),
+            (Some("default"), Some(SentenceLevel::A1), 1),
+            "the unpinned batch level lost its plain-language label or adjacent CEFR choice"
         );
     }
 

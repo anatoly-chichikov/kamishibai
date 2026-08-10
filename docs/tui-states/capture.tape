@@ -48,9 +48,6 @@ Screenshot "live/01b-busy.png"
 
 Wait+Screen@2m /—/
 Sleep 2s
-# Keep the read-state and the following navigation on the same first row.
-Up
-Sleep 250ms
 Screenshot "live/02-what-i-understood.png"
 
 # smooth tick-tick navigation down to canard (row 3)

@@ -202,7 +202,7 @@ fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<St
         errs.push(String::from("wu.sentence_summary is missing"));
         return;
     };
-    for text in ["sentences: level ", " · types "] {
+    for text in ["sentences  ", "default", "natural"] {
         if !text_contains(summary, text) {
             errs.push(format!("wu.sentence_summary does not lock {text:?}"));
         }
@@ -213,7 +213,7 @@ fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<St
     };
     for text in [
         "what's the desired level?",
-        "—|a1|a2|b1|b2|c1|c2",
+        "default|a1|a2|b1|b2|c1|c2",
         "how to mix the types?",
         "natural|varied",
     ] {
@@ -225,9 +225,9 @@ fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<St
         errs.push(String::from("wu.footer_sentence_settings_open is missing"));
         return;
     };
-    if !text_contains(open, "[S] sentences") {
+    if !text_contains(open, "[↑] sentences") {
         errs.push(String::from(
-            "wu.footer_sentence_settings_open does not reveal S",
+            "wu.footer_sentence_settings_open does not reveal upward navigation",
         ));
     }
     let Some(editor) = element_by_id(contract, "wu.footer_sentence_settings_editor") else {

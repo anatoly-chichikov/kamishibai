@@ -19,7 +19,7 @@ pub enum AppEvent {
     KeyEnter,
     /// User asked to back out of a modal or go back a screen.
     Cancel,
-    /// Mouse or keyboard opened batch sentence settings below the reviewed words.
+    /// Mouse or keyboard opened batch sentence settings above the reviewed words.
     SentenceSettingsOpen,
     /// Mouse focus moved to one batch sentence-settings row.
     SentenceSettingsFocus(BatchSettingsRow),

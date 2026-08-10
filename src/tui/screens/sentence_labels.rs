@@ -329,7 +329,8 @@ pub(crate) fn batch_editor_control_at(
         })
 }
 
-fn tag_style(pinned: bool) -> Style {
+/// Return the shared compact-label style used before and after generation.
+pub(crate) fn tag_style(pinned: bool) -> Style {
     if pinned {
         palette::invert()
     } else {

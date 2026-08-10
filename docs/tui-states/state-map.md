@@ -16,7 +16,7 @@ All future work references this map instead of re-deriving transitions.
 | `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `00-welcome.png` (no env key) · `00b-welcome-env.png` (`GEMINI_API_KEY` set) |
 | `YourWords`       | fullscreen                                                                        | `01-your-words.png`             |
 | `WhatIUnderstood` | fullscreen                                                                        | `02-what-i-understood.png` · `24-esc-review-back.png` (current Esc footer) |
-| Batch sentence settings | inline editor below the reviewed candidates on `WhatIUnderstood`                    | `28-batch-sentence-settings.png` · `29-batch-sentence-settings-narrow.png` |
+| Batch sentence settings | compact tags and inline editor above the reviewed candidates on `WhatIUnderstood` | `28-batch-sentence-settings.png` · `29-batch-sentence-settings-narrow.png` |
 | `ChangeSomething` | modal over `WhatIUnderstood`, opened from the `+ add more` row in the sense picker | `03-change-something-modal.png` |
 | `YourCards`       | fullscreen                                                                        | `04-your-cards.png`             |
 | Retry stress      | synthetic `YourCards` gallery with active, inactive, recovered, and terminal attempts | `06b-your-cards-retry-stress.png` |
@@ -119,22 +119,33 @@ with a struck-through term so the user can see what was rejected and why.
 
 ## Batch sentence settings
 
-Every non-empty `WhatIUnderstood` review ends with the exact persistent summary
-`sentences: level — · types natural`. `S` or a click anywhere on that visible
-summary opens two inline carousels immediately below it: `what's the desired
-level?` with `—`, `a1`, `a2`, `b1`, `b2`, `c1`, `c2`, and `how to mix the
-types?` with `natural`, `varied`. They use the same fixed-track marker and
-two-cell `< ` / ` >` hit geometry as the per-card editor. The focused question
-is white and bold, the selected chip is inverted, and the entire block follows
-the ordinary body scroll so a short viewport brings the focused row into view.
+Every non-empty `WhatIUnderstood` review begins with the persistent compact row
+`sentences  default  natural`, followed by exactly one blank line and then the
+reviewed words. Only `default` and `natural` carry the same muted tag background
+as unpinned generated-card labels; explicit `b1` or `varied` choices use the
+brighter pinned-label treatment. `default` is a presentation alias for no
+requested level, while the durable domain and JSON values remain `level: None`
+and `types: natural`.
 
-These are batch preferences, not a new screen or modal. `←/→` moves one
-adjacent choice without wrapping, `↑/↓` moves between the two rows, and `Esc`
-closes only this editor while retaining both choices. While it is open, its
-input ownership prevents `Enter`, `D`, `J`, `Space`, or other printable keys
-from leaking into candidate or sense controls. The choices survive sense
+`S`, a click on the compact row, or moving up from the first word opens two
+inline carousels between the compact row and the blank separator: `what's the
+desired level?` with `default`, `a1`, `a2`, `b1`, `b2`, `c1`, `c2`, and `how to
+mix the types?` with `natural`, `varied`. They use the same fixed-track marker
+and two-cell `< ` / ` >` hit geometry as the per-card editor. The focused
+question is white and bold, the selected chip is inverted, and the entire block
+follows the ordinary body scroll so a short viewport brings the focused row
+into view.
+
+These are batch preferences, not a new screen or modal. Ordinary upward
+navigation reaches the first word before one more `↑` or `k` opens the nearest
+`types` row; `S` and mouse opening retain `level` as their initial focus.
+`←/→` moves one adjacent choice without wrapping, `↑/↓` moves between the
+two rows, and `↓` from `types` or `Esc` closes only this editor while retaining
+both choices and returning to the previously selected word. While it is open,
+its input ownership prevents `Enter`, `D`, `J`, `Space`, or other printable
+keys from leaking into candidate or sense controls. The choices survive sense
 re-review, screen changes, and session resume; only a new batch resets them to
-`level — · types natural`.
+`default` and `natural`.
 
 `Ctrl+G` is valid with the editor open. At that boundary the settings expand
 once, after excluded candidates and selected senses have produced the final
@@ -149,11 +160,11 @@ Fresh generated metadata may attribute the sentence by register, type, and an
 operational CEFR band. The lowercase choices are `a1`, `a2`, `b1`, `b2`, `c1`,
 and `c2`. They classify only the language surrounding the target term; the
 target term itself is exempt, and the estimate is not an official proficiency
-assessment. With the default batch level `—`, a new card first gets the natural
-sentence required by its approved understanding and only then receives a
-descriptive level; that default initial generation does not target a band. An
-explicit batch-level choice is the initial-generation exception and constrains
-every draft. A later per-card level change becomes a rewrite constraint. Every
+assessment. With the visible default batch level `default`, a new card first
+gets the natural sentence required by its approved understanding and only then
+receives a descriptive level; that default initial generation does not target
+a band. An explicit batch-level choice is the initial-generation exception and
+constrains every draft. A later per-card level change becomes a rewrite constraint. Every
 card head keeps `term → target sentence`.
 The artifacts begin immediately after the last line of that head, including
 when the target sentence wraps, and remain an uninterrupted left column in
@@ -264,8 +275,8 @@ is no per-card modal and `R` has no `YourCards` action.
         │       └─ [Enter] on the "+ add more" row ──► ChangeSomething (bulk modal)
         │                                                  ├─ [Enter] send ──► (BulkCorrection busy) ──► WhatIUnderstood
         │                                                  └─ [Esc] cancel ──► WhatIUnderstood
-        ├─ [S]/[click sentence summary] ──► batch sentence settings open
-        │       ├─ [←→] pick · [↑↓] row
+        ├─ [↑/k from first word]/[S]/[click sentence summary] ──► batch sentence settings open
+        │       ├─ [←→] pick · [↑↓] row · [↓ from types] close to words
         │       ├─ [Esc] close while retaining choices
         │       └─ [Ctrl+G, ≥1 ok row] ──► allocate initial requests ──► YourCards
         ├─ [D] drop selected row ──► last row dropped returns to YourWords (blob cleared)
@@ -308,9 +319,9 @@ not a key the user presses.
 | `Welcome` · pick language   | `←/→` cycle `my language` · `Enter` next · `Ctrl+C` quit                                                     |
 | `Welcome` · enter key       | type/`Cmd+V` paste key · `←/→` move focus (submit ↔ load-from-env, env only) · `Enter` submit · `Esc` back   |
 | `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `Ctrl+L` language · double `Esc` clears nonempty input |
-| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav · `Enter`/`→` pick meanings · `D` drop row · `S` sentence settings · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
+| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav; `↑`/`k` above the first word opens sentence settings · `Enter`/`→` pick meanings · `D` drop row · `S` settings alias · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
 | `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter`/`←` done · `Enter` on `+ add more` opens ChangeSomething  |
-| `WhatIUnderstood` sentence settings | `Ctrl+G` make cards · `←→` pick · `↑↓` row · `Esc` close (`Enter` and printable review keys inert) |
+| `WhatIUnderstood` sentence settings | `Ctrl+G` make cards · `←→` pick · `↑↓` row · `↓` from types returns to words · `Esc` close (`Enter` and printable review keys inert) |
 | `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
 | `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` tune · `↑↓` nav (`Space` is an unadvertised alias) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |

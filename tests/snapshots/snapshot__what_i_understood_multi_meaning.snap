@@ -5,12 +5,12 @@ expression: render(&app)
                                                                                 
      what i understood   quick check before i build the cards        RU → EN    
                                                                                 
+    sentences   default   natural                                               
+                                                                                
     01  bank 2/3      multiple meanings:                                        
                          —  [фин.] Сущ. «банк», финансовое учреждение.          
                          —  Сущ. «берег» реки или водоёма.                      
-    sentences: level — · types natural                                          
-                                                                                
                                                                                 
                                       ai may be wrong, please verify results    
                                                                                 
-    step 2/3  2 cards           [Ctrl+G] generate  [S] sentences  [Esc] back
+    step 2/3  2 cards           [Ctrl+G] generate  [↑] sentences  [Esc] back

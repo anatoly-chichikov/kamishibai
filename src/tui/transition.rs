@@ -4,7 +4,7 @@ use super::app::App;
 use super::disclosure::{DisclosureControls, DisclosureIntent};
 use super::event::AppEvent;
 use super::screen::{ModalKind, Screen, WelcomeFocus, WelcomeStage};
-use super::sentence_editor::LabelEditorRow;
+use super::sentence_editor::{BatchSettingsRow, LabelEditorRow};
 
 /// A side effect requested by a transition. The shell interprets it outside the pure function.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -110,6 +110,11 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (app.sentence_settings_row_previous(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::NavNext)
+            if app.sentence_settings_editor() == Some(BatchSettingsRow::Types) =>
+        {
+            (app.sentence_settings_closed(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::NavNext)
             if app.sentence_settings_editor().is_some() =>
         {
             (app.sentence_settings_row_next(), Side::None)
@@ -176,6 +181,18 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, None, AppEvent::NavNext) if app.expanded_sense().is_some() => {
             (app.sense_next(), Side::None)
         }
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev)
+            if app.expanded_sense().is_none()
+                && app.sentence_settings_editor().is_none()
+                && app.selected() == 0
+                && !app.candidates().is_empty() =>
+        {
+            (
+                app.sentence_settings_opened()
+                    .sentence_settings_focused(BatchSettingsRow::Types),
+                Side::None,
+            )
+        }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K'))
             if app.expanded_sense().is_some() =>
@@ -204,7 +221,15 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K')) => {
-            (app.selected_previous(), Side::None)
+            if app.selected() == 0 && !app.candidates().is_empty() {
+                (
+                    app.sentence_settings_opened()
+                        .sentence_settings_focused(BatchSettingsRow::Types),
+                    Side::None,
+                )
+            } else {
+                (app.selected_previous(), Side::None)
+            }
         }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('j'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('J')) => {

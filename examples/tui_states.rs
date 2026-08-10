@@ -941,7 +941,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            rendered.contains("sentences: level b1 · types varied")
+            rendered.contains("sentences   b1   varied")
                 && rendered.contains("what's the desired level?")
                 && rendered.contains("how to mix the types?")
                 && rendered.contains("[Esc] close"),
