@@ -128,9 +128,11 @@ level-then-format order with the brighter pinned-label treatment: `b1`,
 `questions`, or `b1  questions`.
 
 `S`, a click on the compact row, or moving up from the first word opens two
-inline carousels between the compact row and the blank separator: `target
-level` with `from example`, `a1`, `a2`, `b1`, `b2`, `c1`, `c2`, and `preferred
-format` with `best fit`, `statements`, `questions`, `dialogue`, `mixed`. They use
+inline carousels between the quiet `generation guidance` label and the blank
+separator. Every compact summary tag is hidden while they are open. The rows
+are `what's the desired level?` with `best fit`, `a1`, `a2`, `b1`, `b2`, `c1`,
+`c2`, and `what kinds of phrases?` with `best fit`, `statements`, `questions`,
+`dialogue`, `mixed`. They use
 the same fixed-track marker and two-cell `< ` / ` >` hit geometry as the
 per-card editor. The focused label is white and bold, the selected chip is
 inverted, and the entire block follows the ordinary body scroll so a short
@@ -161,7 +163,7 @@ Fresh generated metadata may attribute the sentence by register, type, and an
 operational CEFR band. The lowercase choices are `a1`, `a2`, `b1`, `b2`, `c1`,
 and `c2`. They classify only the language surrounding the target term; the
 target term itself is exempt, and the estimate is not an official proficiency
-assessment. With the visible batch level `from example`, a new card first
+assessment. With the visible batch level `best fit`, a new card first
 gets the natural sentence required by its approved understanding and only then
 receives a descriptive level; that default initial generation does not target
 a band. An explicit batch-level choice is the initial-generation exception and

@@ -44,7 +44,7 @@ impl BatchSettingsRow {
     #[must_use]
     pub fn choice_token(self, index: usize) -> Option<&'static str> {
         match (self, index) {
-            (Self::Level, 0) => Some("from example"),
+            (Self::Level, 0) => Some("best fit"),
             (Self::Level, 1) => Some("a1"),
             (Self::Level, 2) => Some("a2"),
             (Self::Level, 3) => Some("b1"),
@@ -391,7 +391,7 @@ mod tests {
     };
 
     #[test]
-    fn batch_level_carousel_names_the_unpinned_choice_from_example() {
+    fn batch_level_carousel_names_the_unpinned_choice_best_fit() {
         let settings = BatchSettingsRow::Level
             .advanced(SentenceBatchSettings::default(), true)
             .with_types(SentenceTypeMix::BestFit);
@@ -401,7 +401,7 @@ mod tests {
                 settings.level(),
                 BatchSettingsRow::Level.selected(settings),
             ),
-            (Some("from example"), Some(SentenceLevel::A1), 1),
+            (Some("best fit"), Some(SentenceLevel::A1), 1),
             "the unpinned batch level lost its plain-language label or adjacent CEFR choice"
         );
     }

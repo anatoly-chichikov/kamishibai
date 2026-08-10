@@ -212,9 +212,9 @@ fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<St
         return;
     };
     for text in [
-        "target level",
-        "from example|a1|a2|b1|b2|c1|c2",
-        "preferred format",
+        "what's the desired level?",
+        "best fit|a1|a2|b1|b2|c1|c2",
+        "what kinds of phrases?",
         "best fit|statements|questions|dialogue|mixed",
     ] {
         if !text_contains(axes, text) {

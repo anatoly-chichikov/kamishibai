@@ -941,9 +941,12 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            rendered.contains("generation guidance   b1   questions")
-                && rendered.contains("target level")
-                && rendered.contains("preferred format")
+            rendered.contains("generation guidance")
+                && !rendered.contains("generation guidance   b1")
+                && rendered.contains("what's the desired level?")
+                && rendered.contains("what kinds of phrases?")
+                && rendered.contains("b1")
+                && rendered.contains("questions")
                 && rendered.contains("[Esc] close"),
             "synthetic generation guidance must show both retained choices and editor rows:\n{rendered}"
         );

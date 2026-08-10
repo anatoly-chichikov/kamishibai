@@ -170,6 +170,9 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
 fn settings_summary_line(app: &App) -> Line<'static> {
     let settings = app.sentence_settings();
     let mut spans = vec![Span::styled(format!("{SETTINGS_LABEL}  "), palette::dim())];
+    if app.sentence_settings_editor().is_some() {
+        return Line::from(spans);
+    }
     if settings.level().is_none() && !settings.types().pins() {
         spans.push(Span::styled(
             format!(" {DEFAULT_GUIDANCE_LABEL} "),

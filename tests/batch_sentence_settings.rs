@@ -174,16 +174,30 @@ fn review_places_quiet_generation_guidance_one_blank_row_above_words() {
 }
 
 #[test]
-fn expanded_guidance_uses_plain_axis_and_choice_copy() {
-    let rendered = flat_at(&review(2).sentence_settings_opened(), 120, 24);
+fn expanded_guidance_hides_summary_chips_and_uses_card_editor_questions() {
+    let area = terminal(120, 24);
+    let app = review(2).sentence_settings_opened();
+    let configured = review(2)
+        .with_sentence_settings(SentenceBatchSettings::new(
+            Some(SentenceLevel::B1),
+            SentenceTypeMix::Questions,
+        ))
+        .sentence_settings_opened();
+    let rendered = flat_at(&app, area.width, area.height);
+    let active = style_of(&app, "what's the desired level?", area.width, area.height);
+    let inactive = style_of(&app, "what kinds of phrases?", area.width, area.height);
     assert!(
-        rendered.contains("target level")
-            && rendered.contains("from example")
-            && rendered.contains("preferred format")
-            && rendered.contains("best fit")
-            && !rendered.contains("what's the desired level?")
-            && !rendered.contains("how to mix the types?"),
-        "expanded guidance must use the accepted plain-language axes and defaults: {rendered}"
+        line_of(&app, "generation guidance", area.width, area.height) == "generation guidance"
+            && line_of(&configured, "generation guidance", area.width, area.height,)
+                == "generation guidance"
+            && rendered.contains("what's the desired level?")
+            && rendered.contains("what kinds of phrases?")
+            && rendered.matches("best fit").count() == 2
+            && active.0 == Color::Rgb(0xe6, 0xe3, 0xda)
+            && active.2.contains(Modifier::BOLD)
+            && inactive.0 == Color::Rgb(0x5a, 0x59, 0x53)
+            && !inactive.2.contains(Modifier::BOLD),
+        "expanded guidance must replace summary chips with two card-editor-style best-fit questions: {rendered}"
     );
 }
 
@@ -434,16 +448,16 @@ fn narrow_guidance_wraps_each_full_carousel_without_losing_hit_regions() {
     let lines = rendered.lines().collect::<Vec<_>>();
     let level = lines
         .iter()
-        .position(|line| line.contains("target level"))
+        .position(|line| line.contains("what's the desired level?"))
         .expect("narrow guidance must keep the level label");
     let format = lines
         .iter()
-        .position(|line| line.contains("preferred format"))
+        .position(|line| line.contains("what kinds of phrases?"))
         .expect("narrow guidance must keep the format label");
     assert!(
         lines
             .get(level + 1)
-            .is_some_and(|line| line.contains("from example"))
+            .is_some_and(|line| line.contains("best fit"))
             && lines
                 .get(format + 1)
                 .is_some_and(|line| line.contains("best fit"))
@@ -472,13 +486,13 @@ fn opening_settings_scrolls_a_long_review_to_the_top_carousels() {
     let questions = cell_of_on_line(
         &app,
         "questions",
-        "preferred format",
+        "what kinds of phrases?",
         area.width,
         area.height,
     );
     assert!(
         app.body_scroll() == 0
-            && rendered.contains("preferred format")
+            && rendered.contains("what kinds of phrases?")
             && rendered.contains("term-01")
             && sentence_settings_event_at(&app, area, questions.0, questions.1)
                 == Some(AppEvent::SentenceSettingsChoose(BatchSettingsRow::Types, 2))

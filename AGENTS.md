@@ -351,7 +351,7 @@ the `Your cards` and `Done` indices by number).
 The level chips are the lowercase operational CEFR bands `a1`, `a2`, `b1`,
 `b2`, `c1`, and `c2`. They classify only the language surrounding the target
 term; the target term itself is exempt, and the estimate is not an official
-proficiency assessment. With the TUI's `from example` level (stored as no
+proficiency assessment. With the TUI's `best fit` level (stored as no
 level), fresh cards first get the natural sentence required by their approved
 understanding and only then receive a descriptive level; that default initial
 generation does not target a band. An explicit batch-level choice is the

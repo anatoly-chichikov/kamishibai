@@ -632,8 +632,8 @@ fn batch_question_column() -> usize {
 
 fn batch_row_label(row: BatchSettingsRow) -> &'static str {
     match row {
-        BatchSettingsRow::Level => "target level",
-        BatchSettingsRow::Types => "preferred format",
+        BatchSettingsRow::Level => "what's the desired level?",
+        BatchSettingsRow::Types => "what kinds of phrases?",
     }
 }
 
