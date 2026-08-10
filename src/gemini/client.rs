@@ -1163,6 +1163,7 @@ struct SentenceLabelsResponse {
     level: SentenceLevelProfile,
     #[serde(rename = "type")]
     kind: SentenceKind,
+    #[serde(default)]
     approx: Vec<SentenceAxis>,
 }
 
@@ -1720,6 +1721,42 @@ mod tests {
                 true,
             ),
             "requested initial labels were not reconciled as one metadata response"
+        );
+    }
+
+    #[test]
+    fn exact_requested_initial_labels_accept_an_omitted_empty_approx() {
+        let request = SentenceLabelSelection::empty()
+            .choosing(SentenceAxis::Level, 2)
+            .choosing(SentenceAxis::Type, 1);
+        let mut labels = sentence_labels_response("neutral", "b1", "question", Vec::new());
+        labels
+            .as_object_mut()
+            .expect("sentence labels must be an object")
+            .remove("approx");
+        let response = serde_json::from_value::<CardMetaResponse>(card_meta_response(labels))
+            .expect("omitted empty approx must decode");
+        assert!(
+            response.into_meta(Some(&request)).is_ok(),
+            "an omitted empty approx rejected an otherwise exact initial preset"
+        );
+    }
+
+    #[test]
+    fn omitted_empty_approx_cannot_hide_an_initial_preset_mismatch() {
+        let request = SentenceLabelSelection::empty()
+            .choosing(SentenceAxis::Level, 2)
+            .choosing(SentenceAxis::Type, 1);
+        let mut labels = sentence_labels_response("neutral", "a2", "statement", Vec::new());
+        labels
+            .as_object_mut()
+            .expect("sentence labels must be an object")
+            .remove("approx");
+        let response = serde_json::from_value::<CardMetaResponse>(card_meta_response(labels))
+            .expect("omitted empty approx must decode before preset validation");
+        assert!(
+            response.into_meta(Some(&request)).is_err(),
+            "an omitted approx silently accepted a mismatched initial preset"
         );
     }
 
