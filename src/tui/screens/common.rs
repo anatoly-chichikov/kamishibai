@@ -427,9 +427,9 @@ pub fn back_hint() -> FooterHint {
     FooterHint::with("Esc", "back", Tier::Secondary, 2)
 }
 
-/// The review-screen sentence settings action, retained on a crowded footer.
+/// The review-screen generation-guidance action, retained on a crowded footer.
 pub fn sentence_settings_hint() -> FooterHint {
-    FooterHint::with("↑", "sentences", Tier::Secondary, 2)
+    FooterHint::with("↑", "guidance", Tier::Secondary, 2)
 }
 
 /// The finished-screen Escape action and its armed confirmation state.

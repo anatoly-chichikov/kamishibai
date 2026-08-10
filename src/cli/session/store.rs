@@ -423,7 +423,7 @@ mod tests {
         let store = SessionStore::new(home.path());
         let saved = record("fr-settings").with_sentences(SentenceBatchSettings::new(
             Some(SentenceLevel::B1),
-            SentenceTypeMix::Varied,
+            SentenceTypeMix::Mixed,
         ));
         store.create(&saved).expect("session must save");
         assert_eq!(
@@ -520,6 +520,58 @@ mod tests {
             (opened.sentences, opened.drafts[0].meta_request.as_ref()),
             (SentenceBatchSettings::default(), None),
             "a compatible session did not default its new batch or draft fields"
+        );
+    }
+
+    #[test]
+    fn version_two_type_policy_aliases_migrate_on_the_next_write() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let migrated = [
+            ("legacy-natural", "natural", SentenceTypeMix::BestFit),
+            ("legacy-varied", "varied", SentenceTypeMix::Mixed),
+        ]
+        .map(|(id, legacy, expected)| {
+            let dir = store.dir(id);
+            fs::create_dir_all(&dir).expect("session dir must be created");
+            fs::write(
+                dir.join("session.json"),
+                format!(
+                    r#"{{"version":2,"id":"{id}","created":"t","known":"EN","learning":"FR","out":"/out","senses":"primary","sentences":{{"types":"{legacy}"}},"source":"words","phase":"understood","drafts":[]}}"#
+                ),
+            )
+            .expect("legacy session must be written");
+            let opened = store.open(id).expect("legacy session must open");
+            store
+                .update(id, |_| Ok(()))
+                .expect("legacy session must rewrite canonically");
+            let rewritten: serde_json::Value = serde_json::from_str(
+                fs::read_to_string(dir.join("session.json"))
+                    .expect("rewritten session must be readable")
+                    .as_str(),
+            )
+            .expect("rewritten session must remain JSON");
+            (
+                opened.sentences.types(),
+                rewritten["sentences"]["types"].as_str().map(String::from),
+                expected,
+            )
+        });
+        assert_eq!(
+            migrated,
+            [
+                (
+                    SentenceTypeMix::BestFit,
+                    Some(String::from("best-fit")),
+                    SentenceTypeMix::BestFit,
+                ),
+                (
+                    SentenceTypeMix::Mixed,
+                    Some(String::from("mixed")),
+                    SentenceTypeMix::Mixed,
+                ),
+            ],
+            "a version-two type-policy alias failed to migrate through durable storage"
         );
     }
 

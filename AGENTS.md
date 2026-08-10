@@ -51,7 +51,7 @@ The input contract is strict. There are no optional entry fields.
 With no arguments `kamishibai` opens the interactive TUI; a bare JSON path opens the TUI on a prebuilt batch. Everything non-interactive is a **session** subcommand — a persistent, curatable unit of work an agent drives across invocations. A session moves through stages: understood → (curate) → generating → published (or **partial** when some cards fail but the deck still ships the rest, **failed** when no card survives).
 
 - `kamishibai agent-contract`: print the version-matched `llms.txt` embedded in the installed binary; use this before any remote copy
-- `kamishibai new (--word W [--word W…] | --words FILE | --build FILE) [--learning L] [--known L] [--senses primary|all] [--level a1|a2|b1|b2|c1|c2] [--types natural|varied] [--id NAME] [--generate [--wait]]`: understand the words (exactly one input form; `--build` imports a cards JSON whose entries carry the pair, so it rejects `--known`/`--learning`/`--senses`) and create a session in the **understood** stage (`--learning` is autodetected from the words when omitted; `--known` is a one-off override that otherwise resolves from your saved preference and **refuses** when neither is set — save it once with `config`; `--level` pins one initial surrounding-language band, `--types varied` deterministically mixes statements, questions, and dialogues, and `--wait` requires `--generate`)
+- `kamishibai new (--word W [--word W…] | --words FILE | --build FILE) [--learning L] [--known L] [--senses primary|all] [--level a1|a2|b1|b2|c1|c2] [--types best-fit|statements|questions|dialogue|mixed] [--id NAME] [--generate [--wait]]`: understand the words (exactly one input form; `--build` imports a cards JSON whose entries carry the pair, so it rejects `--known`/`--learning`/`--senses`) and create a session in the **understood** stage (`--learning` is autodetected from the words when omitted; `--known` is a one-off override that otherwise resolves from your saved preference and **refuses** when neither is set — save it once with `config`; `--level` pins one initial surrounding-language band, non-`best-fit` types pin an exact format or deterministic mix, and `--wait` requires `--generate`)
 - `kamishibai select [<id>] --card T --sense 1,3` / `exclude [<id>] --card T` / `correct [<id>] --card T --note "…"`: curate the understanding before generating — pick senses, drop a card, or ask Gemini to add senses (each resets the session to understood)
 - `kamishibai generate [<id>] [--wait]`: commit the curated plan and start a managed background worker that generates + publishes (`--wait` runs it in the foreground)
 - `kamishibai status [<id>]`: stage + per-candidate senses (understood) or per-card progress (generating/published), read from the cache (no Gemini)
@@ -65,7 +65,7 @@ There are exactly two output modes: **plain text** (default, for humans — line
 
 Sentence tuning is a two-step persistent transaction in both delivery surfaces. `adjust` only patches the selected card's staged request and may be called repeatedly for several cards; it leaves the current cached metadata, artifacts, published paths, costs, and lifecycle phase untouched. `regenerate --pending` is the only headless command that activates the whole staged batch. `cards.pending` in session JSON counts staged rewrites, each card's `labels` is its current complete attribution, and `adjustment` carries `state` (`pending` or `active`), the possibly partial requested label selection, and the non-empty note when present. A partial-session pending run also resumes unrelated missing stages before the deck is republished. Ordinary `generate`, `regenerate --failed`, and `regenerate --card` refuse staged changes before any provider or destructive cache work.
 
-Initial batch sentence settings are separate from that post-generation rewrite transaction. `SentenceBatchSettings` persists beside the reviewed candidates in `session.json`; its default is no level plus natural phrase kinds, which leaves the metadata prompt and provider call count unchanged. An explicit level becomes one initial pinned axis on every card, while `types=varied` uses one deterministic allocator to pin only statement, question, or dialogue across the committed plan. The pending per-card metadata request persists only until metadata succeeds; the permanent batch setting remains in both session and result JSON as provenance. TUI and console (`new --level … --types varied`) must allocate through the same policy.
+Initial batch generation guidance is separate from that post-generation rewrite transaction. `SentenceBatchSettings` persists beside the reviewed candidates in `session.json`; its default is no level plus `best-fit` example formats, which leaves the metadata prompt and provider call count unchanged. An explicit level becomes one initial pinned axis on every card; `statements`, `questions`, and `dialogue` pin one exact format throughout the batch, while `mixed` deterministically allocates three statements, one question, and one dialogue per complete group of five. The pending per-card metadata request persists only until metadata succeeds; the permanent batch setting remains in both session and result JSON as provenance. TUI and console (`new --level … --types questions`) must allocate through the same policy; old `natural` and `varied` values remain read/CLI aliases only.
 
 ## Architecture
 
@@ -342,7 +342,7 @@ reproducibly by `states.tape` and `states-narrow.tape`, which drive
 scenarios keep the established indices 0–10 intact: S1 is index 6, S2 replaces the removed
 per-card modal at index 7, S3–S9 are indices 11–17, S10–S12 are indices 18–20, the retry
 stress gallery is index 21, the Esc clear/back/stop/drain/partial states are indices 22–26,
-and the open batch sentence-settings editor is index 27. When the design changes, edit the demo data in
+and the open generation-guidance editor is index 27. When the design changes, edit the demo data in
 `examples/tui_states.rs` and re-run both synthetic tapes. If you add or reorder states in
 the vector, update the absolute indices in both tapes and in the
 `pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells` test (it jumps to
@@ -351,7 +351,7 @@ the `Your cards` and `Done` indices by number).
 The level chips are the lowercase operational CEFR bands `a1`, `a2`, `b1`,
 `b2`, `c1`, and `c2`. They classify only the language surrounding the target
 term; the target term itself is exempt, and the estimate is not an official
-proficiency assessment. With the TUI's `default` batch level (stored as no
+proficiency assessment. With the TUI's `from example` level (stored as no
 level), fresh cards first get the natural sentence required by their approved
 understanding and only then receive a descriptive level; that default initial
 generation does not target a band. An explicit batch-level choice is the

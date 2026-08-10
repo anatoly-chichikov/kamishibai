@@ -77,8 +77,8 @@ pub(in crate::cli) struct NewArgs {
     /// Pin this surrounding-language CEFR level on every generated card.
     #[arg(long, value_enum)]
     pub(super) level: Option<BatchLevel>,
-    /// Choose whether phrase kinds stay natural or are varied across the batch.
-    #[arg(long, value_enum, default_value = "natural")]
+    /// Choose how generated example formats are assigned across the batch.
+    #[arg(long, value_enum, default_value = "best-fit")]
     pub(super) types: BatchTypes,
     /// Output directory for the deck and report (defaults from
     /// KAMISHIBAI_OUTPUT, then Documents/Kamishibai).
@@ -112,13 +112,21 @@ pub(super) enum BatchLevel {
     C2,
 }
 
-/// Exact lowercase phrase-mix policies accepted by `new --types`.
+/// Exact lowercase example-format policies accepted by `new --types`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(super) enum BatchTypes {
-    /// Let each sentence take its naturally suitable phrase kind.
-    Natural,
+    /// Let each example take the format that best fits its approved use.
+    #[value(alias = "natural")]
+    BestFit,
+    /// Generate declarative statements throughout the batch.
+    Statements,
+    /// Generate direct questions throughout the batch.
+    Questions,
+    /// Generate two-utterance dialogues throughout the batch.
+    Dialogue,
     /// Deterministically mix statements, questions, and dialogues.
-    Varied,
+    #[value(alias = "varied")]
+    Mixed,
 }
 
 /// Arguments for `generate`.
@@ -392,24 +400,24 @@ mod tests {
             "--level",
             "b1",
             "--types",
-            "varied",
+            "questions",
             "--generate",
             "--wait",
         ]);
         assert_eq!(
             (args.level, args.types, args.generate, args.wait),
-            (Some(BatchLevel::B1), BatchTypes::Varied, true, true),
-            "new did not retain its batch sentence settings or foreground generation flag"
+            (Some(BatchLevel::B1), BatchTypes::Questions, true, true),
+            "new did not retain its generation guidance or foreground generation flag"
         );
     }
 
     #[test]
-    fn new_defaults_to_natural_sentences_without_a_level() {
+    fn new_defaults_to_best_fit_examples_without_a_level() {
         let args = parse(&["new", "--word", "wreck"]);
         assert_eq!(
             (args.level, args.types, args.wait),
-            (None, BatchTypes::Natural, false),
-            "new changed the natural no-level default"
+            (None, BatchTypes::BestFit, false),
+            "new changed the best-fit no-level default"
         );
     }
 
@@ -422,12 +430,40 @@ mod tests {
             "--level",
             "c1",
             "--types",
-            "varied",
+            "mixed",
         ]);
         assert_eq!(
             (args.level, args.types),
-            (Some(BatchLevel::C1), BatchTypes::Varied),
-            "build rejected explicit batch sentence settings"
+            (Some(BatchLevel::C1), BatchTypes::Mixed),
+            "build rejected explicit generation guidance"
+        );
+    }
+
+    #[test]
+    fn new_accepts_legacy_type_policy_aliases() {
+        let natural = parse(&["new", "--word", "wreck", "--types", "natural"]);
+        let varied = parse(&["new", "--word", "wreck", "--types", "varied"]);
+        assert_eq!(
+            (natural.types, varied.types),
+            (BatchTypes::BestFit, BatchTypes::Mixed),
+            "legacy type-policy flags stopped mapping onto their canonical modes"
+        );
+    }
+
+    #[test]
+    fn new_accepts_every_canonical_example_format() {
+        let parsed = ["best-fit", "statements", "questions", "dialogue", "mixed"]
+            .map(|token| parse(&["new", "--word", "wreck", "--types", token]).types);
+        assert_eq!(
+            parsed,
+            [
+                BatchTypes::BestFit,
+                BatchTypes::Statements,
+                BatchTypes::Questions,
+                BatchTypes::Dialogue,
+                BatchTypes::Mixed,
+            ],
+            "new rejected or remapped a canonical example-format token"
         );
     }
 }

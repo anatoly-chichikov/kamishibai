@@ -126,7 +126,7 @@ pub(crate) enum EditorControl {
     Note,
 }
 
-/// One clickable control inside the batch sentence-settings editor.
+/// One clickable control inside the generation-guidance editor.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum BatchEditorControl {
     Chip(BatchSettingsRow, usize),
@@ -286,7 +286,7 @@ pub(crate) fn editor_control_at(
         })
 }
 
-/// Render both rows of the batch sentence-settings editor.
+/// Render both rows of the generation-guidance editor.
 #[must_use]
 pub(crate) fn batch_editor_lines(
     settings: SentenceBatchSettings,
@@ -632,8 +632,8 @@ fn batch_question_column() -> usize {
 
 fn batch_row_label(row: BatchSettingsRow) -> &'static str {
     match row {
-        BatchSettingsRow::Level => "what's the desired level?",
-        BatchSettingsRow::Types => "how to mix the types?",
+        BatchSettingsRow::Level => "target level",
+        BatchSettingsRow::Types => "preferred format",
     }
 }
 

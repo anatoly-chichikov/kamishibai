@@ -1642,7 +1642,7 @@ mod tests {
 
     #[test]
     fn drafts_expand_batch_sentence_settings_after_candidate_selection() {
-        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Mixed);
         let app = App::new(pair())
             .with_screen(Screen::WhatIUnderstood)
             .confirmed_learning("en")
@@ -2083,7 +2083,7 @@ mod tests {
     fn zero_ready_stop_retains_settings_across_rotation_and_recreates_requests() {
         let home = tempfile::TempDir::new().expect("tempdir must be created");
         let store = SessionStore::new(home.path());
-        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Mixed);
         let app = review()
             .seeded_blob("whilst")
             .with_sentence_settings(settings);
@@ -2176,7 +2176,7 @@ mod tests {
 
     #[test]
     fn partial_stop_keeps_tally_settings_and_pending_initial_request() {
-        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B2), SentenceTypeMix::Varied);
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B2), SentenceTypeMix::Mixed);
         let pending = settings.selections(2)[1]
             .clone()
             .expect("configured second card must receive a metadata request");

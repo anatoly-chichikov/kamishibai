@@ -530,7 +530,7 @@ mod tests {
         )
         .with_sentences(SentenceBatchSettings::new(
             Some(SentenceLevel::B1),
-            SentenceTypeMix::Varied,
+            SentenceTypeMix::Mixed,
         ));
         let expected = record.sentences.selections(2);
         ensure_plan(&mut record);

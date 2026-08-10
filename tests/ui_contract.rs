@@ -202,7 +202,7 @@ fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<St
         errs.push(String::from("wu.sentence_summary is missing"));
         return;
     };
-    for text in ["sentences  ", "default", "natural"] {
+    for text in ["generation guidance  ", "best fit", "requested level"] {
         if !text_contains(summary, text) {
             errs.push(format!("wu.sentence_summary does not lock {text:?}"));
         }
@@ -212,10 +212,10 @@ fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<St
         return;
     };
     for text in [
-        "what's the desired level?",
-        "default|a1|a2|b1|b2|c1|c2",
-        "how to mix the types?",
-        "natural|varied",
+        "target level",
+        "from example|a1|a2|b1|b2|c1|c2",
+        "preferred format",
+        "best fit|statements|questions|dialogue|mixed",
     ] {
         if !text_contains(axes, text) {
             errs.push(format!("wu.sentence_settings_axes does not lock {text:?}"));
@@ -225,7 +225,7 @@ fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<St
         errs.push(String::from("wu.footer_sentence_settings_open is missing"));
         return;
     };
-    if !text_contains(open, "[↑] sentences") {
+    if !text_contains(open, "[↑] guidance") {
         errs.push(String::from(
             "wu.footer_sentence_settings_open does not reveal upward navigation",
         ));

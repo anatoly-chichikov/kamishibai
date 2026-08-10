@@ -162,7 +162,7 @@ Space
 Sleep 800ms
 Screenshot "live/27-generation-partial.png"
 
-# index 27 — batch sentence settings retain b1 + varied in both inline carousels
+# index 27 — generation guidance retains b1 + questions in both inline carousels
 Type "27"
 Space
 Sleep 800ms

@@ -50,7 +50,7 @@ EXAMPLES:
   kamishibai                                       open the interactive TUI
   kamishibai agent-contract                        print this binary's agent contract
   kamishibai new --word bank --learning EN --json  understand words, create a session
-  kamishibai new --word bank --learning EN --level b1 --types varied --generate --wait --json
+  kamishibai new --word bank --learning EN --level b1 --types questions --generate --wait --json
                                                    configure, generate, and wait in one call
   kamishibai select --card bank --sense 2 --json   keep only the 2nd sense of a card
   kamishibai exclude --card spring --json          drop one card from the plan
@@ -273,17 +273,11 @@ mod tests {
     fn new_rejects_unknown_or_noncanonical_sentence_settings() {
         let invalid_level =
             Cli::try_parse_from(["kamishibai", "new", "--word", "wreck", "--level", "B1"]);
-        let invalid_types = Cli::try_parse_from([
-            "kamishibai",
-            "new",
-            "--word",
-            "wreck",
-            "--types",
-            "questions",
-        ]);
+        let invalid_types =
+            Cli::try_parse_from(["kamishibai", "new", "--word", "wreck", "--types", "random"]);
         assert!(
             invalid_level.is_err() && invalid_types.is_err(),
-            "new accepted an undocumented sentence level or type-mix token"
+            "new accepted an undocumented sentence level or example-format token"
         );
     }
 

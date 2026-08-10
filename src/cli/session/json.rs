@@ -6,7 +6,8 @@
 //! Schema promises: one compact document per invocation, `ok` discriminates
 //! success from the error envelope (`error::json_line`), absent options are
 //! omitted (never `null`), `senses[].number` is 1-based to match
-//! `select --sense`, and evolution is additive only.
+//! `select --sense`. Fields evolve additively; closed token vocabularies change
+//! only with an explicit release-contract update and backward read aliases.
 
 use std::path::Path;
 
@@ -650,9 +651,9 @@ mod tests {
                 Some(true),
                 None,
                 None,
-                serde_json::json!({"types": "natural"}),
+                serde_json::json!({"types": "best-fit"}),
             ),
-            "an understood document must carry candidate senses and natural sentence settings while omitting the cards block"
+            "an understood document must carry candidate senses and best-fit example settings while omitting the cards block"
         );
     }
 
@@ -661,7 +662,7 @@ mod tests {
         let home = TempDir::new().expect("tempdir must be created");
         let record = record().with_sentences(SentenceBatchSettings::new(
             Some(SentenceLevel::B1),
-            SentenceTypeMix::Varied,
+            SentenceTypeMix::Mixed,
         ));
         let session = value_of(&record, home.path());
         let paths = ResultRecord {
@@ -676,11 +677,11 @@ mod tests {
                 .expect("result document must build"),
         )
         .expect("result document must serialize");
-        let expected = serde_json::json!({"level": "b1", "types": "varied"});
+        let expected = serde_json::json!({"level": "b1", "types": "mixed"});
         assert_eq!(
             (session["sentences"].clone(), result["sentences"].clone()),
             (expected.clone(), expected),
-            "session or result JSON omitted the configured batch sentence settings"
+            "session or result JSON omitted the configured generation guidance"
         );
     }
 

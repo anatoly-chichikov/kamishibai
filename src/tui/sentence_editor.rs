@@ -4,12 +4,12 @@ use crate::session::{
     SentenceAxis, SentenceBatchSettings, SentenceLabelSelection, SentenceLevel, SentenceTypeMix,
 };
 
-/// One focusable row inside the batch sentence-settings editor.
+/// One focusable row inside the generation-guidance editor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BatchSettingsRow {
     /// The optional surrounding-language CEFR constraint.
     Level,
-    /// The natural or varied sentence-type policy.
+    /// The preferred generated sentence format.
     Types,
 }
 
@@ -36,7 +36,7 @@ impl BatchSettingsRow {
     pub fn choice_count(self) -> usize {
         match self {
             Self::Level => 7,
-            Self::Types => 2,
+            Self::Types => 5,
         }
     }
 
@@ -44,15 +44,18 @@ impl BatchSettingsRow {
     #[must_use]
     pub fn choice_token(self, index: usize) -> Option<&'static str> {
         match (self, index) {
-            (Self::Level, 0) => Some("default"),
+            (Self::Level, 0) => Some("from example"),
             (Self::Level, 1) => Some("a1"),
             (Self::Level, 2) => Some("a2"),
             (Self::Level, 3) => Some("b1"),
             (Self::Level, 4) => Some("b2"),
             (Self::Level, 5) => Some("c1"),
             (Self::Level, 6) => Some("c2"),
-            (Self::Types, 0) => Some("natural"),
-            (Self::Types, 1) => Some("varied"),
+            (Self::Types, 0) => Some("best fit"),
+            (Self::Types, 1) => Some("statements"),
+            (Self::Types, 2) => Some("questions"),
+            (Self::Types, 3) => Some("dialogue"),
+            (Self::Types, 4) => Some("mixed"),
             _ => None,
         }
     }
@@ -71,8 +74,11 @@ impl BatchSettingsRow {
                 Some(SentenceLevel::C2) => 6,
             },
             Self::Types => match settings.types() {
-                SentenceTypeMix::Natural => 0,
-                SentenceTypeMix::Varied => 1,
+                SentenceTypeMix::BestFit => 0,
+                SentenceTypeMix::Statements => 1,
+                SentenceTypeMix::Questions => 2,
+                SentenceTypeMix::Dialogue => 3,
+                SentenceTypeMix::Mixed => 4,
             },
         }
     }
@@ -88,8 +94,11 @@ impl BatchSettingsRow {
             (Self::Level, 4) => settings.with_level(Some(SentenceLevel::B2)),
             (Self::Level, 5) => settings.with_level(Some(SentenceLevel::C1)),
             (Self::Level, 6) => settings.with_level(Some(SentenceLevel::C2)),
-            (Self::Types, 0) => settings.with_types(SentenceTypeMix::Natural),
-            (Self::Types, 1) => settings.with_types(SentenceTypeMix::Varied),
+            (Self::Types, 0) => settings.with_types(SentenceTypeMix::BestFit),
+            (Self::Types, 1) => settings.with_types(SentenceTypeMix::Statements),
+            (Self::Types, 2) => settings.with_types(SentenceTypeMix::Questions),
+            (Self::Types, 3) => settings.with_types(SentenceTypeMix::Dialogue),
+            (Self::Types, 4) => settings.with_types(SentenceTypeMix::Mixed),
             _ => settings,
         }
     }
@@ -382,32 +391,40 @@ mod tests {
     };
 
     #[test]
-    fn batch_level_carousel_names_the_unpinned_choice_default() {
+    fn batch_level_carousel_names_the_unpinned_choice_from_example() {
         let settings = BatchSettingsRow::Level
             .advanced(SentenceBatchSettings::default(), true)
-            .with_types(SentenceTypeMix::Natural);
+            .with_types(SentenceTypeMix::BestFit);
         assert_eq!(
             (
                 BatchSettingsRow::Level.choice_token(0),
                 settings.level(),
                 BatchSettingsRow::Level.selected(settings),
             ),
-            (Some("default"), Some(SentenceLevel::A1), 1),
+            (Some("from example"), Some(SentenceLevel::A1), 1),
             "the unpinned batch level lost its plain-language label or adjacent CEFR choice"
         );
     }
 
     #[test]
-    fn batch_type_carousel_saturates_at_varied() {
-        let settings = BatchSettingsRow::Types.advanced(SentenceBatchSettings::default(), true);
-        let saturated = BatchSettingsRow::Types.advanced(settings, true);
+    fn batch_format_carousel_exposes_every_mode_and_saturates_at_mixed() {
+        let saturated = (0..8).fold(SentenceBatchSettings::default(), |settings, _| {
+            BatchSettingsRow::Types.advanced(settings, true)
+        });
         assert_eq!(
             (
+                (0..BatchSettingsRow::Types.choice_count())
+                    .filter_map(|index| BatchSettingsRow::Types.choice_token(index))
+                    .collect::<Vec<_>>(),
                 saturated.types(),
                 BatchSettingsRow::Types.selected(saturated)
             ),
-            (SentenceTypeMix::Varied, 1),
-            "the batch type carousel wrapped or moved past varied"
+            (
+                vec!["best fit", "statements", "questions", "dialogue", "mixed"],
+                SentenceTypeMix::Mixed,
+                4,
+            ),
+            "the batch format carousel omitted a mode or moved past mixed"
         );
     }
 

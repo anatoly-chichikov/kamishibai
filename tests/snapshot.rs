@@ -319,7 +319,7 @@ fn batch_sentence_settings_snapshot_locks_the_inline_editor() {
         )])
         .with_sentence_settings(SentenceBatchSettings::new(
             Some(SentenceLevel::B1),
-            SentenceTypeMix::Varied,
+            SentenceTypeMix::Questions,
         ))
         .sentence_settings_opened();
     insta::assert_snapshot!("batch_sentence_settings", render_sized(&app, 96, 16));

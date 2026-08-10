@@ -1,4 +1,4 @@
-//! Integration coverage for sentence settings on `What I understood`.
+//! Integration coverage for generation guidance on `What I understood`.
 
 use std::collections::BTreeSet;
 
@@ -128,6 +128,15 @@ fn style_of(app: &App, needle: &str, width: u16, height: u16) -> (Color, Color, 
     panic!("the rendered screen never showed '{needle}'");
 }
 
+fn line_of(app: &App, needle: &str, width: u16, height: u16) -> String {
+    flat_at(app, width, height)
+        .lines()
+        .find(|line| line.contains(needle))
+        .map(str::trim)
+        .map(String::from)
+        .unwrap_or_else(|| panic!("the rendered screen never showed '{needle}'"))
+}
+
 fn choices(app: &App, area: Rect, row: BatchSettingsRow) -> BTreeSet<usize> {
     let mut choices = BTreeSet::new();
     for screen_row in 0..area.height {
@@ -144,13 +153,13 @@ fn choices(app: &App, area: Rect, row: BatchSettingsRow) -> BTreeSet<usize> {
 }
 
 #[test]
-fn review_places_quiet_sentence_labels_one_blank_row_above_words() {
+fn review_places_quiet_generation_guidance_one_blank_row_above_words() {
     let rendered = flat_at(&review(2), 120, 24);
     let lines = rendered.lines().collect::<Vec<_>>();
     let summary = lines
         .iter()
-        .position(|line| line.contains("sentences   default   natural"))
-        .expect("the review must expose the compact sentence labels");
+        .position(|line| line.contains("generation guidance   best fit"))
+        .expect("the review must expose the compact generation guidance");
     let words = lines
         .iter()
         .position(|line| line.contains("01  term-01"))
@@ -158,26 +167,70 @@ fn review_places_quiet_sentence_labels_one_blank_row_above_words() {
     assert!(
         words == summary + 2
             && lines[summary + 1].trim().is_empty()
-            && rendered.contains("[↑] sentences")
+            && rendered.contains("[↑] guidance")
             && !rendered.contains("[S] sentences"),
-        "sentence settings must read as a quiet list row above the words: {rendered}"
+        "generation guidance must read as a quiet list row above the words: {rendered}"
     );
 }
 
 #[test]
-fn summary_reuses_muted_card_tags_and_brightens_only_explicit_choices() {
+fn expanded_guidance_uses_plain_axis_and_choice_copy() {
+    let rendered = flat_at(&review(2).sentence_settings_opened(), 120, 24);
+    assert!(
+        rendered.contains("target level")
+            && rendered.contains("from example")
+            && rendered.contains("preferred format")
+            && rendered.contains("best fit")
+            && !rendered.contains("what's the desired level?")
+            && !rendered.contains("how to mix the types?"),
+        "expanded guidance must use the accepted plain-language axes and defaults: {rendered}"
+    );
+}
+
+#[test]
+fn summary_collapses_inferred_axes_and_keeps_explicit_axes_in_fixed_order() {
+    let area = terminal(120, 24);
+    let defaults = review(2);
+    let level = review(2).with_sentence_settings(SentenceBatchSettings::new(
+        Some(SentenceLevel::B1),
+        SentenceTypeMix::BestFit,
+    ));
+    let format = review(2)
+        .with_sentence_settings(SentenceBatchSettings::new(None, SentenceTypeMix::Questions));
+    let both = review(2).with_sentence_settings(SentenceBatchSettings::new(
+        Some(SentenceLevel::B1),
+        SentenceTypeMix::Questions,
+    ));
+    assert_eq!(
+        [
+            line_of(&defaults, "generation guidance", area.width, area.height),
+            line_of(&level, "generation guidance", area.width, area.height),
+            line_of(&format, "generation guidance", area.width, area.height),
+            line_of(&both, "generation guidance", area.width, area.height),
+        ],
+        [
+            String::from("generation guidance   best fit"),
+            String::from("generation guidance   b1"),
+            String::from("generation guidance   questions"),
+            String::from("generation guidance   b1   questions"),
+        ],
+        "collapsed guidance must show one inferred default or only explicit axes in level-then-format order"
+    );
+}
+
+#[test]
+fn summary_reuses_muted_default_and_brightens_only_explicit_guidance() {
     let area = terminal(120, 24);
     let defaults = review(2);
     let explicit = review(2).with_sentence_settings(SentenceBatchSettings::new(
         Some(SentenceLevel::B1),
-        SentenceTypeMix::Varied,
+        SentenceTypeMix::Questions,
     ));
     assert_eq!(
         (
-            style_of(&defaults, "default", area.width, area.height),
-            style_of(&defaults, "natural", area.width, area.height),
+            style_of(&defaults, "best fit", area.width, area.height),
             style_of(&explicit, "b1", area.width, area.height),
-            style_of(&explicit, "varied", area.width, area.height),
+            style_of(&explicit, "questions", area.width, area.height),
         ),
         (
             (
@@ -187,11 +240,6 @@ fn summary_reuses_muted_card_tags_and_brightens_only_explicit_choices() {
             ),
             (
                 Color::Rgb(0x0e, 0x0e, 0x10),
-                Color::Rgb(0x8b, 0x8a, 0x83),
-                Modifier::empty(),
-            ),
-            (
-                Color::Rgb(0x0e, 0x0e, 0x10),
                 Color::Rgb(0xe6, 0xe3, 0xda),
                 Modifier::empty(),
             ),
@@ -201,7 +249,7 @@ fn summary_reuses_muted_card_tags_and_brightens_only_explicit_choices() {
                 Modifier::empty(),
             ),
         ),
-        "batch choices must share the generated-card tag hierarchy without competing with the title"
+        "guidance choices must share the generated-card tag hierarchy without competing with the title"
     );
 }
 
@@ -282,7 +330,7 @@ fn keyboard_changes_both_rows_and_escape_closes_without_losing_choices() {
     assert_eq!(
         (app.sentence_settings(), app.sentence_settings_editor()),
         (
-            SentenceBatchSettings::new(Some(SentenceLevel::A1), SentenceTypeMix::Varied),
+            SentenceBatchSettings::new(Some(SentenceLevel::A1), SentenceTypeMix::Statements),
             None,
         ),
         "escape must close only the editor and preserve both chosen settings"
@@ -291,7 +339,7 @@ fn keyboard_changes_both_rows_and_escape_closes_without_losing_choices() {
 
 #[test]
 fn re_understanding_and_screen_changes_keep_only_the_durable_choices() {
-    let settings = SentenceBatchSettings::new(Some(SentenceLevel::C1), SentenceTypeMix::Varied);
+    let settings = SentenceBatchSettings::new(Some(SentenceLevel::C1), SentenceTypeMix::Mixed);
     let app = review(2)
         .with_sentence_settings(settings)
         .sentence_settings_opened()
@@ -331,7 +379,7 @@ fn open_editor_owns_enter_drop_navigation_and_printable_keys() {
 
 #[test]
 fn ctrl_g_commits_generation_while_the_editor_is_open() {
-    let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+    let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Questions);
     let app = review(2)
         .with_sentence_settings(settings)
         .sentence_settings_opened();
@@ -352,7 +400,7 @@ fn ctrl_g_commits_generation_while_the_editor_is_open() {
 fn summary_and_every_carousel_choice_share_mouse_hit_geometry() {
     let area = terminal(120, 24);
     let closed = review(1);
-    let summary = cell_of(&closed, "sentences   ", area.width, area.height);
+    let summary = cell_of(&closed, "generation guidance   ", area.width, area.height);
     let separator = (summary.0, summary.1 + 1);
     let open = closed.clone().sentence_settings_opened();
     assert_eq!(
@@ -372,9 +420,38 @@ fn summary_and_every_carousel_choice_share_mouse_hit_geometry() {
             MousePointer::Arrow,
             MousePointer::Arrow,
             BTreeSet::from([0, 1, 2, 3, 4, 5, 6]),
-            BTreeSet::from([0, 1]),
+            BTreeSet::from([0, 1, 2, 3, 4]),
         ),
         "renderer, click dispatch, and pointer policy must agree on the whole settings block"
+    );
+}
+
+#[test]
+fn narrow_guidance_wraps_each_full_carousel_without_losing_hit_regions() {
+    let area = terminal(48, 28);
+    let app = review(1).sentence_settings_opened();
+    let rendered = flat_at(&app, area.width, area.height);
+    let lines = rendered.lines().collect::<Vec<_>>();
+    let level = lines
+        .iter()
+        .position(|line| line.contains("target level"))
+        .expect("narrow guidance must keep the level label");
+    let format = lines
+        .iter()
+        .position(|line| line.contains("preferred format"))
+        .expect("narrow guidance must keep the format label");
+    assert!(
+        lines
+            .get(level + 1)
+            .is_some_and(|line| line.contains("from example"))
+            && lines
+                .get(format + 1)
+                .is_some_and(|line| line.contains("best fit"))
+            && choices(&app, area, BatchSettingsRow::Level)
+                == BTreeSet::from([0, 1, 2, 3, 4, 5, 6])
+            && choices(&app, area, BatchSettingsRow::Types) == BTreeSet::from([0, 1, 2, 3, 4])
+            && rendered.contains("01  term-01"),
+        "narrow guidance clipped a label, choice, candidate, or clickable carousel region: {rendered}"
     );
 }
 
@@ -386,26 +463,26 @@ fn opening_settings_scrolls_a_long_review_to_the_top_carousels() {
     let app = review(25)
         .with_sentence_settings(SentenceBatchSettings::new(
             Some(SentenceLevel::B1),
-            SentenceTypeMix::Varied,
+            SentenceTypeMix::Questions,
         ))
         .sentence_settings_opened()
         .sentence_settings_focused(BatchSettingsRow::Types)
         .body_scroll_to_selection(viewport, width);
     let rendered = flat_at(&app, area.width, area.height);
-    let varied = cell_of_on_line(
+    let questions = cell_of_on_line(
         &app,
-        "varied",
-        "how to mix the types?",
+        "questions",
+        "preferred format",
         area.width,
         area.height,
     );
     assert!(
         app.body_scroll() == 0
-            && rendered.contains("how to mix the types?")
+            && rendered.contains("preferred format")
             && rendered.contains("term-01")
-            && sentence_settings_event_at(&app, area, varied.0, varied.1)
-                == Some(AppEvent::SentenceSettingsChoose(BatchSettingsRow::Types, 1))
-            && mouse_pointer_at(&app, area, varied.0, varied.1) == MousePointer::Hand,
+            && sentence_settings_event_at(&app, area, questions.0, questions.1)
+                == Some(AppEvent::SentenceSettingsChoose(BatchSettingsRow::Types, 2))
+            && mouse_pointer_at(&app, area, questions.0, questions.1) == MousePointer::Hand,
         "the focused batch carousel must anchor above the review in a short viewport: {rendered}"
     );
 }
@@ -414,7 +491,7 @@ fn opening_settings_scrolls_a_long_review_to_the_top_carousels() {
 fn modal_overlay_suppresses_underlying_sentence_settings_hits() {
     let area = terminal(120, 24);
     let app = review(1);
-    let summary = cell_of(&app, "sentences   ", area.width, area.height);
+    let summary = cell_of(&app, "generation guidance   ", area.width, area.height);
     let covered = app.with_modal(ModalKind::PickMyLanguage);
     assert_eq!(
         sentence_settings_event_at(&covered, area, summary.0, summary.1),

@@ -553,7 +553,7 @@ fn build_states() -> Vec<(String, App)> {
         .clone()
         .with_sentence_settings(SentenceBatchSettings::new(
             Some(SentenceLevel::B1),
-            SentenceTypeMix::Varied,
+            SentenceTypeMix::Questions,
         ))
         .sentence_settings_opened();
 
@@ -857,7 +857,7 @@ fn build_states() -> Vec<(String, App)> {
         (String::from("18 · Esc · generation stopping"), stopping),
         (String::from("19 · Esc · partial publish"), partial),
         (
-            String::from("02c · What I understood · batch sentence settings"),
+            String::from("02c · What I understood · generation guidance"),
             batch_sentence_settings,
         ),
     ]
@@ -925,12 +925,12 @@ mod tests {
         let states = build_states();
         let (_, app) = states
             .get(27)
-            .expect("batch sentence settings state must stay at index 27");
+            .expect("generation guidance state must stay at index 27");
         let backend = TestBackend::new(120, 50);
         let mut terminal = Terminal::new(backend).expect("backend must initialize");
         terminal
             .draw(|frame| draw(frame, app))
-            .expect("batch sentence settings state must render");
+            .expect("generation guidance state must render");
         let buffer = terminal.backend().buffer();
         let rendered = (0..buffer.area.height)
             .map(|row| {
@@ -941,11 +941,11 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            rendered.contains("sentences   b1   varied")
-                && rendered.contains("what's the desired level?")
-                && rendered.contains("how to mix the types?")
+            rendered.contains("generation guidance   b1   questions")
+                && rendered.contains("target level")
+                && rendered.contains("preferred format")
                 && rendered.contains("[Esc] close"),
-            "synthetic batch sentence settings must show both retained choices and editor rows:\n{rendered}"
+            "synthetic generation guidance must show both retained choices and editor rows:\n{rendered}"
         );
     }
 }

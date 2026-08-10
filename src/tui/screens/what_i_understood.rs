@@ -23,8 +23,8 @@ use super::sentence_labels::BatchEditorControl;
 
 const HEADLINE: &str = "what i understood";
 const HINT: &str = "quick check before i build the cards";
-const SETTINGS_LABEL: &str = "sentences";
-const DEFAULT_LEVEL_LABEL: &str = "default";
+const SETTINGS_LABEL: &str = "generation guidance";
+const DEFAULT_GUIDANCE_LABEL: &str = "best fit";
 
 /// One clickable surface in the batch sentence-settings block.
 pub(crate) enum SentenceSettingsControl {
@@ -169,24 +169,30 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
 
 fn settings_summary_line(app: &App) -> Line<'static> {
     let settings = app.sentence_settings();
-    let level = settings
-        .level()
-        .map(|level| level.token())
-        .unwrap_or(DEFAULT_LEVEL_LABEL);
-    Line::from(vec![
-        Span::styled(format!("{SETTINGS_LABEL}  "), palette::dim()),
-        Span::styled(
-            format!(" {level} "),
-            super::sentence_labels::tag_style(settings.level().is_some()),
-        ),
-        Span::styled(" ", palette::base()),
-        Span::styled(
+    let mut spans = vec![Span::styled(format!("{SETTINGS_LABEL}  "), palette::dim())];
+    if settings.level().is_none() && !settings.types().pins() {
+        spans.push(Span::styled(
+            format!(" {DEFAULT_GUIDANCE_LABEL} "),
+            super::sentence_labels::tag_style(false),
+        ));
+        return Line::from(spans);
+    }
+    if let Some(level) = settings.level() {
+        spans.push(Span::styled(
+            format!(" {} ", level.token()),
+            super::sentence_labels::tag_style(true),
+        ));
+    }
+    if settings.types().pins() {
+        if settings.level().is_some() {
+            spans.push(Span::styled(" ", palette::base()));
+        }
+        spans.push(Span::styled(
             format!(" {} ", settings.types().token()),
-            super::sentence_labels::tag_style(
-                settings.types() != crate::session::SentenceTypeMix::Natural,
-            ),
-        ),
-    ])
+            super::sentence_labels::tag_style(true),
+        ));
+    }
+    Line::from(spans)
 }
 
 fn review_prefix_height(app: &App, width: usize) -> usize {

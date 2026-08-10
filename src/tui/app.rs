@@ -737,13 +737,13 @@ impl App {
         self
     }
 
-    /// Return the focused row of the open batch sentence-settings editor.
+    /// Return the focused row of the open generation-guidance editor.
     #[must_use]
     pub fn sentence_settings_editor(&self) -> Option<BatchSettingsRow> {
         self.sentence_settings_row
     }
 
-    /// Return the app with batch sentence settings open on the level row.
+    /// Return the app with generation guidance open on the level row.
     #[must_use]
     pub fn sentence_settings_opened(mut self) -> Self {
         self.sentence_settings_row = Some(BatchSettingsRow::Level);
@@ -752,7 +752,7 @@ impl App {
         self
     }
 
-    /// Return the app with batch sentence settings closed and choices retained.
+    /// Return the app with generation guidance closed and choices retained.
     #[must_use]
     pub fn sentence_settings_closed(mut self) -> Self {
         self.sentence_settings_row = None;
@@ -1717,7 +1717,7 @@ mod tests {
 
     #[test]
     fn screen_changes_close_batch_settings_without_losing_their_choices() {
-        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Mixed);
         let next = App::new(LanguagePair::new("fr", "en"))
             .with_sentence_settings(settings)
             .sentence_settings_opened()
@@ -1734,7 +1734,7 @@ mod tests {
         let next = App::new(LanguagePair::new("fr", "en"))
             .with_sentence_settings(SentenceBatchSettings::new(
                 Some(SentenceLevel::B1),
-                SentenceTypeMix::Varied,
+                SentenceTypeMix::Mixed,
             ))
             .sentence_settings_opened()
             .starting_new_batch();

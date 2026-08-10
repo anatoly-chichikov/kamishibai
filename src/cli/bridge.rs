@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn sentence_settings_round_trip_and_participate_in_the_save_fingerprint() {
-        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Mixed);
         let plain = understood_app();
         let configured = plain.clone().with_sentence_settings(settings);
         let record = app_to_record(
@@ -999,7 +999,7 @@ mod tests {
     fn configured_completed_batch_resets_fresh_settings_and_preserves_its_record() {
         let home = tempfile::TempDir::new().expect("tempdir must be created");
         let store = SessionStore::new(home.path());
-        let settings = SentenceBatchSettings::new(Some(SentenceLevel::C1), SentenceTypeMix::Varied);
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::C1), SentenceTypeMix::Mixed);
         let completed = published_app().with_sentence_settings(settings);
         let record = app_to_record(
             &completed,

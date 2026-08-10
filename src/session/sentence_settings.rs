@@ -15,23 +15,42 @@ const TYPE_MIX_BAG: [SentenceKind; 5] = [
 
 /// Batch policy for assigning communicative sentence types.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum SentenceTypeMix {
-    /// Let Gemini choose and describe the natural sentence type.
+    /// Let Gemini choose and describe the type that best fits each approved use.
     #[default]
-    Natural,
+    #[serde(rename = "best-fit", alias = "natural")]
+    BestFit,
+    /// Pin every generated sentence to a declarative statement.
+    #[serde(rename = "statements")]
+    Statements,
+    /// Pin every generated sentence to a direct question.
+    #[serde(rename = "questions")]
+    Questions,
+    /// Pin every generated sentence to a two-utterance dialogue.
+    #[serde(rename = "dialogue")]
+    Dialogue,
     /// Pin a deterministic weighted mix of statements, questions, and dialogues.
-    Varied,
+    #[serde(rename = "mixed", alias = "varied")]
+    Mixed,
 }
 
 impl SentenceTypeMix {
-    /// Return the stable lowercase token used by the TUI, CLI, and session JSON.
+    /// Return the stable kebab-case token used by the TUI, CLI, and session JSON.
     #[must_use]
     pub fn token(self) -> &'static str {
         match self {
-            Self::Natural => "natural",
-            Self::Varied => "varied",
+            Self::BestFit => "best-fit",
+            Self::Statements => "statements",
+            Self::Questions => "questions",
+            Self::Dialogue => "dialogue",
+            Self::Mixed => "mixed",
         }
+    }
+
+    /// Return whether this policy creates an explicit type request for each card.
+    #[must_use]
+    pub fn pins(self) -> bool {
+        self != Self::BestFit
     }
 }
 
@@ -87,17 +106,22 @@ impl SentenceBatchSettings {
             .map(level_index)
             .map(|choice| SentenceLabelSelection::empty().choosing(SentenceAxis::Level, choice))
             .unwrap_or_default();
-        let selection = match self.types {
-            SentenceTypeMix::Natural => selection,
-            SentenceTypeMix::Varied => {
-                selection.choosing(SentenceAxis::Type, kind_index(varied_kind(index)))
-            }
+        let kind = match self.types {
+            SentenceTypeMix::BestFit => None,
+            SentenceTypeMix::Statements => Some(SentenceKind::Statement),
+            SentenceTypeMix::Questions => Some(SentenceKind::Question),
+            SentenceTypeMix::Dialogue => Some(SentenceKind::Dialogue),
+            SentenceTypeMix::Mixed => Some(mixed_kind(index)),
+        };
+        let selection = match kind {
+            Some(kind) => selection.choosing(SentenceAxis::Type, kind_index(kind)),
+            None => selection,
         };
         (!selection.pinned().is_empty()).then_some(selection)
     }
 }
 
-fn varied_kind(index: usize) -> SentenceKind {
+fn mixed_kind(index: usize) -> SentenceKind {
     let cycle = u64::try_from(index / TYPE_MIX_BAG.len()).unwrap_or(u64::MAX);
     let mixed = seeded(cycle ^ TYPE_MIX_SEED);
     let offset = usize::try_from(mixed % 5).unwrap_or(0);
@@ -130,7 +154,7 @@ fn kind_index(kind: SentenceKind) -> usize {
         SentenceKind::Question => 1,
         SentenceKind::Dialogue => 4,
         SentenceKind::Request | SentenceKind::Exclamation => {
-            panic!("varied sentence type must be statement, question, or dialogue")
+            panic!("mixed sentence type must be statement, question, or dialogue")
         }
     }
 }

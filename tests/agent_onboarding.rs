@@ -437,16 +437,16 @@ fn clean_env_only_agent_reaches_published_results_without_the_tui() {
 fn configured_new_can_generate_and_wait_in_one_offline_call() {
     let profile = Profile::new();
     let understanding = "Сущ. «кот», домашнее животное.";
-    let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Varied);
+    let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Mixed);
     let selection = settings
         .selections(1)
         .into_iter()
         .next()
         .flatten()
-        .expect("varied settings must allocate one request");
+        .expect("mixed settings must allocate one request");
     let kind = selection
         .token(SentenceAxis::Type)
-        .expect("varied request must pin a phrase kind");
+        .expect("mixed request must pin a phrase kind");
     let (gemini, calls, requests) =
         configured_generation_gemini(profile.cache.path(), understanding, kind);
     let (new_code, created) = json(
@@ -466,7 +466,7 @@ fn configured_new_can_generate_and_wait_in_one_offline_call() {
                 "--level",
                 "b1",
                 "--types",
-                "varied",
+                "mixed",
                 "--generate",
                 "--wait",
                 "--json",
@@ -496,13 +496,13 @@ fn configured_new_can_generate_and_wait_in_one_offline_call() {
         (
             Some(0),
             Some("published"),
-            serde_json::json!({"level": "b1", "types": "varied"}),
+            serde_json::json!({"level": "b1", "types": "mixed"}),
             Some("b1"),
             Some(kind),
             true,
             true,
             Some(0),
-            serde_json::json!({"level": "b1", "types": "varied"}),
+            serde_json::json!({"level": "b1", "types": "mixed"}),
             3,
             true,
         ),

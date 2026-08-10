@@ -255,8 +255,11 @@ fn sentence_settings(args: &NewArgs) -> SentenceBatchSettings {
         BatchLevel::C2 => SentenceLevel::C2,
     });
     let types = match args.types {
-        BatchTypes::Natural => SentenceTypeMix::Natural,
-        BatchTypes::Varied => SentenceTypeMix::Varied,
+        BatchTypes::BestFit => SentenceTypeMix::BestFit,
+        BatchTypes::Statements => SentenceTypeMix::Statements,
+        BatchTypes::Questions => SentenceTypeMix::Questions,
+        BatchTypes::Dialogue => SentenceTypeMix::Dialogue,
+        BatchTypes::Mixed => SentenceTypeMix::Mixed,
     };
     SentenceBatchSettings::new(level, types)
 }
