@@ -10,9 +10,9 @@ Set TypingSpeed 35ms
 Set WaitTimeout 60s
 
 Hide
-Type "cd ../.. && rm -rf /tmp/kamishibai-vhs-home/Documents/Kamishibai /tmp/kamishibai-vhs-cache/cards /tmp/kamishibai-vhs-cache/understanding /tmp/kamishibai-vhs-cache/sessions && mkdir -p /tmp/kamishibai-vhs-home/Documents/Kamishibai && clear"
+Type "cd ../.. && rm -rf /tmp/kamishibai-vhs-data /tmp/kamishibai-vhs-home/Documents/Kamishibai /tmp/kamishibai-vhs-cache/cards /tmp/kamishibai-vhs-cache/understanding /tmp/kamishibai-vhs-cache/sessions && mkdir -p /tmp/kamishibai-vhs-home/Documents/Kamishibai && clear"
 Enter
-Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor HOME=/tmp/kamishibai-vhs-home KAMISHIBAI_CACHE=/tmp/kamishibai-vhs-cache KAMISHIBAI_OUTPUT=/tmp/kamishibai-vhs-home/Documents/Kamishibai"
+Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor KAMISHIBAI_DATA=/tmp/kamishibai-vhs-data KAMISHIBAI_CACHE=/tmp/kamishibai-vhs-cache KAMISHIBAI_OUTPUT=/tmp/kamishibai-vhs-home/Documents/Kamishibai"
 Enter
 Type "printenv GEMINI_API_KEY | ./target/release/kamishibai config --known en --key - >/dev/null"
 Enter

@@ -249,7 +249,9 @@ the approved understanding and only then assigns its descriptive register,
 phrase kind, and lowercase `a1`–`c2` level. Initial generation targets a band or
 phrase kind only when `new --level` or a non-`best-fit` `new --types` requested it. When
 an exact requested value would make the accepted use unnatural, the closest
-natural result marks that pinned axis as approximate.
+natural result keeps its actual attribution and records the requested target
+separately. That pinned axis is also named in `approx`; this is a best-effort
+outcome, not a failed card.
 
 `status`
 
@@ -326,12 +328,14 @@ adjustments exist, before provider work or cache invalidation, and point to
 `regenerate --pending`.
 
 Every full-card rewrite carries the complete current sentence-label preset.
-Every unedited axis must keep its current value exactly. Only an explicitly
-changed or already pinned axis may differ from its requested value, and that
-response must mark the axis `approx`. With a rewrite note, Gemini also applies
-the note while rewriting that card. A successful rewrite replaces `labels`
-and removes `adjustment`; an interrupted or failed rewrite keeps an active
-adjustment so a later `generate` can resume it.
+Every unedited axis keeps its current requested target. Only an explicitly
+changed or already pinned axis may differ from that target, and the response
+must name the axis in `approx`. Such a result is accepted as the closest natural
+sentence: `labels` reports the actual attribution and `labels.requested` keeps
+the target. With a rewrite note, Gemini also applies the note while rewriting
+that card. A successful rewrite replaces `labels` and removes `adjustment`; an
+interrupted or failed rewrite keeps an active adjustment so a later `generate`
+can resume it.
 
 `cancel`
 
@@ -396,13 +400,19 @@ Presence rules:
   adjustments
 - `labels` is the card's current complete attribution and is omitted only when
   current metadata has no labels
+- `labels.requested` is present when one or more axes were pinned; its values
+  are the targets that generation or regeneration aimed for, while the sibling
+  `register`, `kind`, and `level` remain the actual attribution of the generated
+  sentence
 - `adjustment` is present while a rewrite is staged or active; `state` is
   `pending` before `regenerate --pending` and `active` after activation
 - `adjustment.labels` is a selection: `register`, `kind`, and `level` are each
   omitted when a legacy baseline has not attributed that axis; `pinned` and
   `approx` are always arrays
 - `adjustment.note` is present only when non-empty
-- `approx` is always a subset of `pinned`; all tokens and axes are lowercase
+- `approx` is always a subset of `pinned`; an axis in `approx` may have different
+  actual and requested values without failing the card; all tokens and axes are
+  lowercase
 
 Example:
 
@@ -451,7 +461,11 @@ Example:
           "kind": "question",
           "level": "b1",
           "pinned": ["level", "kind"],
-          "approx": []
+          "approx": [],
+          "requested": {
+            "kind": "question",
+            "level": "b1"
+          }
         },
         "adjustment": {
           "state": "pending",

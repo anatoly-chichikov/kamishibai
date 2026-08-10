@@ -12,7 +12,7 @@ use crate::gemini::GeminiAccess;
 use crate::generation::artifact_cache::{Cache, META_FILE, ROOT_STAGE_LOCK_TIMEOUT, RootStage};
 use crate::generation::visual_revision;
 use crate::session::{
-    Artifact, ArtifactAttempt, ArtifactFile, CardCell, CardDraft, CardMeta, CardMetaCache,
+    Artifact, ArtifactAttempt, ArtifactFile, AxisSet, CardCell, CardDraft, CardMeta, CardMetaCache,
     CardRevision, LanguagePair, SentenceLabelSelection,
 };
 
@@ -55,9 +55,17 @@ impl MetadataProduction {
         };
         match self.meta_cache().load_current(term, understanding, pair) {
             Ok(Some(meta)) if request.is_none_or(|request| request.pinned().is_empty()) => {
-                let result = self
-                    .cached_file(term, understanding, pair)
-                    .map(|file| (meta, Some(file)));
+                let result = match meta.sentence_labels().cloned() {
+                    Some(labels) if !labels.pinned().is_empty() || !labels.approx().is_empty() => {
+                        let labels = labels.with_axis_state(AxisSet::default(), AxisSet::default());
+                        let meta = meta.with_sentence_labels(labels);
+                        self.replace_cached(term, understanding, pair, &meta)
+                            .map(|file| (meta, Some(file)))
+                    }
+                    _ => self
+                        .cached_file(term, understanding, pair)
+                        .map(|file| (meta, Some(file))),
+                };
                 return ArtifactAttempt::unmetered(result);
             }
             Ok(Some(meta)) => {
@@ -256,10 +264,22 @@ impl MetadataProduction {
 fn requested_cached(meta: CardMeta, request: Option<&SentenceLabelSelection>) -> Option<CardMeta> {
     let request = request?;
     let labels = meta.sentence_labels()?.clone();
-    let matches = request.pinned().iter().all(|axis| {
-        request
-            .token(axis)
-            .is_some_and(|token| labels.token(axis) == Some(token))
-    });
-    matches.then(|| meta.with_sentence_labels(request.reconciled(labels)))
+    let approx = request
+        .pinned()
+        .iter()
+        .try_fold(AxisSet::default(), |approx, axis| {
+            let token = request.token(axis)?;
+            if labels.approx().contains(axis) {
+                match labels.recorded_request_token(axis) {
+                    Some(recorded) if recorded == token => {
+                        return Some(approx.including(axis));
+                    }
+                    None => return None,
+                    Some(_) => {}
+                }
+            }
+            (labels.token(axis) == Some(token)).then_some(approx)
+        })?;
+    let labels = labels.with_axis_state(request.pinned().clone(), approx);
+    Some(meta.with_sentence_labels(request.reconciled(labels)))
 }

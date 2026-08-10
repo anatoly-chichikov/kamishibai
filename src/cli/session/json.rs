@@ -159,6 +159,18 @@ struct LabelsDoc {
     kind: Option<&'static str>,
     pinned: Vec<&'static str>,
     approx: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    requested: Option<RequestedLabelsDoc>,
+}
+
+#[derive(Serialize)]
+struct RequestedLabelsDoc {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    register: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'static str>,
 }
 
 impl LabelsDoc {
@@ -169,6 +181,7 @@ impl LabelsDoc {
             kind: labels.token(SentenceAxis::Type),
             pinned: axes(labels.pinned()),
             approx: axes(labels.approx()),
+            requested: RequestedLabelsDoc::current(labels),
         }
     }
 
@@ -179,7 +192,21 @@ impl LabelsDoc {
             kind: labels.token(SentenceAxis::Type),
             pinned: axes(labels.pinned()),
             approx: axes(labels.approx()),
+            requested: None,
         }
+    }
+}
+
+impl RequestedLabelsDoc {
+    fn current(labels: &SentenceLabels) -> Option<Self> {
+        if labels.pinned().is_empty() {
+            return None;
+        }
+        Some(Self {
+            register: labels.requested_token(SentenceAxis::Register),
+            level: labels.requested_token(SentenceAxis::Level),
+            kind: labels.requested_token(SentenceAxis::Type),
+        })
     }
 }
 
@@ -623,6 +650,27 @@ mod tests {
         serde_json::to_value(SessionDoc::of(record, root)).expect("the document must serialize")
     }
 
+    fn value_with_labels(home: &TempDir, labels: SentenceLabels) -> serde_json::Value {
+        let pair = LanguagePair::new("fr", "en");
+        let mut record = record();
+        record.drafts = vec![DraftRecord {
+            term: String::from("canard"),
+            understanding: String::from("a duck"),
+            costs: crate::session::ArtifactCosts::default(),
+            rewrite: None,
+            meta_request: None,
+        }];
+        CardMetaCache::new(home.path())
+            .store(
+                "canard",
+                "a duck",
+                &pair,
+                &unlabeled_meta().with_sentence_labels(labels),
+            )
+            .expect("labeled metadata must store");
+        value_of(&record, home.path())
+    }
+
     fn nulls_in(value: &serde_json::Value) -> usize {
         match value {
             serde_json::Value::Null => 1,
@@ -735,6 +783,37 @@ mod tests {
                 }),
             ),
             "a committed document must carry cache-derived artifacts and current labels without a pending adjustment"
+        );
+    }
+
+    #[test]
+    fn current_labels_separate_actual_values_from_every_requested_pin() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let requested = SentenceLabelSelection::empty()
+            .choosing(SentenceAxis::Level, 2)
+            .choosing(SentenceAxis::Type, 1);
+        let actual = SentenceLabels::new(
+            Register::Neutral,
+            SentenceLevel::B2,
+            SentenceKind::Question,
+            AxisSet::default(),
+            AxisSet::from_axes([SentenceAxis::Level]),
+        );
+        let value = value_with_labels(&home, requested.reconciled(actual));
+        assert_eq!(
+            value["cards"]["items"][0]["labels"],
+            serde_json::json!({
+                "register": "neutral",
+                "level": "b2",
+                "kind": "question",
+                "pinned": ["level", "kind"],
+                "approx": ["level"],
+                "requested": {
+                    "level": "b1",
+                    "kind": "question"
+                }
+            }),
+            "current labels merged requested targets into actual attribution or omitted exact pin provenance"
         );
     }
 

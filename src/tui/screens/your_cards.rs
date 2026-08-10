@@ -216,6 +216,7 @@ fn card_block<'a>(
             lines.push(Line::from(""));
             lines.extend(super::sentence_labels::editor_lines(
                 editor,
+                draft.meta().and_then(CardMeta::sentence_labels),
                 width,
                 super::common::CARD_DETAIL_COLUMN,
                 super::common::CARD_DETAIL_COLUMN,
@@ -1324,6 +1325,7 @@ pub(crate) fn focused_card_range(app: &App, width: usize) -> Option<(u16, u16)> 
                         base.saturating_add(SECTION_GAP_ROWS).saturating_add(
                             super::sentence_labels::editor_focus_end(
                                 editor,
+                                draft.meta().and_then(CardMeta::sentence_labels),
                                 width,
                                 super::common::CARD_DETAIL_COLUMN,
                                 super::common::CARD_DETAIL_COLUMN,
@@ -1437,6 +1439,7 @@ pub(crate) fn sentence_editor_control_at(
     )?;
     super::sentence_labels::editor_control_at(
         editor,
+        draft.meta().and_then(CardMeta::sentence_labels),
         width,
         column,
         row,
@@ -1483,7 +1486,7 @@ fn card_layout(
 
 /// Number of rows added to the artifact block by the sentence pane.
 pub(crate) fn sentence_label_extra_rows(
-    _draft: &CardDraft,
+    draft: &CardDraft,
     _running: Option<Artifact>,
     editor: Option<&SentenceLabelsEditor>,
     expanded: bool,
@@ -1497,6 +1500,7 @@ pub(crate) fn sentence_label_extra_rows(
             SECTION_GAP_ROWS.saturating_add(
                 super::sentence_labels::editor_lines(
                     editor,
+                    draft.meta().and_then(CardMeta::sentence_labels),
                     width,
                     super::common::CARD_DETAIL_COLUMN,
                     super::common::CARD_DETAIL_COLUMN,
@@ -1527,6 +1531,7 @@ pub(crate) fn sentence_editor_cursor_for(app: &App, width: usize) -> Option<(usi
             let steps = step_rows_for(draft, running);
             let (column, row) = super::sentence_labels::editor_cursor(
                 editor,
+                draft.meta().and_then(CardMeta::sentence_labels),
                 width,
                 super::common::CARD_DETAIL_COLUMN,
                 super::common::CARD_DETAIL_COLUMN,

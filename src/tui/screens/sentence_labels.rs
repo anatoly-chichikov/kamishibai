@@ -12,38 +12,48 @@ const MARKER_WIDTH: usize = 2;
 const CHEVRON_WIDTH: usize = 2;
 const NOTE_PLACEHOLDER: &str = "say what should change";
 
-enum TagSource<'a> {
-    Generated(&'a SentenceLabels),
-    Editing(&'a SentenceLabelSelection),
+struct TagSource<'a> {
+    generated: Option<&'a SentenceLabels>,
+    working: Option<&'a SentenceLabelSelection>,
 }
 
 impl TagSource<'_> {
     fn attributed(&self) -> bool {
-        match self {
-            Self::Generated(_) => true,
-            Self::Editing(selection) => selection.attributed(),
-        }
+        self.generated.is_some() || self.working.is_some_and(SentenceLabelSelection::attributed)
     }
 
-    fn token(&self, axis: SentenceAxis) -> Option<&'static str> {
-        match self {
-            Self::Generated(labels) => labels.token(axis),
-            Self::Editing(selection) => selection.token(axis),
+    fn actual(&self, axis: SentenceAxis) -> Option<&'static str> {
+        let labels = self.generated?;
+        if labels.approx().contains(axis) && labels.recorded_request_token(axis).is_none() {
+            return None;
         }
+        labels.token(axis)
+    }
+
+    fn requested(&self, axis: SentenceAxis) -> Option<&'static str> {
+        if !self.pinned(axis) {
+            return None;
+        }
+        self.working
+            .and_then(|selection| selection.token(axis))
+            .or_else(|| {
+                self.generated
+                    .and_then(|labels| labels.requested_token(axis))
+            })
     }
 
     fn pinned(&self, axis: SentenceAxis) -> bool {
-        match self {
-            Self::Generated(labels) => labels.pinned().contains(axis),
-            Self::Editing(selection) => selection.pinned().contains(axis),
-        }
+        self.working
+            .map(|selection| selection.pinned().contains(axis))
+            .unwrap_or_else(|| {
+                self.generated
+                    .is_some_and(|labels| labels.pinned().contains(axis))
+            })
     }
 
-    fn approximate(&self, axis: SentenceAxis) -> bool {
-        match self {
-            Self::Generated(labels) => labels.approx().contains(axis),
-            Self::Editing(selection) => selection.approx().contains(axis),
-        }
+    fn fallback(&self, axis: SentenceAxis) -> Option<&'static str> {
+        self.actual(axis)
+            .or_else(|| self.working.and_then(|selection| selection.token(axis)))
     }
 }
 
@@ -52,7 +62,7 @@ struct HeadTag {
     row: usize,
     start: usize,
     end: usize,
-    span: Span<'static>,
+    spans: Vec<Span<'static>>,
 }
 
 /// Atomic sentence-label tags positioned beside the artifact rows.
@@ -97,7 +107,7 @@ impl HeadTagsLayout {
             if tag.start > column {
                 spans.push(Span::styled(" ".repeat(tag.start - column), gap_style));
             }
-            spans.push(tag.span.clone());
+            spans.extend(tag.spans.clone());
             column = tag.end;
         }
         spans
@@ -150,6 +160,7 @@ struct ChipRegion<Row> {
 struct EditorLayout {
     lines: Vec<Line<'static>>,
     chips: Vec<ChipRegion<LabelEditorRow>>,
+    row_ends: Vec<(LabelEditorRow, usize)>,
     note_row: usize,
     note_start: usize,
     cursor: Option<(usize, usize)>,
@@ -183,12 +194,9 @@ pub(crate) fn head_tags_layout(
     editor: Option<&SentenceLabelsEditor>,
     width: usize,
 ) -> Option<HeadTagsLayout> {
-    let source = match editor {
-        Some(editor) => TagSource::Editing(editor.selection()),
-        None => match staged {
-            Some(selection) => TagSource::Editing(selection),
-            None => TagSource::Generated(labels?),
-        },
+    let source = TagSource {
+        generated: labels,
+        working: editor.map(SentenceLabelsEditor::selection).or(staged),
     };
     if !source.attributed() {
         return None;
@@ -201,10 +209,7 @@ pub(crate) fn head_tags_layout(
         SentenceAxis::Type,
         SentenceAxis::Level,
     ] {
-        let prefix = if source.approximate(axis) { "≈" } else { "" };
-        let token = source.token(axis).unwrap_or("—");
-        let text = format!(" {prefix}{token} ");
-        let tag_width = super::common::display_width(text.as_str());
+        let (spans, tag_width) = tag_spans(&source, axis);
         let gap = usize::from(used > 0);
         if used > 0 && used.saturating_add(gap).saturating_add(tag_width) > width {
             row = row.saturating_add(1);
@@ -216,7 +221,7 @@ pub(crate) fn head_tags_layout(
             row,
             start,
             end,
-            span: Span::styled(text, tag_style(source.pinned(axis))),
+            spans,
         });
         used = end;
     }
@@ -225,54 +230,54 @@ pub(crate) fn head_tags_layout(
 
 pub(crate) fn editor_lines(
     editor: &SentenceLabelsEditor,
+    current: Option<&SentenceLabels>,
     width: usize,
     first_start: usize,
     fallback_start: usize,
 ) -> Vec<Line<'static>> {
-    editor_layout(editor, width, first_start, fallback_start).lines
+    editor_layout(editor, current, width, first_start, fallback_start).lines
 }
 
 /// Return the exclusive editor row needed to keep the focused control visible.
 #[must_use]
 pub(crate) fn editor_focus_end(
     editor: &SentenceLabelsEditor,
+    current: Option<&SentenceLabels>,
     width: usize,
     first_start: usize,
     fallback_start: usize,
 ) -> usize {
-    let layout = editor_layout(editor, width, first_start, fallback_start);
+    let layout = editor_layout(editor, current, width, first_start, fallback_start);
     if editor.row() == LabelEditorRow::Note {
         return layout.note_row + 1;
     }
     layout
-        .chips
+        .row_ends
         .iter()
-        .filter_map(|region| match region.control {
-            CarouselControl::Chip(row, _) if row == editor.row() => Some(region.row + 1),
-            _ => None,
-        })
-        .max()
+        .find_map(|(row, end)| (*row == editor.row()).then_some(*end))
         .unwrap_or(1)
 }
 
 pub(crate) fn editor_cursor(
     editor: &SentenceLabelsEditor,
+    current: Option<&SentenceLabels>,
     width: usize,
     first_start: usize,
     fallback_start: usize,
 ) -> Option<(usize, usize)> {
-    editor_layout(editor, width, first_start, fallback_start).cursor
+    editor_layout(editor, current, width, first_start, fallback_start).cursor
 }
 
 pub(crate) fn editor_control_at(
     editor: &SentenceLabelsEditor,
+    current: Option<&SentenceLabels>,
     width: usize,
     column: usize,
     row: usize,
     first_start: usize,
     fallback_start: usize,
 ) -> Option<EditorControl> {
-    let layout = editor_layout(editor, width, first_start, fallback_start);
+    let layout = editor_layout(editor, current, width, first_start, fallback_start);
     if row == layout.note_row && column >= layout.note_start && column < width {
         return Some(EditorControl::Note);
     }
@@ -338,8 +343,36 @@ pub(crate) fn tag_style(pinned: bool) -> Style {
     }
 }
 
+fn tag_spans(source: &TagSource<'_>, axis: SentenceAxis) -> (Vec<Span<'static>>, usize) {
+    let actual = source.actual(axis);
+    let requested = source.requested(axis);
+    let spans = match (actual, requested) {
+        (Some(actual), Some(requested)) if actual != requested => vec![
+            label_tag(actual, false),
+            Span::styled(" · aimed for ", palette::dim2()),
+            label_tag(requested, true),
+        ],
+        (None, Some(requested)) => vec![
+            Span::styled("aimed for ", palette::dim2()),
+            label_tag(requested, true),
+        ],
+        (Some(actual), _) => vec![label_tag(actual, source.pinned(axis))],
+        (None, None) => vec![label_tag(source.fallback(axis).unwrap_or("—"), false)],
+    };
+    let width = spans
+        .iter()
+        .map(|span| super::common::display_width(span.content.as_ref()))
+        .sum();
+    (spans, width)
+}
+
+fn label_tag(token: &str, pinned: bool) -> Span<'static> {
+    Span::styled(format!(" {token} "), tag_style(pinned))
+}
+
 fn editor_layout(
     editor: &SentenceLabelsEditor,
+    current: Option<&SentenceLabels>,
     width: usize,
     first_start: usize,
     fallback_start: usize,
@@ -353,14 +386,17 @@ fn editor_layout(
         Vec::new()
     };
     let mut chips = Vec::new();
+    let mut row_ends = Vec::new();
     for row in [
         LabelEditorRow::Register,
         LabelEditorRow::Type,
         LabelEditorRow::Level,
     ] {
-        let (mut rendered, mut regions) = axis_lines(editor, row, width, lines.len(), indent);
+        let (mut rendered, mut regions) =
+            axis_lines(editor, current, row, width, lines.len(), indent);
         lines.append(&mut rendered);
         chips.append(&mut regions);
+        row_ends.push((row, lines.len()));
     }
     let note_row = lines.len();
     let note_start = indent + question_column();
@@ -383,6 +419,7 @@ fn editor_layout(
     EditorLayout {
         lines,
         chips,
+        row_ends,
         note_row,
         note_start,
         cursor,
@@ -418,6 +455,7 @@ fn selector_width(editor: &SentenceLabelsEditor) -> usize {
 
 fn axis_lines(
     editor: &SentenceLabelsEditor,
+    current: Option<&SentenceLabels>,
     row: LabelEditorRow,
     width: usize,
     first_row: usize,
@@ -430,7 +468,7 @@ fn axis_lines(
     let selected = editor.selection().token(axis).and_then(|token| {
         (0..count).find(|index| editor.selection().choice_token(axis, *index) == Some(token))
     });
-    carousel_lines(
+    let (mut lines, regions) = carousel_lines(
         CarouselAxis {
             row,
             label: row_label(row),
@@ -445,7 +483,58 @@ fn axis_lines(
             width,
             origin: (first_row, indent),
         },
-    )
+    );
+    append_current(&mut lines, current, editor.selection(), axis, width, indent);
+    (lines, regions)
+}
+
+fn append_current(
+    lines: &mut Vec<Line<'static>>,
+    current: Option<&SentenceLabels>,
+    selection: &SentenceLabelSelection,
+    axis: SentenceAxis,
+    width: usize,
+    indent: usize,
+) {
+    let Some(actual) = current.and_then(|labels| known_current(labels, axis)) else {
+        return;
+    };
+    if selection.token(axis) == Some(actual) {
+        return;
+    }
+    let label = "current  ";
+    let same_line_gap = "   ";
+    let status_width = super::common::display_width(same_line_gap)
+        .saturating_add(super::common::display_width(label))
+        .saturating_add(super::common::display_width(actual));
+    let line_width = lines.last().map(Line::width).unwrap_or(0);
+    if line_width.saturating_add(status_width) <= width {
+        let line = lines
+            .last_mut()
+            .expect("invariant: every sentence-label axis must render a carousel line");
+        line.spans
+            .push(Span::styled(same_line_gap, palette::base()));
+        line.spans.push(Span::styled(label, palette::dim2()));
+        line.spans.push(Span::styled(actual, palette::base()));
+        return;
+    }
+    let start = if lines.len() > 1 {
+        indent
+    } else {
+        indent.saturating_add(question_column())
+    };
+    lines.push(Line::from(vec![
+        Span::styled(" ".repeat(start), palette::base()),
+        Span::styled(label, palette::dim2()),
+        Span::styled(actual, palette::base()),
+    ]));
+}
+
+fn known_current(labels: &SentenceLabels, axis: SentenceAxis) -> Option<&'static str> {
+    if labels.approx().contains(axis) && labels.recorded_request_token(axis).is_none() {
+        return None;
+    }
+    labels.token(axis)
 }
 
 fn carousel_lines<Row: Copy>(

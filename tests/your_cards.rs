@@ -1500,7 +1500,9 @@ fn closed_pending_card_shows_the_staged_tags_and_bulk_regeneration_footer() {
             && rendered.contains("formal")
             && rendered.contains("b1")
             && rendered.contains("statement")
-            && !rendered.contains("casual")
+            && rendered.contains("casual")
+            && rendered.contains("· aimed for")
+            && chip_has_style(&buffer, "casual", ink, gray)
             && chip_has_style(&buffer, "formal", ink, white)
             && !buffer[formal].modifier.contains(Modifier::BOLD)
             && chip_has_style(&buffer, "b1", ink, gray)
@@ -1624,7 +1626,56 @@ fn a_long_editor_note_keeps_its_cursor_at_the_narrow_body_edge() {
 }
 
 #[test]
-fn pinned_and_approximate_axes_are_emphasized_inside_the_tags() {
+fn best_effort_axes_show_the_actual_value_and_requested_target() {
+    let request = SentenceLabelSelection::empty().choosing(SentenceAxis::Register, 2);
+    let labels = request.reconciled(SentenceLabels::new(
+        Register::Casual,
+        SentenceLevel::B2,
+        SentenceKind::Statement,
+        AxisSet::default(),
+        AxisSet::from_axes([SentenceAxis::Register]),
+    ));
+    let draft = CardDraft::new(
+        "whilst",
+        "understanding for whilst",
+        LanguagePair::new("en", "ru"),
+    )
+    .with_meta(meta_for("whilst").with_sentence_labels(labels), None)
+    .with_artifacts(ready_artifacts());
+    let app = seeded(vec![draft]);
+    let rendered = flat(&app);
+    let buffer = rendered_buffer(&app);
+    let actual = position_of(&buffer, "casual");
+    let aimed = position_of(&buffer, "aimed for");
+    let requested = position_of(&buffer, "formal");
+    let ink = Color::Rgb(0x0e, 0x0e, 0x10);
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let white = Color::Rgb(0xe6, 0xe3, 0xda);
+    let quiet = Color::Rgb(0x5a, 0x59, 0x53);
+    let background = Color::Rgb(0x0e, 0x0e, 0x10);
+    assert!(
+        rendered.contains("· aimed for")
+            && !rendered.contains('≈')
+            && rendered.contains("b2")
+            && rendered.contains("statement")
+            && actual.1 == aimed.1
+            && aimed.1 == requested.1
+            && actual.0 < aimed.0
+            && aimed.0 < requested.0
+            && chip_has_style(&buffer, "casual", ink, gray)
+            && chip_has_style(&buffer, "formal", ink, white)
+            && matching_cells(&app, "aimed for")
+                .iter()
+                .all(|(fg, bg, _)| *fg == quiet && *bg == background)
+            && !buffer[requested].modifier.contains(Modifier::BOLD)
+            && chip_has_style(&buffer, "b2", ink, gray)
+            && chip_has_style(&buffer, "statement", ink, gray),
+        "the compact tags hid the actual value, target, or restrained best-effort styling: {rendered}"
+    );
+}
+
+#[test]
+fn legacy_best_effort_axes_name_only_the_known_target() {
     let labels = SentenceLabels::new(
         Register::Archaic,
         SentenceLevel::B2,
@@ -1642,19 +1693,42 @@ fn pinned_and_approximate_axes_are_emphasized_inside_the_tags() {
     let app = seeded(vec![draft]);
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
-    let pinned = position_of(&buffer, "≈archaic");
-    let ink = Color::Rgb(0x0e, 0x0e, 0x10);
-    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
-    let white = Color::Rgb(0xe6, 0xe3, 0xda);
     assert!(
-        rendered.contains("≈archaic")
-            && rendered.contains("b2")
-            && rendered.contains("statement")
-            && chip_has_style(&buffer, "≈archaic", ink, white)
-            && !buffer[pinned].modifier.contains(Modifier::BOLD)
-            && chip_has_style(&buffer, "b2", ink, gray)
-            && chip_has_style(&buffer, "statement", ink, gray),
-        "the tags must prefix an approximately fulfilled pinned axis with the approximation mark: {rendered}"
+        rendered.contains("aimed for")
+            && rendered.contains("archaic")
+            && !rendered.contains('≈')
+            && chip_has_style(
+                &buffer,
+                "archaic",
+                Color::Rgb(0x0e, 0x0e, 0x10),
+                Color::Rgb(0xe6, 0xe3, 0xda),
+            ),
+        "a legacy best-effort target invented an actual value or fell back to an opaque symbol: {rendered}"
+    );
+}
+
+#[test]
+fn open_editor_keeps_the_target_selected_and_names_the_current_actual_value() {
+    let request = SentenceLabelSelection::empty().choosing(SentenceAxis::Register, 2);
+    let labels = request.reconciled(SentenceLabels::new(
+        Register::Casual,
+        SentenceLevel::B2,
+        SentenceKind::Statement,
+        AxisSet::default(),
+        AxisSet::from_axes([SentenceAxis::Register]),
+    ));
+    let draft = CardDraft::new(
+        "whilst",
+        "understanding for whilst",
+        LanguagePair::new("en", "ru"),
+    )
+    .with_meta(meta_for("whilst").with_sentence_labels(labels), None)
+    .with_artifacts(ready_artifacts());
+    let app = seeded(vec![draft]).sentence_editor_opened_for_register();
+    let row = row_containing(flat(&app).as_str(), "how should it sound?").to_string();
+    assert!(
+        row.contains("formal") && row.contains("current  casual") && !row.contains('≈'),
+        "the editor confused its requested target with the current generated value: {row}"
     );
 }
 

@@ -108,7 +108,7 @@ Space
 Sleep 800ms
 Screenshot "live/18-s8-label-regenerated.png"
 
-# index 17 — S9: collapsed card shows an approximately fulfilled register pin
+# index 17 — S9: collapsed card keeps the actual register beside its requested target
 Type "17"
 Space
 Sleep 800ms

@@ -378,9 +378,14 @@ blank row, before the expanded metadata and never to the artifacts' right. If
 the focused editor block fits the viewport, opening it anchors the selected card
 head at the top of the body; shorter viewports instead scroll only far enough to
 keep the focused row visible.
-Unchanged tags use a gray background; explicitly changed or previously pinned
-tags use a white background with dark letters and no bold. An approximately
-fulfilled pinned tag keeps that white treatment and adds an `≈` prefix.
+Unchanged actual tags use a gray background; explicitly changed or exactly
+fulfilled pinned tags use a white background with dark letters and no bold. If
+a pinned target could not be fulfilled exactly, the generated actual value stays
+gray and is followed by muted `· aimed for` plus the requested value in a white
+tag. The actual value remains the attribution of what was generated; the white
+value remains the target for a later regeneration. Legacy cached approximation
+records that predate separate actual-value storage show only muted `aimed for`
+plus the requested white tag and never invent an actual value.
 
 The editor's three carousel questions are `how should it sound?`, `what kind of
 phrase?`, and `what's the desired level?`. The note label is `one more thing`, and its
@@ -402,9 +407,10 @@ one two-cell marker on each side inside the shared track; both cells of either
 marker are clickable.
 
 Regeneration carries the complete current three-axis preset. Every unedited
-axis must keep its current value exactly. Only an explicitly changed or already
-pinned axis may differ from the requested value, and only when the result marks
-that axis as approximate.
+axis must keep its current requested value exactly. Only an explicitly changed
+or already pinned axis may differ from its requested target, and only when the
+result names that axis in `approx`; the generated value remains the actual
+attribution and the requested target remains visible separately.
 
 A successfully published live batch remains on `YourCards`; reopening that
 published session uses `Done`. Both final views permanently show the muted

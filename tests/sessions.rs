@@ -118,7 +118,8 @@ fn cli(cache: &Path) -> Command {
     let mut command = Command::cargo_bin("kamishibai").expect("the binary must build");
     command
         .env("KAMISHIBAI_CACHE", cache)
-        .env("GEMINI_API_KEY", "offline-dummy-key");
+        .env("GEMINI_API_KEY", "offline-dummy-key")
+        .env("KAMISHIBAI_GEMINI_URL", "http://127.0.0.1:9");
     command
 }
 

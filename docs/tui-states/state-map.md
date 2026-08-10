@@ -186,17 +186,18 @@ picture  … cached
 
 The actual register, sentence-type, and CEFR values replace the three
 example values. Each value remains a separate tag with dark `BG` letters.
-Unchanged tags use the gray `DIM` background — the same color used for the
-compact target sentence's foreground — while explicitly changed or previously
-pinned tags use a white background without bold. An approximately fulfilled
-pinned tag keeps the white background and adds an `≈` prefix. Adjacent tags have
-one ordinary-background space between them. At narrow widths wrapping occurs
-only between whole chips and may use the same tag-column on the `scene` and
+Unchanged actual tags use the gray `DIM` background — the same color used for
+the compact target sentence's foreground — while explicitly changed or exactly
+fulfilled pinned tags use a white background without bold. If a target is only
+fulfilled as a best effort, its atomic group is the gray actual tag, muted
+`· aimed for`, and the requested white tag. Adjacent axis groups have one
+ordinary-background space between them. At narrow widths wrapping occurs only
+between whole axis groups and may use the same tag-column on the `scene` and
 `picture` rows. `ai is working…`, ready, cached, inactive retry, and recovered
 audio all keep the same tag column. Retry history appears once in the card head
-instead of beside the tags; when the complete row or a wrapped chip would
-collide, the complete inline summary is hidden. There is no
-vertical rail, rule, or filled backing behind the labels.
+instead of beside the tags; when the complete row or a wrapped group would
+collide, the complete inline summary is hidden. There is no vertical rail,
+rule, or filled backing behind the labels.
 If the complete atomic set cannot fit even that way, the card head remains the
 mouse entry into tuning. There is no grammar axis or grammar row.
 
@@ -242,14 +243,16 @@ struck through and its current metadata and artifact rows are muted. While the
 editor is open, its white selected chips show the staged choices below the
 artifacts; after it closes, the staged choices return inline on the `audio` row as
 summary tags, gray for unchanged values and white without bold for changed or
-pinned values. Regeneration carries this complete current preset: every unedited
-axis must keep its value exactly, while only an explicitly changed or already
-pinned axis may differ from the requested value and then must carry `≈` as an
-approximate result. Returning all chips to their generated defaults and leaving
-only a blank note removes pending automatically. `Enter` is inert while the
-editor is open. `Esc` closes the editor and collapses the card while retaining
-pending; `Ctrl+G` closes it and regenerates every pending card together. There
-is no per-card modal and `R` has no `YourCards` action.
+pinned values. The editor carousel remains on the requested target; when it
+differs from the generated attribution, muted `current` plus the actual value
+makes that distinction explicit. Regeneration carries this complete requested
+preset. An explicitly changed or already pinned axis may differ only when the
+result names it in `approx`; the actual attribution and requested target then
+remain visible separately. Returning all chips to their generated defaults and
+leaving only a blank note removes pending automatically. `Enter` is inert while
+the editor is open. `Esc` closes the editor and collapses the card while
+retaining pending; `Ctrl+G` closes it and regenerates every pending card
+together. There is no per-card modal and `R` has no `YourCards` action.
 
 | Scenario | Synthetic reference |
 | -------- | ------------------- |
@@ -261,7 +264,7 @@ is no per-card modal and `R` has no `YourCards` action.
 | S6 · two collapsed cards accumulated as pending | `16-s6-label-multiple-pending.png` |
 | S7 · pending batch regenerating | `17-s7-label-regenerating.png` |
 | S8 · regenerated pinned value stays audio-anchored beside a recovered picture whose head shows `↻2` | `18-s8-label-regenerated.png` |
-| S9 · collapsed approximate pinned value | `19-s9-label-approx.png` |
+| S9 · collapsed actual value beside its requested best-effort target | `19-s9-label-approx.png` |
 | S10 · whole-tag wrapping onto `scene` / `picture`, with impossible summaries hidden atomically | `20-s10-label-tags-narrow.png` |
 | S11 · post-click `request` selection between both direction chevrons | `21-s11-label-mouse-selection.png` |
 | S12 · legacy below-artifacts editor with a marker on each side of `—` | `22-s12-label-legacy-meta.png` |

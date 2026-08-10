@@ -23,8 +23,8 @@ use crossterm::terminal::{
 use kamishibai::session::{
     Artifact, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptFault, AxisSet, CardArtifacts,
     CardDraft, CardMeta, GenerationCost, LanguagePair, Register, SentenceAxis,
-    SentenceBatchSettings, SentenceKind, SentenceLabels, SentenceLevel, SentenceTypeMix,
-    WordCandidate,
+    SentenceBatchSettings, SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel,
+    SentenceTypeMix, WordCandidate,
 };
 use kamishibai::tui::{
     App, BusyKind, KeySource, ModalKind, MousePointer, Screen, draw, mouse_pointer_at,
@@ -635,13 +635,15 @@ fn build_states() -> Vec<(String, App)> {
         "dépaysement",
         "Ce dépaysement lui a vraiment fait du bien.",
         "This change of scenery really did her good.",
-        labels(
-            Register::Formal,
-            SentenceLevel::B1,
-            SentenceKind::Statement,
-            &[SentenceAxis::Register],
-            &[SentenceAxis::Register],
-        ),
+        SentenceLabelSelection::empty()
+            .choosing(SentenceAxis::Register, 2)
+            .reconciled(labels(
+                Register::Casual,
+                SentenceLevel::B1,
+                SentenceKind::Statement,
+                &[],
+                &[SentenceAxis::Register],
+            )),
         cached_artifacts(),
     ));
     let narrow = cards_with_first(card_with_labels(
@@ -751,8 +753,8 @@ fn build_states() -> Vec<(String, App)> {
         .cards_running(Some((2, Artifact::Picture)))
         .generation_stop_started();
     let partial = cards_seed.clone().done_published_counted(
-        "fr_2026-06-01_183029.apkg",
-        "fr_2026-06-01_183029.pdf",
+        "FR_2026-06-01_183029.apkg",
+        "FR_2026-06-01_183029.pdf",
         "~/Documents/Kamishibai",
         2,
         2,
@@ -762,8 +764,8 @@ fn build_states() -> Vec<(String, App)> {
         .with_screen(Screen::Done)
         .confirmed_learning("fr")
         .done_published(
-            "fr_2026-06-01_183029.apkg",
-            "fr_2026-06-01_183029.pdf",
+            "FR_2026-06-01_183029.apkg",
+            "FR_2026-06-01_183029.pdf",
             "~/Documents/Kamishibai",
         );
 
@@ -949,6 +951,34 @@ mod tests {
                 && rendered.contains("questions")
                 && rendered.contains("[Esc] close"),
             "synthetic generation guidance must show both retained choices and editor rows:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn partial_publish_state_uses_canonical_uppercase_artifact_names() {
+        let states = build_states();
+        let (_, app) = states
+            .get(26)
+            .expect("partial publish state must stay at index 26");
+        let backend = TestBackend::new(120, 50);
+        let mut terminal = Terminal::new(backend).expect("backend must initialize");
+        terminal
+            .draw(|frame| draw(frame, app))
+            .expect("partial publish state must render");
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer[(column, row)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("FR_2026-06-01_183029.apkg")
+                && rendered.contains("FR_2026-06-01_183029.pdf")
+                && !rendered.contains("fr_2026-06-01_183029"),
+            "synthetic partial publish leaked lowercase artifact names:\n{rendered}"
         );
     }
 }

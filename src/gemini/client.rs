@@ -1689,7 +1689,7 @@ mod tests {
     }
 
     #[test]
-    fn requested_initial_labels_are_reconciled_without_a_correction() {
+    fn requested_initial_labels_preserve_actual_attribution_and_target() {
         let request = SentenceLabelSelection::empty()
             .choosing(SentenceAxis::Level, 2)
             .choosing(SentenceAxis::Type, 1);
@@ -1707,20 +1707,24 @@ mod tests {
             (
                 labels.level(),
                 labels.kind(),
+                labels.requested_token(SentenceAxis::Level),
+                labels.requested_token(SentenceAxis::Type),
                 labels.pinned().contains(SentenceAxis::Level),
                 labels.pinned().contains(SentenceAxis::Type),
                 labels.approx().contains(SentenceAxis::Level),
                 labels.approx().contains(SentenceAxis::Type),
             ),
             (
-                SentenceLevel::B1,
-                SentenceKind::Question,
+                SentenceLevel::B2,
+                SentenceKind::Statement,
+                Some("b1"),
+                Some("question"),
                 true,
                 true,
                 true,
                 true,
             ),
-            "requested initial labels were not reconciled as one metadata response"
+            "requested initial labels erased the actual attribution or requested target"
         );
     }
 
@@ -1832,7 +1836,7 @@ mod tests {
     }
 
     #[test]
-    fn correction_reconciles_an_approximate_changed_label_to_the_requested_value() {
+    fn correction_preserves_an_approximate_actual_label_and_requested_target() {
         let response = serde_json::from_value::<CardCorrectionResponse>(card_correction_response(
             sentence_labels_response("casual", "b1", "statement", vec!["register"]),
         ))
@@ -1847,11 +1851,12 @@ mod tests {
         assert_eq!(
             (
                 labels.register(),
+                labels.requested_token(SentenceAxis::Register),
                 labels.pinned().contains(SentenceAxis::Register),
                 labels.approx().contains(SentenceAxis::Register),
             ),
-            (Register::Formal, true, true),
-            "approximate changed register was not restored to the requested display value"
+            (Register::Casual, Some("formal"), true, true),
+            "approximate changed register erased the actual attribution or requested target"
         );
     }
 
