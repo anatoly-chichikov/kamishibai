@@ -49,6 +49,7 @@ Screenshot "live/01b-busy.png"
 Wait+Screen@2m /—/
 Sleep 2s
 Screenshot "live/02-what-i-understood.png"
+Sleep 400ms
 
 # smooth tick-tick navigation down to canard (row 3)
 Down
