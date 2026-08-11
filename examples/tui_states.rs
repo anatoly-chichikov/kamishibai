@@ -22,8 +22,9 @@ use crossterm::terminal::{
 };
 use kamishibai::session::{
     Artifact, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptFault, AxisSet, CardArtifacts,
-    CardDraft, CardMeta, GenerationCost, LanguagePair, Register, SentenceAxis, SentenceKind,
-    SentenceLabels, SentenceLevel, WordCandidate,
+    CardDraft, CardMeta, GenerationCost, LanguagePair, Register, SentenceAxis,
+    SentenceBatchSettings, SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel,
+    SentenceTypeMix, WordCandidate,
 };
 use kamishibai::tui::{
     App, BusyKind, KeySource, ModalKind, MousePointer, Screen, draw, mouse_pointer_at,
@@ -548,6 +549,14 @@ fn build_states() -> Vec<(String, App)> {
         .confirmed_learning("fr")
         .understood(candidates.clone());
 
+    let batch_sentence_settings = review
+        .clone()
+        .with_sentence_settings(SentenceBatchSettings::new(
+            Some(SentenceLevel::B1),
+            SentenceTypeMix::Questions,
+        ))
+        .sentence_settings_opened();
+
     let change_something = review
         .clone()
         .with_modal(ModalKind::ChangeSomething)
@@ -626,13 +635,15 @@ fn build_states() -> Vec<(String, App)> {
         "dépaysement",
         "Ce dépaysement lui a vraiment fait du bien.",
         "This change of scenery really did her good.",
-        labels(
-            Register::Formal,
-            SentenceLevel::B1,
-            SentenceKind::Statement,
-            &[SentenceAxis::Register],
-            &[SentenceAxis::Register],
-        ),
+        SentenceLabelSelection::empty()
+            .choosing(SentenceAxis::Register, 2)
+            .reconciled(labels(
+                Register::Casual,
+                SentenceLevel::B1,
+                SentenceKind::Statement,
+                &[],
+                &[SentenceAxis::Register],
+            )),
         cached_artifacts(),
     ));
     let narrow = cards_with_first(card_with_labels(
@@ -731,12 +742,30 @@ fn build_states() -> Vec<(String, App)> {
         .cards_running(Some((0, Artifact::Sound)))
         .with_elapsed(Duration::from_secs(142));
 
+    let words_clear = base_words.clone().with_word_clear_pending(true);
+    let review_back = review.clone();
+    let stop_armed = cards_seed
+        .clone()
+        .cards_running(Some((2, Artifact::Picture)))
+        .with_generation_stop_pending(true);
+    let stopping = cards_seed
+        .clone()
+        .cards_running(Some((2, Artifact::Picture)))
+        .generation_stop_started();
+    let partial = cards_seed.clone().done_published_counted(
+        "FR_2026-06-01_183029.apkg",
+        "FR_2026-06-01_183029.pdf",
+        "~/Documents/Kamishibai",
+        2,
+        2,
+    );
+
     let done = App::new(pair())
         .with_screen(Screen::Done)
         .confirmed_learning("fr")
         .done_published(
-            "fr_2026-06-01_183029.apkg",
-            "fr_2026-06-01_183029.pdf",
+            "FR_2026-06-01_183029.apkg",
+            "FR_2026-06-01_183029.pdf",
             "~/Documents/Kamishibai",
         );
 
@@ -824,6 +853,15 @@ fn build_states() -> Vec<(String, App)> {
             String::from("03e · Your cards · retry layout stress"),
             retry_stress,
         ),
+        (String::from("15 · Esc · clear words armed"), words_clear),
+        (String::from("16 · Esc · review back"), review_back),
+        (String::from("17 · Esc · generation stop armed"), stop_armed),
+        (String::from("18 · Esc · generation stopping"), stopping),
+        (String::from("19 · Esc · partial publish"), partial),
+        (
+            String::from("02c · What I understood · generation guidance"),
+            batch_sentence_settings,
+        ),
     ]
 }
 
@@ -881,6 +919,66 @@ mod tests {
                 .all(|needle| !rendered.contains(needle))
                 && app.cards_running_target() == Some((0, Artifact::Sound)),
             "retry layout stress state leaked attempt history out of the card heads:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn batch_sentence_settings_state_keeps_both_carousels_visible() {
+        let states = build_states();
+        let (_, app) = states
+            .get(27)
+            .expect("generation guidance state must stay at index 27");
+        let backend = TestBackend::new(120, 50);
+        let mut terminal = Terminal::new(backend).expect("backend must initialize");
+        terminal
+            .draw(|frame| draw(frame, app))
+            .expect("generation guidance state must render");
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer[(column, row)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("generation guidance")
+                && !rendered.contains("generation guidance   b1")
+                && rendered.contains("what's the desired level?")
+                && rendered.contains("what kinds of phrases?")
+                && rendered.contains("b1")
+                && rendered.contains("questions")
+                && rendered.contains("[Esc] close"),
+            "synthetic generation guidance must show both retained choices and editor rows:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn partial_publish_state_uses_canonical_uppercase_artifact_names() {
+        let states = build_states();
+        let (_, app) = states
+            .get(26)
+            .expect("partial publish state must stay at index 26");
+        let backend = TestBackend::new(120, 50);
+        let mut terminal = Terminal::new(backend).expect("backend must initialize");
+        terminal
+            .draw(|frame| draw(frame, app))
+            .expect("partial publish state must render");
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer[(column, row)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("FR_2026-06-01_183029.apkg")
+                && rendered.contains("FR_2026-06-01_183029.pdf")
+                && !rendered.contains("fr_2026-06-01_183029"),
+            "synthetic partial publish leaked lowercase artifact names:\n{rendered}"
         );
     }
 }

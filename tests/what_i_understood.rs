@@ -57,6 +57,26 @@ fn modifiers(app: &App, needle: &str) -> Vec<Modifier> {
     Vec::new()
 }
 
+fn style_of(app: &App, needle: &str) -> (Color, Color, Modifier) {
+    let backend = TestBackend::new(140, 24);
+    let mut terminal = Terminal::new(backend).expect("backend");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    for row in 0..buffer.area.height {
+        let mut rendered = String::new();
+        for column in 0..buffer.area.width {
+            rendered.push_str(buffer[(column, row)].symbol());
+        }
+        if let Some(start) = rendered.find(needle) {
+            let column = u16::try_from(rendered[..start].chars().count())
+                .expect("rendered column must fit the terminal");
+            let cell = &buffer[(column, row)];
+            return (cell.fg, cell.bg, cell.modifier);
+        }
+    }
+    panic!("the rendered screen never showed '{needle}'");
+}
+
 fn has_highlight_after_text(app: &App, needle: &str) -> bool {
     let backend = TestBackend::new(140, 24);
     let mut terminal = Terminal::new(backend).expect("backend");
@@ -211,6 +231,7 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
             && rendered.contains("[Enter/→] toggle")
             && rendered.contains("[Ctrl+G]")
             && rendered.contains("generate")
+            && rendered.contains("[Esc] back")
             && !rendered.contains("[R] change"),
         "sense check must render the new mono header, gloss list, and key hints: {rendered}"
     );
@@ -281,11 +302,44 @@ fn enter_on_multi_sense_word_expands_the_sense_list() {
             && rendered.contains("+ add more"),
         "Enter on a multi-sense row must expand a tagged sublist with an add-more row: {rendered}"
     );
-    assert!(
-        modifiers(&opened, "bank")
-            .iter()
-            .all(|modifier| !modifier.contains(Modifier::BOLD)),
-        "expanded parent row must dim instead of keeping the selected-row highlight"
+}
+
+#[test]
+fn expanded_sense_focus_moves_inside_without_dimming_the_parent() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let second = transit(opened.clone(), AppEvent::NavNext).0;
+    let third = transit(second.clone(), AppEvent::NavNext).0;
+    let add_more = transit(third, AppEvent::NavNext).0;
+    let foreground = Color::Rgb(0xe6, 0xe3, 0xda);
+    let muted = Color::Rgb(0x8b, 0x8a, 0x83);
+    let background = Color::Rgb(0x0e, 0x0e, 0x10);
+    let highlight = Color::Rgb(0x1c, 0x1c, 0x1f);
+    assert_eq!(
+        (
+            style_of(&opened, "bank"),
+            style_of(&opened, "1/3"),
+            style_of(&opened, "[фин.]"),
+            style_of(&opened, "✓"),
+            style_of(&second, "✓"),
+            style_of(&second, "Сущ. «берег»"),
+            style_of(&second, "[авиац.]"),
+            style_of(&add_more, "+ add more"),
+        ),
+        (
+            (foreground, background, Modifier::empty()),
+            (muted, background, Modifier::empty()),
+            (muted, background, Modifier::empty()),
+            (foreground, highlight, Modifier::BOLD),
+            (foreground, background, Modifier::empty()),
+            (foreground, highlight, Modifier::BOLD),
+            (muted, background, Modifier::empty()),
+            (foreground, highlight, Modifier::BOLD),
+        ),
+        "expanded focus must move from an ordinary parent into a bright focused choice while selected context stays readable"
     );
 }
 
@@ -349,6 +403,34 @@ fn space_toggles_the_focused_sense_and_enter_commits_the_selection() {
             && rendered.contains("2/3")
             && !rendered.contains("✓"),
         "Space must mark another sense and Enter must collapse with both meanings selected: {rendered}"
+    );
+}
+
+#[test]
+fn footer_card_count_updates_before_sense_picker_closes() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let second = transit(opened, AppEvent::NavNext).0;
+    let selected = transit(second, AppEvent::KeyChar(' ')).0;
+    let selected_footer = flat(&selected);
+    let deselected = transit(selected.clone(), AppEvent::KeyChar(' ')).0;
+    let deselected_footer = flat(&deselected);
+    assert_eq!(
+        (
+            selected.expanded_sense().is_some(),
+            selected.candidates()[0].selected_count(),
+            selected_footer.contains("2 cards"),
+            selected_footer.contains("2/3"),
+            deselected.expanded_sense().is_some(),
+            deselected.candidates()[0].selected_count(),
+            deselected_footer.contains("1 card"),
+            deselected_footer.contains("1/3"),
+        ),
+        (true, 1, true, true, true, 1, true, true),
+        "the footer must preview the open sense selection without committing it"
     );
 }
 

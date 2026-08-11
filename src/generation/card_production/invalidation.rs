@@ -60,23 +60,66 @@ pub(crate) fn invalidate_card(
     Ok(())
 }
 
-struct ArtifactGuards {
+/// Every producer lease required for a destructive card-cache transaction.
+pub(super) struct ArtifactGuards {
     _meta: RootStageGuard,
+    _dependents: DependentGuards,
+}
+
+/// Voice and visual leases acquired after a metadata lease is already held.
+pub(super) struct DependentGuards {
     _voice: RootStageGuard,
     _visual: VisualGuard,
 }
 
 impl ArtifactGuards {
-    fn hold(cache: &Cache, visual: &Cache) -> Result<Self> {
+    /// Acquire producer leases in the global metadata, voice, visual order.
+    pub(super) fn hold(cache: &Cache, visual: &Cache) -> Result<Self> {
         let meta = cache.hold_root_stage(RootStage::Meta, ROOT_STAGE_LOCK_TIMEOUT)?;
+        let dependents = DependentGuards::hold(cache, visual)?;
+        Ok(Self {
+            _meta: meta,
+            _dependents: dependents,
+        })
+    }
+}
+
+impl DependentGuards {
+    /// Acquire dependent producer leases after the caller has locked metadata.
+    pub(super) fn hold(cache: &Cache, visual: &Cache) -> Result<Self> {
         let voice = cache.hold_root_stage(RootStage::Voice, ROOT_STAGE_LOCK_TIMEOUT)?;
         let visual = visual.hold_visual(VISUAL_LOCK_TIMEOUT)?;
         Ok(Self {
-            _meta: meta,
             _voice: voice,
             _visual: visual,
         })
     }
+}
+
+/// Clear every artifact that depends on replaced metadata while retaining costs.
+pub(super) fn clear_for_meta_refresh(cache: &Cache, visual: &Cache) -> Result<()> {
+    remove_cached_files(
+        visual,
+        &[
+            SCENE_FILE,
+            SCENE_ATTEMPT_FILE,
+            ILLUSTRATION_FILE,
+            PICTURE_REQUESTS_FILE,
+        ],
+    )?;
+    remove_attempt_journal(visual)?;
+    remove_cached_files(
+        cache,
+        &[
+            VOICE_FILE,
+            SCENE_FILE,
+            SCENE_ATTEMPT_FILE,
+            ILLUSTRATION_FILE,
+            PICTURE_REQUESTS_FILE,
+            LEGACY_VISUAL_REVISION_FILE,
+        ],
+    )?;
+    Ok(())
 }
 
 fn remove_cached_files(cache: &Cache, files: &[&str]) -> Result<()> {

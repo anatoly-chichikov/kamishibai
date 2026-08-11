@@ -73,9 +73,14 @@ pub struct Screen {
 pub enum ScreenState {
     Default,
     Pending,
+    ConfirmingClear,
+    ConfirmingStop,
+    Stopping,
+    Partial,
     Empty(EmptyCause),
     Retrying,
     Failed,
+    EditingSentenceSettings,
     EditingLabels,
     Regenerating,
 }

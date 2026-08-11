@@ -4,7 +4,7 @@ use super::app::App;
 use super::disclosure::{DisclosureControls, DisclosureIntent};
 use super::event::AppEvent;
 use super::screen::{ModalKind, Screen, WelcomeFocus, WelcomeStage};
-use super::sentence_editor::LabelEditorRow;
+use super::sentence_editor::{BatchSettingsRow, LabelEditorRow};
 
 /// A side effect requested by a transition. The shell interprets it outside the pure function.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,7 +13,11 @@ pub enum Side {
     RunUnderstanding,
     RunBulkCorrection(String),
     PersistMyLanguageAndRunUnderstanding(String),
+    /// Ask the shell to arm or confirm clearing the nonempty words input.
+    ClearWords,
     StartGeneration,
+    /// Ask the shell to arm or confirm stopping the active card engine.
+    StopGeneration,
     RegenerateFailed,
     RegenerateCards,
     PersistMyLanguage(String),
@@ -63,9 +67,88 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourWords, None, AppEvent::OpenLanguagePicker) => {
             (open_language_picker(app), Side::None)
         }
+        (Screen::YourWords, None, AppEvent::Cancel) if !app.blob().is_empty() => {
+            (app, Side::ClearWords)
+        }
         (Screen::WhatIUnderstood, None, AppEvent::Generate) => start_generation(app),
+        (Screen::WhatIUnderstood, None, AppEvent::Cancel)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_closed(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsOpen)
+            if app.expanded_sense().is_none() && !app.candidates().is_empty() =>
+        {
+            (app.sentence_settings_opened(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsFocus(row))
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_focused(row), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsChoose(row, index))
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (
+                app.sentence_settings_focused(row)
+                    .sentence_settings_chosen(index),
+                Side::None,
+            )
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsAdvance(row, forward))
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (
+                app.sentence_settings_focused(row)
+                    .sentence_settings_advanced(forward),
+                Side::None,
+            )
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_row_previous(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::NavNext)
+            if app.sentence_settings_editor() == Some(BatchSettingsRow::Types) =>
+        {
+            (app.sentence_settings_closed(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::NavNext)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_row_next(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorLeft)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_advanced(false), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorRight)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_advanced(true), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::Submit | AppEvent::KeyEnter)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app, Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar(_))
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app, Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('s' | 'S'))
+            if app.expanded_sense().is_none() && !app.candidates().is_empty() =>
+        {
+            (app.sentence_settings_opened(), Side::None)
+        }
         (Screen::WhatIUnderstood, None, AppEvent::Cancel) if app.expanded_sense().is_some() => {
             (app.senses_cancelled(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::Cancel) => {
+            (app.with_screen(Screen::YourWords), Side::None)
         }
         (Screen::WhatIUnderstood, None, event)
             if matches!(sense_controls(&app).intent(&event), DisclosureIntent::Close) =>
@@ -98,6 +181,18 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, None, AppEvent::NavNext) if app.expanded_sense().is_some() => {
             (app.sense_next(), Side::None)
         }
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev)
+            if app.expanded_sense().is_none()
+                && app.sentence_settings_editor().is_none()
+                && app.selected() == 0
+                && !app.candidates().is_empty() =>
+        {
+            (
+                app.sentence_settings_opened()
+                    .sentence_settings_focused(BatchSettingsRow::Types),
+                Side::None,
+            )
+        }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K'))
             if app.expanded_sense().is_some() =>
@@ -126,7 +221,15 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K')) => {
-            (app.selected_previous(), Side::None)
+            if app.selected() == 0 && !app.candidates().is_empty() {
+                (
+                    app.sentence_settings_opened()
+                        .sentence_settings_focused(BatchSettingsRow::Types),
+                    Side::None,
+                )
+            } else {
+                (app.selected_previous(), Side::None)
+            }
         }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('j'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('J')) => {
@@ -181,6 +284,11 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (_, Some(ModalKind::PickMyLanguage), _) => (app, Side::None),
         (Screen::YourCards, None, AppEvent::Cancel) if app.sentence_editor().is_some() => {
             (app.sentence_editor_closed(), Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::Cancel)
+            if !app.cards().is_empty() && !app.can_start_new_batch() =>
+        {
+            (app, Side::StopGeneration)
         }
         (Screen::YourCards, None, AppEvent::SentenceLabelOpen(card, row))
             if app.card_tunable_at(card) =>

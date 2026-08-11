@@ -265,6 +265,7 @@ mod tests {
             understanding: String::from("a financial institution"),
             costs: ArtifactCosts::default(),
             rewrite,
+            meta_request: None,
         }
     }
 
@@ -368,6 +369,7 @@ mod tests {
                 understanding: String::from("the side of a river"),
                 costs: ArtifactCosts::default(),
                 rewrite: None,
+                meta_request: None,
             },
         ];
         let mut selected = args();

@@ -215,6 +215,8 @@ pub struct SentenceLabels {
     pinned: AxisSet,
     #[serde(default)]
     approx: AxisSet,
+    #[serde(default, skip_serializing_if = "SentenceLabelChoices::is_empty")]
+    requested: SentenceLabelChoices,
 }
 
 impl SentenceLabels {
@@ -231,6 +233,7 @@ impl SentenceLabels {
             values: SentenceLabelValues::new(register, level, kind),
             pinned,
             approx,
+            requested: SentenceLabelChoices::default(),
         }
     }
 
@@ -274,13 +277,33 @@ impl SentenceLabels {
         }
     }
 
+    /// Return the requested token for one pinned axis, including legacy fallback.
+    #[must_use]
+    pub fn requested_token(&self, axis: SentenceAxis) -> Option<&'static str> {
+        if !self.pinned.contains(axis) {
+            return None;
+        }
+        self.requested.token(axis).or_else(|| self.token(axis))
+    }
+
+    /// Return the explicitly recorded requested token for one pinned axis.
+    #[must_use]
+    pub fn recorded_request_token(&self, axis: SentenceAxis) -> Option<&'static str> {
+        if !self.pinned.contains(axis) {
+            return None;
+        }
+        self.requested.token(axis)
+    }
+
     /// Return labels carrying a client-owned pin set and valid approximation subset.
     #[must_use]
     pub fn with_axis_state(self, pinned: AxisSet, approx: AxisSet) -> Self {
+        let requested = self.requested.retaining(&pinned);
         Self {
             values: self.values,
             approx: approx.intersecting(&pinned),
             pinned,
+            requested,
         }
     }
 }
@@ -295,10 +318,74 @@ struct SentenceLabelChoices {
 impl SentenceLabelChoices {
     fn from_labels(labels: &SentenceLabels) -> Self {
         Self {
-            register: Some(labels.register()),
-            level: Some(labels.level()),
-            kind: Some(labels.kind()),
+            register: Some(if labels.pinned.contains(SentenceAxis::Register) {
+                labels.requested.register.unwrap_or(labels.register())
+            } else {
+                labels.register()
+            }),
+            level: Some(if labels.pinned.contains(SentenceAxis::Level) {
+                labels.requested.level.unwrap_or(labels.level())
+            } else {
+                labels.level()
+            }),
+            kind: Some(if labels.pinned.contains(SentenceAxis::Type) {
+                labels.requested.kind.unwrap_or(labels.kind())
+            } else {
+                labels.kind()
+            }),
         }
+    }
+
+    fn from_selection(selection: &SentenceLabelSelection) -> Self {
+        Self {
+            register: if selection.pinned.contains(SentenceAxis::Register) {
+                selection.values.register
+            } else {
+                None
+            },
+            level: if selection.pinned.contains(SentenceAxis::Level) {
+                selection.values.level
+            } else {
+                None
+            },
+            kind: if selection.pinned.contains(SentenceAxis::Type) {
+                selection.values.kind
+            } else {
+                None
+            },
+        }
+    }
+
+    fn token(&self, axis: SentenceAxis) -> Option<&'static str> {
+        match axis {
+            SentenceAxis::Register => self.register.map(Register::token),
+            SentenceAxis::Level => self.level.map(SentenceLevel::token),
+            SentenceAxis::Type => self.kind.map(SentenceKind::token),
+        }
+    }
+
+    fn retaining(&self, axes: &AxisSet) -> Self {
+        Self {
+            register: if axes.contains(SentenceAxis::Register) {
+                self.register
+            } else {
+                None
+            },
+            level: if axes.contains(SentenceAxis::Level) {
+                self.level
+            } else {
+                None
+            },
+            kind: if axes.contains(SentenceAxis::Type) {
+                self.kind
+            } else {
+                None
+            },
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.register.is_none() && self.level.is_none() && self.kind.is_none()
     }
 }
 
@@ -493,30 +580,15 @@ impl SentenceLabelSelection {
         })
     }
 
-    /// Return response labels with changed display values and client pins restored.
+    /// Return response labels with actual values and requested targets retained.
     #[must_use]
     pub fn reconciled(&self, labels: SentenceLabels) -> SentenceLabels {
-        let register = if self.pinned.contains(SentenceAxis::Register) {
-            self.register().unwrap_or_else(|| labels.register())
-        } else {
-            labels.register()
-        };
-        let level = if self.pinned.contains(SentenceAxis::Level) {
-            self.level().unwrap_or_else(|| labels.level())
-        } else {
-            labels.level()
-        };
-        let kind = if self.pinned.contains(SentenceAxis::Type) {
-            self.kind().unwrap_or_else(|| labels.kind())
-        } else {
-            labels.kind()
-        };
-        SentenceLabels::new(
-            register,
-            level,
-            kind,
-            self.pinned.clone(),
-            labels.approx().intersecting(&self.pinned),
-        )
+        let approx = labels.approx.intersecting(&self.pinned);
+        SentenceLabels {
+            values: labels.values,
+            pinned: self.pinned.clone(),
+            approx,
+            requested: SentenceLabelChoices::from_selection(self),
+        }
     }
 }

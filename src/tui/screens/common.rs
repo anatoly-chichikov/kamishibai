@@ -422,13 +422,28 @@ pub fn quit_hint(pending: bool) -> FooterHint {
     }
 }
 
+/// The review-screen back action, retained alongside quit on a crowded footer.
+pub fn back_hint() -> FooterHint {
+    FooterHint::with("Esc", "back", Tier::Secondary, 2)
+}
+
+/// The review-screen generation-guidance action, retained on a crowded footer.
+pub fn sentence_settings_hint() -> FooterHint {
+    FooterHint::with("↑", "guidance", Tier::Secondary, 2)
+}
+
 /// The finished-screen Escape action and its armed confirmation state.
 pub fn new_batch_hint(pending: bool) -> FooterHint {
     if pending {
-        FooterHint::with("Esc", "again", Tier::Primary, 4)
+        escape_again_hint()
     } else {
         FooterHint::with("Esc", "new cards", Tier::Ghost, 2)
     }
+}
+
+/// The high-priority second-Escape confirmation shared by destructive actions.
+pub fn escape_again_hint() -> FooterHint {
+    FooterHint::with("Esc", "again", Tier::Primary, 4)
 }
 
 /// One and only entry point for drawing a fullscreen screen.
@@ -504,12 +519,7 @@ fn banner_visible(app: &App) -> bool {
     }
     match app.screen() {
         crate::tui::screen::Screen::Done => true,
-        crate::tui::screen::Screen::YourCards => {
-            app.cards()
-                .iter()
-                .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed())
-                && !app.cards().is_empty()
-        }
+        crate::tui::screen::Screen::YourCards => app.batch_settled(),
         _ => false,
     }
 }

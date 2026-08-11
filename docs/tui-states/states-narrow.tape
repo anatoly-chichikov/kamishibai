@@ -23,6 +23,12 @@ Type "18"
 Space
 Sleep 800ms
 Screenshot "live/20-s10-label-tags-narrow.png"
+
+# index 27 — generation guidance wraps with the same mouse geometry at narrow width
+Type "27"
+Space
+Sleep 800ms
+Screenshot "live/29-batch-sentence-settings-narrow.png"
 Sleep 250ms
 
 Type "q"

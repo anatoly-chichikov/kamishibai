@@ -5,12 +5,12 @@ expression: render(&app)
                                                                                 
      what i understood   quick check before i build the cards        RU → EN    
                                                                                 
+    generation guidance   best fit                                              
+                                                                                
     01  bank 2/3      multiple meanings:                                        
                          —  [фин.] Сущ. «банк», финансовое учреждение.          
                          —  Сущ. «берег» реки или водоёма.                      
                                                                                 
-                                                                                
-                                                                                
                                       ai may be wrong, please verify results    
                                                                                 
-    step 2/3  2 cards     [Ctrl+G] generate  [Enter/→] toggle  [Ctrl+C] quit
+    step 2/3  2 cards            [Ctrl+G] generate  [↑] guidance  [Esc] back

@@ -460,6 +460,74 @@ fn your_cards_footer_hides_total_cost_until_money_is_spent() {
 }
 
 #[test]
+fn armed_generation_stop_makes_escape_the_only_primary_action() {
+    let app = seeded(vec![draft("whilst", partial_priced_artifacts())])
+        .with_generation_stop_pending(true);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("[Esc] again")
+            && !rendered.contains("[Ctrl+G] regenerate")
+            && !rendered.contains("[Enter/→] tune"),
+        "armed generation stop competed with generation actions: {rendered}"
+    );
+}
+
+#[test]
+fn draining_generation_says_stopping_without_offering_more_work() {
+    let app = seeded(vec![draft("whilst", partial_priced_artifacts())]).generation_stop_started();
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("stopping…")
+            && !rendered.contains("[Ctrl+G] regenerate")
+            && !rendered.contains("[Enter/→] tune")
+            && !rendered.contains("[Esc] again"),
+        "draining generation looked active or offered another action: {rendered}"
+    );
+}
+
+#[test]
+fn partial_publish_is_a_settled_view_with_outputs_and_durable_tally() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("wreck", partial_priced_artifacts()),
+    ])
+    .done_published_counted("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp", 1, 1);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("your cards")
+            && rendered.contains("some cards didn't make it")
+            && rendered.contains("1/2 ready")
+            && rendered.contains("1 omitted")
+            && rendered.contains("APKG")
+            && rendered.contains("PDF")
+            && !rendered.contains("building your cards"),
+        "partial publish did not render as a settled output-bearing batch: {rendered}"
+    );
+}
+
+#[test]
+fn partial_publish_reserves_and_links_the_same_banner_rows() {
+    let terminal = Rect::new(0, 0, 120, 30);
+    let cards = vec![
+        draft("whilst", ready_artifacts()),
+        draft("wreck", partial_priced_artifacts()),
+    ];
+    let building = seeded(cards.clone());
+    let partial =
+        seeded(cards).done_published_counted("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp", 1, 1);
+    let buffer = rendered_buffer_at(&partial, terminal.width, terminal.height);
+    let (column, row) = position_of(&buffer, "APKG");
+    assert_eq!(
+        (
+            scroll_viewport(&building, terminal) - scroll_viewport(&partial, terminal),
+            link_at(&partial, terminal, column, row),
+        ),
+        (4, Some(String::from("/tmp/cards.apkg"))),
+        "partial banner rendering, scrolling, and hit geometry diverged"
+    );
+}
+
+#[test]
 fn your_cards_marks_cached_artifacts_next_to_the_file_metadata() {
     let app = seeded(vec![draft("whilst", cached_artifacts())]);
     let rendered = flat(&app);
@@ -1432,7 +1500,9 @@ fn closed_pending_card_shows_the_staged_tags_and_bulk_regeneration_footer() {
             && rendered.contains("formal")
             && rendered.contains("b1")
             && rendered.contains("statement")
-            && !rendered.contains("casual")
+            && rendered.contains("casual")
+            && rendered.contains("· aimed for")
+            && chip_has_style(&buffer, "casual", ink, gray)
             && chip_has_style(&buffer, "formal", ink, white)
             && !buffer[formal].modifier.contains(Modifier::BOLD)
             && chip_has_style(&buffer, "b1", ink, gray)
@@ -1556,7 +1626,56 @@ fn a_long_editor_note_keeps_its_cursor_at_the_narrow_body_edge() {
 }
 
 #[test]
-fn pinned_and_approximate_axes_are_emphasized_inside_the_tags() {
+fn best_effort_axes_show_the_actual_value_and_requested_target() {
+    let request = SentenceLabelSelection::empty().choosing(SentenceAxis::Register, 2);
+    let labels = request.reconciled(SentenceLabels::new(
+        Register::Casual,
+        SentenceLevel::B2,
+        SentenceKind::Statement,
+        AxisSet::default(),
+        AxisSet::from_axes([SentenceAxis::Register]),
+    ));
+    let draft = CardDraft::new(
+        "whilst",
+        "understanding for whilst",
+        LanguagePair::new("en", "ru"),
+    )
+    .with_meta(meta_for("whilst").with_sentence_labels(labels), None)
+    .with_artifacts(ready_artifacts());
+    let app = seeded(vec![draft]);
+    let rendered = flat(&app);
+    let buffer = rendered_buffer(&app);
+    let actual = position_of(&buffer, "casual");
+    let aimed = position_of(&buffer, "aimed for");
+    let requested = position_of(&buffer, "formal");
+    let ink = Color::Rgb(0x0e, 0x0e, 0x10);
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let white = Color::Rgb(0xe6, 0xe3, 0xda);
+    let quiet = Color::Rgb(0x5a, 0x59, 0x53);
+    let background = Color::Rgb(0x0e, 0x0e, 0x10);
+    assert!(
+        rendered.contains("· aimed for")
+            && !rendered.contains('≈')
+            && rendered.contains("b2")
+            && rendered.contains("statement")
+            && actual.1 == aimed.1
+            && aimed.1 == requested.1
+            && actual.0 < aimed.0
+            && aimed.0 < requested.0
+            && chip_has_style(&buffer, "casual", ink, gray)
+            && chip_has_style(&buffer, "formal", ink, white)
+            && matching_cells(&app, "aimed for")
+                .iter()
+                .all(|(fg, bg, _)| *fg == quiet && *bg == background)
+            && !buffer[requested].modifier.contains(Modifier::BOLD)
+            && chip_has_style(&buffer, "b2", ink, gray)
+            && chip_has_style(&buffer, "statement", ink, gray),
+        "the compact tags hid the actual value, target, or restrained best-effort styling: {rendered}"
+    );
+}
+
+#[test]
+fn legacy_best_effort_axes_name_only_the_known_target() {
     let labels = SentenceLabels::new(
         Register::Archaic,
         SentenceLevel::B2,
@@ -1574,19 +1693,42 @@ fn pinned_and_approximate_axes_are_emphasized_inside_the_tags() {
     let app = seeded(vec![draft]);
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
-    let pinned = position_of(&buffer, "≈archaic");
-    let ink = Color::Rgb(0x0e, 0x0e, 0x10);
-    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
-    let white = Color::Rgb(0xe6, 0xe3, 0xda);
     assert!(
-        rendered.contains("≈archaic")
-            && rendered.contains("b2")
-            && rendered.contains("statement")
-            && chip_has_style(&buffer, "≈archaic", ink, white)
-            && !buffer[pinned].modifier.contains(Modifier::BOLD)
-            && chip_has_style(&buffer, "b2", ink, gray)
-            && chip_has_style(&buffer, "statement", ink, gray),
-        "the tags must prefix an approximately fulfilled pinned axis with the approximation mark: {rendered}"
+        rendered.contains("aimed for")
+            && rendered.contains("archaic")
+            && !rendered.contains('≈')
+            && chip_has_style(
+                &buffer,
+                "archaic",
+                Color::Rgb(0x0e, 0x0e, 0x10),
+                Color::Rgb(0xe6, 0xe3, 0xda),
+            ),
+        "a legacy best-effort target invented an actual value or fell back to an opaque symbol: {rendered}"
+    );
+}
+
+#[test]
+fn open_editor_keeps_the_target_selected_and_names_the_current_actual_value() {
+    let request = SentenceLabelSelection::empty().choosing(SentenceAxis::Register, 2);
+    let labels = request.reconciled(SentenceLabels::new(
+        Register::Casual,
+        SentenceLevel::B2,
+        SentenceKind::Statement,
+        AxisSet::default(),
+        AxisSet::from_axes([SentenceAxis::Register]),
+    ));
+    let draft = CardDraft::new(
+        "whilst",
+        "understanding for whilst",
+        LanguagePair::new("en", "ru"),
+    )
+    .with_meta(meta_for("whilst").with_sentence_labels(labels), None)
+    .with_artifacts(ready_artifacts());
+    let app = seeded(vec![draft]).sentence_editor_opened_for_register();
+    let row = row_containing(flat(&app).as_str(), "how should it sound?").to_string();
+    assert!(
+        row.contains("formal") && row.contains("current  casual") && !row.contains('≈'),
+        "the editor confused its requested target with the current generated value: {row}"
     );
 }
 

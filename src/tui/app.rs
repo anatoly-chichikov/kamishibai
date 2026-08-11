@@ -2,11 +2,12 @@ use std::fmt;
 use std::time::Duration;
 
 use crate::session::{
-    Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, SentenceLabelSelection, WordCandidate,
+    Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, SentenceBatchSettings,
+    SentenceLabelSelection, WordCandidate,
 };
 
 use super::screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
-use super::sentence_editor::{LabelEditorRow, NoteDraft, SentenceLabelsEditor};
+use super::sentence_editor::{BatchSettingsRow, LabelEditorRow, NoteDraft, SentenceLabelsEditor};
 
 /// The immutable shell state carried between transitions.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,12 +20,15 @@ pub struct App {
     input: AppInput,
     blob_cursor: usize,
     review: Review,
+    sentence_settings: SentenceBatchSettings,
+    sentence_settings_row: Option<BatchSettingsRow>,
     cards: CardsView,
     done: DoneArtifacts,
     welcome: WelcomeView,
     body_scroll: u16,
     quit_pending: bool,
     new_batch_pending: bool,
+    word_clear_pending: bool,
     picker_cursor: usize,
 }
 
@@ -142,6 +146,16 @@ pub struct CardsView {
     pub elapsed: Duration,
     pub running: Option<(usize, Artifact)>,
     editor: Option<SentenceLabelsEditor>,
+    stop: GenerationStopState,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum GenerationStopState {
+    #[default]
+    Inactive,
+    Pending,
+    Stopping,
+    Cancelling,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -149,6 +163,8 @@ pub struct DoneArtifacts {
     pub deck: String,
     pub report: String,
     pub output: String,
+    pub cards: usize,
+    pub failed: usize,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -190,12 +206,15 @@ impl App {
             },
             blob_cursor: 0,
             review: Review::default(),
+            sentence_settings: SentenceBatchSettings::default(),
+            sentence_settings_row: None,
             cards: CardsView::default(),
             done: DoneArtifacts::default(),
             welcome: WelcomeView::default(),
             body_scroll: 0,
             quit_pending: false,
             new_batch_pending: false,
+            word_clear_pending: false,
             picker_cursor: 0,
         }
     }
@@ -223,20 +242,82 @@ impl App {
         self
     }
 
+    /// Return whether a first Escape has armed clearing the words field.
+    pub fn word_clear_pending(&self) -> bool {
+        self.word_clear_pending
+    }
+
+    /// Return the app with the words-clear confirmation flag updated.
+    pub fn with_word_clear_pending(mut self, pending: bool) -> Self {
+        self.word_clear_pending = pending;
+        self
+    }
+
+    /// Return whether a first Escape has armed stopping card generation.
+    pub fn generation_stop_pending(&self) -> bool {
+        self.cards.stop == GenerationStopState::Pending
+    }
+
+    /// Return whether the shell is draining the last in-flight artifact.
+    pub fn generation_stopping(&self) -> bool {
+        matches!(
+            self.cards.stop,
+            GenerationStopState::Stopping | GenerationStopState::Cancelling
+        )
+    }
+
+    /// Return whether a stopped run is waiting for durable cancellation.
+    pub fn generation_cancelling(&self) -> bool {
+        self.cards.stop == GenerationStopState::Cancelling
+    }
+
+    /// Return the app with generation-stop confirmation armed or disarmed.
+    pub fn with_generation_stop_pending(mut self, pending: bool) -> Self {
+        if pending {
+            self.cards.stop = GenerationStopState::Pending;
+        } else if self.cards.stop == GenerationStopState::Pending {
+            self.cards.stop = GenerationStopState::Inactive;
+        }
+        self
+    }
+
+    /// Return the app while it drains the current artifact before stopping.
+    pub fn generation_stop_started(mut self) -> Self {
+        self.cards.stop = GenerationStopState::Stopping;
+        self
+    }
+
+    /// Return the app while its stopped run is being closed without publication.
+    pub fn generation_cancellation_started(mut self) -> Self {
+        self.cards.stop = GenerationStopState::Cancelling;
+        self
+    }
+
+    /// Return the app with all transient generation-stop state cleared.
+    pub fn generation_stop_finished(mut self) -> Self {
+        self.cards.stop = GenerationStopState::Inactive;
+        self
+    }
+
     /// Return whether a finished batch can be replaced from the final screen.
     pub fn can_start_new_batch(&self) -> bool {
-        let terminal = !self.cards.drafts.is_empty()
-            && self
-                .cards
-                .drafts
-                .iter()
-                .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed());
         matches!(self.screen, Screen::YourCards | Screen::Done)
-            && (!self.done.deck.is_empty() || terminal)
+            && self.batch_settled()
             && self.modal.is_none()
             && self.busy.is_none()
             && self.error.is_none()
             && self.cards.editor.is_none()
+    }
+
+    /// Return whether generation has reached a terminal or published view.
+    pub fn batch_settled(&self) -> bool {
+        !self.done.deck.is_empty()
+            || (!self.cards.drafts.is_empty()
+                && self
+                    .cards
+                    .drafts
+                    .iter()
+                    .all(|draft| draft.artifacts().all_ready() || draft.artifacts().has_failed()))
     }
 
     /// Start a clean batch while preserving the user's current language direction.
@@ -277,6 +358,7 @@ impl App {
             focus: WelcomeFocus::Submit,
             env_available,
         };
+        self.sentence_settings_row = None;
         self
     }
 
@@ -418,6 +500,7 @@ impl App {
         self.modal = None;
         self.input.modal.clear();
         self.cards.editor = None;
+        self.sentence_settings_row = None;
         self.body_scroll = 0;
         self
     }
@@ -639,6 +722,86 @@ impl App {
     /// Return the short review notice, if any.
     pub fn review_notice(&self) -> Option<&str> {
         self.review.notice.as_deref()
+    }
+
+    /// Return the durable sentence preferences chosen for this reviewed batch.
+    #[must_use]
+    pub fn sentence_settings(&self) -> SentenceBatchSettings {
+        self.sentence_settings
+    }
+
+    /// Return the app carrying durable sentence preferences for this batch.
+    #[must_use]
+    pub fn with_sentence_settings(mut self, settings: SentenceBatchSettings) -> Self {
+        self.sentence_settings = settings;
+        self
+    }
+
+    /// Return the focused row of the open generation-guidance editor.
+    #[must_use]
+    pub fn sentence_settings_editor(&self) -> Option<BatchSettingsRow> {
+        self.sentence_settings_row
+    }
+
+    /// Return the app with generation guidance open on the level row.
+    #[must_use]
+    pub fn sentence_settings_opened(mut self) -> Self {
+        self.sentence_settings_row = Some(BatchSettingsRow::Level);
+        self.review.expanded = None;
+        self.review.notice = None;
+        self
+    }
+
+    /// Return the app with generation guidance closed and choices retained.
+    #[must_use]
+    pub fn sentence_settings_closed(mut self) -> Self {
+        self.sentence_settings_row = None;
+        self
+    }
+
+    /// Return the app with one batch sentence-settings row focused.
+    #[must_use]
+    pub fn sentence_settings_focused(mut self, row: BatchSettingsRow) -> Self {
+        if self.sentence_settings_row.is_some() {
+            self.sentence_settings_row = Some(row);
+        }
+        self
+    }
+
+    /// Return the app with batch sentence-settings focus moved one row up.
+    #[must_use]
+    pub fn sentence_settings_row_previous(mut self) -> Self {
+        if let Some(row) = self.sentence_settings_row {
+            self.sentence_settings_row = Some(row.previous());
+        }
+        self
+    }
+
+    /// Return the app with batch sentence-settings focus moved one row down.
+    #[must_use]
+    pub fn sentence_settings_row_next(mut self) -> Self {
+        if let Some(row) = self.sentence_settings_row {
+            self.sentence_settings_row = Some(row.next());
+        }
+        self
+    }
+
+    /// Return the app with the focused batch sentence choice moved one step.
+    #[must_use]
+    pub fn sentence_settings_advanced(mut self, forward: bool) -> Self {
+        if let Some(row) = self.sentence_settings_row {
+            self.sentence_settings = row.advanced(self.sentence_settings, forward);
+        }
+        self
+    }
+
+    /// Return the app with one batch sentence choice selected directly.
+    #[must_use]
+    pub fn sentence_settings_chosen(mut self, index: usize) -> Self {
+        if let Some(row) = self.sentence_settings_row {
+            self.sentence_settings = row.choosing(self.sentence_settings, index);
+        }
+        self
     }
 
     /// Return the app with a new set of understood candidates installed.
@@ -1024,6 +1187,7 @@ impl App {
 
     /// Return the app with a new card session installed.
     pub fn cards_started(mut self, drafts: Vec<CardDraft>) -> Self {
+        self.sentence_settings_row = None;
         self.cards = CardsView {
             drafts,
             selected: 0,
@@ -1031,8 +1195,16 @@ impl App {
             elapsed: Duration::ZERO,
             running: None,
             editor: None,
+            stop: GenerationStopState::Inactive,
         };
         self
+    }
+
+    /// Return to review after a stopped run while preserving words and curation.
+    pub fn generation_cancelled_to_review(mut self) -> Self {
+        self.cards = CardsView::default();
+        self.done = DoneArtifacts::default();
+        self.with_screen(Screen::WhatIUnderstood)
     }
 
     /// Return the app with the currently-running artifact recorded so the UI can
@@ -1125,16 +1297,33 @@ impl App {
 
     /// Return the app with Done artifacts installed for the final screen.
     pub fn done_published(
+        self,
+        deck: impl Into<String>,
+        report: impl Into<String>,
+        output: impl Into<String>,
+    ) -> Self {
+        let failed = self.cards_failed();
+        let cards = self.cards.drafts.len().saturating_sub(failed);
+        self.done_published_counted(deck, report, output, cards, failed)
+    }
+
+    /// Return the app with published paths and their durable card tally installed.
+    pub fn done_published_counted(
         mut self,
         deck: impl Into<String>,
         report: impl Into<String>,
         output: impl Into<String>,
+        cards: usize,
+        failed: usize,
     ) -> Self {
         self.done = DoneArtifacts {
             deck: deck.into(),
             report: report.into(),
             output: output.into(),
+            cards,
+            failed,
         };
+        self.cards.stop = GenerationStopState::Inactive;
         self
     }
 
@@ -1146,6 +1335,7 @@ impl App {
     /// Return the app with stale published output paths cleared.
     pub fn publication_cleared(mut self) -> Self {
         self.done = DoneArtifacts::default();
+        self.cards.stop = GenerationStopState::Inactive;
         self
     }
 
@@ -1488,10 +1678,10 @@ fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {
 mod tests {
     use super::App;
     use crate::session::{
-        AxisSet, CardDraft, CardMeta, LanguagePair, Register, SentenceAxis, SentenceKind,
-        SentenceLabelSelection, SentenceLabels, SentenceLevel,
+        AxisSet, CardDraft, CardMeta, LanguagePair, Register, SentenceAxis, SentenceBatchSettings,
+        SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel, SentenceTypeMix,
     };
-    use crate::tui::LabelEditorRow;
+    use crate::tui::{BatchSettingsRow, LabelEditorRow, Screen};
 
     fn generated(term: &str, understanding: &str, pair: LanguagePair) -> CardDraft {
         CardDraft::new(term, understanding, pair).with_meta(
@@ -1523,6 +1713,51 @@ mod tests {
             generated("flâner", "to stroll", pair.clone()),
             generated("canard", "a duck", pair),
         ])
+    }
+
+    #[test]
+    fn screen_changes_close_batch_settings_without_losing_their_choices() {
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Mixed);
+        let next = App::new(LanguagePair::new("fr", "en"))
+            .with_sentence_settings(settings)
+            .sentence_settings_opened()
+            .with_screen(Screen::YourWords);
+        assert_eq!(
+            (next.sentence_settings(), next.sentence_settings_editor()),
+            (settings, None),
+            "changing screens lost batch sentence choices or kept their editor open"
+        );
+    }
+
+    #[test]
+    fn starting_a_new_batch_resets_sentence_settings() {
+        let next = App::new(LanguagePair::new("fr", "en"))
+            .with_sentence_settings(SentenceBatchSettings::new(
+                Some(SentenceLevel::B1),
+                SentenceTypeMix::Mixed,
+            ))
+            .sentence_settings_opened()
+            .starting_new_batch();
+        assert_eq!(
+            (next.sentence_settings(), next.sentence_settings_editor()),
+            (SentenceBatchSettings::default(), None),
+            "a clean batch inherited sentence settings from the previous one"
+        );
+    }
+
+    #[test]
+    fn opening_batch_settings_focuses_level_and_closes_the_sense_picker() {
+        let next = App::new(LanguagePair::new("fr", "en"))
+            .understood(vec![crate::session::WordCandidate::new(
+                "canard", "a duck", true,
+            )])
+            .senses_expanded()
+            .sentence_settings_opened();
+        assert_eq!(
+            (next.sentence_settings_editor(), next.expanded_sense()),
+            (Some(BatchSettingsRow::Level), None),
+            "opening sentence settings left another review layer open"
+        );
     }
 
     #[test]

@@ -108,10 +108,73 @@ fn card_meta_cache_round_trips_sentence_labels_without_changing_policy() {
         .load("lingerer", "to linger · casual", &pair)
         .expect("labeled meta must load")
         .expect("labeled meta must exist");
+    let loaded_labels = loaded.sentence_labels();
     assert_eq!(
-        loaded.sentence_labels(),
-        Some(&labels),
+        (
+            loaded_labels,
+            loaded_labels.and_then(|labels| labels.requested_token(SentenceAxis::Register)),
+            loaded_labels.and_then(|labels| labels.recorded_request_token(SentenceAxis::Register)),
+        ),
+        (Some(&labels), Some("casual"), None),
         "the meta cache dropped sentence labels or their client-owned pin state"
+    );
+}
+
+#[test]
+fn card_meta_cache_keeps_actual_and_requested_approximate_labels_separate() {
+    let directory = tempfile::tempdir().expect("tempdir must be created");
+    let pair = LanguagePair::new("fr", "en");
+    let request = SentenceLabelSelection::empty()
+        .choosing(SentenceAxis::Register, 2)
+        .choosing(SentenceAxis::Level, 2);
+    let labels = request.reconciled(SentenceLabels::new(
+        Register::Casual,
+        SentenceLevel::A2,
+        SentenceKind::Statement,
+        AxisSet::default(),
+        AxisSet::from_axes([SentenceAxis::Register, SentenceAxis::Level]),
+    ));
+    let meta = CardMeta::new(
+        "liŋ.ɡe.ʁe",
+        "sɔ̃ paʁ.fœʀ liŋ.ɡe.ʁe dɑ̃ lə ku.lwaʁ",
+        "linger",
+        6,
+        "Her perfume lingered in the hall",
+        "lingered",
+        "A trace stays after its source has gone",
+        "Usage context",
+        "Son parfum lingerait dans le couloir",
+    )
+    .with_sentence_labels(labels);
+    CardMetaCache::new(directory.path())
+        .store("lingerer", "to linger · casual", &pair, &meta)
+        .expect("labeled meta must store");
+    let loaded = CardMetaCache::new(directory.path())
+        .load("lingerer", "to linger · casual", &pair)
+        .expect("labeled meta must load")
+        .expect("labeled meta must exist");
+    let labels = loaded
+        .sentence_labels()
+        .expect("labeled meta must retain labels");
+    let selection = SentenceLabelSelection::from_labels(labels);
+    assert_eq!(
+        (
+            labels.register(),
+            labels.level(),
+            labels.requested_token(SentenceAxis::Register),
+            labels.requested_token(SentenceAxis::Level),
+            selection.register(),
+            selection.level(),
+        ),
+        (
+            Register::Casual,
+            SentenceLevel::A2,
+            Some("formal"),
+            Some("b1"),
+            Some(Register::Formal),
+            Some(SentenceLevel::B1),
+        ),
+        "the meta cache merged actual sentence labels with their requested targets"
     );
 }
 

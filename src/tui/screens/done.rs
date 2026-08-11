@@ -29,7 +29,7 @@ impl ScreenView for Done {
     }
 
     fn hint(&self, app: &App) -> Cow<'static, str> {
-        let copy = if app.cards_failed() > 0 {
+        let copy = if app.cards_failed() > 0 || app.done_artifacts().failed > 0 {
             HINT_FAIL
         } else {
             HINT_OK
@@ -100,26 +100,50 @@ fn card_summary(app: &App) -> Paragraph<'_> {
 }
 
 fn footer(app: &App, width: u16) -> Paragraph<'static> {
+    let done = app.done_artifacts();
+    let published = !done.deck.is_empty() && done.cards.saturating_add(done.failed) > 0;
+    let ready = if published {
+        done.cards
+    } else {
+        app.cards_ready()
+    };
+    let total = if published {
+        done.cards.saturating_add(done.failed)
+    } else {
+        app.cards().len()
+    };
+    let failed = if published {
+        done.failed
+    } else {
+        app.cards_failed()
+    };
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 3/3", palette::dim2()));
     left.push(super::common::status_sep());
     left.push(Span::styled(
-        format!("{}/{} ready", app.cards_ready(), app.cards().len()),
+        format!("{ready}/{total} ready"),
         palette::dim(),
     ));
-    if app.cards_failed() > 0 {
+    if failed > 0 {
         left.push(super::common::status_sep());
-        left.push(Span::styled(
-            format!("{} gave up", app.cards_failed()),
-            palette::dim(),
-        ));
+        left.push(Span::styled(format!("{failed} gave up"), palette::dim()));
     }
     if let Some(cost) = super::your_cards::total_cost(app) {
         left.push(super::common::status_sep());
         left.push(Span::styled(cost.dollars_cents(), palette::dim()));
     }
+    if app.new_batch_pending() {
+        return super::common::footer_bar(
+            left,
+            vec![
+                super::common::new_batch_hint(true),
+                super::common::quit_hint(app.quit_pending()),
+            ],
+            width,
+        );
+    }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
-    if app.cards_failed() > 0 {
+    if failed > 0 {
         hints.push(super::common::FooterHint::primary("Ctrl+G", "Regenerate"));
     }
     if app.can_start_new_batch() {

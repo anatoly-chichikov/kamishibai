@@ -51,7 +51,7 @@ The input contract is strict. There are no optional entry fields.
 With no arguments `kamishibai` opens the interactive TUI; a bare JSON path opens the TUI on a prebuilt batch. Everything non-interactive is a **session** subcommand — a persistent, curatable unit of work an agent drives across invocations. A session moves through stages: understood → (curate) → generating → published (or **partial** when some cards fail but the deck still ships the rest, **failed** when no card survives).
 
 - `kamishibai agent-contract`: print the version-matched `llms.txt` embedded in the installed binary; use this before any remote copy
-- `kamishibai new (--word W [--word W…] | --words FILE | --build FILE) [--learning L] [--known L] [--senses primary|all] [--id NAME] [--generate]`: understand the words (exactly one input form; `--build` imports a cards JSON whose entries carry the pair, so it rejects `--known`/`--learning`/`--senses`) and create a session in the **understood** stage (`--learning` is autodetected from the words when omitted; `--known` is a one-off override that otherwise resolves from your saved preference and **refuses** when neither is set — save it once with `config`)
+- `kamishibai new (--word W [--word W…] | --words FILE | --build FILE) [--learning L] [--known L] [--senses primary|all] [--level a1|a2|b1|b2|c1|c2] [--types best-fit|statements|questions|dialogue|mixed] [--id NAME] [--generate [--wait]]`: understand the words (exactly one input form; `--build` imports a cards JSON whose entries carry the pair, so it rejects `--known`/`--learning`/`--senses`) and create a session in the **understood** stage (`--learning` is autodetected from the words when omitted; `--known` is a one-off override that otherwise resolves from your saved preference and **refuses** when neither is set — save it once with `config`; `--level` pins one initial surrounding-language band, non-`best-fit` types pin an exact format or deterministic mix, and `--wait` requires `--generate`)
 - `kamishibai select [<id>] --card T --sense 1,3` / `exclude [<id>] --card T` / `correct [<id>] --card T --note "…"`: curate the understanding before generating — pick senses, drop a card, or ask Gemini to add senses (each resets the session to understood)
 - `kamishibai generate [<id>] [--wait]`: commit the curated plan and start a managed background worker that generates + publishes (`--wait` runs it in the foreground)
 - `kamishibai status [<id>]`: stage + per-candidate senses (understood) or per-card progress (generating/published), read from the cache (no Gemini)
@@ -64,6 +64,8 @@ With no arguments `kamishibai` opens the interactive TUI; a bare JSON path opens
 There are exactly two output modes: **plain text** (default, for humans — line-oriented, not a parsing target) and **`--json`** (placed after the verb, for machines — exactly one JSON document on stdout: the success document, or the `{"ok":false,"error":{"code","exit","message","hint","retryable"}}` envelope on failure; `generate --wait --json` and `regenerate --wait --json` additionally stream NDJSON events on stderr). `agent-contract` is the text-only exception and refuses `--json`. There is no `-q` and no `result` path selectors — an agent uses `--json`. Exit codes, locking, and semantics are identical in both modes for invocations valid in both; `open` is interactive and also refuses `--json` before any session lookup. The full console contract lives in `llms.txt`. Plain output carries no bare capturable value — every single-session command opens with the header `your session <ID> · <KNOWN> → <LEARNING> · <phase>` and the id lives there; errors are one `kamishibai: <message>` line plus a next-step hint line on stderr. **Language codes are the app's canonical UPPERCASE form everywhere** — stored in config and `session.json`, minted into ids (`FR-…`), used in the cache layout (`cards/EN-FR`) and deck names (`FR_….apkg`), and emitted in plain and JSON; input is accepted in any case and normalised to uppercase, and the only lowercase code is the frozen `target_lang` on the Gemini wire (`src/gemini/client.rs`). Exit codes are centralized in `src/cli/error.rs` (`Refusal` carries the exit, optional hint, retryability, and optional session listing): `0` ok · `2` usage · `3` no such session · `4` not ready · `5` ambiguous · `1` other. The `<id>` positional is optional on every verb: an omitted id resolves to the only session, else the only unfinished one, else the command lists the newest five sessions and exits 5 (`session::resolve`). The background worker is the same binary re-invoked as the hidden `__run <id>`, detached into a new process group with its stdio redirected to `sessions/<id>/worker.log`. Concurrency is two flocks: the long-held liveness lock (`sessions/<id>/lock`, OS-released on death) decides who may generate — `status` derives `interrupted` from a recorded worker whose lock is free — and the short write lock makes every `session.json` change a serialized read-modify-write (`SessionStore::update`), so concurrent edits all apply. The worker writes only while the record still names it, which is how `cancel` and a finishing worker resolve their race. The TUI shares this same session model — it takes the liveness lock before generating and persists its live state to `session.json`, so `ls`/`status`/`open` see interactive runs too. The full agent-facing contract lives in `llms.txt` at the repo root. `--out` wins, `KAMISHIBAI_OUTPUT` is second, and new sessions otherwise resolve the platform Documents directory plus `Kamishibai`; resolved output is stored per session. For offline tests, `KAMISHIBAI_GEMINI_URL` overrides the Gemini base URL (point it at a 127.0.0.1 listener), `KAMISHIBAI_CACHE` overrides the exact cache root, `KAMISHIBAI_DATA` overrides the data home before `kamishibai/preferences.json` is appended, and `KAMISHIBAI_OUTPUT` overrides the exact output root.
 
 Sentence tuning is a two-step persistent transaction in both delivery surfaces. `adjust` only patches the selected card's staged request and may be called repeatedly for several cards; it leaves the current cached metadata, artifacts, published paths, costs, and lifecycle phase untouched. `regenerate --pending` is the only headless command that activates the whole staged batch. `cards.pending` in session JSON counts staged rewrites, each card's `labels` is its current complete attribution, and `adjustment` carries `state` (`pending` or `active`), the possibly partial requested label selection, and the non-empty note when present. A partial-session pending run also resumes unrelated missing stages before the deck is republished. Ordinary `generate`, `regenerate --failed`, and `regenerate --card` refuse staged changes before any provider or destructive cache work.
+
+Initial batch generation guidance is separate from that post-generation rewrite transaction. `SentenceBatchSettings` persists beside the reviewed candidates in `session.json`; its default is no level plus `best-fit` example formats, which leaves the metadata prompt and provider call count unchanged. An explicit level becomes one initial pinned axis on every card; `statements`, `questions`, and `dialogue` pin one exact format throughout the batch, while `mixed` deterministically allocates three statements, one question, and one dialogue per complete group of five. The pending per-card metadata request persists only until metadata succeeds; the permanent batch setting remains in both session and result JSON as provenance. TUI and console (`new --level … --types questions`) must allocate through the same policy; old `natural` and `varied` values remain read/CLI aliases only.
 
 ## Architecture
 
@@ -129,9 +131,9 @@ it are produced by three VHS tapes in `docs/tui-states/`:
 - `capture.tape` runs the **live binary** (real Gemini) and writes the happy-path screenshots
   plus the raw `live/capture.gif`.
 - `states.tape` drives the `examples/tui_states` **state-walker** (no Gemini) to write the
-  synthetic edge-case / modal / Welcome screenshots that the live run cannot reach.
+  review, batch-settings, edge-case, modal, and Welcome screenshots reproducibly.
 - `states-narrow.tape` drives the same state-walker at 1200 px to write the intentionally
-  narrow S10 sentence-label screenshot; VHS accepts geometry only at the top of a tape.
+  narrow S10 sentence-label and batch-settings screenshots; VHS accepts geometry only at the top of a tape.
 
 The README gif itself is then assembled deterministically by `encode.sh` from `timings.conf`
 (the single source of truth for section windows, durations, and raw source); it emits
@@ -172,13 +174,17 @@ From the repo root:
    rm -f states-throwaway.gif states-narrow-throwaway.gif
    ```
 
-   Writes the six environment/failure/retry shots (`live/00-welcome.png`,
+   Writes the review and six environment/failure/retry shots (`live/02-what-i-understood.png`,
+   `live/00-welcome.png`,
    `live/00b-welcome-env.png`, `live/03-change-something-modal.png`,
    `live/06-your-cards-retrying.png`, `live/06b-your-cards-retry-stress.png`,
    `live/07-your-cards-couldnt-finish.png`) plus the
    twelve sentence-label S1–S12 PNGs from `live/11-s1-label-tags.png` through
-   `live/22-s12-label-legacy-meta.png`. All are 2x except S10, whose intentionally narrow
-   frame comes from `states-narrow.tape` at 1200 px. Both synthetic tapes jump to each state
+   `live/22-s12-label-legacy-meta.png`, the five Esc lifecycle PNGs from
+   `live/23-esc-words-clear.png` through `live/27-generation-partial.png`, plus
+   the open batch-settings pair `live/28-batch-sentence-settings.png` and
+   `live/29-batch-sentence-settings-narrow.png`. All are 2x except S10 and the narrow
+   batch-settings frame, which come from `states-narrow.tape` at 1200 px. Both synthetic tapes jump to each state
    by **absolute index** (`Type "<n>"` then `Space`) and keep a uniform 800 ms settle after
    each jump so VHS never captures a mid-repaint frame. Absolute jumps are immune to
    keystroke coalescing and to the stray Return the shell injects when it launches the
@@ -329,12 +335,14 @@ card. The tape may continue afterward to capture the separate open-card screensh
 
 ### Synthetic and edge-case shots
 
-The six environment/modal/failure/retry PNGs and twelve sentence-label scenario PNGs listed in
-step 3 are not produced by `capture.tape`. They are produced reproducibly by `states.tape`
-and `states-narrow.tape`, which drive `examples/tui_states.rs` through the same EN→FR flow
-without Gemini. The sentence-label scenarios keep the established indices 0–10 intact: S1
-is index 6, S2 replaces the removed per-card modal at index 7, S3–S9 are indices 11–17,
-S10–S12 are indices 18–20, and the retry stress gallery is index 21. When the design changes, edit the demo data in
+The review, six environment/modal/failure/retry PNGs, twelve sentence-label scenarios,
+five Esc lifecycle PNGs, and two batch-settings PNGs listed in step 3 are produced
+reproducibly by `states.tape` and `states-narrow.tape`, which drive
+`examples/tui_states.rs` through the same EN→FR flow without Gemini. The sentence-label
+scenarios keep the established indices 0–10 intact: S1 is index 6, S2 replaces the removed
+per-card modal at index 7, S3–S9 are indices 11–17, S10–S12 are indices 18–20, the retry
+stress gallery is index 21, the Esc clear/back/stop/drain/partial states are indices 22–26,
+and the open generation-guidance editor is index 27. When the design changes, edit the demo data in
 `examples/tui_states.rs` and re-run both synthetic tapes. If you add or reorder states in
 the vector, update the absolute indices in both tapes and in the
 `pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells` test (it jumps to
@@ -343,10 +351,12 @@ the `Your cards` and `Done` indices by number).
 The level chips are the lowercase operational CEFR bands `a1`, `a2`, `b1`,
 `b2`, `c1`, and `c2`. They classify only the language surrounding the target
 term; the target term itself is exempt, and the estimate is not an official
-proficiency assessment. Fresh cards first get the natural sentence required by
-their approved understanding and only then receive a descriptive level; initial
-generation never targets a band. A level becomes a rewrite constraint only
-after the user explicitly changes it. Legacy `easy`, `takes practice`/`balanced`,
+proficiency assessment. With the TUI's `best fit` level (stored as no
+level), fresh cards first get the natural sentence required by their approved
+understanding and only then receive a descriptive level; that default initial
+generation does not target a band. An explicit batch-level choice is the
+initial-generation exception and constrains every draft. A later per-card level
+change becomes a rewrite constraint. Legacy `easy`, `takes practice`/`balanced`,
 and `challenging`/`stretch` cache values reopen as `a2`, `b1`, and `b2`
 respectively.
 
@@ -368,9 +378,14 @@ blank row, before the expanded metadata and never to the artifacts' right. If
 the focused editor block fits the viewport, opening it anchors the selected card
 head at the top of the body; shorter viewports instead scroll only far enough to
 keep the focused row visible.
-Unchanged tags use a gray background; explicitly changed or previously pinned
-tags use a white background with dark letters and no bold. An approximately
-fulfilled pinned tag keeps that white treatment and adds an `≈` prefix.
+Unchanged actual tags use a gray background; explicitly changed or exactly
+fulfilled pinned tags use a white background with dark letters and no bold. If
+a pinned target could not be fulfilled exactly, the generated actual value stays
+gray and is followed by muted `· aimed for` plus the requested value in a white
+tag. The actual value remains the attribution of what was generated; the white
+value remains the target for a later regeneration. Legacy cached approximation
+records that predate separate actual-value storage show only muted `aimed for`
+plus the requested white tag and never invent an actual value.
 
 The editor's three carousel questions are `how should it sound?`, `what kind of
 phrase?`, and `what's the desired level?`. The note label is `one more thing`, and its
@@ -392,9 +407,10 @@ one two-cell marker on each side inside the shared track; both cells of either
 marker are clickable.
 
 Regeneration carries the complete current three-axis preset. Every unedited
-axis must keep its current value exactly. Only an explicitly changed or already
-pinned axis may differ from the requested value, and only when the result marks
-that axis as approximate.
+axis must keep its current requested value exactly. Only an explicitly changed
+or already pinned axis may differ from its requested target, and only when the
+result names that axis in `approx`; the generated value remains the actual
+attribution and the requested target remains visible separately.
 
 A successfully published live batch remains on `YourCards`; reopening that
 published session uses `Done`. Both final views permanently show the muted
@@ -403,10 +419,17 @@ one-second confirmation and changes its hint to the highest-priority `[Esc]
 again`; the second starts a clean `YourWords` batch in the same process,
 preserving preferences and output location while rotating the persistent
 session identity and cost journal. Any other action or timeout disarms the
-confirmation. An open sentence-label editor consumes its first `Esc` to close,
-and `Ctrl+C` keeps an independent double-press quit confirmation. The same
-reset remains available after every card terminally gives up and no package can
-be published, once the publication error has been dismissed.
+confirmation. Everywhere else `Esc` closes exactly one layer from inside out:
+an error, a modal/editor/expanded sense list, then the current screen action.
+On nonempty `YourWords`, double `Esc` clears the field; on collapsed
+`WhatIUnderstood`, one `Esc` returns to the preserved words; during generation,
+double `Esc` stops after the current request finishes and launches no next
+request. A stop publishes the complete subset as `partial`, or, when no card is
+complete, closes the old run as `cancelled`, rotates identity and cost scope,
+and returns to the preserved review. While the current request drains the
+header says `stopping…`. The same reset remains available after every card
+terminally gives up and no package can be published, once the publication error
+has been dismissed. `Ctrl+C` keeps an independent double-press quit confirmation.
 
 Expanded metadata uses statement and noun labels: `the phrase`, `in your
 language`, `a visual clue`, `word meaning`, `word pronunciation`, `phrase

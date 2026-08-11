@@ -73,7 +73,8 @@ fn app_to_record(
         source.to_string(),
         words,
         candidates,
-    );
+    )
+    .with_sentences(app.sentence_settings());
     record.drafts = app
         .cards()
         .iter()
@@ -82,6 +83,7 @@ fn app_to_record(
             understanding: draft.understanding().to_string(),
             costs: crate::session::ArtifactCosts::from_artifacts(draft.artifacts()),
             rewrite: draft.rewrite().cloned(),
+            meta_request: draft.meta_request().cloned(),
         })
         .collect();
     let done = app.done_artifacts();
@@ -90,8 +92,8 @@ fn app_to_record(
             deck: done.deck.clone(),
             report: done.report.clone(),
             output: done.output.clone(),
-            cards: record.drafts.len(),
-            failed: 0,
+            cards: done.cards,
+            failed: done.failed,
         });
     }
     if let Some(pid) = worker_pid {
@@ -100,8 +102,12 @@ fn app_to_record(
             pid,
             started: created,
         });
-    } else if record.result.is_some() {
-        record.phase = Phase::Published;
+    } else if let Some(result) = record.result.as_ref() {
+        record.phase = if result.failed > 0 {
+            Phase::Partial
+        } else {
+            Phase::Published
+        };
     }
     record
 }
@@ -117,6 +123,7 @@ fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
         .map(|stored| stored.clone().candidate())
         .collect();
     let mut app = App::new(pair.clone())
+        .with_sentence_settings(record.sentences)
         .seeded_blob(record.words.join("\n"))
         .confirmed_learning(record.learning.clone());
     if !candidates.is_empty() {
@@ -131,21 +138,28 @@ fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
         .drafts
         .iter()
         .map(|draft| {
-            CardDraft::new(
+            let hydrated = CardDraft::new(
                 draft.term.as_str(),
                 draft.understanding.as_str(),
                 pair.clone(),
-            )
-            .with_rewrite(draft.rewrite.clone())
-            .with_costs(draft.costs)
+            );
+            let hydrated = match &draft.meta_request {
+                Some(selection) => hydrated.requesting_meta(selection.clone()),
+                None => hydrated,
+            };
+            hydrated
+                .with_rewrite(draft.rewrite.clone())
+                .with_costs(draft.costs)
         })
         .collect();
     let mut app = app.cards_started(drafts.clone());
     if let Some(result) = record.result.as_ref() {
-        app = app.done_published(
+        app = app.done_published_counted(
             result.deck.clone(),
             result.report.clone(),
             result.output.clone(),
+            result.cards,
+            result.failed,
         );
     }
     if record.phase == Phase::Published
@@ -253,6 +267,32 @@ impl TuiSession {
         Ok(())
     }
 
+    /// Close the active run as cancelled, then rotate identity and cost scope.
+    pub(super) fn cancel_and_start_next(&mut self, app: &App, output: &Path) -> Result<()> {
+        let id = self.ensure_id(app)?;
+        let created = self.ensure_created()?;
+        let mut projected = app_to_record(
+            app,
+            id.clone(),
+            created,
+            self.source.as_str(),
+            self.senses.as_str(),
+            output.to_string_lossy().as_ref(),
+            None,
+        );
+        projected.phase = Phase::Cancelled;
+        let fallback = record_costs(&projected);
+        apply_costs(
+            &mut projected,
+            self.costs.overlay_if_bound(fallback.as_slice())?,
+        );
+        self.write_projection(id.as_str(), &projected)?;
+        self.written = Some(projected);
+        self.fingerprint = Some(fingerprint(app, false));
+        self.lock = None;
+        self.start_next_batch()
+    }
+
     fn hydrate(&self, record: &SessionRecord) -> Result<SessionRecord> {
         let mut hydrated = record.clone();
         apply_costs(
@@ -280,29 +320,45 @@ impl TuiSession {
     pub(super) fn claim_and_save(&mut self, app: &App, output: &Path) -> Result<bool> {
         let id = self.ensure_id(app)?;
         let created = self.ensure_created()?;
-        let lock = match self.lock.take() {
+        let held = self.lock.take();
+        let retain_on_failure = held.is_some();
+        let lock = match held {
             Some(lock) => lock,
             None => match self.store.hold(id.as_str())? {
                 Some(lock) => lock,
                 None => return Ok(false),
             },
         };
-        let mut projected = app_to_record(
-            app,
-            id.clone(),
-            created.clone(),
-            self.source.as_str(),
-            self.senses.as_str(),
-            output.to_string_lossy().as_ref(),
-            Some(i32::try_from(std::process::id())?),
-        );
-        let fallback = record_costs(&projected);
-        apply_costs(
-            &mut projected,
-            self.costs.overlay_if_bound(fallback.as_slice())?,
-        );
+        let projection = (|| {
+            let mut projected = app_to_record(
+                app,
+                id.clone(),
+                created.clone(),
+                self.source.as_str(),
+                self.senses.as_str(),
+                output.to_string_lossy().as_ref(),
+                Some(i32::try_from(std::process::id())?),
+            );
+            let fallback = record_costs(&projected);
+            apply_costs(
+                &mut projected,
+                self.costs.overlay_if_bound(fallback.as_slice())?,
+            );
+            Ok::<SessionRecord, anyhow::Error>(projected)
+        })();
+        let projected = match projection {
+            Ok(projected) => projected,
+            Err(error) => {
+                if retain_on_failure {
+                    self.lock = Some(lock);
+                }
+                return Err(error);
+            }
+        };
         if let Err(error) = self.write_projection(id.as_str(), &projected) {
-            self.lock = None;
+            if retain_on_failure {
+                self.lock = Some(lock);
+            }
             return Err(error);
         }
         self.written = Some(projected.clone());
@@ -312,7 +368,7 @@ impl TuiSession {
             .and_then(|()| self.costs.bind(journal))
         {
             self.fingerprint = None;
-            self.lock = None;
+            self.lock = Some(lock);
             return Err(error);
         }
         self.fingerprint = Some(fingerprint(app, true));
@@ -439,6 +495,7 @@ fn fingerprint(app: &App, generating: bool) -> u64 {
     app.blob().hash(&mut hasher);
     app.pair().known().hash(&mut hasher);
     app.pair().learning().hash(&mut hasher);
+    app.sentence_settings().hash(&mut hasher);
     for candidate in app.candidates() {
         candidate.term().hash(&mut hasher);
         candidate.ok().hash(&mut hasher);
@@ -448,6 +505,7 @@ fn fingerprint(app: &App, generating: bool) -> u64 {
     for draft in app.cards() {
         draft.term().hash(&mut hasher);
         draft.understanding().hash(&mut hasher);
+        draft.meta_request().hash(&mut hasher);
         draft.rewrite().hash(&mut hasher);
         for artifact in [
             crate::session::Artifact::Meta,
@@ -459,6 +517,8 @@ fn fingerprint(app: &App, generating: bool) -> u64 {
         }
     }
     app.done_artifacts().deck.hash(&mut hasher);
+    app.done_artifacts().cards.hash(&mut hasher);
+    app.done_artifacts().failed.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -483,7 +543,8 @@ mod tests {
     use super::*;
     use crate::session::{
         Artifact, ArtifactSlot, CardArtifacts, CardMeta, GenerationCost, Sense,
-        SentenceLabelSelection, SessionEngine,
+        SentenceBatchSettings, SentenceLabelSelection, SentenceLevel, SentenceTypeMix,
+        SessionEngine,
     };
 
     fn understood_app() -> App {
@@ -545,6 +606,62 @@ mod tests {
     }
 
     #[test]
+    fn sentence_settings_round_trip_and_participate_in_the_save_fingerprint() {
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Mixed);
+        let plain = understood_app();
+        let configured = plain.clone().with_sentence_settings(settings);
+        let record = app_to_record(
+            &configured,
+            String::from("fr-settings"),
+            String::from("t"),
+            "tui",
+            "primary",
+            "/out",
+            None,
+        );
+        let (reopened, _) = record_to_app(&record);
+        assert_eq!(
+            (
+                record.sentences,
+                reopened.sentence_settings(),
+                fingerprint(&plain, false) != fingerprint(&configured, false),
+            ),
+            (settings, settings, true),
+            "TUI session projection lost sentence settings or debounced their change"
+        );
+    }
+
+    #[test]
+    fn an_initial_meta_request_round_trips_through_the_session_record() {
+        let pair = LanguagePair::new("fr", "en");
+        let request =
+            SentenceLabelSelection::empty().choosing(crate::session::SentenceAxis::Level, 2);
+        let app = App::new(pair.clone())
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![
+                CardDraft::new("canard", "a duck", pair).requesting_meta(request.clone()),
+            ]);
+        let record = app_to_record(
+            &app,
+            String::from("fr-request"),
+            String::from("t"),
+            "tui",
+            "primary",
+            "/out",
+            None,
+        );
+        let (reopened, _) = record_to_app(&record);
+        assert_eq!(
+            (
+                record.drafts[0].meta_request.as_ref(),
+                reopened.cards()[0].meta_request(),
+            ),
+            (Some(&request), Some(&request)),
+            "TUI session projection discarded a pending initial metadata request"
+        );
+    }
+
+    #[test]
     fn a_published_app_reopens_on_its_finished_cards() {
         let record = app_to_record(
             &published_app(),
@@ -570,6 +687,211 @@ mod tests {
                 Screen::Done,
             ),
             "a published session must reopen on the done summary with no startup batch"
+        );
+    }
+
+    #[test]
+    fn a_partial_publish_keeps_its_tally_across_reopen_and_save() {
+        let pair = LanguagePair::new("fr", "en");
+        let app = App::new(pair.clone())
+            .confirmed_learning("fr")
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![
+                CardDraft::new("canard", "a duck", pair.clone()),
+                CardDraft::new("flaner", "to stroll", pair),
+            ])
+            .done_published_counted("/o/deck.apkg", "/o/deck.pdf", "/o", 1, 1);
+        let record = app_to_record(
+            &app,
+            String::from("fr-partial"),
+            String::from("t"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        let (reopened, startup) = record_to_app(&record);
+        let saved = app_to_record(
+            &reopened,
+            String::from("fr-partial"),
+            String::from("t"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        assert_eq!(
+            (
+                record.phase,
+                record.result,
+                reopened.screen(),
+                reopened.done_artifacts().cards,
+                reopened.done_artifacts().failed,
+                startup.is_none(),
+                saved.phase,
+                saved.result,
+            ),
+            (
+                Phase::Partial,
+                Some(ResultRecord {
+                    deck: String::from("/o/deck.apkg"),
+                    report: String::from("/o/deck.pdf"),
+                    output: String::from("/o"),
+                    cards: 1,
+                    failed: 1,
+                }),
+                Screen::YourCards,
+                1,
+                1,
+                true,
+                Phase::Partial,
+                Some(ResultRecord {
+                    deck: String::from("/o/deck.apkg"),
+                    report: String::from("/o/deck.pdf"),
+                    output: String::from("/o"),
+                    cards: 1,
+                    failed: 1,
+                }),
+            ),
+            "partial publication tally drifted when cache readiness was not hydrated"
+        );
+    }
+
+    #[test]
+    fn cancelling_without_ready_cards_rotates_into_a_clean_understood_session() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let pair = LanguagePair::new("fr", "en");
+        let app = understood_app()
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![CardDraft::new("canard", "a duck", pair)]);
+        let record = app_to_record(
+            &app,
+            String::from("fr-old"),
+            String::from("created-old"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        store.create(&record).expect("active session must persist");
+        let mut session =
+            TuiSession::resuming_in(&record, store.clone()).expect("session must resume");
+        session
+            .claim_and_save(&app, Path::new("/o"))
+            .expect("active session must claim");
+        session
+            .cancel_and_start_next(&app, Path::new("/o"))
+            .expect("active session must cancel and rotate");
+        let review = app.generation_cancelled_to_review();
+        session
+            .save(&review, Path::new("/o"), false)
+            .expect("preserved review must save under a new identity");
+        let new_id = session
+            .id
+            .clone()
+            .expect("new session must have an identity");
+        let old: SessionRecord = serde_json::from_slice(
+            std::fs::read(home.path().join("sessions/fr-old/session.json"))
+                .expect("cancelled record must remain")
+                .as_slice(),
+        )
+        .expect("cancelled record must decode");
+        let new: SessionRecord = serde_json::from_slice(
+            std::fs::read(
+                home.path()
+                    .join("sessions")
+                    .join(new_id)
+                    .join("session.json"),
+            )
+            .expect("preserved review record must exist")
+            .as_slice(),
+        )
+        .expect("preserved review record must decode");
+        let (_, startup) = record_to_app(&new);
+        assert_eq!(
+            (
+                old.id.as_str(),
+                old.phase,
+                old.drafts.len(),
+                old.worker.is_none(),
+                new.id != old.id,
+                new.phase,
+                new.drafts.len(),
+                new.words,
+                new.candidates[0]
+                    .clone()
+                    .candidate()
+                    .selected_senses()
+                    .to_vec(),
+                startup.is_none(),
+            ),
+            (
+                "fr-old",
+                Phase::Cancelled,
+                1,
+                true,
+                true,
+                Phase::Understood,
+                0,
+                vec![String::from("canard"), String::from("flaner")],
+                vec![1],
+                true,
+            ),
+            "cancelled generation reused its identity, costs, or lost the preserved review"
+        );
+    }
+
+    #[test]
+    fn clearing_an_understood_batch_cancels_its_identity_and_forgets_review_state() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let app = understood_app().with_screen(Screen::YourWords);
+        let record = app_to_record(
+            &app,
+            String::from("fr-review"),
+            String::from("created-old"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        store.create(&record).expect("review session must persist");
+        let mut session =
+            TuiSession::resuming_in(&record, store).expect("review session must resume");
+        session
+            .cancel_and_start_next(&app, Path::new("/o"))
+            .expect("review session must cancel and rotate");
+        let cleared = app.starting_new_batch();
+        session
+            .save(&cleared, Path::new("/o"), false)
+            .expect("an empty next batch must remain unpersisted");
+        let old: SessionRecord = serde_json::from_slice(
+            std::fs::read(home.path().join("sessions/fr-review/session.json"))
+                .expect("cancelled review must remain")
+                .as_slice(),
+        )
+        .expect("cancelled review must decode");
+        assert_eq!(
+            (
+                old.phase,
+                old.words,
+                old.candidates.len(),
+                session.id.is_none(),
+                cleared.screen(),
+                cleared.blob(),
+                cleared.candidates().len(),
+            ),
+            (
+                Phase::Cancelled,
+                vec![String::from("canard"), String::from("flaner")],
+                2,
+                true,
+                Screen::YourWords,
+                "",
+                0,
+            ),
+            "cleared words reused the discarded review identity or hidden candidates"
         );
     }
 
@@ -670,6 +992,82 @@ mod tests {
                 Some(String::from("/o/deck.apkg")),
             ),
             "the next TUI batch reused the published session identity or provider spend"
+        );
+    }
+
+    #[test]
+    fn configured_completed_batch_resets_fresh_settings_and_preserves_its_record() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::C1), SentenceTypeMix::Mixed);
+        let completed = published_app().with_sentence_settings(settings);
+        let record = app_to_record(
+            &completed,
+            String::from("fr-configured"),
+            String::from("created-old"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        store
+            .create(&record)
+            .expect("configured published session must persist");
+        let mut session =
+            TuiSession::resuming_in(&record, store.clone()).expect("session must resume");
+        session
+            .start_next_batch()
+            .expect("completed session must detach");
+        let fresh = completed.starting_new_batch();
+        let fresh_settings = fresh.sentence_settings();
+        let next = fresh
+            .seeded_blob("chouette")
+            .confirmed_learning("fr")
+            .with_screen(Screen::WhatIUnderstood)
+            .understood(vec![WordCandidate::new("chouette", "great", true)]);
+        session
+            .save(&next, Path::new("/o"), false)
+            .expect("fresh review must persist under a new identity");
+        let new_id = session.id.clone().expect("fresh batch must mint an id");
+        let old: SessionRecord = serde_json::from_slice(
+            std::fs::read(home.path().join("sessions/fr-configured/session.json"))
+                .expect("published session must remain readable")
+                .as_slice(),
+        )
+        .expect("published session must decode");
+        let new: SessionRecord = serde_json::from_slice(
+            std::fs::read(
+                home.path()
+                    .join("sessions")
+                    .join(new_id.as_str())
+                    .join("session.json"),
+            )
+            .expect("fresh session must remain readable")
+            .as_slice(),
+        )
+        .expect("fresh session must decode");
+        assert_eq!(
+            (
+                old.sentences,
+                old.phase,
+                old.result.map(|result| result.deck),
+                new_id != old.id,
+                fresh_settings,
+                next.sentence_settings(),
+                new.sentences,
+                new.phase,
+            ),
+            (
+                settings,
+                Phase::Published,
+                Some(String::from("/o/deck.apkg")),
+                true,
+                SentenceBatchSettings::default(),
+                SentenceBatchSettings::default(),
+                SentenceBatchSettings::default(),
+                Phase::Understood,
+            ),
+            "new batch inherited completed settings or rewrote the published session record"
         );
     }
 
@@ -800,6 +1198,23 @@ mod tests {
             fingerprint(&plain, true),
             fingerprint(&priced, true),
             "a cost-only UI update was debounced instead of being saved for reopen"
+        );
+    }
+
+    #[test]
+    fn session_fingerprint_changes_when_an_initial_meta_request_clears() {
+        let pair = LanguagePair::new("fr", "en");
+        let request =
+            SentenceLabelSelection::empty().choosing(crate::session::SentenceAxis::Level, 2);
+        let pending = App::new(pair.clone()).cards_started(vec![
+            CardDraft::new("canard", "a duck", pair.clone()).requesting_meta(request),
+        ]);
+        let cleared =
+            App::new(pair.clone()).cards_started(vec![CardDraft::new("canard", "a duck", pair)]);
+        assert_ne!(
+            fingerprint(&pending, true),
+            fingerprint(&cleared, true),
+            "clearing a zero-cost initial metadata request was debounced instead of saved"
         );
     }
 
@@ -1052,6 +1467,63 @@ mod tests {
             ),
             (true, true, String::from("all"), true, false, true),
             "a stale TUI claim started or poisoned a plan after losing its optimistic save race"
+        );
+    }
+
+    #[test]
+    fn a_reclaim_conflict_keeps_an_already_held_generation_lock() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let record = app_to_record(
+            &understood_app(),
+            String::from("fr-held-race"),
+            String::from("created-a"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        store.create(&record).expect("the session must persist");
+        let mut session =
+            TuiSession::resuming_in(&record, store.clone()).expect("the session must resume");
+        let pair = LanguagePair::new("fr", "en");
+        let target = understood_app()
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![
+                CardDraft::new("canard", "a duck", pair.clone()),
+                CardDraft::new("canard", "a hoax", pair),
+            ]);
+        session
+            .claim_and_save(&target, Path::new("/o"))
+            .expect("the first claim must persist");
+        store
+            .update("fr-held-race", |fresh| {
+                fresh.senses = String::from("all");
+                Ok(())
+            })
+            .expect("the competing update must persist");
+        let claim = session.claim_and_save(&target, Path::new("/o"));
+        let stored: SessionRecord = serde_json::from_slice(
+            std::fs::read(home.path().join("sessions/fr-held-race/session.json"))
+                .expect("the competing record must read")
+                .as_slice(),
+        )
+        .expect("the competing record must decode");
+        let second_lock = store
+            .hold("fr-held-race")
+            .expect("the lock probe must succeed")
+            .is_some();
+        assert_eq!(
+            (
+                claim.is_err(),
+                session.lock.is_some(),
+                second_lock,
+                stored.phase,
+                stored.senses,
+                stored.drafts.len(),
+            ),
+            (true, true, false, Phase::Generating, String::from("all"), 2,),
+            "a failed re-claim released live ownership or rewrote the competing record"
         );
     }
 }

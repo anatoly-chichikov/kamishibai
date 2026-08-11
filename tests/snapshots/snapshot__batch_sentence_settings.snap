@@ -1,0 +1,20 @@
+---
+source: tests/snapshot.rs
+expression: "render_sized(&app, 96, 16)"
+---
+                                                                                                
+     what i understood   quick check before i build the cards                        FR → FR    
+                                                                                                
+    generation guidance                                                                         
+    what's the desired level?  <           b1           >                                       
+    what kinds of phrases?     <        questions       >                                       
+                                                                                                
+    01  chouette      —  an owl or something excellent                                          
+                                                                                                
+                                                                                                
+                                                                                                
+                                                                                                
+                                                                                                
+                                                      ai may be wrong, please verify results    
+                                                                                                
+    step 2/3  1 card                   [Ctrl+G] generate  [← →] pick  [↑ ↓] row  [Esc] close

@@ -36,6 +36,12 @@ Space
 Sleep 800ms
 Screenshot "live/00b-welcome-env.png"
 
+# index 4 — WhatIUnderstood with the closed batch sentence summary
+Type "4"
+Space
+Sleep 800ms
+Screenshot "live/02-what-i-understood.png"
+
 # index 5 — ChangeSomething modal over WhatIUnderstood
 Type "5"
 Space
@@ -102,7 +108,7 @@ Space
 Sleep 800ms
 Screenshot "live/18-s8-label-regenerated.png"
 
-# index 17 — S9: collapsed card shows an approximately fulfilled register pin
+# index 17 — S9: collapsed card keeps the actual register beside its requested target
 Type "17"
 Space
 Sleep 800ms
@@ -125,6 +131,42 @@ Type "21"
 Space
 Sleep 800ms
 Screenshot "live/06b-your-cards-retry-stress.png"
+
+# index 22 — first Esc on nonempty YourWords arms a guarded clear
+Type "22"
+Space
+Sleep 800ms
+Screenshot "live/23-esc-words-clear.png"
+
+# index 23 — collapsed review advertises the harmless Esc back action
+Type "23"
+Space
+Sleep 800ms
+Screenshot "live/24-esc-review-back.png"
+
+# index 24 — first Esc during generation arms a guarded stop
+Type "24"
+Space
+Sleep 800ms
+Screenshot "live/25-esc-generation-stop.png"
+
+# index 25 — confirmed stop drains the current artifact
+Type "25"
+Space
+Sleep 800ms
+Screenshot "live/26-generation-stopping.png"
+
+# index 26 — completed subset is published as a settled partial batch
+Type "26"
+Space
+Sleep 800ms
+Screenshot "live/27-generation-partial.png"
+
+# index 27 — generation guidance retains b1 + questions in both inline carousels
+Type "27"
+Space
+Sleep 800ms
+Screenshot "live/28-batch-sentence-settings.png"
 Sleep 250ms
 
 Type "q"

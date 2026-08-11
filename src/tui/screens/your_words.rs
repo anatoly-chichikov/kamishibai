@@ -202,6 +202,16 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         ));
         left.push(Span::styled(format!(" {noun}"), palette::dim()));
     }
+    if app.word_clear_pending() {
+        return super::common::footer_bar(
+            left,
+            vec![
+                super::common::escape_again_hint(),
+                super::common::quit_hint(app.quit_pending()),
+            ],
+            width,
+        );
+    }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if count > 0 {
         hints.push(super::common::FooterHint::primary("Ctrl+G", "continue"));

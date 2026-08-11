@@ -10,9 +10,9 @@ Set TypingSpeed 35ms
 Set WaitTimeout 60s
 
 Hide
-Type "cd ../.. && rm -rf /tmp/kamishibai-vhs-home/Documents/Kamishibai /tmp/kamishibai-vhs-cache/cards /tmp/kamishibai-vhs-cache/understanding /tmp/kamishibai-vhs-cache/sessions && mkdir -p /tmp/kamishibai-vhs-home/Documents/Kamishibai && clear"
+Type "cd ../.. && rm -rf /tmp/kamishibai-vhs-data /tmp/kamishibai-vhs-home/Documents/Kamishibai /tmp/kamishibai-vhs-cache/cards /tmp/kamishibai-vhs-cache/understanding /tmp/kamishibai-vhs-cache/sessions && mkdir -p /tmp/kamishibai-vhs-home/Documents/Kamishibai && clear"
 Enter
-Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor HOME=/tmp/kamishibai-vhs-home KAMISHIBAI_CACHE=/tmp/kamishibai-vhs-cache KAMISHIBAI_OUTPUT=/tmp/kamishibai-vhs-home/Documents/Kamishibai"
+Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor KAMISHIBAI_DATA=/tmp/kamishibai-vhs-data KAMISHIBAI_CACHE=/tmp/kamishibai-vhs-cache KAMISHIBAI_OUTPUT=/tmp/kamishibai-vhs-home/Documents/Kamishibai"
 Enter
 Type "printenv GEMINI_API_KEY | ./target/release/kamishibai config --known en --key - >/dev/null"
 Enter
@@ -48,10 +48,8 @@ Screenshot "live/01b-busy.png"
 
 Wait+Screen@2m /—/
 Sleep 2s
-# Keep the read-state and the following navigation on the same first row.
-Up
-Sleep 250ms
 Screenshot "live/02-what-i-understood.png"
+Sleep 400ms
 
 # smooth tick-tick navigation down to canard (row 3)
 Down

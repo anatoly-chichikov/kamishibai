@@ -44,6 +44,7 @@ fn loads_ui_contract() {
     check_meta_sources(&contract, &mut errs);
     check_source_refs(&contract, &mut errs);
     check_your_words_input_contract(&contract, &mut errs);
+    check_batch_sentence_settings_contract(&contract, &mut errs);
     assert!(
         errs.is_empty(),
         "ui-contract failed {} invariant(s):\n  - {}",
@@ -193,6 +194,54 @@ fn check_your_words_input_contract(contract: &Contract, errs: &mut Vec<String>) 
         errs.push(String::from(
             "yw.toggle_my_language does not reveal Ctrl+L language",
         ));
+    }
+}
+
+fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<String>) {
+    let Some(summary) = element_by_id(contract, "wu.sentence_summary") else {
+        errs.push(String::from("wu.sentence_summary is missing"));
+        return;
+    };
+    for text in ["generation guidance  ", "best fit", "requested level"] {
+        if !text_contains(summary, text) {
+            errs.push(format!("wu.sentence_summary does not lock {text:?}"));
+        }
+    }
+    let Some(axes) = element_by_id(contract, "wu.sentence_settings_axes") else {
+        errs.push(String::from("wu.sentence_settings_axes is missing"));
+        return;
+    };
+    for text in [
+        "what's the desired level?",
+        "best fit|a1|a2|b1|b2|c1|c2",
+        "what kinds of phrases?",
+        "best fit|statements|questions|dialogue|mixed",
+    ] {
+        if !text_contains(axes, text) {
+            errs.push(format!("wu.sentence_settings_axes does not lock {text:?}"));
+        }
+    }
+    let Some(open) = element_by_id(contract, "wu.footer_sentence_settings_open") else {
+        errs.push(String::from("wu.footer_sentence_settings_open is missing"));
+        return;
+    };
+    if !text_contains(open, "[↑] guidance") {
+        errs.push(String::from(
+            "wu.footer_sentence_settings_open does not reveal upward navigation",
+        ));
+    }
+    let Some(editor) = element_by_id(contract, "wu.footer_sentence_settings_editor") else {
+        errs.push(String::from(
+            "wu.footer_sentence_settings_editor is missing",
+        ));
+        return;
+    };
+    for text in ["Ctrl+G", "pick", "row", "Esc", "close"] {
+        if !text_contains(editor, text) {
+            errs.push(format!(
+                "wu.footer_sentence_settings_editor does not lock {text:?}"
+            ));
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.7.0
+Release: 1.7.2
 
 Overview
 
@@ -21,7 +21,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.7.0/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.7.2/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -179,6 +179,14 @@ matching application version in `Release`. It is text-only and refuses
 
 `new`
 
+```text
+kamishibai new (--word W [--word W...] | --words FILE | --build FILE)
+  [--known L] [--learning L] [--senses primary|all]
+  [--level a1|a2|b1|b2|c1|c2]
+  [--types best-fit|statements|questions|dialogue|mixed]
+  [--id NAME] [--out DIR] [--generate [--wait]]
+```
+
 Word intake completes Gemini understanding before creating an `understood`
 session; a cards JSON import skips understanding and takes its language pair
 from the entries. An explicit `--learning` value is normalized and validated
@@ -187,6 +195,30 @@ constrains Gemini understanding to that target and must match Gemini's returned
 target. Every explicit target and autodetection use separate understanding-cache
 identities. `--known` falls back to saved config; without either value, the
 command refuses and points to `config --known`.
+
+`--level` pins one lowercase operational CEFR band for the surrounding
+language on every card. Without it, metadata writes the natural example first
+and attributes its honest level afterward. `--types best-fit` leaves each
+example format unconstrained and is the default. `statements`, `questions`,
+and `dialogue` pin that exact format on every selected card. `mixed`
+deterministically gives each complete group of five cards three statements,
+one question, and one dialogue; it never assigns requests or exclamations.
+The allocation is stable across retries and process restarts. The retired
+`natural` and `varied` values remain accepted as aliases for `best-fit` and
+`mixed`.
+
+These settings are initial metadata constraints, not a second rewrite pass:
+each card still makes at most the ordinary one metadata request per attempt.
+When neither a level nor a non-`best-fit` type policy is requested, the rendered metadata
+prompt and provider-call shape are unchanged. This release advances the
+metadata policy, so a card carrying metadata from an older policy refreshes it
+once even under defaults. Explicit settings are accepted with both word intake
+and `--build`; an imported card whose cached metadata does not satisfy them is
+refreshed only when generation starts.
+
+`--generate` immediately commits and starts the session. Add `--wait` to run
+that generation in the same foreground process; `--wait` without `--generate`
+is a usage error.
 
 `select`
 
@@ -212,12 +244,14 @@ it exits 1 with the error envelope; if nothing is selected, it exits 2. A
 session carrying staged sentence adjustments refuses before spawning a worker;
 activate the whole pending batch with `regenerate --pending`.
 
-Fresh card metadata first writes the natural sentence required by the approved
-understanding and only then assigns its descriptive register, phrase kind, and
-lowercase `a1`–`c2` level. Initial generation does not target a CEFR band. A
-level becomes a rewrite constraint only after the user explicitly changes it;
-when an exact band would make the accepted use unnatural, the closest natural
-result marks `level` as approximate.
+By default, fresh card metadata first writes the natural sentence required by
+the approved understanding and only then assigns its descriptive register,
+phrase kind, and lowercase `a1`–`c2` level. Initial generation targets a band or
+phrase kind only when `new --level` or a non-`best-fit` `new --types` requested it. When
+an exact requested value would make the accepted use unnatural, the closest
+natural result keeps its actual attribution and records the requested target
+separately. That pinned axis is also named in `approx`; this is a best-effort
+outcome, not a failed card.
 
 `status`
 
@@ -294,12 +328,14 @@ adjustments exist, before provider work or cache invalidation, and point to
 `regenerate --pending`.
 
 Every full-card rewrite carries the complete current sentence-label preset.
-Every unedited axis must keep its current value exactly. Only an explicitly
-changed or already pinned axis may differ from its requested value, and that
-response must mark the axis `approx`. With a rewrite note, Gemini also applies
-the note while rewriting that card. A successful rewrite replaces `labels`
-and removes `adjustment`; an interrupted or failed rewrite keeps an active
-adjustment so a later `generate` can resume it.
+Every unedited axis keeps its current requested target. Only an explicitly
+changed or already pinned axis may differ from that target, and the response
+must name the axis in `approx`. Such a result is accepted as the closest natural
+sentence: `labels` reports the actual attribution and `labels.requested` keeps
+the target. With a rewrite note, Gemini also applies the note while rewriting
+that card. A successful rewrite replaces `labels` and removes `adjustment`; an
+interrupted or failed rewrite keeps an active adjustment so a later `generate`
+can resume it.
 
 `cancel`
 
@@ -350,6 +386,9 @@ Presence rules:
 - `candidates` and `cards` can appear together during and after generation
 - `worker`, `progress`, `result`, and `error` appear only when present
 - absent fields are omitted, never null
+- `sentences` is always present; `types` is `best-fit`, `statements`,
+  `questions`, `dialogue`, or `mixed`, while
+  `level` is omitted when the batch did not request one
 - `progress` appears only while generating
 - a sense's 1-based position in its `senses` array is its `select --sense`
   number
@@ -361,13 +400,19 @@ Presence rules:
   adjustments
 - `labels` is the card's current complete attribution and is omitted only when
   current metadata has no labels
+- `labels.requested` is present when one or more axes were pinned; its values
+  are the targets that generation or regeneration aimed for, while the sibling
+  `register`, `kind`, and `level` remain the actual attribution of the generated
+  sentence
 - `adjustment` is present while a rewrite is staged or active; `state` is
   `pending` before `regenerate --pending` and `active` after activation
 - `adjustment.labels` is a selection: `register`, `kind`, and `level` are each
   omitted when a legacy baseline has not attributed that axis; `pinned` and
   `approx` are always arrays
 - `adjustment.note` is present only when non-empty
-- `approx` is always a subset of `pinned`; all tokens and axes are lowercase
+- `approx` is always a subset of `pinned`; an axis in `approx` may have different
+  actual and requested values without failing the card; all tokens and axes are
+  lowercase
 
 Example:
 
@@ -378,6 +423,7 @@ Example:
   "created": "2026-06-14T09:15:00Z",
   "pair": {"known": "EN", "learning": "FR"},
   "senses": "primary",
+  "sentences": {"level": "b1", "types": "questions"},
   "source": "words",
   "out": "/abs/out",
   "phase": "published",
@@ -412,18 +458,22 @@ Example:
         },
         "labels": {
           "register": "neutral",
-          "kind": "statement",
-          "level": "a2",
-          "pinned": [],
-          "approx": []
+          "kind": "question",
+          "level": "b1",
+          "pinned": ["level", "kind"],
+          "approx": [],
+          "requested": {
+            "kind": "question",
+            "level": "b1"
+          }
         },
         "adjustment": {
           "state": "pending",
           "labels": {
             "register": "neutral",
-            "kind": "statement",
-            "level": "b1",
-            "pinned": ["level"],
+            "kind": "question",
+            "level": "b2",
+            "pinned": ["level", "kind"],
             "approx": []
           }
         }
@@ -437,7 +487,9 @@ Result document
 
 Returned by `result`. `items` are strict cards JSON entries, the exact
 `new --build` schema with uppercase `lang`, so they round-trip into a new
-session.
+session. The top-level `sentences` object repeats the batch setting that
+produced the result even though the strict card entries do not carry that
+session provenance.
 
 Example:
 
@@ -446,6 +498,7 @@ Example:
   "ok": true,
   "session": "FR-20260614_091500_ab3x",
   "pair": {"known": "EN", "learning": "FR"},
+  "sentences": {"level": "b1", "types": "questions"},
   "phase": "published",
   "paths": {"deck": "/o/FR.apkg", "pdf": "/o/FR.pdf", "dir": "/o"},
   "failed": 0,
@@ -657,7 +710,8 @@ every terminal phase, not just `published`, or it spins forever on a failed run.
 ```bash
 set -euo pipefail
 GEMINI_API_KEY="$SECRET" \
-  kamishibai new --word flâner --word canard --known EN --learning FR --json >/dev/null
+  kamishibai new --word flâner --word canard --known EN --learning FR \
+  --level b1 --types questions --json >/dev/null
 kamishibai exclude --card canard --json >/dev/null
 GEMINI_API_KEY="$SECRET" kamishibai generate --json >/dev/null
 while :; do

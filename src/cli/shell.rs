@@ -63,6 +63,19 @@ struct PendingArtifactJob {
     artifact: Artifact,
 }
 
+struct PendingPublishJob {
+    job: PendingJob<StudyPublishMessage>,
+    cards: usize,
+    failed: usize,
+    stopped: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DestructiveEscape {
+    ClearWords,
+    StopGeneration,
+}
+
 /// Channel adapter that forwards publish-phase changes into the shell's
 /// publish-job mailbox, implementing the UI-neutral [`PublishProgress`] port.
 struct StudyPublishProgress {
@@ -88,11 +101,12 @@ pub(super) struct Shell<P, K> {
     engine: Option<SessionEngine>,
     text: Option<PendingJob<TextOutcome>>,
     artifact_job: Option<PendingArtifactJob>,
-    publish_job: Option<PendingJob<StudyPublishMessage>>,
+    publish_job: Option<PendingPublishJob>,
     regeneration_pending: bool,
     started: Option<Instant>,
     quit_armed_at: Option<Instant>,
     new_batch_armed_at: Option<Instant>,
+    destructive_escape_armed_at: Option<(DestructiveEscape, Instant)>,
     workflow: P,
     keys: K,
     store: PreferenceStore,
@@ -125,6 +139,7 @@ impl Shell<GeminiCardWorkflow, GeminiKeyValidation> {
             started: None,
             quit_armed_at: None,
             new_batch_armed_at: None,
+            destructive_escape_armed_at: None,
             workflow,
             keys,
             store: default_store(&SystemContext)?,
@@ -163,7 +178,8 @@ where
     /// to touch it. A persistence failure surfaces as a dismissable error instead
     /// of aborting the interactive run; the next edit retries the save.
     pub(super) fn persist(&mut self) {
-        let generating = self.engine.is_some() || self.publish_job.is_some();
+        let generating =
+            self.engine.is_some() || self.publish_job.is_some() || self.app.generation_stopping();
         let failure = match self.session.as_mut() {
             Some(session) => session
                 .save(&self.app, self.output.as_path(), generating)
@@ -222,7 +238,7 @@ where
             || self
                 .publish_job
                 .as_ref()
-                .map(PendingJob::fresh)
+                .map(|job| job.job.fresh())
                 .unwrap_or(false)
     }
 
@@ -335,6 +351,99 @@ where
         false
     }
 
+    /// Expire a guarded screen action after a pause or eligibility change.
+    pub(super) fn refresh_destructive_escape_pending(&mut self) -> bool {
+        let Some((action, armed)) = self.destructive_escape_armed_at else {
+            return false;
+        };
+        if armed.elapsed() > CONFIRMATION_WINDOW || !self.can_confirm(action) {
+            return self.disarm_destructive_escape();
+        }
+        false
+    }
+
+    /// Clear a pending words-clear or generation-stop confirmation.
+    pub(super) fn disarm_destructive_escape(&mut self) -> bool {
+        let changed = self.destructive_escape_armed_at.take().is_some()
+            || self.app.word_clear_pending()
+            || self.app.generation_stop_pending();
+        self.app = self
+            .app
+            .clone()
+            .with_word_clear_pending(false)
+            .with_generation_stop_pending(false);
+        changed
+    }
+
+    fn handle_destructive_escape(&mut self, action: DestructiveEscape) {
+        if !self.can_confirm(action) {
+            self.disarm_destructive_escape();
+            return;
+        }
+        let now = Instant::now();
+        let confirmed = self.destructive_escape_armed_at.is_some_and(|(armed, at)| {
+            armed == action && now.duration_since(at) <= CONFIRMATION_WINDOW
+        });
+        if confirmed {
+            self.destructive_escape_armed_at = None;
+            match action {
+                DestructiveEscape::ClearWords => {
+                    self.clear_words();
+                }
+                DestructiveEscape::StopGeneration => {
+                    self.regeneration_pending = false;
+                    self.app = self
+                        .app
+                        .clone()
+                        .with_generation_stop_pending(false)
+                        .generation_stop_started();
+                }
+            }
+            return;
+        }
+        self.disarm_destructive_escape();
+        self.destructive_escape_armed_at = Some((action, now));
+        self.app = match action {
+            DestructiveEscape::ClearWords => self.app.clone().with_word_clear_pending(true),
+            DestructiveEscape::StopGeneration => {
+                self.app.clone().with_generation_stop_pending(true)
+            }
+        };
+    }
+
+    fn can_confirm(&self, action: DestructiveEscape) -> bool {
+        match action {
+            DestructiveEscape::ClearWords => {
+                self.app.screen() == Screen::YourWords && !self.app.blob().is_empty()
+            }
+            DestructiveEscape::StopGeneration => {
+                self.app.screen() == Screen::YourCards
+                    && self.engine.is_some()
+                    && self.publish_job.is_none()
+                    && self.app.busy().is_none()
+                    && !self.app.generation_stopping()
+            }
+        }
+    }
+
+    fn clear_words(&mut self) {
+        let established = !self.app.candidates().is_empty() || !self.app.cards().is_empty();
+        if established
+            && let Some(session) = self.session.as_mut()
+            && let Err(error) = session.cancel_and_start_next(&self.app, self.output.as_path())
+        {
+            self.app = self
+                .app
+                .clone()
+                .with_word_clear_pending(false)
+                .error_shown(format!("session not cancelled: {error:#}"));
+            return;
+        }
+        self.app = self.app.clone().starting_new_batch();
+        self.regeneration_pending = false;
+        self.started = None;
+    }
+
     fn can_start_new_batch(&self) -> bool {
         self.app.can_start_new_batch()
             && self.engine.is_none()
@@ -357,11 +466,18 @@ where
 
     /// Apply one app event and start any resulting side effect.
     pub(super) fn handle(&mut self, event: AppEvent) -> Result<Side> {
+        if !matches!(event, AppEvent::Cancel | AppEvent::Redraw) {
+            self.disarm_destructive_escape();
+        }
         if self.text.is_some() {
             return Ok(Side::None);
         }
+        let cancelled = event == AppEvent::Cancel;
         let (next, side) = transit(self.app.clone(), event);
         self.app = next;
+        if cancelled && !matches!(side, Side::ClearWords | Side::StopGeneration) {
+            self.disarm_destructive_escape();
+        }
         self.apply(side.clone())?;
         Ok(side)
     }
@@ -375,6 +491,18 @@ where
         }
         changed |= self.poll_artifact()?;
         if self.artifact_job.is_some() {
+            return Ok(changed);
+        }
+        if self.app.generation_cancelling() {
+            if self.app.error().is_none() {
+                changed |= self.cancel_stopped_generation(None);
+            }
+            return Ok(changed);
+        }
+        if self.app.generation_stopping() && self.publish_job.is_none() {
+            if self.app.error().is_none() {
+                changed |= self.finish_generation_stop()?;
+            }
             return Ok(changed);
         }
         changed |= self.poll_publish()?;
@@ -506,7 +634,11 @@ where
         outcome: ArtifactOutcome,
     ) {
         if artifact_rejects_key(&outcome) {
-            self.recover_key_rejection();
+            if self.app.generation_stopping() {
+                self.app = self.app.clone().cards_running(None);
+            } else {
+                self.recover_key_rejection();
+            }
             return;
         }
         let requests = self
@@ -658,6 +790,12 @@ where
                 self.app = self.app.clone().cards_started(drafts);
                 self.start_engine();
             }
+            Side::ClearWords => {
+                self.handle_destructive_escape(DestructiveEscape::ClearWords);
+            }
+            Side::StopGeneration => {
+                self.handle_destructive_escape(DestructiveEscape::StopGeneration);
+            }
             Side::RegenerateFailed => {
                 self.app = self.app.clone().cards_reset_failures();
                 self.start_engine();
@@ -693,7 +831,7 @@ where
                 })?;
             }
             Side::StartPublish => {
-                self.start_publish()?;
+                let _ = self.start_publish(false)?;
             }
             Side::PersistMyLanguage(code) => {
                 self.persist_preferences(|prefs| prefs.adopt(code))?;
@@ -735,6 +873,7 @@ where
 
     fn recover_key_rejection(&mut self) {
         self.regeneration_pending = false;
+        self.destructive_escape_armed_at = None;
         if let Err(error) = clear_saved_key_in(&self.store) {
             self.app = self.app.clone().error_shown(error.to_string());
             return;
@@ -747,6 +886,8 @@ where
             .clone()
             .busy_finished()
             .cards_running(None)
+            .with_word_clear_pending(false)
+            .generation_stop_finished()
             .close_modal()
             .opening_welcome_at(
                 WelcomeStage::EnterKey,
@@ -836,7 +977,7 @@ where
             .iter()
             .all(|draft| draft.artifacts().all_ready())
         {
-            self.start_publish()?;
+            let _ = self.start_publish(false)?;
             if self.publish_job.is_none() {
                 self.rollback(previous_app, previous_engine, previous_started);
             }
@@ -892,14 +1033,23 @@ where
         }
     }
 
-    fn start_publish(&mut self) -> Result<()> {
+    fn start_publish(&mut self, stopped: bool) -> Result<bool> {
         if self.publish_job.is_some() {
             bail!("background publish job already running");
         }
         if !self.claim_session() {
-            return Ok(());
+            return Ok(false);
         }
-        let drafts = self.app.cards().to_vec();
+        let total = self.app.cards().len();
+        let drafts = self
+            .app
+            .cards()
+            .iter()
+            .filter(|draft| draft.artifacts().all_ready() && draft.staged_rewrite().is_none())
+            .cloned()
+            .collect::<Vec<_>>();
+        let cards = drafts.len();
+        let failed = total.saturating_sub(cards);
         let workflow = self.workflow.clone();
         let (sender, receiver) = channel();
         let progress = StudyPublishProgress::new(sender.clone());
@@ -907,17 +1057,22 @@ where
             let outcome = workflow.publish(&drafts, &progress);
             let _ = sender.send(StudyPublishMessage::Done(outcome));
         });
-        self.publish_job = Some(PendingJob {
-            receiver,
-            handle,
-            started: Instant::now(),
+        self.publish_job = Some(PendingPublishJob {
+            job: PendingJob {
+                receiver,
+                handle,
+                started: Instant::now(),
+            },
+            cards,
+            failed,
+            stopped,
         });
         self.app = self.app.clone().busy_started(BusyKind::PublishingDeck);
-        Ok(())
+        Ok(true)
     }
 
     fn poll_publish(&mut self) -> Result<bool> {
-        let Some(started) = self.publish_job.as_ref().map(|job| job.started) else {
+        let Some(started) = self.publish_job.as_ref().map(|job| job.job.started) else {
             return Ok(false);
         };
         let mut changed = self.refresh_busy_elapsed(started);
@@ -925,7 +1080,7 @@ where
             return Ok(changed);
         };
         loop {
-            let message = match job.receiver.try_recv() {
+            let message = match job.job.receiver.try_recv() {
                 Ok(message) => message,
                 Err(TryRecvError::Empty) => return Ok(changed),
                 Err(TryRecvError::Disconnected) => {
@@ -933,12 +1088,10 @@ where
                         .publish_job
                         .take()
                         .expect("invariant: publish job must exist");
-                    let message = join_thread(job.handle)
+                    let message = join_thread(job.job.handle)
                         .map(|()| String::from("background publish job disconnected"))
                         .unwrap_or_else(|error| error.to_string());
-                    self.app = self.app.clone().busy_finished().error_shown(message);
-                    self.engine = None;
-                    self.started = None;
+                    self.publish_failed(job.stopped, message);
                     return Ok(true);
                 }
             };
@@ -956,34 +1109,77 @@ where
                         .publish_job
                         .take()
                         .expect("invariant: publish job must exist");
-                    if let Err(error) = join_thread(job.handle) {
-                        self.app = self
-                            .app
-                            .clone()
-                            .busy_finished()
-                            .error_shown(error.to_string());
-                        self.engine = None;
-                        self.started = None;
+                    if let Err(error) = join_thread(job.job.handle) {
+                        self.publish_failed(job.stopped, error.to_string());
                         return Ok(true);
                     }
                     self.app = self.app.clone().busy_finished();
                     match result {
                         Ok(package) => {
                             let (deck, report, output) = package.into_paths();
-                            self.app = self.app.clone().done_published(deck, report, output);
+                            self.app = self.app.clone().done_published_counted(
+                                deck, report, output, job.cards, job.failed,
+                            );
                             self.engine = None;
                             self.started = None;
                         }
                         Err(error) => {
-                            self.app = self.app.clone().error_shown(error.to_string());
-                            self.engine = None;
-                            self.started = None;
+                            self.publish_failed(job.stopped, error.to_string());
                         }
                     }
                     return Ok(true);
                 }
             }
         }
+    }
+
+    fn finish_generation_stop(&mut self) -> Result<bool> {
+        self.engine = None;
+        self.started = None;
+        self.regeneration_pending = false;
+        self.app = self.app.clone().cards_running(None);
+        if self
+            .app
+            .cards()
+            .iter()
+            .any(|draft| draft.artifacts().all_ready() && draft.staged_rewrite().is_none())
+        {
+            let _ = self.start_publish(true)?;
+            return Ok(true);
+        }
+        self.app = self.app.clone().generation_cancellation_started();
+        self.cancel_stopped_generation(None);
+        Ok(true)
+    }
+
+    fn publish_failed(&mut self, stopped: bool, message: String) {
+        self.app = self.app.clone().busy_finished();
+        self.engine = None;
+        self.started = None;
+        if stopped {
+            self.app = self.app.clone().generation_cancellation_started();
+            self.cancel_stopped_generation(Some(message));
+        } else {
+            self.app = self.app.clone().error_shown(message);
+        }
+    }
+
+    fn cancel_stopped_generation(&mut self, notice: Option<String>) -> bool {
+        if let Some(session) = self.session.as_mut()
+            && let Err(error) = session.cancel_and_start_next(&self.app, self.output.as_path())
+        {
+            let message = match notice {
+                Some(notice) => format!("{notice}; session not cancelled: {error:#}"),
+                None => format!("session not cancelled: {error:#}"),
+            };
+            self.app = self.app.clone().error_shown(message);
+            return true;
+        }
+        self.app = self.app.clone().generation_cancelled_to_review();
+        if let Some(notice) = notice {
+            self.app = self.app.clone().error_shown(notice);
+        }
+        true
     }
 }
 
@@ -1004,7 +1200,8 @@ fn animation_elapsed(elapsed: Duration) -> Duration {
 }
 
 fn drafts_from(app: &App) -> Vec<CardDraft> {
-    app.candidates()
+    let drafts = app
+        .candidates()
         .iter()
         .filter(|candidate| candidate.ok())
         .flat_map(|candidate| {
@@ -1015,6 +1212,15 @@ fn drafts_from(app: &App) -> Vec<CardDraft> {
                 .map(|sense| {
                     CardDraft::new(candidate.term(), sense.understanding(), app.pair().clone())
                 })
+        })
+        .collect::<Vec<_>>();
+    let count = drafts.len();
+    drafts
+        .into_iter()
+        .zip(app.sentence_settings().selections(count))
+        .map(|(draft, request)| match request {
+            Some(request) => draft.requesting_meta(request),
+            None => draft,
         })
         .collect()
 }
@@ -1050,8 +1256,9 @@ mod tests {
     use crate::session::{
         ARTIFACT_ATTEMPT_CEILING, ArtifactCosts, ArtifactFile, ArtifactSlot, CandidateRecord,
         CardArtifacts, CardMeta, CardRevision, GenerationCost, LanguagePair, LearningDetection,
-        RawInputBatch, ScriptDetection, Sense, SenseCorrection, SentenceLabelSelection, Understood,
-        WordCandidate, catalog_for_detection,
+        RawInputBatch, ScriptDetection, Sense, SenseCorrection, SentenceBatchSettings,
+        SentenceLabelSelection, SentenceLevel, SentenceTypeMix, Understood, WordCandidate,
+        catalog_for_detection,
     };
     use crate::tui::{LabelEditorRow, ModalKind};
     use anyhow::Result;
@@ -1200,6 +1407,7 @@ mod tests {
             term: &str,
             understanding: &str,
             _pair: &LanguagePair,
+            _request: Option<&SentenceLabelSelection>,
         ) -> Result<CardMeta> {
             self.ready()?;
             Ok(Self::local_meta(term, understanding))
@@ -1239,9 +1447,10 @@ mod tests {
             term: &str,
             understanding: &str,
             pair: &LanguagePair,
+            request: Option<&SentenceLabelSelection>,
         ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
             let result = self
-                .generate_card_meta(term, understanding, pair)
+                .generate_card_meta(term, understanding, pair, request)
                 .and_then(|meta| {
                     self.store_card_meta(term, understanding, pair, &meta)
                         .map(|file| (meta, Some(file)))
@@ -1258,7 +1467,13 @@ mod tests {
                 let term = draft.term().to_string();
                 let understanding = draft.understanding().to_string();
                 return self
-                    .generate_meta_in(slot, draft.term(), draft.understanding(), draft.pair())
+                    .generate_meta_in(
+                        slot,
+                        draft.term(),
+                        draft.understanding(),
+                        draft.pair(),
+                        draft.meta_request(),
+                    )
                     .map(|(meta, file)| (CardRevision::new(term, understanding, meta), file));
             };
             let (result, cost) = self
@@ -1397,6 +1612,7 @@ mod tests {
             started: None,
             quit_armed_at: None,
             new_batch_armed_at: None,
+            destructive_escape_armed_at: None,
             workflow: workflow.clone(),
             keys: workflow,
             store,
@@ -1422,6 +1638,46 @@ mod tests {
             .with_screen(Screen::WhatIUnderstood)
             .confirmed_learning("en")
             .understood(vec![candidate("whilst")])
+    }
+
+    #[test]
+    fn drafts_expand_batch_sentence_settings_after_candidate_selection() {
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Mixed);
+        let app = App::new(pair())
+            .with_screen(Screen::WhatIUnderstood)
+            .confirmed_learning("en")
+            .understood(vec![
+                candidate("alpha"),
+                skipped("skip"),
+                candidate("beta"),
+                candidate("gamma"),
+                candidate("delta"),
+                candidate("epsilon"),
+            ])
+            .with_sentence_settings(settings);
+        let drafts = drafts_from(&app);
+        let requests = drafts
+            .iter()
+            .map(|draft| draft.meta_request().cloned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests,
+            settings.selections(5),
+            "generation drafts must receive the exact per-card allocation after excluded rows are removed"
+        );
+    }
+
+    #[test]
+    fn default_batch_sentence_settings_leave_generation_requests_empty() {
+        let requests = drafts_from(&review())
+            .iter()
+            .map(|draft| draft.meta_request().cloned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests,
+            vec![None],
+            "natural unlevelled batches must preserve the existing unconstrained metadata request"
+        );
     }
 
     fn finished(screen: Screen) -> App {
@@ -1451,6 +1707,15 @@ mod tests {
             .cards_started(vec![
                 CardDraft::new("whilst", "although", pair).with_artifacts(artifacts),
             ])
+    }
+
+    fn ready_artifacts() -> CardArtifacts {
+        CardArtifacts::from_parts(
+            ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+            ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+            ArtifactSlot::fresh(Artifact::Picture).succeeded(),
+            ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+        )
     }
 
     fn settle_shell<P, K>(shell: &mut Shell<P, K>, max_ticks: usize)
@@ -1575,6 +1840,717 @@ mod tests {
             (changed, shell.app.new_batch_pending(), shell.app.screen()),
             (true, false, Screen::YourCards),
             "another action left the destructive Escape confirmation armed"
+        );
+    }
+
+    #[test]
+    fn first_escape_on_words_only_arms_the_clear() {
+        let mut shell = shell(App::new(pair()).seeded_blob("whilst\nwreck"));
+        let side = shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must be handled");
+        assert_eq!(
+            (
+                side,
+                shell.app.blob(),
+                shell.app.word_clear_pending(),
+                shell.destructive_escape_armed_at.map(|(action, _)| action),
+            ),
+            (
+                Side::ClearWords,
+                "whilst\nwreck",
+                true,
+                Some(DestructiveEscape::ClearWords),
+            ),
+            "first Escape erased words instead of arming their clear"
+        );
+    }
+
+    #[test]
+    fn second_escape_on_words_clears_the_field() {
+        let mut shell = shell(App::new(pair()).seeded_blob("whilst\nwreck"));
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the clear");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the clear");
+        assert_eq!(
+            (
+                shell.app.blob(),
+                shell.app.word_clear_pending(),
+                shell.destructive_escape_armed_at,
+            ),
+            ("", false, None),
+            "confirmed Escape left words or their clear intent behind"
+        );
+    }
+
+    #[test]
+    fn confirmed_words_clear_forgets_the_hidden_review() {
+        let mut shell = shell(
+            review()
+                .seeded_blob("whilst")
+                .with_screen(Screen::YourWords),
+        );
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the clear");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the clear");
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.blob(),
+                shell.app.candidates().len(),
+                shell.app.cards().len(),
+                shell.app.learning_pending(),
+            ),
+            (Screen::YourWords, "", 0, 0, true),
+            "confirmed words clear kept hidden review state for the next batch"
+        );
+    }
+
+    #[test]
+    fn words_clear_confirmation_expires_after_the_confirmation_window() {
+        let mut shell = shell(App::new(pair()).seeded_blob("whilst"));
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the clear");
+        shell.destructive_escape_armed_at = Some((
+            DestructiveEscape::ClearWords,
+            Instant::now() - CONFIRMATION_WINDOW - Duration::from_millis(1),
+        ));
+        let changed = shell.refresh_destructive_escape_pending();
+        assert_eq!(
+            (
+                changed,
+                shell.app.blob(),
+                shell.app.word_clear_pending(),
+                shell.destructive_escape_armed_at,
+            ),
+            (true, "whilst", false, None),
+            "an expired words-clear confirmation stayed armed"
+        );
+    }
+
+    #[test]
+    fn another_key_disarms_words_clear_before_editing() {
+        let mut shell = shell(App::new(pair()).seeded_blob("whilst"));
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the clear");
+        shell
+            .handle(AppEvent::KeyChar('x'))
+            .expect("typing must stay available");
+        assert_eq!(
+            (
+                shell.app.blob(),
+                shell.app.word_clear_pending(),
+                shell.destructive_escape_armed_at,
+            ),
+            ("whilstx", false, None),
+            "typing inherited a stale words-clear confirmation"
+        );
+    }
+
+    #[test]
+    fn first_escape_during_generation_only_arms_the_stop() {
+        let mut shell = shell(review());
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        let side = shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must be handled");
+        assert_eq!(
+            (
+                side,
+                shell.app.generation_stop_pending(),
+                shell.app.generation_stopping(),
+                shell.engine.is_some(),
+            ),
+            (Side::StopGeneration, true, false, true),
+            "first Escape stopped generation without confirmation"
+        );
+    }
+
+    #[test]
+    fn second_escape_starts_draining_without_dropping_the_engine() {
+        let mut shell = shell(review());
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        assert_eq!(
+            (
+                shell.app.generation_stop_pending(),
+                shell.app.generation_stopping(),
+                shell.engine.is_some(),
+                shell.regeneration_pending,
+            ),
+            (false, true, true, false),
+            "confirmed stop discarded the engine before its active request drained"
+        );
+    }
+
+    #[test]
+    fn generation_stop_confirmation_expires_without_stopping_the_engine() {
+        let mut shell = shell(review());
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell.destructive_escape_armed_at = Some((
+            DestructiveEscape::StopGeneration,
+            Instant::now() - CONFIRMATION_WINDOW - Duration::from_millis(1),
+        ));
+        let changed = shell.refresh_destructive_escape_pending();
+        assert_eq!(
+            (
+                changed,
+                shell.app.generation_stop_pending(),
+                shell.app.generation_stopping(),
+                shell.engine.is_some(),
+            ),
+            (true, false, false, true),
+            "an expired stop confirmation stayed armed or stopped the engine"
+        );
+    }
+
+    #[test]
+    fn another_key_disarms_generation_stop_without_stopping_the_engine() {
+        let mut shell = shell(review());
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::NavNext)
+            .expect("navigation must stay available");
+        assert_eq!(
+            (
+                shell.app.generation_stop_pending(),
+                shell.app.generation_stopping(),
+                shell.destructive_escape_armed_at,
+                shell.engine.is_some(),
+            ),
+            (false, false, None, true),
+            "navigation inherited a stale stop confirmation or stopped the engine"
+        );
+    }
+
+    #[test]
+    fn confirmed_stop_without_ready_cards_returns_to_review() {
+        let mut shell = shell(review().seeded_blob("whilst"));
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        shell
+            .tick()
+            .expect("stop must finish between artifact jobs");
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.blob(),
+                shell.app.candidates().len(),
+                shell.app.cards().len(),
+                shell.app.generation_stopping(),
+                shell.engine.is_none(),
+            ),
+            (Screen::WhatIUnderstood, "whilst", 1, 0, false, true),
+            "zero-ready stop lost review state or left a committed engine behind"
+        );
+    }
+
+    #[test]
+    fn zero_ready_stop_retains_settings_across_rotation_and_recreates_requests() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Mixed);
+        let app = review()
+            .seeded_blob("whilst")
+            .with_sentence_settings(settings);
+        let record = SessionRecord::understood(
+            String::from("en-old"),
+            String::from("created-old"),
+            app.pair().known().to_string(),
+            app.pair().learning().to_string(),
+            std::env::temp_dir().to_string_lossy().into_owned(),
+            String::from("custom"),
+            String::from("tui"),
+            vec![String::from("whilst")],
+            app.candidates()
+                .iter()
+                .map(CandidateRecord::from_candidate)
+                .collect(),
+        )
+        .with_sentences(settings);
+        store.create(&record).expect("review session must persist");
+        let session =
+            TuiSession::resuming_in(&record, store.clone()).expect("review session must resume");
+        let mut shell = shell(app);
+        shell.session = Some(session);
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        shell
+            .tick()
+            .expect("zero-ready stop must rotate the session");
+        shell.persist();
+        let old: SessionRecord = serde_json::from_slice(
+            std::fs::read(home.path().join("sessions/en-old/session.json"))
+                .expect("cancelled session must remain")
+                .as_slice(),
+        )
+        .expect("cancelled session must decode");
+        let mut rotated = std::fs::read_dir(home.path().join("sessions"))
+            .expect("rotated sessions must remain readable")
+            .flatten()
+            .filter(|entry| entry.file_name() != "en-old")
+            .map(|entry| {
+                serde_json::from_slice::<SessionRecord>(
+                    std::fs::read(entry.path().join("session.json"))
+                        .expect("preserved review must remain")
+                        .as_slice(),
+                )
+                .expect("preserved review must decode")
+            })
+            .collect::<Vec<_>>();
+        let new = rotated
+            .pop()
+            .expect("preserved review must receive a new identity");
+        let expected = settings.selections(1);
+        let recreated = drafts_from(&shell.app)
+            .into_iter()
+            .map(|draft| draft.meta_request().cloned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (
+                old.phase,
+                old.sentences,
+                old.drafts[0].meta_request.clone(),
+                new.phase,
+                new.sentences,
+                new.drafts.len(),
+                shell.app.sentence_settings(),
+                recreated,
+                rotated.is_empty(),
+            ),
+            (
+                Phase::Cancelled,
+                settings,
+                expected[0].clone(),
+                Phase::Understood,
+                settings,
+                0,
+                settings,
+                expected,
+                true,
+            ),
+            "zero-ready stop lost batch settings or failed to recreate initial metadata requests after rotation"
+        );
+    }
+
+    #[test]
+    fn partial_stop_keeps_tally_settings_and_pending_initial_request() {
+        let settings = SentenceBatchSettings::new(Some(SentenceLevel::B2), SentenceTypeMix::Mixed);
+        let pending = settings.selections(2)[1]
+            .clone()
+            .expect("configured second card must receive a metadata request");
+        let language_pair = pair();
+        let first = CardDraft::new("alpha", "first understanding", language_pair.clone())
+            .with_artifacts(ready_artifacts());
+        let second = CardDraft::new("beta", "second understanding", language_pair.clone())
+            .requesting_meta(pending.clone());
+        let app = App::new(language_pair)
+            .with_sentence_settings(settings)
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![first.clone(), second.clone()]);
+        let mut shell = shell(app);
+        shell.engine = Some(SessionEngine::start(vec![first, second]));
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.done_artifacts().cards,
+                shell.app.done_artifacts().failed,
+                shell.app.sentence_settings(),
+                shell.app.cards()[0].meta_request().is_none(),
+                shell.app.cards()[1].meta_request().cloned(),
+                shell.app.generation_stopping(),
+                shell.engine.is_none(),
+            ),
+            (1, 1, settings, true, Some(pending), false, true),
+            "partial stop changed its publish tally, batch settings, or unfinished initial metadata request"
+        );
+    }
+
+    #[test]
+    fn stop_applies_the_inflight_outcome_then_publishes_only_ready_cards() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let language_pair = pair();
+        let first = CardDraft::new("alpha", "first understanding", language_pair.clone())
+            .with_artifacts(ready_artifacts());
+        let second = CardDraft::new("beta", "second understanding", language_pair.clone());
+        let app = App::new(language_pair)
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![first.clone(), second.clone()])
+            .cards_running(Some((1, Artifact::Meta)));
+        let mut shell = shell_with(app, TestWorkflow::counting(calls.clone()));
+        shell.engine = Some(SessionEngine::start(vec![first, second]));
+        let settled = TestWorkflow::local_meta("beta", "second understanding");
+        let (release, waiting) = channel();
+        shell.artifact_job = Some(PendingArtifactJob {
+            job: PendingJob::spawn(move || {
+                waiting
+                    .recv_timeout(Duration::from_secs(1))
+                    .expect("in-flight artifact must be released");
+                ArtifactOutcome::Meta(Box::new(ArtifactAttempt::new(
+                    Ok((
+                        CardRevision::new("beta", "second understanding", settled),
+                        None,
+                    )),
+                    Some(GenerationCost::from_nanos(91_000)),
+                )))
+            }),
+            card: 1,
+            artifact: Artifact::Meta,
+        });
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        release.send(()).expect("in-flight artifact must resume");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.cards()[1].meta().is_some(),
+                shell.app.done_artifacts().cards,
+                shell.app.done_artifacts().failed,
+                shell.app.generation_stopping(),
+                calls.load(Ordering::SeqCst),
+            ),
+            (true, 1, 1, false, 1),
+            "stop lost the in-flight result, started another artifact, or published the wrong tally"
+        );
+    }
+
+    #[test]
+    fn stopped_inflight_key_rejection_does_not_resume_generation() {
+        let language_pair = pair();
+        let draft = CardDraft::new("alpha", "first understanding", language_pair.clone());
+        let app = App::new(language_pair)
+            .with_screen(Screen::YourCards)
+            .understood(vec![candidate("alpha")])
+            .cards_started(vec![draft.clone()])
+            .cards_running(Some((0, Artifact::Meta)));
+        let mut shell = shell(app);
+        shell.engine = Some(SessionEngine::start(vec![draft]));
+        let (release, waiting) = channel();
+        shell.artifact_job = Some(PendingArtifactJob {
+            job: PendingJob::spawn(move || {
+                waiting
+                    .recv_timeout(Duration::from_secs(1))
+                    .expect("in-flight artifact must be released");
+                let error = anyhow::anyhow!(crate::gemini::GeminiApiError::new(
+                    "UNAUTHENTICATED",
+                    Some(String::from("API key not valid")),
+                    Vec::new(),
+                ));
+                ArtifactOutcome::Meta(Box::new(ArtifactAttempt::unmetered(Err(error))))
+            }),
+            card: 0,
+            artifact: Artifact::Meta,
+        });
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        release.send(()).expect("in-flight artifact must resume");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.cards().len(),
+                shell.app.generation_stopping(),
+                shell.engine.is_none(),
+                shell.app.welcome().notice.clone(),
+            ),
+            (Screen::WhatIUnderstood, 0, false, true, None),
+            "a rejected in-flight request reopened key recovery or resumed a confirmed stop"
+        );
+    }
+
+    #[test]
+    fn failed_publish_after_stop_returns_to_review_without_resuming() {
+        let home = tempfile::tempdir().expect("temp home");
+        let store = SessionStore::new(home.path());
+        let language_pair = pair();
+        let candidates = vec![candidate("alpha"), candidate("beta")];
+        let ready = CardDraft::new("alpha", "first understanding", language_pair.clone())
+            .with_artifacts(ready_artifacts());
+        let incomplete = CardDraft::new("beta", "second understanding", language_pair.clone());
+        let drafts = vec![ready, incomplete];
+        let app = App::new(language_pair)
+            .seeded_blob("alpha\nbeta")
+            .confirmed_learning("en")
+            .with_screen(Screen::YourCards)
+            .understood(candidates.clone())
+            .cards_started(drafts.clone());
+        let mut record = SessionRecord::understood(
+            String::from("stopped-publish"),
+            String::from("created-a"),
+            String::from("ru"),
+            String::from("en"),
+            home.path().to_string_lossy().into_owned(),
+            String::from("primary"),
+            String::from("tui"),
+            vec![String::from("alpha"), String::from("beta")],
+            candidates
+                .iter()
+                .map(CandidateRecord::from_candidate)
+                .collect(),
+        );
+        record.drafts = drafts
+            .iter()
+            .map(|draft| DraftRecord {
+                term: draft.term().to_string(),
+                understanding: draft.understanding().to_string(),
+                costs: ArtifactCosts::default(),
+                meta_request: None,
+                rewrite: None,
+            })
+            .collect();
+        store.create(&record).expect("the session must persist");
+        let session = TuiSession::resuming_in(&record, store).expect("the session must resume");
+        let mut shell = shell_with(app, TestWorkflow::publish_failing());
+        shell.session = Some(session);
+        shell.output = home.path().to_path_buf();
+        shell.engine = Some(SessionEngine::start(drafts));
+        let claimed = shell.claim_session();
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        settle_shell(&mut shell, 200);
+        shell.persist();
+        let old: SessionRecord = serde_json::from_slice(
+            std::fs::read(home.path().join("sessions/stopped-publish/session.json"))
+                .expect("the cancelled record must read")
+                .as_slice(),
+        )
+        .expect("the cancelled record must decode");
+        let mut next = std::fs::read_dir(home.path().join("sessions"))
+            .expect("the sessions directory must list")
+            .flatten()
+            .filter(|entry| entry.file_name() != "stopped-publish")
+            .map(|entry| {
+                serde_json::from_slice::<SessionRecord>(
+                    std::fs::read(entry.path().join("session.json"))
+                        .expect("the next record must read")
+                        .as_slice(),
+                )
+                .expect("the next record must decode")
+            })
+            .collect::<Vec<_>>();
+        let new = next.pop().expect("the preserved review must persist");
+        assert_eq!(
+            (
+                shell.app.screen(),
+                claimed,
+                shell.app.cards().len(),
+                shell.app.generation_stopping(),
+                shell.engine.is_none(),
+                shell.app.error(),
+                old.phase,
+                old.worker.is_none(),
+                new.phase,
+                new.drafts.len(),
+                new.worker.is_none(),
+                next.is_empty(),
+            ),
+            (
+                Screen::WhatIUnderstood,
+                true,
+                0,
+                false,
+                true,
+                Some("publish boom"),
+                Phase::Cancelled,
+                true,
+                Phase::Understood,
+                0,
+                true,
+                true,
+            ),
+            "a stopped publish failure left drafts able to auto-resume or reused its identity"
+        );
+    }
+
+    #[test]
+    fn stopped_publish_claim_conflict_keeps_live_ownership_and_cannot_resume() {
+        let home = tempfile::tempdir().expect("temp home");
+        let store = SessionStore::new(home.path());
+        let language_pair = pair();
+        let candidates = vec![candidate("alpha"), candidate("beta")];
+        let ready = CardDraft::new("alpha", "first understanding", language_pair.clone())
+            .with_artifacts(ready_artifacts());
+        let incomplete = CardDraft::new("beta", "second understanding", language_pair.clone());
+        let drafts = vec![ready, incomplete];
+        let app = App::new(language_pair)
+            .seeded_blob("alpha\nbeta")
+            .confirmed_learning("en")
+            .with_screen(Screen::YourCards)
+            .understood(candidates.clone())
+            .cards_started(drafts.clone());
+        let mut record = SessionRecord::understood(
+            String::from("stop-publish-race"),
+            String::from("created-a"),
+            String::from("ru"),
+            String::from("en"),
+            home.path().to_string_lossy().into_owned(),
+            String::from("primary"),
+            String::from("tui"),
+            vec![String::from("alpha"), String::from("beta")],
+            candidates
+                .iter()
+                .map(CandidateRecord::from_candidate)
+                .collect(),
+        );
+        record.drafts = drafts
+            .iter()
+            .map(|draft| DraftRecord {
+                term: draft.term().to_string(),
+                understanding: draft.understanding().to_string(),
+                costs: ArtifactCosts::default(),
+                meta_request: None,
+                rewrite: None,
+            })
+            .collect();
+        store.create(&record).expect("the session must persist");
+        let session =
+            TuiSession::resuming_in(&record, store.clone()).expect("the session must resume");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut shell = shell_with(app, TestWorkflow::counting(calls.clone()));
+        shell.session = Some(session);
+        shell.output = home.path().to_path_buf();
+        shell.engine = Some(SessionEngine::start(drafts));
+        let claimed = shell.claim_session();
+        store
+            .update("stop-publish-race", |fresh| {
+                fresh.senses = String::from("all");
+                Ok(())
+            })
+            .expect("the competing edit must persist");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        shell.tick().expect("the stopped publish must try to claim");
+        shell.persist();
+        let stored: SessionRecord = serde_json::from_slice(
+            std::fs::read(home.path().join("sessions/stop-publish-race/session.json"))
+                .expect("the competing record must read")
+                .as_slice(),
+        )
+        .expect("the competing record must decode");
+        let lock_available = store
+            .hold("stop-publish-race")
+            .expect("the lock probe must succeed")
+            .is_some();
+        assert_eq!(
+            (
+                shell.app.generation_stopping(),
+                claimed,
+                shell.publish_job.is_none(),
+                shell.engine.is_none(),
+                calls.load(Ordering::SeqCst),
+                stored.phase,
+                stored.senses,
+                stored.drafts.len(),
+                lock_available,
+            ),
+            (
+                true,
+                true,
+                true,
+                true,
+                0,
+                Phase::Generating,
+                String::from("all"),
+                2,
+                false,
+            ),
+            "a stopped claim conflict released ownership, rewrote the record, or resumed work"
+        );
+    }
+
+    #[test]
+    fn confirmed_stop_omits_a_ready_card_with_an_uncommitted_rewrite() {
+        let language_pair = pair();
+        let clean = CardDraft::new("alpha", "first understanding", language_pair.clone())
+            .with_artifacts(ready_artifacts());
+        let staged = CardDraft::new("beta", "second understanding", language_pair.clone())
+            .with_artifacts(ready_artifacts())
+            .staging_rewrite(SentenceLabelSelection::empty(), "make beta formal");
+        let incomplete = CardDraft::new("gamma", "third understanding", language_pair.clone());
+        let drafts = vec![clean, staged, incomplete];
+        let app = App::new(language_pair)
+            .with_screen(Screen::YourCards)
+            .cards_started(drafts.clone());
+        let mut shell = shell_with(app, TestWorkflow::local());
+        shell.engine = Some(SessionEngine::start(drafts));
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm the stop");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm the stop");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.done_artifacts().deck.as_str(),
+                shell.app.done_artifacts().cards,
+                shell.app.done_artifacts().failed,
+            ),
+            ("local-1-cards.apkg", 1, 2),
+            "partial stop published a card whose rewrite was still staged"
         );
     }
 
@@ -2091,12 +3067,14 @@ mod tests {
                 term: String::from("alpha"),
                 understanding: String::from("first understanding"),
                 costs: first,
+                meta_request: None,
                 rewrite: None,
             },
             DraftRecord {
                 term: String::from("beta"),
                 understanding: String::from("second understanding"),
                 costs: second,
+                meta_request: None,
                 rewrite: None,
             },
         ];
@@ -2119,6 +3097,7 @@ mod tests {
             started: None,
             quit_armed_at: None,
             new_batch_armed_at: None,
+            destructive_escape_armed_at: None,
             workflow: TestWorkflow::local(),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -2270,6 +3249,7 @@ mod tests {
             started: None,
             quit_armed_at: None,
             new_batch_armed_at: None,
+            destructive_escape_armed_at: None,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -2355,6 +3335,7 @@ mod tests {
             term: String::from("alpha"),
             understanding: String::from("first understanding"),
             costs: ArtifactCosts::default(),
+            meta_request: None,
             rewrite: None,
         }];
         record.result = Some(ResultRecord {
@@ -2388,6 +3369,7 @@ mod tests {
             started: None,
             quit_armed_at: None,
             new_batch_armed_at: None,
+            destructive_escape_armed_at: None,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -2500,6 +3482,7 @@ mod tests {
             term: String::from("alpha"),
             understanding: String::from("first understanding"),
             costs: ArtifactCosts::default(),
+            meta_request: None,
             rewrite: None,
         }];
         record.result = Some(ResultRecord {
@@ -2533,6 +3516,7 @@ mod tests {
             started: None,
             quit_armed_at: None,
             new_batch_armed_at: None,
+            destructive_escape_armed_at: None,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),

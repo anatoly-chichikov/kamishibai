@@ -138,7 +138,8 @@ while IFS='|' read -r id kind a b out_s cap source; do
         -filter_complex "[0:v]trim=start=${a}:end=${end},setpts=PTS-STARTPTS,fps=${rate}[v];[1:v]${capflt}[c];[v][c]overlay=${cx}:${cy}:shortest=1" \
         "$tmp/w-%04d.png"
     else
-      ffmpeg -nostdin -y -loglevel error -i "$input" -ss "$a" -t "$dur" -vf "fps=$rate" "$tmp/w-%04d.png"
+      ffmpeg -nostdin -y -loglevel error -i "$input" \
+        -vf "trim=start=${a}:end=${b},setpts=PTS-STARTPTS,fps=${rate}" "$tmp/w-%04d.png"
     fi
     frames=()
     while IFS= read -r line; do frames+=("$line"); done < <(ls "$tmp"/w-*.png | sort)

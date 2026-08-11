@@ -11,6 +11,7 @@ mod engine;
 mod labels;
 mod pair;
 mod pass;
+mod sentence_settings;
 mod state;
 mod vault;
 
@@ -37,6 +38,7 @@ pub use labels::{
 };
 pub use pair::LanguagePair;
 pub use pass::{CardRevision, SenseCorrection, Understood};
+pub use sentence_settings::{SentenceBatchSettings, SentenceTypeMix};
 pub use state::SessionState;
 pub use vault::CardCell;
 

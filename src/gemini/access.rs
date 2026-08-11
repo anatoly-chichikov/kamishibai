@@ -12,6 +12,8 @@ use crate::runtime::locations::SystemContext;
 enum KeyLookup {
     Saved,
     Environment,
+    #[cfg(test)]
+    Unavailable,
 }
 
 /// Opens Gemini clients using the credential policy of one workflow.
@@ -38,6 +40,12 @@ impl GeminiAccess {
         Self::new(KeyLookup::Environment)
     }
 
+    #[cfg(test)]
+    /// Build access that deterministically refuses to open a client.
+    pub(crate) fn unavailable() -> Self {
+        Self::new(KeyLookup::Unavailable)
+    }
+
     /// Open a client after resolving the latest saved preferences.
     pub(crate) fn client(&self) -> Result<GeminiClient<HttpTransport>> {
         match self.keys {
@@ -50,6 +58,8 @@ impl GeminiAccess {
                 let saved = default_store(&SystemContext)?.read()?.api_key;
                 GeminiClient::from_env_or_saved(saved.as_deref())
             }
+            #[cfg(test)]
+            KeyLookup::Unavailable => anyhow::bail!("Gemini access unavailable in test"),
         }
     }
 }

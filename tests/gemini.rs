@@ -548,6 +548,7 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
         "borrow",
         "verb sense — to take something temporarily",
         &LanguagePair::new("en", "ru"),
+        None,
     )?;
     let labels = meta_out
         .sentence_labels()

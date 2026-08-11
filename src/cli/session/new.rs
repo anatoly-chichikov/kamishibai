@@ -14,11 +14,12 @@ use crate::cli::error::{usage, usage_hint};
 use crate::config::{PreferenceStore, default_store};
 use crate::runtime::locations::{LocationArgs, Locations, OutputUnavailable, SystemContext};
 use crate::session::{
-    CandidateRecord, LanguagePair, RawInputBatch, WordCandidate, drafts_from_document,
+    CandidateRecord, LanguagePair, RawInputBatch, SentenceBatchSettings, SentenceLevel,
+    SentenceTypeMix, WordCandidate, drafts_from_document,
 };
 use crate::vocabulary::VocabularyDocument;
 
-use super::args::NewArgs;
+use super::args::{BatchLevel, BatchTypes, NewArgs};
 use super::generate::run_session;
 use super::store::{SessionRecord, SessionStore, mint_id, now, valid_id};
 use super::{Render, json, preflight_key, resolve_language, validate_language, view};
@@ -65,10 +66,11 @@ pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
         String::from(session.source),
         session.words,
         session.candidates,
-    );
+    )
+    .with_sentences(sentence_settings(args));
     store.create(&record)?;
     if args.generate {
-        return run_session(&store, record.id.as_str(), false, render, None, false);
+        return run_session(&store, record.id.as_str(), args.wait, render, None, false);
     }
     if matches!(render, Render::Json) {
         return json::emit_session(&record);
@@ -241,4 +243,23 @@ fn senses_label(policy: SensePolicy) -> &'static str {
         SensePolicy::Primary => "primary",
         SensePolicy::All => "all",
     }
+}
+
+fn sentence_settings(args: &NewArgs) -> SentenceBatchSettings {
+    let level = args.level.map(|level| match level {
+        BatchLevel::A1 => SentenceLevel::A1,
+        BatchLevel::A2 => SentenceLevel::A2,
+        BatchLevel::B1 => SentenceLevel::B1,
+        BatchLevel::B2 => SentenceLevel::B2,
+        BatchLevel::C1 => SentenceLevel::C1,
+        BatchLevel::C2 => SentenceLevel::C2,
+    });
+    let types = match args.types {
+        BatchTypes::BestFit => SentenceTypeMix::BestFit,
+        BatchTypes::Statements => SentenceTypeMix::Statements,
+        BatchTypes::Questions => SentenceTypeMix::Questions,
+        BatchTypes::Dialogue => SentenceTypeMix::Dialogue,
+        BatchTypes::Mixed => SentenceTypeMix::Mixed,
+    };
+    SentenceBatchSettings::new(level, types)
 }

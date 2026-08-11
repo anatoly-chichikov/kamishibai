@@ -14,6 +14,7 @@ use tempfile::TempDir;
 
 use super::attempt_archive::*;
 use super::cost_accounting::*;
+use super::invalidation::ArtifactGuards;
 use super::picture_recovery::*;
 use super::picture_requests::*;
 use super::scene_attempt::*;
@@ -21,20 +22,24 @@ use super::visual::judged;
 use super::*;
 use crate::application::GenerationCostLedger;
 use crate::generation::artifact_cache::{
-    Cache, ILLUSTRATION_COST_FILE, IMAGE_ATTEMPTS_DIRECTORY, META_COST_FILE, PICTURE_REQUESTS_FILE,
-    RootStage, SCENE_FILE, VOICE_COST_FILE, VOICE_FILE,
+    Cache, ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, IMAGE_ATTEMPTS_DIRECTORY, META_COST_FILE,
+    PICTURE_REQUESTS_FILE, RootStage, SCENE_ATTEMPT_FILE, SCENE_COST_FILE, SCENE_FILE,
+    VOICE_COST_FILE, VOICE_FILE,
 };
 use crate::generation::manga::{
     BorderDetector, Illustration, ImageSource, MangaRenderer, RecallJudge, RecallReview, Renderer,
     Translator,
 };
+use crate::generation::visual_revision;
 use crate::generation::{Audio, Speaker};
 use crate::session::{
-    Artifact, ArtifactCosts, ArtifactFile, CardCell, CardMetaCache, CostRecord, GenerationCost,
+    Artifact, ArtifactCosts, ArtifactFile, AxisSet, CardCell, CardMetaCache, CostRecord,
+    GenerationCost, Register, SentenceAxis, SentenceKind, SentenceLabelSelection, SentenceLabels,
+    SentenceLevel,
 };
 
 #[test]
-fn localized_meta_refresh_removes_legacy_audio_and_its_cost() {
+fn localized_meta_refresh_removes_legacy_audio_and_preserves_its_cost() {
     let directory = TempDir::new().expect("tempdir must be created");
     let pair = LanguagePair::new("fr", "en");
     let term = "canard";
@@ -101,8 +106,328 @@ fn localized_meta_refresh_removes_legacy_audio_and_its_cost() {
             cell.exists(VOICE_FILE),
             cell.exists(VOICE_COST_FILE)
         ),
-        (false, "The localized sentence uses canard", false, false),
-        "localized meta refresh retained legacy audio or failed to replace meta"
+        (false, "The localized sentence uses canard", false, true),
+        "localized meta refresh retained legacy audio, erased its cost, or failed to replace meta"
+    );
+}
+
+#[test]
+fn matching_cached_labels_are_pinned_locally_without_invalidating_media() {
+    let directory = TempDir::new().expect("tempdir must be created");
+    let pair = LanguagePair::new("fr", "en");
+    let term = "canard";
+    let understanding = "a duck";
+    let meta = labeled_meta(
+        SentenceLevel::B1,
+        SentenceKind::Question,
+        AxisSet::default(),
+    );
+    CardMetaCache::new(directory.path())
+        .store(term, understanding, &pair, &meta)
+        .expect("matching meta must be seeded");
+    let cell = CardCell::new(directory.path(), &pair, term, understanding).cache();
+    let visual = cell
+        .visual(visual_revision())
+        .expect("visual revision must resolve");
+    seed_refresh_files(&cell, &visual);
+    let request = SentenceLabelSelection::empty()
+        .choosing(SentenceAxis::Level, 2)
+        .choosing(SentenceAxis::Type, 1);
+    let production = MetadataProduction::new(
+        directory.path().to_path_buf(),
+        GeminiAccess::unavailable(),
+        CostAccounting::new(None),
+    );
+    let attempt = production.generate(term, understanding, &pair, Some(&request), None);
+    let generated = attempt
+        .into_result()
+        .expect("matching cached meta must not need Gemini")
+        .0;
+    let labels = generated
+        .sentence_labels()
+        .expect("locally reconciled meta must retain labels");
+    assert_eq!(
+        (
+            labels.pinned().contains(SentenceAxis::Level),
+            labels.pinned().contains(SentenceAxis::Type),
+            cell.exists(VOICE_FILE),
+            visual.exists(SCENE_FILE),
+            visual.exists(ILLUSTRATION_FILE),
+            visual.path().join(IMAGE_ATTEMPTS_DIRECTORY).exists(),
+        ),
+        (true, true, true, true, true, true),
+        "matching cached labels called Gemini or invalidated reusable media"
+    );
+}
+
+#[test]
+fn matching_approximate_cached_target_reuses_its_actual_sentence_without_gemini() {
+    let directory = TempDir::new().expect("tempdir must be created");
+    let pair = LanguagePair::new("fr", "en");
+    let term = "canard";
+    let understanding = "a duck";
+    let request = SentenceLabelSelection::empty().choosing(SentenceAxis::Level, 2);
+    let labels = request.reconciled(SentenceLabels::new(
+        Register::Neutral,
+        SentenceLevel::A2,
+        SentenceKind::Statement,
+        AxisSet::default(),
+        AxisSet::from_axes([SentenceAxis::Level]),
+    ));
+    let meta = card_meta("An a2 sentence aimed at b1").with_sentence_labels(labels);
+    CardMetaCache::new(directory.path())
+        .store(term, understanding, &pair, &meta)
+        .expect("approximate meta must be seeded");
+    let cell = CardCell::new(directory.path(), &pair, term, understanding).cache();
+    let visual = cell
+        .visual(visual_revision())
+        .expect("visual revision must resolve");
+    seed_refresh_files(&cell, &visual);
+    let production = MetadataProduction::new(
+        directory.path().to_path_buf(),
+        GeminiAccess::unavailable(),
+        CostAccounting::new(None),
+    );
+    let generated = production
+        .generate(term, understanding, &pair, Some(&request), None)
+        .into_result()
+        .expect("the same approximate target must reuse cached metadata")
+        .0;
+    let labels = generated
+        .sentence_labels()
+        .expect("reused approximate metadata must retain labels");
+    assert_eq!(
+        (
+            labels.level(),
+            labels.requested_token(SentenceAxis::Level),
+            labels.approx().contains(SentenceAxis::Level),
+            cell.exists(VOICE_FILE),
+            visual.exists(SCENE_FILE),
+            visual.exists(ILLUSTRATION_FILE),
+        ),
+        (SentenceLevel::A2, Some("b1"), true, true, true, true,),
+        "the approximate cache hit called Gemini, rewrote actual labels, or invalidated media"
+    );
+}
+
+#[test]
+fn default_request_clears_cached_targets_without_gemini_or_media_invalidation() {
+    let directory = TempDir::new().expect("tempdir must be created");
+    let pair = LanguagePair::new("fr", "en");
+    let term = "canard";
+    let understanding = "a duck";
+    let request = SentenceLabelSelection::empty().choosing(SentenceAxis::Level, 2);
+    let labels = request.reconciled(SentenceLabels::new(
+        Register::Neutral,
+        SentenceLevel::B1,
+        SentenceKind::Statement,
+        AxisSet::default(),
+        AxisSet::default(),
+    ));
+    let meta = card_meta("A cached b1 sentence").with_sentence_labels(labels);
+    CardMetaCache::new(directory.path())
+        .store(term, understanding, &pair, &meta)
+        .expect("targeted meta must be seeded");
+    let cell = CardCell::new(directory.path(), &pair, term, understanding).cache();
+    let visual = cell
+        .visual(visual_revision())
+        .expect("visual revision must resolve");
+    seed_refresh_files(&cell, &visual);
+    let production = MetadataProduction::new(
+        directory.path().to_path_buf(),
+        GeminiAccess::unavailable(),
+        CostAccounting::new(None),
+    );
+    let generated = production
+        .generate(term, understanding, &pair, None, None)
+        .into_result()
+        .expect("default guidance must reuse cached metadata")
+        .0;
+    let stored = CardMetaCache::new(directory.path())
+        .load(term, understanding, &pair)
+        .expect("default metadata must remain readable")
+        .expect("default metadata must remain cached");
+    let generated = generated
+        .sentence_labels()
+        .expect("reused default metadata must retain actual labels");
+    let stored = stored
+        .sentence_labels()
+        .expect("stored default metadata must retain actual labels");
+    assert_eq!(
+        (
+            generated.level(),
+            generated.pinned().is_empty(),
+            generated.requested_token(SentenceAxis::Level),
+            stored.pinned().is_empty(),
+            stored.requested_token(SentenceAxis::Level),
+            cell.exists(VOICE_FILE),
+            visual.exists(SCENE_FILE),
+            visual.exists(ILLUSTRATION_FILE),
+        ),
+        (SentenceLevel::B1, true, None, true, None, true, true, true),
+        "default guidance retained an old target, called Gemini, or invalidated cached media"
+    );
+}
+
+#[test]
+fn legacy_approximate_cache_cannot_fake_an_exact_request_without_gemini() {
+    let directory = TempDir::new().expect("tempdir must be created");
+    let pair = LanguagePair::new("fr", "en");
+    let term = "canard";
+    let understanding = "a duck";
+    let legacy =
+        card_meta("A legacy approximate a2 sentence").with_sentence_labels(SentenceLabels::new(
+            Register::Neutral,
+            SentenceLevel::A2,
+            SentenceKind::Statement,
+            AxisSet::from_axes([SentenceAxis::Level]),
+            AxisSet::from_axes([SentenceAxis::Level]),
+        ));
+    CardMetaCache::new(directory.path())
+        .store(term, understanding, &pair, &legacy)
+        .expect("legacy approximate meta must be seeded");
+    let cell = CardCell::new(directory.path(), &pair, term, understanding).cache();
+    let visual = cell
+        .visual(visual_revision())
+        .expect("visual revision must resolve");
+    seed_refresh_files(&cell, &visual);
+    let request = SentenceLabelSelection::empty().choosing(SentenceAxis::Level, 1);
+    let production = MetadataProduction::new(
+        directory.path().to_path_buf(),
+        GeminiAccess::unavailable(),
+        CostAccounting::new(None),
+    );
+    let attempt = production.generate(term, understanding, &pair, Some(&request), None);
+    let retained = CardMetaCache::new(directory.path())
+        .load(term, understanding, &pair)
+        .expect("legacy metadata must remain readable")
+        .expect("legacy metadata must remain cached");
+    assert_eq!(
+        (
+            attempt.error().is_some(),
+            retained.target_sentence(),
+            cell.exists(VOICE_FILE),
+            visual.exists(SCENE_FILE),
+            visual.exists(ILLUSTRATION_FILE),
+        ),
+        (true, legacy.target_sentence(), true, true, true),
+        "legacy approximation was reused as an invented exact attribution or damaged the cache"
+    );
+}
+
+#[test]
+fn failed_requested_refresh_keeps_the_old_meta_and_every_dependent_artifact() {
+    let directory = TempDir::new().expect("tempdir must be created");
+    let pair = LanguagePair::new("fr", "en");
+    let term = "canard";
+    let understanding = "a duck";
+    let old = card_meta("An approximately fulfilled a2 sentence").with_sentence_labels(
+        SentenceLabels::new(
+            Register::Neutral,
+            SentenceLevel::A2,
+            SentenceKind::Statement,
+            AxisSet::from_axes([SentenceAxis::Level]),
+            AxisSet::from_axes([SentenceAxis::Level]),
+        ),
+    );
+    CardMetaCache::new(directory.path())
+        .store(term, understanding, &pair, &old)
+        .expect("old meta must be seeded");
+    let cell = CardCell::new(directory.path(), &pair, term, understanding).cache();
+    let visual = cell
+        .visual(visual_revision())
+        .expect("visual revision must resolve");
+    seed_refresh_files(&cell, &visual);
+    let request = SentenceLabelSelection::empty().choosing(SentenceAxis::Level, 2);
+    let production = MetadataProduction::new(
+        directory.path().to_path_buf(),
+        GeminiAccess::unavailable(),
+        CostAccounting::new(None),
+    );
+    let attempt = production.generate(term, understanding, &pair, Some(&request), None);
+    let retained = CardMetaCache::new(directory.path())
+        .load(term, understanding, &pair)
+        .expect("old meta must remain readable")
+        .expect("old meta must remain cached");
+    assert_eq!(
+        (
+            attempt.error().is_some(),
+            retained.target_sentence(),
+            cell.exists(VOICE_FILE),
+            visual.exists(SCENE_FILE),
+            visual.exists(ILLUSTRATION_FILE),
+            visual.path().join(IMAGE_ATTEMPTS_DIRECTORY).exists(),
+        ),
+        (true, old.target_sentence(), true, true, true, true),
+        "failed requested refresh deleted usable metadata or dependent artifacts"
+    );
+}
+
+#[test]
+fn successful_meta_refresh_clears_dependents_and_attempts_but_preserves_costs() {
+    let directory = TempDir::new().expect("tempdir must be created");
+    let pair = LanguagePair::new("fr", "en");
+    let term = "canard";
+    let understanding = "a duck";
+    let old = labeled_meta(
+        SentenceLevel::A2,
+        SentenceKind::Statement,
+        AxisSet::default(),
+    );
+    CardMetaCache::new(directory.path())
+        .store(term, understanding, &pair, &old)
+        .expect("old meta must be seeded");
+    let cell = CardCell::new(directory.path(), &pair, term, understanding).cache();
+    let visual = cell
+        .visual(visual_revision())
+        .expect("visual revision must resolve");
+    seed_refresh_files(&cell, &visual);
+    let production = MetadataProduction::new(
+        directory.path().to_path_buf(),
+        GeminiAccess::unavailable(),
+        CostAccounting::new(None),
+    );
+    let replacement = labeled_meta(
+        SentenceLevel::B1,
+        SentenceKind::Question,
+        AxisSet::from_axes([SentenceAxis::Level, SentenceAxis::Type]),
+    );
+    let _guards = ArtifactGuards::hold(&cell, &visual).expect("refresh locks must be acquired");
+    production
+        .replace_generated(&cell, &visual, term, understanding, &pair, &replacement)
+        .expect("replacement transaction must commit");
+    let stored = CardMetaCache::new(directory.path())
+        .load(term, understanding, &pair)
+        .expect("replacement meta must decode")
+        .expect("replacement meta must exist");
+    assert_eq!(
+        (
+            stored.target_sentence(),
+            cell.exists(VOICE_FILE),
+            visual.exists(SCENE_FILE),
+            visual.exists(ILLUSTRATION_FILE),
+            visual.exists(SCENE_ATTEMPT_FILE),
+            visual.exists(PICTURE_REQUESTS_FILE),
+            visual.path().join(IMAGE_ATTEMPTS_DIRECTORY).exists(),
+            cell.exists(META_COST_FILE),
+            cell.exists(VOICE_COST_FILE),
+            visual.exists(SCENE_COST_FILE),
+            visual.exists(ILLUSTRATION_COST_FILE),
+        ),
+        (
+            replacement.target_sentence(),
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            true,
+            true,
+            true,
+        ),
+        "metadata refresh retained stale dependents, erased costs, or missed the replacement"
     );
 }
 
@@ -118,6 +443,35 @@ fn card_meta(sentence: &str) -> CardMeta {
         "A concise context",
         sentence,
     )
+}
+
+fn labeled_meta(level: SentenceLevel, kind: SentenceKind, pinned: AxisSet) -> CardMeta {
+    card_meta(format!("A {level:?} {kind:?} sentence").as_str()).with_sentence_labels(
+        SentenceLabels::new(Register::Neutral, level, kind, pinned, AxisSet::default()),
+    )
+}
+
+fn seed_refresh_files(cell: &Cache, visual: &Cache) {
+    for (cache, filename) in [
+        (cell, META_COST_FILE),
+        (cell, VOICE_FILE),
+        (cell, VOICE_COST_FILE),
+        (visual, SCENE_FILE),
+        (visual, SCENE_ATTEMPT_FILE),
+        (visual, SCENE_COST_FILE),
+        (visual, ILLUSTRATION_FILE),
+        (visual, ILLUSTRATION_COST_FILE),
+        (visual, PICTURE_REQUESTS_FILE),
+    ] {
+        fs::write(
+            cache.filepath(filename).expect("fixture path must resolve"),
+            b"fixture",
+        )
+        .expect("refresh fixture must be written");
+    }
+    let attempts = visual.path().join(IMAGE_ATTEMPTS_DIRECTORY);
+    fs::create_dir_all(&attempts).expect("attempt directory must be created");
+    fs::write(attempts.join("attempt-0001.json"), b"{}").expect("attempt must be written");
 }
 
 #[derive(Clone, Default)]

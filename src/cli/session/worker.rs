@@ -131,6 +131,12 @@ impl Reporter for SessionReporter {
                 draft.understanding = String::from(settled.understanding());
                 draft.costs = costs;
                 draft.rewrite = settled.rewrite().cloned();
+                draft.meta_request =
+                    if artifact == Artifact::Meta && matches!(outcome, StepOutcome::Ready { .. }) {
+                        None
+                    } else {
+                        settled.meta_request().cloned()
+                    };
                 record.progress = Some(progress);
             }
             Ok(())
@@ -270,13 +276,18 @@ fn drafts_with_costs(
         .iter()
         .zip(absolute)
         .map(|(draft, costs)| {
-            Ok(CardDraft::new(
+            let hydrated = CardDraft::new(
                 draft.term.as_str(),
                 draft.understanding.as_str(),
                 pair.clone(),
-            )
-            .with_rewrite(draft.rewrite.clone())
-            .with_costs(costs))
+            );
+            let hydrated = match &draft.meta_request {
+                Some(selection) => hydrated.requesting_meta(selection.clone()),
+                None => hydrated,
+            };
+            Ok(hydrated
+                .with_rewrite(draft.rewrite.clone())
+                .with_costs(costs))
         })
         .collect()
 }
@@ -459,6 +470,7 @@ mod tests {
             understanding: String::from("a duck"),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: None,
+            meta_request: None,
         }];
         record.phase = Phase::Generating;
         record.worker = Some(WorkerHandle {
@@ -693,6 +705,99 @@ mod tests {
                 .cost(),
             Some(crate::session::GenerationCost::from_nanos(730_000_000)),
             "worker restart trusted stale DraftRecord costs instead of the provider-boundary journal"
+        );
+    }
+
+    #[test]
+    fn a_restarted_worker_restores_the_pending_initial_meta_request() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let mut record = generating_session(&store, 1);
+        let request = crate::session::SentenceLabelSelection::empty()
+            .choosing(crate::session::SentenceAxis::Level, 2);
+        record.drafts[0].meta_request = Some(request.clone());
+        let journal = store.cost_journal(&record);
+        journal
+            .seed(
+                record
+                    .drafts
+                    .iter()
+                    .map(|draft| draft.costs)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
+            .expect("journal must seed");
+        let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
+        assert_eq!(
+            drafts_with_costs(&record, &pair, &journal).expect("worker drafts must hydrate")[0]
+                .meta_request(),
+            Some(&request),
+            "worker restart discarded an initial metadata request that had not completed"
+        );
+    }
+
+    #[test]
+    fn a_restarted_worker_prefers_a_rewrite_over_a_corrupt_initial_request() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let mut record = generating_session(&store, 1);
+        record.drafts[0].meta_request = Some(
+            crate::session::SentenceLabelSelection::empty()
+                .choosing(crate::session::SentenceAxis::Level, 2),
+        );
+        record.drafts[0].rewrite = Some(crate::session::CardRewrite::new(
+            None,
+            crate::session::SentenceLabelSelection::empty()
+                .choosing(crate::session::SentenceAxis::Register, 2),
+            "",
+        ));
+        let journal = store.cost_journal(&record);
+        journal
+            .seed(
+                record
+                    .drafts
+                    .iter()
+                    .map(|draft| draft.costs)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
+            .expect("journal must seed");
+        let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
+        let hydrated = drafts_with_costs(&record, &pair, &journal)
+            .expect("worker drafts must hydrate")
+            .remove(0);
+        assert_eq!(
+            (hydrated.meta_request(), hydrated.rewrite().is_some()),
+            (None, true),
+            "worker hydration let a corrupt initial request override a durable rewrite"
+        );
+    }
+
+    #[test]
+    fn a_successful_meta_step_clears_the_durable_initial_request() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        let request = crate::session::SentenceLabelSelection::empty()
+            .choosing(crate::session::SentenceAxis::Level, 2);
+        store
+            .update("fr-1", |record| {
+                record.drafts[0].meta_request = Some(request.clone());
+                Ok(())
+            })
+            .expect("initial request must persist");
+        let settled = CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en"))
+            .requesting_meta(request);
+        reporter(&store, 1).step(
+            0,
+            &settled,
+            Artifact::Meta,
+            StepOutcome::Ready { cached: false },
+        );
+        assert_eq!(
+            store.open("fr-1").expect("reopen").drafts[0].meta_request,
+            None,
+            "a successful metadata step left the initial request pending on disk"
         );
     }
 

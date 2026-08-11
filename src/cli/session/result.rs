@@ -66,6 +66,9 @@ pub(super) fn result(args: &ResultArgs, render: Render) -> Result<()> {
     let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let cache = CardMetaCache::new(root);
     for draft in &record.drafts {
+        if view::awaits_initial_meta(draft) {
+            continue;
+        }
         if let Some(meta) = cache.load(draft.term.as_str(), draft.understanding.as_str(), &pair)? {
             print_card(draft, &record, &meta);
         }

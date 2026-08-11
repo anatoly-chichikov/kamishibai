@@ -79,6 +79,7 @@ pub(super) fn render_card_meta_prompt(
     term: &str,
     understanding: &str,
     pair: &LanguagePair,
+    request: Option<&SentenceLabelSelection>,
     catalog: &LanguageCatalog,
 ) -> Result<String> {
     let source = pair.known_profile(catalog)?;
@@ -96,7 +97,49 @@ pub(super) fn render_card_meta_prompt(
             ("{context_examples}", examples.context()?),
             ("{term}", String::from(term)),
             ("{understanding}", String::from(understanding)),
+            (
+                "{initial_approx_schema}",
+                String::from(initial_approx_schema(request)),
+            ),
+            (
+                "{initial_approx_rule}",
+                String::from(initial_approx_rule(request)),
+            ),
+            (
+                "{initial_sentence_preferences}",
+                initial_sentence_preferences(request),
+            ),
         ],
+    )
+}
+
+fn initial_approx_schema(request: Option<&SentenceLabelSelection>) -> &'static str {
+    if has_initial_preferences(request) {
+        "[\"<requested axis that could not be fulfilled exactly; omit fulfilled and unrequested axes>\"]"
+    } else {
+        "[]"
+    }
+}
+
+fn initial_approx_rule(request: Option<&SentenceLabelSelection>) -> &'static str {
+    if has_initial_preferences(request) {
+        "`approx` is empty when every requested axis is fulfilled exactly; otherwise it contains only the requested axes whose returned natural sentence labels differ from the preset."
+    } else {
+        "`approx` is always an empty array."
+    }
+}
+
+fn has_initial_preferences(request: Option<&SentenceLabelSelection>) -> bool {
+    request.is_some_and(|request| !request.pinned().is_empty())
+}
+
+fn initial_sentence_preferences(request: Option<&SentenceLabelSelection>) -> String {
+    let Some(request) = request.filter(|request| !request.pinned().is_empty()) else {
+        return String::new();
+    };
+    format!(
+        "\n\n  Initial sentence preset: {}. This explicit preset overrides the preceding no-target rule for exactly the named axes. Treat each named value as a constraint while preserving the approved term, sense, form, and naturally required register. Satisfy it exactly when possible; otherwise return the closest natural sentence and name only that requested axis in `approx`. Unnamed axes remain descriptive.",
+        requested_labels(request)
     )
 }
 
@@ -233,7 +276,8 @@ fn render(template: &str, values: &[(&str, String)]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
+        CARD_META_PROMPT, language_label, render, render_bulk_prompt, render_card_meta_prompt,
+        render_card_prompt, render_intake_prompt,
     };
     use crate::application::LearningTarget;
     use crate::languages::catalog;
@@ -279,6 +323,7 @@ mod tests {
             "canard",
             "eine Zeitungsente",
             &LanguagePair::new("fr", "de"),
+            None,
             &catalog(),
         )
         .expect("german card meta prompt must render");
@@ -296,6 +341,7 @@ mod tests {
             "canard",
             "a duck",
             &LanguagePair::new("fr", "en"),
+            None,
             &catalog(),
         )
         .expect("three-axis card meta prompt must render");
@@ -335,6 +381,88 @@ mod tests {
                 && !prompt.contains("20 natural words")
                 && !prompt.contains("\"grammar\":"),
             "card meta prompt turned post-hoc CEFR attribution into a generation target"
+        );
+    }
+
+    #[test]
+    fn empty_initial_preferences_leave_the_legacy_prompt_byte_for_byte() {
+        let pair = LanguagePair::new("fr", "en");
+        let catalog = catalog();
+        let source = pair
+            .known_profile(&catalog)
+            .expect("source language must resolve");
+        let examples = catalog
+            .prompts(source.code)
+            .expect("prompt examples must resolve");
+        let legacy_template = CARD_META_PROMPT
+            .replace("{initial_approx_schema}", "[]")
+            .replace(
+                "{initial_approx_rule}",
+                "`approx` is always an empty array.",
+            )
+            .replace("{initial_sentence_preferences}", "");
+        let legacy = render(
+            legacy_template.as_str(),
+            &[
+                (
+                    "{target_language}",
+                    language_label(&catalog, pair.learning())
+                        .expect("target language label must render"),
+                ),
+                (
+                    "{source_language}",
+                    language_label(&catalog, source.code)
+                        .expect("source language label must render"),
+                ),
+                ("{hint_length}", String::from(examples.hint_length())),
+                (
+                    "{hint_examples}",
+                    examples.hint().expect("hint examples must render"),
+                ),
+                (
+                    "{context_examples}",
+                    examples.context().expect("context examples must render"),
+                ),
+                ("{term}", String::from("canard")),
+                ("{understanding}", String::from("a duck")),
+            ],
+        )
+        .expect("legacy card meta prompt must render");
+        assert_eq!(
+            render_card_meta_prompt("canard", "a duck", &pair, None, &catalog)
+                .expect("default card meta prompt must render"),
+            legacy,
+            "empty initial preferences changed the legacy card meta prompt bytes"
+        );
+    }
+
+    #[test]
+    fn initial_preferences_render_only_the_pinned_level_and_type() {
+        let request = SentenceLabelSelection::empty()
+            .choosing(SentenceAxis::Level, 2)
+            .choosing(SentenceAxis::Type, 1);
+        let prompt = render_card_meta_prompt(
+            "canard",
+            "a duck",
+            &LanguagePair::new("fr", "en"),
+            Some(&request),
+            &catalog(),
+        )
+        .expect("requested card meta prompt must render");
+        assert!(
+            prompt.contains(
+                "Initial sentence preset: type=\"question\" (changed) · level=\"b1\" (changed)"
+            ) && prompt.contains("otherwise return the closest natural sentence")
+                && prompt.contains(
+                    "\"approx\":[\"<requested axis that could not be fulfilled exactly; omit fulfilled and unrequested axes>\"]"
+                )
+                && prompt.contains(
+                    "`approx` is empty when every requested axis is fulfilled exactly"
+                )
+                && !prompt.contains("\"approx\":[]")
+                && !prompt.contains("`approx` is always an empty array")
+                && !prompt.contains("register=\""),
+            "initial card meta prompt kept a contradictory approximation rule or invented a register preference"
         );
     }
 
@@ -466,6 +594,7 @@ mod tests {
             "{understanding}",
             "chosen sense",
             &LanguagePair::new("fr", "en"),
+            None,
             &catalog(),
         )
         .expect("card meta prompt with placeholder-shaped input must render");
@@ -484,6 +613,7 @@ mod tests {
             "承認",
             "同意して認めること",
             &LanguagePair::new("en", "ja"),
+            None,
             &catalog(),
         )
         .expect("japanese card prompt must render");
@@ -507,8 +637,14 @@ mod tests {
                     let pair = LanguagePair::new(learning, known);
                     let draft = CardDraft::new("term", "one precise sense", pair.clone());
                     render_bulk_prompt(&candidate, "add one sense", &pair, &catalog).is_ok()
-                        && render_card_meta_prompt("term", "one precise sense", &pair, &catalog)
-                            .is_ok()
+                        && render_card_meta_prompt(
+                            "term",
+                            "one precise sense",
+                            &pair,
+                            None,
+                            &catalog,
+                        )
+                        .is_ok()
                         && render_card_prompt(&draft, "make it shorter", &pair, &catalog).is_ok()
                 })
         });

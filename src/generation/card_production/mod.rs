@@ -24,6 +24,7 @@ use crate::gemini::GeminiAccess;
 use crate::languages::LanguageCatalog;
 use crate::session::{
     ArtifactAttempt, ArtifactFile, CardDraft, CardMeta, CardRevision, GenerationCost, LanguagePair,
+    SentenceLabelSelection,
 };
 
 use cost_accounting::CostAccounting;
@@ -75,9 +76,10 @@ impl CardMetaGeneration for GeminiCardProduction {
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
+        request: Option<&SentenceLabelSelection>,
     ) -> Result<CardMeta> {
         self.metadata
-            .generate(term, understanding, pair, None)
+            .generate(term, understanding, pair, request, None)
             .into_result()
             .map(|(meta, _file)| meta)
     }
@@ -112,9 +114,10 @@ impl CardProduction for GeminiCardProduction {
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
+        request: Option<&SentenceLabelSelection>,
     ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
         self.metadata
-            .generate(term, understanding, pair, Some(slot))
+            .generate(term, understanding, pair, request, Some(slot))
     }
 
     fn generate_draft_meta_in(
@@ -132,6 +135,7 @@ impl CardProduction for GeminiCardProduction {
                 draft.term(),
                 draft.understanding(),
                 draft.pair(),
+                draft.meta_request(),
                 Some(slot),
             )
             .map(|(meta, file)| (CardRevision::new(term, understanding, meta), file))

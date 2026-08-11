@@ -129,6 +129,18 @@ fn your_words_footer_keeps_paste_shortcut() {
 }
 
 #[test]
+fn armed_words_clear_makes_escape_the_only_primary_action() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob("whilst")
+        .with_word_clear_pending(true);
+    let rendered = flatten(&app);
+    assert!(
+        rendered.contains("[Esc] again") && !rendered.contains("[Ctrl+G] continue"),
+        "armed words clear competed with another primary footer action: {rendered}"
+    );
+}
+
+#[test]
 fn busy_loader_covers_the_current_screen_with_request_status() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .busy_started(BusyKind::Understanding)

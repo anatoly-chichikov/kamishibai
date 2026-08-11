@@ -19,8 +19,18 @@ use crate::tui::app::App;
 use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
 
+use super::sentence_labels::BatchEditorControl;
+
 const HEADLINE: &str = "what i understood";
 const HINT: &str = "quick check before i build the cards";
+const SETTINGS_LABEL: &str = "generation guidance";
+const DEFAULT_GUIDANCE_LABEL: &str = "best fit";
+
+/// One clickable surface in the batch sentence-settings block.
+pub(crate) enum SentenceSettingsControl {
+    Open,
+    Editor(BatchEditorControl),
+}
 
 /// `ScreenView` handle for the sense-check screen.
 pub struct WhatIUnderstood;
@@ -74,22 +84,35 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
             .style(palette::base());
     }
     let term_width = candidate_label_width(app.candidates(), 12);
-    let mut lines = Vec::new();
+    let mut lines = vec![settings_summary_line(app)];
+    if let Some(focused) = app.sentence_settings_editor() {
+        lines.extend(super::sentence_labels::batch_editor_lines(
+            app.sentence_settings(),
+            focused,
+            usize::from(width),
+        ));
+    }
+    lines.push(Line::from(""));
+    let selected = if app.sentence_settings_editor().is_some() {
+        usize::MAX
+    } else {
+        app.selected()
+    };
     for (index, candidate) in app.candidates().iter().enumerate() {
         let expanded = app.expanded_sense();
         if expanded.as_ref().map(|item| item.row) == Some(index) {
+            let expanded = expanded
+                .as_ref()
+                .expect("invariant: row is the expanded one");
             lines.extend(candidate_line(
                 index,
                 candidate,
-                app.selected(),
-                true,
+                selected,
+                Some(expanded.selected.len()),
                 Gloss::Sentence(sense_text(candidate.sense())),
                 term_width,
                 width,
             ));
-            let expanded = expanded
-                .as_ref()
-                .expect("invariant: row is the expanded one");
             for (sense_index, sense) in candidate.senses().iter().enumerate() {
                 lines.extend(sense_line(
                     sense_index,
@@ -107,18 +130,14 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
             ));
         } else if candidate.ok() && candidate.selected_count() > 1 {
             lines.extend(candidate_block(
-                index,
-                candidate,
-                app.selected(),
-                term_width,
-                width,
+                index, candidate, selected, term_width, width,
             ));
         } else {
             lines.extend(candidate_line(
                 index,
                 candidate,
-                app.selected(),
-                false,
+                selected,
+                None,
                 Gloss::Sentence(sense_text(candidate.sense())),
                 term_width,
                 width,
@@ -135,14 +154,8 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
     if !app.candidates().is_empty() {
         let expanded_row = app.expanded_sense().map(|item| item.row);
         let term_width = candidate_label_width(app.candidates(), 12);
-        let total: usize = app
-            .candidates()
-            .iter()
-            .enumerate()
-            .map(|(index, candidate)| {
-                candidate_rows(candidate, expanded_row == Some(index), term_width, width)
-            })
-            .sum();
+        let total = candidate_content_height(app, width, expanded_row, term_width)
+            .saturating_add(review_prefix_height(app, width));
         return u16::try_from(total).unwrap_or(u16::MAX);
     }
     let typed = app
@@ -152,6 +165,90 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
         .filter(|line| !line.is_empty())
         .count();
     u16::try_from(typed).unwrap_or(u16::MAX)
+}
+
+fn settings_summary_line(app: &App) -> Line<'static> {
+    let settings = app.sentence_settings();
+    let mut spans = vec![Span::styled(format!("{SETTINGS_LABEL}  "), palette::dim())];
+    if app.sentence_settings_editor().is_some() {
+        return Line::from(spans);
+    }
+    if settings.level().is_none() && !settings.types().pins() {
+        spans.push(Span::styled(
+            format!(" {DEFAULT_GUIDANCE_LABEL} "),
+            super::sentence_labels::tag_style(false),
+        ));
+        return Line::from(spans);
+    }
+    if let Some(level) = settings.level() {
+        spans.push(Span::styled(
+            format!(" {} ", level.token()),
+            super::sentence_labels::tag_style(true),
+        ));
+    }
+    if settings.types().pins() {
+        if settings.level().is_some() {
+            spans.push(Span::styled(" ", palette::base()));
+        }
+        spans.push(Span::styled(
+            format!(" {} ", settings.types().token()),
+            super::sentence_labels::tag_style(true),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn review_prefix_height(app: &App, width: usize) -> usize {
+    2usize.saturating_add(
+        app.sentence_settings_editor()
+            .map(|focused| {
+                super::sentence_labels::batch_editor_lines(app.sentence_settings(), focused, width)
+                    .len()
+            })
+            .unwrap_or(0),
+    )
+}
+
+fn candidate_content_height(
+    app: &App,
+    width: usize,
+    expanded_row: Option<usize>,
+    term_width: usize,
+) -> usize {
+    app.candidates()
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| {
+            candidate_rows(candidate, expanded_row == Some(index), term_width, width)
+        })
+        .sum()
+}
+
+/// Return the batch sentence-settings control occupying one body-content cell.
+pub(crate) fn sentence_settings_control_at(
+    app: &App,
+    width: usize,
+    column: usize,
+    row: usize,
+) -> Option<SentenceSettingsControl> {
+    if app.candidates().is_empty() {
+        return None;
+    }
+    if row == 0 {
+        let summary_width = settings_summary_line(app).width();
+        return (app.expanded_sense().is_none() && column < summary_width)
+            .then_some(SentenceSettingsControl::Open);
+    }
+    let focused = app.sentence_settings_editor()?;
+    let editor_row = row.checked_sub(1)?;
+    super::sentence_labels::batch_editor_control_at(
+        app.sentence_settings(),
+        focused,
+        width,
+        column,
+        editor_row,
+    )
+    .map(SentenceSettingsControl::Editor)
 }
 
 fn pending_line<'a>(index: usize, raw: &'a str, term_width: usize, width: u16) -> Line<'a> {
@@ -182,13 +279,14 @@ fn candidate_line<'a>(
     index: usize,
     candidate: &'a WordCandidate,
     selected: usize,
-    expanded: bool,
+    expanded_count: Option<usize>,
     gloss: Gloss,
     term_width: usize,
     width: u16,
 ) -> Vec<Line<'a>> {
+    let expanded = expanded_count.is_some();
     let is_selected = index == selected && !expanded;
-    let is_dimmed_parent = index == selected && expanded;
+    let is_expanded_parent = index == selected && expanded;
     let row_style = if is_selected {
         palette::highlight()
     } else {
@@ -201,8 +299,8 @@ fn candidate_line<'a>(
     };
     let term_style = if !candidate.ok() {
         palette::dim().add_modifier(Modifier::CROSSED_OUT)
-    } else if is_dimmed_parent {
-        palette::dim()
+    } else if is_expanded_parent {
+        palette::base()
     } else if is_selected {
         palette::highlight().add_modifier(Modifier::BOLD)
     } else {
@@ -210,12 +308,14 @@ fn candidate_line<'a>(
     };
     let dash_style = if !candidate.ok() {
         palette::dim2()
+    } else if is_expanded_parent {
+        palette::dim()
     } else if is_selected {
         palette::highlight_dim()
     } else {
         palette::dim2()
     };
-    let gloss_style = if !candidate.ok() || is_dimmed_parent {
+    let gloss_style = if !candidate.ok() || is_expanded_parent {
         palette::dim()
     } else if is_selected {
         palette::highlight_dim().add_modifier(Modifier::BOLD)
@@ -223,7 +323,7 @@ fn candidate_line<'a>(
         palette::dim()
     };
     let label_width = candidate_label_len(candidate);
-    let indicator = inline_indicator(candidate);
+    let indicator = inline_indicator(candidate, expanded_count);
     let pad_after_label = term_width.saturating_sub(label_width);
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled(format!("{:0>2}  ", index + 1), num_style));
@@ -274,13 +374,12 @@ fn sense_line<'a>(
     width: u16,
 ) -> Vec<Line<'a>> {
     let focused = index == cursor;
-    let marker = if selected.contains(&index) {
-        "  ✓ "
-    } else {
-        "    "
-    };
+    let checked = selected.contains(&index);
+    let marker = if checked { "  ✓ " } else { "    " };
     let style = if focused {
-        palette::highlight_dim().add_modifier(Modifier::BOLD)
+        palette::highlight().add_modifier(Modifier::BOLD)
+    } else if checked {
+        palette::base()
     } else {
         palette::dim()
     };
@@ -395,10 +494,21 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
     if app.candidates().is_empty() {
         return None;
     }
-    let selected = app.selected().min(app.candidates().len() - 1);
     let expanded_row = app.expanded_sense().map(|item| item.row);
     let term_width = candidate_label_width(app.candidates(), 12);
-    let mut offset = 0usize;
+    if let Some(focused) = app.sentence_settings_editor() {
+        let (start, height) = super::sentence_labels::batch_editor_focus_range(
+            app.sentence_settings(),
+            focused,
+            width,
+        );
+        return Some((
+            u16::try_from(1usize.saturating_add(start)).unwrap_or(u16::MAX),
+            u16::try_from(height).unwrap_or(u16::MAX),
+        ));
+    }
+    let selected = app.selected().min(app.candidates().len() - 1);
+    let mut offset = review_prefix_height(app, width);
     for (index, candidate) in app.candidates().iter().enumerate() {
         if index != selected {
             offset = offset.saturating_add(candidate_rows(
@@ -456,7 +566,7 @@ fn candidate_block<'a>(
         index,
         candidate,
         selected,
-        false,
+        None,
         Gloss::Heading(String::from(MEANINGS_LABEL)),
         term_width,
         width,
@@ -525,7 +635,7 @@ fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
     let text = "+ add more";
     let used = indent + marker.chars().count() + text.chars().count();
     let style = if focused {
-        palette::highlight_dim().add_modifier(Modifier::BOLD)
+        palette::highlight().add_modifier(Modifier::BOLD)
     } else {
         palette::dim()
     };
@@ -546,11 +656,11 @@ fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
     Line::from(spans)
 }
 
-fn inline_indicator(candidate: &WordCandidate) -> Option<String> {
+fn inline_indicator(candidate: &WordCandidate, selected_count: Option<usize>) -> Option<String> {
     if candidate.ok() && candidate.has_multiple_senses() {
         return Some(format!(
             "{}/{}",
-            candidate.selected_count(),
+            selected_count.unwrap_or_else(|| candidate.selected_count()),
             candidate.senses().len()
         ));
     }
@@ -567,7 +677,7 @@ fn candidate_label_width(candidates: &[WordCandidate], minimum: usize) -> usize 
 }
 
 fn candidate_label_len(candidate: &WordCandidate) -> usize {
-    let indicator = inline_indicator(candidate)
+    let indicator = inline_indicator(candidate, None)
         .map(|value| 1 + value.chars().count())
         .unwrap_or(0);
     candidate.term().chars().count() + indicator
@@ -577,12 +687,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 2/3", palette::dim2()));
     left.push(super::common::status_sep());
-    let count = app
-        .candidates()
-        .iter()
-        .filter(|candidate| candidate.ok())
-        .map(WordCandidate::selected_count)
-        .sum::<usize>();
+    let count = review_card_count(app);
     if count > 0 {
         left.push(Span::styled(
             count.to_string(),
@@ -598,7 +703,14 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         left.push(Span::styled(message.to_string(), palette::dim()));
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
-    if app.expanded_sense().is_some() {
+    if app.sentence_settings_editor().is_some() {
+        if count > 0 {
+            hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
+        }
+        hints.push(super::common::FooterHint::secondary("← →", "pick"));
+        hints.push(super::common::FooterHint::ghost("↑ ↓", "row"));
+        hints.push(super::common::FooterHint::ghost("Esc", "close"));
+    } else if app.expanded_sense().is_some() {
         let controls = if app.expanded_add_more_focused() {
             DisclosureControls::new(true).with_action("add")
         } else {
@@ -616,10 +728,34 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         if count > 0 {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
+        if !app.candidates().is_empty() && app.selected() == 0 {
+            hints.push(super::common::sentence_settings_hint());
+        }
         hints.push(DisclosureControls::new(false).secondary_toggle());
+        hints.push(super::common::back_hint());
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     }
-    hints.push(super::common::quit_hint(app.quit_pending()));
+    if app.sentence_settings_editor().is_none() {
+        hints.push(super::common::quit_hint(app.quit_pending()));
+    }
     super::common::footer_bar(left, hints, width)
+}
+
+fn review_card_count(app: &App) -> usize {
+    let expanded = app.expanded_sense();
+    app.candidates()
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| candidate.ok())
+        .map(|(row, candidate)| {
+            expanded
+                .as_ref()
+                .filter(|selection| selection.row == row)
+                .map_or_else(
+                    || candidate.selected_count(),
+                    |selection| selection.selected.len(),
+                )
+        })
+        .sum()
 }
