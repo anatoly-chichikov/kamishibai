@@ -1,7 +1,9 @@
 //! Tests for language profiles, naming, labels, and fonts.
 
 use anyhow::Result;
-use kamishibai::languages::{LanguageEntry, ReportLabels, catalog, language};
+use kamishibai::languages::{
+    LanguageEntry, OcrModel, ReportLabels, TextDirection, TextGate, catalog, language,
+};
 use kamishibai::vocabulary::{
     Importance, LanguageCode, NonEmptyText, VocabularyEntry, VocabularySource, VocabularyTarget,
 };
@@ -48,10 +50,16 @@ fn score(value: u8) -> Importance {
 fn english_profile_keeps_the_frozen_runtime_values() -> Result<()> {
     let item = language("en")?;
     assert_eq!(
-        (item.prompt, item.ocr, item.naming.name),
+        (
+            item.prompt,
+            item.text_gate,
+            item.direction,
+            item.naming.name,
+        ),
         (
             String::from("English"),
-            String::from("eng"),
+            TextGate::Ocr(OcrModel::En),
+            TextDirection::Ltr,
             String::from("English Vocabulary"),
         ),
         "english profile drifted away from the frozen runtime values"
@@ -67,7 +75,8 @@ fn dutch_profile_exposes_the_complete_production_contract() -> Result<()> {
         (
             item.code,
             item.prompt,
-            item.ocr,
+            item.text_gate,
+            item.direction,
             item.naming.name,
             item.naming.prefix,
             item.labels.sentence,
@@ -78,7 +87,8 @@ fn dutch_profile_exposes_the_complete_production_contract() -> Result<()> {
         (
             "nl",
             String::from("Dutch"),
-            String::from("eng+nld"),
+            TextGate::Ocr(OcrModel::Latin),
+            TextDirection::Ltr,
             String::from("Dutch Vocabulary"),
             String::from("nl"),
             String::from("Vertaling"),
@@ -107,7 +117,8 @@ fn registry_keeps_the_supported_codes_in_stable_order() {
     assert_eq!(
         catalog().codes(),
         [
-            "en", "zh", "es", "ja", "fr", "de", "ru", "it", "pt", "el", "nl",
+            "en", "zh", "es", "ja", "fr", "de", "ko", "ru", "it", "pt", "hi", "ar", "tr", "pl",
+            "uk", "id", "vi", "th", "el", "he", "nl",
         ],
         "profile registry codes no longer match the frozen order"
     );

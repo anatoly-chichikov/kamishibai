@@ -64,7 +64,7 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
         if !typed.is_empty() {
             let term_width = typed
                 .iter()
-                .map(|line| line.chars().count())
+                .map(|line| super::common::display_width(line))
                 .max()
                 .unwrap_or(12)
                 .max(12);
@@ -338,7 +338,7 @@ fn candidate_line<'a>(
         Gloss::Sentence(text) => ("  —  ", text),
         Gloss::Heading(text) => ("  ", text),
     };
-    let gloss_start = 4 + term_width + separator.chars().count();
+    let gloss_start = 4 + term_width + super::common::display_width(separator);
     let available = (width as usize).saturating_sub(gloss_start).max(1);
     let chunks = super::common::wrap_words(gloss.as_str(), available, available);
     let first = chunks.first().cloned().unwrap_or_default();
@@ -606,14 +606,14 @@ fn marked_lines<'a>(
     pad_style: Style,
     width: u16,
 ) -> Vec<Line<'a>> {
-    let start = indent + marker.chars().count();
+    let start = indent + super::common::display_width(marker);
     let available = (width as usize).saturating_sub(start).max(1);
     let chunks = super::common::wrap_words(text, available, available);
     let mut lines = Vec::with_capacity(chunks.len());
     for (index, chunk) in chunks.into_iter().enumerate() {
         let row_marker = if index == 0 { marker } else { "" };
         let row_indent = if index == 0 { indent } else { start };
-        let row_start = row_indent + row_marker.chars().count();
+        let row_start = row_indent + super::common::display_width(row_marker);
         let used = row_start + super::common::display_width(chunk.as_str());
         let pad = (width as usize).saturating_sub(used);
         let mut spans = vec![
@@ -633,7 +633,7 @@ fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
     let indent = 4 + term_width + 5;
     let marker = "    ";
     let text = "+ add more";
-    let used = indent + marker.chars().count() + text.chars().count();
+    let used = indent + super::common::display_width(marker) + super::common::display_width(text);
     let style = if focused {
         palette::highlight().add_modifier(Modifier::BOLD)
     } else {
@@ -678,9 +678,9 @@ fn candidate_label_width(candidates: &[WordCandidate], minimum: usize) -> usize 
 
 fn candidate_label_len(candidate: &WordCandidate) -> usize {
     let indicator = inline_indicator(candidate, None)
-        .map(|value| 1 + value.chars().count())
+        .map(|value| 1 + super::common::display_width(value.as_str()))
         .unwrap_or(0);
-    candidate.term().chars().count() + indicator
+    super::common::display_width(candidate.term()) + indicator
 }
 
 fn footer(app: &App, width: u16) -> Paragraph<'static> {

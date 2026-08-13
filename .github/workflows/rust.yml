@@ -39,6 +39,7 @@ jobs:
             fonts-dejavu-core \
             fonts-liberation2 \
             fonts-noto-cjk \
+            fonts-noto-core \
             libclang-dev \
             libfontconfig1-dev \
             libfreetype6-dev \
@@ -71,6 +72,7 @@ jobs:
             fonts-dejavu-core \
             fonts-liberation2 \
             fonts-noto-cjk \
+            fonts-noto-core \
             libclang-dev \
             libfontconfig1-dev \
             libfreetype6-dev \

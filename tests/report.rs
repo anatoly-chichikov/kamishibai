@@ -51,6 +51,72 @@ fn entry(word: &str, source: &str, target: &str) -> VocabularyEntry {
     }
 }
 
+/// Create one strict multilingual entry whose fields exercise a script's
+/// shaping, combining marks, or font coverage.
+fn source_scripted_entry(fields: [&str; 8]) -> VocabularyEntry {
+    let [
+        highlight,
+        term,
+        source_sentence,
+        source_hint,
+        source_context,
+        source,
+        target_sentence,
+        target,
+    ] = fields;
+    VocabularyEntry {
+        term: text(term),
+        meaning: text(highlight),
+        pronunciation: text("/proof/"),
+        transcription: text(term),
+        importance: score(5),
+        source: VocabularySource {
+            sentence: text(source_sentence),
+            lang: code(source),
+            highlight: text(highlight),
+            hint: text(source_hint),
+            context: text(source_context),
+        },
+        target: VocabularyTarget {
+            sentence: text(target_sentence),
+            lang: code(target),
+        },
+    }
+}
+
+/// Create a role-correct reversed entry so each complex script is exercised
+/// as target sentence and lemma rather than only as source context.
+fn reversed_scripted_entry(fields: [&str; 8]) -> VocabularyEntry {
+    let [
+        term,
+        meaning,
+        source_sentence,
+        source_hint,
+        source_context,
+        target,
+        target_sentence,
+        source,
+    ] = fields;
+    VocabularyEntry {
+        term: text(term),
+        meaning: text(meaning),
+        pronunciation: text("/proof/"),
+        transcription: text(term),
+        importance: score(5),
+        source: VocabularySource {
+            sentence: text(source_sentence),
+            lang: code(source),
+            highlight: text(meaning),
+            hint: text(source_hint),
+            context: text(source_context),
+        },
+        target: VocabularyTarget {
+            sentence: text(target_sentence),
+            lang: code(target),
+        },
+    }
+}
+
 /// Return one validated text fixture.
 fn text(value: &str) -> NonEmptyText {
     NonEmptyText::new(value).expect("test text must be valid")
@@ -429,6 +495,125 @@ fn card_sheets_render_mixed_script_content_without_panicking() -> Result<()> {
     assert!(
         bytes(&path) > 1000,
         "card sheets no longer render mixed-script content without panicking"
+    );
+    Ok(())
+}
+
+/// The production card-sheet boundary generates one parseable PDF containing
+/// every newly introduced complex-script font and both bidi directions.
+#[test]
+fn card_sheet_pdf_proves_rtl_and_complex_script_rendering() -> Result<()> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("cards-complex-scripts.pdf");
+    let mut sheet = CardSheet::new();
+    for item in [
+        source_scripted_entry([
+            "سلام",
+            "hello",
+            "سلام 2026، يا صديقي",
+            "تحية ودية",
+            "عبارة عربية قصيرة",
+            "ar",
+            "Hello, my friend",
+            "en",
+        ]),
+        reversed_scripted_entry([
+            "سلام",
+            "hello",
+            "I said hello to my friend",
+            "a friendly greeting",
+            "An Arabic greeting in the target sentence",
+            "ar",
+            "قلت سلام لصديقي",
+            "en",
+        ]),
+        reversed_scripted_entry([
+            "שלום",
+            "hello",
+            "I said hello to my friend",
+            "a friendly greeting",
+            "A Hebrew greeting in the target sentence",
+            "he",
+            "אמרתי שלום לחבר שלי",
+            "en",
+        ]),
+        reversed_scripted_entry([
+            "किताब",
+            "book",
+            "This book is very good",
+            "something to read",
+            "A Hindi noun in the target sentence",
+            "hi",
+            "यह किताब बहुत अच्छी है",
+            "en",
+        ]),
+        reversed_scripted_entry([
+            "เก่ง",
+            "skilled",
+            "They are very skilled",
+            "having strong ability",
+            "A Thai adjective in the target sentence",
+            "th",
+            "เขาเป็นคนเก่งมาก",
+            "en",
+        ]),
+        reversed_scripted_entry([
+            "친구",
+            "friend",
+            "I met a good friend",
+            "a close person",
+            "A Korean noun in the target sentence",
+            "ko",
+            "좋은 친구를 만났어요",
+            "en",
+        ]),
+        source_scripted_entry([
+            "שלום",
+            "hello",
+            "שלום 2026 חבר",
+            "ברכה ידידותית",
+            "משפט קצר בעברית",
+            "he",
+            "Hello, friend",
+            "en",
+        ]),
+        source_scripted_entry([
+            "किताब",
+            "book",
+            "यह एक अच्छी किताब है",
+            "पढ़ने की चीज़",
+            "देवनागरी मात्रा और संयुक्त अक्षर",
+            "hi",
+            "This is a good book",
+            "en",
+        ]),
+        source_scripted_entry([
+            "เก่ง",
+            "skilled",
+            "เขาเป็นคนเก่งมาก",
+            "มีความสามารถ",
+            "ภาษาไทยมีสระและวรรณยุกต์",
+            "th",
+            "They are very skilled",
+            "en",
+        ]),
+        source_scripted_entry([
+            "친구",
+            "friend",
+            "좋은 친구를 만났어요",
+            "가까운 사람",
+            "한국어 글꼴 적용 확인",
+            "ko",
+            "I met a good friend",
+            "en",
+        ]),
+    ] {
+        sheet.append(&item, None);
+    }
+    sheet.save(&path, &Thumbnail::new(256))?;
+    assert!(
+        pages(&path) == 3 && bytes(&path) > 50_000,
+        "the complex-script card sheet was not emitted as a substantial parseable PDF"
     );
     Ok(())
 }

@@ -170,7 +170,7 @@ fn line_for_row(index: usize, raw: &str, active: usize, width: u16) -> Line<'sta
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::styled(String::from(raw), style));
     if index == active {
-        let used = raw.chars().count();
+        let used = super::common::display_width(raw);
         let pad = (width as usize).saturating_sub(used);
         if pad > 0 {
             spans.push(Span::styled(" ".repeat(pad), palette::highlight()));

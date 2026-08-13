@@ -499,6 +499,7 @@ fn validate_dynamic(scene: &Value) -> Result<()> {
         bail!("manga_panel.panel_layout.special_device_budget must equal 1");
     }
     validate_semantic(root)?;
+    validate_image_facing_text(root)?;
     let panels = root
         .get("panels")
         .and_then(Value::as_array)
@@ -525,6 +526,576 @@ fn validate_dynamic(scene: &Value) -> Result<()> {
         validate_camera_program(page, panels)?;
     }
     Ok(())
+}
+
+fn validate_image_facing_text(root: &Map<String, Value>) -> Result<()> {
+    let spine = root
+        .get("semantic_spine")
+        .ok_or_else(|| anyhow!("dynamic scene must contain a semantic_spine object"))?;
+    validate_image_value(spine, "semantic_spine")?;
+    let panels = root
+        .get("panels")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("dynamic scene must contain a panels array"))?;
+    for panel in panels {
+        let id = required_string(panel, "/id", "panel id")?;
+        for (pointer, label) in [
+            ("/semantic_job", "semantic_job"),
+            (
+                "/shot_contract/visible_anchor",
+                "shot_contract.visible_anchor",
+            ),
+            (
+                "/shot_contract/camera_motivation",
+                "shot_contract.camera_motivation",
+            ),
+            (
+                "/shot_contract/information_gain",
+                "shot_contract.information_gain",
+            ),
+            ("/continuity/subject_phase", "continuity.subject_phase"),
+            (
+                "/continuity/match_on_action/action",
+                "continuity.match_on_action.action",
+            ),
+        ] {
+            if let Some(value) = panel.pointer(pointer) {
+                validate_image_value(value, format!("panel '{id}' {label}").as_str())?;
+            }
+        }
+        if let Some(value) = panel.get("scene") {
+            validate_image_value(value, format!("panel '{id}' scene").as_str())?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_image_value(value: &Value, label: &str) -> Result<()> {
+    match value {
+        Value::String(text) if requests_blank_information(text) => {
+            bail!("{label} requires a blank carrier to display semantic information")
+        }
+        Value::String(text) if requests_writing_like_marks(text) => {
+            bail!("{label} requests writing-like marks in the generated image")
+        }
+        Value::Array(items) => {
+            for item in items {
+                validate_image_value(item, label)?;
+            }
+        }
+        Value::Object(fields) => {
+            for item in fields.values() {
+                validate_image_value(item, label)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn requests_blank_information(value: &str) -> bool {
+    let normalized = value
+        .to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+    let sequence = normalized.split_whitespace().collect::<Vec<_>>();
+    let blank = ["blank", "empty", "unmarked", "featureless"];
+    let carriers = [
+        "calendar",
+        "calendars",
+        "document",
+        "documents",
+        "screen",
+        "screens",
+        "board",
+        "boards",
+    ];
+    let relations = [
+        "show",
+        "shows",
+        "showing",
+        "shown",
+        "display",
+        "displays",
+        "displaying",
+        "displayed",
+        "indicate",
+        "indicates",
+        "indicating",
+        "indicated",
+        "reveal",
+        "reveals",
+        "revealing",
+        "revealed",
+        "record",
+        "records",
+        "recording",
+        "recorded",
+        "prove",
+        "proves",
+        "proving",
+        "proven",
+        "contain",
+        "contains",
+        "containing",
+        "bear",
+        "bears",
+        "bearing",
+        "represent",
+        "represents",
+        "representing",
+        "evidence",
+        "evidences",
+        "evidencing",
+        "signal",
+        "signals",
+        "signaling",
+        "signalling",
+        "demonstrate",
+        "demonstrates",
+        "demonstrating",
+        "serve",
+        "serves",
+        "serving",
+        "proof",
+        "proofs",
+    ];
+    let information = [
+        "date",
+        "dates",
+        "deadline",
+        "deadlines",
+        "overdue",
+        "missed",
+        "status",
+        "statuses",
+        "data",
+        "progress",
+        "result",
+        "results",
+        "entry",
+        "entries",
+        "elapsed",
+        "expired",
+        "passed",
+    ];
+    let direct_information = ["deadline", "deadlines", "progress", "result", "results"];
+    let boundaries = [
+        "while",
+        "whereas",
+        "although",
+        "but",
+        "beside",
+        "alongside",
+        "near",
+        "behind",
+        "next",
+        "adjacent",
+        "opposite",
+        "and",
+        "with",
+    ];
+    sequence.iter().enumerate().any(|(carrier_index, word)| {
+        if !carriers.contains(word) || negated(&sequence, carrier_index) {
+            return false;
+        }
+        sequence.iter().enumerate().any(|(blank_index, word)| {
+            if !blank.contains(word)
+                || negated(&sequence, blank_index)
+                || carrier_index.abs_diff(blank_index) > 3
+            {
+                return false;
+            }
+            let tail_start = carrier_index.max(blank_index).saturating_add(1);
+            let direct_with = sequence
+                .get(tail_start..tail_start.saturating_add(4).min(sequence.len()))
+                .is_some_and(|tail| {
+                    tail.windows(2)
+                        .any(|pair| pair[0] == "with" && direct_information.contains(&pair[1]))
+                        || tail.windows(3).any(|triple| {
+                            triple[0] == "with"
+                                && ["result", "results", "data"].contains(&triple[1])
+                                && ["entry", "entries", "rows", "fields"].contains(&triple[2])
+                        })
+                });
+            let tail_end = sequence[tail_start..]
+                .iter()
+                .position(|candidate| boundaries.contains(candidate))
+                .map_or(sequence.len(), |offset| tail_start + offset);
+            direct_with
+                || (tail_start..tail_end).any(|relation_index| {
+                    if !relations.contains(&sequence[relation_index])
+                        || negated(&sequence, relation_index)
+                    {
+                        return false;
+                    }
+                    let information_end = tail_end.min(relation_index.saturating_add(14));
+                    ((relation_index + 1)..information_end).any(|information_index| {
+                        information.contains(&sequence[information_index])
+                            && !negated(&sequence, information_index)
+                    })
+                })
+        })
+    })
+}
+
+fn requests_writing_like_marks(value: &str) -> bool {
+    let normalized = value
+        .to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+    let sequence = normalized.split_whitespace().collect::<Vec<_>>();
+    let direct = [
+        "formula",
+        "formulas",
+        "equation",
+        "equations",
+        "notation",
+        "notations",
+        "diagram",
+        "diagrams",
+        "chart",
+        "charts",
+        "graph",
+        "graphs",
+        "worksheet",
+        "worksheets",
+        "handwriting",
+        "handwritten",
+        "writing",
+        "writes",
+        "write",
+        "written",
+        "scribble",
+        "scribbles",
+        "scribbling",
+        "lettering",
+        "caption",
+        "captions",
+        "label",
+        "labels",
+        "legend",
+        "legends",
+        "numeral",
+        "numerals",
+        "glyph",
+        "glyphs",
+    ];
+    if contains_unnegated(&sequence, &direct) {
+        return true;
+    }
+    let plan_surfaces = [
+        "blueprint",
+        "blueprints",
+        "floorplan",
+        "floorplans",
+        "schematic",
+        "schematics",
+    ];
+    if contains_unnegated(&sequence, &plan_surfaces) {
+        return true;
+    }
+    let plans = contains_unnegated(&sequence, &["plan", "plans"]);
+    let plan_kind = contains_unnegated(&sequence, &["floor", "drafting", "engineering"]);
+    if plans && plan_kind {
+        return true;
+    }
+    let drawings = contains_unnegated(&sequence, &["drawing", "drawings"]);
+    if drawings && contains_unnegated(&sequence, &["technical"]) {
+        return true;
+    }
+    let surfaces = [
+        "paper",
+        "papers",
+        "book",
+        "books",
+        "page",
+        "pages",
+        "sheet",
+        "sheets",
+        "notebook",
+        "document",
+        "documents",
+        "form",
+        "forms",
+        "board",
+        "screen",
+        "sign",
+        "poster",
+        "clipboard",
+        "card",
+        "ledger",
+        "ledgers",
+        "receipt",
+        "receipts",
+    ];
+    let drawing_words = [
+        "draw",
+        "draws",
+        "drawing",
+        "drawn",
+        "sketch",
+        "sketches",
+        "sketching",
+        "marking",
+        "marks",
+    ];
+    let clause_boundaries = [
+        "adjacent",
+        "alongside",
+        "although",
+        "and",
+        "behind",
+        "beside",
+        "but",
+        "near",
+        "next",
+        "opposite",
+        "whereas",
+        "while",
+    ];
+    let surface_drawing = sequence.iter().enumerate().any(|(drawing_index, word)| {
+        drawing_words.contains(word)
+            && !negated(&sequence, drawing_index)
+            && sequence
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| surfaces.contains(candidate))
+                .any(|(surface_index, _)| {
+                    if surface_index.abs_diff(drawing_index) > 8
+                        || negated(&sequence, surface_index)
+                    {
+                        return false;
+                    }
+                    let start = surface_index.min(drawing_index).saturating_add(1);
+                    let end = surface_index.max(drawing_index);
+                    !sequence[start..end]
+                        .iter()
+                        .any(|candidate| clause_boundaries.contains(candidate))
+                })
+    });
+    let surface_visual_content =
+        sequence
+            .split(|word| clause_boundaries.contains(word))
+            .any(|clause| {
+                let record_surface = contains_unnegated(clause, &surfaces);
+                let geometric = (contains_unnegated(clause, &["geometric"])
+                    && contains_unnegated(clause, &["shape", "shapes", "figure", "figures"]))
+                    || (contains_unnegated(clause, &["mathematical"])
+                        && contains_unnegated(clause, &["symbol", "symbols"]));
+                let form = contains_unnegated(clause, &["form", "forms"]);
+                let form_action = contains_unnegated(
+                    clause,
+                    &["fill", "fills", "filled", "filling", "blank", "application"],
+                );
+                let text = contains_unnegated(clause, &["text", "texts"]);
+                let text_visible = contains_unnegated(
+                    clause,
+                    &[
+                        "visible",
+                        "printed",
+                        "readable",
+                        "displayed",
+                        "showing",
+                        "contains",
+                        "bearing",
+                    ],
+                );
+                record_surface && (geometric || (form && form_action) || (text && text_visible))
+            });
+    let populated_record = sequence
+        .split(|word| clause_boundaries.contains(word))
+        .any(|clause| {
+            let record_surface = contains_unnegated(clause, &surfaces)
+                || contains_unnegated(clause, &["table", "tables", "tabular"]);
+            let entries = contains_unnegated(
+                clause,
+                &[
+                    "entry", "entries", "record", "records", "stamped", "stamp", "stamps",
+                    "stroke", "strokes",
+                ],
+            );
+            let rows = contains_unnegated(
+                clause,
+                &["row", "rows", "column", "columns", "line", "lines"],
+            );
+            let populated = contains_unnegated(
+                clause,
+                &[
+                    "dense",
+                    "stacked",
+                    "clustered",
+                    "tight",
+                    "tightly",
+                    "microscopic",
+                    "tiny",
+                    "numerous",
+                    "multiple",
+                    "filled",
+                    "printed",
+                ],
+            );
+            let line_items = clause
+                .windows(2)
+                .any(|pair| pair[0] == "line" && matches!(pair[1], "item" | "items"));
+            let tick_boxes = clause
+                .windows(2)
+                .any(|pair| pair[0] == "tick" && matches!(pair[1], "box" | "boxes"));
+            let tally = contains_unnegated(
+                clause,
+                &["tally", "tallies", "total", "totals", "sum", "sums"],
+            );
+            let circled = contains_unnegated(clause, &["circle", "circled", "ring", "ringed"]);
+            let heavily_marked = contains_unnegated(clause, &["marked"])
+                && contains_unnegated(
+                    clause,
+                    &["heavy", "heavily", "dense", "densely", "thick", "thickly"],
+                );
+            let financial = contains_unnegated(
+                clause,
+                &[
+                    "financial",
+                    "cost",
+                    "costs",
+                    "fee",
+                    "fees",
+                    "charge",
+                    "charges",
+                    "bill",
+                    "bills",
+                    "itemized",
+                    "itemised",
+                    "detailing",
+                ],
+            );
+            let ledger = contains_unnegated(clause, &["ledger", "ledgers"]);
+            let blank = contains_unnegated(clause, &["blank", "empty", "unmarked", "closed"]);
+            record_surface
+                && (entries
+                    || (rows && populated)
+                    || line_items
+                    || tick_boxes
+                    || (circled && tally)
+                    || heavily_marked
+                    || (ledger && financial && !blank))
+        });
+    let clauses = sequence
+        .split(|word| clause_boundaries.contains(word))
+        .collect::<Vec<_>>();
+    let sparse_written_ending = clauses.iter().enumerate().any(|(index, clause)| {
+        let clause_text = clause.join(" ");
+        let explicitly_content_free = [
+            "no text",
+            "without text",
+            "no writing",
+            "without writing",
+            "no written marks",
+            "without written marks",
+            "no content",
+            "without content",
+        ]
+        .iter()
+        .any(|phrase| clause_text.contains(phrase))
+            || clauses.get(index.saturating_add(1)).is_some_and(|next| {
+                matches!(next.first(), Some(&"no" | &"without"))
+                    && next
+                        .iter()
+                        .any(|word| ["text", "writing", "mark", "marks", "content"].contains(word))
+            });
+        contains_unnegated(clause, &surfaces)
+            && contains_unnegated(
+                clause,
+                &[
+                    "text",
+                    "texts",
+                    "line",
+                    "lines",
+                    "paragraph",
+                    "paragraphs",
+                    "sentence",
+                    "sentences",
+                    "layout",
+                    "content",
+                    "contents",
+                    "block",
+                    "blocks",
+                ],
+            )
+            && contains_unnegated(clause, &["couple", "few", "short", "sparse", "brief"])
+            && (contains_unnegated(
+                clause,
+                &[
+                    "final",
+                    "ending",
+                    "unfinished",
+                    "incomplete",
+                    "abrupt",
+                    "abruptly",
+                    "terminate",
+                    "terminates",
+                    "terminated",
+                    "stopping",
+                    "stops",
+                    "halfway",
+                ],
+            ) || (contains_unnegated(clause, &["blank", "empty"])
+                && contains_unnegated(clause, &["space", "area", "half", "section"])))
+            && !explicitly_content_free
+    });
+    let annotated_surface = clauses.iter().any(|clause| {
+        clause.iter().enumerate().any(|(mark_index, word)| {
+            let annotation = matches!(*word, "annotated" | "annotation" | "annotations");
+            let qualified_marking = matches!(*word, "marking" | "markings")
+                && clause[mark_index.saturating_sub(2)..mark_index]
+                    .iter()
+                    .any(|modifier| matches!(*modifier, "detailed" | "heavy" | "heavily"));
+            let other_target = clause.get(mark_index.saturating_add(1)) == Some(&"on")
+                && clause
+                    .get(mark_index.saturating_add(2)..mark_index.saturating_add(5))
+                    .is_some_and(|tail| !tail.iter().any(|candidate| surfaces.contains(candidate)));
+            (annotation || qualified_marking)
+                && !negated(clause, mark_index)
+                && !other_target
+                && clause.iter().enumerate().any(|(surface_index, candidate)| {
+                    surfaces.contains(candidate)
+                        && surface_index.abs_diff(mark_index) <= 6
+                        && !negated(clause, surface_index)
+                })
+        })
+    });
+    surface_drawing
+        || surface_visual_content
+        || populated_record
+        || sparse_written_ending
+        || annotated_surface
+}
+
+fn contains_unnegated(words: &[&str], candidates: &[&str]) -> bool {
+    words
+        .iter()
+        .enumerate()
+        .any(|(index, word)| candidates.contains(word) && !negated(words, index))
+}
+
+fn negated(words: &[&str], index: usize) -> bool {
+    let start = index.saturating_sub(5);
+    words[start..index]
+        .iter()
+        .any(|word| matches!(*word, "no" | "not" | "without" | "never" | "avoid"))
 }
 
 /// Validate one persisted scene against the current production scene contract.
@@ -1901,7 +2472,8 @@ mod tests {
 
     use super::{
         normalize_camera_subjects, normalize_eyelines, normalize_match_on_action,
-        normalize_panel_roles, normalize_subject_expressions, validate_dynamic,
+        normalize_panel_roles, normalize_subject_expressions, requests_blank_information,
+        requests_writing_like_marks, validate_dynamic,
     };
 
     fn panel(id: &str, x: i64, y: i64, width: i64, height: i64) -> Value {
@@ -2415,6 +2987,479 @@ mod tests {
         assert!(
             validate_dynamic(&scene).is_err(),
             "dynamic panel without its visible description unexpectedly passed validation"
+        );
+    }
+
+    #[test]
+    fn image_facing_scene_cannot_request_mathematical_diagrams_on_paper() {
+        let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
+        scene["manga_panel"]["panels"][0]["scene"]["environment"]["midground"] =
+            json!(["paper with non-textual geometric and mathematical-style diagrams"]);
+        assert!(
+            validate_dynamic(&scene).is_err(),
+            "the accepted Ukrainian paper-and-diagrams scene escaped image-facing validation"
+        );
+    }
+
+    #[test]
+    fn image_facing_scene_cannot_request_the_accepted_hindi_blueprints() {
+        let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
+        scene["manga_panel"]["panels"][0]["shot_contract"] = json!({
+            "visible_anchor": "Project site environment with blueprints and workspace."
+        });
+        assert!(
+            validate_dynamic(&scene).is_err(),
+            "the accepted Hindi blueprint anchor escaped image-facing validation"
+        );
+    }
+
+    #[test]
+    fn plan_surface_taxonomy_rejects_writing_like_architectural_artifacts() {
+        let requests = [
+            "blueprint",
+            "rolled blueprints",
+            "floor plan",
+            "two floor plans",
+            "floorplan",
+            "floorplans",
+            "drafting plan",
+            "drafting plans",
+            "engineering plan",
+            "engineering plans",
+            "schematic",
+            "schematics",
+            "technical drawing",
+            "technical drawings",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| requests_writing_like_marks(request)),
+            "one writing-like architectural plan escaped the scene taxonomy"
+        );
+    }
+
+    #[test]
+    fn plan_surface_taxonomy_keeps_architecture_without_visible_plans() {
+        let requests = [
+            "a modern bright architectural studio",
+            "a scale building model",
+            "a plain drafting table",
+            "an engineer walking through a finished building",
+            "an empty studio without any blueprints or floor plans",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| !requests_writing_like_marks(request)),
+            "a benign architectural object was mistaken for a visible plan"
+        );
+    }
+
+    #[test]
+    fn source_support_can_quote_writing_without_requesting_visible_marks() {
+        let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
+        scene["manga_panel"]["panels"][0]["shot_contract"] = json!({
+            "source_support": "The student was writing the final equation on paper"
+        });
+        assert!(
+            validate_dynamic(&scene).is_ok(),
+            "source-support evidence was mistaken for an image-facing writing request"
+        );
+    }
+
+    #[test]
+    fn visible_anchor_cannot_request_a_hand_writing_final_steps_on_paper() {
+        let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
+        scene["manga_panel"]["panels"][0]["shot_contract"] = json!({
+            "visible_anchor": "A hand rapidly writing the final correct steps of the solution on paper"
+        });
+        assert!(
+            validate_dynamic(&scene).is_err(),
+            "the accepted Ukrainian writing action escaped shot-anchor validation"
+        );
+    }
+
+    #[test]
+    fn writing_like_request_taxonomy_rejects_visible_mark_surfaces() {
+        let requests = [
+            "formula on a wall",
+            "two equations",
+            "mathematical notation",
+            "geometric diagrams",
+            "a bar chart",
+            "an application form being filled",
+            "pseudo-writing",
+            "handwriting",
+            "drawing a circle on paper",
+            "paper sheets with geometric shapes",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| requests_writing_like_marks(request)),
+            "one known writing-like surface escaped the scene taxonomy"
+        );
+    }
+
+    #[test]
+    fn accepted_v42_ledger_scene_cannot_request_populated_record_surfaces() {
+        let requests = [
+            "A close-up insert on a heavy paper ledger resting on a dark desk, showing long stacked rows of thick stamped entries leading to a heavily circled bottom tally.",
+            "A hand pointing firmly at a heavily marked bottom section of the document",
+            "The open paper ledger with dense rows",
+            "An open thick paper document with dense row entries",
+            "an unlabelled document or financial ledger detailing actual physical costs and fees",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| requests_writing_like_marks(request)),
+            "one accepted v42 ledger request escaped the scene taxonomy"
+        );
+    }
+
+    #[test]
+    fn rejected_v42_scene_replies_cannot_request_printed_or_itemized_records() {
+        let requests = [
+            "A close insert shot focusing tightly on the lower corner of the glossy poster, showing microscopic, tightly clustered, faded printed horizontal lines contrasted against the bold border above.",
+            "An extreme close-up insert focusing on the bottom-right corner of the same poster. The glossy paper texture is visible, filled with dense rows of unreadable tiny dark blocks, tick boxes, and tight columns contrasting with the clean white background.",
+            "A top-down detail shot focusing on a hand holding a dark pen, pressing down hard on a dense, multi-layered receipt paper with numerous added line items highlighted by heavy shadows.",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| requests_writing_like_marks(request)),
+            "one rejected v42 record-surface request escaped the scene taxonomy"
+        );
+    }
+
+    #[test]
+    fn writing_like_request_taxonomy_keeps_blank_paper_and_table_objects() {
+        let requests = [
+            "a completely blank sheet of paper on a wooden table",
+            "an empty table beside a closed blank notebook",
+            "a bare work table holding an unmarked paper ledger",
+            "an open blank ledger without any populated row entries",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| !requests_writing_like_marks(request)),
+            "a blank paper or table object was mistaken for visible writing"
+        );
+    }
+
+    #[test]
+    fn rushed_scene_cannot_require_sparse_content_on_book_pages() {
+        let requests = [
+            "showing only a couple of short lines at the top of the page followed by vast blank space",
+            "a few sparse lines of abstract layout that abruptly terminate into a vast empty white paper lower half",
+            "an open final page with sparse text ending abruptly in the middle of a sentence",
+            "a document page containing two short content blocks above an unfinished empty section",
+            "printed marks stopping halfway down the open book page",
+            "a few sparse lines of text stop abruptly at the lower edge of the open page",
+            "a final book with a few sparse lines of text ending abruptly",
+            "an open page shows a few sparse lines of text ending abruptly, with physical hatching on the wall behind it",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| requests_writing_like_marks(request)),
+            "one writing-dependent rushed-book anchor escaped the scene taxonomy"
+        );
+    }
+
+    #[test]
+    fn physical_lines_and_explicitly_blank_pages_remain_valid() {
+        let requests = [
+            "an open blank book with no text, writing, printed marks, or content blocks",
+            "horizontal lines formed by the metal railings along the platform",
+            "fine hatching lines shade the plain brick wall",
+            "the page edges form two short physical horizontal lines",
+            "a blank paper page with two physical crease lines and no written marks",
+            "a final blank page with two short physical crease lines and no text or marks",
+            "an unmarked paper rests beside a fence with a few short lines ending at the gate",
+        ];
+        assert_eq!(
+            requests.map(requests_writing_like_marks),
+            [false; 7],
+            "physical linework or an explicitly content-free page became visible writing"
+        );
+    }
+
+    #[test]
+    fn accepted_overthink_contract_cannot_require_document_markings() {
+        let requests = [
+            "A office worker seated at a desk pinches the bridge of their nose in deep frustration, staring intensely down at a single paper covered in detailed markings.",
+            "A person pinching the bridge of their nose in frustration over a heavily annotated document.",
+            "a paper page covered in heavy markings",
+            "a document covered in detailed annotations",
+            "paper without marks and document annotations",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| requests_writing_like_marks(request)),
+            "one immutable overthink writing-dependent anchor escaped the scene taxonomy"
+        );
+    }
+
+    #[test]
+    fn accepted_overthink_scene_cannot_require_a_marked_featureless_document() {
+        let mut panel = panel("p1", 16, 16, 992, 992);
+        panel["scene"]["description"] = json!(
+            "An office worker stares intensely down at a single paper covered in detailed markings"
+        );
+        panel["scene"]["environment"]["foreground"] =
+            json!(["Hands and a single featureless paper sheet resting flat on the desk"]);
+        panel["shot_contract"]["visible_anchor"] =
+            json!("A person pinching the bridge of their nose over a heavily annotated document");
+        assert!(
+            validate_dynamic(&scene("none", "", "", "", vec![panel])).is_err(),
+            "the accepted overthink scene made forbidden document markings carry its frustration anchor"
+        );
+    }
+
+    #[test]
+    fn annotated_surface_taxonomy_keeps_natural_physical_and_negated_marks() {
+        let requests = [
+            "a blank paper lies behind a basketball court with detailed markings",
+            "a blank document with detailed markings on the basketball court",
+            "natural markings on a bird beside a blank document",
+            "a detailed marked basketball court behind a blank paper",
+            "a detailed wooden frame beside a blank document",
+            "a content-free book with paper texture and no marks",
+            "an unannotated document",
+            "a paper without markings",
+            "a featureless document without any annotations",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| !requests_writing_like_marks(request)),
+            "a natural, physical, or explicitly unmarked object became visible writing"
+        );
+    }
+
+    #[test]
+    fn drawing_action_must_belong_to_the_nearby_writing_surface() {
+        let rejected = [
+            "a hand drawing a circle on paper",
+            "a pencil sketching a figure across the blank document",
+        ];
+        let allowed = [
+            "an unmarked paper lies on the desk while a traveler is drawing a plain curtain across the window",
+            "a blank document sits beside an artist drawing closer to the stage",
+        ];
+        assert_eq!(
+            (
+                rejected
+                    .iter()
+                    .all(|request| requests_writing_like_marks(request)),
+                allowed
+                    .iter()
+                    .all(|request| !requests_writing_like_marks(request)),
+            ),
+            (true, true),
+            "a drawing action escaped its surface or borrowed an unrelated writing surface"
+        );
+    }
+
+    #[test]
+    fn geometric_content_must_belong_to_the_nearby_writing_surface() {
+        let rejected = [
+            "geometric shapes on paper",
+            "a document bearing a mathematical symbol",
+        ];
+        let allowed = [
+            "an unmarked paper rests beside geometric shapes made from wooden blocks",
+            "a blank document lies near a geometric wooden sculpture",
+        ];
+        assert_eq!(
+            (
+                rejected
+                    .iter()
+                    .all(|request| requests_writing_like_marks(request)),
+                allowed
+                    .iter()
+                    .all(|request| !requests_writing_like_marks(request)),
+            ),
+            (true, true),
+            "geometric content escaped its surface or borrowed an unrelated writing surface"
+        );
+    }
+
+    #[test]
+    fn record_action_must_belong_to_the_nearby_record_surface() {
+        let rejected = [
+            "a document with stamped records",
+            "a paper ledger showing several entries",
+            "a paper document with numerous dense rows",
+        ];
+        let allowed = [
+            "an unmarked document rests beside a singer who records a song in the studio",
+            "a blank ledger lies near a camera that records the dancer",
+            "an unmarked paper rests beside numerous rows of empty theater seats",
+        ];
+        assert_eq!(
+            (
+                rejected
+                    .iter()
+                    .all(|request| requests_writing_like_marks(request)),
+                allowed
+                    .iter()
+                    .all(|request| !requests_writing_like_marks(request)),
+            ),
+            (true, true),
+            "a record action escaped its surface or borrowed an unrelated record surface"
+        );
+    }
+
+    #[test]
+    fn accepted_rushed_scene_cannot_depend_on_sparse_text_for_its_ending() {
+        let first = panel("p1", 16, 16, 320, 992);
+        let mut second = panel("p2", 352, 16, 656, 992);
+        second["semantic_job"] =
+            json!("Reveal the abruptly sparse and unfinished final page resting open");
+        second["shot_contract"]["visible_anchor"] = json!(
+            "An open final page with sparse text ending abruptly in the middle of a sentence"
+        );
+        second["scene"]["description"] = json!(
+            "An insert shot over the open final page, showing a few sparse lines of abstract layout that terminate into a vast empty lower half"
+        );
+        let mut scene = scene("none", "", "", "", vec![first, second]);
+        scene["manga_panel"]["semantic_spine"]["literal_event"] = json!(
+            "A hand rapidly turns through pages of a thick book, revealing an abruptly blank and unfinished ending"
+        );
+        scene["manga_panel"]["semantic_spine"]["semantic_focus"] =
+            json!("The abrupt transition from rushed page-turning to sparse incomplete text");
+        scene["manga_panel"]["semantic_spine"]["visual_relation"] = json!("contrast");
+        assert!(
+            validate_dynamic(&scene).is_err(),
+            "the accepted rushed scene made forbidden sparse text carry its semantic ending"
+        );
+    }
+
+    #[test]
+    fn accepted_far_fetched_scene_cannot_make_a_blank_calendar_prove_an_overdue_deadline() {
+        let first = panel("p1", 16, 16, 480, 992);
+        let mut second = panel("p2", 528, 16, 480, 992);
+        second["semantic_job"] = json!(
+            "Execute the detail insert showing the physical evidence of the missed deadline that makes the excuse far-fetched."
+        );
+        second["shot_contract"] = json!({
+            "visible_anchor": "an unmarked calendar showing a severely overdue date next to disorganized papers"
+        });
+        second["scene"]["description"] =
+            json!("A completely blank calendar showing a missed deadline beside untouched work");
+        let mut scene = scene("none", "", "", "", vec![first, second]);
+        scene["manga_panel"]["semantic_spine"]["literal_event"] = json!(
+            "A speaker gestures dramatically while giving an excuse, juxtaposed with an unmarked calendar showing a severely overdue date and cluttered, untouched work."
+        );
+        scene["manga_panel"]["semantic_spine"]["semantic_focus"] = json!(
+            "The physical starkness of an overdue date contrasting against an unconvincing explanation."
+        );
+        scene["manga_panel"]["semantic_spine"]["visual_relation"] = json!("contrast");
+        assert!(
+            validate_dynamic(&scene).is_err(),
+            "the accepted far-fetched scene made a blank calendar carry an invisible overdue deadline"
+        );
+    }
+
+    #[test]
+    fn blank_calendar_remains_valid_when_it_carries_no_information_requirement() {
+        let mut scene = scene("none", "", "", "", vec![panel("p1", 16, 16, 992, 992)]);
+        scene["manga_panel"]["panels"][0]["scene"]["environment"]["background"] = json!([
+            "A blank calendar hangs in the background while a traveler closes the office door"
+        ]);
+        assert!(
+            validate_dynamic(&scene).is_ok(),
+            "a benign blank background calendar became an information-bearing contradiction"
+        );
+    }
+
+    #[test]
+    fn blank_information_carrier_taxonomy_rejects_invisible_states() {
+        let requests = [
+            "an unmarked calendar showing an overdue date",
+            "an unmarked calendar serves as proof that a due date has long passed",
+            "a blank document displaying deadline status",
+            "a featureless screen indicating progress data",
+            "an empty board with result entries",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| requests_blank_information(request)),
+            "one blank carrier still claimed to display an invisible information state"
+        );
+    }
+
+    #[test]
+    fn blank_information_carrier_taxonomy_keeps_incidental_and_negated_objects() {
+        let requests = [
+            "a blank calendar hangs in the background while a student worries about a deadline",
+            "a blank calendar showing no date",
+            "a blank calendar showing no date beside a student who visibly missed the deadline",
+            "a blank calendar showing no date and a student who visibly missed the deadline",
+            "a blank calendar showing no date next to a student who visibly missed the deadline",
+            "an unmarked calendar with expired milk on the kitchen counter",
+            "a featureless screen with a status lamp glowing green",
+            "a featureless screen with data cables attached",
+            "an unmarked calendar with date palms outside the window",
+            "a featureless screen beside a status lamp",
+            "an empty board while a manager discusses progress",
+            "a blank calendar with a worried student who missed the deadline",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| !requests_blank_information(request)),
+            "an incidental or explicitly information-free blank carrier became contradictory"
+        );
+    }
+
+    #[test]
+    fn writing_like_request_taxonomy_keeps_unmarked_actions_and_objects() {
+        let requests = [
+            "drawing a plain curtain across the window",
+            "two friends drawing closer",
+            "a pen clipped inside a shirt pocket",
+            "a hand holding a pen above a completely blank paper sheet",
+            "pressing a pen cap down gently on the corner of the paper sheet",
+            "a folded paper airplane",
+            "abstract geometric forms made from wooden blocks",
+            "reveals aged photographs without text or labels",
+            "natural surroundings specified in the text",
+        ];
+        assert!(
+            requests
+                .iter()
+                .all(|request| !requests_writing_like_marks(request)),
+            "a benign action or unmarked object was mistaken for visible writing"
+        );
+    }
+
+    #[test]
+    fn negative_text_constraint_remains_valid_in_an_image_facing_field() {
+        let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
+        scene["manga_panel"]["panels"][0]["semantic_job"] =
+            json!("Reveal the photographs without text or labels");
+        assert!(
+            validate_dynamic(&scene).is_ok(),
+            "a prohibition on visible text was mistaken for a request to render it"
+        );
+    }
+
+    #[test]
+    fn benign_drawing_action_without_a_marked_surface_remains_valid() {
+        let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
+        scene["manga_panel"]["panels"][0]["scene"]["description"] =
+            json!("A traveler is drawing a plain curtain across the window");
+        assert!(
+            validate_dynamic(&scene).is_ok(),
+            "a benign drawing action unrelated to visible marks was rejected"
         );
     }
 

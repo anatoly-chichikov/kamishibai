@@ -768,12 +768,12 @@ fn file_extension(filename: &str) -> Option<&str> {
 
 fn label_gap(label: &str) -> usize {
     STEP_LABEL_COL_CHARS
-        .saturating_sub(label.chars().count())
+        .saturating_sub(super::common::display_width(label))
         .max(2)
 }
 
 fn pad_left(text: &str, width: usize) -> String {
-    let len = text.chars().count();
+    let len = super::common::display_width(text);
     if len >= width {
         return String::from(text);
     }
@@ -884,9 +884,9 @@ pub(crate) struct RejectedRow<'a> {
 /// once and reused by the hit-tester instead of being measured twice.
 pub(crate) fn rejected_row<'a>(attempt: RejectedAttempt<'_>, width: usize) -> RejectedRow<'a> {
     let step = format!("{} {}", step_name(attempt.artifact), attempt.index);
-    let used = REJECTED_INDENT.chars().count()
+    let used = super::common::display_width(REJECTED_INDENT)
         + 2
-        + REJECTED_STEP_COL_CHARS.max(step.chars().count() + 2)
+        + REJECTED_STEP_COL_CHARS.max(super::common::display_width(step.as_str()) + 2)
         + REJECTED_FILE_COL_CHARS;
     let reason = clip(
         format!("{} · {}", attempt.fault.category(), attempt.fault.reason()).as_str(),
@@ -965,7 +965,7 @@ fn column_gap(column: usize, next_column: usize) -> String {
 }
 
 fn pad_right(text: &str, width: usize) -> String {
-    let len = text.chars().count();
+    let len = super::common::display_width(text);
     if len >= width {
         return format!("{text} ");
     }
@@ -973,10 +973,10 @@ fn pad_right(text: &str, width: usize) -> String {
 }
 
 fn clip(text: &str, width: usize) -> String {
-    if text.chars().count() <= width {
+    if super::common::display_width(text) <= width {
         return String::from(text);
     }
-    let kept: String = text.chars().take(width.saturating_sub(1)).collect();
+    let (kept, _) = super::common::split_display_prefix(text, width.saturating_sub(1));
     format!("{kept}…")
 }
 

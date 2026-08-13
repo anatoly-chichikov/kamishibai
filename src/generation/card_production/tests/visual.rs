@@ -293,6 +293,62 @@ fn a_rejected_picture_attempt_carries_the_renderer_verdict_and_its_frame() {
     );
 }
 
+#[derive(Clone, Copy, Debug)]
+struct FailingRecall;
+
+impl RecallJudge for FailingRecall {
+    fn review(&self, _scene: &Value, _image: &[u8]) -> Result<RecallReview> {
+        bail!("recall judge unavailable")
+    }
+}
+
+#[test]
+fn a_resumed_picture_rejection_carries_its_same_sequence_verdict_and_frame() {
+    let home = TempDir::new().expect("tempdir must be created");
+    let cache = Cache::new("card", home.path());
+    let attempts = cache
+        .filepath(IMAGE_ATTEMPTS_DIRECTORY)
+        .expect("attempt archive path must resolve");
+    let source = CountingImageSource::new(valid_image());
+    let first = production_renderer(
+        source.clone(),
+        FailingRecall,
+        BorderDetector::new(2, 6, 240, 2),
+    )
+    .with_attempt_archive(attempts.clone())
+    .render(&renderable_scene(), &mut NoopProgress);
+    let archived = archived_sequence(&cache);
+    let rejected = production_renderer(
+        source.clone(),
+        AcceptingRecall,
+        BorderDetector::new(2, 6, 240, 4),
+    )
+    .with_attempt_archive(attempts)
+    .render(&renderable_scene(), &mut NoopProgress);
+    let attempt = judged(
+        ArtifactAttempt::unmetered(
+            rejected.map(|_| unreachable!("the resumed image must fail the stricter border gate")),
+        ),
+        &cache,
+        archived,
+    );
+    assert_eq!(
+        (
+            first.is_err(),
+            attempt.fault().map(|fault| fault.category()),
+            attempt.fault().and_then(|fault| {
+                fault
+                    .artifact()
+                    .and_then(|path| path.file_name().and_then(|name| name.to_str()))
+            }),
+            source.calls(),
+            archived_sequence(&cache),
+        ),
+        (true, Some("border"), Some("attempt-0001.png"), 1, 1),
+        "a resumed picture rejection lost its rewritten verdict or immutable frame"
+    );
+}
+
 #[test]
 fn a_failure_before_the_provider_does_not_borrow_an_older_rejected_frame() {
     let home = TempDir::new().expect("tempdir must be created");

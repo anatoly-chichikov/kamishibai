@@ -1,0 +1,50 @@
+{
+  "type": "OBJECT",
+  "properties": {
+    "literal_writing_present": {
+      "type": "BOOLEAN"
+    },
+    "literal_evidence": {
+      "type": "ARRAY",
+      "maxItems": 6,
+      "items": {
+        "type": "OBJECT",
+        "properties": {
+          "description": {
+            "type": "STRING"
+          },
+          "location": {
+            "type": "STRING"
+          },
+          "kind": {
+            "type": "STRING",
+            "enum": [
+              "WRITING",
+              "NUMERAL",
+              "MATHEMATICAL_NOTATION",
+              "TECHNICAL_DIAGRAM",
+              "PSEUDO_WRITING",
+              "DECORATIVE_GLYPH_STRING",
+              "INTERFACE_MARK",
+              "SYMBOL_OR_EMBLEM",
+              "AMBIGUOUS_MARK"
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "location",
+          "kind"
+        ]
+      }
+    },
+    "reason": {
+      "type": "STRING"
+    }
+  },
+  "required": [
+    "literal_writing_present",
+    "literal_evidence",
+    "reason"
+  ]
+}

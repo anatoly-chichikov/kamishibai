@@ -7,7 +7,7 @@ use std::collections::HashSet;
 const OPENING: &str = "Create a finished black-and-white manga page in high-contrast Indian ink, with crisp expressive linework and fine screentone shading; keep every visible mark strictly monochrome.";
 const DOMINANT_HIERARCHY: &str = "Make unequal panel size express editorial emphasis, letting the dominant region carry the payoff while smaller regions provide only motivated visual progression.";
 const BALANCED_HIERARCHY: &str = "Keep panel areas balanced so equal editorial emphasis remains clear throughout the motivated visual progression.";
-const CLOSING: &str = "Keep all surfaces blank and unlettered, all gutters and the outer border clean paper white; the page contains no lettering of any kind.";
+const CLOSING: &str = "No logos, emblems, icons, symbols, pseudo-writing, glyphs. Badge mounts/grille positions, license plates, destination displays stay blank. Lights/hardware/contours remain physical; surfaces unlettered; gutters/borders paper-white.";
 const FILLERS: [&str; 4] = [
     "Keep the visual hierarchy immediate: silhouettes read cleanly, spatial layers stay distinct, and every pose supports the sentence rather than decorative spectacle.",
     "Use deliberate negative space and controlled screentone density so the eye follows the intended edit without losing the focal action.",
@@ -755,7 +755,7 @@ mod tests {
     use serde_json::{Value, json};
     use sha2::{Digest, Sha256};
 
-    use super::{Emphasis, compile_image_prompt, emphasis};
+    use super::{CLOSING, Emphasis, compile_image_prompt, emphasis};
 
     fn production_scene() -> Value {
         serde_json::from_str(include_str!(
@@ -856,7 +856,7 @@ mod tests {
                 (150..=250).contains(&words),
                 prompt.starts_with("Create a finished black-and-white manga page"),
                 prompt.contains("gutter slanting"),
-                prompt.ends_with("the page contains no lettering of any kind."),
+                prompt.ends_with(CLOSING),
                 ["\"x\"", "\"y\"", "z_index", "p1", "woman_ze"]
                     .iter()
                     .all(|token| !prompt.contains(token)),
@@ -884,8 +884,24 @@ mod tests {
             },
         );
         assert_eq!(
-            digest, "bae3fdc298673e6967b4c54db049bfc363924d594630b1129a7eb791dc2ce8ee",
+            digest, "1c828d8fc0f3f601b841299ee2d4a000a40ccadc24e7d65f59301892b78df2cd",
             "production image prose changed without an explicit revision review"
+        );
+    }
+
+    #[test]
+    fn production_prompt_closes_the_vehicle_symbol_boundary_exactly() {
+        let prompt = compile_image_prompt(&production_scene())
+            .expect("production prompt must compile from a valid scene");
+        assert_eq!(
+            (
+                prompt.ends_with(
+                    "No logos, emblems, icons, symbols, pseudo-writing, glyphs. Badge mounts/grille positions, license plates, destination displays stay blank. Lights/hardware/contours remain physical; surfaces unlettered; gutters/borders paper-white.",
+                ),
+                (150..=250).contains(&prompt.split_whitespace().count()),
+            ),
+            (true, true),
+            "production image prompt lost its exact vehicle symbol prohibition or word budget"
         );
     }
 
@@ -1265,7 +1281,7 @@ mod tests {
             (
                 (150..=250).contains(&prompt.split_whitespace().count()),
                 prompt.chars().all(|character| !character.is_ascii_digit()),
-                prompt.ends_with("the page contains no lettering of any kind."),
+                prompt.ends_with(CLOSING),
             ),
             (true, true, true),
             "dense four-panel prose exceeded its bounded provider contract"

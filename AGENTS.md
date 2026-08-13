@@ -97,19 +97,20 @@ An artifact gets one plain try plus three retries on top of it — `ARTIFACT_ATT
 
 The cache (printed by `kamishibai cache-path`) groups one folder per card, keyed by a content hash of the card identity:
 
-- `cards/<known>-<learning>/<key>/` holds `meta.json` and `audio.wav`; `visual/<revision>/` beneath it holds `scene.json` and `picture.jpg` for one visual-policy revision, plus `attempts/` where every image attempt is archived immutably as `attempt-NNNN.jpg` next to its `attempt-NNNN.json` verdict (`status`, `category`, `reason`), the scene and prompt it used, and the recall review; rejected scene replies land beside them as `scene-NNNN.json` / `scene-NNNN.txt`
+- `cards/<known>-<learning>/<key>/` holds `meta.json` and `audio.wav`; `visual/<revision>/` beneath it holds `scene.json` and `picture.jpg` for one visual-policy revision, plus `attempts/` where every image attempt is archived immutably as `attempt-NNNN.jpg` next to its `attempt-NNNN.json` verdict (`status`, `category`, `reason`), the scene and prompt it used, the literal-text verdict when that gate ran (`attempt-NNNN.text.json`), and the merged review when the picture reached the later gates (`attempt-NNNN.recall.json`, with independent answer-leakage, scene-fidelity, and literal-policy verdicts plus explicit dedicated-fidelity and zoom inspection proof); rejected scene replies land beside them as `scene-NNNN.json` / `scene-NNNN.txt`
 - `understanding/<known>-<learning>/<key>.json` holds the understanding-pass result
 - `sessions/<id>/` holds `session.json` (identity, phase, words, curated candidates, committed plan, worker pid, result) and `worker.log`
 - `ocr-models/` holds the shared OCR model files
 
-`CardCell` (`src/session/vault.rs`) owns this layout; deleting a card's folder forces just that card to regenerate. Visual revisions hash the production feature and scene-composer prompts, the composer schema, both layout/device registries, and the manga template together with the manual `LAYOUT_POLICY_VERSION`, so concurrent application versions never overwrite one another. Bump that version whenever a scene model/configuration, local scene specialization/validation rule, or renderer acceptance policy changes without changing an embedded asset. Anki media names are decoupled from disk filenames in `src/anki/deck.rs` so per-card role-named files stay unique inside the `.apkg`.
+`CardCell` (`src/session/vault.rs`) owns this layout; deleting a card's folder forces just that card to regenerate. Visual revisions hash the production feature and scene-composer prompts, the composer schema, all four judge prompt/schema pairs (literal text, full recall, dedicated fidelity, and scale-aware literal zoom), the all-language recall examples, both layout/device registries, and the manga template together with the manual `LAYOUT_POLICY_VERSION`, so concurrent application versions never overwrite one another. Bump that version whenever a scene model/configuration, local scene specialization/validation rule, or renderer acceptance policy changes without changing an embedded asset. Anki media names are decoupled from disk filenames in `src/anki/deck.rs` so per-card role-named files stay unique inside the `.apkg`.
 
 ## Language Profiles
 
 Language-specific behavior belongs only in `src/languages` profile declarations. A profile defines:
 
 - Gemini prompt display name
-- OCR configuration
+- typed literal-text gate (`TextGate::Ocr` with an `OcrModel`, or `TextGate::LlmJudge`)
+- text direction (`TextDirection::Ltr` or `TextDirection::Rtl`)
 - default deck naming
 - user-facing report labels
 

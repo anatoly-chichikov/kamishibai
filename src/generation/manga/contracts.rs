@@ -4,6 +4,8 @@ use anyhow::Result;
 use image::{DynamicImage, GrayImage};
 use serde_json::Value;
 
+use super::text_gate::{TextReview, TextReviewGate};
+
 /// Report scene and illustration progress events.
 pub trait Progress {
     /// Signal the start of one step.
@@ -36,6 +38,14 @@ pub trait ImageText {
 pub trait SceneText {
     /// Return the detected OCR text for one scene and image pair.
     fn detected(&self, scene: &Value, image: &GrayImage) -> Result<String>;
+}
+
+/// Judge literal writing in one encoded candidate image.
+pub trait TextJudge {
+    /// Return the route used by this judge.
+    fn gate(&self) -> TextReviewGate;
+    /// Return the typed literal-writing verdict for one candidate image.
+    fn review(&self, encoded: &[u8], grayscale: &GrayImage) -> Result<TextReview>;
 }
 
 /// Render one compiled prose prompt into raw image bytes.

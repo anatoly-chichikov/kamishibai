@@ -12,7 +12,9 @@ use super::App;
 use super::event::AppEvent;
 use super::screen::{Screen, WelcomeFocus, WelcomeStage};
 use super::screens::banner;
-use super::screens::common::{CARD_DETAIL_COLUMN, GUTTER, TOP_MARGIN, frame_rects, language_chip};
+use super::screens::common::{
+    CARD_DETAIL_COLUMN, GUTTER, TOP_MARGIN, display_width, frame_rects, language_chip,
+};
 use super::screens::sentence_labels::EditorControl;
 use super::screens::welcome;
 use super::screens::what_i_understood::{SentenceSettingsControl, sentence_settings_control_at};
@@ -55,7 +57,7 @@ pub fn language_chip_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -
     }
     let chip_width: u16 = language_chip(app)
         .iter()
-        .map(|span| span.content.chars().count() as u16)
+        .map(|span| u16::try_from(display_width(span.content.as_ref())).unwrap_or(u16::MAX))
         .sum();
     if chip_width == 0 {
         return false;
@@ -281,7 +283,7 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
                 + u16::try_from(CARD_DETAIL_COLUMN)
                     .expect("invariant: card detail column must fit in u16");
             let label_end = label_start
-                .saturating_add(u16::try_from(label.chars().count()).unwrap_or(u16::MAX));
+                .saturating_add(u16::try_from(display_width(label.as_str())).unwrap_or(u16::MAX));
             links.push(LinkRegion {
                 row: screen_row,
                 hit_start: label_start,
@@ -357,8 +359,8 @@ fn banner_regions(app: &App, body_x: u16, body_y: u16) -> Vec<LinkRegion> {
             let label_start = body_x
                 .saturating_add(prefix)
                 .saturating_add(u16::try_from(banner::GLYPH.chars().count()).unwrap_or(u16::MAX));
-            let label_end = label_start
-                .saturating_add(u16::try_from(label.chars().count()).unwrap_or(u16::MAX));
+            let label_end =
+                label_start.saturating_add(u16::try_from(display_width(label)).unwrap_or(u16::MAX));
             LinkRegion {
                 row: body_y.saturating_add(u16::try_from(row).unwrap_or(u16::MAX)),
                 hit_start: label_start,

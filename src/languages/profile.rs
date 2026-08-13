@@ -1,5 +1,46 @@
 use crate::vocabulary::VocabularyEntry;
 
+/// One PP-OCRv5 recognition bundle declared by a language profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OcrModel {
+    /// Shared multilingual bundle used by Chinese and Japanese.
+    Default,
+    /// English recognition bundle.
+    En,
+    /// Latin-script recognition bundle.
+    Latin,
+    /// Cyrillic-script recognition bundle.
+    Cyrillic,
+    /// Greek recognition bundle.
+    El,
+    /// Korean recognition bundle.
+    Korean,
+    /// Arabic recognition bundle.
+    Arabic,
+    /// Devanagari recognition bundle.
+    Devanagari,
+    /// Thai recognition bundle.
+    Th,
+}
+
+/// Text-validation route for one language's generated manga.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TextGate {
+    /// Validate visible text with the selected PP-OCRv5 bundle.
+    Ocr(OcrModel),
+    /// Validate visible text directly with the Gemini vision judge.
+    LlmJudge,
+}
+
+/// Reading direction for language-dependent presentation surfaces.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TextDirection {
+    /// Render text from left to right.
+    Ltr,
+    /// Render text from right to left.
+    Rtl,
+}
+
 /// Expose language codes from canonical entries.
 pub trait LanguageEntry {
     /// Return the optional source language code.
@@ -72,9 +113,16 @@ impl UiLabels {
 /// One language profile composed from runtime and UI settings.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LanguageProfile {
+    /// Canonical lowercase ISO 639-1 code.
     pub code: &'static str,
+    /// English display name used in Gemini prompts.
     pub prompt: String,
-    pub ocr: String,
+    /// Authoritative route for generated-image text validation.
+    pub text_gate: TextGate,
+    /// Reading direction used by presentation surfaces.
+    pub direction: TextDirection,
+    /// Default Anki deck naming.
     pub naming: DeckNaming,
+    /// Native labels used when this is the known language.
     pub labels: UiLabels,
 }

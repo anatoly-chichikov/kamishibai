@@ -52,11 +52,16 @@ pub(super) fn latest_verdict(cache: &Cache) -> Option<ArchivedVerdict> {
     if status == "accepted" {
         return None;
     }
+    let category = if status == "rejected" {
+        member(&value, "category").unwrap_or_else(|| String::from("other"))
+    } else {
+        String::from("error")
+    };
     let directory = path.parent()?.to_path_buf();
     Some(ArchivedVerdict {
         sequence,
         fault: AttemptFault::new(
-            member(&value, "category").unwrap_or_else(|| String::from("other")),
+            category,
             member(&value, "reason").unwrap_or_else(|| String::from("attempt was rejected")),
             member(&value, "image").map(|name| directory.join(name)),
         ),
@@ -197,6 +202,25 @@ mod tests {
         assert!(
             latest_verdict(&cache).is_none(),
             "an accepted picture was reported as a failed attempt"
+        );
+    }
+
+    #[test]
+    fn provider_and_judge_failures_keep_the_shared_error_taxonomy() {
+        let root = tempdir().expect("temporary cache root must be creatable");
+        let cache = Cache::new("card", root.path());
+        archive(
+            &cache,
+            1,
+            json!({"status": "error", "category": "text_judge", "reason": "transport failed", "image": "attempt-0001.jpg"}),
+        );
+        let fault = latest_verdict(&cache)
+            .expect("archived infrastructure failure must be readable")
+            .fault();
+        assert_eq!(
+            fault.category(),
+            "error",
+            "an infrastructure failure escaped the shared attempt-fault taxonomy"
         );
     }
 }

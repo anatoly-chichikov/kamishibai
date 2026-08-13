@@ -7,14 +7,20 @@ use std::thread;
 use anyhow::Result;
 use image::{DynamicImage, GenericImageView};
 use printpdf::{
-    Line, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt,
-    RawImage, RawImageData, RawImageFormat, TextItem, XObjectTransform,
+    Codepoint, FontId, Line, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage,
+    PdfSaveOptions, Point, Pt, RawImage, RawImageData, RawImageFormat, TextItem, TextMatrix,
+    XObjectTransform,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
+use crate::languages::TextDirection;
 use crate::vocabulary::VocabularyEntry;
 
 use super::FontPalette;
-use super::font::{carries, font_arc, leading, rgb, target, wrap};
+use super::font::{carries, font_arc, leading, rgb, shaping_font_arc, target};
+use super::shaping::{
+    inferred_direction, shape, shape_with_context, supplemental_slot, visual_runs,
+};
 use super::{ReportLayout, Thumbnail};
 
 const GAP: f32 = 1.0;
@@ -103,27 +109,14 @@ where
     /// the prepare and render passes use the same dispatch so subsets are
     /// always sufficient.
     fn prepared_fonts(&self) -> Result<PaletteFonts> {
-        let (
-            primary_regular_full,
-            primary_bold_full,
-            cjk_regular_full,
-            cjk_bold_full,
-            fallback_full,
-        ) = parse_palette_parallel(&self.palette)?;
-        let mut buckets = CharBuckets::default();
+        let parsed = parse_palette_parallel(&self.palette)?;
+        let mut buckets = CharBuckets::new(parsed.supplemental_regular.len());
+        let view = ClassifierView::from(&parsed);
         for (entry, _) in &self.rows {
             for (index, (line, _)) in self.layout.row(entry).into_iter().enumerate() {
                 let bold = index == 0;
                 for ch in line.chars() {
-                    let track = dispatch(
-                        ch,
-                        bold,
-                        &primary_regular_full,
-                        &primary_bold_full,
-                        &cjk_regular_full,
-                        &cjk_bold_full,
-                        &fallback_full,
-                    );
+                    let track = view.track(ch, bold);
                     buckets.insert(track, bold, ch);
                 }
             }
@@ -134,23 +127,36 @@ where
         if buckets.primary_bold.is_empty() {
             buckets.primary_bold.insert(' ');
         }
+        let shaping_active = buckets.shaping;
         Ok(PaletteFonts {
-            primary_regular: Arc::new(subset_or_full(
-                &primary_regular_full,
-                &buckets.primary_regular,
-            )),
-            primary_bold: Arc::new(subset_or_full(&primary_bold_full, &buckets.primary_bold)),
+            primary_regular: embedded(&parsed.primary_regular, &buckets.primary_regular, false),
+            primary_bold: embedded(&parsed.primary_bold, &buckets.primary_bold, false),
             cjk_regular: (!buckets.cjk_regular.is_empty())
-                .then(|| Arc::new(subset_or_full(&cjk_regular_full, &buckets.cjk_regular))),
+                .then(|| embedded(&parsed.cjk_regular, &buckets.cjk_regular, false)),
             cjk_bold: (!buckets.cjk_bold.is_empty())
-                .then(|| Arc::new(subset_or_full(&cjk_bold_full, &buckets.cjk_bold))),
+                .then(|| embedded(&parsed.cjk_bold, &buckets.cjk_bold, false)),
+            supplemental_regular: parsed
+                .supplemental_regular
+                .iter()
+                .zip(&buckets.supplemental_regular)
+                .map(|(font, bucket)| (!bucket.is_empty()).then(|| font.clone()))
+                .collect(),
+            supplemental_bold: parsed
+                .supplemental_bold
+                .iter()
+                .zip(&buckets.supplemental_bold)
+                .map(|(font, bucket)| (!bucket.is_empty()).then(|| font.clone()))
+                .collect(),
             fallback: (!buckets.fallback.is_empty())
-                .then(|| Arc::new(subset_or_full(&fallback_full, &buckets.fallback))),
-            classifier_primary_regular: primary_regular_full,
-            classifier_primary_bold: primary_bold_full,
-            classifier_cjk_regular: cjk_regular_full,
-            classifier_cjk_bold: cjk_bold_full,
-            classifier_fallback: fallback_full,
+                .then(|| embedded(&parsed.fallback, &buckets.fallback, false)),
+            classifier_primary_regular: parsed.primary_regular,
+            classifier_primary_bold: parsed.primary_bold,
+            classifier_cjk_regular: parsed.cjk_regular,
+            classifier_cjk_bold: parsed.cjk_bold,
+            classifier_supplemental_regular: parsed.supplemental_regular,
+            classifier_supplemental_bold: parsed.supplemental_bold,
+            classifier_fallback: parsed.fallback,
+            shaping_active,
         })
     }
 
@@ -190,25 +196,8 @@ where
                 text += GAP;
             }
             let bold = index == 0;
-            let primary_for_wrap = if bold {
-                fonts.classifier_primary_bold.as_ref()
-            } else {
-                fonts.classifier_primary_regular.as_ref()
-            };
-            let cjk_for_wrap = if bold {
-                fonts.classifier_cjk_bold.as_ref()
-            } else {
-                fonts.classifier_cjk_regular.as_ref()
-            };
-            let fallback_for_wrap = fonts.classifier_fallback.as_ref();
-            for part in wrap(
-                line.as_str(),
-                size,
-                WIDTH,
-                primary_for_wrap,
-                cjk_for_wrap,
-                fallback_for_wrap,
-            ) {
+            let view = ClassifierView::from(fonts);
+            for part in wrap_line(line.as_str(), size, WIDTH, bold, view) {
                 let color = if bold {
                     rgb(0, 0, 0)
                 } else if size <= 8.0 {
@@ -242,9 +231,8 @@ where
         Ok(())
     }
 
-    /// Write one wrapped text line, splitting into runs whenever the active
-    /// track changes (primary → CJK → fallback) so every glyph reaches the
-    /// font that actually carries it.
+    /// Write one wrapped text line in bidi visual order with OpenType shaping
+    /// whenever a complex-script face is active.
     #[allow(clippy::too_many_arguments)]
     fn line(
         &self,
@@ -260,57 +248,59 @@ where
         if line.is_empty() {
             return;
         }
-        ops.push(Op::StartTextSection);
-        ops.push(Op::SetTextCursor {
-            pos: Point::new(Mm(INDENT), Mm(HEIGHT - y)),
-        });
-        ops.push(Op::SetLineHeight { lh: Pt(size) });
-        ops.push(Op::SetFillColor { col: color });
-        let mut current = String::new();
-        let mut current_track = Track::Primary;
-        let mut started = false;
-        for ch in line.chars() {
-            let track = dispatch(
-                ch,
-                bold,
-                fonts.classifier_primary_regular.as_ref(),
-                fonts.classifier_primary_bold.as_ref(),
-                fonts.classifier_cjk_regular.as_ref(),
-                fonts.classifier_cjk_bold.as_ref(),
-                fonts.classifier_fallback.as_ref(),
-            );
-            if started && track != current_track {
-                emit(ops, ids, &current, current_track, bold, size);
-                current.clear();
-            }
-            current.push(ch);
-            current_track = track;
-            started = true;
+        let view = ClassifierView::from(fonts);
+        let direction = inferred_direction(line);
+        let spans = visual_spans(line, direction, bold, view);
+        let line_width = spans
+            .iter()
+            .map(|span| {
+                if fonts.shaping_active && matches!(span.track, Track::Supplemental(_)) {
+                    return shaped_span_width(view.font(span.track, bold), span, size);
+                }
+                view.measure(span.text.as_str(), bold, size)
+            })
+            .sum::<f32>();
+        let mut x = if direction == TextDirection::Rtl {
+            INDENT + (WIDTH - line_width).max(0.0)
+        } else {
+            INDENT
+        };
+        for span in spans {
+            let id = ids.id(span.track, bold);
+            let font = view.font(span.track, bold);
+            let advance = if fonts.shaping_active && matches!(span.track, Track::Supplemental(_)) {
+                emit_shaped(ops, font, id, &span, size, x, HEIGHT - y, color.clone())
+            } else {
+                emit_plain(
+                    ops,
+                    id,
+                    span.text.as_str(),
+                    size,
+                    x,
+                    HEIGHT - y,
+                    color.clone(),
+                );
+                view.measure(span.text.as_str(), bold, size)
+            };
+            x += advance;
         }
-        if !current.is_empty() {
-            emit(ops, ids, &current, current_track, bold, size);
-        }
-        ops.push(Op::EndTextSection);
     }
 }
 
-fn emit(ops: &mut Vec<Op>, ids: &PageFonts, text: &str, track: Track, bold: bool, size: f32) {
-    let id = match (track, bold) {
-        (Track::Primary, true) => ids.primary_bold.clone(),
-        (Track::Primary, false) => ids.primary_regular.clone(),
-        (Track::Cjk, true) => ids
-            .cjk_bold
-            .clone()
-            .unwrap_or_else(|| ids.primary_bold.clone()),
-        (Track::Cjk, false) => ids
-            .cjk_regular
-            .clone()
-            .unwrap_or_else(|| ids.primary_regular.clone()),
-        (Track::Fallback, _) => ids
-            .fallback
-            .clone()
-            .unwrap_or_else(|| ids.primary_regular.clone()),
-    };
+fn emit_plain(
+    ops: &mut Vec<Op>,
+    id: FontId,
+    text: &str,
+    size: f32,
+    x: f32,
+    y: f32,
+    color: printpdf::Color,
+) {
+    ops.push(Op::StartTextSection);
+    ops.push(Op::SetTextCursor {
+        pos: Point::new(Mm(x), Mm(y)),
+    });
+    ops.push(Op::SetFillColor { col: color });
     ops.push(Op::SetFont {
         font: PdfFontHandle::External(id),
         size: Pt(size),
@@ -318,53 +308,96 @@ fn emit(ops: &mut Vec<Op>, ids: &PageFonts, text: &str, track: Track, bold: bool
     ops.push(Op::ShowText {
         items: vec![TextItem::Text(String::from(text))],
     });
+    ops.push(Op::EndTextSection);
 }
 
-/// Pick the track that carries the glyph at the current weight: primary →
-/// CJK → fallback. Identical logic for prepare-time char bucketing and
-/// render-time dispatch, so every emitted glyph lives in the matching subset.
 #[allow(clippy::too_many_arguments)]
-fn dispatch(
-    ch: char,
-    bold: bool,
-    primary_regular: &ParsedFont,
-    primary_bold: &ParsedFont,
-    cjk_regular: &ParsedFont,
-    cjk_bold: &ParsedFont,
-    fallback: &ParsedFont,
-) -> Track {
-    let primary = if bold { primary_bold } else { primary_regular };
-    if carries(primary, ch) {
-        return Track::Primary;
+fn emit_shaped(
+    ops: &mut Vec<Op>,
+    font: &ParsedFont,
+    id: FontId,
+    span: &VisualSpan,
+    size: f32,
+    x: f32,
+    y: f32,
+    color: printpdf::Color,
+) -> f32 {
+    let glyphs = shape_with_context(
+        font,
+        span.text.as_str(),
+        span.rtl,
+        span.pre_context.as_str(),
+        span.post_context.as_str(),
+    )
+    .expect("invariant: a parsed PDF font must be shapeable");
+    let units = f32::from(font.font_metrics.units_per_em).max(1.0);
+    let scale = size / units;
+    let mut cursor = 0.0_f32;
+    ops.push(Op::StartTextSection);
+    ops.push(Op::SetFont {
+        font: PdfFontHandle::External(id),
+        size: Pt(size),
+    });
+    ops.push(Op::SetFillColor { col: color });
+    for glyph in glyphs {
+        ops.push(Op::SetTextMatrix {
+            matrix: TextMatrix::Raw([
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                x * 72.0 / 25.4 + (cursor + f32::from(glyph.x_offset)) * scale,
+                y * 72.0 / 25.4 + f32::from(glyph.y_offset) * scale,
+            ]),
+        });
+        ops.push(Op::ShowText {
+            items: vec![TextItem::GlyphIds(vec![Codepoint {
+                gid: glyph.gid,
+                offset: 0.0,
+                cid: glyph.cid,
+            }])],
+        });
+        cursor += f32::from(glyph.x_advance);
     }
-    let cjk = if bold { cjk_bold } else { cjk_regular };
-    if carries(cjk, ch) {
-        return Track::Cjk;
-    }
-    if carries(fallback, ch) {
-        return Track::Fallback;
-    }
-    Track::Primary
+    ops.push(Op::EndTextSection);
+    cursor * scale * 25.4 / 72.0
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Track {
     Primary,
     Cjk,
+    Supplemental(usize),
     Fallback,
 }
 
-#[derive(Default)]
 struct CharBuckets {
     primary_regular: HashSet<char>,
     primary_bold: HashSet<char>,
     cjk_regular: HashSet<char>,
     cjk_bold: HashSet<char>,
+    supplemental_regular: Vec<HashSet<char>>,
+    supplemental_bold: Vec<HashSet<char>>,
     fallback: HashSet<char>,
+    shaping: bool,
 }
 
 impl CharBuckets {
+    fn new(supplemental: usize) -> Self {
+        Self {
+            primary_regular: HashSet::new(),
+            primary_bold: HashSet::new(),
+            cjk_regular: HashSet::new(),
+            cjk_bold: HashSet::new(),
+            supplemental_regular: vec![HashSet::new(); supplemental],
+            supplemental_bold: vec![HashSet::new(); supplemental],
+            fallback: HashSet::new(),
+            shaping: false,
+        }
+    }
+
     fn insert(&mut self, track: Track, bold: bool, ch: char) {
+        self.shaping |= supplemental_slot(ch).is_some();
         match (track, bold) {
             (Track::Primary, true) => {
                 self.primary_bold.insert(ch);
@@ -378,11 +411,270 @@ impl CharBuckets {
             (Track::Cjk, false) => {
                 self.cjk_regular.insert(ch);
             }
+            (Track::Supplemental(index), true) => {
+                self.supplemental_bold[index].insert(ch);
+            }
+            (Track::Supplemental(index), false) => {
+                self.supplemental_regular[index].insert(ch);
+            }
             (Track::Fallback, _) => {
                 self.fallback.insert(ch);
             }
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct ClassifierView<'a> {
+    primary_regular: &'a ParsedFont,
+    primary_bold: &'a ParsedFont,
+    cjk_regular: &'a ParsedFont,
+    cjk_bold: &'a ParsedFont,
+    supplemental_regular: &'a [Arc<ParsedFont>],
+    supplemental_bold: &'a [Arc<ParsedFont>],
+    fallback: &'a ParsedFont,
+}
+
+impl<'a> From<&'a ParsedPalette> for ClassifierView<'a> {
+    fn from(value: &'a ParsedPalette) -> Self {
+        Self {
+            primary_regular: value.primary_regular.as_ref(),
+            primary_bold: value.primary_bold.as_ref(),
+            cjk_regular: value.cjk_regular.as_ref(),
+            cjk_bold: value.cjk_bold.as_ref(),
+            supplemental_regular: value.supplemental_regular.as_slice(),
+            supplemental_bold: value.supplemental_bold.as_slice(),
+            fallback: value.fallback.as_ref(),
+        }
+    }
+}
+
+impl<'a> From<&'a PaletteFonts> for ClassifierView<'a> {
+    fn from(value: &'a PaletteFonts) -> Self {
+        Self {
+            primary_regular: value.classifier_primary_regular.as_ref(),
+            primary_bold: value.classifier_primary_bold.as_ref(),
+            cjk_regular: value.classifier_cjk_regular.as_ref(),
+            cjk_bold: value.classifier_cjk_bold.as_ref(),
+            supplemental_regular: value.classifier_supplemental_regular.as_slice(),
+            supplemental_bold: value.classifier_supplemental_bold.as_slice(),
+            fallback: value.classifier_fallback.as_ref(),
+        }
+    }
+}
+
+impl ClassifierView<'_> {
+    fn track(&self, ch: char, bold: bool) -> Track {
+        let supplemental = if bold {
+            self.supplemental_bold
+        } else {
+            self.supplemental_regular
+        };
+        if let Some(index) = supplemental_slot(ch).filter(|index| {
+            supplemental
+                .get(*index)
+                .is_some_and(|font| carries(font.as_ref(), ch))
+        }) {
+            return Track::Supplemental(index);
+        }
+        let primary = if bold {
+            self.primary_bold
+        } else {
+            self.primary_regular
+        };
+        if carries(primary, ch) {
+            return Track::Primary;
+        }
+        let cjk = if bold {
+            self.cjk_bold
+        } else {
+            self.cjk_regular
+        };
+        if carries(cjk, ch) {
+            return Track::Cjk;
+        }
+        if let Some(index) = supplemental
+            .iter()
+            .position(|font| carries(font.as_ref(), ch))
+        {
+            return Track::Supplemental(index);
+        }
+        if carries(self.fallback, ch) {
+            return Track::Fallback;
+        }
+        Track::Primary
+    }
+
+    fn font(&self, track: Track, bold: bool) -> &ParsedFont {
+        match (track, bold) {
+            (Track::Primary, true) => self.primary_bold,
+            (Track::Primary, false) => self.primary_regular,
+            (Track::Cjk, true) => self.cjk_bold,
+            (Track::Cjk, false) => self.cjk_regular,
+            (Track::Supplemental(index), true) => self.supplemental_bold[index].as_ref(),
+            (Track::Supplemental(index), false) => self.supplemental_regular[index].as_ref(),
+            (Track::Fallback, _) => self.fallback,
+        }
+    }
+
+    fn measure(&self, text: &str, bold: bool, size: f32) -> f32 {
+        self.font_spans(text, bold)
+            .iter()
+            .map(|span| {
+                let rtl = inferred_direction(span.text.as_str()) == TextDirection::Rtl;
+                shaped_width(self.font(span.track, bold), span.text.as_str(), rtl, size)
+            })
+            .sum()
+    }
+
+    fn font_spans(&self, text: &str, bold: bool) -> Vec<FontSpan> {
+        let mut spans = Vec::new();
+        let mut current = String::new();
+        let mut current_track = Track::Primary;
+        let mut start = 0usize;
+        for (index, ch) in text.char_indices() {
+            let track = self.track(ch, bold);
+            if !current.is_empty() && track != current_track {
+                spans.push(FontSpan {
+                    text: std::mem::take(&mut current),
+                    track: current_track,
+                    range: start..index,
+                });
+                start = index;
+            }
+            current.push(ch);
+            current_track = track;
+        }
+        if !current.is_empty() {
+            spans.push(FontSpan {
+                text: current,
+                track: current_track,
+                range: start..text.len(),
+            });
+        }
+        spans
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FontSpan {
+    text: String,
+    track: Track,
+    range: std::ops::Range<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct VisualSpan {
+    text: String,
+    pre_context: String,
+    post_context: String,
+    track: Track,
+    rtl: bool,
+}
+
+fn visual_spans(
+    text: &str,
+    direction: TextDirection,
+    bold: bool,
+    view: ClassifierView<'_>,
+) -> Vec<VisualSpan> {
+    let mut spans = Vec::new();
+    for run in visual_runs(text, direction) {
+        let run_start = run.range.start;
+        let mut directional = view
+            .font_spans(&text[run.range.clone()], bold)
+            .into_iter()
+            .map(|span| {
+                let start = run_start + span.range.start;
+                let end = run_start + span.range.end;
+                VisualSpan {
+                    text: span.text,
+                    pre_context: text[..start].to_string(),
+                    post_context: text[end..].to_string(),
+                    track: span.track,
+                    rtl: run.rtl,
+                }
+            })
+            .collect::<Vec<_>>();
+        if run.rtl {
+            directional.reverse();
+        }
+        spans.extend(directional);
+    }
+    spans
+}
+
+fn shaped_width(font: &ParsedFont, text: &str, rtl: bool, size: f32) -> f32 {
+    let units = f32::from(font.font_metrics.units_per_em).max(1.0);
+    let advance = shape(font, text, rtl)
+        .expect("invariant: a parsed PDF font must be shapeable")
+        .iter()
+        .map(|glyph| f32::from(glyph.x_advance))
+        .sum::<f32>();
+    advance * size / units * 25.4 / 72.0
+}
+
+fn shaped_span_width(font: &ParsedFont, span: &VisualSpan, size: f32) -> f32 {
+    let units = f32::from(font.font_metrics.units_per_em).max(1.0);
+    let advance = shape_with_context(
+        font,
+        span.text.as_str(),
+        span.rtl,
+        span.pre_context.as_str(),
+        span.post_context.as_str(),
+    )
+    .expect("invariant: a parsed PDF font must be shapeable")
+    .iter()
+    .map(|glyph| f32::from(glyph.x_advance))
+    .sum::<f32>();
+    advance * size / units * 25.4 / 72.0
+}
+
+fn wrap_line(
+    text: &str,
+    size: f32,
+    width: f32,
+    bold: bool,
+    view: ClassifierView<'_>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for (word_index, word) in text.split_whitespace().enumerate() {
+        for (piece_index, piece) in wrap_pieces(word).into_iter().enumerate() {
+            let joiner = if !current.is_empty() && word_index > 0 && piece_index == 0 {
+                " "
+            } else {
+                ""
+            };
+            let candidate = format!("{current}{joiner}{piece}");
+            if view.measure(candidate.as_str(), bold, size) <= width {
+                current = candidate;
+                continue;
+            }
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            current = piece;
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn wrap_pieces(word: &str) -> Vec<String> {
+    if !word.chars().any(is_unspaced) {
+        return vec![word.to_string()];
+    }
+    word.graphemes(true).map(String::from).collect()
+}
+
+fn is_unspaced(ch: char) -> bool {
+    super::font::is_cjk(ch) || matches!(u32::from(ch), 0x0E00..=0x0E7F)
 }
 
 #[derive(Clone, Debug)]
@@ -391,12 +683,17 @@ struct PaletteFonts {
     primary_bold: Arc<ParsedFont>,
     cjk_regular: Option<Arc<ParsedFont>>,
     cjk_bold: Option<Arc<ParsedFont>>,
+    supplemental_regular: Vec<Option<Arc<ParsedFont>>>,
+    supplemental_bold: Vec<Option<Arc<ParsedFont>>>,
     fallback: Option<Arc<ParsedFont>>,
     classifier_primary_regular: Arc<ParsedFont>,
     classifier_primary_bold: Arc<ParsedFont>,
     classifier_cjk_regular: Arc<ParsedFont>,
     classifier_cjk_bold: Arc<ParsedFont>,
+    classifier_supplemental_regular: Vec<Arc<ParsedFont>>,
+    classifier_supplemental_bold: Vec<Arc<ParsedFont>>,
     classifier_fallback: Arc<ParsedFont>,
+    shaping_active: bool,
 }
 
 impl PaletteFonts {
@@ -404,6 +701,27 @@ impl PaletteFonts {
     /// id table. CJK and fallback are registered only if at least one glyph
     /// routed to them.
     fn register(&self, doc: &mut PdfDocument) -> PageFonts {
+        let supplemental_regular = self
+            .supplemental_regular
+            .iter()
+            .map(|font| font.as_ref().map(|value| doc.add_font(value.as_ref())))
+            .collect::<Vec<_>>();
+        let supplemental_bold = self
+            .supplemental_bold
+            .iter()
+            .enumerate()
+            .map(|(index, font)| match font.as_ref() {
+                Some(value)
+                    if self.supplemental_regular[index]
+                        .as_ref()
+                        .is_some_and(|regular| Arc::ptr_eq(regular, value)) =>
+                {
+                    supplemental_regular[index].clone()
+                }
+                Some(value) => Some(doc.add_font(value.as_ref())),
+                None => None,
+            })
+            .collect();
         PageFonts {
             primary_regular: doc.add_font(&self.primary_regular),
             primary_bold: doc.add_font(&self.primary_bold),
@@ -415,6 +733,8 @@ impl PaletteFonts {
                 .cjk_bold
                 .as_ref()
                 .map(|font| doc.add_font(font.as_ref())),
+            supplemental_regular,
+            supplemental_bold,
             fallback: self
                 .fallback
                 .as_ref()
@@ -425,11 +745,40 @@ impl PaletteFonts {
 
 #[derive(Clone, Debug)]
 struct PageFonts {
-    primary_regular: printpdf::FontId,
-    primary_bold: printpdf::FontId,
-    cjk_regular: Option<printpdf::FontId>,
-    cjk_bold: Option<printpdf::FontId>,
-    fallback: Option<printpdf::FontId>,
+    primary_regular: FontId,
+    primary_bold: FontId,
+    cjk_regular: Option<FontId>,
+    cjk_bold: Option<FontId>,
+    supplemental_regular: Vec<Option<FontId>>,
+    supplemental_bold: Vec<Option<FontId>>,
+    fallback: Option<FontId>,
+}
+
+impl PageFonts {
+    fn id(&self, track: Track, bold: bool) -> FontId {
+        match (track, bold) {
+            (Track::Primary, true) => self.primary_bold.clone(),
+            (Track::Primary, false) => self.primary_regular.clone(),
+            (Track::Cjk, true) => self
+                .cjk_bold
+                .clone()
+                .unwrap_or_else(|| self.primary_bold.clone()),
+            (Track::Cjk, false) => self
+                .cjk_regular
+                .clone()
+                .unwrap_or_else(|| self.primary_regular.clone()),
+            (Track::Supplemental(index), true) => self.supplemental_bold[index]
+                .clone()
+                .unwrap_or_else(|| self.primary_bold.clone()),
+            (Track::Supplemental(index), false) => self.supplemental_regular[index]
+                .clone()
+                .unwrap_or_else(|| self.primary_regular.clone()),
+            (Track::Fallback, _) => self
+                .fallback
+                .clone()
+                .unwrap_or_else(|| self.primary_regular.clone()),
+        }
+    }
 }
 
 fn raw(image: DynamicImage) -> RawImage {
@@ -444,21 +793,19 @@ fn raw(image: DynamicImage) -> RawImage {
     }
 }
 
-/// Resolve and parse all five embedded font tracks concurrently. Each thread
-/// runs the full font-kit lookup and `ParsedFont::from_bytes` for one track,
-/// so the wall-clock collapses to roughly the time of the single slowest face
-/// (Arial Unicode MS at ~108 ms in release). `parsed_shared` keeps a
-/// process-wide parse cache so repeated calls inside one session pay zero.
-#[allow(clippy::type_complexity)]
-fn parse_palette_parallel(
-    palette: &FontPalette,
-) -> Result<(
-    Arc<ParsedFont>,
-    Arc<ParsedFont>,
-    Arc<ParsedFont>,
-    Arc<ParsedFont>,
-    Arc<ParsedFont>,
-)> {
+#[derive(Clone, Debug)]
+struct ParsedPalette {
+    primary_regular: Arc<ParsedFont>,
+    primary_bold: Arc<ParsedFont>,
+    cjk_regular: Arc<ParsedFont>,
+    cjk_bold: Arc<ParsedFont>,
+    supplemental_regular: Vec<Arc<ParsedFont>>,
+    supplemental_bold: Vec<Arc<ParsedFont>>,
+    fallback: Arc<ParsedFont>,
+}
+
+/// Resolve and parse all configured font tracks concurrently.
+fn parse_palette_parallel(palette: &FontPalette) -> Result<ParsedPalette> {
     thread::scope(|scope| {
         let primary = palette.primary();
         let cjk = palette.cjk();
@@ -467,20 +814,57 @@ fn parse_palette_parallel(
         let pb = scope.spawn(|| font_arc(primary, true));
         let cr = scope.spawn(|| font_arc(cjk, false));
         let cb = scope.spawn(|| font_arc(cjk, true));
+        let sr = palette
+            .supplemental()
+            .iter()
+            .map(|family| scope.spawn(|| font_arc(family, false)))
+            .collect::<Vec<_>>();
+        let sb = palette
+            .supplemental()
+            .iter()
+            .map(|family| scope.spawn(|| shaping_font_arc(family, true)))
+            .collect::<Vec<_>>();
         let fb = scope.spawn(|| font_arc(fallback, false));
-        Ok((
-            pr.join()
+        Ok(ParsedPalette {
+            primary_regular: pr
+                .join()
                 .map_err(|_| anyhow::anyhow!("font parse panicked"))??,
-            pb.join()
+            primary_bold: pb
+                .join()
                 .map_err(|_| anyhow::anyhow!("font parse panicked"))??,
-            cr.join()
+            cjk_regular: cr
+                .join()
                 .map_err(|_| anyhow::anyhow!("font parse panicked"))??,
-            cb.join()
+            cjk_bold: cb
+                .join()
                 .map_err(|_| anyhow::anyhow!("font parse panicked"))??,
-            fb.join()
+            supplemental_regular: joined_fonts(sr)?,
+            supplemental_bold: joined_fonts(sb)?,
+            fallback: fb
+                .join()
                 .map_err(|_| anyhow::anyhow!("font parse panicked"))??,
-        ))
+        })
     })
+}
+
+fn joined_fonts(
+    handles: Vec<std::thread::ScopedJoinHandle<'_, Result<Arc<ParsedFont>>>>,
+) -> Result<Vec<Arc<ParsedFont>>> {
+    handles
+        .into_iter()
+        .map(|handle| {
+            handle
+                .join()
+                .map_err(|_| anyhow::anyhow!("font parse panicked"))?
+        })
+        .collect()
+}
+
+fn embedded(font: &Arc<ParsedFont>, chars: &HashSet<char>, full: bool) -> Arc<ParsedFont> {
+    if full && font.original_index == 0 {
+        return font.clone();
+    }
+    Arc::new(subset_or_full(font, chars))
 }
 
 /// Decode and resize every row's thumbnail in parallel. Image decoding +
@@ -542,4 +926,22 @@ fn subset_or_full(font: &ParsedFont, chars: &HashSet<char>) -> ParsedFont {
     };
     let mut warnings = Vec::new();
     ParsedFont::from_bytes(&subset.bytes, 0, &mut warnings).unwrap_or_else(|| font.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClassifierView, FontPalette, parse_palette_parallel, wrap_line};
+
+    #[test]
+    fn row_wrap_preserves_korean_and_mixed_thai_word_spaces() {
+        let parsed = parse_palette_parallel(&FontPalette::default()).expect("fonts must resolve");
+        let inputs = ["한국어 문장", "use ช่วย instead"];
+        let output = inputs.map(|input| {
+            wrap_line(input, 8.0, 200.0, false, ClassifierView::from(&parsed)).join("|")
+        });
+        assert_eq!(
+            output, inputs,
+            "row wrapping removed explicit Korean or Thai word spaces"
+        );
+    }
 }

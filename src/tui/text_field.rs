@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthStr;
 
 use super::palette;
 
@@ -58,5 +59,5 @@ impl<'a> TextField<'a> {
 }
 
 fn text_width(text: &str) -> u16 {
-    u16::try_from(text.chars().count()).unwrap_or(u16::MAX)
+    u16::try_from(UnicodeWidthStr::width(text)).unwrap_or(u16::MAX)
 }

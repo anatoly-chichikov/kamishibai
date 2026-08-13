@@ -681,5 +681,525 @@
         "sentence_end": "definitief ontwerp"
       }
     }
+  },
+  "ko": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["금융", "고어", "관용", "영국식", "포커"],
+        "parts": ["명사:", "동사:", "형용사:", "부사:", "대명사:", "조사:"]
+      },
+      "forbidden": {
+        "starters": ["우리가 배울 말은", "공부할 표현은", "지금 배우는 것은"],
+        "joins": ["X 또는 Y", "X라는 뜻도 있고 Y라는 뜻도 있다"],
+        "fillers": ["평범한", "흔한", "일상적인", "표준적인", "기본적인", "간단한"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "명사: <하나의 정확한 중심 뜻을 짧은 문장으로 설명>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "명사: <다른 하나의 뜻을 짧고 분명하게 설명>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "동사: <사용자 힌트가 가리키는 정확한 뜻을 짧게 설명>",
+          "tag": null
+        },
+        "invalid": "이 단어는 감지된 학습 대상 언어에 속하지 않습니다."
+      },
+      "messages": {
+        "listed": "이미 목록에 있습니다.",
+        "absent": "더 추가할 뜻이 없습니다."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "무언가를 정중하게 부탁할 때 씁니다.",
+          "피곤하다는 뜻입니다.",
+          "업무 상황에서 흔히 씁니다."
+        ],
+        "good": "‘<near target word>’ 쪽엔 장독대가 있고, 이쪽엔 대나무 숲이 있다.",
+        "contrast": "‘<near target word>’ 쪽엔 …이 있고, 이쪽엔 …이 있다"
+      },
+      "context": {
+        "headers": ["뜻.", "자연스럽게 쓰는 상황.", "어색해지는 상황.", "말맛과 뉘앙스."],
+        "rarity": "드문 표현으로, 주로 옛 문학의 산문에서 보임"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "눈", "longer": "눈물"},
+      "fragment": {"visible": "최종 설계", "sentence_end": "최종 설계"}
+    }
+  },
+  "tr": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["fin.", "esk.", "dey.", "Brit.", "poker"],
+        "parts": ["ad", "fiil", "sıfat", "zarf", "zamir", "edat"]
+      },
+      "forbidden": {
+        "starters": ["Öğrendiğimiz", "Çalıştığımız", "Şimdi öğreneceğimiz"],
+        "joins": ["X veya Y", "hem X hem de Y anlamına gelebilir"],
+        "fillers": ["sıradan", "yaygın", "gündelik", "standart", "temel", "basit"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "Ad <tek bir kesin temel anlamı kısa cümlede açıklar>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "Ad <ayrı bir ikinci anlamı kısa cümlede açıklar>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "Fiil <kullanıcı ipucunun belirttiği kesin anlamı kısa açıklar>",
+          "tag": null
+        },
+        "invalid": "Bu sözcük algılanan hedef dile ait değil."
+      },
+      "messages": {
+        "listed": "Bu zaten listede var.",
+        "absent": "Eklenecek başka anlam yok."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Kibarca bir şey isterken kullanılır.",
+          "Yorgun olmak demektir.",
+          "İş ortamında yaygın kullanılır."
+        ],
+        "good": "“<near target word>” tarafında vapur ve martılar; burada çamlar sis içinde.",
+        "contrast": "“<near target word>” tarafında …; burada …"
+      },
+      "context": {
+        "headers": ["Anlamı.", "Doğal kullanıldığı yer.", "Yadırganacağı yer.", "Söyleyiş inceliği."],
+        "rarity": "seyrek; daha çok eski edebî metinlerde geçer"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "bal", "longer": "balık"},
+      "fragment": {"visible": "SON TASARIM", "sentence_end": "son tasarım"}
+    }
+  },
+  "pl": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["fin.", "arch.", "idiom.", "bryt.", "poker"],
+        "parts": ["rzecz.", "czas.", "przym.", "przysł.", "zaim.", "przyim."]
+      },
+      "forbidden": {
+        "starters": ["Uczymy się", "Poznajemy słowo", "Teraz uczymy się"],
+        "joins": ["X lub Y", "może znaczyć X, a także Y"],
+        "fillers": ["zwykły", "częsty", "codzienny", "standardowy", "podstawowy", "prosty"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "Rzecz. <jedno precyzyjne główne znaczenie opisane krótkim zdaniem>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "Rzecz. <inne odrębne znaczenie opisane jednym krótkim zdaniem>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "Czas. <dokładne znaczenie wskazane przez podpowiedź użytkownika>",
+          "tag": null
+        },
+        "invalid": "To słowo nie należy do wykrytego języka docelowego."
+      },
+      "messages": {
+        "listed": "To już jest na liście.",
+        "absent": "Nie ma nic więcej do dodania."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Używane przy uprzejmym proszeniu o coś.",
+          "Oznacza zmęczenie.",
+          "Częste w sytuacjach zawodowych."
+        ],
+        "good": "„<near target word>” ukazuje rynek i tramwaj; tutaj pomost przecina jezioro.",
+        "contrast": "„<near target word>” ukazuje…; tutaj…"
+      },
+      "context": {
+        "headers": ["Znaczenie.", "Naturalny kontekst.", "Kontekst, w którym razi.", "Odcień znaczeniowy."],
+        "rarity": "rzadkie; spotykane głównie w dawnej prozie"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "kot", "longer": "kotara"},
+      "fragment": {"visible": "PROJEKT KOŃCOWY", "sentence_end": "projekt końcowy"}
+    }
+  },
+  "uk": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["фін.", "арх.", "ідіом.", "брит.", "покер"],
+        "parts": ["ім.", "дієсл.", "прикм.", "присл.", "займ.", "прийм."]
+      },
+      "forbidden": {
+        "starters": ["Ми вивчаємо", "Вивчаючи", "Зараз вивчаємо"],
+        "joins": ["X або Y", "може означати X, а також Y"],
+        "fillers": ["звичайний", "поширений", "повсякденний", "стандартний", "базовий", "простий"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "Ім. <одне точне основне значення у стислому реченні>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "Ім. <інше окреме значення в одному стислому реченні>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "Дієсл. <точне значення визначене підказкою користувача>",
+          "tag": null
+        },
+        "invalid": "Це слово не належить до визначеної цільової мови."
+      },
+      "messages": {
+        "listed": "Це вже є у списку.",
+        "absent": "Більше нічого додати."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Уживається для ввічливого прохання.",
+          "Означає втому.",
+          "Часто трапляється в діловому контексті."
+        ],
+        "good": "«<near target word>» показує трамвай і каштани; тут човен пливе серед очерету.",
+        "contrast": "«<near target word>» показує…; тут…"
+      },
+      "context": {
+        "headers": ["Значення.", "Природний контекст.", "Недоречний контекст.", "Смисловий відтінок."],
+        "rarity": "рідковживане; переважно трапляється в давній художній прозі"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "кіт", "longer": "кітель"},
+      "fragment": {"visible": "ОСТАТОЧНИЙ ПРОЄКТ", "sentence_end": "остаточний проєкт"}
+    }
+  },
+  "id": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["keu.", "ark.", "idiom", "Brit.", "poker"],
+        "parts": ["n.", "v.", "a.", "adv.", "pron.", "prep."]
+      },
+      "forbidden": {
+        "starters": ["Kita mempelajari", "Sedang mempelajari", "Kata yang dipelajari"],
+        "joins": ["X atau Y", "dapat berarti X dan juga Y"],
+        "fillers": ["biasa", "umum", "sehari-hari", "standar", "dasar", "sederhana"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "N. <satu makna utama yang tepat dalam kalimat ringkas>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "N. <makna lain yang berbeda dalam satu kalimat ringkas>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "V. <makna tepat yang ditentukan oleh petunjuk pengguna>",
+          "tag": null
+        },
+        "invalid": "Kata ini bukan bagian dari bahasa sasaran yang terdeteksi."
+      },
+      "messages": {
+        "listed": "Ini sudah ada dalam daftar.",
+        "absent": "Tidak ada lagi yang perlu ditambahkan."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Dipakai saat meminta sesuatu dengan sopan.",
+          "Berarti merasa lelah.",
+          "Umum dalam konteks profesional."
+        ],
+        "good": "“<near target word>” menampilkan warung-becak; di sini perahu melintasi sawah.",
+        "contrast": "“<near target word>” menampilkan…; di sini…"
+      },
+      "context": {
+        "headers": ["Makna.", "Konteks yang wajar.", "Konteks yang terasa janggal.", "Nuansa pemakaian."],
+        "rarity": "jarang; terutama ditemukan dalam prosa sastra lama"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "air", "longer": "cairan"},
+      "fragment": {"visible": "RANCANGAN AKHIR", "sentence_end": "rancangan akhir"}
+    }
+  },
+  "hi": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["वित्त.", "पुरा.", "मुहा.", "ब्रिट.", "पोकर"],
+        "parts": ["संज्ञा", "क्रिया", "विशेषण", "क्रियाविशेषण", "सर्वनाम", "संबंधबोधक"]
+      },
+      "forbidden": {
+        "starters": ["हम सीखते हैं", "सीखते समय", "हम यह शब्द सीख रहे हैं"],
+        "joins": ["X या Y", "X और Y दोनों अर्थ हो सकते हैं"],
+        "fillers": ["सामान्य", "आम", "रोज़मर्रा", "मानक", "बुनियादी", "सरल"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "संज्ञा <एक सटीक मुख्य अर्थ को संक्षिप्त वाक्य में बताए>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "संज्ञा <एक अलग दूसरा अर्थ संक्षिप्त वाक्य में बताए>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "क्रिया <उपयोगकर्ता के संकेत से चुना सटीक अर्थ बताए>",
+          "tag": null
+        },
+        "invalid": "यह शब्द पहचानी गई लक्ष्य भाषा का नहीं है।"
+      },
+      "messages": {
+        "listed": "यह पहले से सूची में है।",
+        "absent": "जोड़ने के लिए और कुछ नहीं है।"
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "विनम्रता से कुछ माँगते समय इसका प्रयोग होता है।",
+          "इसका अर्थ थका हुआ है।",
+          "व्यावसायिक संदर्भों में यह आम है।"
+        ],
+        "good": "“<near target word>” में चायघर है; यहाँ छत पर पतंग है।",
+        "contrast": "“<near target word>” में … है; यहाँ … है"
+      },
+      "context": {
+        "headers": ["अर्थ।", "स्वाभाविक प्रयोग।", "जहाँ प्रयोग अटपटा लगे।", "भाव और लहजा।"],
+        "rarity": "दुर्लभ; मुख्यतः पुराने साहित्यिक गद्य में मिलता है"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "कल", "longer": "कलम"},
+      "fragment": {"visible": "अंतिम रूपरेखा", "sentence_end": "अंतिम रूपरेखा"}
+    }
+  },
+  "ar": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["مالي", "قديم", "اصطلاحي", "بريطاني", "بوكر"],
+        "parts": ["اسم", "فعل", "صفة", "ظرف", "ضمير", "حرف"]
+      },
+      "forbidden": {
+        "starters": ["نتعلم", "عند دراسة", "الكلمة التي نتعلمها"],
+        "joins": ["X أو Y", "قد تعني X وتعني أيضًا Y"],
+        "fillers": ["عادي", "شائع", "يومي", "قياسي", "أساسي", "بسيط"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "اسم <معنى رئيسي واحد دقيق في جملة موجزة واضحة>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "اسم <معنى آخر مستقل ودقيق في جملة موجزة>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "فعل <المعنى الدقيق الذي تحدده ملاحظة المستخدم>",
+          "tag": null
+        },
+        "invalid": "هذه الكلمة ليست من اللغة الهدف التي تم اكتشافها."
+      },
+      "messages": {
+        "listed": "هذا موجود بالفعل في القائمة.",
+        "absent": "لا يوجد معنى آخر لإضافته."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "تُستخدم عند طلب شيء بأدب.",
+          "تعني الشعور بالتعب.",
+          "شائعة في السياقات المهنية."
+        ],
+        "good": "في «<near target word>» سوق ومظلّات؛ وهنا قارب بين النخيل.",
+        "contrast": "في «<near target word>» …؛ وهنا …"
+      },
+      "context": {
+        "headers": ["المعنى.", "موضع الاستعمال الطبيعي.", "موضع لا يلائمه.", "الإيحاء والأسلوب."],
+        "rarity": "نادر، ويظهر غالبًا في النثر التراثي"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "علم", "longer": "معلم"},
+      "fragment": {"visible": "التصميم النهائي", "sentence_end": "التصميم النهائي"}
+    }
+  },
+  "th": {
+    "spacing": "unspaced",
+    "understanding": {
+      "markers": {
+        "tags": ["การเงิน", "โบราณ", "สำนวน", "อังกฤษ", "โป๊กเกอร์"],
+        "parts": ["คำนาม", "คำกริยา", "คำคุณศัพท์", "คำวิเศษณ์", "คำสรรพนาม", "คำบุพบท"]
+      },
+      "forbidden": {
+        "starters": ["เราเรียน", "ระหว่างเรียน", "คำที่เรากำลังเรียนคือ"],
+        "joins": ["XหรือY", "อาจหมายถึงXและหมายถึงYด้วย"],
+        "fillers": ["ธรรมดา", "ทั่วไป", "ในชีวิตประจำวัน", "มาตรฐาน", "พื้นฐาน", "ง่าย"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "คำนาม<อธิบายความหมายหลักที่แม่นยำหนึ่งความหมายด้วยประโยคสั้น>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "คำนาม<อธิบายอีกความหมายหนึ่งที่แตกต่างอย่างชัดเจนด้วยประโยคสั้น>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "คำกริยา<อธิบายความหมายตรงตามคำใบ้ของผู้ใช้อย่างแม่นยำ>",
+          "tag": null
+        },
+        "invalid": "คำนี้ไม่ใช่คำในภาษาเป้าหมายที่ตรวจพบ"
+      },
+      "messages": {
+        "listed": "คำนี้อยู่ในรายการแล้ว",
+        "absent": "ไม่มีความหมายอื่นให้เพิ่ม"
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "ใช้เมื่อต้องการขอบางสิ่งอย่างสุภาพ",
+          "หมายถึงรู้สึกเหนื่อย",
+          "พบบ่อยในบริบทการทำงาน"
+        ],
+        "good": "“<near target word>”มีเรือหางยาวที่ตลาดน้ำส่วนภาพนี้มีช้างเดินกลางฝน",
+        "contrast": "“<near target word>”มี…ส่วนภาพนี้มี…"
+      },
+      "context": {
+        "headers": ["ความหมาย", "บริบทที่ใช้ได้เป็นธรรมชาติ", "บริบทที่ฟังดูไม่เข้าที่", "น้ำเสียงและนัย"],
+        "rarity": "พบน้อยและมักปรากฏในร้อยแก้ววรรณกรรมเก่า"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "นา", "longer": "นาฬิกา"},
+      "fragment": {"visible": "แบบสุดท้าย", "sentence_end": "แบบสุดท้าย"}
+    }
+  },
+  "he": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["פינ׳", "ארכ׳", "ניב", "בריטי", "פוקר"],
+        "parts": ["ש״ע", "פועל", "תואר", "תה״פ", "כינוי", "מילת יחס"]
+      },
+      "forbidden": {
+        "starters": ["אנחנו לומדים", "בזמן שלומדים", "המילה הנלמדת היא"],
+        "joins": ["X או Y", "עשוי להיות גם X וגם Y"],
+        "fillers": ["רגיל", "נפוץ", "יומיומי", "תקני", "בסיסי", "פשוט"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "ש״ע <משמעות ראשית אחת ומדויקת במשפט קצר וברור>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "ש״ע <משמעות נוספת ונבדלת במשפט אחד קצר וברור>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "פועל <המשמעות המדויקת שנבחרה לפי רמז המשתמש>",
+          "tag": null
+        },
+        "invalid": "המילה הזאת אינה שייכת לשפת היעד שזוהתה."
+      },
+      "messages": {
+        "listed": "זה כבר מופיע ברשימה.",
+        "absent": "אין משמעות נוספת שאפשר להוסיף."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "משמש כשמבקשים משהו בנימוס.",
+          "פירושו להיות עייף.",
+          "נפוץ בהקשרים מקצועיים."
+        ],
+        "good": "בציור עם <near target word> רואים שוק; כאן סירה שטה בין קנים.",
+        "contrast": "בתמונה עם <near target word> רואים…, ואילו כאן…"
+      },
+      "context": {
+        "headers": ["משמעות.", "הקשר טבעי.", "הקשר שבו זה צורם.", "גוון ומשלב."],
+        "rarity": "נדיר, ומופיע בעיקר בפרוזה ספרותית ישנה"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "דג", "longer": "דגל"},
+      "fragment": {"visible": "העיצוב הסופי", "sentence_end": "העיצוב הסופי"}
+    }
+  },
+  "vi": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["tài chính", "cổ", "thành ngữ", "Anh", "poker"],
+        "parts": ["danh từ", "động từ", "tính từ", "trạng từ", "đại từ", "giới từ"]
+      },
+      "forbidden": {
+        "starters": ["Chúng ta học", "Khi học", "Từ đang học là"],
+        "joins": ["X hoặc Y", "có thể mang nghĩa X và cả Y"],
+        "fillers": ["bình thường", "phổ biến", "hằng ngày", "tiêu chuẩn", "cơ bản", "đơn giản"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "Danh từ <một nghĩa chính xác được diễn đạt bằng câu ngắn>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "Danh từ <một nghĩa khác biệt được diễn đạt bằng câu ngắn>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "Động từ <nghĩa chính xác do gợi ý của người dùng chọn>",
+          "tag": null
+        },
+        "invalid": "Từ này không thuộc ngôn ngữ đích đã nhận diện."
+      },
+      "messages": {
+        "listed": "Mục này đã có trong danh sách.",
+        "absent": "Không còn nghĩa nào để thêm."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Dùng khi lịch sự yêu cầu điều gì đó.",
+          "Có nghĩa là mệt.",
+          "Thường gặp trong bối cảnh công việc."
+        ],
+        "good": "“<near target word>” có chợ nổi; đây đèn lồng soi hiên nhà.",
+        "contrast": "“<near target word>” có…; ở đây…"
+      },
+      "context": {
+        "headers": ["Nghĩa.", "Ngữ cảnh dùng tự nhiên.", "Ngữ cảnh nghe gượng.", "Sắc thái và văn phong."],
+        "rarity": "hiếm, chủ yếu gặp trong văn xuôi văn chương xưa"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "ăn", "longer": "chăn"},
+      "fragment": {"visible": "THIẾT KẾ CUỐI CÙNG", "sentence_end": "thiết kế cuối cùng"}
+    }
   }
 }

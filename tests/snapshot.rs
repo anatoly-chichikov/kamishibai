@@ -197,6 +197,20 @@ fn welcome_language_row_keeps_the_dutch_chip_visible_at_standard_width() {
 }
 
 #[test]
+fn narrow_welcome_key_step_keeps_every_language_and_form_control_visible() {
+    let app = App::new(LanguagePair::new("fr", "en"))
+        .opening_welcome(KeySource::Empty, String::new(), false)
+        .welcome_advance();
+    let rendered = render_sized(&app, 80, 16);
+    assert!(
+        rendered.contains(" NL ")
+            && rendered.contains("paste your key [Cmd+V]")
+            && rendered.contains(" submit "),
+        "the narrow Welcome key step clipped either the 21-language catalog or its form controls"
+    );
+}
+
+#[test]
 fn your_words_snapshot_locks_initial_layout() {
     let app = App::new(LanguagePair::new("en", "ru"));
     insta::assert_snapshot!("your_words", render(&app));

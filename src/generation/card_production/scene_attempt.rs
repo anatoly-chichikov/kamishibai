@@ -114,6 +114,13 @@ pub(super) fn reserve_scene_attempt(
     } else {
         cursor.current(fallback)
     };
+    if !advance
+        && cursor
+            .attempted
+            .is_some_and(|attempted| attempted > selected)
+    {
+        return Ok(selected);
+    }
     store_scene_attempt(cache, selected)?;
     Ok(selected)
 }

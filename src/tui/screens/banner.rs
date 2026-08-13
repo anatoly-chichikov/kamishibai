@@ -93,7 +93,7 @@ pub fn widget(app: &App) -> Paragraph<'static> {
     let entries = entries(app);
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries.len() + 1);
     for (label, path) in &entries {
-        let padding = LABEL_PAD.saturating_sub(label.chars().count()) + PATH_GAP;
+        let padding = LABEL_PAD.saturating_sub(super::common::display_width(label)) + PATH_GAP;
         let display = display(label, path);
         let spans: Vec<Span<'static>> = vec![
             Span::styled("│ ", palette::base()),

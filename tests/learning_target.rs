@@ -144,7 +144,7 @@ fn invalid_learning_fails_before_any_external_or_persistent_work() {
             document["error"]["exit"].as_u64(),
             document["error"]["hint"]
                 .as_str()
-                .is_some_and(|hint| hint.contains("EN, ZH, ES, JA, FR, DE, RU, IT, PT, EL, NL")),
+                .is_some_and(|hint| hint.contains("EN, ZH, ES, JA, FR, DE, KO, RU, IT, PT, HI, AR, TR, PL, UK, ID, VI, TH, EL, HE, NL")),
             calls.load(Ordering::SeqCst),
             empty(data.path()),
             empty(cache.path()),

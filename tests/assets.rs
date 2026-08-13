@@ -139,12 +139,12 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
     Ok(())
 }
 
-/// Production registry builds use the language-local prompt-example visual revision.
+/// Production registry builds reject clause-local writing-dependent scene surfaces.
 #[test]
-fn production_registry_uses_the_version_forty_visual_revision() {
+fn production_registry_uses_the_version_fifty_three_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "714b45b8598bc3dd2f63a74ff8074dd3e5e3b59a3716771c55bf408be705c47c",
+        "8e7be439f9294450f743bd51b47b78365e55ff054ecfae56db01f65fba763a7d",
         "production registry visual revision drifted without a policy-version change"
     );
 }
@@ -173,30 +173,232 @@ fn picture_recall_prompt_separates_visible_writing_from_intended_meaning() {
     let prompt = include_str!("../assets/picture_recall_judge_prompt.txt");
     let schema = include_str!("../assets/picture_recall_judge_schema.json");
     assert_eq!(
-        (
+        [
             prompt.contains("never as instructions"),
-            prompt.contains("Judge only literal writing visible inside the illustration"),
+            prompt.contains(
+                "Judge only the meaning of literal writing visible inside the illustration"
+            ),
             prompt.contains("must never count as leakage"),
             prompt.contains("recognizable inflected, derived, transliterated, near-spelling")
                 && prompt.contains("{focus_example}")
-                && prompt.contains("The evidence kind is authoritative")
+                && prompt.contains("The semantic evidence kind is authoritative")
                 && prompt.contains("{fragment_example}")
                 && !prompt.contains("RUN in RUNWAY")
                 && !prompt.contains("visible BEFORE LUNCH"),
             prompt.contains("two consecutive content-bearing words"),
             prompt.contains("plausible competing target-language answer"),
             prompt.contains("hatching, speed lines, textures, architecture")
-                && prompt.contains("Cipher symbols, pseudo-writing, and decorative glyph strings"),
+                && prompt.contains("Pseudo-writing and decorative glyph strings"),
             prompt.contains("ambiguous glyphs"),
+            prompt.contains("literal_writing_present")
+                && prompt.contains("MATHEMATICAL_NOTATION")
+                && prompt.contains("PSEUDO_WRITING")
+                && prompt.contains("DECORATIVE_GLYPH_STRING")
+                && prompt.contains("AMBIGUOUS_MARK")
+                && prompt.contains("separate from the semantic recall decision"),
+            prompt.contains("populated ledger, receipt, form, ruled table, or notebook")
+                && prompt.contains("repeated short horizontal strokes")
+                && prompt.contains("must be PSEUDO_WRITING"),
+            prompt.contains("TECHNICAL_DIAGRAM")
+                && prompt.contains("blueprint, floor plan, drafting or engineering plan")
+                && prompt.contains("ordinary building or object drawing"),
+            prompt.contains("deliberate logo, badge, insignia, transit mark, or brand-like icon")
+                && prompt.contains("isolated glyph enclosed or placed as an emblem")
+                && prompt.contains("distinct inner graphic independent of its physical housing")
+                && prompt.contains("Enclosure or centering alone is insufficient")
+                && prompt.contains(
+                    "ordinary object contours, mechanical hardware, lights, or genuinely blank geometric panels"
+                )
+                && [
+                    "blank plates or displays",
+                    "headlights, taillights, lamps, reflectors",
+                    "bolts, screws, handles, latches, hinges",
+                    "vents, grilles, couplers, wipers",
+                    "door and window seams",
+                ]
+                .iter()
+                .all(|needle| prompt.contains(needle))
+                && schema.contains("\"SYMBOL_OR_EMBLEM\""),
             schema.contains("\"FOCUS\""),
             schema.contains("\"TARGET_FRAGMENT\""),
             schema.contains("\"COMPETING_ANSWER\""),
+            schema.contains("\"literal_writing_present\"")
+                && schema.contains("\"literal_evidence\"")
+                && schema.contains("\"MATHEMATICAL_NOTATION\"")
+                && schema.contains("\"PSEUDO_WRITING\"")
+                && schema.contains("\"DECORATIVE_GLYPH_STRING\"")
+                && schema.contains("\"AMBIGUOUS_MARK\""),
+            schema.contains("\"TECHNICAL_DIAGRAM\""),
             !schema.contains("\"additionalProperties\""),
-        ),
-        (
-            true, true, true, true, true, true, true, true, true, true, true, true,
-        ),
+            prompt.contains("SCENE FIDELITY REFERENCE")
+                && prompt.contains("untrusted reference data")
+                && prompt.contains("MISSING_REQUIRED_SUBJECT")
+                && prompt.contains("MISSING_REQUIRED_RELATION")
+                && prompt.contains("MISSING_LITERAL_ANCHOR")
+                && prompt.contains("BROKEN_SUBJECT_CONTINUITY")
+                && prompt.contains("same nonempty subject id")
+                && prompt.contains("different person, animal, or acting object")
+                && prompt.contains("substitution of another declared subject")
+                && prompt.contains("distinct required subject ids are collapsed or swapped")
+                && prompt.contains("camera angle, framing, pose, ordinary clothing variation")
+                && prompt.contains(
+                    "Intended changes in action, emotion, or narrative beat by the same identifiable subject are allowed"
+                )
+                && prompt.contains(
+                    "Never infer a date, deadline, overdue or missed state, status, data, progress, result, or entries"
+                )
+                && prompt.contains("independent pixel-grounded cue")
+                && prompt.contains(
+                    "A blank carrier used only as an incidental object or background remains allowed"
+                )
+                && prompt.contains("Never infer that a required element is visible merely because")
+                && prompt.contains("{scene_fidelity_json}")
+                && schema.contains("\"scene_fidelity_decision\"")
+                && schema.contains("\"scene_fidelity_evidence\"")
+                && schema.contains("\"requirement\"")
+                && schema.contains("\"observed\"")
+                && schema.contains("\"MISSING_REQUIRED_SUBJECT\"")
+                && schema.contains("\"MISSING_REQUIRED_RELATION\"")
+                && schema.contains("\"MISSING_LITERAL_ANCHOR\"")
+                && schema.contains("\"BROKEN_SUBJECT_CONTINUITY\""),
+        ],
+        [true; 19],
         "picture recall review regained an ambiguous, meaning-hostile, or Gemini-incompatible contract"
+    );
+}
+
+/// Scale-aware literal review inspects nine ordered crops without receiving answer strings.
+#[test]
+fn picture_literal_zoom_prompt_keeps_the_one_request_crop_contract() {
+    let prompt = include_str!("../assets/picture_literal_zoom_judge_prompt.txt");
+    let schema = include_str!("../assets/picture_literal_zoom_judge_schema.json");
+    assert_eq!(
+        [
+            prompt.contains("nine enlarged overlapping crops")
+                && prompt.contains("row-major order")
+                && prompt.contains("8 lower-center"),
+            prompt.contains("No flashcard term, sentence, language, or answer is supplied")
+                && !prompt.contains("{card_json}")
+                && !prompt.contains("{focus_example}")
+                && !prompt.contains("{fragment_example}"),
+            prompt.contains("distant signs, information boards, documents")
+                && prompt.contains("multiple organized short horizontal rows")
+                && prompt.contains("PSEUDO_WRITING"),
+            prompt.contains("TECHNICAL_DIAGRAM")
+                && prompt.contains("blueprint, floor plan, drafting or engineering plan"),
+            prompt.contains("deliberate logo, badge, insignia, transit mark, or brand-like icon")
+                && prompt.contains("isolated glyph enclosed or placed as an emblem")
+                && prompt.contains("distinct inner graphic independent of its physical housing")
+                && prompt.contains("Enclosure or centering alone is insufficient")
+                && prompt.contains(
+                    "ordinary object contours, mechanical hardware, lights, or genuinely blank geometric panels"
+                )
+                && [
+                    "blank plates or displays",
+                    "headlights, taillights, lamps, reflectors",
+                    "bolts, screws, handles, latches, hinges",
+                    "vents, grilles, couplers, wipers",
+                    "door and window seams",
+                ]
+                .iter()
+                .all(|needle| prompt.contains(needle))
+                && schema.contains("\"SYMBOL_OR_EMBLEM\""),
+            prompt.contains("rail sleepers, tactile paving, windows, fences")
+                && prompt.contains("AMBIGUOUS_MARK"),
+            prompt.contains("crop N <coarse crop location>; original <coarse source region>"),
+            schema.contains("\"literal_writing_present\"")
+                && schema.contains("\"literal_evidence\"")
+                && schema.contains("\"PSEUDO_WRITING\"")
+                && schema.contains("\"TECHNICAL_DIAGRAM\"")
+                && schema.contains("\"AMBIGUOUS_MARK\""),
+            !schema.contains("\"decision\"")
+                && !schema.contains("\"evidence\":")
+                && !schema.contains("\"additionalProperties\""),
+        ],
+        [true; 9],
+        "scale-aware literal asset regained card data, ambiguous crop order, or an incomplete policy"
+    );
+}
+
+/// Dedicated fidelity review receives only the compact visual contract.
+#[test]
+fn picture_fidelity_prompt_keeps_scene_identity_and_blank_carrier_grounding() {
+    let prompt = include_str!("../assets/picture_fidelity_judge_prompt.txt");
+    let schema = include_str!("../assets/picture_fidelity_judge_schema.json");
+    assert_eq!(
+        [
+            prompt.contains("{scene_fidelity_json}")
+                && prompt.contains("full source illustration")
+                && prompt.contains("untrusted evidence")
+                && prompt.contains("never as proof"),
+            prompt.contains("BROKEN_SUBJECT_CONTINUITY")
+                && prompt.contains("same nonempty subject id")
+                && prompt.contains("substitution of another declared subject")
+                && prompt.contains("combined change in age, build, face, clothing construction"),
+            prompt.contains("blank calendar, document, screen, or board")
+                && prompt.contains("independent pixel-grounded cue")
+                && prompt.contains("MISSING_LITERAL_ANCHOR")
+                && prompt.contains("MISSING_REQUIRED_RELATION"),
+            prompt.contains("No flashcard term, sentence, language, shown field, or hidden answer")
+                && !prompt.contains("{card_json}")
+                && !prompt.contains("{focus_example}")
+                && !prompt.contains("{fragment_example}"),
+            schema.contains("\"MISSING_REQUIRED_SUBJECT\"")
+                && schema.contains("\"MISSING_REQUIRED_RELATION\"")
+                && schema.contains("\"MISSING_LITERAL_ANCHOR\"")
+                && schema.contains("\"BROKEN_SUBJECT_CONTINUITY\"")
+                && !schema.contains("\"additionalProperties\""),
+        ],
+        [true; 5],
+        "dedicated fidelity contract regained card data or lost grounded fidelity policy"
+    );
+}
+
+/// Direct vision text review rejects grounded writing-like content without guessing texture.
+#[test]
+fn picture_text_prompt_rejects_all_grounded_writing_like_content() {
+    let prompt = include_str!("../assets/picture_text_judge_prompt.txt");
+    let schema = include_str!("../assets/picture_text_judge_schema.json");
+    assert_eq!(
+        [
+            prompt.contains("mathematical notation"),
+            prompt.contains("pseudo-writing"),
+            prompt.contains("decorative glyph string"),
+            prompt.contains("interface mark"),
+            prompt.contains("AMBIGUOUS requires ALLOW") && prompt.contains("hatching, texture"),
+            prompt.contains("populated ledger, receipt, form, ruled table, or notebook")
+                && prompt.contains("repeated short horizontal strokes")
+                && prompt.contains("must be PSEUDO_WRITING"),
+            prompt.contains("TECHNICAL_DIAGRAM")
+                && prompt.contains("blueprint, floor plan, drafting or engineering plan")
+                && prompt.contains("ordinary building or object drawing"),
+            prompt.contains("deliberate logo, badge, insignia, transit mark, or brand-like icon")
+                && prompt.contains("isolated glyph enclosed or placed as an emblem")
+                && prompt.contains("distinct inner graphic independent of its physical housing")
+                && prompt.contains("Enclosure or centering alone is insufficient")
+                && prompt.contains(
+                    "ordinary object contours, mechanical hardware, lights, or genuinely blank geometric panels"
+                )
+                && [
+                    "blank plates or displays",
+                    "headlights, taillights, lamps, reflectors",
+                    "bolts, screws, handles, latches, hinges",
+                    "vents, grilles, couplers, wipers",
+                    "door and window seams",
+                ]
+                .iter()
+                .all(|needle| prompt.contains(needle))
+                && schema.contains("\"SYMBOL_OR_EMBLEM\""),
+            !prompt.contains("Allow isolated one- or two-letter Latin labels"),
+            schema.contains("\"MATHEMATICAL_NOTATION\""),
+            schema.contains("\"PSEUDO_WRITING\""),
+            schema.contains("\"DECORATIVE_GLYPH_STRING\""),
+            schema.contains("\"INTERFACE_MARK\""),
+            schema.contains("\"TECHNICAL_DIAGRAM\""),
+            schema.contains("\"AMBIGUOUS\""),
+        ],
+        [true; 15],
+        "direct literal-writing contract allowed writing-like content or rejected ambiguous texture"
     );
 }
 

@@ -9,42 +9,39 @@ use ocr_rs::{OcrEngine, OcrEngineConfig};
 use reqwest::blocking::Client;
 
 use crate::generation::artifact_cache::Cache;
+use crate::languages::OcrModel;
 
 const CACHE: &str = "ocr-models";
 const URL: &str = "https://raw.githubusercontent.com/zibo-chen/rust-paddle-ocr/next/models";
 const DET: &str = "PP-OCRv5_mobile_det.mnn";
 
-/// Route one legacy OCR token string to one PP-OCRv5 model bundle.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Bundle {
-    Cyrillic,
-    Default,
-    El,
-    En,
-    Latin,
+/// Return the recognition model filename for one typed bundle.
+fn model_name(model: OcrModel) -> &'static str {
+    match model {
+        OcrModel::Cyrillic => "cyrillic_PP-OCRv5_mobile_rec_infer.mnn",
+        OcrModel::Default => "PP-OCRv5_mobile_rec.mnn",
+        OcrModel::El => "el_PP-OCRv5_mobile_rec_infer.mnn",
+        OcrModel::En => "en_PP-OCRv5_mobile_rec_infer.mnn",
+        OcrModel::Latin => "latin_PP-OCRv5_mobile_rec_infer.mnn",
+        OcrModel::Korean => "korean_PP-OCRv5_mobile_rec_infer.mnn",
+        OcrModel::Arabic => "arabic_PP-OCRv5_mobile_rec_infer.mnn",
+        OcrModel::Devanagari => "devanagari_PP-OCRv5_mobile_rec_infer.mnn",
+        OcrModel::Th => "th_PP-OCRv5_mobile_rec_infer.mnn",
+    }
 }
 
-impl Bundle {
-    /// Return the recognition model filename for one bundle.
-    fn model(self) -> &'static str {
-        match self {
-            Self::Cyrillic => "cyrillic_PP-OCRv5_mobile_rec_infer.mnn",
-            Self::Default => "PP-OCRv5_mobile_rec.mnn",
-            Self::El => "el_PP-OCRv5_mobile_rec_infer.mnn",
-            Self::En => "en_PP-OCRv5_mobile_rec_infer.mnn",
-            Self::Latin => "latin_PP-OCRv5_mobile_rec_infer.mnn",
-        }
-    }
-
-    /// Return the charset filename for one bundle.
-    fn charset(self) -> &'static str {
-        match self {
-            Self::Cyrillic => "ppocr_keys_cyrillic.txt",
-            Self::Default => "ppocr_keys_v5.txt",
-            Self::El => "ppocr_keys_el.txt",
-            Self::En => "ppocr_keys_en.txt",
-            Self::Latin => "ppocr_keys_latin.txt",
-        }
+/// Return the charset filename for one typed bundle.
+fn charset_name(model: OcrModel) -> &'static str {
+    match model {
+        OcrModel::Cyrillic => "ppocr_keys_cyrillic.txt",
+        OcrModel::Default => "ppocr_keys_v5.txt",
+        OcrModel::El => "ppocr_keys_el.txt",
+        OcrModel::En => "ppocr_keys_en.txt",
+        OcrModel::Latin => "ppocr_keys_latin.txt",
+        OcrModel::Korean => "ppocr_keys_korean.txt",
+        OcrModel::Arabic => "ppocr_keys_arabic.txt",
+        OcrModel::Devanagari => "ppocr_keys_devanagari.txt",
+        OcrModel::Th => "ppocr_keys_th.txt",
     }
 }
 
@@ -56,9 +53,9 @@ struct Paths {
     rec: PathBuf,
 }
 
-/// Create one OCR engine for the requested legacy OCR selection string.
-pub(crate) fn engine(selection: &str, root: &Path) -> Result<OcrEngine> {
-    let paths = Catalog::new(root).paths(selection)?;
+/// Create one OCR engine for the requested typed PP-OCRv5 bundle.
+pub(crate) fn engine(model: OcrModel, root: &Path) -> Result<OcrEngine> {
+    let paths = Catalog::new(root).paths(model)?;
     OcrEngine::new(
         paths.det.as_path(),
         paths.rec.as_path(),
@@ -69,22 +66,22 @@ pub(crate) fn engine(selection: &str, root: &Path) -> Result<OcrEngine> {
                 .with_min_result_confidence(0.0),
         ),
     )
-    .map_err(|error| anyhow!("Failed to load OCR bundle for '{}': {}", selection, error))
+    .map_err(|error| anyhow!("Failed to load OCR bundle for '{model:?}': {error}"))
 }
 
 /// Route one legacy OCR selection string to one OCR bundle.
-fn bundle(selection: &str) -> Bundle {
+pub(super) fn legacy_model(selection: &str) -> OcrModel {
     if matches(selection, &["chi_sim", "chi_tra", "chi", "zh"]) {
-        return Bundle::Default;
+        return OcrModel::Default;
     }
     if matches(selection, &["ell", "el"]) {
-        return Bundle::El;
+        return OcrModel::El;
     }
     if matches(
         selection,
         &["rus", "ukr", "bel", "ru", "bg", "cyrillic", "eslav"],
     ) {
-        return Bundle::Cyrillic;
+        return OcrModel::Cyrillic;
     }
     if matches(
         selection,
@@ -92,12 +89,12 @@ fn bundle(selection: &str) -> Bundle {
             "deu", "spa", "fra", "ita", "por", "nld", "dut", "lat", "de", "es", "nl",
         ],
     ) {
-        return Bundle::Latin;
+        return OcrModel::Latin;
     }
     if matches(selection, &["jpn"]) {
-        return Bundle::Default;
+        return OcrModel::Default;
     }
-    Bundle::En
+    OcrModel::En
 }
 
 /// Return whether one legacy OCR token string includes any item from the target set.
@@ -134,13 +131,12 @@ impl Catalog {
         }
     }
 
-    /// Return the resolved local model paths for one legacy selection string.
-    fn paths(&self, selection: &str) -> Result<Paths> {
-        let bundle = bundle(selection);
+    /// Return the resolved local model paths for one typed bundle.
+    fn paths(&self, model: OcrModel) -> Result<Paths> {
         Ok(Paths {
-            charset: self.fetch(bundle.charset())?,
+            charset: self.fetch(charset_name(model))?,
             det: self.fetch(DET)?,
-            rec: self.fetch(bundle.model())?,
+            rec: self.fetch(model_name(model))?,
         })
     }
 
@@ -178,14 +174,15 @@ impl Catalog {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bundle, bundle};
+    use super::{charset_name, legacy_model, model_name};
+    use crate::languages::OcrModel;
 
     /// German legacy OCR tokens route to the Latin PP-OCRv5 recognizer.
     #[test]
     fn german_legacy_ocr_tokens_route_to_the_latin_pp_ocrv5_recognizer() {
         assert_eq!(
-            bundle("eng+deu"),
-            Bundle::Latin,
+            legacy_model("eng+deu"),
+            OcrModel::Latin,
             "german legacy ocr tokens no longer route to the latin pp ocrv5 recognizer"
         );
     }
@@ -194,8 +191,8 @@ mod tests {
     #[test]
     fn dutch_legacy_ocr_tokens_route_to_the_latin_pp_ocrv5_recognizer() {
         assert_eq!(
-            bundle("eng+nld"),
-            Bundle::Latin,
+            legacy_model("eng+nld"),
+            OcrModel::Latin,
             "dutch legacy ocr tokens no longer route to the latin pp ocrv5 recognizer"
         );
     }
@@ -204,8 +201,8 @@ mod tests {
     #[test]
     fn greek_legacy_ocr_tokens_route_to_the_greek_pp_ocrv5_recognizer() {
         assert_eq!(
-            bundle("eng+ell"),
-            Bundle::El,
+            legacy_model("eng+ell"),
+            OcrModel::El,
             "greek legacy ocr tokens no longer route to the greek pp ocrv5 recognizer"
         );
     }
@@ -214,8 +211,8 @@ mod tests {
     #[test]
     fn russian_legacy_ocr_tokens_route_to_the_cyrillic_pp_ocrv5_recognizer() {
         assert_eq!(
-            bundle("eng+rus"),
-            Bundle::Cyrillic,
+            legacy_model("eng+rus"),
+            OcrModel::Cyrillic,
             "russian legacy ocr tokens no longer route to the cyrillic pp ocrv5 recognizer"
         );
     }
@@ -224,8 +221,8 @@ mod tests {
     #[test]
     fn auxiliary_japanese_detection_cannot_replace_the_target_script_recognizer() {
         assert_eq!(
-            (bundle("eng+deu+jpn"), bundle("eng+rus+jpn")),
-            (Bundle::Latin, Bundle::Cyrillic),
+            (legacy_model("eng+deu+jpn"), legacy_model("eng+rus+jpn")),
+            (OcrModel::Latin, OcrModel::Cyrillic),
             "auxiliary Japanese detection replaced a target script recognizer"
         );
     }
@@ -234,8 +231,8 @@ mod tests {
     #[test]
     fn chinese_legacy_ocr_tokens_route_to_the_shared_multilingual_pp_ocrv5_recognizer() {
         assert_eq!(
-            bundle("eng+chi_sim"),
-            Bundle::Default,
+            legacy_model("eng+chi_sim"),
+            OcrModel::Default,
             "chinese legacy ocr tokens no longer route to the shared multilingual pp ocrv5 recognizer"
         );
     }
@@ -244,9 +241,39 @@ mod tests {
     #[test]
     fn unknown_ocr_tokens_still_fall_back_to_the_english_pp_ocrv5_recognizer() {
         assert_eq!(
-            bundle("osd"),
-            Bundle::En,
+            legacy_model("osd"),
+            OcrModel::En,
             "unknown ocr tokens no longer fall back to the english pp ocrv5 recognizer"
+        );
+    }
+
+    /// New script bundles resolve to the exact upstream model and charset assets.
+    #[test]
+    fn new_script_bundles_resolve_to_the_upstream_pp_ocrv5_assets() {
+        assert_eq!(
+            [
+                OcrModel::Korean,
+                OcrModel::Arabic,
+                OcrModel::Devanagari,
+                OcrModel::Th,
+            ]
+            .map(|model| (model_name(model), charset_name(model))),
+            [
+                (
+                    "korean_PP-OCRv5_mobile_rec_infer.mnn",
+                    "ppocr_keys_korean.txt"
+                ),
+                (
+                    "arabic_PP-OCRv5_mobile_rec_infer.mnn",
+                    "ppocr_keys_arabic.txt"
+                ),
+                (
+                    "devanagari_PP-OCRv5_mobile_rec_infer.mnn",
+                    "ppocr_keys_devanagari.txt"
+                ),
+                ("th_PP-OCRv5_mobile_rec_infer.mnn", "ppocr_keys_th.txt"),
+            ],
+            "a new script bundle no longer resolves to its upstream model and charset"
         );
     }
 }

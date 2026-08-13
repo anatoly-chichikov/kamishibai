@@ -1,6 +1,9 @@
 use std::fmt;
 use std::time::Duration;
 
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
+
 use crate::session::{
     Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, SentenceBatchSettings,
     SentenceLabelSelection, WordCandidate,
@@ -1532,23 +1535,20 @@ fn boundary_at_or_before(text: &str, cursor: usize) -> usize {
     if cursor >= text.len() {
         return text.len();
     }
-    if text.is_char_boundary(cursor) {
-        return cursor;
-    }
     let mut boundary = 0;
-    for (index, _) in text.char_indices() {
+    for (index, _) in text.grapheme_indices(true) {
         if index > cursor {
             return boundary;
         }
         boundary = index;
     }
-    text.len()
+    boundary
 }
 
 fn boundary_before(text: &str, cursor: usize) -> usize {
     let cursor = boundary_at_or_before(text, cursor);
     let mut boundary = 0;
-    for (index, _) in text.char_indices() {
+    for (index, _) in text.grapheme_indices(true) {
         if index >= cursor {
             return boundary;
         }
@@ -1563,9 +1563,8 @@ fn cursor_forward(text: &mut String, cursor: usize) -> usize {
         text.insert(cursor, ' ');
         return cursor + 1;
     }
-    let mut characters = text[cursor..].chars();
-    match characters.next() {
-        Some(character) => cursor + character.len_utf8(),
+    match text[cursor..].graphemes(true).next() {
+        Some(grapheme) => cursor + grapheme.len(),
         None => text.len(),
     }
 }
@@ -1596,15 +1595,15 @@ fn cursor_row_column(text: &str, cursor: usize) -> (usize, usize) {
     let cursor = boundary_at_or_before(text, cursor);
     let mut row = 0;
     let mut column = 0;
-    for (index, character) in text.char_indices() {
+    for (index, grapheme) in text.grapheme_indices(true) {
         if index >= cursor {
             return (row, column);
         }
-        if character == '\n' {
+        if grapheme.ends_with('\n') {
             row += 1;
             column = 0;
         } else {
-            column += 1;
+            column += UnicodeWidthStr::width(grapheme);
         }
     }
     (row, column)
@@ -1622,12 +1621,14 @@ fn line_starts(text: &str) -> Vec<usize> {
 
 fn cursor_for_column(text: &mut String, start: usize, column: usize) -> usize {
     let end = line_end(text, start);
-    for (seen, (offset, _)) in text[start..end].char_indices().enumerate() {
-        if seen == column {
+    let mut seen = 0usize;
+    for (offset, grapheme) in text[start..end].grapheme_indices(true) {
+        if seen >= column {
             return start + offset;
         }
+        seen += UnicodeWidthStr::width(grapheme);
     }
-    let missing = column.saturating_sub(text[start..end].chars().count());
+    let missing = column.saturating_sub(UnicodeWidthStr::width(&text[start..end]));
     text.insert_str(end, &" ".repeat(missing));
     end + missing
 }
@@ -1676,7 +1677,7 @@ fn artifact_hint(artifacts: &CardArtifacts, kind: Artifact) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::App;
+    use super::{App, boundary_before, cursor_below, cursor_forward};
     use crate::session::{
         AxisSet, CardDraft, CardMeta, LanguagePair, Register, SentenceAxis, SentenceBatchSettings,
         SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel, SentenceTypeMix,
@@ -1825,6 +1826,21 @@ mod tests {
             ),
             (1, false, None),
             "card navigation kept an editor attached to the previous selection"
+        );
+    }
+
+    #[test]
+    fn blob_navigation_never_splits_thai_or_decomposed_latin_graphemes() {
+        let mut vertical = String::from("a\nกิ");
+        let below = cursor_below(&mut vertical, 1);
+        let decomposed = "e\u{301}";
+        let previous = boundary_before(decomposed, decomposed.len());
+        let mut thai = String::from("กิ");
+        let forward = cursor_forward(&mut thai, 0);
+        assert_eq!(
+            (below, vertical.len(), previous, forward, thai.len()),
+            (vertical.len(), vertical.len(), 0, thai.len(), thai.len()),
+            "blob navigation left a cursor inside a visible grapheme cluster"
         );
     }
 

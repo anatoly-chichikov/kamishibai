@@ -9,7 +9,7 @@ use super::attempt_archive::{archived_reply, archived_sequence, latest_verdict};
 use super::cost_accounting::{
     AccountingHealth, CostAccounting, CostRecorder, attach_scene_cost, visual_costs,
 };
-use super::gemini_media::{GeminiRecall, MeteredGemini};
+use super::gemini_media::{GeminiRecall, GeminiTextGate, MeteredGemini};
 use super::picture_recovery::{
     LocalImageRejection, NoopProgress, PictureRecovery, render_recomposition_with_fallback,
 };
@@ -279,12 +279,14 @@ impl VisualProduction {
             picture_costs.clone(),
         );
         let picture_client = RequestCountingImage::guarded(
-            MeteredGemini::new(client, picture_costs),
+            MeteredGemini::new(client.clone(), picture_costs.clone()),
             cache.clone(),
             accounting,
         );
+        let text = GeminiTextGate::new(&learning, self.cache.clone(), client, picture_costs);
         let renderer =
-            production_renderer(picture_client, recall, BorderDetector::new(6, 24, 240, 10));
+            production_renderer(picture_client, recall, BorderDetector::new(6, 24, 240, 10))
+                .with_text_judge(text);
         let renderer = renderer.with_attempt_archive(cache.filepath(IMAGE_ATTEMPTS_DIRECTORY)?);
         Ok(Illustration::new(
             cache,
@@ -310,9 +312,10 @@ impl VisualProduction {
 
 /// Attach the archived verdict of one picture attempt that the provider judged.
 ///
-/// A verdict only belongs to this attempt when the archive actually grew: an
-/// attempt that failed before reaching the provider keeps the plain error, so
-/// the shell never blames a fresh failure on an older rejected picture.
+/// A verdict belongs to this attempt when the archive grew, or when a typed
+/// renderer rejection rewrote the same immutable sequence during resumed
+/// review. Untyped failures keep the strict growth check, so a failure before
+/// the provider never borrows an older rejected picture.
 pub(super) fn judged(
     attempt: ArtifactAttempt<ArtifactFile>,
     cache: &Cache,
@@ -321,7 +324,12 @@ pub(super) fn judged(
     if attempt.error().is_none() {
         return attempt;
     }
-    match latest_verdict(cache).filter(|verdict| verdict.sequence() > archived) {
+    let rejected = attempt
+        .error()
+        .is_some_and(|error| error.downcast_ref::<MangaRenderRejection>().is_some());
+    match latest_verdict(cache).filter(|verdict| {
+        verdict.sequence() > archived || (rejected && verdict.sequence() == archived)
+    }) {
         Some(verdict) => attempt.with_fault(verdict.fault()),
         None => attempt,
     }

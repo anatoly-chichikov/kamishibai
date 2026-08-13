@@ -10,10 +10,9 @@ use anyhow::{Result, anyhow, bail};
 
 /// Resolve one font family + weight to one filesystem path through the report
 /// font cache.
-/// macOS ships Arial (Regular and Bold as separate .ttf files), Hiragino
-/// Sans GB, and Arial Unicode MS — these three together cover every script
-/// the report uses, so the binary stays fontless and the embed is whatever
-/// subsetting trims the system files to.
+/// The default palette combines platform Latin, CJK, complex-script, and
+/// wide-coverage faces, so the binary stays fontless while glyph coverage is
+/// verified from each resolved face before it is selected.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct FontPath {
     bold: bool,
@@ -74,14 +73,26 @@ impl FontPath {
 
     /// Return the family queries for the resolver.
     fn queries(&self) -> Vec<String> {
-        let mut value = vec![self.family.clone()];
+        let mut value = self
+            .preferred()
+            .iter()
+            .map(|item| String::from(*item))
+            .collect::<Vec<_>>();
+        value.push(self.family.clone());
         for item in self.aliases() {
-            if *item != self.family.as_str() {
+            if *item != self.family.as_str() && !value.iter().any(|query| query == item) {
                 value.push(String::from(*item));
             }
         }
         value.extend(OperatingSystem::current().expand_generic_family("sans-serif", &[]));
         value
+    }
+
+    fn preferred(&self) -> &'static [&'static str] {
+        match self.family.as_str() {
+            "Geeza Pro" => &["گیزا پرو", "गीज़ा प्रो", "جيزة"],
+            _ => &[],
+        }
     }
 
     /// Return the platform fallback aliases for the requested family. macOS
@@ -115,6 +126,17 @@ impl FontPath {
                 "Liberation Sans",
                 "Segoe UI Symbol",
             ],
+            "AppleGothic" => &[
+                "Apple SD Gothic Neo",
+                "Apple SD Gothic Neo Regular",
+                "Noto Sans CJK KR",
+                "Noto Sans KR",
+                "Malgun Gothic",
+            ],
+            "Geeza Pro" => &["Noto Sans Arabic", "Arial", "Tahoma"],
+            "Arial Hebrew" => &[".SF Hebrew", "Noto Sans Hebrew", "Arial", "Tahoma"],
+            "Kohinoor Devanagari" => &["Devanagari Sangam MN", "Noto Sans Devanagari", "Mangal"],
+            "Thonburi" => &["Noto Sans Thai", "Leelawadee UI", "Tahoma"],
             "Courier New" => &[
                 "CourierNewPSMT",
                 "Courier",
@@ -232,17 +254,16 @@ impl FontFamily {
     }
 }
 
-/// Three-track palette: primary Latin/Greek/Cyrillic (Arial), CJK (Hiragino
-/// Sans, which ships distinct regular and bold faces on macOS unlike
-/// Hiragino Sans GB), and a wide-coverage fallback (Arial Unicode MS) for
-/// glyphs the primary or CJK weight is missing — IPA in bold is the canonical
-/// example. The renderer routes each glyph at the current weight to the first
-/// track that carries it, so a single line can mix scripts and weights without
-/// dropping glyphs.
+/// Glyph-coverage palette: primary Latin/Greek/Cyrillic, CJK, dedicated
+/// complex-script faces, then one wide-coverage fallback. Dedicated faces are
+/// tried for their own scripts before the general tracks because merely
+/// carrying an Arabic, Devanagari, Thai, Hebrew, or Hangul codepoint does not
+/// prove that a font has the shaping tables needed to render it readably.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FontPalette {
     primary: FontFamily,
     cjk: FontFamily,
+    supplemental: Vec<FontFamily>,
     fallback: FontFamily,
 }
 
@@ -257,6 +278,13 @@ impl Default for FontPalette {
         Self {
             primary: FontFamily::new("Arial"),
             cjk: FontFamily::new("Hiragino Sans"),
+            supplemental: vec![
+                FontFamily::new("AppleGothic"),
+                FontFamily::new("Geeza Pro"),
+                FontFamily::new("Arial Hebrew"),
+                FontFamily::new("Kohinoor Devanagari"),
+                FontFamily::new("Thonburi"),
+            ],
             fallback: FontFamily::new("Arial Unicode MS"),
         }
     }
@@ -268,6 +296,7 @@ impl FontPalette {
         Self {
             primary,
             cjk,
+            supplemental: Vec::new(),
             fallback,
         }
     }
@@ -280,6 +309,11 @@ impl FontPalette {
     /// Return the CJK family.
     pub fn cjk(&self) -> &FontFamily {
         &self.cjk
+    }
+
+    /// Return dedicated script families in their stable dispatch order.
+    pub fn supplemental(&self) -> &[FontFamily] {
+        self.supplemental.as_slice()
     }
 
     /// Return the wide-coverage fallback family.
@@ -303,11 +337,10 @@ static FONT_SOURCE_CACHE: LazyLock<FcFontCache> = LazyLock::new(FcFontCache::bui
 
 /// Eagerly parse the default report palette on a background thread.
 ///
-/// The five system fonts the report embeds (Arial regular + bold, Hiragino
-/// Sans GB regular + bold, Arial Unicode MS) cost ~100 ms parallel and ~220 ms
-/// serial in release. Calling this when the TUI starts means the parses run
-/// while the user is reviewing cards, so `Report::save()` later finds every
-/// face already in the process-wide cache and skips the parse phase entirely.
+/// The configured system palette is parsed in the background. Calling this
+/// when the TUI starts lets primary, CJK, complex-script, and fallback faces
+/// warm while the user reviews cards, so `Report::save()` later finds them in
+/// the process-wide cache and skips the parse phase entirely.
 /// The thread is detached: failures land in the cache as a miss so the next
 /// real call retries normally.
 pub fn warm_fonts_async() {
@@ -317,6 +350,10 @@ pub fn warm_fonts_async() {
         let _ = font_arc(palette.primary(), true);
         let _ = font_arc(palette.cjk(), false);
         let _ = font_arc(palette.cjk(), true);
+        for family in palette.supplemental() {
+            let _ = font_arc(family, false);
+            let _ = font_arc(family, true);
+        }
         let _ = font_arc(palette.fallback(), false);
     });
 }
@@ -346,12 +383,34 @@ pub(super) fn font_arc(family: &FontFamily, bold: bool) -> Result<Arc<ParsedFont
     )
     .ok_or_else(|| anyhow!("Font '{}' could not be parsed", path.label()))?;
     let arc = Arc::new(font);
-    FONT_PARSE_CACHE
+    let cached = FONT_PARSE_CACHE
         .lock()
         .expect("font cache mutex must not be poisoned")
         .entry(key)
-        .or_insert_with(|| arc.clone());
-    Ok(arc)
+        .or_insert(arc)
+        .clone();
+    Ok(cached)
+}
+
+/// Return a complex-script face that PDF readers can address by its shaped glyph ids.
+///
+/// A PDF font stream cannot select a nonzero face from an embedded TrueType
+/// collection. When a requested bold face lives later in a collection, use
+/// the family's regular face-zero font and preserve correct shaping instead
+/// of emitting the bold face's glyph ids against the wrong outlines.
+pub(super) fn shaping_font_arc(family: &FontFamily, bold: bool) -> Result<Arc<ParsedFont>> {
+    let requested = font_arc(family, bold)?;
+    if requested.original_index == 0 {
+        return Ok(requested);
+    }
+    let regular = font_arc(family, false)?;
+    if regular.original_index == 0 {
+        return Ok(regular);
+    }
+    bail!(
+        "Font '{}' has no face-zero variant safe for shaped PDF embedding",
+        family.name()
+    )
 }
 
 /// Return whether the parsed font carries a real (non-notdef) glyph for the
@@ -361,131 +420,9 @@ pub(super) fn carries(font: &ParsedFont, ch: char) -> bool {
         .is_some_and(|gid| gid != 0)
 }
 
-/// Measure one text span in millimeters using a primary + CJK + fallback
-/// chain at the current weight. Each codepoint is measured against the first
-/// track that carries it so wrap decisions match what the renderer emits.
-pub(super) fn measure(
-    primary: &ParsedFont,
-    cjk: &ParsedFont,
-    fallback: &ParsedFont,
-    text: &str,
-    size: f32,
-) -> f32 {
-    let mut total = 0.0_f32;
-    for ch in text.chars() {
-        let font = if carries(primary, ch) {
-            primary
-        } else if carries(cjk, ch) {
-            cjk
-        } else {
-            fallback
-        };
-        let units = f32::from(font.font_metrics.units_per_em).max(1.0);
-        let advance = font
-            .lookup_glyph_index(ch as u32)
-            .map(|gid| f32::from(font.get_horizontal_advance(gid)))
-            .unwrap_or(units * 0.5);
-        total += advance / units;
-    }
-    total * size * 25.4 / 72.0
-}
-
 /// Return the leading for one point size in millimeters.
 pub(super) fn leading(size: f32) -> f32 {
     size * 1.2 * 25.4 / 72.0
-}
-
-/// Wrap one report line to fit the target width using the same primary, CJK,
-/// and fallback chain the renderer uses. Handles CJK by allowing any CJK
-/// character to be a line-break candidate, since these scripts do not use
-/// inter-word spaces.
-pub(super) fn wrap(
-    text: &str,
-    size: f32,
-    width: f32,
-    primary: &ParsedFont,
-    cjk: &ParsedFont,
-    fallback: &ParsedFont,
-) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    let mut current = String::new();
-    for word in text.split_whitespace() {
-        for piece in cjk_segments(word) {
-            let joiner = if current.is_empty() || piece_is_glued(current.as_str(), piece.as_str()) {
-                ""
-            } else {
-                " "
-            };
-            let candidate = format!("{current}{joiner}{piece}");
-            if measure(primary, cjk, fallback, candidate.as_str(), size) <= width {
-                current = candidate;
-                continue;
-            }
-            if !current.is_empty() {
-                lines.push(std::mem::take(&mut current));
-            }
-            if measure(primary, cjk, fallback, piece.as_str(), size) <= width {
-                current = piece;
-                continue;
-            }
-            let mut head = String::new();
-            for ch in piece.chars() {
-                let mut next = head.clone();
-                next.push(ch);
-                if measure(primary, cjk, fallback, next.as_str(), size) <= width {
-                    head = next;
-                    continue;
-                }
-                if !head.is_empty() {
-                    lines.push(std::mem::take(&mut head));
-                }
-                head.push(ch);
-            }
-            current = head;
-        }
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-    lines
-}
-
-/// Split one whitespace-delimited word into pieces where each CJK character
-/// is its own piece and runs of non-CJK letters stay glued together. Lets
-/// the wrap loop pick line-break points inside scripts that do not use
-/// spaces between words.
-fn cjk_segments(word: &str) -> Vec<String> {
-    if !word.chars().any(is_cjk) {
-        return vec![String::from(word)];
-    }
-    let mut out = Vec::new();
-    let mut buffer = String::new();
-    for ch in word.chars() {
-        if is_cjk(ch) {
-            if !buffer.is_empty() {
-                out.push(std::mem::take(&mut buffer));
-            }
-            out.push(ch.to_string());
-        } else {
-            buffer.push(ch);
-        }
-    }
-    if !buffer.is_empty() {
-        out.push(buffer);
-    }
-    out
-}
-
-/// Return whether the boundary between the tail of `left` and the head of
-/// `right` should NOT take a literal space — true for CJK-on-either-side
-/// boundaries inside one whitespace-delimited input word.
-fn piece_is_glued(left: &str, right: &str) -> bool {
-    let left_cjk = left.chars().next_back().is_some_and(is_cjk);
-    let right_cjk = right.chars().next().is_some_and(is_cjk);
-    left_cjk || right_cjk
 }
 
 /// Return whether the character belongs to a script that does not separate
@@ -528,7 +465,7 @@ pub(super) fn target(mm: f32, pixels: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::FontPalette;
+    use super::{FontPalette, carries, font_arc, shaping_font_arc};
 
     /// Regression for the Hiragino Sans GB pitfall: font-kit used to resolve
     /// the bold weight to the exact same .ttc subface as the regular weight,
@@ -549,6 +486,53 @@ mod tests {
         assert!(
             !same_face,
             "CJK bold ({bold:?}) collapsed onto the CJK regular face ({regular:?}) — bold weight will silently render as regular"
+        );
+    }
+
+    /// The default supplemental faces are accepted only when their parsed
+    /// cmaps carry a representative glyph from the intended script.
+    #[test]
+    fn supplemental_fonts_cover_every_complex_script() {
+        let palette = FontPalette::default();
+        let samples = ['한', 'ش', 'ש', 'क', 'ก'];
+        let covered = palette
+            .supplemental()
+            .iter()
+            .zip(samples)
+            .all(|(family, sample)| {
+                font_arc(family, false).is_ok_and(|font| carries(font.as_ref(), sample))
+            });
+        assert!(
+            covered,
+            "a default supplemental font resolved without actual glyph coverage"
+        );
+    }
+
+    /// Shaped glyph ids must always be emitted against the collection face
+    /// that a PDF reader actually embeds.
+    #[test]
+    fn supplemental_shaping_weights_resolve_to_pdf_addressable_faces() {
+        let palette = FontPalette::default();
+        let resolved = palette
+            .supplemental()
+            .iter()
+            .map(|family| {
+                (
+                    family.name(),
+                    font_arc(family, false).map(|font| font.original_index),
+                    font_arc(family, true).map(|font| font.original_index),
+                    shaping_font_arc(family, false).map(|font| font.original_index),
+                    shaping_font_arc(family, true).map(|font| font.original_index),
+                )
+            })
+            .collect::<Vec<_>>();
+        let addressable = resolved.iter().all(|(_, _, _, regular, bold)| {
+            regular.as_ref().is_ok_and(|index| *index == 0)
+                && bold.as_ref().is_ok_and(|index| *index == 0)
+        });
+        assert!(
+            addressable,
+            "a supplemental shaping track kept a nonzero collection face that PDF cannot address: {resolved:?}"
         );
     }
 }

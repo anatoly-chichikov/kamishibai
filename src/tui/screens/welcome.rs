@@ -62,7 +62,7 @@ impl ScreenView for Welcome {
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
         let rows = body_rows(area);
         frame.render_widget(intro(area.width), rows[0]);
-        frame.render_widget(language_row(app), rows[2]);
+        frame.render_widget(language_row(app, rows[2].width), rows[2]);
         let (input_line, notice_line) = input_lines(app, rows[4].width);
         frame.render_widget(input_line, rows[4]);
         frame.render_widget(key_underline_row(app), rows[5]);
@@ -99,17 +99,19 @@ pub fn control_at(app: &App, area: Rect, x: u16, y: u16) -> Option<WelcomeFocus>
 }
 
 fn body_rows(area: Rect) -> Rc<[Rect]> {
+    let language_height = u16::try_from(language_line_count(area.width)).unwrap_or(u16::MAX);
+    let language_gap = u16::from(language_height <= 1);
     Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // intro
-            Constraint::Length(1), // blank
-            Constraint::Length(1), // 01 · language
-            Constraint::Length(1), // blank
-            Constraint::Length(1), // 02 · key field
-            Constraint::Length(1), // input underline
-            Constraint::Length(1), // blank · notice wraps here on a narrow terminal
-            Constraint::Length(1), // buttons
+            Constraint::Length(3),               // intro
+            Constraint::Length(1),               // blank
+            Constraint::Length(language_height), // 01 · language
+            Constraint::Length(language_gap),    // blank
+            Constraint::Length(1),               // 02 · key field
+            Constraint::Length(1),               // input underline
+            Constraint::Length(1),               // blank · notice wraps here on a narrow terminal
+            Constraint::Length(1),               // buttons
             Constraint::Min(0),
         ])
         .split(area)
@@ -138,26 +140,35 @@ fn intro(width: u16) -> Paragraph<'static> {
     Paragraph::new(lines).style(palette::base())
 }
 
-fn language_row(app: &App) -> Paragraph<'static> {
+fn language_row(app: &App, width: u16) -> Paragraph<'static> {
+    Paragraph::new(language_lines(app, width)).style(palette::base())
+}
+
+fn language_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let stage = app.welcome().stage;
     let active = stage == WelcomeStage::PickLanguage;
-    let mut spans: Vec<Span<'static>> = Vec::new();
     let num_style = if active {
         palette::base()
     } else {
         palette::dim2()
     };
-    spans.push(Span::styled("01  ", num_style));
     let label_style = if active {
         palette::base()
     } else {
         palette::dim()
     };
-    spans.push(Span::styled(
-        super::common::pad_right("your language", 16),
-        label_style,
-    ));
-    spans.push(chevron(active));
+    let mut spans = vec![
+        Span::styled("01  ", num_style),
+        Span::styled(super::common::pad_right("your language", 16), label_style),
+        chevron(active),
+    ];
+    let prefix_width = spans
+        .iter()
+        .map(|span| super::common::display_width(span.content.as_ref()))
+        .sum::<usize>();
+    let limit = usize::from(width).max(prefix_width + 4);
+    let mut used = prefix_width;
+    let mut lines = Vec::new();
     let current = app.pair().known().to_ascii_lowercase();
     for code in catalog().codes() {
         let label = code.to_ascii_uppercase();
@@ -167,9 +178,22 @@ fn language_row(app: &App) -> Paragraph<'static> {
         } else {
             Span::styled(format!(" {label} "), palette::dim())
         };
+        let chip_width = super::common::display_width(chip.content.as_ref());
+        if used + chip_width > limit && used > prefix_width {
+            lines.push(Line::from(std::mem::take(&mut spans)));
+            spans.push(Span::styled(" ".repeat(prefix_width), palette::base()));
+            used = prefix_width;
+        }
         spans.push(chip);
+        used += chip_width;
     }
-    Paragraph::new(Line::from(spans)).style(palette::base())
+    lines.push(Line::from(spans));
+    lines
+}
+
+fn language_line_count(width: u16) -> usize {
+    let app = App::new(crate::session::LanguagePair::new("en", "en"));
+    language_lines(&app, width).len()
 }
 
 /// Build the `02 gemini api key` row spans and the visual width of its field.

@@ -1,0 +1,54 @@
+{
+  "type": "OBJECT",
+  "properties": {
+    "decision": {
+      "type": "STRING",
+      "enum": [
+        "ALLOW",
+        "REJECT"
+      ]
+    },
+    "evidence": {
+      "type": "ARRAY",
+      "maxItems": 6,
+      "items": {
+        "type": "OBJECT",
+        "properties": {
+          "reading": {
+            "type": "STRING"
+          },
+          "location": {
+            "type": "STRING"
+          },
+          "kind": {
+            "type": "STRING",
+            "enum": [
+              "WRITING",
+              "NUMERAL",
+              "MATHEMATICAL_NOTATION",
+              "TECHNICAL_DIAGRAM",
+              "PSEUDO_WRITING",
+              "DECORATIVE_GLYPH_STRING",
+              "INTERFACE_MARK",
+              "SYMBOL_OR_EMBLEM",
+              "AMBIGUOUS"
+            ]
+          }
+        },
+        "required": [
+          "reading",
+          "location",
+          "kind"
+        ]
+      }
+    },
+    "reason": {
+      "type": "STRING"
+    }
+  },
+  "required": [
+    "decision",
+    "evidence",
+    "reason"
+  ]
+}
