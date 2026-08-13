@@ -17,7 +17,7 @@ crossterm = "=0.29.0"
 dirs = "=6.0.0"
 image = "=0.25.10"
 md5 = "=0.8.0"
-ocr-rs = "=2.2.2"
+ocr-rs = "=2.4.1"
 printpdf = { version = "=0.9.1", default-features = false, features = ["images", "jpeg", "text_layout"] }
 rand = "=0.10.1"
 ratatui = "=0.30.0"
