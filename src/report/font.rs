@@ -129,6 +129,7 @@ impl FontPath {
             "AppleGothic" => &[
                 "Apple SD Gothic Neo",
                 "Apple SD Gothic Neo Regular",
+                "Noto Sans CJK JP",
                 "Noto Sans CJK KR",
                 "Noto Sans KR",
                 "Malgun Gothic",
