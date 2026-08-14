@@ -1201,5 +1201,57 @@
       "focus": {"focus": "ăn", "longer": "chăn"},
       "fragment": {"visible": "THIẾT KẾ CUỐI CÙNG", "sentence_end": "thiết kế cuối cùng"}
     }
+  },
+  "cs": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": ["fin.", "zast.", "idiom.", "brit.", "poker"],
+        "parts": ["podst. jm.", "slov.", "příd. jm.", "přísl.", "zájm.", "předl."]
+      },
+      "forbidden": {
+        "starters": ["Učíme se", "Poznáváme slovo", "Teď se učíme"],
+        "joins": ["X nebo Y", "může znamenat X a také Y"],
+        "fillers": ["běžný", "častý", "každodenní", "standardní", "základní", "jednoduchý"]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "Podst. jm. <jeden přesný hlavní význam popsaný krátkou větou>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "Podst. jm. <jiný samostatný význam popsaný jednou krátkou větou>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "Slov. <přesný význam určený uživatelovou nápovědou>",
+          "tag": null
+        },
+        "invalid": "Toto slovo nepatří do rozpoznaného cílového jazyka."
+      },
+      "messages": {
+        "listed": "To už je na seznamu.",
+        "absent": "Není co dalšího přidat."
+      }
+    },
+    "card": {
+      "hint": {
+        "bad": [
+          "Používá se při zdvořilé žádosti o něco.",
+          "Znamená únavu.",
+          "Časté v pracovních situacích."
+        ],
+        "good": "„<near target word>“ ukazuje trh a tramvaj; tady lávka kříží jezero.",
+        "contrast": "„<near target word>“ ukazuje…; tady…"
+      },
+      "context": {
+        "headers": ["Význam.", "Přirozený kontext.", "Kontext, kde působí nepatřičně.", "Významový odstín."],
+        "rarity": "zřídka; hlavně ve starší próze"
+      }
+    },
+    "recall": {
+      "focus": {"focus": "hrad", "longer": "ohrada"},
+      "fragment": {"visible": "KONEČNÝ NÁVRH", "sentence_end": "konečný návrh"}
+    }
   }
 }

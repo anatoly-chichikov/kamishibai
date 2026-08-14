@@ -329,7 +329,7 @@ impl SessionStore {
 
     /// Delete one session's directory and everything in it, after any in-flight
     /// update finishes (the write lock serializes the two).
-    pub(super) fn remove(&self, id: &str) -> Result<()> {
+    pub(in crate::cli) fn remove(&self, id: &str) -> Result<()> {
         let dir = self.dir(id);
         if !dir.is_dir() {
             return Ok(());

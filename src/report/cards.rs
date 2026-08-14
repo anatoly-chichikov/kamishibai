@@ -39,6 +39,9 @@ const TEXT_PAD_RIGHT: f32 = 5.0;
 const PANEL_BORDER_PT: f32 = 0.6;
 const IMPORTANCE_GLYPHS: &str = "Importance ";
 const BULLET_MARKER: &str = "•  ";
+/// The same marker for a right-to-left column: the dot moves to the outer edge
+/// and the gap keeps it off the text. Same glyphs, so the same width.
+const BULLET_MARKER_RTL: &str = "  •";
 const BULLET_INDENT_STEP: f32 = 3.5;
 const BLOCK_GAP_RATIO: f32 = 0.35;
 const HAIR: f32 = 0.4;
@@ -397,7 +400,15 @@ impl CardSheet {
         }
         cursor -= leading(IMP_SIZE) * 0.4;
         cursor -= leading(IMP_SIZE);
-        draw_importance(ops, fonts, ids, plan.importance, PAD, cursor);
+        draw_importance(
+            ops,
+            fonts,
+            ids,
+            plan.importance,
+            PAD,
+            cursor,
+            plan.source_direction,
+        );
         cursor -= leading(EXPLAIN_SIZE) * 0.6;
         let view = ClassifierView::from(fonts);
         let explain_size = fit_explanation(&plan.explanation, text_w, cursor - PAD, view);
@@ -431,8 +442,8 @@ impl CardSheet {
                 }
                 Block::Bullet { indent, chunks } => {
                     let indent_mm = f32::from(*indent) * BULLET_INDENT_STEP;
-                    let marker_x = PAD + indent_mm;
-                    let text_x = marker_x + marker_width;
+                    let (marker_x, text_x) =
+                        bullet_gutter(plan.source_direction, indent_mm, marker_width, text_w);
                     let inner_w = (text_w - indent_mm - marker_width).max(10.0);
                     let lines = wrap_runs(chunks.as_slice(), inner_w, explain_size, view);
                     for (line_idx, line) in lines.into_iter().enumerate() {
@@ -445,7 +456,7 @@ impl CardSheet {
                                 ops,
                                 fonts,
                                 ids,
-                                &[plain_chunk(BULLET_MARKER)],
+                                &[plain_chunk(bullet_marker(plan.source_direction))],
                                 explain_size,
                                 marker_x,
                                 cursor,
@@ -479,6 +490,36 @@ impl CardSheet {
 /// inter-block gap and bullet indents; falls back to the minimum size when
 /// even the smallest pass overflows so the caller can still emit and let the
 /// cursor guard clip the tail.
+/// Return the marker glyphs for one reading direction.
+fn bullet_marker(direction: TextDirection) -> &'static str {
+    match direction {
+        TextDirection::Ltr => BULLET_MARKER,
+        TextDirection::Rtl => BULLET_MARKER_RTL,
+    }
+}
+
+/// Return where one bullet's marker and its text frame start.
+///
+/// The indent eats the margin the reader starts from — the left one going
+/// left-to-right, the right one going right-to-left — and the marker sits in
+/// the gutter that indent opens. Either way the marker's inner edge meets the
+/// text frame's outer edge, so a right-aligned right-to-left line ends up
+/// against its own dot instead of across the card from it.
+///
+/// The frame's width is `text_w - indent - marker_w` in both directions, which
+/// is why `fit_explanation` needs no direction of its own.
+fn bullet_gutter(
+    direction: TextDirection,
+    indent_mm: f32,
+    marker_w: f32,
+    text_w: f32,
+) -> (f32, f32) {
+    match direction {
+        TextDirection::Ltr => (PAD + indent_mm, PAD + indent_mm + marker_w),
+        TextDirection::Rtl => (PAD + text_w - indent_mm - marker_w, PAD),
+    }
+}
+
 fn fit_explanation(blocks: &[Block], width: f32, available: f32, view: ClassifierView<'_>) -> f32 {
     let mut size = EXPLAIN_SIZE;
     while size >= EXPLAIN_SIZE_MIN {
@@ -871,6 +912,11 @@ fn scale_to_side(side_mm: f32, pixels: f32) -> f32 {
 }
 
 /// Draw the importance row: label and ten dots, no numeric trailer.
+/// Draw the importance meter: the label, then ten dots reading away from it.
+///
+/// The label stays English and stays readable left to right; only the row's
+/// anchor follows the card. On a right-to-left card the row hangs off the right
+/// margin instead of stranding itself under text that has moved away.
 fn draw_importance(
     ops: &mut Vec<Op>,
     fonts: &SheetFonts,
@@ -878,19 +924,8 @@ fn draw_importance(
     score: u8,
     x: f32,
     y: f32,
+    direction: TextDirection,
 ) {
-    draw_runs(
-        ops,
-        fonts,
-        ids,
-        &[plain_chunk(IMPORTANCE_GLYPHS)],
-        IMP_SIZE,
-        x,
-        y,
-        MUTED,
-        TextDirection::Ltr,
-        CARD_W - x - PAD,
-    );
     let label_w = measure_runs(
         ClassifierView::from(fonts),
         &[plain_chunk(IMPORTANCE_GLYPHS)],
@@ -898,10 +933,30 @@ fn draw_importance(
     );
     let radius = 0.6_f32;
     let pitch = 1.8_f32;
+    let label_x = match direction {
+        TextDirection::Ltr => x,
+        TextDirection::Rtl => (CARD_W - PAD - label_w).max(x),
+    };
+    draw_runs(
+        ops,
+        fonts,
+        ids,
+        &[plain_chunk(IMPORTANCE_GLYPHS)],
+        IMP_SIZE,
+        label_x,
+        y,
+        MUTED,
+        TextDirection::Ltr,
+        label_w,
+    );
     let cap_height = IMP_SIZE * 25.4 / 72.0 * 0.62;
     let dot_cy = y + cap_height / 2.0;
     for index in 0..10 {
-        let dot_cx = x + label_w + radius + index as f32 * pitch;
+        let step = radius + index as f32 * pitch;
+        let dot_cx = match direction {
+            TextDirection::Ltr => label_x + label_w + step,
+            TextDirection::Rtl => label_x - step,
+        };
         let filled = (index as u8) < score;
         draw_dot(ops, dot_cx, dot_cy, radius, filled);
     }
@@ -1861,11 +1916,94 @@ fn rgb_tuple(rgb: (u8, u8, u8)) -> Color {
 #[cfg(test)]
 mod tests {
     use super::{
-        ClassifierView, FontPalette, ParsedPalette, bold_split, group_tokens, plain_chunk,
-        tokenize, wrap_runs,
+        BULLET_MARKER, BULLET_MARKER_RTL, ClassifierView, FontPalette, PAD, ParsedPalette,
+        bold_split, bullet_gutter, bullet_marker, group_tokens, plain_chunk, tokenize, wrap_runs,
     };
+    use crate::languages::TextDirection;
     use crate::report::font::font_arc;
     use std::sync::Arc;
+
+    /// A bullet's text must end up against its own dot, whichever way the card
+    /// reads. This is the geometry the Hebrew card got wrong: the marker sat on
+    /// the left margin while the right-aligned text hugged the right one.
+    #[test]
+    fn a_bullet_marker_always_touches_the_text_frame_it_belongs_to() {
+        let text_w = 95.0_f32;
+        let marker_w = 3.0_f32;
+        let apart = [0.0_f32, 3.5, 7.0]
+            .into_iter()
+            .flat_map(|indent| {
+                [TextDirection::Ltr, TextDirection::Rtl].map(move |direction| (direction, indent))
+            })
+            .filter(|(direction, indent)| {
+                let (marker_x, text_x) = bullet_gutter(*direction, *indent, marker_w, text_w);
+                let inner_w = text_w - indent - marker_w;
+                match direction {
+                    TextDirection::Ltr => (marker_x + marker_w - text_x).abs() > f32::EPSILON,
+                    TextDirection::Rtl => (text_x + inner_w - marker_x).abs() > f32::EPSILON,
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            apart,
+            Vec::<(TextDirection, f32)>::new(),
+            "a bullet marker drifted away from the text frame it marks"
+        );
+    }
+
+    /// However deep the indent and whichever way the card reads, the marker
+    /// stays inside the panel it was drawn for.
+    #[test]
+    fn a_bullet_marker_never_leaves_the_panel() {
+        let text_w = 95.0_f32;
+        let marker_w = 3.0_f32;
+        let escaped = [0.0_f32, 3.5, 7.0, 10.5]
+            .into_iter()
+            .flat_map(|indent| {
+                [TextDirection::Ltr, TextDirection::Rtl].map(move |direction| (direction, indent))
+            })
+            .filter(|(direction, indent)| {
+                let (marker_x, _) = bullet_gutter(*direction, *indent, marker_w, text_w);
+                marker_x < PAD || marker_x + marker_w > PAD + text_w
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            escaped,
+            Vec::<(TextDirection, f32)>::new(),
+            "a bullet marker was placed outside the panel"
+        );
+    }
+
+    /// The indent eats the margin the reader starts from, so a nested bullet
+    /// moves inward from opposite sides in the two directions.
+    #[test]
+    fn indenting_a_bullet_moves_it_away_from_the_margin_the_reader_starts_from() {
+        let text_w = 95.0_f32;
+        let marker_w = 3.0_f32;
+        let (flush_ltr, _) = bullet_gutter(TextDirection::Ltr, 0.0, marker_w, text_w);
+        let (nested_ltr, _) = bullet_gutter(TextDirection::Ltr, 7.0, marker_w, text_w);
+        let (flush_rtl, _) = bullet_gutter(TextDirection::Rtl, 0.0, marker_w, text_w);
+        let (nested_rtl, _) = bullet_gutter(TextDirection::Rtl, 7.0, marker_w, text_w);
+        assert_eq!(
+            (nested_ltr > flush_ltr, nested_rtl < flush_rtl),
+            (true, true),
+            "a nested bullet did not move inward from the margin its reader starts at"
+        );
+    }
+
+    /// Both markers carry the same glyphs, so the width the layout measured
+    /// once holds for either direction.
+    #[test]
+    fn the_two_bullet_markers_are_the_same_glyphs_mirrored() {
+        assert_eq!(
+            (
+                bullet_marker(TextDirection::Rtl),
+                BULLET_MARKER_RTL.chars().rev().collect::<String>().as_str(),
+            ),
+            (BULLET_MARKER_RTL, BULLET_MARKER),
+            "the right-to-left bullet marker is not the mirror of the left-to-right one"
+        );
+    }
 
     /// A comma carried into the regular run right after the bold highlight
     /// stays in the same wrap group as the word it abuts.

@@ -23,12 +23,12 @@ All future work references this map instead of re-deriving transitions.
 | Esc lifecycle     | synthetic armed clear, review back, armed stop, draining stop, and partial-publish states | `23-esc-words-clear.png` through `27-generation-partial.png` |
 | Sentence labels   | collapsed three-tag summary starts inline on `audio` and wraps onto `scene` / `picture`; expanded question-led editor sits below every artifact | `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png` |
 | `Done`            | fullscreen                                                                        | `08-done.png`                   |
-| `PickMyLanguage`  | modal over `Welcome` / `YourWords` / `WhatIUnderstood`, opened with `Ctrl+L`      | header chip (no standalone shot) |
+| `PickLanguages`   | two scrolling lists over `YourWords` / `WhatIUnderstood`, opened with `Ctrl+L` or either header half | `31-language-pair-modal.png` |
 | Busy              | one universal blocking overlay on any screen                                      | `01b-busy.png`                  |
 
 Source of truth for these names (`src/tui/screen.rs`, `src/tui/app.rs`):
 `Screen` = {`Welcome`, `YourWords`, `WhatIUnderstood`, `YourCards`, `Done`};
-`ModalKind` = {`ChangeSomething`, `PickMyLanguage`};
+`ModalKind` = {`ChangeSomething`, `PickLanguages`};
 `BusyKind` = {`Understanding`, `BulkCorrection`, `CheckingKey`,
 `PublishingDeck`, `PublishingReport`}. There is no separate `BulkCorrectionBusy` screen —
 bulk correction is just `BusyKind::BulkCorrection` drawn by the universal busy overlay.
@@ -91,13 +91,22 @@ steady-state fullscreen screen, reading `my → target` (e.g. `EN → FR`).
 | Screen            | What is shown                                                                                  |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
 | `Welcome`         | Unlocked setup language. `←/→` (or `Ctrl+L`) cycles `my language`; `Enter` confirms it.        |
-| `YourWords`       | Detected target (pending), persisted `my`. `Ctrl+L` opens the language picker.                 |
-| `WhatIUnderstood` | Confirmed target, current `my`. `Ctrl+L` opens the language picker (re-runs understanding).    |
+| `YourWords`       | Detected target (pending), persisted `my`. `Ctrl+L` opens the pair picker.                     |
+| `WhatIUnderstood` | Confirmed target, current `my`. `Ctrl+L` opens the pair picker; a changed pair may re-run understanding. |
 | `YourCards`       | Frozen pair for the batch — read-only.                                                         |
 | `Done`            | Pair remains visible next to the batch summary.                                                |
 
-The only way to change `my language` mid-flow is the `Ctrl+L` picker modal
-(`PickMyLanguage`), available on `Welcome`, `YourWords`, and `WhatIUnderstood`.
+The only way to change either half mid-flow is the `Ctrl+L` pair picker modal
+(`PickLanguages`), available on `YourWords` and `WhatIUnderstood`. It draws the
+pair as two side-by-side vertical lists under one ruled heading row carrying the
+`→` that says which way the pair reads. Each row names a language by code and by
+the name its own speakers use; right-to-left scripts carry their English name
+because the terminal does no bidi reordering. One pinned row sits above both
+lists — `auto` on the learning side, blank opposite it — so both columns scroll
+exactly the catalog and the same language shares a row across the pair. `auto`
+hands the choice back to detection and never scrolls away. A column taller than
+the terminal scrolls, and its window is derived from the pick rather than stored,
+so the pick is always visible.
 There is no `[L]` flip key and no `[T]` target-cycle key — both were removed.
 
 `target language` is resolved before `WhatIUnderstood`. `my language` is read
@@ -287,7 +296,7 @@ together. There is no per-card modal and `R` has no `YourCards` action.
         │       └─ [Ctrl+G, ≥1 ok row] ──► allocate initial requests ──► YourCards
         ├─ [D] drop selected row ──► last row dropped returns to YourWords (blob cleared)
         ├─ [Esc, no inner layer] ──► YourWords (blob and selected senses preserved)
-        ├─ [Ctrl+L] ──► PickMyLanguage modal ──► re-runs understanding
+        ├─ [Ctrl+L] ──► PickLanguages modal ──► adopt pair; re-read only when required
         └─ [Ctrl+G, ≥1 ok row] ──► (StartGeneration) ──► YourCards
 
     YourCards
@@ -332,7 +341,7 @@ not a key the user presses.
 | `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` tune · `↑↓` nav (`Space` is an unadvertised alias) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
 | `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row · text editing under `one more thing` · `Esc` close (`Enter` inert) |
-| `PickMyLanguage`            | `←/→`/`↑↓` move · `Enter` confirm · `Esc` cancel                                                             |
+| `PickLanguages`             | `↑/↓` pick within a column · `←/→` focus the left / right column · wheel scrolls the column under the pointer · `Enter` confirm · `Esc` cancel |
 | `Done`                      | `Ctrl+G` regenerate failed (only when failures) · `[Esc] new cards` · twice within 1 s starts a clean batch · `Ctrl+C` quit |
 
 The words-clear, generation-stop, new-batch, and quit confirmations use
@@ -417,7 +426,7 @@ The screen state machine is the pure function `transit(app, event) -> (App, Side
 `Side` effect the shell runs outside the function (`RunUnderstanding`,
 `RunBulkCorrection`, `ClearWords`, `StartGeneration`, `StopGeneration`, `RegenerateCards`, `RegenerateFailed`,
 `StartPublish`, `ValidateKey`, `LoadEnvKey`,
-`PersistMyLanguage…`, `ExitApp`). Tests drive it with fabricated events to verify
+`AdoptLanguages…`, `ExitApp`). Tests drive it with fabricated events to verify
 the live path `YourWords → WhatIUnderstood → YourCards → published YourCards`
 without touching the network; `Done` is the final view when a published session
 is reopened. All time-bounded confirmations belong to the shell. A second eligible

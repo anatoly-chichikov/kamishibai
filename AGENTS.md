@@ -184,7 +184,9 @@ From the repo root:
    `live/22-s12-label-legacy-meta.png`, the five Esc lifecycle PNGs from
    `live/23-esc-words-clear.png` through `live/27-generation-partial.png`, plus
    the open batch-settings pair `live/28-batch-sentence-settings.png` and
-   `live/29-batch-sentence-settings-narrow.png`. All are 2x except S10 and the narrow
+   `live/29-batch-sentence-settings-narrow.png`, plus the two language-pair shots
+   `live/30-plausible-alternates.png` and `live/31-language-pair-modal.png`.
+   All are 2x except S10 and the narrow
    batch-settings frame, which come from `states-narrow.tape` at 1200 px. Both synthetic tapes jump to each state
    by **absolute index** (`Type "<n>"` then `Space`) and keep a uniform 800 ms settle after
    each jump so VHS never captures a mid-repaint frame. Absolute jumps are immune to
@@ -337,13 +339,15 @@ card. The tape may continue afterward to capture the separate open-card screensh
 ### Synthetic and edge-case shots
 
 The review, six environment/modal/failure/retry PNGs, twelve sentence-label scenarios,
-five Esc lifecycle PNGs, and two batch-settings PNGs listed in step 3 are produced
+five Esc lifecycle PNGs, two batch-settings PNGs, and two language-pair PNGs listed in
+step 3 are produced
 reproducibly by `states.tape` and `states-narrow.tape`, which drive
 `examples/tui_states.rs` through the same EN→FR flow without Gemini. The sentence-label
 scenarios keep the established indices 0–10 intact: S1 is index 6, S2 replaces the removed
 per-card modal at index 7, S3–S9 are indices 11–17, S10–S12 are indices 18–20, the retry
 stress gallery is index 21, the Esc clear/back/stop/drain/partial states are indices 22–26,
-and the open generation-guidance editor is index 27. When the design changes, edit the demo data in
+the open generation-guidance editor is index 27, the `also plausible` alternates row is
+index 28, and the language-pair modal is index 29. When the design changes, edit the demo data in
 `examples/tui_states.rs` and re-run both synthetic tapes. If you add or reorder states in
 the vector, update the absolute indices in both tapes and in the
 `pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells` test (it jumps to

@@ -101,6 +101,40 @@ fn dutch_profile_exposes_the_complete_production_contract() -> Result<()> {
     Ok(())
 }
 
+/// Czech resolves to its production language, OCR, deck, and report contract.
+#[test]
+fn czech_profile_exposes_the_complete_production_contract() -> Result<()> {
+    let item = language("cs")?;
+    assert_eq!(
+        (
+            item.code,
+            item.prompt,
+            item.text_gate,
+            item.direction,
+            item.naming.name,
+            item.naming.prefix,
+            item.labels.sentence,
+            item.labels.context,
+            item.labels.hint,
+            item.labels.importance,
+        ),
+        (
+            "cs",
+            String::from("Czech"),
+            TextGate::Ocr(OcrModel::Latin),
+            TextDirection::Ltr,
+            String::from("Czech Vocabulary"),
+            String::from("cs"),
+            String::from("Překlad"),
+            String::from("Kontext"),
+            String::from("Nápověda"),
+            String::from("Důležitost"),
+        ),
+        "czech profile is incomplete or inconsistent"
+    );
+    Ok(())
+}
+
 /// Unknown profiles fail with the frozen error wording.
 #[test]
 fn unknown_profiles_raise_the_frozen_error_message() {
@@ -118,7 +152,7 @@ fn registry_keeps_the_supported_codes_in_stable_order() {
         catalog().codes(),
         [
             "en", "zh", "es", "ja", "fr", "de", "ko", "ru", "it", "pt", "hi", "ar", "tr", "pl",
-            "uk", "id", "vi", "th", "el", "he", "nl",
+            "uk", "id", "vi", "th", "el", "he", "nl", "cs",
         ],
         "profile registry codes no longer match the frozen order"
     );

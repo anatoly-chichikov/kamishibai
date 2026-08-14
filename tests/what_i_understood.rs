@@ -783,3 +783,70 @@ fn skipped_candidate_list_keeps_user_on_what_i_understood() {
         "only skipped candidates must not advance into card generation"
     );
 }
+
+#[test]
+fn the_review_names_the_languages_the_pass_found_equally_plausible() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![WordCandidate::new("gift", "a present", true)])
+        .with_alternates(vec![String::from("DE"), String::from("NL")]);
+    assert!(
+        flat(&app).contains("also plausible: DE  ·  NL"),
+        "an ambiguous batch must name the other languages it could have been read as"
+    );
+}
+
+#[test]
+fn an_unambiguous_review_says_nothing_about_other_languages() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![WordCandidate::new("gift", "a present", true)]);
+    assert!(
+        !flat(&app).contains("also plausible"),
+        "an unambiguous batch must not invent a language caveat"
+    );
+}
+
+#[test]
+fn a_pinned_batch_drops_the_alternates_the_pass_reported() {
+    let pinned = transit(
+        App::new(LanguagePair::new("en", "ru"))
+            .with_screen(Screen::WhatIUnderstood)
+            .confirmed_learning("en")
+            .understood(vec![WordCandidate::new("gift", "a present", true)]),
+        AppEvent::SetLanguages(kamishibai::tui::LanguageChoice::new(
+            "RU",
+            kamishibai::tui::learning_target(Some("de")),
+        )),
+    )
+    .0
+    .with_alternates(vec![String::from("NL")]);
+    assert!(
+        !flat(&pinned).contains("also plausible"),
+        "a batch whose language the user pinned must stop second-guessing that decision"
+    );
+}
+
+#[test]
+fn clicking_a_plausible_language_rereads_the_batch_as_that_language() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![WordCandidate::new("gift", "a present", true)])
+        .with_alternates(vec![String::from("DE")]);
+    let area = ratatui::layout::Rect::new(0, 0, 140, 24);
+    let column = u16::try_from("    also plausible: ".len()).expect("column must fit");
+    let event = kamishibai::tui::review_event_at(&app, area, column, area.y + 4);
+    assert_eq!(
+        event,
+        Some(AppEvent::SetLanguages(
+            kamishibai::tui::LanguageChoice::new(
+                "ru",
+                kamishibai::tui::learning_target(Some("de"))
+            )
+        )),
+        "clicking a plausible language must reread the batch as it, keeping the known half"
+    );
+}

@@ -4,11 +4,13 @@ use std::time::Duration;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use crate::application::LearningTarget;
 use crate::session::{
     Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, SentenceBatchSettings,
     SentenceLabelSelection, WordCandidate,
 };
 
+use super::picker::{LanguageChoice, PickerCursor, PickerSection};
 use super::screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
 use super::sentence_editor::{BatchSettingsRow, LabelEditorRow, NoteDraft, SentenceLabelsEditor};
 
@@ -32,7 +34,8 @@ pub struct App {
     quit_pending: bool,
     new_batch_pending: bool,
     word_clear_pending: bool,
-    picker_cursor: usize,
+    picker_cursor: PickerCursor,
+    learning_target: LearningTarget,
 }
 
 /// First-run welcome state: stage, typed key, source of that key, focused
@@ -184,6 +187,23 @@ pub struct Review {
     pub selected: usize,
     pub expanded: Option<ExpandedSense>,
     pub notice: Option<String>,
+    /// Supported codes the understanding pass judged equally plausible for
+    /// this batch, excluding the one it chose. Empty when the batch is
+    /// unambiguous, and empty for cache entries written before the pass
+    /// started reporting them.
+    pub alternates: Vec<String>,
+}
+
+/// Build one language pair, preserving the case each code arrived in.
+///
+/// Codes reach the app in several cases — the catalog hands out lowercase,
+/// `LanguagePair` from a cards document is uppercase, `LanguageCode` from a pin
+/// is uppercase, and Gemini answers in whatever it likes — and the record each
+/// case round-trips into is the console's, not this app's, to recase. So the
+/// pair carries codes verbatim and every comparison against it is
+/// case-insensitive instead.
+fn paired(learning: &str, known: &str) -> LanguagePair {
+    LanguagePair::new(learning.to_string(), known.to_string())
 }
 
 /// Expanded sense picker state for one review row.
@@ -197,6 +217,8 @@ pub struct ExpandedSense {
 impl App {
     /// Create a fresh app sitting on `YourWords` with an initial language pair.
     pub fn new(pair: LanguagePair) -> Self {
+        let pair = paired(pair.learning(), pair.known());
+        let picker_cursor = PickerCursor::opening(pair.known(), None, PickerSection::Known);
         Self {
             screen: Screen::YourWords,
             modal: None,
@@ -218,7 +240,8 @@ impl App {
             quit_pending: false,
             new_batch_pending: false,
             word_clear_pending: false,
-            picker_cursor: 0,
+            picker_cursor,
+            learning_target: LearningTarget::Detect,
         }
     }
 
@@ -625,25 +648,73 @@ impl App {
         self
     }
 
-    /// Return the index of the chip currently highlighted inside the
-    /// language picker modal. Meaningful only while `PickMyLanguage` is open.
-    pub fn picker_cursor(&self) -> usize {
+    /// Return the chip highlighted in each half of the language picker modal
+    /// plus the focused half. Meaningful only while `PickLanguages` is open.
+    pub fn picker_cursor(&self) -> PickerCursor {
         self.picker_cursor
     }
 
-    /// Return the app with the picker cursor set to a specific index. Used
-    /// when opening the modal so the active language is pre-selected.
-    pub fn with_picker_cursor(mut self, index: usize) -> Self {
-        self.picker_cursor = index;
+    /// Return the app with the picker cursor replaced. Used when opening the
+    /// modal so the active pair is pre-selected on the requested half.
+    pub fn with_picker_cursor(mut self, cursor: PickerCursor) -> Self {
+        self.picker_cursor = cursor;
         self
     }
 
     /// Return the app with the picker cursor advanced by `delta`, wrapping
-    /// around the supported-language catalog.
+    /// around the focused half only.
     pub fn picker_cursor_advanced(mut self, delta: i32) -> Self {
-        let len = crate::languages::catalog().codes().len() as i32;
-        let next = (self.picker_cursor as i32 + delta).rem_euclid(len);
-        self.picker_cursor = next as usize;
+        self.picker_cursor = self.picker_cursor.advanced(delta);
+        self
+    }
+
+    /// Return the app with the picker focused on one half of the pair.
+    pub fn picker_facing(mut self, section: PickerSection) -> Self {
+        self.picker_cursor = self.picker_cursor.facing(section);
+        self
+    }
+
+    /// Return the app with one picker half focused and its chip highlighted.
+    pub fn picker_chosen(mut self, section: PickerSection, index: usize) -> Self {
+        self.picker_cursor = self.picker_cursor.chosen(section, index);
+        self
+    }
+
+    /// Return how this batch decides the language being learned.
+    pub fn learning_target(&self) -> &LearningTarget {
+        &self.learning_target
+    }
+
+    /// Return the pinned learning code, or `None` while detection is in charge.
+    pub fn learning_pin(&self) -> Option<&str> {
+        match &self.learning_target {
+            LearningTarget::Detect => None,
+            LearningTarget::Explicit(code) => Some(code.as_ref()),
+        }
+    }
+
+    /// Return the app with one confirmed language pair adopted.
+    ///
+    /// A pinned learning code lands in the pair immediately — it is a decision,
+    /// not a guess, so the header stops showing the pending ellipsis. Handing
+    /// the half back to detection reopens that ellipsis until the pass answers.
+    pub fn languages_adopted(mut self, choice: &LanguageChoice) -> Self {
+        self.learning_target = choice.learning().clone();
+        match choice.pinned() {
+            Some(code) => {
+                self.pair = paired(code, choice.known());
+                self.input.learning_pending = false;
+            }
+            None => {
+                self.pair = paired(self.pair.learning(), choice.known());
+                self.input.learning_pending = true;
+            }
+        }
+        self.picker_cursor = PickerCursor::opening(
+            self.pair.known(),
+            choice.pinned(),
+            self.picker_cursor.section(),
+        );
         self
     }
 
@@ -694,15 +765,13 @@ impl App {
     /// The learning language stays untouched. Use this from the language picker
     /// modal and from the Welcome screen — there is no implicit cycle anymore.
     pub fn set_known(mut self, code: impl Into<String>) -> Self {
-        let pair = LanguagePair::new(self.pair.learning().to_string(), code.into());
-        self.pair = pair;
+        self.pair = paired(self.pair.learning(), code.into().as_str());
         self
     }
 
     /// Return the app with a confirmed learning language guess from the LLM pass.
     pub fn confirmed_learning(mut self, code: impl Into<String>) -> Self {
-        let pair = LanguagePair::new(code, self.pair.known().to_string());
-        self.pair = pair;
+        self.pair = paired(code.into().as_str(), self.pair.known());
         self.input.learning_pending = false;
         self
     }
@@ -814,8 +883,24 @@ impl App {
             selected: 0,
             expanded: None,
             notice: None,
+            alternates: Vec::new(),
         };
         self
+    }
+
+    /// Return the app with the equally plausible learning languages this pass
+    /// reported. A pinned batch shows none: the user already decided.
+    pub fn with_alternates(mut self, alternates: Vec<String>) -> Self {
+        self.review.alternates = match self.learning_target {
+            LearningTarget::Detect => alternates,
+            LearningTarget::Explicit(_) => Vec::new(),
+        };
+        self
+    }
+
+    /// Return the learning languages the pass judged equally plausible.
+    pub fn alternates(&self) -> &[String] {
+        self.review.alternates.as_slice()
     }
 
     /// Return the app with understood candidates installed while preserving selected senses by row.
@@ -832,11 +917,13 @@ impl App {
             }
         }
         let selected = self.review.selected.min(candidates.len().saturating_sub(1));
+        let alternates = std::mem::take(&mut self.review.alternates);
         self.review = Review {
             candidates,
             selected,
             expanded: None,
             notice: None,
+            alternates,
         };
         self
     }

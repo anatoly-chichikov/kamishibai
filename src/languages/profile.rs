@@ -117,6 +117,13 @@ pub struct LanguageProfile {
     pub code: &'static str,
     /// English display name used in Gemini prompts.
     pub prompt: String,
+    /// The language's name in that language, shown when a human picks it.
+    ///
+    /// Right-to-left scripts carry their English name instead: the terminal,
+    /// unlike the PDF report, does no bidi reordering, so an Arabic or Hebrew
+    /// endonym renders differently in every emulator. Everything else is
+    /// written the way its own speakers write it.
+    pub endonym: String,
     /// Authoritative route for generated-image text validation.
     pub text_gate: TextGate,
     /// Reading direction used by presentation surfaces.

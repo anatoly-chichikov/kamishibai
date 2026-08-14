@@ -209,6 +209,65 @@ fn recoverable_error_overlay_wraps_long_timeout_messages() {
     );
 }
 
+/// The key a user reaches for after a dead batch is the one that retries it.
+/// Spending that press on dismissing the notice is what made a failed batch feel
+/// unrecoverable, so Generate must dismiss and retry in the same press.
+#[test]
+fn generate_over_a_shown_error_dismisses_it_and_retries_in_one_press() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob("back in the day")
+        .error_shown("no completed cards to publish");
+    let (after, side) = transit(app, AppEvent::Generate);
+    assert_eq!(
+        (after.error().is_some(), side),
+        (false, Side::RunUnderstanding),
+        "Ctrl+G over an error was spent dismissing it instead of retrying"
+    );
+}
+
+/// Every other key still just clears the notice.
+#[test]
+fn any_other_key_over_a_shown_error_only_dismisses_it() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob("back in the day")
+        .error_shown("no completed cards to publish");
+    let (after, side) = transit(app, AppEvent::NavNext);
+    assert_eq!(
+        (after.error().is_some(), side),
+        (false, Side::None),
+        "dismissing an error must not carry the dismissing key into the screen"
+    );
+}
+
+/// A one-line failure must not open a near-fullscreen box. The panel is sized
+/// from the message, so it stays an overlay you can see the screen behind.
+#[test]
+fn a_short_error_keeps_the_overlay_small() {
+    let app = App::new(LanguagePair::new("en", "ru")).error_shown("no completed cards to publish");
+    let painted = flatten(&app)
+        .lines()
+        .filter(|line| line.contains('\u{2502}') || line.contains('\u{250c}'))
+        .count();
+    assert!(
+        painted < 10,
+        "a one-line error opened a {painted}-row overlay instead of sizing to its message"
+    );
+}
+
+/// A long message still gets the room it needs, so shrinking the panel did not
+/// turn into clipping.
+#[test]
+fn a_long_error_still_gets_the_room_it_needs() {
+    let app = App::new(LanguagePair::new("en", "ru")).error_shown(
+        "error sending request for url https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent: operation timed out while understanding a large word list",
+    );
+    let flat = flatten(&app);
+    assert!(
+        flat.contains("operation timed out") && flat.contains("large word list"),
+        "sizing the overlay to its message clipped a long one: {flat}"
+    );
+}
+
 #[test]
 fn ctrl_l_on_your_words_opens_the_language_picker() {
     let app = App::new(LanguagePair::new("en", "ru"));
@@ -218,7 +277,7 @@ fn ctrl_l_on_your_words_opens_the_language_picker() {
     );
     assert_eq!(
         (next.modal(), side),
-        (Some(kamishibai::tui::ModalKind::PickMyLanguage), Side::None,),
+        (Some(kamishibai::tui::ModalKind::PickLanguages), Side::None,),
         "Ctrl+L on Your words must open the language picker modal without persisting yet"
     );
 }
@@ -232,7 +291,7 @@ fn cmd_l_on_your_words_opens_the_language_picker() {
     );
     assert_eq!(
         (next.modal(), side),
-        (Some(kamishibai::tui::ModalKind::PickMyLanguage), Side::None,),
+        (Some(kamishibai::tui::ModalKind::PickLanguages), Side::None,),
         "Cmd+L on Your words must open the language picker modal in kitty-protocol terminals"
     );
 }

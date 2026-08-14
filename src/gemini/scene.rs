@@ -67,7 +67,9 @@ pub(super) fn compose(
     );
     materialize(&mut scene, selection)?;
     normalize_camera_subjects(&mut scene)?;
+    normalize_camera_axis(&mut scene)?;
     normalize_eyelines(&mut scene)?;
+    normalize_eyeline_policy(&mut scene)?;
     normalize_match_on_action(&mut scene)?;
     normalize_subject_expressions(&mut scene)?;
     validate_dynamic(&scene)?;
@@ -278,6 +280,229 @@ fn add_camera_subject(subjects: &mut Vec<Value>, id: &str, anchor: &str, blockin
         "expression": "scene-consistent visible state",
         "blocking": blocking
     }));
+}
+
+/// Reconcile the page's camera-axis contract with what the panels actually cut.
+///
+/// The arc is written by the cheap shot planner one call earlier; the panels are
+/// written by the composer, which never sees that arc. `validate_axis_execution`
+/// then demands they agree exactly, and nothing repairs a disagreement — unlike
+/// eyelines and match-on-action next door, which are rewritten rather than
+/// rejected. A memory idiom cuts between two unrelated spaces, so the composer
+/// always writes a break the planner did not plan, and the card dies.
+///
+/// The panels hold the real decision about what is on the page, so they win.
+/// When the planner named no axis there is no shared 180-degree line to keep or
+/// cross, and the page is normalised to say exactly that; when it named one, the
+/// mode is inferred from the cuts the panels made.
+fn normalize_camera_axis(scene: &mut Value) -> Result<()> {
+    let axis = String::from(
+        scene
+            .pointer("/manga_panel/page_design/camera_arc/continuity/axis")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("registered scene must contain a camera axis"))?,
+    );
+    let relations = panel_relations(scene)?;
+    let mode = axis_mode_for(axis.trim(), relations.as_slice());
+    write_axis_relations(scene, mode)?;
+    let policy = scene
+        .pointer_mut("/manga_panel/page_design/camera_arc/continuity")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| anyhow!("camera arc must contain a continuity policy"))?;
+    policy.insert(String::from("axis_mode"), Value::String(String::from(mode)));
+    if mode == "not_applicable" {
+        policy.insert(String::from("axis"), Value::String(String::new()));
+    }
+    normalize_screen_direction(scene)
+}
+
+/// Return each panel's declared relation to the previous one.
+fn panel_relations(scene: &Value) -> Result<Vec<String>> {
+    let panels = scene
+        .pointer("/manga_panel/panels")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("registered scene must contain panels"))?;
+    Ok(panels
+        .iter()
+        .map(|panel| {
+            panel
+                .pointer("/continuity/axis_relation_from_previous")
+                .and_then(Value::as_str)
+                .unwrap_or("not_applicable")
+                .to_string()
+        })
+        .collect())
+}
+
+/// Return the axis mode the panels' cuts describe.
+///
+/// An unnamed axis means the planner found no shared line, so no cut can preserve
+/// or cross one. Otherwise the strongest cut on the page names the mode, because
+/// a break is what the reader sees whatever the rest of the page does.
+fn axis_mode_for(axis: &str, relations: &[String]) -> &'static str {
+    if axis.is_empty()
+        || relations
+            .iter()
+            .all(|relation| relation == "not_applicable")
+    {
+        return "not_applicable";
+    }
+    let later = relations.iter().skip(1);
+    for relation in later.clone() {
+        if relation == "deliberate_break" {
+            return "deliberate_break";
+        }
+    }
+    for relation in later {
+        if relation == "reestablish" {
+            return "reestablish";
+        }
+    }
+    "preserve"
+}
+
+/// Rewrite every panel's relation into the one legal sequence for `mode`.
+fn write_axis_relations(scene: &mut Value, mode: &str) -> Result<()> {
+    let panels = scene
+        .pointer_mut("/manga_panel/panels")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| anyhow!("registered scene must contain panels"))?;
+    for (index, panel) in panels.iter_mut().enumerate() {
+        let continuity = panel
+            .pointer_mut("/continuity")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| anyhow!("registered panel must contain continuity"))?;
+        let current = continuity
+            .get("axis_relation_from_previous")
+            .and_then(Value::as_str)
+            .unwrap_or("not_applicable");
+        let settled = settled_relation(mode, index, current);
+        continuity.insert(
+            String::from("axis_relation_from_previous"),
+            Value::String(String::from(settled)),
+        );
+    }
+    Ok(())
+}
+
+/// Return the relation one panel keeps once the page has settled on `mode`.
+fn settled_relation(mode: &str, index: usize, current: &str) -> &'static str {
+    if mode == "not_applicable" {
+        return "not_applicable";
+    }
+    if index == 0 {
+        return "establish";
+    }
+    match mode {
+        "deliberate_break" if current == "deliberate_break" => "deliberate_break",
+        "reestablish" if current == "reestablish" => "reestablish",
+        _ => "preserve",
+    }
+}
+
+/// Make the arc's screen direction the one the panels agree on, or declare that
+/// the page has none when they disagree.
+fn normalize_screen_direction(scene: &mut Value) -> Result<()> {
+    let panels = scene
+        .pointer("/manga_panel/panels")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("registered scene must contain panels"))?;
+    let mut directions = panels.iter().map(|panel| {
+        panel
+            .pointer("/continuity/screen_direction")
+            .and_then(Value::as_str)
+            .unwrap_or("not_applicable")
+    });
+    let first = directions.next().unwrap_or("not_applicable").to_string();
+    let agreed = directions.all(|direction| direction == first);
+    let settled = if agreed {
+        first
+    } else {
+        String::from("not_applicable")
+    };
+    let panels = scene
+        .pointer_mut("/manga_panel/panels")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| anyhow!("registered scene must contain panels"))?;
+    for panel in panels {
+        if let Some(continuity) = panel
+            .pointer_mut("/continuity")
+            .and_then(Value::as_object_mut)
+        {
+            continuity.insert(
+                String::from("screen_direction"),
+                Value::String(settled.clone()),
+            );
+        }
+    }
+    let policy = scene
+        .pointer_mut("/manga_panel/page_design/camera_arc/continuity")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| anyhow!("camera arc must contain a continuity policy"))?;
+    policy.insert(String::from("screen_direction"), Value::String(settled));
+    Ok(())
+}
+
+/// Make the page's eyeline policy describe the eyelines the panels drew.
+///
+/// The last of the four continuity fields the planner declares and the composer
+/// executes without either seeing the other. `normalize_eyelines` above can
+/// silence eyelines and harmonise their directions, but it can neither invent a
+/// look nor change the policy, so a plan that expects matched eyelines over a
+/// page where nobody looks at anybody still killed the card.
+///
+/// Runs after `normalize_eyelines`, so it reads directions that have already
+/// been made consistent and only has to name what is there.
+fn normalize_eyeline_policy(scene: &mut Value) -> Result<()> {
+    let panels = scene
+        .pointer("/manga_panel/panels")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("registered scene must contain panels"))?;
+    let mut seen: BTreeMap<(&str, &str), &str> = BTreeMap::new();
+    let mut enabled = 0usize;
+    let mut broken = false;
+    for panel in panels {
+        let Some(eyeline) = panel.pointer("/continuity/eyeline") else {
+            continue;
+        };
+        if eyeline.get("enabled").and_then(Value::as_bool) != Some(true) {
+            continue;
+        }
+        let looker = eyeline
+            .get("looker_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let target = eyeline
+            .get("target_anchor")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let direction = eyeline
+            .get("direction")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        enabled += 1;
+        broken |= seen
+            .get(&(looker, target))
+            .is_some_and(|settled| *settled != direction);
+        broken |= seen
+            .get(&(target, looker))
+            .is_some_and(|settled| !opposite_eyelines(settled, direction));
+        seen.entry((looker, target)).or_insert(direction);
+    }
+    let settled = match (enabled, broken) {
+        (0, _) => "not_applicable",
+        (count, true) if count > 1 => "deliberately_broken",
+        _ => "matched",
+    };
+    let policy = scene
+        .pointer_mut("/manga_panel/page_design/camera_arc/continuity")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| anyhow!("camera arc must contain a continuity policy"))?;
+    policy.insert(
+        String::from("eyeline_policy"),
+        Value::String(String::from(settled)),
+    );
+    Ok(())
 }
 
 fn normalize_eyelines(scene: &mut Value) -> Result<()> {
@@ -2471,9 +2696,10 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        normalize_camera_subjects, normalize_eyelines, normalize_match_on_action,
-        normalize_panel_roles, normalize_subject_expressions, requests_blank_information,
-        requests_writing_like_marks, validate_dynamic,
+        normalize_camera_axis, normalize_camera_subjects, normalize_eyeline_policy,
+        normalize_eyelines, normalize_match_on_action, normalize_panel_roles,
+        normalize_subject_expressions, requests_blank_information, requests_writing_like_marks,
+        validate_dynamic,
     };
 
     fn panel(id: &str, x: i64, y: i64, width: i64, height: i64) -> Value {
@@ -2850,6 +3076,151 @@ mod tests {
             ),
             (true, Some("screen_left")),
             "reciprocal matched eyelines retained the same screen direction"
+        );
+    }
+
+    /// A memory idiom cuts between two unrelated spaces: the composer breaks the
+    /// axis the planner never established. Every real "back in the day" attempt
+    /// looked exactly like this, and none of them could satisfy any axis mode.
+    #[test]
+    fn a_break_the_planner_never_established_is_settled_instead_of_rejecting_the_scene() {
+        let mut scene = registered_camera_scene();
+        scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["axis_mode"] =
+            json!("not_applicable");
+        scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["axis"] = json!("");
+        scene["manga_panel"]["panels"][0]["continuity"]["axis_relation_from_previous"] =
+            json!("not_applicable");
+        scene["manga_panel"]["panels"][1]["continuity"]["axis_relation_from_previous"] =
+            json!("deliberate_break");
+        let rejected_before = validate_dynamic(&scene).is_err();
+        normalize_camera_axis(&mut scene).expect("the camera axis must normalize");
+        assert_eq!(
+            (
+                rejected_before,
+                validate_dynamic(&scene).is_ok(),
+                scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["axis_mode"]
+                    .clone(),
+            ),
+            (true, true, json!("not_applicable")),
+            "an unestablished break kept killing a scene the composer built correctly"
+        );
+    }
+
+    /// When the planner did name an axis, the cut the panels made names the mode
+    /// rather than the other way round — the panels hold the real page.
+    #[test]
+    fn a_named_axis_takes_its_mode_from_the_cut_the_panels_made() {
+        let mut scene = registered_camera_scene();
+        scene["manga_panel"]["panels"][1]["continuity"]["axis_relation_from_previous"] =
+            json!("deliberate_break");
+        let rejected_before = validate_dynamic(&scene).is_err();
+        normalize_camera_axis(&mut scene).expect("the camera axis must normalize");
+        assert_eq!(
+            (
+                rejected_before,
+                validate_dynamic(&scene).is_ok(),
+                scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["axis_mode"]
+                    .clone(),
+            ),
+            (true, true, json!("deliberate_break")),
+            "a named axis ignored the break its own panels executed"
+        );
+    }
+
+    /// Panels that disagree about screen direction leave the page with none,
+    /// instead of one panel's direction killing the card.
+    #[test]
+    fn panels_disagreeing_on_screen_direction_settle_on_having_none() {
+        let mut scene = registered_camera_scene();
+        scene["manga_panel"]["panels"][1]["continuity"]["screen_direction"] =
+            json!("toward_camera");
+        let rejected_before = validate_dynamic(&scene).is_err();
+        normalize_camera_axis(&mut scene).expect("the camera axis must normalize");
+        assert_eq!(
+            (
+                rejected_before,
+                validate_dynamic(&scene).is_ok(),
+                scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["screen_direction"]
+                    .clone(),
+            ),
+            (true, true, json!("not_applicable")),
+            "disagreeing screen directions kept rejecting the scene"
+        );
+    }
+
+    /// A page whose plan and panels already agree passes through untouched.
+    #[test]
+    fn an_agreeing_camera_plan_survives_normalization() {
+        let mut scene = registered_camera_scene();
+        let before = scene.clone();
+        normalize_camera_axis(&mut scene).expect("the camera axis must normalize");
+        assert_eq!(
+            scene, before,
+            "normalization rewrote a camera plan the panels already honoured"
+        );
+    }
+
+    /// The plan expects matched eyelines; the composer draws a page where nobody
+    /// looks at anybody. That is a legitimate page — the policy follows it.
+    #[test]
+    fn a_page_where_nobody_looks_settles_on_having_no_eyeline_policy() {
+        let mut scene = registered_camera_scene();
+        scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["eyeline_policy"] =
+            json!("matched");
+        let rejected_before = validate_dynamic(&scene).is_err();
+        normalize_eyeline_policy(&mut scene).expect("the eyeline policy must normalize");
+        assert_eq!(
+            (
+                rejected_before,
+                validate_dynamic(&scene).is_ok(),
+                scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["eyeline_policy"]
+                    .clone(),
+            ),
+            (true, true, json!("not_applicable")),
+            "a page without eyelines kept dying on a plan that expected them"
+        );
+    }
+
+    /// Two panels that do look at each other name the matched policy themselves,
+    /// whatever the plan guessed.
+    #[test]
+    fn panels_that_look_at_each_other_settle_on_matched() {
+        let mut scene = registered_camera_scene();
+        scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["eyeline_policy"] =
+            json!("deliberately_broken");
+        for (index, looker, target, direction) in [
+            (0usize, "traveler", "guide", "screen_right"),
+            (1usize, "guide", "traveler", "screen_left"),
+        ] {
+            scene["manga_panel"]["panels"][index]["continuity"]["eyeline"] = json!({
+                "enabled": true,
+                "looker_id": looker,
+                "target_anchor": target,
+                "direction": direction
+            });
+        }
+        let rejected_before = validate_dynamic(&scene).is_err();
+        normalize_eyeline_policy(&mut scene).expect("the eyeline policy must normalize");
+        assert_eq!(
+            (
+                rejected_before,
+                scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["eyeline_policy"]
+                    .clone(),
+            ),
+            (true, json!("matched")),
+            "a page whose eyelines agree was not named matched"
+        );
+    }
+
+    /// A policy the panels already honour is left alone.
+    #[test]
+    fn an_agreeing_eyeline_policy_survives_normalization() {
+        let mut scene = registered_camera_scene();
+        let before = scene.clone();
+        normalize_eyeline_policy(&mut scene).expect("the eyeline policy must normalize");
+        assert_eq!(
+            scene, before,
+            "normalization rewrote an eyeline policy the panels already honoured"
         );
     }
 

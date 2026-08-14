@@ -89,4 +89,4 @@ Validation checks structure, not taste. What makes the fields good is the style 
 
 ## Languages
 
-Twenty-one codes, accepted in any case and normalized to uppercase: `EN`, `ZH`, `ES`, `JA`, `FR`, `DE`, `KO`, `RU`, `IT`, `PT`, `HI`, `AR`, `TR`, `PL`, `UK`, `ID`, `VI`, `TH`, `EL`, `HE`, `NL`.
+Twenty-two codes, accepted in any case and normalized to uppercase: `EN`, `ZH`, `ES`, `JA`, `FR`, `DE`, `KO`, `RU`, `IT`, `PT`, `HI`, `AR`, `TR`, `PL`, `UK`, `ID`, `VI`, `TH`, `EL`, `HE`, `NL`, `CS`.

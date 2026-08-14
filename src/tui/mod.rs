@@ -12,6 +12,7 @@ mod event;
 mod input;
 mod links;
 pub(crate) mod palette;
+mod picker;
 mod pointer;
 mod render;
 mod screen;
@@ -24,9 +25,9 @@ pub use app::{App, BusyKind, BusyView, WelcomeView};
 pub use event::{AppEvent, EditingOwner};
 pub use input::to_app;
 pub use links::{
-    language_chip_at, link_at, sentence_label_event_at, sentence_settings_event_at,
-    welcome_control_at,
+    language_chip_at, link_at, review_event_at, sentence_label_event_at, welcome_control_at,
 };
+pub use picker::{AUTO_CHIP, LanguageChoice, PickerCursor, PickerSection, learning_target};
 pub use pointer::{
     MousePointer, mouse_pointer_at, reset_mouse_pointer, write_mouse_pointer,
     write_mouse_pointer_once,

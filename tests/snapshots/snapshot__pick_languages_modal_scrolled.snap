@@ -1,0 +1,25 @@
+---
+source: tests/snapshot.rs
+assertion_line: 263
+expression: "render_sized(&opened_picker(), 96, 20)"
+---
+             ┌─ languages ───────────────────────────────────────────────────────┐              
+     what i u│                                                                   │    RU → …    
+             │  your language             →  what you're learning                │              
+    understan│  ──────────────────────       ───────────────────────────         │              
+             │                               auto  detect from the words         │              
+             │  JA    日 本 語            │     EN    English               ┃       │              
+             │  FR    Français         ┃     ZH    中 文                   ┃       │              
+             │  DE    Deutsch          ┃     ES    Español               ┃       │              
+             │  KO    한 국 어            ┃     JA    日 本 語                 ┃       │              
+             │  RU    Русский          ┃     FR    Français              │       │              
+             │  IT    Italiano         │     DE    Deutsch               │       │              
+             │  PT    Português        │     KO    한 국 어                 │       │              
+             │  HI    हि न्दी              │     RU    Русский               │       │              
+             │  AR    Arabic           │     IT    Italiano              │       │              
+             │                                                                   │              
+             │  [↑ ↓] pick  [← →] column  [Enter] confirm  [Esc] cancel          │              
+             └───────────────────────────────────────────────────────────────────┘              
+                                                      ai may be wrong, please verify results    
+                                                                                                
+    step 2/3  nothing to make          [Enter/→] toggle  [Esc] back  [D] drop  [Ctrl+C] quit

@@ -25,6 +25,8 @@ const HEADLINE: &str = "what i understood";
 const HINT: &str = "quick check before i build the cards";
 const SETTINGS_LABEL: &str = "generation guidance";
 const DEFAULT_GUIDANCE_LABEL: &str = "best fit";
+const ALTERNATES_LABEL: &str = "also plausible: ";
+const ALTERNATES_SEPARATOR: &str = "  ·  ";
 
 /// One clickable surface in the batch sentence-settings block.
 pub(crate) enum SentenceSettingsControl {
@@ -92,6 +94,7 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
             usize::from(width),
         ));
     }
+    lines.extend(alternates_line(app));
     lines.push(Line::from(""));
     let selected = if app.sentence_settings_editor().is_some() {
         usize::MAX
@@ -198,15 +201,64 @@ fn settings_summary_line(app: &App) -> Line<'static> {
     Line::from(spans)
 }
 
+/// Name the learning languages the pass judged equally plausible for this
+/// batch, each one a click away from re-reading the words as that language.
+///
+/// Rendered directly below the guidance summary — or below the guidance editor
+/// while that is open, so the editor stays glued to the row that opens it.
+fn alternates_line(app: &App) -> Option<Line<'static>> {
+    let codes = app.alternates();
+    if codes.is_empty() {
+        return None;
+    }
+    let mut spans = vec![Span::styled(ALTERNATES_LABEL, palette::dim2())];
+    for (index, code) in codes.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(ALTERNATES_SEPARATOR, palette::rule()));
+        }
+        spans.push(Span::styled(
+            code.to_uppercase(),
+            palette::dim().add_modifier(Modifier::UNDERLINED),
+        ));
+    }
+    Some(Line::from(spans))
+}
+
+/// Return the index of the alternate language covering one body-content cell.
+pub(crate) fn alternate_at(app: &App, width: usize, column: usize, row: usize) -> Option<usize> {
+    if app.candidates().is_empty() || app.alternates().is_empty() {
+        return None;
+    }
+    if row != editor_height(app, width).saturating_add(1) {
+        return None;
+    }
+    let mut start = super::common::display_width(ALTERNATES_LABEL);
+    for (index, code) in app.alternates().iter().enumerate() {
+        if index > 0 {
+            start = start.saturating_add(super::common::display_width(ALTERNATES_SEPARATOR));
+        }
+        let end = start.saturating_add(super::common::display_width(code));
+        if column >= start && column < end {
+            return Some(index);
+        }
+        start = end;
+    }
+    None
+}
+
+fn editor_height(app: &App, width: usize) -> usize {
+    app.sentence_settings_editor()
+        .map(|focused| {
+            super::sentence_labels::batch_editor_lines(app.sentence_settings(), focused, width)
+                .len()
+        })
+        .unwrap_or(0)
+}
+
 fn review_prefix_height(app: &App, width: usize) -> usize {
-    2usize.saturating_add(
-        app.sentence_settings_editor()
-            .map(|focused| {
-                super::sentence_labels::batch_editor_lines(app.sentence_settings(), focused, width)
-                    .len()
-            })
-            .unwrap_or(0),
-    )
+    2usize
+        .saturating_add(editor_height(app, width))
+        .saturating_add(usize::from(!app.alternates().is_empty()))
 }
 
 fn candidate_content_height(
@@ -735,6 +787,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         hints.push(super::common::back_hint());
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
     }
     if app.sentence_settings_editor().is_none() {
         hints.push(super::common::quit_hint(app.quit_pending()));

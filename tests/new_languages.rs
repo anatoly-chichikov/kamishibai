@@ -1,4 +1,4 @@
-//! Offline bidirectional smoke coverage for the ten languages added in 1.8.
+//! Offline bidirectional smoke coverage for recently added languages.
 
 use std::fs;
 use std::io::{ErrorKind, Write};
@@ -351,5 +351,22 @@ fn vietnamese_works_in_both_language_roles_offline() {
             ("Bản dịch", "Ngữ cảnh", "Gợi ý", "Mức độ quan trọng")
         ),
         "Vietnamese did not preserve both offline language roles"
+    );
+}
+
+#[test]
+fn czech_works_in_both_language_roles_offline() {
+    assert_eq!(
+        both(
+            "CS",
+            "Naučil jsem se ten výraz.",
+            "Naučil jsem se ten výraz."
+        ),
+        expected(
+            "CS",
+            "Czech Vocabulary",
+            ("Překlad", "Kontext", "Nápověda", "Důležitost")
+        ),
+        "Czech did not preserve both offline language roles"
     );
 }

@@ -1,20 +1,30 @@
 use crate::languages::LanguageCatalog;
 use anyhow::Result;
 
-/// One guessed learning language with a confidence flag.
+/// One guessed learning language with a confidence flag and the languages the
+/// same input would equally have read as.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LearningGuess {
     code: String,
     confident: bool,
+    alternates: Vec<String>,
 }
 
 impl LearningGuess {
-    /// Create one learning guess with confidence.
+    /// Create one learning guess with confidence and no reported alternates.
     pub fn new(code: impl Into<String>, confident: bool) -> Self {
         Self {
             code: code.into(),
             confident,
+            alternates: Vec::new(),
         }
+    }
+
+    /// Return the guess carrying the languages that were equally plausible.
+    #[must_use]
+    pub fn with_alternates(mut self, alternates: Vec<String>) -> Self {
+        self.alternates = alternates;
+        self
     }
 
     /// Return the guessed language code.
@@ -25,6 +35,13 @@ impl LearningGuess {
     /// Return whether the detector is confident in the guess.
     pub fn confident(&self) -> bool {
         self.confident
+    }
+
+    /// Return the languages the same input would equally have read as. Empty
+    /// when the input was unambiguous, when the target was pinned, and for
+    /// detectors that do not report alternates at all.
+    pub fn alternates(&self) -> &[String] {
+        self.alternates.as_slice()
     }
 }
 

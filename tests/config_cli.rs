@@ -235,7 +235,7 @@ fn config_refuses_an_unknown_language() {
             document["error"]["retryable"].as_bool(),
             document["error"]["hint"]
                 .as_str()
-                .is_some_and(|hint| hint.contains("EN, ZH, ES, JA, FR, DE, KO, RU, IT, PT, HI, AR, TR, PL, UK, ID, VI, TH, EL, HE, NL")),
+                .is_some_and(|hint| hint.contains("EN, ZH, ES, JA, FR, DE, KO, RU, IT, PT, HI, AR, TR, PL, UK, ID, VI, TH, EL, HE, NL, CS")),
         ),
         (Some(2), Some("usage"), Some(false), true),
         "an unknown language refusal omitted its supported language codes"

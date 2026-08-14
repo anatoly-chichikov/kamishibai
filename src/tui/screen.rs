@@ -13,11 +13,13 @@ pub enum Screen {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ModalKind {
     ChangeSomething,
-    /// Picker for the user's `my` language. Opened by `Cmd+L` / `Ctrl+L` or by
-    /// clicking the language chip in the header. Shows the supported codes
-    /// from `LanguageCatalog`, navigated with `←/→` and confirmed with
-    /// `Enter`. The currently active code is pre-selected.
-    PickMyLanguage,
+    /// Picker for the whole session language pair. Opened by `Cmd+L` /
+    /// `Ctrl+L` or by clicking a half of the header language chip. Shows the
+    /// supported codes from `LanguageCatalog` twice — once for the known half
+    /// and once, behind a leading `auto` chip, for the learning half. `↑/↓`
+    /// moves between the halves, `←/→` moves inside one, and `Enter` confirms
+    /// both at once. The active pair is pre-selected.
+    PickLanguages,
 }
 
 /// Stage the first-run Welcome screen is currently on.

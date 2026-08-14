@@ -6,7 +6,9 @@
 use kamishibai::session::{
     LanguagePair, Sense, SentenceBatchSettings, SentenceLevel, SentenceTypeMix, WordCandidate,
 };
-use kamishibai::tui::{App, AppEvent, BusyKind, KeySource, ModalKind, Screen, draw, transit};
+use kamishibai::tui::{
+    App, AppEvent, BusyKind, KeySource, ModalKind, PickerSection, Screen, draw, transit,
+};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::{Color, Modifier};
@@ -184,15 +186,15 @@ fn welcome_key_step_with_env_locks_load_from_env_chip() {
 }
 
 #[test]
-fn welcome_language_row_keeps_the_dutch_chip_visible_at_standard_width() {
+fn welcome_language_row_keeps_the_czech_chip_visible_at_standard_width() {
     let app = App::new(LanguagePair::new("fr", "en")).opening_welcome(
         KeySource::Empty,
         String::new(),
         false,
     );
     assert!(
-        render_sized(&app, 80, 16).contains(" NL "),
-        "welcome language row clipped the Dutch chip at standard width"
+        render_sized(&app, 80, 16).contains(" CS "),
+        "welcome language row clipped the Czech chip at standard width"
     );
 }
 
@@ -203,10 +205,10 @@ fn narrow_welcome_key_step_keeps_every_language_and_form_control_visible() {
         .welcome_advance();
     let rendered = render_sized(&app, 80, 16);
     assert!(
-        rendered.contains(" NL ")
+        rendered.contains(" CS ")
             && rendered.contains("paste your key [Cmd+V]")
             && rendered.contains(" submit "),
-        "the narrow Welcome key step clipped either the 21-language catalog or its form controls"
+        "the narrow Welcome key step clipped either the 22-language catalog or its form controls"
     );
 }
 
@@ -240,33 +242,68 @@ fn done_snapshot_locks_final_screen() {
     insta::assert_snapshot!("done", render(&app));
 }
 
-#[test]
-fn pick_my_language_modal_snapshot_locks_picker_layout() {
+fn opened_picker() -> App {
     let app = App::new(LanguagePair::new("en", "ru")).with_screen(Screen::WhatIUnderstood);
-    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
-    let backend = TestBackend::new(80, 16);
-    let mut terminal = Terminal::new(backend).expect("test backend must boot");
-    terminal
-        .draw(|frame| draw(frame, &opened))
-        .expect("draw must succeed");
-    let mut buffer = String::new();
-    for row in 0..terminal.backend().buffer().area.height {
-        for column in 0..terminal.backend().buffer().area.width {
-            let cell = &terminal.backend().buffer()[(column, row)];
-            buffer.push_str(cell.symbol());
-        }
-        buffer.push('\n');
-    }
-    insta::assert_snapshot!("pick_my_language_modal", buffer);
+    transit(app, AppEvent::OpenLanguagePicker(PickerSection::Known)).0
 }
 
 #[test]
-fn pick_my_language_modal_keeps_the_dutch_chip_visible() {
-    let app = App::new(LanguagePair::new("en", "ru")).with_screen(Screen::WhatIUnderstood);
-    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
+fn pick_languages_modal_snapshot_locks_picker_layout() {
+    insta::assert_snapshot!(
+        "pick_languages_modal",
+        render_sized(&opened_picker(), 96, 40)
+    );
+}
+
+/// The same modal on a terminal too short for the catalog: the columns scroll
+/// and grow a thumb. This is the frame that catches the renderer and the mouse
+/// geometry drifting apart.
+#[test]
+fn pick_languages_modal_snapshot_locks_the_scrolled_layout() {
+    insta::assert_snapshot!(
+        "pick_languages_modal_scrolled",
+        render_sized(&opened_picker(), 96, 20)
+    );
+}
+
+/// Every language stays reachable on a terminal that cannot show them all —
+/// a list you can scroll must not hide its tail.
+#[test]
+fn pick_languages_modal_scrolls_the_last_language_into_view() {
+    let last = PickerSection::Known.chips() - 1;
+    let walked = transit(
+        opened_picker(),
+        AppEvent::LanguagePickerPoint(PickerSection::Known, last),
+    )
+    .0;
     assert!(
-        render_sized(&opened, 80, 16).contains(" NL "),
-        "language picker clipped the Dutch chip"
+        render_sized(&walked, 96, 20).contains("Čeština"),
+        "the last language stayed unreachable however far the column scrolled"
+    );
+}
+
+/// The two columns and the scrollbars keep one column of cells each, whatever
+/// script a row is written in. Devanagari and CJK are the ones that drift.
+#[test]
+fn pick_languages_modal_keeps_every_row_in_one_grid() {
+    let backend = TestBackend::new(96, 40);
+    let mut terminal = Terminal::new(backend).expect("test backend must boot");
+    terminal
+        .draw(|frame| draw(frame, &opened_picker()))
+        .expect("draw must succeed");
+    let buffer = terminal.backend().buffer();
+    let borders = (0..buffer.area.height)
+        .map(|row| {
+            (0..buffer.area.width)
+                .filter(|column| buffer[(*column, row)].symbol() == "│")
+                .collect::<Vec<_>>()
+        })
+        .filter(|found| !found.is_empty())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        borders.len(),
+        1,
+        "a row of the language modal escaped the grid the others share"
     );
 }
 

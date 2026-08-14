@@ -1,3 +1,4 @@
+use super::picker::{LanguageChoice, PickerSection};
 use super::screen::{ModalKind, WelcomeFocus};
 use super::sentence_editor::{BatchSettingsRow, LabelEditorRow};
 
@@ -39,15 +40,20 @@ pub enum AppEvent {
     SendCorrection(String),
     /// User asked to quit the app from Done.
     Quit,
-    /// User asked to open the `my` language picker modal (`Cmd+L`, `Ctrl+L`,
-    /// or click on the header language chip).
-    OpenLanguagePicker,
-    /// User picked a `my` language code from the picker modal.
-    SetMyLanguage(String),
-    /// User cycled the picker selection one step left.
+    /// User asked to open the language pair modal on one half (`Cmd+L`,
+    /// `Ctrl+L`, or a click on that half of the header language chip).
+    OpenLanguagePicker(PickerSection),
+    /// User confirmed one language pair, from the modal or from a click on the
+    /// `also plausible` hint.
+    SetLanguages(LanguageChoice),
+    /// Mouse highlighted one row of one picker column without confirming.
+    LanguagePickerPoint(PickerSection, usize),
+    /// User moved the focused picker column one row up.
     LanguagePickerPrev,
-    /// User cycled the picker selection one step right.
+    /// User moved the focused picker column one row down.
     LanguagePickerNext,
+    /// User moved picker focus onto one column of the pair.
+    LanguagePickerFocus(PickerSection),
     /// Text editor inserted a character.
     KeyChar(char),
     /// Text editor pressed backspace.
@@ -91,9 +97,10 @@ impl AppEvent {
     pub fn targets(&self) -> Option<ModalKind> {
         match self {
             AppEvent::SendCorrection(_) => Some(ModalKind::ChangeSomething),
-            AppEvent::SetMyLanguage(_)
+            AppEvent::LanguagePickerPoint(_, _)
             | AppEvent::LanguagePickerPrev
-            | AppEvent::LanguagePickerNext => Some(ModalKind::PickMyLanguage),
+            | AppEvent::LanguagePickerNext
+            | AppEvent::LanguagePickerFocus(_) => Some(ModalKind::PickLanguages),
             _ => None,
         }
     }

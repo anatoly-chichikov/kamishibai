@@ -18,7 +18,7 @@ use crate::generation::manga::{
     TextCheck, TextReview,
 };
 use crate::generation::prompts::layout_scene_prompt;
-use crate::languages::catalog;
+use crate::languages::{LanguageCatalog, LanguageCode, catalog};
 use crate::session::{
     AxisSet, CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair, LearningGuess,
     RawInputBatch, Register, Sense, SenseCorrection, SentenceAxis, SentenceKind,
@@ -75,6 +75,7 @@ const RECALL_MAX_OUTPUT_TOKENS: u32 = 256;
 const RECALL_RECOVERY_MAX_OUTPUT_TOKENS: u32 = 512;
 const FIDELITY_MAX_OUTPUT_TOKENS: u32 = 512;
 const TEXT_JUDGE_MAX_OUTPUT_TOKENS: u32 = 256;
+const MAX_ALTERNATES: usize = 3;
 const TEXT_JUDGE_RECOVERY_MAX_OUTPUT_TOKENS: u32 = 512;
 const LITERAL_ZOOM_MAX_OUTPUT_TOKENS: u32 = 512;
 const VOICES: [&str; 30] = [
@@ -492,7 +493,14 @@ where
         let decoded: IntakeResponse =
             serde_json::from_str(unfence(self.text(TEXT_MODEL, prompt)?.trim()))?;
         let guess = match target {
-            LearningTarget::Detect => LearningGuess::new(decoded.target_lang, true),
+            LearningTarget::Detect => {
+                let alternates = supported_alternates(
+                    decoded.alternates.as_slice(),
+                    decoded.target_lang.as_str(),
+                    &catalog,
+                );
+                LearningGuess::new(decoded.target_lang, true).with_alternates(alternates)
+            }
             LearningTarget::Explicit(expected) => {
                 let returned = catalog
                     .resolve(decoded.target_lang.as_str())
@@ -1150,7 +1158,42 @@ fn speech_from_response(response: &Response, text: &str) -> Result<Vec<u8>> {
 #[derive(Clone, Debug, Deserialize)]
 struct IntakeResponse {
     target_lang: String,
+    #[serde(default)]
+    alternates: Vec<String>,
     items: Vec<IntakeItem>,
+}
+
+/// Keep only alternates the app can actually switch to.
+///
+/// The model is asked for supported codes, most plausible first, but it answers
+/// in free text: it can name a language the catalog does not carry, repeat
+/// itself, or hand back the target it just chose. Anything the picker could not
+/// honour is dropped rather than shown as an offer the app cannot keep.
+fn supported_alternates(
+    reported: &[String],
+    target: &str,
+    catalog: &LanguageCatalog,
+) -> Vec<String> {
+    let chosen = catalog.resolve(target).ok();
+    let mut kept: Vec<String> = Vec::new();
+    for code in reported {
+        let Ok(resolved) = catalog.resolve(code.as_str()) else {
+            continue;
+        };
+        let resolved = resolved.to_string();
+        if chosen
+            .as_ref()
+            .is_some_and(|target| LanguageCode::as_ref(target) == resolved)
+            || kept.contains(&resolved)
+        {
+            continue;
+        }
+        kept.push(resolved);
+        if kept.len() == MAX_ALTERNATES {
+            break;
+        }
+    }
+    kept
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1235,6 +1278,7 @@ struct CardMetaResponse {
 
 impl CardMetaResponse {
     fn into_meta(self, request: Option<&SentenceLabelSelection>) -> Result<CardMeta> {
+        validate_source_hint(self.source_hint.as_str())?;
         let labels = self.labels.into_labels()?;
         let labels = match request {
             Some(request) => {
@@ -1283,6 +1327,7 @@ struct CardCorrectionResponse {
 
 impl CardCorrectionResponse {
     fn into_revision(self, selection: SentenceLabelSelection) -> Result<CardRevision> {
+        validate_source_hint(self.source_hint.as_str())?;
         let labels = self.labels.into_labels()?;
         if labels.approx().len() != labels.approx().intersecting(selection.pinned()).len() {
             bail!("approximate sentence labels must name only changed axes");
@@ -1305,6 +1350,13 @@ impl CardCorrectionResponse {
         .with_sentence_labels(labels);
         Ok(CardRevision::new(self.term, self.understanding, meta))
     }
+}
+
+fn validate_source_hint(source_hint: &str) -> Result<()> {
+    if source_hint.contains("<near target word>") {
+        bail!("source hint contains unresolved <near target word> placeholder");
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1478,6 +1530,43 @@ mod tests {
             "target_sentence": "Le canard nage",
             "labels": labels
         })
+    }
+
+    #[test]
+    fn card_metadata_rejects_the_hint_placeholder_without_rejecting_angle_brackets() {
+        let labels = sentence_labels_response("neutral", "b1", "statement", Vec::new());
+        let mut generated_placeholder = card_meta_response(labels.clone());
+        generated_placeholder["source_hint"] =
+            json!("„<near target word>“ ukazuje zisk; tady jde o užitek.");
+        let mut corrected_placeholder = card_correction_response(labels.clone());
+        corrected_placeholder["source_hint"] =
+            json!("„<near target word>“ ukazuje zisk; tady jde o užitek.");
+        let mut generated_angle_brackets = card_meta_response(labels.clone());
+        generated_angle_brackets["source_hint"] = json!("Choose x < y and y > z.");
+        let mut corrected_angle_brackets = card_correction_response(labels);
+        corrected_angle_brackets["source_hint"] = json!("Choose x < y and y > z.");
+        assert_eq!(
+            (
+                serde_json::from_value::<CardMetaResponse>(generated_placeholder)
+                    .expect("placeholder metadata must decode before semantic validation")
+                    .into_meta(None)
+                    .is_err(),
+                serde_json::from_value::<CardCorrectionResponse>(corrected_placeholder)
+                    .expect("placeholder correction must decode before semantic validation")
+                    .into_revision(preserved_selection())
+                    .is_err(),
+                serde_json::from_value::<CardMetaResponse>(generated_angle_brackets)
+                    .expect("angle-bracket metadata must decode")
+                    .into_meta(None)
+                    .is_ok(),
+                serde_json::from_value::<CardCorrectionResponse>(corrected_angle_brackets)
+                    .expect("angle-bracket correction must decode")
+                    .into_revision(preserved_selection())
+                    .is_ok(),
+            ),
+            (true, true, true, true),
+            "card metadata retained an unresolved hint placeholder or rejected legitimate angle brackets"
+        );
     }
 
     fn changed_register_selection() -> SentenceLabelSelection {

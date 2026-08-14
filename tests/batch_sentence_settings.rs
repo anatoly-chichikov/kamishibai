@@ -7,7 +7,7 @@ use kamishibai::session::{
 };
 use kamishibai::tui::{
     App, AppEvent, BatchSettingsRow, ModalKind, MousePointer, Screen, Side, draw, mouse_pointer_at,
-    scroll_body_width, scroll_viewport, sentence_settings_event_at, transit,
+    review_event_at, scroll_body_width, scroll_viewport, transit,
 };
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -142,7 +142,7 @@ fn choices(app: &App, area: Rect, row: BatchSettingsRow) -> BTreeSet<usize> {
     for screen_row in 0..area.height {
         for column in 0..area.width {
             if let Some(AppEvent::SentenceSettingsChoose(found, index)) =
-                sentence_settings_event_at(app, area, column, screen_row)
+                review_event_at(app, area, column, screen_row)
                 && found == row
             {
                 choices.insert(index);
@@ -419,9 +419,9 @@ fn summary_and_every_carousel_choice_share_mouse_hit_geometry() {
     let open = closed.clone().sentence_settings_opened();
     assert_eq!(
         (
-            sentence_settings_event_at(&closed, area, summary.0, summary.1),
+            review_event_at(&closed, area, summary.0, summary.1),
             mouse_pointer_at(&closed, area, summary.0, summary.1),
-            sentence_settings_event_at(&closed, area, separator.0, separator.1),
+            review_event_at(&closed, area, separator.0, separator.1),
             mouse_pointer_at(&closed, area, separator.0, separator.1),
             mouse_pointer_at(&closed, area, 0, 0),
             choices(&open, area, BatchSettingsRow::Level),
@@ -494,7 +494,7 @@ fn opening_settings_scrolls_a_long_review_to_the_top_carousels() {
         app.body_scroll() == 0
             && rendered.contains("what kinds of phrases?")
             && rendered.contains("term-01")
-            && sentence_settings_event_at(&app, area, questions.0, questions.1)
+            && review_event_at(&app, area, questions.0, questions.1)
                 == Some(AppEvent::SentenceSettingsChoose(BatchSettingsRow::Types, 2))
             && mouse_pointer_at(&app, area, questions.0, questions.1) == MousePointer::Hand,
         "the focused batch carousel must anchor above the review in a short viewport: {rendered}"
@@ -506,9 +506,9 @@ fn modal_overlay_suppresses_underlying_sentence_settings_hits() {
     let area = terminal(120, 24);
     let app = review(1);
     let summary = cell_of(&app, "generation guidance   ", area.width, area.height);
-    let covered = app.with_modal(ModalKind::PickMyLanguage);
+    let covered = app.with_modal(ModalKind::PickLanguages);
     assert_eq!(
-        sentence_settings_event_at(&covered, area, summary.0, summary.1),
+        review_event_at(&covered, area, summary.0, summary.1),
         None,
         "an overlay must own clicks instead of leaking them to the review body"
     );

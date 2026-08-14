@@ -27,8 +27,8 @@ use kamishibai::session::{
     SentenceTypeMix, WordCandidate,
 };
 use kamishibai::tui::{
-    App, BusyKind, KeySource, ModalKind, MousePointer, Screen, draw, mouse_pointer_at,
-    reset_mouse_pointer, write_mouse_pointer,
+    App, AppEvent, BusyKind, KeySource, ModalKind, MousePointer, PickerSection, Screen, draw,
+    mouse_pointer_at, reset_mouse_pointer, transit, write_mouse_pointer,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -557,6 +557,16 @@ fn build_states() -> Vec<(String, App)> {
         ))
         .sentence_settings_opened();
 
+    let ambiguous = review
+        .clone()
+        .with_alternates(vec![String::from("EN"), String::from("NL")]);
+
+    let language_pair_modal = transit(
+        review.clone(),
+        AppEvent::OpenLanguagePicker(PickerSection::Learning),
+    )
+    .0;
+
     let change_something = review
         .clone()
         .with_modal(ModalKind::ChangeSomething)
@@ -861,6 +871,14 @@ fn build_states() -> Vec<(String, App)> {
         (
             String::from("02c · What I understood · generation guidance"),
             batch_sentence_settings,
+        ),
+        (
+            String::from("02d · What I understood · plausible alternates"),
+            ambiguous,
+        ),
+        (
+            String::from("02e · Languages · pair picker modal"),
+            language_pair_modal,
         ),
     ]
 }
