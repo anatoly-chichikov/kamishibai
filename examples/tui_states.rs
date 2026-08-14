@@ -788,6 +788,8 @@ fn build_states() -> Vec<(String, App)> {
         .welcome_advance()
         .welcome_focus_next();
 
+    let welcome_language = App::new(pair()).opening_welcome(KeySource::Empty, String::new(), false);
+
     let busy_understanding = App::new(pair())
         .seeded_blob(words_seed)
         .busy_started(BusyKind::Understanding)
@@ -879,6 +881,10 @@ fn build_states() -> Vec<(String, App)> {
         (
             String::from("02e · Languages · pair picker modal"),
             language_pair_modal,
+        ),
+        (
+            String::from("00c · Welcome · language grid"),
+            welcome_language,
         ),
     ]
 }

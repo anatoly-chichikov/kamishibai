@@ -1,4 +1,6 @@
+use std::array::from_fn;
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::sync::OnceLock;
 
 use anyhow::{Result, anyhow};
 
@@ -36,8 +38,18 @@ impl LanguageCatalog {
     /// while the catalog stores the lowercase ISO code, so `item("FR")` and
     /// `item("fr")` both resolve the French profile.
     pub fn item(&self, code: &str) -> Result<LanguageProfile> {
+        self.borrowed(code).cloned()
+    }
+
+    /// Borrow the supported profile for one language code.
+    ///
+    /// Same lookup as `item`, without copying the profile out of the catalog.
+    /// A caller that only reads a declaration — the picker asking a language
+    /// how it writes its own name, once per row per frame — has no reason to
+    /// own one.
+    pub(crate) fn borrowed(&self, code: &str) -> Result<&'static LanguageProfile> {
         profiles()
-            .into_iter()
+            .iter()
             .find(|profile| profile.code.eq_ignore_ascii_case(code))
             .ok_or_else(|| anyhow!("Unsupported language '{code}'"))
     }
@@ -67,8 +79,9 @@ impl LanguageCatalog {
     pub(crate) fn identify(&self, value: &str) -> Result<LanguageProfile> {
         self.item(value).or_else(|_| {
             profiles()
-                .into_iter()
+                .iter()
                 .find(|profile| profile.prompt.eq_ignore_ascii_case(value))
+                .cloned()
                 .ok_or_else(|| anyhow!("Unsupported language '{value}'"))
         })
     }
@@ -76,7 +89,7 @@ impl LanguageCatalog {
 
 /// Return codes from the canonical profile declarations.
 pub(super) fn profile_codes() -> [&'static str; 22] {
-    profiles().map(|profile| profile.code)
+    from_fn(|index| profiles()[index].code)
 }
 
 /// Return the supported language catalog.
@@ -89,11 +102,22 @@ pub fn language(code: &str) -> Result<LanguageProfile> {
     catalog().item(code)
 }
 
+/// Return the canonical list of supported profiles, declared once.
+///
+/// Every catalog lookup reads this table, and the TUI reads it thousands of
+/// times per rendered frame, so declaring it per call meant rebuilding
+/// twenty-two profiles — and every string inside them — on each one. The
+/// declaration is a constant, so it is built once and lent out by reference.
+fn profiles() -> &'static [LanguageProfile; 22] {
+    static PROFILES: OnceLock<[LanguageProfile; 22]> = OnceLock::new();
+    PROFILES.get_or_init(declared_profiles)
+}
+
 /// Build the single canonical list of supported profiles. The order here is
 /// the order surfaced everywhere in the UI (Welcome chips, `Cmd+L` picker,
 /// Gemini language list) and is sorted by global learning popularity, not
 /// alphabetically.
-fn profiles() -> [LanguageProfile; 22] {
+fn declared_profiles() -> [LanguageProfile; 22] {
     [
         LanguageProfile {
             code: "en",
@@ -188,7 +212,7 @@ fn profiles() -> [LanguageProfile; 22] {
         LanguageProfile {
             code: "hi",
             prompt: String::from("Hindi"),
-            endonym: String::from("हिन्दी"),
+            endonym: String::from("Hindi"),
             text_gate: TextGate::Ocr(OcrModel::Devanagari),
             direction: TextDirection::Ltr,
             naming: DeckNaming::new("Hindi Vocabulary", "hi", super::DEFAULT_FILE),
@@ -299,6 +323,7 @@ fn profiles() -> [LanguageProfile; 22] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use unicode_segmentation::UnicodeSegmentation;
 
     /// Catalog should not declare phantom codes via `codes()` that `item()`
     /// cannot resolve, nor should it stash profiles unreachable from
@@ -339,7 +364,9 @@ mod tests {
 
     #[test]
     fn profiles_declare_every_text_gate_and_direction() {
-        let values = profiles().map(|profile| (profile.code, profile.text_gate, profile.direction));
+        let values = profiles()
+            .each_ref()
+            .map(|profile| (profile.code, profile.text_gate, profile.direction));
         assert_eq!(
             values,
             [
@@ -381,7 +408,7 @@ mod tests {
     #[test]
     fn right_to_left_profiles_name_themselves_in_ascii() {
         let offenders = profiles()
-            .into_iter()
+            .iter()
             .filter(|profile| profile.direction == TextDirection::Rtl)
             .filter(|profile| !profile.endonym.is_ascii())
             .map(|profile| profile.code)
@@ -393,10 +420,31 @@ mod tests {
         );
     }
 
+    /// A profile must name itself one code point per letter. The terminal draws
+    /// a multi-code-point letter as one glyph while the cell buffer counts its
+    /// parts separately, and the cells they disagree about are never painted —
+    /// which punched black holes through the highlighted row of the picker.
+    #[test]
+    fn no_profile_asks_the_terminal_to_compose_a_letter() {
+        let offenders = profiles()
+            .iter()
+            .filter(|profile| {
+                UnicodeSegmentation::graphemes(profile.endonym.as_str(), true)
+                    .any(|letter| letter.chars().count() > 1)
+            })
+            .map(|profile| profile.code)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            offenders,
+            Vec::<&'static str>::new(),
+            "a profile named itself with a letter the terminal has to compose, which no row can highlight cleanly"
+        );
+    }
+
     #[test]
     fn every_profile_names_itself() {
         let unnamed = profiles()
-            .into_iter()
+            .iter()
             .filter(|profile| profile.endonym.trim().is_empty())
             .map(|profile| profile.code)
             .collect::<Vec<_>>();
@@ -413,7 +461,9 @@ mod tests {
     #[test]
     fn every_profile_declares_its_own_name() {
         assert_eq!(
-            profiles().map(|profile| (profile.code, profile.endonym)),
+            profiles()
+                .each_ref()
+                .map(|profile| (profile.code, profile.endonym.clone())),
             [
                 ("en", "English".into()),
                 ("zh", "中文".into()),
@@ -425,7 +475,7 @@ mod tests {
                 ("ru", "Русский".into()),
                 ("it", "Italiano".into()),
                 ("pt", "Português".into()),
-                ("hi", "हिन्दी".into()),
+                ("hi", "Hindi".into()),
                 ("ar", "Arabic".into()),
                 ("tr", "Türkçe".into()),
                 ("pl", "Polski".into()),

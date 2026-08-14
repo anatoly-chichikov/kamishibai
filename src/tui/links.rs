@@ -99,6 +99,31 @@ pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<
         .map(|region| region.target)
 }
 
+/// Return where one vertical arrow press lands on the Welcome language grid.
+///
+/// How far `↑` and `↓` travel is how many languages the grid packs side by
+/// side, which only a rendered width can answer — the same reason the picker's
+/// wheel resolves a row before it becomes an event. `←` and `→` need no
+/// geometry: they step one language either way whatever the grid looks like.
+pub fn welcome_language_step(app: &App, terminal: Rect, rows: i32) -> Option<AppEvent> {
+    if app.screen() != Screen::Welcome || app.welcome().stage != WelcomeStage::PickLanguage {
+        return None;
+    }
+    let grid = welcome::language_grid(frame_rects(terminal).body);
+    Some(AppEvent::WelcomeLanguageAt(
+        grid.stepped(welcome::picked_language(app), rows),
+    ))
+}
+
+/// Return which Welcome language one cell lands on, if any. Every cell of the
+/// language grid is a click target on the language step.
+pub fn welcome_language_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<usize> {
+    if app.screen() != Screen::Welcome {
+        return None;
+    }
+    welcome::language_at(app, terminal, click_x, click_y)
+}
+
 /// Return which Welcome key-step control one cell lands on, if any. The key
 /// input, the `submit` chip, and (when env offers a key) the `load from env`
 /// chip are the click targets.

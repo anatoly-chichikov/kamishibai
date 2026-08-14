@@ -1,6 +1,5 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 252
 expression: "render_sized(&opened_picker(), 96, 40)"
 ---
                                                                                                 
@@ -23,7 +22,7 @@ expression: "render_sized(&opened_picker(), 96, 40)"
              │  RU    Русский                RU    Русский                       │              
              │  IT    Italiano               IT    Italiano                      │              
              │  PT    Português              PT    Português                     │              
-             │  HI    हि न्दी                    HI    हि न्दी                           │              
+             │  HI    Hindi                  HI    Hindi                         │              
              │  AR    Arabic                 AR    Arabic                        │              
              │  TR    Türkçe                 TR    Türkçe                        │              
              │  PL    Polski                 PL    Polski                        │              

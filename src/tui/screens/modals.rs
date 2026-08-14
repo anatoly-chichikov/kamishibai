@@ -149,8 +149,6 @@ fn text_panel(kind: ModalKind, app: &App, width: usize) -> Paragraph<'static> {
 const PICKER_CHROME: usize = 8;
 /// Cells between the two columns, wide enough to centre the arrow.
 const COLUMN_GAP: usize = 5;
-/// Cells the code cell occupies, sized for the widest label (`auto`).
-const CODE_WIDTH: usize = 4;
 /// Cells the action row needs: `[↑ ↓] pick  [← →] column  [Enter] confirm  [Esc] cancel`.
 const ACTION_ROW_WIDTH: usize = 63;
 /// Cells each column spends to the right of its text: one blank, then the
@@ -204,7 +202,7 @@ fn across(
             .iter()
             .map(|span| super::common::display_width(span.content.as_ref()))
             .sum();
-        let owed = (column_width(section) + SCROLLBAR_GUTTER).saturating_sub(filled);
+        let owed = (section.column_width() + SCROLLBAR_GUTTER).saturating_sub(filled);
         spans.extend(cells);
         spans.push(Span::styled(" ".repeat(owed), palette::base()));
     }
@@ -248,7 +246,7 @@ fn gutter() -> Span<'static> {
 fn rules() -> Vec<Span<'static>> {
     across(gutter(), |section| {
         vec![Span::styled(
-            "─".repeat(column_width(section)),
+            "─".repeat(section.column_width()),
             palette::rule(),
         )]
     })
@@ -259,11 +257,11 @@ fn rules() -> Vec<Span<'static>> {
 fn pinned_cell(section: PickerSection, cursor: PickerCursor) -> Vec<Span<'static>> {
     let pinned = (0..section.scrolling_first()).next();
     let text = pinned
-        .map(|index| row_text(section, index))
+        .map(|index| section.row_text(index))
         .unwrap_or_default();
     let selected = pinned.is_some_and(|index| index == cursor.index(section));
     vec![Span::styled(
-        super::common::pad_right(text.as_str(), column_width(section)),
+        super::common::pad_right(text.as_str(), section.column_width()),
         row_style(selected, cursor.section() == section),
     )]
 }
@@ -281,29 +279,19 @@ fn scrolling_cell(
     let offset = window(total, cursor.index(section).saturating_sub(first), visible);
     let index = first + offset + row;
     let text = if offset + row < total {
-        row_text(section, index)
+        section.row_text(index)
     } else {
         String::new()
     };
     let selected = offset + row < total && index == cursor.index(section);
     vec![
         Span::styled(
-            super::common::pad_right(text.as_str(), column_width(section)),
+            super::common::pad_right(text.as_str(), section.column_width()),
             row_style(selected, cursor.section() == section),
         ),
         Span::styled(" ", palette::base()),
         scrollbar_cell(total, offset, row, visible),
     ]
-}
-
-/// Render one row as its two cells. The `auto` row goes through here too, so
-/// it lines up with the languages instead of being a special case.
-fn row_text(section: PickerSection, index: usize) -> String {
-    format!(
-        "{}  {}",
-        super::common::pad_right(section.label_at(index).as_str(), CODE_WIDTH),
-        section.name_at(index)
-    )
 }
 
 /// Paint one row. The pick of each column stays inverted so the pair reads at
@@ -342,15 +330,6 @@ pub fn window(total: usize, selected: usize, visible: usize) -> usize {
         .min(total.saturating_sub(visible))
 }
 
-/// Return the width one column's text occupies, before its scrollbar cell.
-fn column_width(section: PickerSection) -> usize {
-    let widest = (0..section.chips())
-        .map(|index| super::common::display_width(row_text(section, index).as_str()))
-        .max()
-        .unwrap_or(0);
-    widest.max(super::common::display_width(section.heading()))
-}
-
 /// Return how many list rows the modal shows inside `area`.
 ///
 /// Both the renderer and the geometry call this, so the clamping `overlay_rect`
@@ -380,7 +359,7 @@ fn picker_inset(area: Rect) -> Rect {
 fn picker_width() -> u16 {
     let columns = SECTIONS
         .into_iter()
-        .map(|section| column_width(section) + SCROLLBAR_GUTTER)
+        .map(|section| section.column_width() + SCROLLBAR_GUTTER)
         .sum::<usize>()
         + COLUMN_GAP;
     let content = columns.max(ACTION_ROW_WIDTH);
@@ -391,8 +370,8 @@ fn picker_width() -> u16 {
 /// inside the language pair modal.
 pub mod picker_geometry {
     use super::{
-        COLUMN_GAP, HORIZONTAL_PADDING, PINNED_ROW, SCROLLBAR_GUTTER, SECTIONS, column_width,
-        picker_inset, picker_rows, window,
+        COLUMN_GAP, HORIZONTAL_PADDING, PINNED_ROW, SCROLLBAR_GUTTER, SECTIONS, picker_inset,
+        picker_rows, window,
     };
     use crate::tui::picker::{PickerCursor, PickerSection};
     use ratatui::layout::Rect;
@@ -470,12 +449,12 @@ pub mod picker_geometry {
     fn column_span(area: Rect, section: PickerSection) -> (u16, u16) {
         let inset = picker_inset(area);
         let left = inset.x + 1 + HORIZONTAL_PADDING;
-        let width = u16::try_from(column_width(section)).unwrap_or(u16::MAX);
+        let width = u16::try_from(section.column_width()).unwrap_or(u16::MAX);
         match section {
             PickerSection::Known => (left, width),
             PickerSection::Learning => {
                 let known = u16::try_from(
-                    column_width(PickerSection::Known) + SCROLLBAR_GUTTER + COLUMN_GAP,
+                    PickerSection::Known.column_width() + SCROLLBAR_GUTTER + COLUMN_GAP,
                 )
                 .unwrap_or(u16::MAX);
                 (left.saturating_add(known), width)
@@ -490,7 +469,7 @@ mod tests {
 
     use crate::tui::picker::{PickerCursor, PickerSection};
 
-    use super::{SECTIONS, column_width, picker_geometry, picker_rows, window};
+    use super::{SECTIONS, picker_geometry, picker_rows, window};
 
     /// A terminal tall enough to show every language without scrolling.
     fn tall() -> Rect {
@@ -677,7 +656,7 @@ mod tests {
         let narrow = SECTIONS
             .into_iter()
             .filter(|section| {
-                column_width(*section) < super::super::common::display_width(section.heading())
+                section.column_width() < super::super::common::display_width(section.heading())
             })
             .collect::<Vec<_>>();
         assert_eq!(

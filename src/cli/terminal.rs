@@ -31,7 +31,7 @@ use crate::tui::{
     App, AppEvent, KeySource, ModalKind, MousePointer, Screen, Side, WelcomeFocus, WelcomeStage,
     draw, language_chip_at, link_at, mouse_pointer_at, picker_geometry, reset_mouse_pointer,
     review_event_at, scroll_body_width, scroll_viewport, sentence_label_event_at, to_app,
-    welcome_control_at, write_mouse_pointer,
+    welcome_control_at, welcome_language_at, welcome_language_step, write_mouse_pointer,
 };
 
 const POINTER_REFRESH: Duration = Duration::from_millis(50);
@@ -226,6 +226,7 @@ where
                     }
                     continue;
                 };
+                let event = welcome_language_arrow(shell.app(), rect, &event).unwrap_or(event);
                 if matches!(event, AppEvent::Quit) {
                     shell.disarm_new_batch();
                     shell.disarm_destructive_escape();
@@ -326,6 +327,15 @@ where
                         }
                         dirty = true;
                         dirty |= shell.tick()?;
+                    } else if let Some(index) =
+                        welcome_language_at(shell.app(), rect, mouse.column, mouse.row)
+                    {
+                        let side = shell.handle(AppEvent::WelcomeLanguageAt(index))?;
+                        if side == Side::ExitApp {
+                            return Ok(());
+                        }
+                        dirty = true;
+                        dirty |= shell.tick()?;
                     } else if let Some(focus) =
                         welcome_control_at(shell.app(), rect, mouse.column, mouse.row)
                     {
@@ -391,6 +401,20 @@ where
         width: area.width,
         height: area.height,
     })
+}
+
+/// Turn a vertical arrow on the Welcome language step into a grid move.
+///
+/// A grid answers `↑` and `↓` with the language one line away, which depends on
+/// how many the rendered width packs side by side; everything else, including
+/// `←` and `→`, keeps the meaning it already has.
+fn welcome_language_arrow(app: &App, rect: Rect, event: &AppEvent) -> Option<AppEvent> {
+    let rows = match event {
+        AppEvent::NavPrev => -1,
+        AppEvent::NavNext => 1,
+        _ => return None,
+    };
+    welcome_language_step(app, rect, rows)
 }
 
 /// Turn a wheel tick over the open language pair modal into a cursor move.

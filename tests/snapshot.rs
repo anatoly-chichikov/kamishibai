@@ -198,17 +198,19 @@ fn welcome_language_row_keeps_the_czech_chip_visible_at_standard_width() {
     );
 }
 
+/// The answered language step collapses to the one language it was answered
+/// with, which is what leaves a narrow terminal the rows the key form needs.
 #[test]
-fn narrow_welcome_key_step_keeps_every_language_and_form_control_visible() {
+fn narrow_welcome_key_step_keeps_the_chosen_language_and_every_form_control_visible() {
     let app = App::new(LanguagePair::new("fr", "en"))
         .opening_welcome(KeySource::Empty, String::new(), false)
         .welcome_advance();
     let rendered = render_sized(&app, 80, 16);
     assert!(
-        rendered.contains(" CS ")
+        rendered.contains("EN    English")
             && rendered.contains("paste your key [Cmd+V]")
             && rendered.contains(" submit "),
-        "the narrow Welcome key step clipped either the 22-language catalog or its form controls"
+        "the narrow Welcome key step clipped either the chosen language or its form controls"
     );
 }
 

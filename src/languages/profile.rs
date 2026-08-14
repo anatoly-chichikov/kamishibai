@@ -119,10 +119,14 @@ pub struct LanguageProfile {
     pub prompt: String,
     /// The language's name in that language, shown when a human picks it.
     ///
-    /// Right-to-left scripts carry their English name instead: the terminal,
-    /// unlike the PDF report, does no bidi reordering, so an Arabic or Hebrew
-    /// endonym renders differently in every emulator. Everything else is
-    /// written the way its own speakers write it.
+    /// A script the terminal cannot lay out carries its English name instead.
+    /// Two of them cannot: a right-to-left script, because the terminal — unlike
+    /// the PDF report — does no bidi reordering; and a script that writes one
+    /// letter as several code points, because the terminal composes them into a
+    /// single glyph while the cell buffer still counts them one by one, so the
+    /// cells between them are left unpainted and a highlighted row comes out
+    /// with holes in it. Everything else is written the way its own speakers
+    /// write it.
     pub endonym: String,
     /// Authoritative route for generated-image text validation.
     pub text_gate: TextGate,

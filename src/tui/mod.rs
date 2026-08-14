@@ -26,6 +26,7 @@ pub use event::{AppEvent, EditingOwner};
 pub use input::to_app;
 pub use links::{
     language_chip_at, link_at, review_event_at, sentence_label_event_at, welcome_control_at,
+    welcome_language_at, welcome_language_step,
 };
 pub use picker::{AUTO_CHIP, LanguageChoice, PickerCursor, PickerSection, learning_target};
 pub use pointer::{

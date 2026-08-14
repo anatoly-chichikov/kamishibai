@@ -438,6 +438,12 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
             let next = next_known(app.pair().known(), -1);
             (app.set_known(next), Side::None)
         }
+        (WelcomeStage::PickLanguage, AppEvent::WelcomeLanguageAt(index)) => {
+            match PickerSection::Known.code_at(index) {
+                Some(code) => (app.set_known(code), Side::None),
+                None => (app, Side::None),
+            }
+        }
         (WelcomeStage::PickLanguage, AppEvent::Submit)
         | (WelcomeStage::PickLanguage, AppEvent::KeyEnter) => {
             let choice = LanguageChoice::new(app.pair().known().to_string(), learning_target(None));

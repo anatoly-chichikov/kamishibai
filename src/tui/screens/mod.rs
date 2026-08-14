@@ -16,6 +16,7 @@ pub mod busy;
 pub mod common;
 pub mod done;
 pub mod error;
+pub mod language_grid;
 pub mod modals;
 pub mod sentence_labels;
 pub mod welcome;

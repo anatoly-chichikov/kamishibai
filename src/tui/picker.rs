@@ -8,11 +8,17 @@
 //! The learning half carries one extra leading chip — `auto` — which is the
 //! way back to `LearningTarget::Detect` after a pin.
 
+use std::sync::OnceLock;
+
 use crate::application::LearningTarget;
 use crate::languages::catalog;
+use crate::tui::screens::common::{display_width, pad_right};
 
 /// The label of the learning half's leading row, which means "detect again".
 pub const AUTO_CHIP: &str = "auto";
+
+/// Cells the code cell occupies, sized for the widest label (`auto`).
+pub const CODE_WIDTH: usize = 4;
 
 /// What that leading row promises in the name column.
 pub const AUTO_NAME: &str = "detect from the words";
@@ -100,9 +106,52 @@ impl PickerSection {
             return String::from(AUTO_NAME);
         };
         catalog()
-            .item(code)
-            .map(|profile| profile.endonym)
+            .borrowed(code)
+            .map(|profile| profile.endonym.clone())
             .unwrap_or_else(|_| code.to_uppercase())
+    }
+
+    /// Render one row as its two cells: the padded code, then the language's
+    /// own name.
+    ///
+    /// The `auto` row goes through here too, so it lines up with the languages
+    /// instead of being a special case. Both the modal's columns and the
+    /// Welcome step's grid draw their cells from here, which is what makes one
+    /// language look the same wherever it is offered.
+    #[must_use]
+    pub fn row_text(self, index: usize) -> String {
+        format!(
+            "{}  {}",
+            pad_right(self.label_at(index).as_str(), CODE_WIDTH),
+            self.name_at(index)
+        )
+    }
+
+    /// Return the cells one column of this half occupies.
+    ///
+    /// A column is as wide as the widest row it can ever hold, which the
+    /// catalog decides and no terminal can change — so both halves are measured
+    /// once. Every span of every frame and every mouse hit-test asks for these
+    /// two numbers, and re-reading two dozen rows per question is what left the
+    /// open modal seconds behind the arrow keys.
+    #[must_use]
+    pub fn column_width(self) -> usize {
+        static WIDTHS: OnceLock<[usize; 2]> = OnceLock::new();
+        let widths = WIDTHS
+            .get_or_init(|| [PickerSection::Known, PickerSection::Learning].map(Self::measured));
+        match self {
+            PickerSection::Known => widths[0],
+            PickerSection::Learning => widths[1],
+        }
+    }
+
+    /// Measure this half against every row it can hold and its own heading.
+    fn measured(self) -> usize {
+        (0..self.chips())
+            .map(|index| display_width(self.row_text(index).as_str()))
+            .max()
+            .unwrap_or(0)
+            .max(display_width(self.heading()))
     }
 
     /// Return the heading printed above this half inside the modal.

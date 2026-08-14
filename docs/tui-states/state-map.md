@@ -13,7 +13,7 @@ All future work references this map instead of re-deriving transitions.
 
 | Id                | Kind                                                                              | Reference shot                  |
 | ----------------- | --------------------------------------------------------------------------------- | ------------------------------- |
-| `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `00-welcome.png` (no env key) · `00b-welcome-env.png` (`GEMINI_API_KEY` set) |
+| `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `32-welcome-language-grid.png` (language step) · `00-welcome.png` (key step, no env key) · `00b-welcome-env.png` (`GEMINI_API_KEY` set) |
 | `YourWords`       | fullscreen                                                                        | `01-your-words.png`             |
 | `WhatIUnderstood` | fullscreen                                                                        | `02-what-i-understood.png` · `24-esc-review-back.png` (current Esc footer) |
 | Batch generation guidance | compact tags and inline editor above the reviewed candidates on `WhatIUnderstood` | `28-batch-sentence-settings.png` · `29-batch-sentence-settings-narrow.png` |
@@ -37,7 +37,7 @@ Sentence-label editing, retry, failure banner and recovery are inline within
 `YourCards` — not separate screens or modals.
 
 The synthetic PNGs (`00-welcome.png`, `00b-welcome-env.png`,
-`03-change-something-modal.png`, `06-your-cards-retrying.png`,
+`32-welcome-language-grid.png`, `03-change-something-modal.png`, `06-your-cards-retrying.png`,
 `06b-your-cards-retry-stress.png`, `07-your-cards-couldnt-finish.png`, the Esc lifecycle set from
 `23-esc-words-clear.png` through `27-generation-partial.png`, the batch sentence-settings
 pair (`28-batch-sentence-settings.png` and `29-batch-sentence-settings-narrow.png`), and the S1–S12 sentence-label set from
@@ -75,8 +75,14 @@ owns keyboard input — every non-redraw key is swallowed until the background
 request finishes (`transit` short-circuits when `app.busy()` is set). An error
 overlay behaves the same way but clears on any key.
 
-`Welcome` is the explicit setup gate, with two stages. **Pick language**: `←/→`
-(or `Ctrl+L`) cycle `my language`, `Enter` confirms it and advances. **Enter key**:
+`Welcome` is the explicit setup gate, with two stages. **Pick language**: every
+supported language is laid out as a grid of the picker's own `CODE  Endonym`
+rows, as many side by side as the terminal affords and one language per line on
+a screen that affords none; a screen too short for the names falls back to the
+bare codes. `←/→` (or `Ctrl+L`) step one language either way, `↑/↓` move a whole
+line, a click picks the language under the pointer, and `Enter` confirms it and
+advances. The answered step then collapses to the one language it was answered
+with, leaving the key form its rows. **Enter key**:
 type or paste a Gemini key; `←/→` move focus between the submit button and a
 `load from env` action (the env action only joins the cycle when `GEMINI_API_KEY`
 is set); `Enter` on a filled field runs a live validity check and only on success
@@ -90,7 +96,7 @@ steady-state fullscreen screen, reading `my → target` (e.g. `EN → FR`).
 
 | Screen            | What is shown                                                                                  |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
-| `Welcome`         | Unlocked setup language. `←/→` (or `Ctrl+L`) cycles `my language`; `Enter` confirms it.        |
+| `Welcome`         | Unlocked setup language, as a responsive grid. `←/→` (or `Ctrl+L`) step, `↑/↓` move one line, click picks; `Enter` confirms it. |
 | `YourWords`       | Detected target (pending), persisted `my`. `Ctrl+L` opens the pair picker.                     |
 | `WhatIUnderstood` | Confirmed target, current `my`. `Ctrl+L` opens the pair picker; a changed pair may re-run understanding. |
 | `YourCards`       | Frozen pair for the batch — read-only.                                                         |
@@ -331,7 +337,7 @@ not a key the user presses.
 
 | State                       | Keys (footer leads with the bright primary)                                                                 |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `Welcome` · pick language   | `←/→` cycle `my language` · `Enter` next · `Ctrl+C` quit                                                     |
+| `Welcome` · pick language   | `←/→` step `my language` · `↑/↓` move one grid line · click picks · `Enter` next · `Ctrl+C` quit             |
 | `Welcome` · enter key       | type/`Cmd+V` paste key · `←/→` move focus (submit ↔ load-from-env, env only) · `Enter` submit · `Esc` back   |
 | `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `Ctrl+L` language · double `Esc` clears nonempty input |
 | `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav; `↑`/`k` above the first word opens generation guidance · `Enter`/`→` pick meanings · `D` drop row · `S` guidance alias · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |

@@ -13,6 +13,7 @@ use ratatui::layout::Rect;
 use super::app::App;
 use super::links::{
     language_chip_at, link_at, review_event_at, sentence_label_event_at, welcome_control_at,
+    welcome_language_at,
 };
 use super::screen::ModalKind;
 use super::screens::modals::picker_geometry;
@@ -83,6 +84,7 @@ fn clickable_at(app: &App, terminal: Rect, column: u16, row: u16) -> bool {
     }
     language_chip_at(app, terminal, column, row).is_some()
         || welcome_control_at(app, terminal, column, row).is_some()
+        || welcome_language_at(app, terminal, column, row).is_some()
         || review_event_at(app, terminal, column, row).is_some()
         || sentence_label_event_at(app, terminal, column, row).is_some()
         || link_at(app, terminal, column, row).is_some()

@@ -136,7 +136,7 @@ fn welcome_language_step_footer_is_clean() {
     let rendered = flat(&app);
     assert_eq!(
         (
-            rendered.contains("[← →] language"),
+            rendered.contains("[↑ ↓ ← →] language"),
             rendered.contains("Ctrl+L")
         ),
         (true, false),
@@ -569,5 +569,98 @@ fn typing_letter_l_inside_your_words_does_not_rotate_the_language() {
         state.pair().known().to_string(),
         "ru",
         "letter L inside Your words blob must be treated as user input, not as a global shortcut"
+    );
+}
+
+/// The open picker is redrawn on every keypress and hit-tested on every tick of
+/// the pointer refresh, so both paths have to be cheap. Neither was: each one
+/// rebuilt the whole language catalog — twenty-two profiles and every string
+/// inside them — thousands of times per frame, once per rendered span and once
+/// per candidate row, and the modal fell seconds behind the arrow keys.
+#[test]
+fn the_open_picker_keeps_up_with_the_arrow_keys() {
+    let opened = transit(
+        reviewed(),
+        AppEvent::OpenLanguagePicker(PickerSection::Known),
+    )
+    .0;
+    let terminal = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let started = std::time::Instant::now();
+    for _ in 0..20 {
+        flat(&opened);
+        for column in 0..8 {
+            let _ = kamishibai::tui::mouse_pointer_at(&opened, terminal, column * 12, 12);
+        }
+    }
+    let spent = started.elapsed();
+    assert!(
+        spent < std::time::Duration::from_secs(3),
+        "twenty picker frames with a pointer sweep took {spent:?}, which is the lag the modal showed on every arrow key"
+    );
+}
+
+/// The Welcome language step lays every language out as a grid, so a click has
+/// to land on the language actually drawn under the pointer.
+#[test]
+fn clicking_a_language_on_the_welcome_grid_picks_that_language() {
+    let app = App::new(LanguagePair::new("en", "en")).opening_welcome(
+        KeySource::Empty,
+        String::new(),
+        false,
+    );
+    let terminal = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let landed = kamishibai::tui::welcome_language_at(&app, terminal, 0, 0);
+    let ru = PickerSection::Known.chip_for("ru");
+    let target = (0..terminal.width)
+        .flat_map(|x| (0..terminal.height).map(move |y| (x, y)))
+        .find(|(x, y)| kamishibai::tui::welcome_language_at(&app, terminal, *x, *y) == Some(ru))
+        .expect("the grid must draw Russian somewhere");
+    let picked = transit(app, AppEvent::WelcomeLanguageAt(ru)).0;
+    assert_eq!(
+        (landed, picked.pair().known().to_string()),
+        (None, String::from("ru")),
+        "clicking the cell at {target:?} must pick the language drawn there and nowhere else"
+    );
+}
+
+/// `↑` and `↓` move one whole line of the grid, which is what makes a grid
+/// worth having: `←` and `→` alone would walk the catalog one language at a
+/// time.
+#[test]
+fn a_vertical_arrow_on_the_welcome_grid_moves_one_whole_line() {
+    let app = App::new(LanguagePair::new("en", "en")).opening_welcome(
+        KeySource::Empty,
+        String::new(),
+        false,
+    );
+    let terminal = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let down = kamishibai::tui::welcome_language_step(&app, terminal, 1)
+        .expect("the language step must answer a vertical arrow");
+    let moved = transit(app, down).0;
+    assert_eq!(
+        moved.pair().known().to_string(),
+        "ja",
+        "one press of down must skip the whole grid line below English, which is three languages wide here"
+    );
+}
+
+/// Every language must stay clickable on a terminal too small for their names,
+/// which is the shape the step falls back to rather than hiding a language.
+#[test]
+fn every_language_stays_clickable_on_a_narrow_welcome_step() {
+    let app = App::new(LanguagePair::new("en", "en")).opening_welcome(
+        KeySource::Empty,
+        String::new(),
+        false,
+    );
+    let terminal = ratatui::layout::Rect::new(0, 0, 80, 16);
+    let reachable = (0..terminal.width)
+        .flat_map(|x| (0..terminal.height).map(move |y| (x, y)))
+        .filter_map(|(x, y)| kamishibai::tui::welcome_language_at(&app, terminal, x, y))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        reachable,
+        (0..PickerSection::Known.chips()).collect::<std::collections::BTreeSet<_>>(),
+        "a language the narrow step draws stayed out of the mouse's reach"
     );
 }

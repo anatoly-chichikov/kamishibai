@@ -84,6 +84,11 @@ pub enum AppEvent {
     WelcomePrevLanguage,
     /// Welcome stage 0: arrow-cycle to the next language chip.
     WelcomeNextLanguage,
+    /// Welcome stage 0: pick the language at one place in the grid. Carries a
+    /// resolved catalog position because only the terminal layer knows how wide
+    /// the rendered grid is — the same reason the picker's wheel resolves a row
+    /// before it becomes an event.
+    WelcomeLanguageAt(usize),
     /// Welcome: a clipboard paste landed on the API key input.
     WelcomePasteKey(String),
     /// Welcome: user asked to load `GEMINI_API_KEY` from the environment.

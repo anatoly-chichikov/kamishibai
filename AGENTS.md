@@ -185,7 +185,8 @@ From the repo root:
    `live/23-esc-words-clear.png` through `live/27-generation-partial.png`, plus
    the open batch-settings pair `live/28-batch-sentence-settings.png` and
    `live/29-batch-sentence-settings-narrow.png`, plus the two language-pair shots
-   `live/30-plausible-alternates.png` and `live/31-language-pair-modal.png`.
+   `live/30-plausible-alternates.png` and `live/31-language-pair-modal.png`, plus
+   the Welcome language grid `live/32-welcome-language-grid.png`.
    All are 2x except S10 and the narrow
    batch-settings frame, which come from `states-narrow.tape` at 1200 px. Both synthetic tapes jump to each state
    by **absolute index** (`Type "<n>"` then `Space`) and keep a uniform 800 ms settle after
@@ -193,7 +194,9 @@ From the repo root:
    keystroke coalescing and to the stray Return the shell injects when it launches the
    binary — `Enter` in the walker only clears the queued digits. The two Welcome shots are
    the same `EnterKey` stage: `00-welcome.png` has no `GEMINI_API_KEY` (just the `submit`
-   button), `00b-welcome-env.png` has it set (adds the focused `load from env` chip).
+   button), `00b-welcome-env.png` has it set (adds the focused `load from env` chip); both show the language step already
+   answered and collapsed to its one value, while `00c-welcome-language-grid` at
+   index 30 is that step still open.
 
 4. **Record the live-binary flow** (real Gemini run, roughly 5–7 minutes wall-clock because
    the tape starts with an empty cache and later regenerates one tuned card):
@@ -339,15 +342,16 @@ card. The tape may continue afterward to capture the separate open-card screensh
 ### Synthetic and edge-case shots
 
 The review, six environment/modal/failure/retry PNGs, twelve sentence-label scenarios,
-five Esc lifecycle PNGs, two batch-settings PNGs, and two language-pair PNGs listed in
-step 3 are produced
+five Esc lifecycle PNGs, two batch-settings PNGs, two language-pair PNGs, and the
+Welcome language grid listed in step 3 are produced
 reproducibly by `states.tape` and `states-narrow.tape`, which drive
 `examples/tui_states.rs` through the same EN→FR flow without Gemini. The sentence-label
 scenarios keep the established indices 0–10 intact: S1 is index 6, S2 replaces the removed
 per-card modal at index 7, S3–S9 are indices 11–17, S10–S12 are indices 18–20, the retry
 stress gallery is index 21, the Esc clear/back/stop/drain/partial states are indices 22–26,
 the open generation-guidance editor is index 27, the `also plausible` alternates row is
-index 28, and the language-pair modal is index 29. When the design changes, edit the demo data in
+index 28, the language-pair modal is index 29, and the Welcome language grid is index 30.
+When the design changes, edit the demo data in
 `examples/tui_states.rs` and re-run both synthetic tapes. If you add or reorder states in
 the vector, update the absolute indices in both tapes and in the
 `pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells` test (it jumps to

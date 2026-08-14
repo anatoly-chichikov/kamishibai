@@ -9,8 +9,8 @@ expression: "render_sized(&app, 96, 16)"
     pdf. for each word it writes a natural example sentence, illustrates the scene as a         
     manga panel, and reads it aloud in a natural, native-speaker voice.                         
                                                                                                 
-    01  your language      EN  ZH  ES  JA  FR  DE  KO  RU  IT  PT  HI  AR  TR  PL  UK  ID       
-                           VI  TH  EL  HE  NL  CS                                               
+    01  your language     EN    English                                                         
+                                                                                                
     02  gemini api key  › paste your key [Cmd+V]                                                
                           ───────────────────────────────────────                               
                                                                                                 
