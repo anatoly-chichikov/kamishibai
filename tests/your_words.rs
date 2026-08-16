@@ -276,9 +276,13 @@ fn ctrl_l_on_your_words_opens_the_language_picker() {
         to_app(modified(KeyCode::Char('l'), KeyModifiers::CONTROL)).expect("map"),
     );
     assert_eq!(
-        (next.modal(), side),
-        (Some(kamishibai::tui::ModalKind::PickLanguages), Side::None,),
-        "Ctrl+L on Your words must open the language picker modal without persisting yet"
+        (next.modal(), next.picker_cursor().section(), side),
+        (
+            Some(kamishibai::tui::ModalKind::PickLanguages),
+            kamishibai::tui::PickerSection::Known,
+            Side::None,
+        ),
+        "Ctrl+L on Your words must keep prioritizing the user's language without persisting yet"
     );
 }
 

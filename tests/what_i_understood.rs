@@ -103,6 +103,29 @@ fn has_highlight_after_text(app: &App, needle: &str) -> bool {
     false
 }
 
+fn highlight_is_contiguous(app: &App, needle: &str) -> bool {
+    let backend = TestBackend::new(140, 24);
+    let mut terminal = Terminal::new(backend).expect("backend");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    for row in 0..buffer.area.height {
+        let rendered = (0..buffer.area.width)
+            .map(|column| buffer[(column, row)].symbol())
+            .collect::<String>();
+        if rendered.contains(needle) {
+            let highlighted = (0..buffer.area.width)
+                .filter(|column| buffer[(*column, row)].bg == Color::Rgb(0x1c, 0x1c, 0x1f))
+                .collect::<Vec<_>>();
+            let Some((first, last)) = highlighted.first().zip(highlighted.last()) else {
+                return false;
+            };
+            return (*first..=*last)
+                .all(|column| buffer[(column, row)].bg == Color::Rgb(0x1c, 0x1c, 0x1f));
+        }
+    }
+    false
+}
+
 fn many_candidates(count: usize) -> Vec<WordCandidate> {
     (1..=count)
         .map(|index| {
@@ -700,6 +723,33 @@ fn excluded_candidate_renders_with_strikethrough_and_dim_gloss() {
                 .iter()
                 .any(|modifier| modifier.contains(Modifier::CROSSED_OUT)),
         "excluded items must show their reason and render the term with a strikethrough: {rendered}"
+    );
+}
+
+#[test]
+fn selected_off_language_row_keeps_one_contiguous_highlight() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![WordCandidate::new(
+            "cat",
+            "Это слово не относится к русскому языку.",
+            false,
+        )]);
+    let dim = Color::Rgb(0x8b, 0x8a, 0x83);
+    let highlight = Color::Rgb(0x1c, 0x1c, 0x1f);
+    assert_eq!(
+        (
+            highlight_is_contiguous(&app, "Это слово не относится"),
+            style_of(&app, "cat"),
+            style_of(&app, "Это слово не относится"),
+        ),
+        (
+            true,
+            (dim, highlight, Modifier::CROSSED_OUT),
+            (dim, highlight, Modifier::empty()),
+        ),
+        "the selected off-language row must not punch ordinary-background gaps through its highlight"
     );
 }
 

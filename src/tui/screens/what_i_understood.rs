@@ -327,6 +327,14 @@ enum Gloss {
     Heading(String),
 }
 
+fn on_selected_row(style: Style, selected: bool) -> Style {
+    if selected {
+        style.bg(palette::HL)
+    } else {
+        style
+    }
+}
+
 fn candidate_line<'a>(
     index: usize,
     candidate: &'a WordCandidate,
@@ -350,7 +358,7 @@ fn candidate_line<'a>(
         palette::dim2()
     };
     let term_style = if !candidate.ok() {
-        palette::dim().add_modifier(Modifier::CROSSED_OUT)
+        on_selected_row(palette::dim(), is_selected).add_modifier(Modifier::CROSSED_OUT)
     } else if is_expanded_parent {
         palette::base()
     } else if is_selected {
@@ -359,7 +367,7 @@ fn candidate_line<'a>(
         palette::base()
     };
     let dash_style = if !candidate.ok() {
-        palette::dim2()
+        on_selected_row(palette::dim2(), is_selected)
     } else if is_expanded_parent {
         palette::dim()
     } else if is_selected {
@@ -367,7 +375,9 @@ fn candidate_line<'a>(
     } else {
         palette::dim2()
     };
-    let gloss_style = if !candidate.ok() || is_expanded_parent {
+    let gloss_style = if !candidate.ok() {
+        on_selected_row(palette::dim(), is_selected)
+    } else if is_expanded_parent {
         palette::dim()
     } else if is_selected {
         palette::highlight_dim().add_modifier(Modifier::BOLD)

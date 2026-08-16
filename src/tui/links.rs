@@ -42,16 +42,17 @@ impl LinkRegion {
     }
 }
 
-/// Return which half of the header language chip the click landed on, if the
-/// active screen actually allows the user to change the pair.
+/// Return which language-picker half one header-chip click should prioritize,
+/// if the active screen actually allows the user to change the pair.
 ///
 /// The chip lives at `(area.y + TOP_MARGIN)` row, anchored to the right edge
 /// at `(area.x + area.width - GUTTER)` minus the chip width, and reads
-/// `known → learning`. Clicking a half opens the pair modal focused on that
-/// half; the arrow between them is left-biased onto the known half. Welcome
-/// doesn't render a chip at all; YourCards and Done do render one but the
-/// batch pair is frozen, so clicks there are inert (the same rule the keyboard
-/// path follows in `transit`).
+/// `known → learning`. `WhatIUnderstood` gives the whole chip to the learning
+/// half, matching its keyboard shortcut; `YourWords` keeps the two halves
+/// individually addressable, with the arrow left-biased onto the known half.
+/// Welcome doesn't render a chip at all; YourCards and Done do render one but
+/// the batch pair is frozen, so clicks there are inert (the same rule the
+/// keyboard path follows in `transit`).
 pub fn language_chip_at(
     app: &App,
     terminal: Rect,
@@ -76,6 +77,9 @@ pub fn language_chip_at(
     let start = right_edge.saturating_sub(chip_width);
     if click_x < start || click_x >= right_edge {
         return None;
+    }
+    if app.screen() == Screen::WhatIUnderstood {
+        return Some(PickerSection::Learning);
     }
     let learning_width = widths.last().copied().unwrap_or(0);
     let learning_start = right_edge.saturating_sub(learning_width);

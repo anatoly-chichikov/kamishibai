@@ -78,6 +78,9 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourWords, None, AppEvent::CursorRight) => (app.cursor_right(), Side::None),
         (Screen::YourWords, None, AppEvent::NavPrev) => (app.cursor_up(), Side::None),
         (Screen::YourWords, None, AppEvent::NavNext) => (app.cursor_down(), Side::None),
+        (Screen::YourWords, None, AppEvent::OpenPreferredLanguagePicker) => {
+            (open_language_picker(app, PickerSection::Known), Side::None)
+        }
         (Screen::YourWords, None, AppEvent::OpenLanguagePicker(section)) => {
             (open_language_picker(app, section), Side::None)
         }
@@ -162,7 +165,12 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (app.senses_cancelled(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::Cancel) => {
-            (app.with_screen(Screen::YourWords), Side::None)
+            let choice = LanguageChoice::new(app.pair().known().to_string(), learning_target(None));
+            (
+                app.languages_adopted(&choice)
+                    .with_screen(Screen::YourWords),
+                Side::None,
+            )
         }
         (Screen::WhatIUnderstood, None, event)
             if matches!(sense_controls(&app).intent(&event), DisclosureIntent::Close) =>
@@ -251,6 +259,10 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::WhatIUnderstood, None, AppEvent::NavPrev) => (app.selected_previous(), Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::NavNext) => (app.selected_next(), Side::None),
+        (Screen::WhatIUnderstood, None, AppEvent::OpenPreferredLanguagePicker) => (
+            open_language_picker(app, PickerSection::Learning),
+            Side::None,
+        ),
         (Screen::WhatIUnderstood, None, AppEvent::OpenLanguagePicker(section)) => {
             (open_language_picker(app, section), Side::None)
         }
@@ -513,11 +525,10 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         {
             AppEvent::WelcomeNextLanguage
         }
-        (Screen::Welcome, AppEvent::OpenLanguagePicker(_))
-            if app.welcome().stage == WelcomeStage::PickLanguage =>
-        {
-            AppEvent::WelcomeNextLanguage
-        }
+        (
+            Screen::Welcome,
+            AppEvent::OpenPreferredLanguagePicker | AppEvent::OpenLanguagePicker(_),
+        ) if app.welcome().stage == WelcomeStage::PickLanguage => AppEvent::WelcomeNextLanguage,
         _ => event,
     }
 }
