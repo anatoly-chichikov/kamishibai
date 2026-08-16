@@ -79,6 +79,30 @@ fn press(code: crossterm::event::KeyCode) -> AppEvent {
     .expect("the key must map to an event")
 }
 
+fn chip_edge_focus(app: &App) -> [PickerSection; 2] {
+    let terminal = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let hits = (0..terminal.width)
+        .flat_map(|column| (0..terminal.height).map(move |row| (column, row)))
+        .filter(|(column, row)| {
+            kamishibai::tui::language_chip_at(app, terminal, *column, *row).is_some()
+        })
+        .collect::<Vec<_>>();
+    let edges = [
+        *hits
+            .first()
+            .expect("the header must expose a language chip"),
+        *hits.last().expect("the header must expose a language chip"),
+    ];
+    edges.map(|(column, row)| {
+        let section = kamishibai::tui::language_chip_at(app, terminal, column, row)
+            .expect("the recorded chip cell must remain clickable");
+        transit(app.clone(), AppEvent::OpenLanguagePicker(section))
+            .0
+            .picker_cursor()
+            .section()
+    })
+}
+
 /// A reviewed batch: the only state where changing the pair rereads words.
 fn reviewed() -> App {
     base()
@@ -368,6 +392,30 @@ fn picker_modal_opens_with_the_active_language_preselected_and_arrows_cycle_thro
 }
 
 #[test]
+fn language_shortcuts_on_what_i_understood_focus_what_youre_learning() {
+    let app = base()
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en");
+    let sections = [
+        crossterm::event::KeyModifiers::CONTROL,
+        crossterm::event::KeyModifiers::SUPER,
+    ]
+    .map(|modifiers| {
+        let event = to_app(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('l'),
+            modifiers,
+        ))
+        .expect("the language shortcut must map");
+        transit(app.clone(), event).0.picker_cursor().section()
+    });
+    assert_eq!(
+        sections,
+        [PickerSection::Learning, PickerSection::Learning],
+        "language shortcuts on What I understood must prioritize the language being learned"
+    );
+}
+
+#[test]
 fn picker_does_not_open_on_your_cards_or_done_because_the_pair_is_frozen() {
     for screen in [Screen::YourCards, Screen::Done] {
         let app = base().with_screen(screen).confirmed_learning("en");
@@ -390,6 +438,28 @@ fn clicking_the_learning_half_opens_the_modal_on_the_learning_half() {
         opened.picker_cursor().section(),
         PickerSection::Learning,
         "opening the modal from the learning half must focus that half"
+    );
+}
+
+#[test]
+fn clicking_either_chip_half_on_what_i_understood_focuses_what_youre_learning() {
+    let app = base()
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en");
+    assert_eq!(
+        chip_edge_focus(&app),
+        [PickerSection::Learning, PickerSection::Learning],
+        "every click on the What I understood language chip must prioritize what the user is learning"
+    );
+}
+
+#[test]
+fn clicking_chip_halves_on_your_words_keeps_both_choices_reachable() {
+    let app = base().confirmed_learning("en");
+    assert_eq!(
+        chip_edge_focus(&app),
+        [PickerSection::Known, PickerSection::Learning],
+        "Your words must keep both language-chip halves individually reachable"
     );
 }
 
@@ -472,6 +542,34 @@ fn the_unpinned_learning_half_opens_on_the_auto_chip() {
         PickerSection::Learning.code_at(opened.picker_cursor().index(PickerSection::Learning)),
         None,
         "a batch left to detection must open the learning half on auto"
+    );
+}
+
+#[test]
+fn escape_from_review_returns_new_words_to_auto_detection() {
+    let pinned = transit(
+        reviewed().seeded_blob("chat").confirmed_learning("en"),
+        AppEvent::SetLanguages(pinned_choice("ru", "de")),
+    )
+    .0;
+    let words = transit(pinned, press(crossterm::event::KeyCode::Esc)).0;
+    let typed = transit(words, press(crossterm::event::KeyCode::Char('x'))).0;
+    let opened = transit(
+        typed.clone(),
+        AppEvent::OpenLanguagePicker(PickerSection::Learning),
+    )
+    .0;
+    assert_eq!(
+        (
+            typed.screen(),
+            typed.pair().known(),
+            typed.learning_pin(),
+            typed.learning_pending(),
+            typed.blob(),
+            PickerSection::Learning.code_at(opened.picker_cursor().index(PickerSection::Learning),),
+        ),
+        (Screen::YourWords, "RU", None, true, "chatx", None),
+        "Escape from review kept the previous learning language for newly edited words"
     );
 }
 

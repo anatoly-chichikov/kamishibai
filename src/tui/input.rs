@@ -9,7 +9,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::event::AppEvent;
-use super::picker::PickerSection;
 
 /// Convert one crossterm `KeyEvent` into the matching high-level `AppEvent`.
 ///
@@ -29,7 +28,7 @@ pub fn to_app(key: KeyEvent) -> Option<AppEvent> {
         KeyCode::Right => Some(AppEvent::CursorRight),
         KeyCode::Char(symbol) if key.modifiers.contains(KeyModifiers::SUPER) => {
             match latin_for_ctrl(symbol) {
-                'l' => Some(AppEvent::OpenLanguagePicker(PickerSection::Known)),
+                'l' => Some(AppEvent::OpenPreferredLanguagePicker),
                 _ => None,
             }
         }
@@ -38,7 +37,7 @@ pub fn to_app(key: KeyEvent) -> Option<AppEvent> {
                 'c' => Some(AppEvent::Quit),
                 'e' => Some(AppEvent::WelcomeLoadEnvKey),
                 'g' => Some(AppEvent::Generate),
-                'l' => Some(AppEvent::OpenLanguagePicker(PickerSection::Known)),
+                'l' => Some(AppEvent::OpenPreferredLanguagePicker),
                 _ => None,
             }
         }

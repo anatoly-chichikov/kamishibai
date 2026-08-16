@@ -40,8 +40,11 @@ pub enum AppEvent {
     SendCorrection(String),
     /// User asked to quit the app from Done.
     Quit,
-    /// User asked to open the language pair modal on one half (`Cmd+L`,
-    /// `Ctrl+L`, or a click on that half of the header language chip).
+    /// A keyboard shortcut asked to open the language pair modal on the half
+    /// preferred by the active screen.
+    OpenPreferredLanguagePicker,
+    /// A click asked to open the language pair modal on one explicit half of
+    /// the header language chip.
     OpenLanguagePicker(PickerSection),
     /// User confirmed one language pair, from the modal or from a click on the
     /// `also plausible` hint.
