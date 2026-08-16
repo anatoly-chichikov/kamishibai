@@ -9,7 +9,8 @@ use anyhow::{Result, bail};
 use image::{DynamicImage, GrayImage, ImageFormat, Luma};
 use kamishibai::generation::manga::{
     BorderDetector, ImageSource, ImageText, MangaRenderer, Progress, RecallJudge, RecallReview,
-    Renderer, SceneText, TextDetector, TextDetectors, TextEnsemble,
+    Renderer, SceneText, TextDetector, TextDetectors, TextEnsemble, TextJudge, TextReview,
+    TextReviewGate,
 };
 use serde_json::{Value, json};
 use tempfile::tempdir;
@@ -60,7 +61,7 @@ impl ScriptedRecall {
 
 impl RecallJudge for ScriptedRecall {
     /// Return the next scripted image recall verdict.
-    fn review(&self, image: &[u8]) -> Result<RecallReview> {
+    fn review(&self, _scene: &Value, image: &[u8]) -> Result<RecallReview> {
         self.images.borrow_mut().push(image.to_vec());
         self.values
             .borrow_mut()
@@ -70,10 +71,101 @@ impl RecallJudge for ScriptedRecall {
 }
 
 fn recall_review(reading: &str) -> RecallReview {
+    if reading == "zoom-safe" {
+        return serde_json::from_value(json!({
+            "decision": "ALLOW",
+            "evidence": [],
+            "literal_writing_present": false,
+            "literal_evidence": [],
+            "fidelity_inspected": true,
+            "zoom_inspected": true,
+            "reason": "No answer-bearing writing is visible"
+        }))
+        .expect("zoom-inspected recall review must decode");
+    }
+    if let Some(description) = reading.strip_prefix("technical:") {
+        return serde_json::from_value(json!({
+            "decision": "ALLOW",
+            "evidence": [],
+            "literal_writing_present": true,
+            "literal_evidence": [{
+                "description": description,
+                "location": "drafting sheet in right panel",
+                "kind": "TECHNICAL_DIAGRAM"
+            }],
+            "reason": "No answer-bearing writing is visible"
+        }))
+        .expect("technical-diagram recall review must decode");
+    }
+    if let Some(description) = reading.strip_prefix("literal:") {
+        return serde_json::from_value(json!({
+            "decision": "ALLOW",
+            "evidence": [],
+            "literal_writing_present": true,
+            "literal_evidence": [{
+                "description": description,
+                "location": "open book in upper panel",
+                "kind": "PSEUDO_WRITING"
+            }],
+            "reason": "No answer-bearing writing is visible"
+        }))
+        .expect("literal recall review must decode");
+    }
+    if reading == "missing-required-subject" {
+        return serde_json::from_value(json!({
+            "decision": "ALLOW",
+            "evidence": [],
+            "scene_fidelity_decision": "REJECT",
+            "scene_fidelity_evidence": [{
+                "requirement": "panel p1 requires agitated_companion, a tall man shouting while leaning forward",
+                "observed": "only the weary seated speaker is visible and no second person appears",
+                "location": "both panels",
+                "kind": "MISSING_REQUIRED_SUBJECT"
+            }],
+            "literal_writing_present": false,
+            "literal_evidence": [],
+            "reason": "No answer-bearing writing is visible"
+        }))
+        .expect("missing required subject recall review must decode");
+    }
+    if reading == "broken-subject-continuity" {
+        return serde_json::from_value(json!({
+            "decision": "ALLOW",
+            "evidence": [],
+            "scene_fidelity_decision": "REJECT",
+            "scene_fidelity_evidence": [{
+                "requirement": "touchy_man must remain the same person in p1 and p2",
+                "observed": "p1 shows an older heavy square-faced man in a crewneck while p2 shows a younger slim soft-faced man in a collared sweater",
+                "location": "touchy_man in left p1 and listener in right p2",
+                "kind": "BROKEN_SUBJECT_CONTINUITY"
+            }],
+            "literal_writing_present": false,
+            "literal_evidence": [],
+            "fidelity_inspected": true,
+            "reason": "The repeated subject is visibly substituted"
+        }))
+        .expect("broken subject continuity review must decode");
+    }
+    if let Some(reading) = reading.strip_prefix("unrelated:") {
+        return serde_json::from_value(json!({
+            "decision": "ALLOW",
+            "evidence": [{
+                "reading": reading,
+                "location": "school gate pillar",
+                "kind": "UNRELATED"
+            }],
+            "fidelity_inspected": true,
+            "zoom_inspected": true,
+            "reason": "The writing is unrelated to the hidden answer"
+        }))
+        .expect("unrelated recall review must decode");
+    }
     if reading.is_empty() || reading == "un un" {
         return serde_json::from_value(json!({
             "decision": "ALLOW",
             "evidence": [],
+            "fidelity_inspected": true,
+            "zoom_inspected": true,
             "reason": "No answer-bearing writing is visible"
         }))
         .expect("allow recall review must decode");
@@ -88,6 +180,90 @@ fn recall_review(reading: &str) -> RecallReview {
         "reason": "The hidden answer is legible"
     }))
     .expect("reject recall review must decode")
+}
+
+/// Scripted literal-writing judge for renderer tests.
+#[derive(Clone, Debug)]
+struct ScriptedText {
+    values: Rc<RefCell<VecDeque<TextReview>>>,
+    images: Rc<RefCell<Vec<Vec<u8>>>>,
+    gate: TextReviewGate,
+}
+
+impl ScriptedText {
+    /// Create one scripted direct text judge.
+    fn new(values: &[&str]) -> Self {
+        Self {
+            values: Rc::new(RefCell::new(
+                values
+                    .iter()
+                    .map(|value| text_review(value, TextReviewGate::LlmJudge))
+                    .collect(),
+            )),
+            images: Rc::new(RefCell::new(Vec::new())),
+            gate: TextReviewGate::LlmJudge,
+        }
+    }
+
+    /// Create one scripted OCR text judge.
+    fn ocr(values: &[&str]) -> Self {
+        Self {
+            values: Rc::new(RefCell::new(
+                values
+                    .iter()
+                    .map(|value| text_review(value, TextReviewGate::Ocr))
+                    .collect(),
+            )),
+            images: Rc::new(RefCell::new(Vec::new())),
+            gate: TextReviewGate::Ocr,
+        }
+    }
+}
+
+impl TextJudge for ScriptedText {
+    /// Return the direct LLM route used by this test judge.
+    fn gate(&self) -> TextReviewGate {
+        self.gate
+    }
+
+    /// Return the next scripted literal-writing verdict.
+    fn review(&self, image: &[u8], _grayscale: &GrayImage) -> Result<TextReview> {
+        self.images.borrow_mut().push(image.to_vec());
+        self.values
+            .borrow_mut()
+            .pop_front()
+            .ok_or_else(|| anyhow::anyhow!("text judge ran out of scripted verdicts"))
+    }
+}
+
+fn text_review(reading: &str, gate: TextReviewGate) -> TextReview {
+    let (decision, evidence, reason) = if reading.is_empty() {
+        (
+            "ALLOW",
+            json!([]),
+            "No literal writing or numerals are visible",
+        )
+    } else {
+        (
+            "REJECT",
+            json!([{
+                "reading": reading,
+                "location": "center sign",
+                "kind": "WRITING"
+            }]),
+            "Literal writing is visible",
+        )
+    };
+    serde_json::from_value(json!({
+        "gate": match gate {
+            TextReviewGate::Ocr => "OCR",
+            TextReviewGate::LlmJudge => "LLM_JUDGE",
+        },
+        "decision": decision,
+        "evidence": evidence,
+        "reason": reason
+    }))
+    .expect("scripted text review must decode")
 }
 
 /// Scripted image source for renderer tests.
@@ -154,7 +330,7 @@ struct FailingRecall;
 
 impl RecallJudge for FailingRecall {
     /// Return one image recall failure after the raw image has been captured.
-    fn review(&self, _image: &[u8]) -> Result<RecallReview> {
+    fn review(&self, _scene: &Value, _image: &[u8]) -> Result<RecallReview> {
         bail!("recall judge failed")
     }
 }
@@ -176,7 +352,7 @@ impl RecoveringRecall {
 
 impl RecallJudge for RecoveringRecall {
     /// Fail the first review and allow every later review.
-    fn review(&self, _image: &[u8]) -> Result<RecallReview> {
+    fn review(&self, _scene: &Value, _image: &[u8]) -> Result<RecallReview> {
         let mut calls = self.calls.borrow_mut();
         *calls += 1;
         if *calls == 1 {
@@ -1228,6 +1404,91 @@ fn renderer_retries_when_recall_review_finds_the_hidden_answer() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn renderer_retries_and_archives_when_recall_review_finds_a_missing_required_subject() -> Result<()>
+{
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
+        2,
+        ScriptedRecall::new(&["missing-required-subject", ""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "en"), &mut progress)?;
+    let first = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    let recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.recall.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            progress.retries.len(),
+            first["category"].as_str(),
+            recall["decision"].as_str(),
+            recall["scene_fidelity_decision"].as_str(),
+            recall["scene_fidelity_evidence"][0]["kind"].as_str(),
+        ),
+        (
+            false,
+            1,
+            Some("recall_text"),
+            Some("ALLOW"),
+            Some("REJECT"),
+            Some("MISSING_REQUIRED_SUBJECT"),
+        ),
+        "missing required subject was accepted, lost from the archive, or changed semantic recall"
+    );
+    Ok(())
+}
+
+#[test]
+fn renderer_archives_dedicated_subject_continuity_rejection_before_zoom() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
+        2,
+        ScriptedRecall::new(&["broken-subject-continuity", "zoom-safe"]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "en"), &mut progress)?;
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    let recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.recall.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            verdict["status"].as_str(),
+            verdict["category"].as_str(),
+            recall["decision"].as_str(),
+            recall["scene_fidelity_decision"].as_str(),
+            recall["scene_fidelity_evidence"][0]["kind"].as_str(),
+            recall["fidelity_inspected"].as_bool(),
+            recall["zoom_inspected"].as_bool(),
+        ),
+        (
+            false,
+            Some("rejected"),
+            Some("recall_text"),
+            Some("ALLOW"),
+            Some("REJECT"),
+            Some("BROKEN_SUBJECT_CONTINUITY"),
+            Some(true),
+            Some(false),
+        ),
+        "dedicated continuity rejection was accepted, miscategorized, zoomed, or lost from its sidecar"
+    );
+    Ok(())
+}
+
 /// The renderer rejects a frame after the last missing-border attempt.
 #[test]
 fn renderer_rejects_a_frame_after_the_last_missing_border_attempt() {
@@ -2033,6 +2294,8 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
     let temporary = tempdir()?;
     let source = CapturingSource::new(vec![rectangular_panels(), rectangular_panels()]);
     let captured = source.prompts.clone();
+    let text = ScriptedText::new(&["", ""]);
+    let text_images = text.images.clone();
     let scene = active_layout_scene(2, "en");
     let renderer = MangaRenderer::new(
         source,
@@ -2040,6 +2303,7 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
         ScriptedRecall::new(&["word", ""]),
         BorderDetector::new(2, 6, 240, 1),
     )
+    .with_text_judge(text)
     .with_attempt_archive(temporary.path().to_path_buf());
     let mut progress = Recorder::default();
     let rendered = renderer.render(&scene, &mut progress)?;
@@ -2054,6 +2318,12 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
     )?)?;
     let second_recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
         temporary.path().join("attempt-0002.recall.json"),
+    )?)?;
+    let first_text = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.text.json"),
+    )?)?;
+    let second_text = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0002.text.json"),
     )?)?;
     let first_scene = serde_json::from_str::<Value>(&std::fs::read_to_string(
         temporary.path().join("attempt-0001.scene.json"),
@@ -2078,6 +2348,8 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
                 second["prompt"].as_str(),
                 first["recall"].as_str(),
                 second["recall"].as_str(),
+                first["text"].as_str(),
+                second["text"].as_str(),
             ],
             [first_scene == scene, second_scene == scene],
             [first_prompt == sent[0], second_prompt == sent[1]],
@@ -2086,6 +2358,12 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
                 first_recall["evidence"][0]["reading"].as_str(),
                 second_recall["decision"].as_str(),
             ],
+            [
+                first_text["gate"].as_str(),
+                first_text["decision"].as_str(),
+                second_text["decision"].as_str(),
+            ],
+            text_images.borrow().len(),
             [
                 first["status"].as_str(),
                 first["category"].as_str(),
@@ -2103,10 +2381,14 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
                 Some("attempt-0002.prompt.txt"),
                 Some("attempt-0001.recall.json"),
                 Some("attempt-0002.recall.json"),
+                Some("attempt-0001.text.json"),
+                Some("attempt-0002.text.json"),
             ],
             [true; 2],
             [true; 2],
             [Some("REJECT"), Some("word"), Some("ALLOW")],
+            [Some("LLM_JUDGE"), Some("ALLOW"), Some("ALLOW")],
+            2,
             [
                 Some("rejected"),
                 Some("recall_text"),
@@ -2118,6 +2400,244 @@ fn renderer_archives_registry_image_attempts_with_verdicts() -> Result<()> {
             ],
         ),
         "production image attempts or their validation verdicts were discarded"
+    );
+    Ok(())
+}
+
+/// Accepted attempt sidecars explicitly prove the scale-aware literal scan ran.
+#[test]
+fn renderer_archives_zoom_inspection_proof_on_an_accepted_attempt() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&["zoom-safe"]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_text_judge(ScriptedText::new(&[""]))
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "en"), &mut progress)?;
+    let recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.recall.json"),
+    )?)?;
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            recall["fidelity_inspected"].as_bool(),
+            recall["zoom_inspected"].as_bool(),
+            verdict["status"].as_str(),
+            verdict["recall"].as_str(),
+        ),
+        (
+            false,
+            Some(true),
+            Some(true),
+            Some("accepted"),
+            Some("attempt-0001.recall.json"),
+        ),
+        "accepted attempt lost explicit proof of dedicated fidelity or scale-aware literal review"
+    );
+    Ok(())
+}
+
+/// Literal-writing rejection retries before the independent semantic recall judge.
+#[test]
+fn renderer_runs_text_gate_before_the_later_recall_judge() -> Result<()> {
+    let text = ScriptedText::new(&["OPEN", ""]);
+    let text_pending = text.values.clone();
+    let recall = ScriptedRecall::new(&[""]);
+    let recall_pending = recall.values.clone();
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
+        2,
+        recall,
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_text_judge(text);
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "en"), &mut progress)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            text_pending.borrow().len(),
+            recall_pending.borrow().len(),
+            progress.retries.len(),
+            progress.retries[0].2.contains("Text judge rejected image"),
+        ),
+        (false, 0, 0, 1, true),
+        "literal text rejection did not precede the separate semantic recall review"
+    );
+    Ok(())
+}
+
+/// Grounded downstream transcription closes an OCR false negative before acceptance.
+#[test]
+fn renderer_rejects_significant_writing_missed_by_the_first_text_gate() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
+        2,
+        ScriptedRecall::new(&["unrelated:고등학교", ""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_text_judge(ScriptedText::ocr(&["", ""]))
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "ko"), &mut progress)?;
+    let first_text = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.text.json"),
+    )?)?;
+    let first_recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.recall.json"),
+    )?)?;
+    let first = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            progress.retries.len(),
+            [
+                first_text["gate"].as_str(),
+                first_text["decision"].as_str(),
+                first_recall["decision"].as_str(),
+                first_recall["evidence"][0]["kind"].as_str(),
+                first["status"].as_str(),
+                first["category"].as_str(),
+            ],
+            first["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("고등학교")),
+        ),
+        (
+            false,
+            1,
+            [
+                Some("OCR"),
+                Some("ALLOW"),
+                Some("ALLOW"),
+                Some("UNRELATED"),
+                Some("rejected"),
+                Some("recall_text"),
+            ],
+            true,
+        ),
+        "grounded downstream writing escaped after the first text gate missed it"
+    );
+    Ok(())
+}
+
+/// Grounded pseudo-writing rejection closes an OCR false negative before acceptance.
+#[test]
+fn renderer_rejects_grounded_pseudo_writing_missed_by_ocr() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
+        2,
+        ScriptedRecall::new(&["literal:rows of CJK-like pseudo-glyphs", ""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_text_judge(ScriptedText::ocr(&["", ""]))
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "ko"), &mut progress)?;
+    let first_recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.recall.json"),
+    )?)?;
+    let first = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            progress.retries.len(),
+            [
+                first_recall["decision"].as_str(),
+                first_recall["literal_writing_present"]
+                    .as_bool()
+                    .map(|value| { if value { "present" } else { "absent" } }),
+                first_recall["literal_evidence"][0]["kind"].as_str(),
+                first["status"].as_str(),
+                first["category"].as_str(),
+            ],
+            first["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("rows of CJK-like pseudo-glyphs")),
+        ),
+        (
+            false,
+            1,
+            [
+                Some("ALLOW"),
+                Some("present"),
+                Some("PSEUDO_WRITING"),
+                Some("rejected"),
+                Some("recall_text"),
+            ],
+            true,
+        ),
+        "grounded pseudo-writing escaped after OCR missed it or changed semantic recall"
+    );
+    Ok(())
+}
+
+/// Grounded technical-diagram rejection closes a visual classifier false negative.
+#[test]
+fn renderer_rejects_grounded_technical_diagram_missed_by_ocr() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
+        2,
+        ScriptedRecall::new(&[
+            "technical:architectural floor plan with conventional room lines and symbols",
+            "",
+        ]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_text_judge(ScriptedText::ocr(&["", ""]))
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "hi"), &mut progress)?;
+    let first_recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.recall.json"),
+    )?)?;
+    let first = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            progress.retries.len(),
+            [
+                first_recall["decision"].as_str(),
+                first_recall["literal_writing_present"]
+                    .as_bool()
+                    .map(|value| { if value { "present" } else { "absent" } }),
+                first_recall["literal_evidence"][0]["kind"].as_str(),
+                first["status"].as_str(),
+                first["category"].as_str(),
+            ],
+            first["reason"].as_str().is_some_and(|reason| {
+                reason.contains("architectural floor plan with conventional room lines and symbols")
+            }),
+        ),
+        (
+            false,
+            1,
+            [
+                Some("ALLOW"),
+                Some("present"),
+                Some("TECHNICAL_DIAGRAM"),
+                Some("rejected"),
+                Some("recall_text"),
+            ],
+            true,
+        ),
+        "grounded technical diagram escaped after OCR missed it or changed semantic recall"
     );
     Ok(())
 }

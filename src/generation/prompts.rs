@@ -17,8 +17,18 @@ const PICTURE_RECALL_JUDGE_PROMPT: &str =
     include_str!("../../assets/picture_recall_judge_prompt.txt");
 const PICTURE_RECALL_JUDGE_SCHEMA: &str =
     include_str!("../../assets/picture_recall_judge_schema.json");
+const PICTURE_FIDELITY_JUDGE_PROMPT: &str =
+    include_str!("../../assets/picture_fidelity_judge_prompt.txt");
+const PICTURE_FIDELITY_JUDGE_SCHEMA: &str =
+    include_str!("../../assets/picture_fidelity_judge_schema.json");
+const PICTURE_LITERAL_ZOOM_JUDGE_PROMPT: &str =
+    include_str!("../../assets/picture_literal_zoom_judge_prompt.txt");
+const PICTURE_LITERAL_ZOOM_JUDGE_SCHEMA: &str =
+    include_str!("../../assets/picture_literal_zoom_judge_schema.json");
+const PICTURE_TEXT_JUDGE_PROMPT: &str = include_str!("../../assets/picture_text_judge_prompt.txt");
+const PICTURE_TEXT_JUDGE_SCHEMA: &str = include_str!("../../assets/picture_text_judge_schema.json");
 const LAYOUT_POLICY_VERSION: &str =
-    "kamishibai-layout-registry-production-v40-language-local-prompt-examples";
+    "kamishibai-layout-registry-production-v53-writing-surface-locality-gate";
 static VISUAL_REVISION: OnceLock<String> = OnceLock::new();
 
 /// Return the embedded shared audio prompt template.
@@ -66,6 +76,36 @@ pub(crate) fn picture_recall_judge_schema() -> &'static str {
     PICTURE_RECALL_JUDGE_SCHEMA.trim()
 }
 
+/// Return the dedicated image scene-fidelity review prompt.
+pub(crate) fn picture_fidelity_judge_prompt() -> &'static str {
+    PICTURE_FIDELITY_JUDGE_PROMPT.trim()
+}
+
+/// Return the dedicated image scene-fidelity response schema.
+pub(crate) fn picture_fidelity_judge_schema() -> &'static str {
+    PICTURE_FIDELITY_JUDGE_SCHEMA.trim()
+}
+
+/// Return the scale-aware literal-only review prompt.
+pub(crate) fn picture_literal_zoom_judge_prompt() -> &'static str {
+    PICTURE_LITERAL_ZOOM_JUDGE_PROMPT.trim()
+}
+
+/// Return the scale-aware literal-only response schema.
+pub(crate) fn picture_literal_zoom_judge_schema() -> &'static str {
+    PICTURE_LITERAL_ZOOM_JUDGE_SCHEMA.trim()
+}
+
+/// Return the direct image-text judge prompt.
+pub(crate) fn picture_text_judge_prompt() -> &'static str {
+    PICTURE_TEXT_JUDGE_PROMPT.trim()
+}
+
+/// Return the direct image-text judge response schema.
+pub(crate) fn picture_text_judge_schema() -> &'static str {
+    PICTURE_TEXT_JUDGE_SCHEMA.trim()
+}
+
 /// Render the audio prompt template for one language.
 pub fn render_audio_prompt(language: &str) -> String {
     audio_prompt().replace("{language}", language)
@@ -93,6 +133,18 @@ pub fn visual_revision() -> &'static str {
             digest.update(picture_recall_judge_prompt().as_bytes());
             digest.update([0]);
             digest.update(picture_recall_judge_schema().as_bytes());
+            digest.update([0]);
+            digest.update(picture_fidelity_judge_prompt().as_bytes());
+            digest.update([0]);
+            digest.update(picture_fidelity_judge_schema().as_bytes());
+            digest.update([0]);
+            digest.update(picture_literal_zoom_judge_prompt().as_bytes());
+            digest.update([0]);
+            digest.update(picture_literal_zoom_judge_schema().as_bytes());
+            digest.update([0]);
+            digest.update(picture_text_judge_prompt().as_bytes());
+            digest.update([0]);
+            digest.update(picture_text_judge_schema().as_bytes());
             digest.update([0]);
             digest.update(prompt_recall_examples_document().as_bytes());
             digest

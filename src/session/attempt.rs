@@ -65,7 +65,7 @@ impl AttemptTally {
 /// Why one spent attempt did not produce its artifact.
 ///
 /// `category` is the stable slug the renderer and the console share (`border`,
-/// `topology`, `recall_text`, `color`, `legacy_gutter`, `provider`, `error`);
+/// `topology`, `ocr`, `recall_text`, `color`, `legacy_gutter`, `other`, `error`);
 /// `reason` is the sentence shown to the user; `artifact` points at whatever
 /// this attempt did produce before it was rejected — the archived picture of a
 /// picture attempt — and stays empty when the attempt failed before producing

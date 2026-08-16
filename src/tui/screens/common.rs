@@ -9,6 +9,8 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::ScreenView;
 use crate::tui::app::App;
@@ -157,7 +159,7 @@ pub fn header(
     let title = String::from(title);
     let mut hint = String::from(hint);
     let title_block = format!(" {title} ");
-    let title_visible = title_block.chars().count();
+    let title_visible = display_width(title_block.as_str());
     let mut hint_lead = if hint.is_empty() { 0 } else { 2 };
     let mut chip = lang_chip.unwrap_or_default();
     let mut chip_visible = spans_width(&chip);
@@ -202,11 +204,14 @@ fn header_width(
     chip_visible: usize,
     chip_lead: usize,
 ) -> usize {
-    title_visible + hint_lead + hint.chars().count() + chip_visible + chip_lead
+    title_visible + hint_lead + display_width(hint) + chip_visible + chip_lead
 }
 
 fn spans_width(spans: &[Span<'static>]) -> usize {
-    spans.iter().map(|span| span.content.chars().count()).sum()
+    spans
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum()
 }
 
 fn compact_chip(chip: Vec<Span<'static>>) -> Vec<Span<'static>> {
@@ -216,7 +221,7 @@ fn compact_chip(chip: Vec<Span<'static>>) -> Vec<Span<'static>> {
 }
 
 fn take_chars(text: &str, limit: usize) -> String {
-    text.chars().take(limit).collect()
+    split_display_prefix(text, limit).0.to_string()
 }
 
 /// Build the language chip — bold bright `support → target`.
@@ -296,7 +301,7 @@ impl FooterHint {
     }
 
     fn width(&self) -> usize {
-        self.key.chars().count() + self.label.chars().count() + 3
+        display_width(self.key.as_str()) + display_width(self.label.as_str()) + 3
     }
 
     /// Paint the hint as `[KEY] label` spans, colored by its tier. Used by the
@@ -338,7 +343,10 @@ fn footer_spans(
     mut hints: Vec<FooterHint>,
     width: u16,
 ) -> Vec<Span<'static>> {
-    let left_width: usize = left.iter().map(|span| span.content.chars().count()).sum();
+    let left_width: usize = left
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum();
     while !hints.is_empty() && !footer_fits(left_width, &hints, width) {
         let victim = droppable_hint(&hints);
         hints.remove(victim);
@@ -350,7 +358,10 @@ fn footer_spans(
         }
         right.extend(hint.spans());
     }
-    let right_width: usize = right.iter().map(|span| span.content.chars().count()).sum();
+    let right_width: usize = right
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum();
     let gap = (width as usize).saturating_sub(left_width + right_width);
     let mut spans = left;
     spans.push(Span::styled(" ".repeat(gap), palette::base()));
@@ -362,12 +373,12 @@ fn footer_fits(left_width: usize, hints: &[FooterHint], width: u16) -> bool {
     if hints.is_empty() {
         return left_width <= width as usize;
     }
-    left_width + SEPARATOR.chars().count() + hints_width(hints) <= width as usize
+    left_width + display_width(SEPARATOR) + hints_width(hints) <= usize::from(width)
 }
 
 fn hints_width(hints: &[FooterHint]) -> usize {
     let keys: usize = hints.iter().map(FooterHint::width).sum();
-    keys + hints.len().saturating_sub(1) * SEPARATOR.chars().count()
+    keys + hints.len().saturating_sub(1) * display_width(SEPARATOR)
 }
 
 fn droppable_hint(hints: &[FooterHint]) -> usize {
@@ -388,13 +399,15 @@ fn clamp_spans(spans: Vec<Span<'static>>, width: u16) -> Vec<Span<'static>> {
     let mut budget = width as usize;
     let mut clamped: Vec<Span<'static>> = Vec::new();
     for span in spans {
-        let length = span.content.chars().count();
+        let length = display_width(span.content.as_ref());
         if length <= budget {
             budget -= length;
             clamped.push(span);
             continue;
         }
-        let head: String = span.content.chars().take(budget).collect();
+        let head = split_display_prefix(span.content.as_ref(), budget)
+            .0
+            .to_string();
         if !head.is_empty() {
             clamped.push(Span::styled(head, span.style));
         }
@@ -527,36 +540,19 @@ fn banner_visible(app: &App) -> bool {
 /// Pad a string to the requested character width.
 pub fn pad_right(value: &str, width: usize) -> String {
     let mut text = String::from(value);
-    let gap = width.saturating_sub(value.chars().count());
+    let gap = width.saturating_sub(display_width(value));
     text.push_str(" ".repeat(gap).as_str());
     text
 }
 
 /// Return the display width of `text` in terminal cells.
 pub fn display_width(text: &str) -> usize {
-    text.chars().map(char_width).sum()
+    UnicodeWidthStr::width(text)
 }
 
 /// Return the display width of one character in terminal cells.
 pub fn char_width(ch: char) -> usize {
-    let code = u32::from(ch);
-    let wide = matches!(
-        code,
-        0x1100..=0x115F
-            | 0x2E80..=0x303E
-            | 0x3041..=0x33FF
-            | 0x3400..=0x4DBF
-            | 0x4E00..=0x9FFF
-            | 0xA000..=0xA4CF
-            | 0xAC00..=0xD7A3
-            | 0xF900..=0xFAFF
-            | 0xFE30..=0xFE4F
-            | 0xFF00..=0xFF60
-            | 0xFFE0..=0xFFE6
-            | 0x20000..=0x2FFFD
-            | 0x30000..=0x3FFFD
-    );
-    if wide { 2 } else { 1 }
+    UnicodeWidthChar::width(ch).unwrap_or(0)
 }
 
 /// Wrap plain text by terminal cells without leaving leading spaces on wrapped rows.
@@ -606,16 +602,19 @@ pub fn wrap_words(text: &str, first_width: usize, continuation_width: usize) -> 
     rows
 }
 
-fn split_display_prefix(text: &str, width: usize) -> (&str, &str) {
+pub fn split_display_prefix(text: &str, width: usize) -> (&str, &str) {
+    if width == 0 {
+        return text.split_at(0);
+    }
     let mut used = 0usize;
     let mut end = 0usize;
-    for (index, ch) in text.char_indices() {
-        let char_width = char_width(ch);
-        if used > 0 && used + char_width > width {
+    for (index, grapheme) in text.grapheme_indices(true) {
+        let grapheme_width = display_width(grapheme);
+        if used > 0 && used + grapheme_width > width {
             break;
         }
-        end = index + ch.len_utf8();
-        used += char_width;
+        end = index + grapheme.len();
+        used += grapheme_width;
         if used >= width {
             break;
         }
@@ -755,6 +754,16 @@ mod tests {
         assert!(
             rows.iter().skip(1).all(|row| !row.starts_with(' ')),
             "wrapped rows must not keep leading whitespace, got: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn complex_graphemes_keep_terminal_cell_width_and_wrap_integrity() {
+        let thai = "กิ่กิ่";
+        assert_eq!(
+            (display_width("กิ่"), split_display_prefix(thai, 1)),
+            (1, ("กิ่", "กิ่")),
+            "Thai combining marks no longer stay attached to their base terminal cell"
         );
     }
 

@@ -13,9 +13,12 @@ use thiserror::Error;
 
 use crate::application::LearningTarget;
 use crate::generation::layout::{LayoutRegistry, feature_prompt_data, render_feature_prompt};
-use crate::generation::manga::{RecallCard, RecallReview};
+use crate::generation::manga::{
+    FidelityCheck, FidelityReview, LiteralZoomCheck, LiteralZoomReview, RecallCard, RecallReview,
+    TextCheck, TextReview,
+};
 use crate::generation::prompts::layout_scene_prompt;
-use crate::languages::catalog;
+use crate::languages::{LanguageCatalog, LanguageCode, catalog};
 use crate::session::{
     AxisSet, CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair, LearningGuess,
     RawInputBatch, Register, Sense, SenseCorrection, SentenceAxis, SentenceKind,
@@ -62,11 +65,19 @@ const FEATURE_MODEL: &str = "gemini-3.5-flash-lite";
 const SCENE_MODEL: &str = TEXT_MODEL;
 const IMAGE_MODEL: &str = "gemini-3.1-flash-image";
 const RECALL_MODEL: &str = "gemini-3.5-flash-lite";
+const FIDELITY_MODEL: &str = TEXT_MODEL;
+const LITERAL_ZOOM_MODEL: &str = TEXT_MODEL;
+const TEXT_JUDGE_MODEL: &str = "gemini-3.5-flash-lite";
 const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
 const FEATURE_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const COMPOSER_MAX_OUTPUT_TOKENS: u32 = 8_192;
 const RECALL_MAX_OUTPUT_TOKENS: u32 = 256;
 const RECALL_RECOVERY_MAX_OUTPUT_TOKENS: u32 = 512;
+const FIDELITY_MAX_OUTPUT_TOKENS: u32 = 512;
+const TEXT_JUDGE_MAX_OUTPUT_TOKENS: u32 = 256;
+const MAX_ALTERNATES: usize = 3;
+const TEXT_JUDGE_RECOVERY_MAX_OUTPUT_TOKENS: u32 = 512;
+const LITERAL_ZOOM_MAX_OUTPUT_TOKENS: u32 = 512;
 const VOICES: [&str; 30] = [
     "Achernar",
     "Achird",
@@ -482,7 +493,14 @@ where
         let decoded: IntakeResponse =
             serde_json::from_str(unfence(self.text(TEXT_MODEL, prompt)?.trim()))?;
         let guess = match target {
-            LearningTarget::Detect => LearningGuess::new(decoded.target_lang, true),
+            LearningTarget::Detect => {
+                let alternates = supported_alternates(
+                    decoded.alternates.as_slice(),
+                    decoded.target_lang.as_str(),
+                    &catalog,
+                );
+                LearningGuess::new(decoded.target_lang, true).with_alternates(alternates)
+            }
             LearningTarget::Explicit(expected) => {
                 let returned = catalog
                     .resolve(decoded.target_lang.as_str())
@@ -648,16 +666,18 @@ where
     pub fn review_recall(
         &self,
         card: &RecallCard,
+        scene: &Value,
         mime_type: &str,
         image: &[u8],
     ) -> Result<RecallReview> {
-        self.review_recall_observed(card, mime_type, image, |_| Ok(()))
+        self.review_recall_observed(card, scene, mime_type, image, |_| Ok(()))
     }
 
     /// Review one candidate illustration and report usage before verdict decoding.
     pub(crate) fn review_recall_observed<F>(
         &self,
         card: &RecallCard,
+        scene: &Value,
         mime_type: &str,
         image: &[u8],
         mut observe: F,
@@ -665,7 +685,7 @@ where
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let prompt = card.prompt()?;
+        let prompt = card.prompt(scene)?;
         let schema = card.schema()?;
         let data = encode(image);
         let request = |tokens| -> Result<Request> {
@@ -673,7 +693,7 @@ where
                 prompt.clone(),
                 mime_type,
                 data.clone(),
-                GenerationConfig::recall(schema.clone())?.with_max_output_tokens(tokens),
+                GenerationConfig::vision_judge(schema.clone())?.with_max_output_tokens(tokens),
             ))
         };
         let mut metered =
@@ -698,6 +718,145 @@ where
             );
         }
         card.review(unfence(raw.trim()))
+    }
+
+    /// Review one full illustration against only its compact scene-fidelity contract.
+    pub(crate) fn review_fidelity_observed<F>(
+        &self,
+        check: &FidelityCheck,
+        mime_type: &str,
+        image: &[u8],
+        mut observe: F,
+    ) -> Result<FidelityReview>
+    where
+        F: FnMut(CostRecord) -> Result<()>,
+    {
+        let prompt = check.prompt()?;
+        let schema = check.schema()?;
+        let request = Request::vision(
+            prompt,
+            mime_type,
+            encode(image),
+            GenerationConfig::structured_vision_judge(schema)?
+                .with_thinking_level(ThinkingLevel::Minimal)
+                .with_max_output_tokens(FIDELITY_MAX_OUTPUT_TOKENS),
+        );
+        let metered = self.request_metered(FIDELITY_MODEL, &request)?;
+        observe(metered.cost.clone())?;
+        if metered.response.finish_reason() == Some("MAX_TOKENS") {
+            bail!(
+                "Gemini fidelity review exceeded the {}-token output ceiling",
+                FIDELITY_MAX_OUTPUT_TOKENS
+            );
+        }
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!(
+                "No text content in Gemini fidelity review response: {}",
+                diagnosis(&metered.response)
+            );
+        }
+        check.review(unfence(raw.trim()))
+    }
+
+    /// Review nine enlarged overlapping crops for literal-looking content in one request.
+    pub(crate) fn review_literal_zoom_observed<F>(
+        &self,
+        check: &LiteralZoomCheck,
+        images: &[Vec<u8>],
+        mut observe: F,
+    ) -> Result<LiteralZoomReview>
+    where
+        F: FnMut(CostRecord) -> Result<()>,
+    {
+        if images.len() != 9 {
+            bail!("literal zoom review requires exactly nine ordered crops");
+        }
+        let prompt = check.prompt();
+        let schema = check.schema()?;
+        let data = images.iter().map(|image| encode(image)).collect::<Vec<_>>();
+        let request = Request::vision_images(
+            String::from(prompt),
+            "image/png",
+            data,
+            GenerationConfig::structured_vision_judge(schema)?
+                .with_thinking_level(ThinkingLevel::Minimal)
+                .with_max_output_tokens(LITERAL_ZOOM_MAX_OUTPUT_TOKENS),
+        );
+        let metered = self.request_metered(LITERAL_ZOOM_MODEL, &request)?;
+        observe(metered.cost.clone())?;
+        if metered.response.finish_reason() == Some("MAX_TOKENS") {
+            bail!(
+                "Gemini literal zoom review exceeded the {}-token output ceiling",
+                LITERAL_ZOOM_MAX_OUTPUT_TOKENS
+            );
+        }
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!(
+                "No text content in Gemini literal zoom review response: {}",
+                diagnosis(&metered.response)
+            );
+        }
+        check.review(unfence(raw.trim()))
+    }
+
+    /// Review one candidate illustration for literal writing without OCR.
+    pub fn review_text(
+        &self,
+        check: &TextCheck,
+        mime_type: &str,
+        image: &[u8],
+    ) -> Result<TextReview> {
+        self.review_text_observed(check, mime_type, image, |_| Ok(()))
+    }
+
+    /// Review literal writing directly and report usage before verdict decoding.
+    pub(crate) fn review_text_observed<F>(
+        &self,
+        check: &TextCheck,
+        mime_type: &str,
+        image: &[u8],
+        mut observe: F,
+    ) -> Result<TextReview>
+    where
+        F: FnMut(CostRecord) -> Result<()>,
+    {
+        let prompt = check.prompt()?;
+        let schema = check.schema()?;
+        let data = encode(image);
+        let request = |tokens| -> Result<Request> {
+            Ok(Request::vision(
+                prompt.clone(),
+                mime_type,
+                data.clone(),
+                GenerationConfig::vision_judge(schema.clone())?.with_max_output_tokens(tokens),
+            ))
+        };
+        let mut metered =
+            self.request_metered(TEXT_JUDGE_MODEL, &request(TEXT_JUDGE_MAX_OUTPUT_TOKENS)?)?;
+        observe(metered.cost.clone())?;
+        if metered.response.finish_reason() == Some("MAX_TOKENS") {
+            metered = self.request_metered(
+                TEXT_JUDGE_MODEL,
+                &request(TEXT_JUDGE_RECOVERY_MAX_OUTPUT_TOKENS)?,
+            )?;
+            observe(metered.cost.clone())?;
+            if metered.response.finish_reason() == Some("MAX_TOKENS") {
+                bail!(
+                    "Gemini text review exceeded the adaptive {}-token output ceiling",
+                    TEXT_JUDGE_RECOVERY_MAX_OUTPUT_TOKENS
+                );
+            }
+        }
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!(
+                "No text content in Gemini text review response: {}",
+                diagnosis(&metered.response)
+            );
+        }
+        check.review(unfence(raw.trim()))
     }
 
     /// Generate one PCM audio payload from the configured TTS model.
@@ -999,7 +1158,42 @@ fn speech_from_response(response: &Response, text: &str) -> Result<Vec<u8>> {
 #[derive(Clone, Debug, Deserialize)]
 struct IntakeResponse {
     target_lang: String,
+    #[serde(default)]
+    alternates: Vec<String>,
     items: Vec<IntakeItem>,
+}
+
+/// Keep only alternates the app can actually switch to.
+///
+/// The model is asked for supported codes, most plausible first, but it answers
+/// in free text: it can name a language the catalog does not carry, repeat
+/// itself, or hand back the target it just chose. Anything the picker could not
+/// honour is dropped rather than shown as an offer the app cannot keep.
+fn supported_alternates(
+    reported: &[String],
+    target: &str,
+    catalog: &LanguageCatalog,
+) -> Vec<String> {
+    let chosen = catalog.resolve(target).ok();
+    let mut kept: Vec<String> = Vec::new();
+    for code in reported {
+        let Ok(resolved) = catalog.resolve(code.as_str()) else {
+            continue;
+        };
+        let resolved = resolved.to_string();
+        if chosen
+            .as_ref()
+            .is_some_and(|target| LanguageCode::as_ref(target) == resolved)
+            || kept.contains(&resolved)
+        {
+            continue;
+        }
+        kept.push(resolved);
+        if kept.len() == MAX_ALTERNATES {
+            break;
+        }
+    }
+    kept
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1084,6 +1278,7 @@ struct CardMetaResponse {
 
 impl CardMetaResponse {
     fn into_meta(self, request: Option<&SentenceLabelSelection>) -> Result<CardMeta> {
+        validate_source_hint(self.source_hint.as_str())?;
         let labels = self.labels.into_labels()?;
         let labels = match request {
             Some(request) => {
@@ -1132,6 +1327,7 @@ struct CardCorrectionResponse {
 
 impl CardCorrectionResponse {
     fn into_revision(self, selection: SentenceLabelSelection) -> Result<CardRevision> {
+        validate_source_hint(self.source_hint.as_str())?;
         let labels = self.labels.into_labels()?;
         if labels.approx().len() != labels.approx().intersecting(selection.pinned()).len() {
             bail!("approximate sentence labels must name only changed axes");
@@ -1154,6 +1350,13 @@ impl CardCorrectionResponse {
         .with_sentence_labels(labels);
         Ok(CardRevision::new(self.term, self.understanding, meta))
     }
+}
+
+fn validate_source_hint(source_hint: &str) -> Result<()> {
+    if source_hint.contains("<near target word>") {
+        bail!("source hint contains unresolved <near target word> placeholder");
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1237,6 +1440,7 @@ mod tests {
     struct FakeTransport {
         responses: Rc<RefCell<Vec<Result<TransportResponse>>>>,
         requests: Rc<RefCell<Vec<String>>>,
+        urls: Rc<RefCell<Vec<String>>>,
     }
 
     impl FakeTransport {
@@ -1244,17 +1448,20 @@ mod tests {
             Self {
                 responses: Rc::new(RefCell::new(responses)),
                 requests: Rc::new(RefCell::new(Vec::new())),
+                urls: Rc::new(RefCell::new(Vec::new())),
             }
         }
     }
 
     impl Transport for FakeTransport {
-        fn get(&self, _url: &str, _key: &str) -> Result<TransportResponse> {
+        fn get(&self, url: &str, _key: &str) -> Result<TransportResponse> {
+            self.urls.borrow_mut().push(String::from(url));
             self.requests.borrow_mut().push(String::from("GET"));
             self.responses.borrow_mut().remove(0)
         }
 
-        fn post(&self, _url: &str, _key: &str, body: &str) -> Result<TransportResponse> {
+        fn post(&self, url: &str, _key: &str, body: &str) -> Result<TransportResponse> {
+            self.urls.borrow_mut().push(String::from(url));
             self.requests.borrow_mut().push(String::from(body));
             self.responses.borrow_mut().remove(0)
         }
@@ -1323,6 +1530,43 @@ mod tests {
             "target_sentence": "Le canard nage",
             "labels": labels
         })
+    }
+
+    #[test]
+    fn card_metadata_rejects_the_hint_placeholder_without_rejecting_angle_brackets() {
+        let labels = sentence_labels_response("neutral", "b1", "statement", Vec::new());
+        let mut generated_placeholder = card_meta_response(labels.clone());
+        generated_placeholder["source_hint"] =
+            json!("„<near target word>“ ukazuje zisk; tady jde o užitek.");
+        let mut corrected_placeholder = card_correction_response(labels.clone());
+        corrected_placeholder["source_hint"] =
+            json!("„<near target word>“ ukazuje zisk; tady jde o užitek.");
+        let mut generated_angle_brackets = card_meta_response(labels.clone());
+        generated_angle_brackets["source_hint"] = json!("Choose x < y and y > z.");
+        let mut corrected_angle_brackets = card_correction_response(labels);
+        corrected_angle_brackets["source_hint"] = json!("Choose x < y and y > z.");
+        assert_eq!(
+            (
+                serde_json::from_value::<CardMetaResponse>(generated_placeholder)
+                    .expect("placeholder metadata must decode before semantic validation")
+                    .into_meta(None)
+                    .is_err(),
+                serde_json::from_value::<CardCorrectionResponse>(corrected_placeholder)
+                    .expect("placeholder correction must decode before semantic validation")
+                    .into_revision(preserved_selection())
+                    .is_err(),
+                serde_json::from_value::<CardMetaResponse>(generated_angle_brackets)
+                    .expect("angle-bracket metadata must decode")
+                    .into_meta(None)
+                    .is_ok(),
+                serde_json::from_value::<CardCorrectionResponse>(corrected_angle_brackets)
+                    .expect("angle-bracket correction must decode")
+                    .into_revision(preserved_selection())
+                    .is_ok(),
+            ),
+            (true, true, true, true),
+            "card metadata retained an unresolved hint placeholder or rejected legitimate angle brackets"
+        );
     }
 
     fn changed_register_selection() -> SentenceLabelSelection {
@@ -1471,6 +1715,30 @@ mod tests {
                     "mood": "assured"
                 }
             }]
+        })
+    }
+
+    fn recall_scene() -> Value {
+        json!({
+            "manga_panel": {
+                "semantic_spine": {
+                    "literal_event": "one frightened person reacts to danger",
+                    "semantic_focus": "visible fear",
+                    "visual_relation": "cause_and_effect",
+                    "metaphor": {"literal_anchor": "the frightened person"}
+                },
+                "panels": [{
+                    "id": "p1",
+                    "semantic_job": "show the frightened person reacting",
+                    "shot_contract": {"visible_anchor": "one visibly frightened person"},
+                    "scene": {"subjects": [{
+                        "id": "person",
+                        "figure": "a person",
+                        "pose": "recoiling from danger",
+                        "expression": "frightened"
+                    }]}
+                }]
+            }
         })
     }
 
@@ -1923,6 +2191,229 @@ mod tests {
     }
 
     #[test]
+    fn direct_text_judge_uses_structured_flash_vision_and_reports_its_cost() {
+        let transport = FakeTransport::new(vec![text_body(&json!({
+            "decision": "REJECT",
+            "evidence": [{
+                "reading": "שלום",
+                "location": "center sign",
+                "kind": "WRITING"
+            }],
+            "reason": "The word is clearly legible"
+        }))]);
+        let requests = transport.requests.clone();
+        let client = GeminiClient::new("key", transport);
+        let check = TextCheck::new("Hebrew");
+        let mut costs = Vec::new();
+        let review = client.review_text_observed(&check, "image/jpeg", &[1, 2, 3], |cost| {
+            costs.push(cost);
+            Ok(())
+        });
+        let payload = serde_json::from_str::<Value>(&requests.borrow()[0])
+            .expect("direct text request must decode");
+        assert_eq!(
+            (
+                review.is_ok_and(|review| !review.allows()),
+                requests.borrow().len(),
+                payload["contents"][0]["parts"][0]["text"]
+                    .as_str()
+                    .is_some_and(|prompt| prompt.contains("Hebrew")),
+                payload["contents"][0]["parts"][1]["inlineData"]["data"].as_str(),
+                payload["generationConfig"]["responseSchema"]["properties"]["evidence"]
+                    ["items"]["properties"]["kind"]["enum"][0]
+                    .as_str(),
+                costs.first().map(|cost| cost.model()),
+            ),
+            (
+                true,
+                1,
+                true,
+                Some("AQID"),
+                Some("WRITING"),
+                Some("gemini-3.5-flash-lite"),
+            ),
+            "direct text validation lost its prompt, image, schema, verdict, or Flash-tier cost"
+        );
+    }
+
+    #[test]
+    fn literal_zoom_review_sends_nine_ordered_png_parts_in_one_request() {
+        let transport = FakeTransport::new(vec![text_body(&json!({
+            "literal_writing_present": false,
+            "literal_evidence": [],
+            "reason": "No literal writing appears in any enlarged crop"
+        }))]);
+        let requests = transport.requests.clone();
+        let urls = transport.urls.clone();
+        let client = GeminiClient::new("key", transport);
+        let crops = (0_u8..9).map(|value| vec![value]).collect::<Vec<_>>();
+        let mut costs = Vec::new();
+        let review = client.review_literal_zoom_observed(
+            &LiteralZoomCheck::new(),
+            crops.as_slice(),
+            |cost| {
+                costs.push(cost);
+                Ok(())
+            },
+        );
+        let payload = serde_json::from_str::<Value>(&requests.borrow()[0])
+            .expect("literal zoom request must decode");
+        let parts = payload["contents"][0]["parts"]
+            .as_array()
+            .expect("literal zoom request parts must be an array");
+        assert_eq!(
+            [
+                review.is_ok(),
+                requests.borrow().len() == 1,
+                parts.len() == 10,
+                parts[0]["text"].as_str().is_some_and(|prompt| {
+                    prompt.contains("nine enlarged overlapping crops")
+                        && !prompt.contains("hidden_focus_term")
+                        && !prompt.contains("CARD")
+                }),
+                parts[1]["inlineData"]["mimeType"].as_str() == Some("image/png"),
+                parts[1]["inlineData"]["data"].as_str() == Some("AA=="),
+                parts[9]["inlineData"]["data"].as_str() == Some("CA=="),
+                payload["generationConfig"]["mediaResolution"].as_str()
+                    == Some("MEDIA_RESOLUTION_HIGH"),
+                payload["generationConfig"]["thinkingConfig"]["thinkingLevel"].as_str()
+                    == Some("MINIMAL"),
+                payload["generationConfig"]["maxOutputTokens"].as_u64() == Some(512),
+                payload["generationConfig"]["responseFormat"]["text"]["schema"]["properties"]
+                    ["literal_evidence"]["items"]["properties"]["kind"]["enum"]
+                    .as_array()
+                    .is_some_and(|items| items.iter().any(|item| item == "PSEUDO_WRITING")),
+                payload["generationConfig"]["responseFormat"]["text"]["mimeType"].as_str()
+                    == Some("APPLICATION_JSON"),
+                payload["generationConfig"]["responseMimeType"].is_null(),
+                payload["generationConfig"]["responseSchema"].is_null(),
+                payload["generationConfig"]["temperature"].as_u64() == Some(0),
+                costs.len() == 1,
+                urls.borrow()[0].ends_with("/gemini-3.6-flash:generateContent"),
+                costs.first().map(CostRecord::model) == Some("gemini-3.6-flash"),
+                costs.first().map(|cost| cost.cost().nanos()) == Some(525_000),
+            ],
+            [true; 19],
+            "literal zoom review lost crop order, sent card data, changed media policy, model, cost, or request count"
+        );
+    }
+
+    #[test]
+    fn dedicated_fidelity_review_uses_one_modern_full_image_request_without_card_data() {
+        let transport = FakeTransport::new(vec![text_body(&json!({
+            "scene_fidelity_decision": "REJECT",
+            "scene_fidelity_evidence": [{
+                "requirement": "person remains the same subject",
+                "observed": "a visibly different person replaces the subject",
+                "location": "left and right panels",
+                "kind": "BROKEN_SUBJECT_CONTINUITY"
+            }],
+            "reason": "The repeated subject is substituted"
+        }))]);
+        let requests = transport.requests.clone();
+        let urls = transport.urls.clone();
+        let client = GeminiClient::new("key", transport);
+        let check = FidelityCheck::new(&recall_scene()).expect("fidelity check must compose");
+        let mut costs = Vec::new();
+        let review = client.review_fidelity_observed(&check, "image/jpeg", &[1, 2, 3], |cost| {
+            costs.push(cost);
+            Ok(())
+        });
+        let payload = serde_json::from_str::<Value>(&requests.borrow()[0])
+            .expect("fidelity request must decode");
+        let prompt = payload["contents"][0]["parts"][0]["text"]
+            .as_str()
+            .expect("fidelity request must contain a prompt");
+        assert_eq!(
+            [
+                review.is_ok(),
+                requests.borrow().len() == 1,
+                urls.borrow()[0].ends_with("/gemini-3.6-flash:generateContent"),
+                prompt.contains("SCENE FIDELITY REFERENCE")
+                    && prompt.contains("\"id\": \"person\"")
+                    && !prompt.contains("hidden_focus_term")
+                    && !prompt.contains("shown_source_sentence")
+                    && !prompt.contains("CARD"),
+                payload["contents"][0]["parts"].as_array().map(Vec::len) == Some(2),
+                payload["contents"][0]["parts"][1]["inlineData"]["mimeType"].as_str()
+                    == Some("image/jpeg"),
+                payload["contents"][0]["parts"][1]["inlineData"]["data"].as_str()
+                    == Some("AQID"),
+                payload["generationConfig"]["responseFormat"]["text"]["mimeType"].as_str()
+                    == Some("APPLICATION_JSON"),
+                payload["generationConfig"]["responseFormat"]["text"]["schema"]
+                    ["properties"]["scene_fidelity_evidence"]["items"]["properties"]["kind"]
+                    ["enum"]
+                    .as_array()
+                    .is_some_and(|items| items.iter().any(|item| item == "BROKEN_SUBJECT_CONTINUITY")),
+                payload["generationConfig"]["responseMimeType"].is_null()
+                    && payload["generationConfig"]["responseSchema"].is_null(),
+                payload["generationConfig"]["thinkingConfig"]["thinkingLevel"].as_str()
+                    == Some("MINIMAL"),
+                payload["generationConfig"]["mediaResolution"].as_str()
+                    == Some("MEDIA_RESOLUTION_HIGH"),
+                payload["generationConfig"]["temperature"].as_u64() == Some(0),
+                payload["generationConfig"]["maxOutputTokens"].as_u64() == Some(512),
+                costs.len() == 1
+                    && costs.first().map(CostRecord::model) == Some("gemini-3.6-flash"),
+            ],
+            [true; 15],
+            "dedicated fidelity request leaked card data or changed its one-shot modern vision contract"
+        );
+    }
+
+    #[test]
+    fn dedicated_fidelity_max_tokens_fails_without_an_adaptive_second_request() {
+        let transport = FakeTransport::new(vec![body(json!({
+            "candidates": [{
+                "finishReason": "MAX_TOKENS",
+                "content": {"parts": [{"text": ""}]}
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "candidatesTokenCount": 512,
+                "totalTokenCount": 612
+            }
+        }))]);
+        let requests = transport.requests.clone();
+        let client = GeminiClient::new("key", transport);
+        let check = FidelityCheck::new(&recall_scene()).expect("fidelity check must compose");
+        let result = client.review_fidelity_observed(&check, "image/jpeg", &[1, 2, 3], |_| Ok(()));
+        assert_eq!(
+            (result.is_err(), requests.borrow().len()),
+            (true, 1),
+            "dedicated fidelity review retried a max-token response or accepted a truncated verdict"
+        );
+    }
+
+    #[test]
+    fn literal_zoom_max_tokens_fails_without_an_adaptive_second_request() {
+        let transport = FakeTransport::new(vec![body(json!({
+            "candidates": [{
+                "finishReason": "MAX_TOKENS",
+                "content": {"parts": [{"text": ""}]}
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "candidatesTokenCount": 256,
+                "totalTokenCount": 356
+            }
+        }))]);
+        let requests = transport.requests.clone();
+        let client = GeminiClient::new("key", transport);
+        let crops = vec![vec![1_u8]; 9];
+        let result =
+            client.review_literal_zoom_observed(&LiteralZoomCheck::new(), crops.as_slice(), |_| {
+                Ok(())
+            });
+        assert_eq!(
+            (result.is_err(), requests.borrow().len()),
+            (true, 1),
+            "literal zoom review retried a max-token response or accepted a truncated verdict"
+        );
+    }
+
+    #[test]
     fn invalid_recall_verdict_still_reports_multimodal_request_cost() {
         let transport = FakeTransport::new(vec![body(json!({
             "candidates": [{
@@ -1952,17 +2443,24 @@ mod tests {
             ),
         );
         let mut costs = Vec::new();
-        let result = client.review_recall_observed(&card, "image/jpeg", &[1, 2, 3], |cost| {
-            costs.push(cost);
-            Ok(())
-        });
+        let result = client.review_recall_observed(
+            &card,
+            &recall_scene(),
+            "image/jpeg",
+            &[1, 2, 3],
+            |cost| {
+                costs.push(cost);
+                Ok(())
+            },
+        );
         assert_eq!(
             (
                 result.is_err(),
                 costs.first().map(CostRecord::requests),
+                costs.first().map(CostRecord::model),
                 costs.first().map(|cost| cost.cost().nanos()),
             ),
-            (true, Some(1), Some(350_800)),
+            (true, Some(1), Some("gemini-3.5-flash-lite"), Some(350_800),),
             "invalid recall JSON discarded the billed multimodal Gemini request cost"
         );
     }
@@ -2015,10 +2513,16 @@ mod tests {
             ),
         );
         let mut costs = Vec::new();
-        let review = client.review_recall_observed(&card, "image/jpeg", &[1, 2, 3], |cost| {
-            costs.push(cost);
-            Ok(())
-        });
+        let review = client.review_recall_observed(
+            &card,
+            &recall_scene(),
+            "image/jpeg",
+            &[1, 2, 3],
+            |cost| {
+                costs.push(cost);
+                Ok(())
+            },
+        );
         let payloads = requests
             .borrow()
             .iter()
@@ -2083,10 +2587,16 @@ mod tests {
             ),
         );
         let mut costs = Vec::new();
-        let result = client.review_recall_observed(&card, "image/jpeg", &[1, 2, 3], |cost| {
-            costs.push(cost);
-            Ok(())
-        });
+        let result = client.review_recall_observed(
+            &card,
+            &recall_scene(),
+            "image/jpeg",
+            &[1, 2, 3],
+            |cost| {
+                costs.push(cost);
+                Ok(())
+            },
+        );
         assert_eq!(
             (result.is_err(), requests.borrow().len(), costs.len()),
             (true, 2, 2),

@@ -13,6 +13,8 @@ mod registry;
 
 pub use labels::ReportLabels;
 pub use naming::{naming, prefix};
-pub use profile::{DeckNaming, LanguageEntry, LanguageProfile, UiLabels};
+pub use profile::{
+    DeckNaming, LanguageEntry, LanguageProfile, OcrModel, TextDirection, TextGate, UiLabels,
+};
 pub(crate) use prompt_examples::recall_document as prompt_recall_examples_document;
 pub use registry::{LanguageCatalog, LanguageCode, catalog, language};

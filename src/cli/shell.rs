@@ -9,14 +9,13 @@ use anyhow::{Result, anyhow, bail};
 
 use super::bridge::TuiSession;
 use super::jobs::{ArtifactOutcome, StudyPublishMessage, TextOutcome};
+use super::session::drop_incomplete_artifacts;
 use super::wiring::{GeminiCardWorkflow, GeminiKeyValidation, interactive_application};
 use crate::application::{CardUseCases, KeyValidation, PublishPhase, PublishProgress};
 use crate::config::{PreferenceStore, Preferences, default_store};
 use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
-use crate::session::{
-    Artifact, ArtifactAttempt, CardDraft, LearningTarget, RawInputBatch, SessionEngine,
-};
+use crate::session::{Artifact, ArtifactAttempt, CardDraft, RawInputBatch, SessionEngine};
 use crate::tui::{App, AppEvent, BusyKind, KeySource, Screen, Side, WelcomeStage, transit};
 
 const ANIMATION_FRAME_MILLIS: u64 = 250;
@@ -112,12 +111,14 @@ pub(super) struct Shell<P, K> {
     store: PreferenceStore,
     session: Option<TuiSession>,
     output: PathBuf,
+    cache: PathBuf,
 }
 
 impl Shell<GeminiCardWorkflow, GeminiKeyValidation> {
     /// Build a live card shell for an interactive empty session.
     pub(super) fn new(app: App, session: Option<TuiSession>) -> Result<Self> {
         let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
+        let cache_root = cache.clone();
         crate::report::warm_fonts_async();
         let session = match session {
             Some(session) => session,
@@ -145,6 +146,7 @@ impl Shell<GeminiCardWorkflow, GeminiKeyValidation> {
             store: default_store(&SystemContext)?,
             session: Some(session),
             output,
+            cache: cache_root,
         })
     }
 
@@ -711,7 +713,8 @@ where
                         .clone()
                         .with_screen(Screen::WhatIUnderstood)
                         .confirmed_learning(understood.guess().code())
-                        .understood_preserving_senses(understood.candidates().to_vec());
+                        .understood_preserving_senses(understood.candidates().to_vec())
+                        .with_alternates(understood.guess().alternates().to_vec());
                 }
                 Err(error) => {
                     if rejects_key(&error) {
@@ -774,16 +777,7 @@ where
     fn apply(&mut self, side: Side) -> Result<()> {
         match side {
             Side::RunUnderstanding => {
-                let raw = RawInputBatch::new(self.app.blob());
-                let known = self.app.pair().known().to_string();
-                let workflow = self.workflow.clone();
-                self.start_text(BusyKind::Understanding, move || {
-                    TextOutcome::Understanding(workflow.understand(
-                        &raw,
-                        known.as_str(),
-                        &LearningTarget::Detect,
-                    ))
-                })?;
+                self.run_understanding()?;
             }
             Side::StartGeneration => {
                 let drafts = drafts_from(&self.app);
@@ -817,24 +811,16 @@ where
                     ))
                 })?;
             }
-            Side::PersistMyLanguageAndRunUnderstanding(code) => {
-                self.persist_preferences(|prefs| prefs.adopt(code))?;
-                let raw = RawInputBatch::new(self.app.blob());
-                let known = self.app.pair().known().to_string();
-                let workflow = self.workflow.clone();
-                self.start_text(BusyKind::Understanding, move || {
-                    TextOutcome::Understanding(workflow.understand(
-                        &raw,
-                        known.as_str(),
-                        &LearningTarget::Detect,
-                    ))
-                })?;
+            Side::AdoptLanguagesAndRunUnderstanding(choice) => {
+                self.persist_preferences(|prefs| prefs.adopt(choice.known()))?;
+                self.retarget_session()?;
+                self.run_understanding()?;
             }
             Side::StartPublish => {
                 let _ = self.start_publish(false)?;
             }
-            Side::PersistMyLanguage(code) => {
-                self.persist_preferences(|prefs| prefs.adopt(code))?;
+            Side::AdoptLanguages(choice) => {
+                self.persist_preferences(|prefs| prefs.adopt(choice.known()))?;
             }
             Side::ValidateKey(key) => {
                 let keys = self.keys.clone();
@@ -862,6 +848,84 @@ where
             Some(value) => self.app.clone().welcome_env_key(value),
             None => self.app.clone().welcome_notice("GEMINI_API_KEY is not set"),
         };
+    }
+
+    /// Reopen the durable budgets of every failed card before retrying it.
+    ///
+    /// The picture-request series is capped per visual revision and persists on
+    /// disk, so a card that spent its four image requests can never draw again —
+    /// every later attempt fails before reaching the provider and the retry looks
+    /// dead while costing nothing. The console's `regenerate --failed` restarts
+    /// that series; the interactive retry means the same thing, so it restarts it
+    /// too. Only missing stages are dropped: whatever is already good is kept.
+    ///
+    /// A card that cannot be reopened is reported and left alone rather than
+    /// blocking the cards that can.
+    fn reopen_failed_artifacts(&mut self) {
+        let failed = self
+            .app
+            .cards()
+            .iter()
+            .filter(|draft| draft.artifacts().has_failed())
+            .map(|draft| {
+                (
+                    draft.pair().clone(),
+                    draft.term().to_string(),
+                    draft.understanding().to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let refused = failed
+            .iter()
+            .filter_map(|(pair, term, understanding)| {
+                drop_incomplete_artifacts(
+                    self.cache.as_path(),
+                    pair,
+                    term.as_str(),
+                    understanding.as_str(),
+                )
+                .err()
+                .map(|error| format!("{term}: {error:#}"))
+            })
+            .collect::<Vec<_>>();
+        if let Some(first) = refused.first() {
+            self.app = self
+                .app
+                .clone()
+                .error_shown(format!("card not reopened for retry — {first}"));
+        }
+    }
+
+    /// Read the current words under the pair the app is carrying.
+    fn run_understanding(&mut self) -> Result<()> {
+        let raw = RawInputBatch::new(self.app.blob());
+        let known = self.app.pair().known().to_string();
+        let target = self.app.learning_target().clone();
+        let workflow = self.workflow.clone();
+        self.start_text(BusyKind::Understanding, move || {
+            TextOutcome::Understanding(workflow.understand(&raw, known.as_str(), &target))
+        })
+    }
+
+    /// Drop the session the previous pair minted so the next save opens a new
+    /// one under the new pair.
+    ///
+    /// The session id carries the learning code, so keeping the old record
+    /// would leave `ls` naming a language this batch is no longer about. A
+    /// review-stage session has no committed plan and no artifacts, so nothing
+    /// of value is discarded — and the understanding cache is untouched, which
+    /// keeps switching back cheap.
+    fn retarget_session(&mut self) -> Result<()> {
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        if let Err(error) = session.discard_and_start_next() {
+            self.app = self
+                .app
+                .clone()
+                .error_shown(format!("session not rotated: {error:#}"));
+        }
+        Ok(())
     }
 
     /// Persist a preference update to this shell's own store. Tests inject a
@@ -965,6 +1029,7 @@ where
             return Ok(());
         }
         if self.app.cards_failed() > 0 {
+            self.reopen_failed_artifacts();
             self.app = self.app.clone().cards_reset_failures();
             if !self.start_engine() {
                 self.rollback(previous_app, previous_engine, previous_started);
@@ -1247,7 +1312,7 @@ mod tests {
 
     use crate::application::{
         BulkCorrection, CardCorrection, CardMetaGeneration, CardProduction, CardUseCases,
-        KeyValidation, PublishedStudyPackage, StudyPublishing, Understanding,
+        KeyValidation, LearningTarget, PublishedStudyPackage, StudyPublishing, Understanding,
     };
 
     use super::super::jobs::TextOutcome;
@@ -1600,6 +1665,7 @@ mod tests {
     fn shell_with(app: App, workflow: TestWorkflow) -> Shell<TestWorkflow, TestWorkflow> {
         let directory = Arc::new(tempfile::tempdir().expect("preference tempdir must exist"));
         let store = PreferenceStore::at(directory.path().join("preferences.json"));
+        let cache = directory.path().join("cache");
         let mut workflow = workflow;
         workflow._directory = Some(directory);
         Shell {
@@ -1618,7 +1684,77 @@ mod tests {
             store,
             session: None,
             output: std::env::temp_dir(),
+            cache,
         }
+    }
+
+    /// The picture-request series is capped per visual revision and lives on
+    /// disk, so a card that spent its four image requests could never draw again
+    /// — the interactive retry restarted the engine but every attempt died before
+    /// reaching the provider. Retrying in the TUI must reopen that budget, the
+    /// same way the console's `regenerate --failed` does.
+    #[test]
+    fn retrying_a_failed_card_reopens_its_exhausted_picture_budget() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let pair = LanguagePair::new("en", "ru");
+        let cache_root = home.path().join("cache");
+        let cell = crate::session::CardCell::new(cache_root.clone(), &pair, "canard", "a duck");
+        let visual = cell
+            .cache()
+            .visual(crate::generation::visual_revision())
+            .expect("production revision must be valid");
+        for _ in 0..ARTIFACT_ATTEMPT_CEILING {
+            crate::generation::reserve_picture_request(&visual)
+                .expect("the series must accept its own ceiling");
+        }
+        let spent = crate::generation::reserve_picture_request(&visual).is_err();
+        let draft = CardDraft::new("canard", "a duck", pair.clone()).with_artifacts(
+            CardArtifacts::from_parts(
+                ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+                ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+                exhausted_slot(Artifact::Picture),
+                ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+            ),
+        );
+        let app = App::new(pair)
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![draft]);
+        let mut shell = Shell {
+            app,
+            engine: None,
+            text: None,
+            artifact_job: None,
+            publish_job: None,
+            regeneration_pending: false,
+            started: None,
+            quit_armed_at: None,
+            new_batch_armed_at: None,
+            destructive_escape_armed_at: None,
+            workflow: TestWorkflow::local(),
+            keys: TestWorkflow::local(),
+            store: PreferenceStore::at(home.path().join("preferences.json")),
+            session: None,
+            output: home.path().to_path_buf(),
+            cache: cache_root,
+        };
+        shell.regenerate_cards().expect("the retry must start");
+        assert_eq!(
+            (
+                spent,
+                crate::generation::reserve_picture_request(&visual).is_ok()
+            ),
+            (true, true),
+            "retrying a failed card left its picture budget spent, so it could never draw again"
+        );
+    }
+
+    /// Build a picture slot that has spent every attempt it will ever get.
+    fn exhausted_slot(artifact: Artifact) -> ArtifactSlot {
+        (0..ARTIFACT_ATTEMPT_CEILING).fold(ArtifactSlot::fresh(artifact), |slot, _| {
+            slot.faulted(crate::session::AttemptFault::failed(
+                "the image gate refused the frame",
+            ))
+        })
     }
 
     fn pair() -> LanguagePair {
@@ -3103,6 +3239,7 @@ mod tests {
             store: PreferenceStore::at(home.path().join("preferences.json")),
             session: Some(session),
             output: home.path().to_path_buf(),
+            cache: home.path().join("cache"),
         };
         shell.finish_text(TextOutcome::KeyCheck(Ok(())));
         let app_plan = shell
@@ -3255,6 +3392,7 @@ mod tests {
             store: PreferenceStore::at(home.path().join("preferences.json")),
             session: Some(session),
             output: home.path().to_path_buf(),
+            cache: home.path().join("cache"),
         };
         let side = shell
             .handle(AppEvent::Generate)
@@ -3375,6 +3513,7 @@ mod tests {
             store: PreferenceStore::at(home.path().join("preferences.json")),
             session: Some(session),
             output: home.path().to_path_buf(),
+            cache: home.path().join("cache"),
         };
         let side = shell
             .handle(AppEvent::Generate)
@@ -3522,6 +3661,7 @@ mod tests {
             store: PreferenceStore::at(home.path().join("preferences.json")),
             session: Some(session),
             output: home.path().to_path_buf(),
+            cache: home.path().join("cache"),
         };
         let side = shell
             .handle(AppEvent::Generate)

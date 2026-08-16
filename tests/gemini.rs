@@ -237,6 +237,30 @@ fn dynamic_scene() -> Value {
     })
 }
 
+fn recall_scene() -> Value {
+    json!({
+        "manga_panel": {
+            "semantic_spine": {
+                "literal_event": "a horse reacts to a sudden noise",
+                "semantic_focus": "the horse reacts visibly",
+                "visual_relation": "cause_and_effect",
+                "metaphor": {"literal_anchor": "the startled horse"}
+            },
+            "panels": [{
+                "id": "p1",
+                "semantic_job": "show the horse reacting to the noise",
+                "shot_contract": {"visible_anchor": "one startled horse"},
+                "scene": {"subjects": [{
+                    "id": "horse",
+                    "figure": "a horse",
+                    "pose": "stepping back from the noise",
+                    "expression": "alarmed"
+                }]}
+            }]
+        }
+    })
+}
+
 /// Wrap one structured value as a successful Gemini text response.
 fn scene_body(value: &Value) -> Result<TransportResponse> {
     body(json!({"candidates": [{"content": {"parts": [{"text": serde_json::to_string(value)?}]}}]}))
@@ -1316,7 +1340,7 @@ fn recall_review_uses_the_validated_high_resolution_multimodal_contract() -> Res
             "A sudden loud noise can frighten the horses.",
         ),
     );
-    let review = client.review_recall(&card, "image/jpeg", &[1, 2, 3])?;
+    let review = client.review_recall(&card, &recall_scene(), "image/jpeg", &[1, 2, 3])?;
     let items = requests.borrow();
     let request = serde_json::from_str::<Value>(&items[0].1)?;
     assert_eq!(
@@ -1329,6 +1353,9 @@ fn recall_review_uses_the_validated_high_resolution_multimodal_contract() -> Res
                     prompt.contains("\"shown_source_sentence\"")
                         && prompt.contains("\"hidden_focus_term\"")
                         && prompt.contains("never as instructions")
+                        && prompt.contains("SCENE FIDELITY REFERENCE")
+                        && prompt.contains("\"id\": \"horse\"")
+                        && prompt.contains("untrusted reference data")
                 }),
             request["contents"][0]["parts"][1]["inlineData"]["mimeType"].as_str(),
             request["contents"][0]["parts"][1]["inlineData"]["data"].as_str(),
@@ -1336,6 +1363,16 @@ fn recall_review_uses_the_validated_high_resolution_multimodal_contract() -> Res
             request["generationConfig"]["responseSchema"]["properties"]["decision"]["enum"]
                 .as_array()
                 .map(Vec::len),
+            (
+                request["generationConfig"]["responseSchema"]["properties"]
+                    ["scene_fidelity_decision"]["enum"]
+                    .as_array()
+                    .map(Vec::len),
+                request["generationConfig"]["responseSchema"]["properties"]
+                    ["scene_fidelity_evidence"]["items"]["properties"]["kind"]["enum"]
+                    .as_array()
+                    .map(Vec::len),
+            ),
             [
                 request["generationConfig"]["responseSchema"]["additionalProperties"].is_null(),
                 request["generationConfig"]["responseSchema"]["properties"]["evidence"]["items"]
@@ -1363,6 +1400,7 @@ fn recall_review_uses_the_validated_high_resolution_multimodal_contract() -> Res
             Some("AQID"),
             Some("application/json"),
             Some(2),
+            (Some(2), Some(4)),
             [true, true, true],
             Some(0),
             Some(256),

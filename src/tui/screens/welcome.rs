@@ -18,9 +18,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
-use crate::languages::catalog;
+use super::language_grid::LanguageGrid;
 use crate::tui::app::App;
 use crate::tui::palette;
+use crate::tui::picker::PickerSection;
 use crate::tui::screen::{WelcomeFocus, WelcomeStage};
 use crate::tui::text_field::TextField;
 
@@ -60,9 +61,9 @@ impl ScreenView for Welcome {
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
-        let rows = body_rows(area);
+        let rows = body_rows(app, area);
         frame.render_widget(intro(area.width), rows[0]);
-        frame.render_widget(language_row(app), rows[2]);
+        frame.render_widget(language_row(app, area), rows[2]);
         let (input_line, notice_line) = input_lines(app, rows[4].width);
         frame.render_widget(input_line, rows[4]);
         frame.render_widget(key_underline_row(app), rows[5]);
@@ -72,6 +73,26 @@ impl ScreenView for Welcome {
     }
 }
 
+/// Return which language one terminal cell lands on, if any. Drives both the
+/// hand-pointer policy and click dispatch on the language step.
+pub fn language_at(app: &App, area: Rect, x: u16, y: u16) -> Option<usize> {
+    if app.welcome().stage != WelcomeStage::PickLanguage {
+        return None;
+    }
+    let body = super::common::frame_rects(area).body;
+    let rows = body_rows(app, body);
+    let origin = Rect {
+        x: body.x + FIELD_INDENT,
+        y: rows[2].y,
+        width: rows[2].width.saturating_sub(FIELD_INDENT),
+        height: rows[2].height,
+    };
+    if y < origin.y || y >= origin.y + origin.height {
+        return None;
+    }
+    language_grid(body).language_at(origin, x, y)
+}
+
 /// Return which key-step control one terminal cell lands on, if any. Drives
 /// both the hand-pointer policy and click dispatch in the shell.
 pub fn control_at(app: &App, area: Rect, x: u16, y: u16) -> Option<WelcomeFocus> {
@@ -79,7 +100,7 @@ pub fn control_at(app: &App, area: Rect, x: u16, y: u16) -> Option<WelcomeFocus>
         return None;
     }
     let frame = super::common::frame_rects(area);
-    let rows = body_rows(frame.body);
+    let rows = body_rows(app, frame.body);
     let base = frame.body.x;
     if y == rows[7].y {
         let submit_start = base + FIELD_INDENT;
@@ -98,18 +119,38 @@ pub fn control_at(app: &App, area: Rect, x: u16, y: u16) -> Option<WelcomeFocus>
     None
 }
 
-fn body_rows(area: Rect) -> Rc<[Rect]> {
+/// Rows the language step must leave to the rest of the body: the intro and its
+/// blank above, one blank below, and the `02 gemini api key` label under that.
+/// Everything else the form draws stays blank until the key step, so the grid
+/// is free to grow into it.
+const LANGUAGE_ROOM_RESERVE: u16 = 5;
+
+/// Return the rows the language step occupies.
+///
+/// The grid is offered while the step is being answered; once it has been, the
+/// step collapses to the one language that was chosen, the way a filled-in form
+/// field stops showing its options.
+fn language_height(app: &App, area: Rect) -> u16 {
+    if app.welcome().stage != WelcomeStage::PickLanguage {
+        return 1;
+    }
+    u16::try_from(language_grid(area).lines()).unwrap_or(u16::MAX)
+}
+
+fn body_rows(app: &App, area: Rect) -> Rc<[Rect]> {
+    let language_height = language_height(app, area);
+    let language_gap = u16::from(language_height <= 1);
     Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // intro
-            Constraint::Length(1), // blank
-            Constraint::Length(1), // 01 · language
-            Constraint::Length(1), // blank
-            Constraint::Length(1), // 02 · key field
-            Constraint::Length(1), // input underline
-            Constraint::Length(1), // blank · notice wraps here on a narrow terminal
-            Constraint::Length(1), // buttons
+            Constraint::Length(3),               // intro
+            Constraint::Length(1),               // blank
+            Constraint::Length(language_height), // 01 · language
+            Constraint::Length(language_gap),    // blank
+            Constraint::Length(1),               // 02 · key field
+            Constraint::Length(1),               // input underline
+            Constraint::Length(1),               // blank · notice wraps here on a narrow terminal
+            Constraint::Length(1),               // buttons
             Constraint::Min(0),
         ])
         .split(area)
@@ -138,38 +179,73 @@ fn intro(width: u16) -> Paragraph<'static> {
     Paragraph::new(lines).style(palette::base())
 }
 
-fn language_row(app: &App) -> Paragraph<'static> {
-    let stage = app.welcome().stage;
-    let active = stage == WelcomeStage::PickLanguage;
-    let mut spans: Vec<Span<'static>> = Vec::new();
+/// Return the grid the language step lays its languages out on.
+///
+/// The grid gets the body minus its own indent across, and minus the rows the
+/// rest of the form needs down — so it grows into the room a big terminal has
+/// and gives that room back on a small one instead of pushing the key field
+/// off the screen.
+pub fn language_grid(area: Rect) -> LanguageGrid {
+    LanguageGrid::measured(
+        area.width.saturating_sub(FIELD_INDENT),
+        area.height.saturating_sub(LANGUAGE_ROOM_RESERVE).max(1),
+    )
+}
+
+/// Return the language the step currently has picked.
+pub fn picked_language(app: &App) -> usize {
+    PickerSection::Known.chip_for(app.pair().known())
+}
+
+fn language_row(app: &App, area: Rect) -> Paragraph<'static> {
+    Paragraph::new(language_lines(app, area)).style(palette::base())
+}
+
+fn language_lines(app: &App, area: Rect) -> Vec<Line<'static>> {
+    let active = app.welcome().stage == WelcomeStage::PickLanguage;
+    let picked = picked_language(app);
+    if !active {
+        let mut spans = step_label(false);
+        spans.push(Span::styled(
+            PickerSection::Known.row_text(picked),
+            palette::dim(),
+        ));
+        return vec![Line::from(spans)];
+    }
+    let grid = language_grid(area);
+    (0..grid.lines())
+        .map(|line| {
+            let mut spans = if line == 0 {
+                step_label(active)
+            } else {
+                vec![Span::styled(
+                    " ".repeat(usize::from(FIELD_INDENT)),
+                    palette::base(),
+                )]
+            };
+            spans.extend(grid.line(line, picked));
+            Line::from(spans)
+        })
+        .collect()
+}
+
+/// The `01  your language  ›` label that opens the step's first line.
+fn step_label(active: bool) -> Vec<Span<'static>> {
     let num_style = if active {
         palette::base()
     } else {
         palette::dim2()
     };
-    spans.push(Span::styled("01  ", num_style));
     let label_style = if active {
         palette::base()
     } else {
         palette::dim()
     };
-    spans.push(Span::styled(
-        super::common::pad_right("your language", 16),
-        label_style,
-    ));
-    spans.push(chevron(active));
-    let current = app.pair().known().to_ascii_lowercase();
-    for code in catalog().codes() {
-        let label = code.to_ascii_uppercase();
-        let is_active = code == current;
-        let chip = if is_active {
-            Span::styled(format!(" {label} "), palette::invert())
-        } else {
-            Span::styled(format!(" {label} "), palette::dim())
-        };
-        spans.push(chip);
-    }
-    Paragraph::new(Line::from(spans)).style(palette::base())
+    vec![
+        Span::styled("01  ", num_style),
+        Span::styled(super::common::pad_right("your language", 16), label_style),
+        chevron(active),
+    ]
 }
 
 /// Build the `02 gemini api key` row spans and the visual width of its field.
@@ -334,7 +410,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     match welcome.stage {
         WelcomeStage::PickLanguage => {
             hints.push(super::common::FooterHint::primary("Enter", "next"));
-            hints.push(super::common::FooterHint::secondary("← →", "language"));
+            hints.push(super::common::FooterHint::secondary("↑ ↓ ← →", "language"));
         }
         WelcomeStage::EnterKey => {
             hints.push(super::common::FooterHint::primary("Enter", "submit"));

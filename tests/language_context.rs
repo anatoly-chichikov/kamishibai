@@ -7,7 +7,8 @@ use kamishibai::session::{
     Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair, WordCandidate,
 };
 use kamishibai::tui::{
-    App, AppEvent, KeySource, Screen, Side, WelcomeStage, draw, to_app, transit,
+    App, AppEvent, KeySource, LanguageChoice, PickerSection, Screen, Side, WelcomeStage, draw,
+    learning_target, to_app, transit,
 };
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -69,6 +70,32 @@ fn base() -> App {
     App::new(LanguagePair::new("en", "ru"))
 }
 
+/// One bare key press, through the real input mapper.
+fn press(code: crossterm::event::KeyCode) -> AppEvent {
+    to_app(crossterm::event::KeyEvent::new(
+        code,
+        crossterm::event::KeyModifiers::NONE,
+    ))
+    .expect("the key must map to an event")
+}
+
+/// A reviewed batch: the only state where changing the pair rereads words.
+fn reviewed() -> App {
+    base()
+        .with_screen(Screen::WhatIUnderstood)
+        .understood(vec![WordCandidate::new("chat", "a cat", true)])
+}
+
+/// A pick that moves only the known half and leaves detection in charge.
+fn known_choice(known: &str) -> LanguageChoice {
+    LanguageChoice::new(known.to_uppercase(), learning_target(None))
+}
+
+/// A pick that also pins the learning half.
+fn pinned_choice(known: &str, learning: &str) -> LanguageChoice {
+    LanguageChoice::new(known.to_uppercase(), learning_target(Some(learning)))
+}
+
 #[test]
 fn ctrl_l_on_welcome_language_step_cycles_the_language() {
     let app = App::new(LanguagePair::new("en", "en")).opening_welcome(
@@ -109,7 +136,7 @@ fn welcome_language_step_footer_is_clean() {
     let rendered = flat(&app);
     assert_eq!(
         (
-            rendered.contains("[← →] language"),
+            rendered.contains("[↑ ↓ ← →] language"),
             rendered.contains("Ctrl+L")
         ),
         (true, false),
@@ -289,19 +316,19 @@ fn picking_my_language_on_what_i_understood_persists_the_new_code() {
     let app = base()
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en");
-    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
+    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker(PickerSection::Known));
     assert_eq!(
         opened.modal(),
-        Some(kamishibai::tui::ModalKind::PickMyLanguage),
-        "OpenLanguagePicker on What I understood must open the picker modal"
+        Some(kamishibai::tui::ModalKind::PickLanguages),
+        "OpenLanguagePicker on What I understood must open the pair modal"
     );
-    let (after, side) = transit(opened, AppEvent::SetMyLanguage(String::from("es")));
+    let (after, side) = transit(opened, AppEvent::SetLanguages(known_choice("es")));
     assert_eq!(
         (after.modal(), after.pair().known().to_string(), side,),
         (
             None,
-            String::from("es"),
-            Side::PersistMyLanguage(String::from("es")),
+            String::from("ES"),
+            Side::AdoptLanguages(known_choice("es")),
         ),
         "confirming a language pick must close the modal, swap support, and request persistence"
     );
@@ -324,21 +351,17 @@ fn letter_l_on_done_is_not_a_hidden_language_shortcut() {
 #[test]
 fn picker_modal_opens_with_the_active_language_preselected_and_arrows_cycle_through_the_catalog() {
     let app = base().confirmed_learning("en");
-    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
-    let codes = kamishibai::languages::catalog().codes();
-    let initial = codes
-        .iter()
-        .position(|code| *code == "ru")
-        .expect("ru must be in the supported catalog");
+    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker(PickerSection::Known));
+    let initial = PickerSection::Known.chip_for("ru");
     assert_eq!(
-        opened.picker_cursor(),
+        opened.picker_cursor().index(PickerSection::Known),
         initial,
         "the picker must open with the cursor on the active `my` language"
     );
     let (after_right, _) = transit(opened, AppEvent::LanguagePickerNext);
     let (after_left_left, _) = transit(after_right, AppEvent::LanguagePickerPrev);
     assert_eq!(
-        after_left_left.picker_cursor(),
+        after_left_left.picker_cursor().index(PickerSection::Known),
         initial,
         "Prev after Next must return the cursor to the original chip"
     );
@@ -348,13 +371,162 @@ fn picker_modal_opens_with_the_active_language_preselected_and_arrows_cycle_thro
 fn picker_does_not_open_on_your_cards_or_done_because_the_pair_is_frozen() {
     for screen in [Screen::YourCards, Screen::Done] {
         let app = base().with_screen(screen).confirmed_learning("en");
-        let (after, side) = transit(app, AppEvent::OpenLanguagePicker);
+        let (after, side) = transit(app, AppEvent::OpenLanguagePicker(PickerSection::Known));
         assert_eq!(
             (after.modal(), side),
             (None, Side::None),
             "OpenLanguagePicker on {screen:?} must not open the picker — the batch pair is frozen"
         );
     }
+}
+
+#[test]
+fn clicking_the_learning_half_opens_the_modal_on_the_learning_half() {
+    let app = base()
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en");
+    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker(PickerSection::Learning));
+    assert_eq!(
+        opened.picker_cursor().section(),
+        PickerSection::Learning,
+        "opening the modal from the learning half must focus that half"
+    );
+}
+
+#[test]
+fn up_and_down_move_inside_one_column_while_left_and_right_swap_columns() {
+    let opened = transit(
+        base().confirmed_learning("en"),
+        AppEvent::OpenLanguagePicker(PickerSection::Known),
+    )
+    .0;
+    let (moved, _) = transit(opened, AppEvent::LanguagePickerNext);
+    let (turned, _) = transit(
+        moved,
+        AppEvent::LanguagePickerFocus(PickerSection::Learning),
+    );
+    assert_eq!(
+        (
+            turned.picker_cursor().section(),
+            turned.picker_cursor().index(PickerSection::Known)
+        ),
+        (
+            PickerSection::Learning,
+            PickerSection::Known.chip_for("ru") + 1
+        ),
+        "swapping columns must keep the pick the other column already made"
+    );
+}
+
+#[test]
+fn the_arrow_keys_map_to_columns_and_up_down_to_rows() {
+    let opened = transit(
+        base().confirmed_learning("en"),
+        AppEvent::OpenLanguagePicker(PickerSection::Known),
+    )
+    .0;
+    let right = transit(opened.clone(), press(crossterm::event::KeyCode::Right)).0;
+    let down = transit(opened, press(crossterm::event::KeyCode::Down)).0;
+    assert_eq!(
+        (
+            right.picker_cursor().section(),
+            right.picker_cursor().index(PickerSection::Known),
+            down.picker_cursor().section(),
+            down.picker_cursor().index(PickerSection::Known),
+        ),
+        (
+            PickerSection::Learning,
+            PickerSection::Known.chip_for("ru"),
+            PickerSection::Known,
+            PickerSection::Known.chip_for("ru") + 1,
+        ),
+        "the vertical lists must take rows from up/down and columns from left/right"
+    );
+}
+
+#[test]
+fn pressing_left_on_the_left_column_stays_put() {
+    let opened = transit(
+        base().confirmed_learning("en"),
+        AppEvent::OpenLanguagePicker(PickerSection::Known),
+    )
+    .0;
+    assert_eq!(
+        transit(opened, press(crossterm::event::KeyCode::Left))
+            .0
+            .picker_cursor()
+            .section(),
+        PickerSection::Known,
+        "left on the leftmost column must not throw focus across the modal"
+    );
+}
+
+#[test]
+fn the_unpinned_learning_half_opens_on_the_auto_chip() {
+    let opened = transit(
+        base().confirmed_learning("en"),
+        AppEvent::OpenLanguagePicker(PickerSection::Learning),
+    )
+    .0;
+    assert_eq!(
+        PickerSection::Learning.code_at(opened.picker_cursor().index(PickerSection::Learning)),
+        None,
+        "a batch left to detection must open the learning half on auto"
+    );
+}
+
+#[test]
+fn pinning_the_learning_language_rereads_the_reviewed_words() {
+    let app = reviewed().confirmed_learning("en");
+    let (after, side) = transit(app, AppEvent::SetLanguages(pinned_choice("ru", "de")));
+    assert_eq!(
+        (after.pair().learning().to_string(), side),
+        (
+            String::from("DE"),
+            Side::AdoptLanguagesAndRunUnderstanding(pinned_choice("ru", "de")),
+        ),
+        "pinning a different learning language must reread the batch under it"
+    );
+}
+
+#[test]
+fn a_pin_naming_the_language_already_on_screen_costs_no_provider_call() {
+    let app = reviewed().confirmed_learning("en");
+    let (_after, side) = transit(app, AppEvent::SetLanguages(pinned_choice("ru", "en")));
+    assert_eq!(
+        side,
+        Side::AdoptLanguages(pinned_choice("ru", "en")),
+        "pinning the language already understood must not reread the batch"
+    );
+}
+
+#[test]
+fn confirming_the_pair_unchanged_asks_for_nothing() {
+    let app = reviewed().confirmed_learning("en");
+    let (_after, side) = transit(app, AppEvent::SetLanguages(known_choice("ru")));
+    assert_eq!(
+        side,
+        Side::None,
+        "confirming the modal without changing anything must not touch preferences or Gemini"
+    );
+}
+
+#[test]
+fn dropping_a_pin_hands_the_language_back_to_detection() {
+    let pinned = transit(
+        reviewed().confirmed_learning("en"),
+        AppEvent::SetLanguages(pinned_choice("ru", "de")),
+    )
+    .0;
+    let (after, side) = transit(pinned, AppEvent::SetLanguages(known_choice("ru")));
+    assert_eq!(
+        (after.learning_pin(), side),
+        (
+            None,
+            Side::AdoptLanguagesAndRunUnderstanding(known_choice("ru")),
+        ),
+        "the auto chip must drop the pin and let the pass decide again"
+    );
 }
 
 #[test]
@@ -367,17 +539,17 @@ fn picking_my_language_through_transit_writes_to_the_preference_store() {
     let app = base()
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en");
-    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker);
-    let (after, side) = transit(opened, AppEvent::SetMyLanguage(String::from("es")));
-    if let Side::PersistMyLanguage(code) = side {
+    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker(PickerSection::Known));
+    let (after, side) = transit(opened, AppEvent::SetLanguages(known_choice("es")));
+    if let Side::AdoptLanguages(choice) = side {
         store
-            .write(&Preferences::new(code))
+            .write(&Preferences::new(choice.known()))
             .expect("persist new code");
     }
     let restored = store.read().expect("reload preferences").my_language;
     assert_eq!(
         (after.pair().known().to_string(), restored),
-        (String::from("es"), String::from("es")),
+        (String::from("ES"), String::from("ES")),
         "picking a language through the modal must update both the session pair and the persisted preference"
     );
 }
@@ -397,5 +569,98 @@ fn typing_letter_l_inside_your_words_does_not_rotate_the_language() {
         state.pair().known().to_string(),
         "ru",
         "letter L inside Your words blob must be treated as user input, not as a global shortcut"
+    );
+}
+
+/// The open picker is redrawn on every keypress and hit-tested on every tick of
+/// the pointer refresh, so both paths have to be cheap. Neither was: each one
+/// rebuilt the whole language catalog — twenty-two profiles and every string
+/// inside them — thousands of times per frame, once per rendered span and once
+/// per candidate row, and the modal fell seconds behind the arrow keys.
+#[test]
+fn the_open_picker_keeps_up_with_the_arrow_keys() {
+    let opened = transit(
+        reviewed(),
+        AppEvent::OpenLanguagePicker(PickerSection::Known),
+    )
+    .0;
+    let terminal = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let started = std::time::Instant::now();
+    for _ in 0..20 {
+        flat(&opened);
+        for column in 0..8 {
+            let _ = kamishibai::tui::mouse_pointer_at(&opened, terminal, column * 12, 12);
+        }
+    }
+    let spent = started.elapsed();
+    assert!(
+        spent < std::time::Duration::from_secs(3),
+        "twenty picker frames with a pointer sweep took {spent:?}, which is the lag the modal showed on every arrow key"
+    );
+}
+
+/// The Welcome language step lays every language out as a grid, so a click has
+/// to land on the language actually drawn under the pointer.
+#[test]
+fn clicking_a_language_on_the_welcome_grid_picks_that_language() {
+    let app = App::new(LanguagePair::new("en", "en")).opening_welcome(
+        KeySource::Empty,
+        String::new(),
+        false,
+    );
+    let terminal = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let landed = kamishibai::tui::welcome_language_at(&app, terminal, 0, 0);
+    let ru = PickerSection::Known.chip_for("ru");
+    let target = (0..terminal.width)
+        .flat_map(|x| (0..terminal.height).map(move |y| (x, y)))
+        .find(|(x, y)| kamishibai::tui::welcome_language_at(&app, terminal, *x, *y) == Some(ru))
+        .expect("the grid must draw Russian somewhere");
+    let picked = transit(app, AppEvent::WelcomeLanguageAt(ru)).0;
+    assert_eq!(
+        (landed, picked.pair().known().to_string()),
+        (None, String::from("ru")),
+        "clicking the cell at {target:?} must pick the language drawn there and nowhere else"
+    );
+}
+
+/// `↑` and `↓` move one whole line of the grid, which is what makes a grid
+/// worth having: `←` and `→` alone would walk the catalog one language at a
+/// time.
+#[test]
+fn a_vertical_arrow_on_the_welcome_grid_moves_one_whole_line() {
+    let app = App::new(LanguagePair::new("en", "en")).opening_welcome(
+        KeySource::Empty,
+        String::new(),
+        false,
+    );
+    let terminal = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let down = kamishibai::tui::welcome_language_step(&app, terminal, 1)
+        .expect("the language step must answer a vertical arrow");
+    let moved = transit(app, down).0;
+    assert_eq!(
+        moved.pair().known().to_string(),
+        "ja",
+        "one press of down must skip the whole grid line below English, which is three languages wide here"
+    );
+}
+
+/// Every language must stay clickable on a terminal too small for their names,
+/// which is the shape the step falls back to rather than hiding a language.
+#[test]
+fn every_language_stays_clickable_on_a_narrow_welcome_step() {
+    let app = App::new(LanguagePair::new("en", "en")).opening_welcome(
+        KeySource::Empty,
+        String::new(),
+        false,
+    );
+    let terminal = ratatui::layout::Rect::new(0, 0, 80, 16);
+    let reachable = (0..terminal.width)
+        .flat_map(|x| (0..terminal.height).map(move |y| (x, y)))
+        .filter_map(|(x, y)| kamishibai::tui::welcome_language_at(&app, terminal, x, y))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        reachable,
+        (0..PickerSection::Known.chips()).collect::<std::collections::BTreeSet<_>>(),
+        "a language the narrow step draws stayed out of the mouse's reach"
     );
 }

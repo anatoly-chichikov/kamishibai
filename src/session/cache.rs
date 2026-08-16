@@ -314,6 +314,11 @@ impl EntryMiss {
 struct EntryRecord {
     target_lang: String,
     confident: bool,
+    /// The batch's equally plausible languages, copied onto every entry exactly
+    /// like `target_lang`. Defaulted so entries written before the pass reported
+    /// alternates keep loading — they simply offer none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    alternates: Vec<String>,
     item: CandidateRecord,
 }
 
@@ -322,12 +327,14 @@ impl EntryRecord {
         Self {
             target_lang: guess.code().to_string(),
             confident: guess.confident(),
+            alternates: guess.alternates().to_vec(),
             item: CandidateRecord::from_candidate(candidate),
         }
     }
 
     fn guess(&self) -> LearningGuess {
         LearningGuess::new(self.target_lang.clone(), self.confident)
+            .with_alternates(self.alternates.clone())
     }
 
     fn candidate(self) -> WordCandidate {
@@ -595,6 +602,35 @@ mod tests {
         }
     }
 
+    /// A pass that always reports two equally plausible languages.
+    struct AmbiguousUnderstanding {
+        calls: Rc<RefCell<usize>>,
+    }
+
+    impl AmbiguousUnderstanding {
+        fn new(calls: Rc<RefCell<usize>>) -> Self {
+            Self { calls }
+        }
+    }
+
+    impl Understanding for AmbiguousUnderstanding {
+        fn understand(
+            &self,
+            raw: &RawInputBatch,
+            _known: &str,
+            _target: &LearningTarget,
+        ) -> Result<Understood> {
+            *self.calls.borrow_mut() += 1;
+            let candidates = normalized_entries(raw)
+                .into_iter()
+                .map(|entry| WordCandidate::new(entry, "a cat", true))
+                .collect();
+            let guess = LearningGuess::new("EN", true)
+                .with_alternates(vec![String::from("DE"), String::from("NL")]);
+            Ok(Understood::new(guess, candidates))
+        }
+    }
+
     impl Understanding for ChangingUnderstanding {
         fn understand(
             &self,
@@ -733,6 +769,43 @@ mod tests {
             ),
             (3, "variant 0", "variant 1", "variant 2", "variant 0"),
             "explicit EN, explicit FR, and autodetection reused one understanding identity"
+        );
+    }
+
+    #[test]
+    fn a_cached_entry_replays_the_alternates_the_pass_reported() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let calls = Rc::new(RefCell::new(0));
+        let cache =
+            CachedUnderstanding::new(AmbiguousUnderstanding::new(calls.clone()), directory.path());
+        cache
+            .understand(&RawInputBatch::new("chat"), "RU", &LearningTarget::Detect)
+            .expect("first understanding must succeed");
+        let replayed = cache
+            .understand(&RawInputBatch::new("chat"), "RU", &LearningTarget::Detect)
+            .expect("cached understanding must succeed");
+        assert_eq!(
+            (*calls.borrow(), replayed.guess().alternates()),
+            (1, ["DE".to_string(), "NL".to_string()].as_slice()),
+            "a cache hit lost the languages the pass judged equally plausible"
+        );
+    }
+
+    #[test]
+    fn an_entry_written_before_alternates_existed_still_loads() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new(String::from("understanding/RU-EN"), directory.path());
+        fs::create_dir_all(cache.path()).expect("cache directory must be created");
+        fs::write(
+            cache.path().join("legacy.json"),
+            br#"{"target_lang":"EN","confident":true,"item":{"term":"chat","senses":[{"understanding":"a cat","tag":null}],"selected_senses":[0],"ok":true}}"#,
+        )
+        .expect("legacy entry must be written");
+        let record: EntryRecord = read_json(&cache, "legacy.json").expect("legacy entry must load");
+        assert_eq!(
+            record.guess().alternates(),
+            Vec::<String>::new().as_slice(),
+            "an entry predating alternates must load offering none"
         );
     }
 

@@ -14,14 +14,15 @@ use serde_json::json;
 
 use super::monochrome::color_detected;
 use super::{
-    BorderDetector, ImageSource, Progress, RecallJudge, RecallReview, Renderer,
-    compile_image_prompt,
+    BorderDetector, ImageSource, Progress, RecallJudge, RecallReview, Renderer, TextJudge,
+    TextReview, TextReviewGate, compile_image_prompt,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RenderRejection {
     Color(String),
     Topology(String),
+    Ocr(String),
     RecallText(String),
     Border(String),
     LegacyGutter(String),
@@ -35,6 +36,10 @@ impl RenderRejection {
 
     fn topology(reason: &str) -> Self {
         Self::Topology(String::from(reason))
+    }
+
+    fn ocr(reason: String) -> Self {
+        Self::Ocr(reason)
     }
 
     fn recall_text(reason: String) -> Self {
@@ -57,6 +62,7 @@ impl RenderRejection {
         match self {
             Self::Color(reason)
             | Self::Topology(reason)
+            | Self::Ocr(reason)
             | Self::RecallText(reason)
             | Self::Border(reason)
             | Self::LegacyGutter(reason)
@@ -68,6 +74,7 @@ impl RenderRejection {
         match self {
             Self::Color(_) => "color",
             Self::Topology(_) => "topology",
+            Self::Ocr(_) => "ocr",
             Self::RecallText(_) => "recall_text",
             Self::Border(_) => "border",
             Self::LegacyGutter(_) => "legacy_gutter",
@@ -115,6 +122,7 @@ impl std::error::Error for MangaRenderRejection {}
 pub struct MangaRenderer<J> {
     client: Rc<dyn ImageSource>,
     retries: usize,
+    text: Option<Rc<dyn TextJudge>>,
     judge: J,
     border: BorderDetector,
     attempts: Option<PathBuf>,
@@ -129,6 +137,7 @@ impl<J> MangaRenderer<J> {
         Self {
             client: Rc::new(client),
             retries,
+            text: None,
             judge,
             border,
             attempts: None,
@@ -138,6 +147,15 @@ impl<J> MangaRenderer<J> {
     /// Preserve every raw production image attempt and its validation verdict.
     pub fn with_attempt_archive(mut self, directory: PathBuf) -> Self {
         self.attempts = Some(directory);
+        self
+    }
+
+    /// Apply one literal-writing gate before semantic recall review.
+    pub fn with_text_judge<T>(mut self, text: T) -> Self
+    where
+        T: TextJudge + 'static,
+    {
+        self.text = Some(Rc::new(text));
         self
     }
 }
@@ -152,6 +170,7 @@ where
         debug
             .field("client", &"ImageSource")
             .field("retries", &self.retries)
+            .field("text", &self.text.as_ref().map(|_| "TextJudge"))
             .field("judge", &self.judge)
             .field("border", &self.border);
         debug.field("attempts", &self.attempts);
@@ -176,7 +195,7 @@ where
             let recovered = self
                 .attempts
                 .as_deref()
-                .map(|directory| AttemptJournal::resume_recall(directory, scene, prompt.as_str()))
+                .map(|directory| AttemptJournal::resume_review(directory, scene, prompt.as_str()))
                 .transpose()?
                 .flatten();
             let (mut journal, bytes) = match recovered {
@@ -281,7 +300,54 @@ where
                 progress.retry("Rendering manga", attempt + 1, rejection.reason());
                 continue;
             }
-            let review = match self.judge.review(bytes.as_slice()) {
+            if let Some(text) = self.text.as_ref() {
+                let archived = journal
+                    .as_ref()
+                    .map(AttemptJournal::text_review)
+                    .transpose()?
+                    .flatten();
+                let review = match archived {
+                    Some(review) => review,
+                    None => match text.review(bytes.as_slice(), &gray) {
+                        Ok(review) => review,
+                        Err(error) => {
+                            let reason = error.to_string();
+                            record_attempt(
+                                journal.as_ref(),
+                                "error",
+                                text.gate().error_category(),
+                                reason.as_str(),
+                            )?;
+                            return Err(error);
+                        }
+                    },
+                };
+                if let Some(journal) = journal.as_mut()
+                    && journal.text.is_none()
+                    && let Err(error) = journal.capture_text(&review)
+                {
+                    let reason = error.to_string();
+                    let _ = journal.record("error", "archive", reason.as_str());
+                    return Err(error);
+                }
+                if let Some(reason) = review.rejection() {
+                    rejection = match review.gate() {
+                        TextReviewGate::Ocr => RenderRejection::ocr(reason),
+                        TextReviewGate::LlmJudge => RenderRejection::recall_text(format!(
+                            "Text judge rejected image: {reason}"
+                        )),
+                    };
+                    record_attempt(
+                        journal.as_ref(),
+                        "rejected",
+                        rejection.category(),
+                        rejection.reason(),
+                    )?;
+                    progress.retry("Rendering manga", attempt + 1, rejection.reason());
+                    continue;
+                }
+            }
+            let review = match self.judge.review(scene, bytes.as_slice()) {
                 Ok(review) => review,
                 Err(error) => {
                     let reason = error.to_string();
@@ -308,6 +374,41 @@ where
                 progress.retry("Rendering manga", attempt + 1, rejection.reason());
                 continue;
             }
+            if let Some(reason) = review.scene_fidelity_rejection() {
+                rejection = RenderRejection::recall_text(format!(
+                    "Scene fidelity judge rejected image: {reason}"
+                ));
+                record_attempt(
+                    journal.as_ref(),
+                    "rejected",
+                    rejection.category(),
+                    rejection.reason(),
+                )?;
+                progress.retry("Rendering manga", attempt + 1, rejection.reason());
+                continue;
+            }
+            if self.text.is_some()
+                && let Some(reason) = review.literal_rejection()
+            {
+                rejection = RenderRejection::recall_text(format!(
+                    "Recall judge found prohibited literal writing after text gate allowed it: {reason}"
+                ));
+                record_attempt(
+                    journal.as_ref(),
+                    "rejected",
+                    rejection.category(),
+                    rejection.reason(),
+                )?;
+                progress.retry("Rendering manga", attempt + 1, rejection.reason());
+                continue;
+            }
+            if !review.inspections_complete() {
+                let reason = String::from(
+                    "Recall review ended without dedicated fidelity and scale-aware literal inspection",
+                );
+                record_attempt(journal.as_ref(), "error", "recall_judge", reason.as_str())?;
+                return Err(anyhow!(reason));
+            }
             record_attempt(journal.as_ref(), "accepted", "accepted", "")?;
             return Ok(DynamicImage::ImageLuma8(gray));
         }
@@ -319,6 +420,7 @@ where
 struct AttemptJournal {
     sequence: usize,
     image: Option<String>,
+    text: Option<String>,
     recall: Option<String>,
     scene: String,
     verdict: PathBuf,
@@ -351,6 +453,7 @@ impl AttemptJournal {
         let journal = Self {
             sequence,
             image: None,
+            text: None,
             recall: None,
             scene: scene_name,
             verdict: directory.join(format!("attempt-{sequence:04}.json")),
@@ -359,7 +462,7 @@ impl AttemptJournal {
         Ok(journal)
     }
 
-    fn resume_recall(
+    fn resume_review(
         directory: &Path,
         scene: &Value,
         prompt: &str,
@@ -385,7 +488,8 @@ impl AttemptJournal {
         let value = serde_json::from_slice::<Value>(fs::read(&verdict)?.as_slice())?;
         let status = value.get("status").and_then(Value::as_str);
         let category = value.get("category").and_then(Value::as_str);
-        let retryable_error = status == Some("error") && category == Some("recall_judge");
+        let retryable_error = status == Some("error")
+            && matches!(category, Some("ocr" | "text_judge" | "recall_judge"));
         let retryable_pending = status == Some("pending")
             && category == Some("pending")
             && value.get("image").and_then(Value::as_str).is_some();
@@ -397,6 +501,7 @@ impl AttemptJournal {
         let image = attempt_member(&value, "image")?;
         let scene_name = attempt_member(&value, "scene")?;
         let prompt_name = attempt_member(&value, "prompt")?;
+        let text = optional_attempt_member(&value, "text")?;
         let archived_scene = serde_json::from_slice::<Value>(
             fs::read(directory.join(scene_name.as_str()))?.as_slice(),
         )?;
@@ -408,6 +513,7 @@ impl AttemptJournal {
         let journal = Self {
             sequence,
             image: Some(image),
+            text,
             recall: None,
             scene: scene_name,
             verdict,
@@ -448,6 +554,33 @@ impl AttemptJournal {
         self.record("pending", "pending", "")
     }
 
+    fn capture_text(&mut self, review: &TextReview) -> Result<()> {
+        let text = format!("attempt-{:04}.text.json", self.sequence);
+        let directory = self
+            .verdict
+            .parent()
+            .ok_or_else(|| anyhow!("attempt verdict has no parent directory"))?;
+        let mut staged = tempfile::NamedTempFile::new_in(directory)?;
+        serde_json::to_writer_pretty(staged.as_file_mut(), review)?;
+        staged.as_file().sync_all()?;
+        staged.persist(directory.join(text.as_str()))?;
+        self.text = Some(text);
+        self.record("pending", "pending", "")
+    }
+
+    fn text_review(&self) -> Result<Option<TextReview>> {
+        let Some(text) = self.text.as_ref() else {
+            return Ok(None);
+        };
+        let directory = self
+            .verdict
+            .parent()
+            .ok_or_else(|| anyhow!("attempt verdict has no parent directory"))?;
+        Ok(Some(serde_json::from_slice::<TextReview>(
+            fs::read(directory.join(text))?.as_slice(),
+        )?))
+    }
+
     fn record(&self, status: &str, category: &str, reason: &str) -> Result<()> {
         let directory = self
             .verdict
@@ -459,6 +592,7 @@ impl AttemptJournal {
             &json!({
                 "sequence": self.sequence,
                 "image": self.image,
+                "text": self.text,
                 "recall": self.recall,
                 "scene": self.scene,
                 "prompt": format!("attempt-{:04}.prompt.txt", self.sequence),
@@ -470,6 +604,13 @@ impl AttemptJournal {
         staged.as_file().sync_all()?;
         staged.persist(self.verdict.as_path())?;
         Ok(())
+    }
+}
+
+fn optional_attempt_member(value: &Value, key: &str) -> Result<Option<String>> {
+    match value.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => attempt_member(value, key).map(Some),
     }
 }
 
@@ -2003,13 +2144,14 @@ mod tests {
             [
                 RenderRejection::color("color"),
                 RenderRejection::topology("topology"),
+                RenderRejection::ocr(String::from("ocr")),
                 RenderRejection::recall_text(String::from("recall text")),
                 RenderRejection::border(String::from("border")),
                 RenderRejection::legacy_gutter("legacy gutter"),
                 RenderRejection::other(String::from("other")),
             ]
             .map(local),
-            [true; 6],
+            [true; 7],
             "typed manga errors no longer identify every local validation rejection"
         );
     }
@@ -2040,6 +2182,7 @@ mod tests {
             [
                 RenderRejection::color("color"),
                 RenderRejection::topology("topology"),
+                RenderRejection::ocr(String::from("ocr")),
                 RenderRejection::recall_text(String::from("recall text")),
                 RenderRejection::border(String::from("border")),
                 RenderRejection::legacy_gutter("legacy gutter"),
@@ -2049,6 +2192,7 @@ mod tests {
             [
                 "color",
                 "topology",
+                "ocr",
                 "recall_text",
                 "border",
                 "legacy_gutter",

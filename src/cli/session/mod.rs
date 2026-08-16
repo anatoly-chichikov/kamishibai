@@ -323,7 +323,7 @@ pub(in crate::cli::session) fn drop_corrected_artifacts(
 
 /// Delete only missing stages and their dependants, retaining every valid
 /// upstream or independent artifact for a failed-card retry.
-pub(in crate::cli::session) fn drop_incomplete_artifacts(
+pub(in crate::cli) fn drop_incomplete_artifacts(
     root: &Path,
     pair: &LanguagePair,
     term: &str,

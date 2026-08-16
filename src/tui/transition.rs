@@ -3,6 +3,7 @@ use crate::languages::catalog;
 use super::app::App;
 use super::disclosure::{DisclosureControls, DisclosureIntent};
 use super::event::AppEvent;
+use super::picker::{LanguageChoice, PickerCursor, PickerSection, learning_target};
 use super::screen::{ModalKind, Screen, WelcomeFocus, WelcomeStage};
 use super::sentence_editor::{BatchSettingsRow, LabelEditorRow};
 
@@ -12,7 +13,10 @@ pub enum Side {
     None,
     RunUnderstanding,
     RunBulkCorrection(String),
-    PersistMyLanguageAndRunUnderstanding(String),
+    /// Adopt one language pair and re-read the words under it. The shell saves
+    /// the known half to preferences, rotates the session identity when the
+    /// learning half moved, and reruns the understanding pass.
+    AdoptLanguagesAndRunUnderstanding(LanguageChoice),
     /// Ask the shell to arm or confirm clearing the nonempty words input.
     ClearWords,
     StartGeneration,
@@ -20,7 +24,9 @@ pub enum Side {
     StopGeneration,
     RegenerateFailed,
     RegenerateCards,
-    PersistMyLanguage(String),
+    /// Adopt one language pair before any words were read. Only the known half
+    /// is persisted; the learning half stays a session-local pin.
+    AdoptLanguages(LanguageChoice),
     /// Welcome key step: probe Gemini with the entered key. The shell runs the
     /// check off-thread, persists language + key only on success, then moves to
     /// `Your Words`; a rejected key stays on Welcome with an inline notice.
@@ -38,7 +44,15 @@ pub enum Side {
 /// next app plus an optional side effect. No IO, no Gemini calls.
 pub fn transit(app: App, event: AppEvent) -> (App, Side) {
     if app.error().is_some() && event != AppEvent::Redraw {
-        return (app.error_cleared(), Side::None);
+        // A shown error is a notice, not a question: any key dismisses it. But
+        // the one key the user reaches for after a failed batch is the one that
+        // retries it, and spending that press on the dismissal makes a dead
+        // batch feel unrecoverable. Generate dismisses and retries in one press.
+        let cleared = app.error_cleared();
+        if event != AppEvent::Generate {
+            return (cleared, Side::None);
+        }
+        return transit(cleared, event);
     }
     if app.busy().is_some() && event != AppEvent::Redraw {
         return (app, Side::None);
@@ -64,8 +78,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourWords, None, AppEvent::CursorRight) => (app.cursor_right(), Side::None),
         (Screen::YourWords, None, AppEvent::NavPrev) => (app.cursor_up(), Side::None),
         (Screen::YourWords, None, AppEvent::NavNext) => (app.cursor_down(), Side::None),
-        (Screen::YourWords, None, AppEvent::OpenLanguagePicker) => {
-            (open_language_picker(app), Side::None)
+        (Screen::YourWords, None, AppEvent::OpenLanguagePicker(section)) => {
+            (open_language_picker(app, section), Side::None)
         }
         (Screen::YourWords, None, AppEvent::Cancel) if !app.blob().is_empty() => {
             (app, Side::ClearWords)
@@ -237,8 +251,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::WhatIUnderstood, None, AppEvent::NavPrev) => (app.selected_previous(), Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::NavNext) => (app.selected_next(), Side::None),
-        (Screen::WhatIUnderstood, None, AppEvent::OpenLanguagePicker) => {
-            (open_language_picker(app), Side::None)
+        (Screen::WhatIUnderstood, None, AppEvent::OpenLanguagePicker(section)) => {
+            (open_language_picker(app, section), Side::None)
         }
         (
             Screen::WhatIUnderstood,
@@ -263,25 +277,28 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::KeyBackspace) => {
             (app.rubbed(), Side::None)
         }
-        (_, Some(ModalKind::PickMyLanguage), AppEvent::LanguagePickerPrev) => {
+        (_, Some(ModalKind::PickLanguages), AppEvent::LanguagePickerPrev) => {
             (app.picker_cursor_advanced(-1), Side::None)
         }
-        (_, Some(ModalKind::PickMyLanguage), AppEvent::LanguagePickerNext) => {
+        (_, Some(ModalKind::PickLanguages), AppEvent::LanguagePickerNext) => {
             (app.picker_cursor_advanced(1), Side::None)
         }
-        (_, Some(ModalKind::PickMyLanguage), AppEvent::SetMyLanguage(code))
+        (_, Some(ModalKind::PickLanguages), AppEvent::LanguagePickerFocus(section)) => {
+            (app.picker_facing(section), Side::None)
+        }
+        (_, Some(ModalKind::PickLanguages), AppEvent::LanguagePickerPoint(section, index)) => {
+            (app.picker_chosen(section, index), Side::None)
+        }
+        (_, Some(ModalKind::PickLanguages), AppEvent::Cancel) => (app.close_modal(), Side::None),
+        (_, Some(ModalKind::PickLanguages), AppEvent::SetLanguages(choice))
             if can_pick_language(app.screen()) =>
         {
-            let screen = app.screen();
-            let next = app.close_modal().set_known(code.clone());
-            if screen == Screen::WhatIUnderstood && !next.candidates().is_empty() {
-                (next, Side::PersistMyLanguageAndRunUnderstanding(code))
-            } else {
-                (next, Side::PersistMyLanguage(code))
-            }
+            adopt_languages(app.close_modal(), choice)
         }
-        (_, Some(ModalKind::PickMyLanguage), AppEvent::Cancel) => (app.close_modal(), Side::None),
-        (_, Some(ModalKind::PickMyLanguage), _) => (app, Side::None),
+        (_, Some(ModalKind::PickLanguages), _) => (app, Side::None),
+        (Screen::WhatIUnderstood, None, AppEvent::SetLanguages(choice)) => {
+            adopt_languages(app, choice)
+        }
         (Screen::YourCards, None, AppEvent::Cancel) if app.sentence_editor().is_some() => {
             (app.sentence_editor_closed(), Side::None)
         }
@@ -421,10 +438,16 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
             let next = next_known(app.pair().known(), -1);
             (app.set_known(next), Side::None)
         }
+        (WelcomeStage::PickLanguage, AppEvent::WelcomeLanguageAt(index)) => {
+            match PickerSection::Known.code_at(index) {
+                Some(code) => (app.set_known(code), Side::None),
+                None => (app, Side::None),
+            }
+        }
         (WelcomeStage::PickLanguage, AppEvent::Submit)
         | (WelcomeStage::PickLanguage, AppEvent::KeyEnter) => {
-            let language = app.pair().known().to_string();
-            (app.welcome_advance(), Side::PersistMyLanguage(language))
+            let choice = LanguageChoice::new(app.pair().known().to_string(), learning_target(None));
+            (app.welcome_advance(), Side::AdoptLanguages(choice))
         }
         (WelcomeStage::EnterKey, AppEvent::Cancel) => (app.welcome_step_back(), Side::None),
         (WelcomeStage::EnterKey, AppEvent::CursorLeft) => (app.welcome_focus_prev(), Side::None),
@@ -463,7 +486,7 @@ fn welcome_submit(app: App) -> (App, Side) {
 }
 
 fn promote(app: &App, event: AppEvent) -> AppEvent {
-    if let Some(ModalKind::PickMyLanguage) = app.modal() {
+    if let Some(ModalKind::PickLanguages) = app.modal() {
         return promote_picker(app, event);
     }
     if app.modal().is_some() {
@@ -490,7 +513,7 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
         {
             AppEvent::WelcomeNextLanguage
         }
-        (Screen::Welcome, AppEvent::OpenLanguagePicker)
+        (Screen::Welcome, AppEvent::OpenLanguagePicker(_))
             if app.welcome().stage == WelcomeStage::PickLanguage =>
         {
             AppEvent::WelcomeNextLanguage
@@ -499,48 +522,73 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
     }
 }
 
-/// Reinterpret keys while the language picker modal is open: arrows cycle the
-/// chip selection, Enter confirms it, plain Esc still cancels through the
-/// generic modal dismissal arm.
+/// Reinterpret keys while the language pair modal is open.
+///
+/// The modal is two side-by-side vertical lists, so the axes follow the shape:
+/// `↑/↓` move inside the focused column, `←/→` name which column has focus,
+/// Enter confirms both at once, and plain Esc still cancels through the generic
+/// modal dismissal arm.
 fn promote_picker(app: &App, event: AppEvent) -> AppEvent {
     match event {
-        AppEvent::NavPrev | AppEvent::CursorLeft => AppEvent::LanguagePickerPrev,
-        AppEvent::NavNext | AppEvent::CursorRight => AppEvent::LanguagePickerNext,
-        AppEvent::Submit | AppEvent::KeyEnter => {
-            AppEvent::SetMyLanguage(picker_selected(app).to_string())
-        }
+        AppEvent::NavPrev => AppEvent::LanguagePickerPrev,
+        AppEvent::NavNext => AppEvent::LanguagePickerNext,
+        AppEvent::CursorLeft => AppEvent::LanguagePickerFocus(PickerSection::Known),
+        AppEvent::CursorRight => AppEvent::LanguagePickerFocus(PickerSection::Learning),
+        AppEvent::Submit | AppEvent::KeyEnter => AppEvent::SetLanguages(picker_selected(app)),
         other => other,
     }
 }
 
-/// Return the language code currently highlighted in the picker modal.
-///
-/// Selection is stored on the app as the modal's persistent index. If the
-/// app has no recorded picker index yet, fall back to the active support
-/// language so the modal opens with the current pick highlighted.
-pub fn picker_selected(app: &App) -> &'static str {
-    let codes = catalog().codes();
-    let cursor = app.picker_cursor();
-    codes[cursor.min(codes.len() - 1)]
-}
-
-/// Compute the picker cursor for a given language code. Used when opening the
-/// modal so the active language is pre-selected.
-pub fn picker_cursor_for(code: &str) -> usize {
-    let codes = catalog().codes();
-    codes
-        .iter()
-        .position(|item| item.eq_ignore_ascii_case(code))
-        .unwrap_or(0)
+/// Return the pair currently highlighted across both halves of the modal.
+pub fn picker_selected(app: &App) -> LanguageChoice {
+    app.picker_cursor().choice()
 }
 
 fn can_pick_language(screen: Screen) -> bool {
     matches!(screen, Screen::YourWords | Screen::WhatIUnderstood)
 }
 
-fn open_language_picker(app: App) -> App {
-    let cursor = picker_cursor_for(app.pair().known());
-    app.with_modal(ModalKind::PickMyLanguage)
+/// Adopt one confirmed pair. A choice that changes nothing is swallowed, so
+/// confirming the modal by reflex never costs a provider call.
+fn adopt_languages(app: App, choice: LanguageChoice) -> (App, Side) {
+    if settled(&app, &choice) {
+        return (app, Side::None);
+    }
+    let rereads = rereads(&app, &choice);
+    let next = app.languages_adopted(&choice);
+    if rereads {
+        return (next, Side::AdoptLanguagesAndRunUnderstanding(choice));
+    }
+    (next, Side::AdoptLanguages(choice))
+}
+
+/// Return whether the choice already describes the current state.
+fn settled(app: &App, choice: &LanguageChoice) -> bool {
+    app.pair().known().eq_ignore_ascii_case(choice.known())
+        && app.learning_target() == choice.learning()
+}
+
+/// Return whether the words on screen have to be read again.
+///
+/// Pinning the language already showing costs nothing to re-read — the
+/// candidates in view were understood as exactly that language. Dropping a pin
+/// does rerun: `auto` means "I was wrong, decide for me".
+fn rereads(app: &App, choice: &LanguageChoice) -> bool {
+    if app.screen() != Screen::WhatIUnderstood || app.candidates().is_empty() {
+        return false;
+    }
+    if !app.pair().known().eq_ignore_ascii_case(choice.known()) {
+        return true;
+    }
+    match choice.pinned() {
+        None => app.learning_pin().is_some(),
+        Some(code) => app.learning_pending() || !app.pair().learning().eq_ignore_ascii_case(code),
+    }
+}
+
+fn open_language_picker(app: App, section: PickerSection) -> App {
+    let cursor = PickerCursor::opening(app.pair().known(), app.learning_pin(), section);
+    app.with_modal(ModalKind::PickLanguages)
         .with_picker_cursor(cursor)
 }
 
@@ -548,7 +596,7 @@ fn next_known(current: &str, direction: i32) -> String {
     let codes = catalog().codes();
     let mut position: i32 = 0;
     for (index, code) in codes.iter().enumerate() {
-        if *code == current {
+        if code.eq_ignore_ascii_case(current) {
             position = index as i32;
             break;
         }
@@ -581,7 +629,10 @@ mod tests {
             (next.welcome().stage, side),
             (
                 WelcomeStage::EnterKey,
-                Side::PersistMyLanguage(String::from("ru")),
+                Side::AdoptLanguages(LanguageChoice::new(
+                    "ru".to_string(),
+                    crate::application::LearningTarget::Detect,
+                )),
             ),
             "confirming the language must advance to the key step and persist that choice"
         );

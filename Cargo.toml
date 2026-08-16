@@ -1,6 +1,6 @@
 [package]
 name = "kamishibai"
-version = "1.7.2"
+version = "1.8.0"
 edition = "2024"
 rust-version = "1.95.0"
 description = "Turn a list of words into an illustrated Anki deck with native-speaker audio"
@@ -17,7 +17,7 @@ crossterm = "=0.29.0"
 dirs = "=6.0.0"
 image = "=0.25.10"
 md5 = "=0.8.0"
-ocr-rs = "=2.2.2"
+ocr-rs = "=2.4.1"
 printpdf = { version = "=0.9.1", default-features = false, features = ["images", "jpeg", "text_layout"] }
 rand = "=0.10.1"
 ratatui = "=0.30.0"
@@ -26,12 +26,17 @@ reqwest = { version = "=0.13.2", default-features = false, features = ["blocking
 rustix = { version = "=1.1.4", features = ["stdio", "process", "fs"] }
 rusqlite = { version = "=0.39.0", default-features = false, features = ["bundled"] }
 rust-fontconfig = { version = "=2.0.0", default-features = false, features = ["std", "parsing"] }
+rustybuzz = "=0.20.1"
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
 sha2 = "=0.11.0"
 tempfile = "=3.27.0"
 thiserror = "=2.0.18"
 time = "=0.3.47"
+unicode-bidi = "=0.3.18"
+unicode-script = "=0.5.8"
+unicode-segmentation = "=1.13.2"
+unicode-width = "=0.2.2"
 zip = "=8.5.1"
 
 [dev-dependencies]

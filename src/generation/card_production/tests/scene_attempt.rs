@@ -87,3 +87,38 @@ fn newly_committed_scene_is_rendered_before_old_rejections_recompose_again() {
         "a crash-safe committed scene was skipped before its first image attempt"
     );
 }
+
+#[test]
+fn cached_scene_does_not_move_recomposition_cursor_backwards() {
+    let temporary = TempDir::new().expect("tempdir must be created");
+    let cache = Cache::new("visual", temporary.path());
+    fs::write(
+        cache.filepath(SCENE_FILE).expect("scene path must resolve"),
+        serde_json::to_vec(&serde_json::json!({
+            "manga_panel": {"meta": {"layout_selection": {"scene_attempt_index": 0}}}
+        }))
+        .expect("scene provenance must encode"),
+    )
+    .expect("scene provenance must be written");
+    fs::write(
+        cache
+            .filepath(SCENE_ATTEMPT_FILE)
+            .expect("cursor path must resolve"),
+        serde_json::to_vec(&serde_json::json!({"scene_attempt_index": 4}))
+            .expect("cursor must encode"),
+    )
+    .expect("recomposition cursor must be seeded");
+    let cached = reserve_scene_attempt(&cache, Artifact::Scene, 0, false)
+        .expect("cached scene must not rewind the durable cursor");
+    let next = reserve_scene_attempt(&cache, Artifact::Picture, 0, true)
+        .expect("next recomposition must advance the durable cursor");
+    assert_eq!(
+        (
+            cached,
+            next,
+            load_scene_attempt(&cache).expect("cursor must decode")
+        ),
+        (0, 5, Some(5)),
+        "cached scene rewound or skipped the durable recomposition cursor"
+    );
+}

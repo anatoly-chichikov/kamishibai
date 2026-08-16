@@ -13,7 +13,7 @@ All future work references this map instead of re-deriving transitions.
 
 | Id                | Kind                                                                              | Reference shot                  |
 | ----------------- | --------------------------------------------------------------------------------- | ------------------------------- |
-| `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `00-welcome.png` (no env key) · `00b-welcome-env.png` (`GEMINI_API_KEY` set) |
+| `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `32-welcome-language-grid.png` (language step) · `00-welcome.png` (key step, no env key) · `00b-welcome-env.png` (`GEMINI_API_KEY` set) |
 | `YourWords`       | fullscreen                                                                        | `01-your-words.png`             |
 | `WhatIUnderstood` | fullscreen                                                                        | `02-what-i-understood.png` · `24-esc-review-back.png` (current Esc footer) |
 | Batch generation guidance | compact tags and inline editor above the reviewed candidates on `WhatIUnderstood` | `28-batch-sentence-settings.png` · `29-batch-sentence-settings-narrow.png` |
@@ -23,12 +23,12 @@ All future work references this map instead of re-deriving transitions.
 | Esc lifecycle     | synthetic armed clear, review back, armed stop, draining stop, and partial-publish states | `23-esc-words-clear.png` through `27-generation-partial.png` |
 | Sentence labels   | collapsed three-tag summary starts inline on `audio` and wraps onto `scene` / `picture`; expanded question-led editor sits below every artifact | `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png` |
 | `Done`            | fullscreen                                                                        | `08-done.png`                   |
-| `PickMyLanguage`  | modal over `Welcome` / `YourWords` / `WhatIUnderstood`, opened with `Ctrl+L`      | header chip (no standalone shot) |
+| `PickLanguages`   | two scrolling lists over `YourWords` / `WhatIUnderstood`, opened with `Ctrl+L` or either header half | `31-language-pair-modal.png` |
 | Busy              | one universal blocking overlay on any screen                                      | `01b-busy.png`                  |
 
 Source of truth for these names (`src/tui/screen.rs`, `src/tui/app.rs`):
 `Screen` = {`Welcome`, `YourWords`, `WhatIUnderstood`, `YourCards`, `Done`};
-`ModalKind` = {`ChangeSomething`, `PickMyLanguage`};
+`ModalKind` = {`ChangeSomething`, `PickLanguages`};
 `BusyKind` = {`Understanding`, `BulkCorrection`, `CheckingKey`,
 `PublishingDeck`, `PublishingReport`}. There is no separate `BulkCorrectionBusy` screen —
 bulk correction is just `BusyKind::BulkCorrection` drawn by the universal busy overlay.
@@ -37,7 +37,7 @@ Sentence-label editing, retry, failure banner and recovery are inline within
 `YourCards` — not separate screens or modals.
 
 The synthetic PNGs (`00-welcome.png`, `00b-welcome-env.png`,
-`03-change-something-modal.png`, `06-your-cards-retrying.png`,
+`32-welcome-language-grid.png`, `03-change-something-modal.png`, `06-your-cards-retrying.png`,
 `06b-your-cards-retry-stress.png`, `07-your-cards-couldnt-finish.png`, the Esc lifecycle set from
 `23-esc-words-clear.png` through `27-generation-partial.png`, the batch sentence-settings
 pair (`28-batch-sentence-settings.png` and `29-batch-sentence-settings-narrow.png`), and the S1–S12 sentence-label set from
@@ -75,8 +75,14 @@ owns keyboard input — every non-redraw key is swallowed until the background
 request finishes (`transit` short-circuits when `app.busy()` is set). An error
 overlay behaves the same way but clears on any key.
 
-`Welcome` is the explicit setup gate, with two stages. **Pick language**: `←/→`
-(or `Ctrl+L`) cycle `my language`, `Enter` confirms it and advances. **Enter key**:
+`Welcome` is the explicit setup gate, with two stages. **Pick language**: every
+supported language is laid out as a grid of the picker's own `CODE  Endonym`
+rows, as many side by side as the terminal affords and one language per line on
+a screen that affords none; a screen too short for the names falls back to the
+bare codes. `←/→` (or `Ctrl+L`) step one language either way, `↑/↓` move a whole
+line, a click picks the language under the pointer, and `Enter` confirms it and
+advances. The answered step then collapses to the one language it was answered
+with, leaving the key form its rows. **Enter key**:
 type or paste a Gemini key; `←/→` move focus between the submit button and a
 `load from env` action (the env action only joins the cycle when `GEMINI_API_KEY`
 is set); `Enter` on a filled field runs a live validity check and only on success
@@ -90,14 +96,23 @@ steady-state fullscreen screen, reading `my → target` (e.g. `EN → FR`).
 
 | Screen            | What is shown                                                                                  |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
-| `Welcome`         | Unlocked setup language. `←/→` (or `Ctrl+L`) cycles `my language`; `Enter` confirms it.        |
-| `YourWords`       | Detected target (pending), persisted `my`. `Ctrl+L` opens the language picker.                 |
-| `WhatIUnderstood` | Confirmed target, current `my`. `Ctrl+L` opens the language picker (re-runs understanding).    |
+| `Welcome`         | Unlocked setup language, as a responsive grid. `←/→` (or `Ctrl+L`) step, `↑/↓` move one line, click picks; `Enter` confirms it. |
+| `YourWords`       | Detected target (pending), persisted `my`. `Ctrl+L` opens the pair picker.                     |
+| `WhatIUnderstood` | Confirmed target, current `my`. `Ctrl+L` opens the pair picker; a changed pair may re-run understanding. |
 | `YourCards`       | Frozen pair for the batch — read-only.                                                         |
 | `Done`            | Pair remains visible next to the batch summary.                                                |
 
-The only way to change `my language` mid-flow is the `Ctrl+L` picker modal
-(`PickMyLanguage`), available on `Welcome`, `YourWords`, and `WhatIUnderstood`.
+The only way to change either half mid-flow is the `Ctrl+L` pair picker modal
+(`PickLanguages`), available on `YourWords` and `WhatIUnderstood`. It draws the
+pair as two side-by-side vertical lists under one ruled heading row carrying the
+`→` that says which way the pair reads. Each row names a language by code and by
+the name its own speakers use; right-to-left scripts carry their English name
+because the terminal does no bidi reordering. One pinned row sits above both
+lists — `auto` on the learning side, blank opposite it — so both columns scroll
+exactly the catalog and the same language shares a row across the pair. `auto`
+hands the choice back to detection and never scrolls away. A column taller than
+the terminal scrolls, and its window is derived from the pick rather than stored,
+so the pick is always visible.
 There is no `[L]` flip key and no `[T]` target-cycle key — both were removed.
 
 `target language` is resolved before `WhatIUnderstood`. `my language` is read
@@ -287,7 +302,7 @@ together. There is no per-card modal and `R` has no `YourCards` action.
         │       └─ [Ctrl+G, ≥1 ok row] ──► allocate initial requests ──► YourCards
         ├─ [D] drop selected row ──► last row dropped returns to YourWords (blob cleared)
         ├─ [Esc, no inner layer] ──► YourWords (blob and selected senses preserved)
-        ├─ [Ctrl+L] ──► PickMyLanguage modal ──► re-runs understanding
+        ├─ [Ctrl+L] ──► PickLanguages modal ──► adopt pair; re-read only when required
         └─ [Ctrl+G, ≥1 ok row] ──► (StartGeneration) ──► YourCards
 
     YourCards
@@ -322,7 +337,7 @@ not a key the user presses.
 
 | State                       | Keys (footer leads with the bright primary)                                                                 |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `Welcome` · pick language   | `←/→` cycle `my language` · `Enter` next · `Ctrl+C` quit                                                     |
+| `Welcome` · pick language   | `←/→` step `my language` · `↑/↓` move one grid line · click picks · `Enter` next · `Ctrl+C` quit             |
 | `Welcome` · enter key       | type/`Cmd+V` paste key · `←/→` move focus (submit ↔ load-from-env, env only) · `Enter` submit · `Esc` back   |
 | `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `Ctrl+L` language · double `Esc` clears nonempty input |
 | `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav; `↑`/`k` above the first word opens generation guidance · `Enter`/`→` pick meanings · `D` drop row · `S` guidance alias · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
@@ -332,7 +347,7 @@ not a key the user presses.
 | `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` tune · `↑↓` nav (`Space` is an unadvertised alias) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
 | `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row · text editing under `one more thing` · `Esc` close (`Enter` inert) |
-| `PickMyLanguage`            | `←/→`/`↑↓` move · `Enter` confirm · `Esc` cancel                                                             |
+| `PickLanguages`             | `↑/↓` pick within a column · `←/→` focus the left / right column · wheel scrolls the column under the pointer · `Enter` confirm · `Esc` cancel |
 | `Done`                      | `Ctrl+G` regenerate failed (only when failures) · `[Esc] new cards` · twice within 1 s starts a clean batch · `Ctrl+C` quit |
 
 The words-clear, generation-stop, new-batch, and quit confirmations use
@@ -417,7 +432,7 @@ The screen state machine is the pure function `transit(app, event) -> (App, Side
 `Side` effect the shell runs outside the function (`RunUnderstanding`,
 `RunBulkCorrection`, `ClearWords`, `StartGeneration`, `StopGeneration`, `RegenerateCards`, `RegenerateFailed`,
 `StartPublish`, `ValidateKey`, `LoadEnvKey`,
-`PersistMyLanguage…`, `ExitApp`). Tests drive it with fabricated events to verify
+`AdoptLanguages…`, `ExitApp`). Tests drive it with fabricated events to verify
 the live path `YourWords → WhatIUnderstood → YourCards → published YourCards`
 without touching the network; `Done` is the final view when a published session
 is reopened. All time-bounded confirmations belong to the shell. A second eligible

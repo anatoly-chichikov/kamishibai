@@ -169,5 +169,26 @@ Sleep 800ms
 Screenshot "live/28-batch-sentence-settings.png"
 Sleep 250ms
 
+# index 28 — the pass reports languages the same words would equally have read as
+Type "28"
+Space
+Sleep 800ms
+Screenshot "live/30-plausible-alternates.png"
+Sleep 250ms
+
+# index 29 — the pair modal, opened on the learning half from the header chip
+Type "29"
+Space
+Sleep 800ms
+Screenshot "live/31-language-pair-modal.png"
+Sleep 250ms
+
+# index 30 — Welcome · the language step, laid out as a grid across the width
+Type "30"
+Space
+Sleep 800ms
+Screenshot "live/32-welcome-language-grid.png"
+Sleep 250ms
+
 Type "q"
 Sleep 250ms

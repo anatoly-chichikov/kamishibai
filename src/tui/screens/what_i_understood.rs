@@ -25,6 +25,8 @@ const HEADLINE: &str = "what i understood";
 const HINT: &str = "quick check before i build the cards";
 const SETTINGS_LABEL: &str = "generation guidance";
 const DEFAULT_GUIDANCE_LABEL: &str = "best fit";
+const ALTERNATES_LABEL: &str = "also plausible: ";
+const ALTERNATES_SEPARATOR: &str = "  ·  ";
 
 /// One clickable surface in the batch sentence-settings block.
 pub(crate) enum SentenceSettingsControl {
@@ -64,7 +66,7 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
         if !typed.is_empty() {
             let term_width = typed
                 .iter()
-                .map(|line| line.chars().count())
+                .map(|line| super::common::display_width(line))
                 .max()
                 .unwrap_or(12)
                 .max(12);
@@ -92,6 +94,7 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
             usize::from(width),
         ));
     }
+    lines.extend(alternates_line(app));
     lines.push(Line::from(""));
     let selected = if app.sentence_settings_editor().is_some() {
         usize::MAX
@@ -198,15 +201,64 @@ fn settings_summary_line(app: &App) -> Line<'static> {
     Line::from(spans)
 }
 
+/// Name the learning languages the pass judged equally plausible for this
+/// batch, each one a click away from re-reading the words as that language.
+///
+/// Rendered directly below the guidance summary — or below the guidance editor
+/// while that is open, so the editor stays glued to the row that opens it.
+fn alternates_line(app: &App) -> Option<Line<'static>> {
+    let codes = app.alternates();
+    if codes.is_empty() {
+        return None;
+    }
+    let mut spans = vec![Span::styled(ALTERNATES_LABEL, palette::dim2())];
+    for (index, code) in codes.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(ALTERNATES_SEPARATOR, palette::rule()));
+        }
+        spans.push(Span::styled(
+            code.to_uppercase(),
+            palette::dim().add_modifier(Modifier::UNDERLINED),
+        ));
+    }
+    Some(Line::from(spans))
+}
+
+/// Return the index of the alternate language covering one body-content cell.
+pub(crate) fn alternate_at(app: &App, width: usize, column: usize, row: usize) -> Option<usize> {
+    if app.candidates().is_empty() || app.alternates().is_empty() {
+        return None;
+    }
+    if row != editor_height(app, width).saturating_add(1) {
+        return None;
+    }
+    let mut start = super::common::display_width(ALTERNATES_LABEL);
+    for (index, code) in app.alternates().iter().enumerate() {
+        if index > 0 {
+            start = start.saturating_add(super::common::display_width(ALTERNATES_SEPARATOR));
+        }
+        let end = start.saturating_add(super::common::display_width(code));
+        if column >= start && column < end {
+            return Some(index);
+        }
+        start = end;
+    }
+    None
+}
+
+fn editor_height(app: &App, width: usize) -> usize {
+    app.sentence_settings_editor()
+        .map(|focused| {
+            super::sentence_labels::batch_editor_lines(app.sentence_settings(), focused, width)
+                .len()
+        })
+        .unwrap_or(0)
+}
+
 fn review_prefix_height(app: &App, width: usize) -> usize {
-    2usize.saturating_add(
-        app.sentence_settings_editor()
-            .map(|focused| {
-                super::sentence_labels::batch_editor_lines(app.sentence_settings(), focused, width)
-                    .len()
-            })
-            .unwrap_or(0),
-    )
+    2usize
+        .saturating_add(editor_height(app, width))
+        .saturating_add(usize::from(!app.alternates().is_empty()))
 }
 
 fn candidate_content_height(
@@ -338,7 +390,7 @@ fn candidate_line<'a>(
         Gloss::Sentence(text) => ("  —  ", text),
         Gloss::Heading(text) => ("  ", text),
     };
-    let gloss_start = 4 + term_width + separator.chars().count();
+    let gloss_start = 4 + term_width + super::common::display_width(separator);
     let available = (width as usize).saturating_sub(gloss_start).max(1);
     let chunks = super::common::wrap_words(gloss.as_str(), available, available);
     let first = chunks.first().cloned().unwrap_or_default();
@@ -606,14 +658,14 @@ fn marked_lines<'a>(
     pad_style: Style,
     width: u16,
 ) -> Vec<Line<'a>> {
-    let start = indent + marker.chars().count();
+    let start = indent + super::common::display_width(marker);
     let available = (width as usize).saturating_sub(start).max(1);
     let chunks = super::common::wrap_words(text, available, available);
     let mut lines = Vec::with_capacity(chunks.len());
     for (index, chunk) in chunks.into_iter().enumerate() {
         let row_marker = if index == 0 { marker } else { "" };
         let row_indent = if index == 0 { indent } else { start };
-        let row_start = row_indent + row_marker.chars().count();
+        let row_start = row_indent + super::common::display_width(row_marker);
         let used = row_start + super::common::display_width(chunk.as_str());
         let pad = (width as usize).saturating_sub(used);
         let mut spans = vec![
@@ -633,7 +685,7 @@ fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
     let indent = 4 + term_width + 5;
     let marker = "    ";
     let text = "+ add more";
-    let used = indent + marker.chars().count() + text.chars().count();
+    let used = indent + super::common::display_width(marker) + super::common::display_width(text);
     let style = if focused {
         palette::highlight().add_modifier(Modifier::BOLD)
     } else {
@@ -678,9 +730,9 @@ fn candidate_label_width(candidates: &[WordCandidate], minimum: usize) -> usize 
 
 fn candidate_label_len(candidate: &WordCandidate) -> usize {
     let indicator = inline_indicator(candidate, None)
-        .map(|value| 1 + value.chars().count())
+        .map(|value| 1 + super::common::display_width(value.as_str()))
         .unwrap_or(0);
-    candidate.term().chars().count() + indicator
+    super::common::display_width(candidate.term()) + indicator
 }
 
 fn footer(app: &App, width: u16) -> Paragraph<'static> {
@@ -735,6 +787,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         hints.push(super::common::back_hint());
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
     }
     if app.sentence_settings_editor().is_none() {
         hints.push(super::common::quit_hint(app.quit_pending()));

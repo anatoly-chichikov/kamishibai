@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.7.2
+Release: 1.8.0
 
 Overview
 
@@ -21,7 +21,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.7.2/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.8.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -545,21 +545,31 @@ Step status is one of `ok`, `cache`, `retry`, or `fail`. Artifact is one of
 `meta`, `sound`, `scene`, or `picture`.
 
 Every artifact gets one plain try plus `retries` (3) retries on top of it, so at
-most four provider calls per artifact. The first try is never numbered: `retry`
-counts the retry the reported failure has just triggered, from `1` to `retries`.
-A `fail` step means all retries were spent and carries `retries` without
-`retry`.
+most four artifact attempts. One picture attempt may contain the image request,
+its literal-writing gate (OCR or Gemini), the full-frame recall request that
+independently checks answer leakage, scene fidelity, and literal policy, a final
+card-free dedicated scene-fidelity request, a scale-aware literal-writing zoom
+request, and an adaptive full-frame
+judge-recovery call when structured output reaches its token ceiling.
+The first try is never numbered: `retry` counts the retry the reported failure
+has just triggered, from `1` to `retries`. A `fail` step means all retries were
+spent and carries `retries` without `retry`.
 
 `category` is the renderer's verdict slug for a picture the model did draw and a
-local gate rejected — `border`, `topology`, `color`, `recall_text`,
-`legacy_gutter`, `other` — or `error` when the attempt failed before any picture
-existed (transport, cache lease, exhausted request budget). Every rejected
-picture stays on disk under
+local gate rejected — `border`, `topology`, `color`, `ocr`, `recall_text`,
+`legacy_gutter`, `other` — or `error` when infrastructure failed rather than a
+gate rejecting the picture (transport, cache lease, exhausted request budget,
+OCR failure, or Gemini judge failure). Every rejected picture stays on disk under
 `cards/<known>-<learning>/<key>/visual/<revision>/attempts/attempt-NNNN.jpg`
 next to its `attempt-NNNN.json` verdict, the `attempt-NNNN.scene.json` it was
-drawn from, the `attempt-NNNN.prompt.txt` compiled for it, and the
-`attempt-NNNN.recall.json` review — so a rejected frame can be read against its
-own scene after the run. A scene step that fails after the model answered
+drawn from, the `attempt-NNNN.prompt.txt` compiled for it, the
+`attempt-NNNN.text.json` literal-writing verdict when that gate ran, and the
+`attempt-NNNN.recall.json` merged review (independent answer-leakage,
+scene-fidelity, and literal-policy verdicts plus explicit proof of dedicated
+fidelity and zoom inspection) only when the picture advanced to those later
+gates. A rejected frame can therefore be read against its own scene
+and every gate that actually reviewed it after the run. A scene step
+that fails after the model answered
 archives that answer in the same folder as `scene-NNNN.json` (when the reply
 parses as JSON and failed later validation) or `scene-NNNN.txt` (when it never
 was JSON), so a rejected scene is readable too. Nothing in the archive is pruned
@@ -590,7 +600,16 @@ use the environment instead of saving a key.
 
 OCR models
 
-The first OCR-backed run downloads PP-OCRv5 model files into the cache.
+Every structurally valid generated picture next passes the language profile's
+literal-writing gate. Most languages use a typed PP-OCRv5 bundle; the first run
+for one of those languages downloads its model files into the cache. `HE` and
+`VI` bypass OCR entirely and use the structured Gemini Flash vision text judge
+because no usable PP-OCRv5 bundle exists for those profiles. The separate
+full-frame recall judge still runs afterward for every language and checks both
+semantic answer leakage and whether required scene subjects, anchors, and
+relations survived rendering. A clean full-frame verdict then reaches the
+card-free dedicated Gemini Flash scene-fidelity judge; only a clean dedicated
+verdict reaches the final enlarged-crop literal-writing judge.
 
 Languages
 
@@ -600,11 +619,22 @@ Languages
 - `JA`: Japanese
 - `FR`: French
 - `DE`: German
+- `KO`: Korean
 - `RU`: Russian
 - `IT`: Italian
 - `PT`: Portuguese
+- `HI`: Hindi
+- `AR`: Arabic
+- `TR`: Turkish
+- `PL`: Polish
+- `UK`: Ukrainian
+- `ID`: Indonesian
+- `VI`: Vietnamese
+- `TH`: Thai
 - `EL`: Greek
+- `HE`: Hebrew
 - `NL`: Dutch
+- `CS`: Czech
 
 Input schema for `new --build`
 
@@ -697,10 +727,11 @@ Cache layout:
 artifact files in the current visual-policy revision and ignores older visual
 directories. Deleting a card folder forces that card to regenerate on the next
 `generate`. The revision hashes the embedded feature and scene-composer
-prompts; the composer schema; both layout/device registries; the manga
-template; and a manual policy version that changes when model
-configuration, local validation, or renderer acceptance changes independently
-of those assets.
+prompts; the composer schema; the literal-text, full-recall, dedicated-fidelity,
+and scale-aware literal-zoom judge prompt/schema pairs; the all-language recall examples; both
+layout/device registries; the manga template; and a manual policy version that
+changes when model configuration, local validation, or renderer acceptance
+changes independently of those assets.
 
 Script example
 

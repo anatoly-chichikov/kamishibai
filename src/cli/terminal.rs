@@ -30,8 +30,8 @@ use crate::session::{CardDraft, LanguagePair};
 use crate::tui::{
     App, AppEvent, KeySource, ModalKind, MousePointer, Screen, Side, WelcomeFocus, WelcomeStage,
     draw, language_chip_at, link_at, mouse_pointer_at, picker_geometry, reset_mouse_pointer,
-    scroll_body_width, scroll_viewport, sentence_label_event_at, sentence_settings_event_at,
-    to_app, welcome_control_at, write_mouse_pointer,
+    review_event_at, scroll_body_width, scroll_viewport, sentence_label_event_at, to_app,
+    welcome_control_at, welcome_language_at, welcome_language_step, write_mouse_pointer,
 };
 
 const POINTER_REFRESH: Duration = Duration::from_millis(50);
@@ -226,6 +226,7 @@ where
                     }
                     continue;
                 };
+                let event = welcome_language_arrow(shell.app(), rect, &event).unwrap_or(event);
                 if matches!(event, AppEvent::Quit) {
                     shell.disarm_new_batch();
                     shell.disarm_destructive_escape();
@@ -279,35 +280,57 @@ where
                     dirty |= shell.disarm_destructive_escape();
                     mouse_position = Some((mouse.column, mouse.row));
                     write_pointer_at(terminal, shell.app(), rect, mouse_position);
-                    let (viewport, body_width) = scroll_frame(shell.app(), rect);
-                    let delta = if matches!(mouse.kind, MouseEventKind::ScrollUp) {
-                        -1
+                    let up = matches!(mouse.kind, MouseEventKind::ScrollUp);
+                    if shell.app().modal().is_some() {
+                        // An overlay owns the wheel; scrolling the screen
+                        // underneath it would move something the user cannot see.
+                        if let Some(event) = picker_scroll(shell.app(), rect, mouse.column, up) {
+                            let side = shell.handle(event)?;
+                            if side == Side::ExitApp {
+                                return Ok(());
+                            }
+                            dirty = true;
+                            dirty |= shell.tick()?;
+                        }
                     } else {
-                        1
-                    };
-                    dirty |= shell.scroll(delta, viewport, body_width);
+                        let (viewport, body_width) = scroll_frame(shell.app(), rect);
+                        let delta = if up { -1 } else { 1 };
+                        dirty |= shell.scroll(delta, viewport, body_width);
+                    }
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
                     dirty |= shell.disarm_new_batch();
                     dirty |= shell.disarm_destructive_escape();
                     mouse_position = Some((mouse.column, mouse.row));
                     write_pointer_at(terminal, shell.app(), rect, mouse_position);
-                    if shell.app().modal() == Some(ModalKind::PickMyLanguage) {
-                        if let Some(index) = picker_geometry::chip_at(rect, mouse.column, mouse.row)
-                        {
-                            let codes = crate::languages::catalog().codes();
-                            if let Some(code) = codes.get(index) {
-                                let event = AppEvent::SetMyLanguage(String::from(*code));
-                                let side = shell.handle(event)?;
-                                if side == Side::ExitApp {
-                                    return Ok(());
-                                }
-                                dirty = true;
-                                dirty |= shell.tick()?;
+                    if shell.app().modal() == Some(ModalKind::PickLanguages) {
+                        if let Some((section, index)) = picker_geometry::row_at(
+                            rect,
+                            shell.app().picker_cursor(),
+                            mouse.column,
+                            mouse.row,
+                        ) {
+                            let event = AppEvent::LanguagePickerPoint(section, index);
+                            let side = shell.handle(event)?;
+                            if side == Side::ExitApp {
+                                return Ok(());
                             }
+                            dirty = true;
+                            dirty |= shell.tick()?;
                         }
-                    } else if language_chip_at(shell.app(), rect, mouse.column, mouse.row) {
-                        let side = shell.handle(AppEvent::OpenLanguagePicker)?;
+                    } else if let Some(section) =
+                        language_chip_at(shell.app(), rect, mouse.column, mouse.row)
+                    {
+                        let side = shell.handle(AppEvent::OpenLanguagePicker(section))?;
+                        if side == Side::ExitApp {
+                            return Ok(());
+                        }
+                        dirty = true;
+                        dirty |= shell.tick()?;
+                    } else if let Some(index) =
+                        welcome_language_at(shell.app(), rect, mouse.column, mouse.row)
+                    {
+                        let side = shell.handle(AppEvent::WelcomeLanguageAt(index))?;
                         if side == Side::ExitApp {
                             return Ok(());
                         }
@@ -328,7 +351,7 @@ where
                         dirty = true;
                         dirty |= shell.tick()?;
                     } else if let Some(event) =
-                        sentence_settings_event_at(shell.app(), rect, mouse.column, mouse.row)
+                        review_event_at(shell.app(), rect, mouse.column, mouse.row)
                     {
                         let side = shell.handle(event)?;
                         if side == Side::ExitApp {
@@ -378,6 +401,41 @@ where
         width: area.width,
         height: area.height,
     })
+}
+
+/// Turn a vertical arrow on the Welcome language step into a grid move.
+///
+/// A grid answers `↑` and `↓` with the language one line away, which depends on
+/// how many the rendered width packs side by side; everything else, including
+/// `←` and `→`, keeps the meaning it already has.
+fn welcome_language_arrow(app: &App, rect: Rect, event: &AppEvent) -> Option<AppEvent> {
+    let rows = match event {
+        AppEvent::NavPrev => -1,
+        AppEvent::NavNext => 1,
+        _ => return None,
+    };
+    welcome_language_step(app, rect, rows)
+}
+
+/// Turn a wheel tick over the open language pair modal into a cursor move.
+///
+/// The column under the pointer takes the tick, falling back to the focused
+/// one when the pointer is elsewhere. Moving the cursor rather than a separate
+/// offset is what keeps the modal's visible window derived from the pick alone.
+fn picker_scroll(app: &App, rect: Rect, column: u16, up: bool) -> Option<AppEvent> {
+    if app.modal() != Some(ModalKind::PickLanguages) {
+        return None;
+    }
+    let cursor = app.picker_cursor();
+    let section = picker_geometry::column_at(rect, column, cursor.section());
+    let total = section.chips();
+    let current = cursor.index(section);
+    let next = if up {
+        (current + total - 1) % total
+    } else {
+        (current + 1) % total
+    };
+    Some(AppEvent::LanguagePickerPoint(section, next))
 }
 
 fn scroll_frame(app: &App, rect: Rect) -> (u16, u16) {

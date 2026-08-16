@@ -10,12 +10,10 @@ use std::io::Write;
 
 use ratatui::layout::Rect;
 
-use crate::languages::catalog;
-
 use super::app::App;
 use super::links::{
-    language_chip_at, link_at, sentence_label_event_at, sentence_settings_event_at,
-    welcome_control_at,
+    language_chip_at, link_at, review_event_at, sentence_label_event_at, welcome_control_at,
+    welcome_language_at,
 };
 use super::screen::ModalKind;
 use super::screens::modals::picker_geometry;
@@ -81,14 +79,13 @@ pub fn reset_mouse_pointer<W: Write>(out: &mut W) {
 }
 
 fn clickable_at(app: &App, terminal: Rect, column: u16, row: u16) -> bool {
-    if app.modal() == Some(ModalKind::PickMyLanguage) {
-        return picker_geometry::chip_at(terminal, column, row)
-            .map(|index| index < catalog().codes().len())
-            .unwrap_or(false);
+    if app.modal() == Some(ModalKind::PickLanguages) {
+        return picker_geometry::row_at(terminal, app.picker_cursor(), column, row).is_some();
     }
-    language_chip_at(app, terminal, column, row)
+    language_chip_at(app, terminal, column, row).is_some()
         || welcome_control_at(app, terminal, column, row).is_some()
-        || sentence_settings_event_at(app, terminal, column, row).is_some()
+        || welcome_language_at(app, terminal, column, row).is_some()
+        || review_event_at(app, terminal, column, row).is_some()
         || sentence_label_event_at(app, terminal, column, row).is_some()
         || link_at(app, terminal, column, row).is_some()
 }

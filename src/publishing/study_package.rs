@@ -91,7 +91,16 @@ where
             bail!("no completed cards to publish");
         }
         let decknaming = naming(None, entries.as_slice());
-        let model = CardModel::new().model();
+        let models = entries
+            .iter()
+            .map(|entry| {
+                CardModel::for_languages(entry.source.lang.as_str(), entry.target.lang.as_str())
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if !models.iter().all(|candidate| candidate == &models[0]) {
+            bail!("completed cards mix incompatible text directions");
+        }
+        let model = models[0].model();
         let mut container = VocabularyDeck::new(
             StableId::new(decknaming.name.as_str()).value(),
             decknaming.name.as_str(),

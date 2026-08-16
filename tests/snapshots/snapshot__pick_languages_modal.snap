@@ -1,0 +1,44 @@
+---
+source: tests/snapshot.rs
+expression: "render_sized(&opened_picker(), 96, 40)"
+---
+                                                                                                
+     what i understood   quick check before i build the cards                         RU → …    
+                                                                                                
+    understanding your words…                                                                   
+                                                                                                
+             ┌─ languages ───────────────────────────────────────────────────────┐              
+             │                                                                   │              
+             │  your language             →  what you're learning                │              
+             │  ──────────────────────       ───────────────────────────         │              
+             │                               auto  detect from the words         │              
+             │  EN    English                EN    English                       │              
+             │  ZH    中 文                    ZH    中 文                           │              
+             │  ES    Español                ES    Español                       │              
+             │  JA    日 本 語                  JA    日 本 語                         │              
+             │  FR    Français               FR    Français                      │              
+             │  DE    Deutsch                DE    Deutsch                       │              
+             │  KO    한 국 어                  KO    한 국 어                         │              
+             │  RU    Русский                RU    Русский                       │              
+             │  IT    Italiano               IT    Italiano                      │              
+             │  PT    Português              PT    Português                     │              
+             │  HI    Hindi                  HI    Hindi                         │              
+             │  AR    Arabic                 AR    Arabic                        │              
+             │  TR    Türkçe                 TR    Türkçe                        │              
+             │  PL    Polski                 PL    Polski                        │              
+             │  UK    Українська             UK    Українська                    │              
+             │  ID    Bahasa Indonesia       ID    Bahasa Indonesia              │              
+             │  VI    Tiếng Việt             VI    Tiếng Việt                    │              
+             │  TH    ไทย                    TH    ไทย                           │              
+             │  EL    Ελληνικά               EL    Ελληνικά                      │              
+             │  HE    Hebrew                 HE    Hebrew                        │              
+             │  NL    Nederlands             NL    Nederlands                    │              
+             │  CS    Čeština                CS    Čeština                       │              
+             │                                                                   │              
+             │  [↑ ↓] pick  [← →] column  [Enter] confirm  [Esc] cancel          │              
+             └───────────────────────────────────────────────────────────────────┘              
+                                                                                                
+                                                                                                
+                                                      ai may be wrong, please verify results    
+                                                                                                
+    step 2/3  nothing to make          [Enter/→] toggle  [Esc] back  [D] drop  [Ctrl+C] quit

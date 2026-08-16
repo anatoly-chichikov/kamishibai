@@ -605,7 +605,7 @@ impl ImageSource for CountingImageSource {
 struct RejectingRecall;
 
 impl RecallJudge for RejectingRecall {
-    fn review(&self, _image: &[u8]) -> Result<RecallReview> {
+    fn review(&self, _scene: &Value, _image: &[u8]) -> Result<RecallReview> {
         Ok(serde_json::from_value(serde_json::json!({
             "decision": "REJECT",
             "evidence": [{
@@ -622,10 +622,12 @@ impl RecallJudge for RejectingRecall {
 struct AcceptingRecall;
 
 impl RecallJudge for AcceptingRecall {
-    fn review(&self, _image: &[u8]) -> Result<RecallReview> {
+    fn review(&self, _scene: &Value, _image: &[u8]) -> Result<RecallReview> {
         Ok(serde_json::from_value(serde_json::json!({
             "decision": "ALLOW",
             "evidence": [],
+            "fidelity_inspected": true,
+            "zoom_inspected": true,
             "reason": "No answer-bearing writing is visible"
         }))?)
     }
@@ -637,7 +639,7 @@ struct PaidRecall {
 }
 
 impl RecallJudge for PaidRecall {
-    fn review(&self, _image: &[u8]) -> Result<RecallReview> {
+    fn review(&self, scene: &Value, _image: &[u8]) -> Result<RecallReview> {
         self.costs.push(CostRecord::new(
             "gemini-3.5-flash-lite",
             1,
@@ -646,7 +648,7 @@ impl RecallJudge for PaidRecall {
             425,
             GenerationCost::from_nanos(50_000),
         ))?;
-        AcceptingRecall.review(&[])
+        AcceptingRecall.review(scene, &[])
     }
 }
 

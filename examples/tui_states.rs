@@ -27,8 +27,8 @@ use kamishibai::session::{
     SentenceTypeMix, WordCandidate,
 };
 use kamishibai::tui::{
-    App, BusyKind, KeySource, ModalKind, MousePointer, Screen, draw, mouse_pointer_at,
-    reset_mouse_pointer, write_mouse_pointer,
+    App, AppEvent, BusyKind, KeySource, ModalKind, MousePointer, PickerSection, Screen, draw,
+    mouse_pointer_at, reset_mouse_pointer, transit, write_mouse_pointer,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -557,6 +557,16 @@ fn build_states() -> Vec<(String, App)> {
         ))
         .sentence_settings_opened();
 
+    let ambiguous = review
+        .clone()
+        .with_alternates(vec![String::from("EN"), String::from("NL")]);
+
+    let language_pair_modal = transit(
+        review.clone(),
+        AppEvent::OpenLanguagePicker(PickerSection::Learning),
+    )
+    .0;
+
     let change_something = review
         .clone()
         .with_modal(ModalKind::ChangeSomething)
@@ -778,6 +788,8 @@ fn build_states() -> Vec<(String, App)> {
         .welcome_advance()
         .welcome_focus_next();
 
+    let welcome_language = App::new(pair()).opening_welcome(KeySource::Empty, String::new(), false);
+
     let busy_understanding = App::new(pair())
         .seeded_blob(words_seed)
         .busy_started(BusyKind::Understanding)
@@ -861,6 +873,18 @@ fn build_states() -> Vec<(String, App)> {
         (
             String::from("02c · What I understood · generation guidance"),
             batch_sentence_settings,
+        ),
+        (
+            String::from("02d · What I understood · plausible alternates"),
+            ambiguous,
+        ),
+        (
+            String::from("02e · Languages · pair picker modal"),
+            language_pair_modal,
+        ),
+        (
+            String::from("00c · Welcome · language grid"),
+            welcome_language,
         ),
     ]
 }

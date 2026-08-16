@@ -170,7 +170,7 @@ fn line_for_row(index: usize, raw: &str, active: usize, width: u16) -> Line<'sta
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::styled(String::from(raw), style));
     if index == active {
-        let used = raw.chars().count();
+        let used = super::common::display_width(raw);
         let pad = (width as usize).saturating_sub(used);
         if pad > 0 {
             spans.push(Span::styled(" ".repeat(pad), palette::highlight()));
@@ -218,7 +218,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     } else {
         hints.push(super::common::FooterHint::primary("Cmd+V", "paste"));
     }
-    hints.push(super::common::FooterHint::ghost("Ctrl+L", "language"));
+    hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
     hints.push(super::common::quit_hint(app.quit_pending()));
     super::common::footer_bar(left, hints, width)
 }

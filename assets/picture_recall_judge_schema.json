@@ -38,6 +38,83 @@
         ]
       }
     },
+    "scene_fidelity_decision": {
+      "type": "STRING",
+      "enum": [
+        "ALLOW",
+        "REJECT"
+      ]
+    },
+    "scene_fidelity_evidence": {
+      "type": "ARRAY",
+      "maxItems": 6,
+      "items": {
+        "type": "OBJECT",
+        "properties": {
+          "requirement": {
+            "type": "STRING"
+          },
+          "observed": {
+            "type": "STRING"
+          },
+          "location": {
+            "type": "STRING"
+          },
+          "kind": {
+            "type": "STRING",
+            "enum": [
+              "MISSING_REQUIRED_SUBJECT",
+              "MISSING_REQUIRED_RELATION",
+              "MISSING_LITERAL_ANCHOR",
+              "BROKEN_SUBJECT_CONTINUITY"
+            ]
+          }
+        },
+        "required": [
+          "requirement",
+          "observed",
+          "location",
+          "kind"
+        ]
+      }
+    },
+    "literal_writing_present": {
+      "type": "BOOLEAN"
+    },
+    "literal_evidence": {
+      "type": "ARRAY",
+      "maxItems": 6,
+      "items": {
+        "type": "OBJECT",
+        "properties": {
+          "description": {
+            "type": "STRING"
+          },
+          "location": {
+            "type": "STRING"
+          },
+          "kind": {
+            "type": "STRING",
+            "enum": [
+              "WRITING",
+              "NUMERAL",
+              "MATHEMATICAL_NOTATION",
+              "TECHNICAL_DIAGRAM",
+              "PSEUDO_WRITING",
+              "DECORATIVE_GLYPH_STRING",
+              "INTERFACE_MARK",
+              "SYMBOL_OR_EMBLEM",
+              "AMBIGUOUS_MARK"
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "location",
+          "kind"
+        ]
+      }
+    },
     "reason": {
       "type": "STRING"
     }
@@ -45,6 +122,10 @@
   "required": [
     "decision",
     "evidence",
+    "scene_fidelity_decision",
+    "scene_fidelity_evidence",
+    "literal_writing_present",
+    "literal_evidence",
     "reason"
   ]
 }

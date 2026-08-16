@@ -117,6 +117,7 @@ fn manifest(path: &Path) -> Result<Value> {
         "model": {
             "css": model["css"],
             "fields": model["flds"].as_array().expect("model fields must exist").iter().map(|item| item["name"].clone()).collect::<Vec<_>>(),
+            "rtl_fields": model["flds"].as_array().expect("model fields must exist").iter().filter(|item| item["rtl"].as_bool().is_some_and(|rtl| rtl)).map(|item| item["name"].clone()).collect::<Vec<_>>(),
             "id": model["id"].as_str().expect("model id must exist").parse::<i64>().expect("model id must be numeric"),
             "name": model["name"],
             "template": model["tmpls"][0].clone(),
@@ -124,6 +125,34 @@ fn manifest(path: &Path) -> Result<Value> {
         "notes": notes,
         "zip_entries": names,
     }))
+}
+
+fn saved_direction_model(source: &str, target: &str) -> Result<Value> {
+    let directory = TempDir::new()?;
+    let output = directory.path().join("direction.apkg");
+    let model = CardModel::for_languages(source, target)?.model();
+    let deck = VocabularyDeck::new(
+        StableId::new("Kamishibai Deck").value(),
+        "Kamishibai Deck",
+        VocabularyNote::new(model),
+        Vec::<(PathBuf, String)>::new(),
+    );
+    deck.save(&output)?;
+    Ok(manifest(&output)?["model"].clone())
+}
+
+fn rtl_field_names(model: &Value) -> Vec<String> {
+    model["rtl_fields"]
+        .as_array()
+        .expect("saved model RTL fields must exist")
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .expect("saved RTL field name must be a string")
+                .to_string()
+        })
+        .collect()
 }
 
 /// Stable deck identifiers match the frozen reference manifest.
@@ -332,10 +361,54 @@ fn saved_apkg_archives_keep_the_frozen_structural_snapshot() -> Result<()> {
         "<img src='179104d071c6.jpg' style='max-width: 100%; height: auto; border-radius: 10px'>",
     );
     deck.save(&output)?;
+    let mut saved = manifest(&output)?;
+    saved["model"]
+        .as_object_mut()
+        .expect("saved model must be an object")
+        .remove("rtl_fields");
     assert_eq!(
-        manifest(&output)?,
-        reference,
+        saved, reference,
         "saved APKG archives no longer keep the frozen structural snapshot"
+    );
+    Ok(())
+}
+
+/// Serialized APKG field declarations mark exactly source-semantic fields for
+/// an Arabic-to-English deck.
+#[test]
+fn saved_arabic_source_apkg_marks_exact_source_fields_rtl() -> Result<()> {
+    let model = saved_direction_model("AR", "EN")?;
+    let qfmt = model["template"]["qfmt"]
+        .as_str()
+        .expect("saved question template must be a string");
+    let afmt = model["template"]["afmt"]
+        .as_str()
+        .expect("saved answer template must be a string");
+    assert!(
+        rtl_field_names(&model)
+            == ["SourceSentence", "Meaning", "Hint", "Context"].map(String::from)
+            && qfmt.contains("<div dir=\"rtl\" style=\"font-size: 20px")
+            && qfmt.contains("class=\"kamishibai-hint\" dir=\"rtl\"")
+            && afmt.contains("class=\"kamishibai-meaning\" dir=\"rtl\"")
+            && afmt.contains("class=\"kamishibai-context\" dir=\"rtl\""),
+        "the saved Arabic-source APKG lost exact RTL fields or source template direction"
+    );
+    Ok(())
+}
+
+/// Serialized APKG field declarations mark exactly target-semantic fields for
+/// an English-to-Hebrew deck.
+#[test]
+fn saved_hebrew_target_apkg_marks_exact_target_fields_rtl() -> Result<()> {
+    let model = saved_direction_model("EN", "HE")?;
+    let afmt = model["template"]["afmt"]
+        .as_str()
+        .expect("saved answer template must be a string");
+    assert!(
+        rtl_field_names(&model) == ["Term", "TargetSentence"].map(String::from)
+            && afmt.contains("<div dir=\"rtl\" style=\"font-size: 22px")
+            && afmt.contains("class=\"kamishibai-term\" dir=\"rtl\""),
+        "the saved Hebrew-target APKG lost exact RTL fields or target template direction"
     );
     Ok(())
 }

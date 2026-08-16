@@ -10,12 +10,17 @@ use ratatui::layout::Rect;
 
 use super::App;
 use super::event::AppEvent;
+use super::picker::{LanguageChoice, PickerSection, learning_target};
 use super::screen::{Screen, WelcomeFocus, WelcomeStage};
 use super::screens::banner;
-use super::screens::common::{CARD_DETAIL_COLUMN, GUTTER, TOP_MARGIN, frame_rects, language_chip};
+use super::screens::common::{
+    CARD_DETAIL_COLUMN, GUTTER, TOP_MARGIN, display_width, frame_rects, language_chip,
+};
 use super::screens::sentence_labels::EditorControl;
 use super::screens::welcome;
-use super::screens::what_i_understood::{SentenceSettingsControl, sentence_settings_control_at};
+use super::screens::what_i_understood::{
+    SentenceSettingsControl, alternate_at, sentence_settings_control_at,
+};
 use super::screens::your_cards::{
     artifact_file_label, card_range_at, detail_pane_height, head_rows_for, rejected_attempts,
     rejected_link_columns, rejected_rows_offset, sentence_editor_control_at,
@@ -37,32 +42,47 @@ impl LinkRegion {
     }
 }
 
-/// Return `true` if the click landed on the language chip in the header row
-/// AND the active screen actually allows the user to change `my` language.
+/// Return which half of the header language chip the click landed on, if the
+/// active screen actually allows the user to change the pair.
 ///
 /// The chip lives at `(area.y + TOP_MARGIN)` row, anchored to the right edge
-/// at `(area.x + area.width - GUTTER)` minus the chip width. Welcome doesn't
-/// render a chip at all; YourCards and Done do render one but the batch pair
-/// is frozen, so clicks there are inert (the same rule the keyboard path
-/// follows in `transit`).
-pub fn language_chip_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> bool {
+/// at `(area.x + area.width - GUTTER)` minus the chip width, and reads
+/// `known → learning`. Clicking a half opens the pair modal focused on that
+/// half; the arrow between them is left-biased onto the known half. Welcome
+/// doesn't render a chip at all; YourCards and Done do render one but the
+/// batch pair is frozen, so clicks there are inert (the same rule the keyboard
+/// path follows in `transit`).
+pub fn language_chip_at(
+    app: &App,
+    terminal: Rect,
+    click_x: u16,
+    click_y: u16,
+) -> Option<PickerSection> {
     if !matches!(app.screen(), Screen::YourWords | Screen::WhatIUnderstood) {
-        return false;
+        return None;
     }
-    let header_y = terminal.y + TOP_MARGIN;
-    if click_y != header_y {
-        return false;
+    if click_y != terminal.y + TOP_MARGIN {
+        return None;
     }
-    let chip_width: u16 = language_chip(app)
+    let widths = language_chip(app)
         .iter()
-        .map(|span| span.content.chars().count() as u16)
-        .sum();
+        .map(|span| u16::try_from(display_width(span.content.as_ref())).unwrap_or(u16::MAX))
+        .collect::<Vec<_>>();
+    let chip_width: u16 = widths.iter().copied().sum();
     if chip_width == 0 {
-        return false;
+        return None;
     }
     let right_edge = terminal.x + terminal.width.saturating_sub(GUTTER);
     let start = right_edge.saturating_sub(chip_width);
-    click_x >= start && click_x < right_edge
+    if click_x < start || click_x >= right_edge {
+        return None;
+    }
+    let learning_width = widths.last().copied().unwrap_or(0);
+    let learning_start = right_edge.saturating_sub(learning_width);
+    if click_x >= learning_start {
+        return Some(PickerSection::Learning);
+    }
+    Some(PickerSection::Known)
 }
 
 /// Return the path that the click landed on, if any. Two clickable surfaces
@@ -77,6 +97,31 @@ pub fn link_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<
         .into_iter()
         .find(|region| region.contains(click_x, click_y))
         .map(|region| region.target)
+}
+
+/// Return where one vertical arrow press lands on the Welcome language grid.
+///
+/// How far `↑` and `↓` travel is how many languages the grid packs side by
+/// side, which only a rendered width can answer — the same reason the picker's
+/// wheel resolves a row before it becomes an event. `←` and `→` need no
+/// geometry: they step one language either way whatever the grid looks like.
+pub fn welcome_language_step(app: &App, terminal: Rect, rows: i32) -> Option<AppEvent> {
+    if app.screen() != Screen::Welcome || app.welcome().stage != WelcomeStage::PickLanguage {
+        return None;
+    }
+    let grid = welcome::language_grid(frame_rects(terminal).body);
+    Some(AppEvent::WelcomeLanguageAt(
+        grid.stepped(welcome::picked_language(app), rows),
+    ))
+}
+
+/// Return which Welcome language one cell lands on, if any. Every cell of the
+/// language grid is a click target on the language step.
+pub fn welcome_language_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<usize> {
+    if app.screen() != Screen::Welcome {
+        return None;
+    }
+    welcome::language_at(app, terminal, click_x, click_y)
 }
 
 /// Return which Welcome key-step control one cell lands on, if any. The key
@@ -177,13 +222,13 @@ pub fn sentence_label_event_at(
     }
 }
 
-/// Return the batch sentence-settings action at one terminal cell.
-pub fn sentence_settings_event_at(
-    app: &App,
-    terminal: Rect,
-    click_x: u16,
-    click_y: u16,
-) -> Option<AppEvent> {
+/// Return the review action at one terminal cell.
+///
+/// Two surfaces share the top of the `what i understood` body: the batch
+/// guidance summary with its editor, and the `also plausible` languages the
+/// understanding pass reported. Clicking one of those codes re-reads the whole
+/// batch as that language without opening the pair modal.
+pub fn review_event_at(app: &App, terminal: Rect, click_x: u16, click_y: u16) -> Option<AppEvent> {
     if app.screen() != Screen::WhatIUnderstood
         || app.modal().is_some()
         || app.busy().is_some()
@@ -203,6 +248,13 @@ pub fn sentence_settings_event_at(
     let column = usize::from(click_x.saturating_sub(frame.body.x));
     let visible_row = usize::from(click_y.saturating_sub(frame.body.y));
     let content_row = usize::from(app.body_scroll()).saturating_add(visible_row);
+    if let Some(index) = alternate_at(app, width, column, content_row) {
+        let code = app.alternates().get(index)?;
+        return Some(AppEvent::SetLanguages(LanguageChoice::new(
+            app.pair().known().to_string(),
+            learning_target(Some(code.as_str())),
+        )));
+    }
     match sentence_settings_control_at(app, width, column, content_row)? {
         SentenceSettingsControl::Open => Some(AppEvent::SentenceSettingsOpen),
         SentenceSettingsControl::Editor(
@@ -281,7 +333,7 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
                 + u16::try_from(CARD_DETAIL_COLUMN)
                     .expect("invariant: card detail column must fit in u16");
             let label_end = label_start
-                .saturating_add(u16::try_from(label.chars().count()).unwrap_or(u16::MAX));
+                .saturating_add(u16::try_from(display_width(label.as_str())).unwrap_or(u16::MAX));
             links.push(LinkRegion {
                 row: screen_row,
                 hit_start: label_start,
@@ -357,8 +409,8 @@ fn banner_regions(app: &App, body_x: u16, body_y: u16) -> Vec<LinkRegion> {
             let label_start = body_x
                 .saturating_add(prefix)
                 .saturating_add(u16::try_from(banner::GLYPH.chars().count()).unwrap_or(u16::MAX));
-            let label_end = label_start
-                .saturating_add(u16::try_from(label.chars().count()).unwrap_or(u16::MAX));
+            let label_end =
+                label_start.saturating_add(u16::try_from(display_width(label)).unwrap_or(u16::MAX));
             LinkRegion {
                 row: body_y.saturating_add(u16::try_from(row).unwrap_or(u16::MAX)),
                 hit_start: label_start,

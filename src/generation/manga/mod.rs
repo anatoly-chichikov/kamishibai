@@ -10,18 +10,23 @@ mod recall;
 mod redirect;
 mod render;
 mod text;
+mod text_gate;
+mod zoom;
 
 use crate::gemini::{GeminiClient, Transport};
 use anyhow::Result;
 
 pub use border::BorderDetector;
-pub use contracts::{ImageSource, ImageText, Progress, Renderer, SceneText, Translator};
+pub use contracts::{ImageSource, ImageText, Progress, Renderer, SceneText, TextJudge, Translator};
 pub use illustration::Illustration;
 pub(crate) use image_prompt::compile_image_prompt;
+pub(crate) use recall::{FidelityCheck, FidelityReview, LiteralZoomCheck, LiteralZoomReview};
 pub use recall::{HiddenRecall, RecallCard, RecallJudge, RecallReview, ShownRecall};
 pub(crate) use render::MangaRenderRejection;
 pub use render::MangaRenderer;
 pub use text::{TextDetector, TextDetectors, TextEnsemble};
+pub use text_gate::{TextCheck, TextReview, TextReviewGate};
+pub(crate) use zoom::literal_zoom_crops;
 
 impl<T> ImageSource for GeminiClient<T>
 where

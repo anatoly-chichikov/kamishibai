@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::languages::{TextDirection, language};
+
 const MODEL_NAME: &str = "Kamishibai Vocabulary Model";
 const CARD_STYLE: &str = r#".card {
   --kamishibai-hint: #666;
@@ -88,6 +90,7 @@ pub struct Model {
     pub fields: Vec<String>,
     pub id: i64,
     pub name: String,
+    pub rtl_fields: Vec<String>,
     pub template: Template,
 }
 
@@ -103,7 +106,7 @@ impl Model {
                     "media": [],
                     "name": name,
                     "ord": index,
-                    "rtl": false,
+                    "rtl": self.rtl_fields.contains(name),
                     "size": 20,
                     "sticky": false,
                 })
@@ -140,6 +143,8 @@ impl Model {
 pub struct CardModel {
     identifier: i64,
     name: String,
+    source_direction: TextDirection,
+    target_direction: TextDirection,
 }
 
 impl CardModel {
@@ -148,11 +153,30 @@ impl CardModel {
         Self {
             identifier: StableId::new(MODEL_NAME).value(),
             name: String::from(MODEL_NAME),
+            source_direction: TextDirection::Ltr,
+            target_direction: TextDirection::Ltr,
         }
+    }
+
+    /// Create one vocabulary model whose field metadata and templates follow
+    /// the source and target language profiles.
+    pub fn for_languages(source: &str, target: &str) -> anyhow::Result<Self> {
+        let source_direction = language(source)?.direction;
+        let target_direction = language(target)?.direction;
+        let name = directional_model_name(source_direction, target_direction);
+        Ok(Self {
+            identifier: StableId::new(name.as_str()).value(),
+            name,
+            source_direction,
+            target_direction,
+        })
     }
 
     /// Return the frozen vocabulary model contract.
     pub fn model(&self) -> Model {
+        let source = direction_attribute(self.source_direction);
+        let target = direction_attribute(self.target_direction);
+        let source_alignment = alignment(self.source_direction);
         Model {
             fields: vec![
                 String::from("SourceSentence"),
@@ -169,9 +193,10 @@ impl CardModel {
             ],
             id: self.identifier,
             name: self.name.clone(),
+            rtl_fields: rtl_fields(self.source_direction, self.target_direction),
             template: Template {
-                afmt: String::from(
-                    "{{FrontSide}}<hr id=\"answer\"><div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;\">{{Audio}}<div style=\"font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;\">{{TargetSentence}}</div>{{#PronunciationAll}}<div class=\"kamishibai-phonetics\" style=\"font-size: 13px; margin-top: 4px;\">{{PronunciationAll}}</div>{{/PronunciationAll}}<div style=\"font-size: 17px; margin-top: 15px;\"><strong class=\"kamishibai-term\">{{Term}}</strong> <span class=\"kamishibai-phonetics\">{{Pronunciation}}</span></div><div class=\"kamishibai-meaning\" style=\"font-size: 15px; margin-top: 3px;\">{{Meaning}}</div><div class=\"kamishibai-importance\" style=\"font-size: 13px; margin-top: 8px;\">{{Importance}}/10</div>{{#Context}}<div class=\"kamishibai-context\" style=\"font-size: 14px; margin-top: 12px; padding: 10px; border-radius: 5px; text-align: left;\">{{Context}}</div>{{/Context}}</div>",
+                afmt: format!(
+                    "{{{{FrontSide}}}}<hr id=\"answer\"><div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 0 20px;\">{{{{Audio}}}}<div{target} style=\"font-size: 22px; font-weight: bold; margin: 20px 0 4px 0;\">{{{{TargetSentence}}}}</div>{{{{#PronunciationAll}}}}<div class=\"kamishibai-phonetics\" style=\"font-size: 13px; margin-top: 4px;\">{{{{PronunciationAll}}}}</div>{{{{/PronunciationAll}}}}<div style=\"font-size: 17px; margin-top: 15px;\"><strong class=\"kamishibai-term\"{target}>{{{{Term}}}}</strong> <span class=\"kamishibai-phonetics\">{{{{Pronunciation}}}}</span></div><div class=\"kamishibai-meaning\"{source} style=\"font-size: 15px; margin-top: 3px;\">{{{{Meaning}}}}</div><div class=\"kamishibai-importance\" style=\"font-size: 13px; margin-top: 8px;\">{{{{Importance}}}}/10</div>{{{{#Context}}}}<div class=\"kamishibai-context\"{source} style=\"font-size: 14px; margin-top: 12px; padding: 10px; border-radius: 5px; text-align: {source_alignment};\">{{{{Context}}}}</div>{{{{/Context}}}}</div>"
                 ),
                 bafmt: String::new(),
                 bfont: String::new(),
@@ -180,12 +205,46 @@ impl CardModel {
                 did: None,
                 name: String::from("Card 1"),
                 ord: 0,
-                qfmt: String::from(
-                    "<div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;\">{{Illustration}}<div style=\"font-size: 20px; margin-top: 15px;\">{{SourceSentence}}</div>{{#Hint}}<div class=\"kamishibai-hint\" style=\"font-size: 14px; margin-top: 8px; font-style: italic;\">{{Hint}}</div>{{/Hint}}</div>",
+                qfmt: format!(
+                    "<div style=\"max-width: 600px; margin: 0 auto; text-align: center; padding: 20px;\">{{{{Illustration}}}}<div{source} style=\"font-size: 20px; margin-top: 15px;\">{{{{SourceSentence}}}}</div>{{{{#Hint}}}}<div class=\"kamishibai-hint\"{source} style=\"font-size: 14px; margin-top: 8px; font-style: italic;\">{{{{Hint}}}}</div>{{{{/Hint}}}}</div>"
                 ),
             },
         }
     }
+}
+
+fn direction_attribute(direction: TextDirection) -> &'static str {
+    match direction {
+        TextDirection::Ltr => "",
+        TextDirection::Rtl => " dir=\"rtl\"",
+    }
+}
+
+fn alignment(direction: TextDirection) -> &'static str {
+    match direction {
+        TextDirection::Ltr => "left",
+        TextDirection::Rtl => "right",
+    }
+}
+
+fn directional_model_name(source: TextDirection, target: TextDirection) -> String {
+    match (source, target) {
+        (TextDirection::Ltr, TextDirection::Ltr) => String::from(MODEL_NAME),
+        (TextDirection::Rtl, TextDirection::Ltr) => format!("{MODEL_NAME} (source RTL)"),
+        (TextDirection::Ltr, TextDirection::Rtl) => format!("{MODEL_NAME} (target RTL)"),
+        (TextDirection::Rtl, TextDirection::Rtl) => format!("{MODEL_NAME} (source and target RTL)"),
+    }
+}
+
+fn rtl_fields(source: TextDirection, target: TextDirection) -> Vec<String> {
+    let mut fields = Vec::new();
+    if source == TextDirection::Rtl {
+        fields.extend(["SourceSentence", "Meaning", "Hint", "Context"].map(String::from));
+    }
+    if target == TextDirection::Rtl {
+        fields.extend(["Term", "TargetSentence"].map(String::from));
+    }
+    fields
 }
 
 impl Default for CardModel {
@@ -230,6 +289,53 @@ mod tests {
                 && template.afmt.contains("kamishibai-context")
                 && template.qfmt.contains("kamishibai-hint"),
             "theme-sensitive template content still bypasses the stylesheet"
+        );
+    }
+
+    /// Source-language RTL metadata follows the profile on every source field
+    /// and leaves target fields alone.
+    #[test]
+    fn an_arabic_source_marks_only_source_fields_as_rtl() {
+        let model = CardModel::for_languages("AR", "EN")
+            .expect("supported language pair must build")
+            .model();
+        assert_eq!(
+            model.rtl_fields,
+            ["SourceSentence", "Meaning", "Hint", "Context"].map(String::from),
+            "an Arabic source no longer marks exactly the source-language fields as RTL"
+        );
+    }
+
+    /// Target-language RTL metadata reaches both the Anki field declarations
+    /// and the visible answer-template elements.
+    #[test]
+    fn a_hebrew_target_marks_target_fields_and_answer_elements_as_rtl() {
+        let model = CardModel::for_languages("en", "he")
+            .expect("supported language pair must build")
+            .model();
+        assert!(
+            model.rtl_fields == ["Term", "TargetSentence"].map(String::from)
+                && model
+                    .template
+                    .afmt
+                    .contains("<div dir=\"rtl\" style=\"font-size: 22px")
+                && model
+                    .template
+                    .afmt
+                    .contains("class=\"kamishibai-term\" dir=\"rtl\""),
+            "a Hebrew target no longer drives both field and template direction"
+        );
+    }
+
+    /// Direction-free languages retain the frozen public model contract.
+    #[test]
+    fn ltr_languages_keep_the_frozen_model_identity_and_templates() {
+        assert_eq!(
+            CardModel::for_languages("EN", "FR")
+                .expect("supported language pair must build")
+                .model(),
+            CardModel::new().model(),
+            "an LTR language pair no longer preserves the frozen card model"
         );
     }
 }

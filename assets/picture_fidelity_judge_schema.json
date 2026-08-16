@@ -1,0 +1,53 @@
+{
+  "type": "OBJECT",
+  "properties": {
+    "scene_fidelity_decision": {
+      "type": "STRING",
+      "enum": [
+        "ALLOW",
+        "REJECT"
+      ]
+    },
+    "scene_fidelity_evidence": {
+      "type": "ARRAY",
+      "maxItems": 6,
+      "items": {
+        "type": "OBJECT",
+        "properties": {
+          "requirement": {
+            "type": "STRING"
+          },
+          "observed": {
+            "type": "STRING"
+          },
+          "location": {
+            "type": "STRING"
+          },
+          "kind": {
+            "type": "STRING",
+            "enum": [
+              "MISSING_REQUIRED_SUBJECT",
+              "MISSING_REQUIRED_RELATION",
+              "MISSING_LITERAL_ANCHOR",
+              "BROKEN_SUBJECT_CONTINUITY"
+            ]
+          }
+        },
+        "required": [
+          "requirement",
+          "observed",
+          "location",
+          "kind"
+        ]
+      }
+    },
+    "reason": {
+      "type": "STRING"
+    }
+  },
+  "required": [
+    "scene_fidelity_decision",
+    "scene_fidelity_evidence",
+    "reason"
+  ]
+}

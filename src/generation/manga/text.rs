@@ -9,12 +9,38 @@ use ocr_rs::OcrResult_;
 use serde_json::Value;
 
 use crate::generation::manga::ocr_bundle as ocr;
+use crate::languages::OcrModel;
 
-use super::contracts::{ImageText, SceneText};
+use super::contracts::{ImageText, SceneText, TextJudge};
 use super::redirect::{discarded, hush, locked};
+use super::text_gate::{TextReview, TextReviewGate};
 
-const DEFAULT_LANG: &str = "eng";
 type Lazy = Rc<QuietEngine>;
+
+/// Pair one authoritative OCR bundle with its compatibility display token.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct BundleSelection {
+    model: OcrModel,
+    token: String,
+}
+
+impl BundleSelection {
+    /// Create one typed production bundle selection.
+    fn typed(model: OcrModel) -> Self {
+        Self {
+            model,
+            token: String::from(token(model)),
+        }
+    }
+
+    /// Create one bundle selection from a legacy token expression.
+    fn legacy(token: String) -> Self {
+        Self {
+            model: ocr::legacy_model(token.as_str()),
+            token,
+        }
+    }
+}
 
 struct QuietEngine {
     item: RefCell<Option<Result<Rc<ocr_rs::OcrEngine>, String>>>,
@@ -67,27 +93,36 @@ pub struct TextDetector {
     cache: PathBuf,
     engine: Lazy,
     threshold: i32,
-    lang: String,
+    bundle: BundleSelection,
 }
 
 impl TextDetector {
     /// Create one detector with the default OCR language.
     pub fn new(threshold: i32) -> Self {
-        Self::cached(threshold, DEFAULT_LANG, std::env::temp_dir())
+        Self::cached(threshold, OcrModel::En, std::env::temp_dir())
     }
 
     /// Create one detector with a custom OCR language string and default cache root.
     pub fn custom(threshold: i32, lang: impl Into<String>) -> Self {
-        Self::cached(threshold, lang, std::env::temp_dir())
+        Self::configured(
+            threshold,
+            BundleSelection::legacy(lang.into()),
+            std::env::temp_dir(),
+        )
     }
 
-    /// Create one detector with a custom OCR language string and explicit cache root.
-    pub fn cached(threshold: i32, lang: impl Into<String>, cache: impl Into<PathBuf>) -> Self {
+    /// Create one detector with a typed OCR bundle and explicit cache root.
+    pub fn cached(threshold: i32, model: OcrModel, cache: impl Into<PathBuf>) -> Self {
+        Self::configured(threshold, BundleSelection::typed(model), cache)
+    }
+
+    /// Create one detector from its complete bundle selection.
+    fn configured(threshold: i32, bundle: BundleSelection, cache: impl Into<PathBuf>) -> Self {
         Self {
             cache: cache.into(),
             engine: Rc::new(QuietEngine::new()),
             threshold,
-            lang: lang.into(),
+            bundle,
         }
     }
 
@@ -104,15 +139,20 @@ impl TextDetector {
         Self::custom(threshold, resolved(lang.into(), inventory.as_slice()))
     }
 
-    /// Return the resolved OCR language selection.
+    /// Return the resolved typed OCR bundle.
+    pub fn model(&self) -> OcrModel {
+        self.bundle.model
+    }
+
+    /// Return the legacy token corresponding to the resolved typed bundle.
     pub fn selection(&self) -> &str {
-        self.lang.as_str()
+        self.bundle.token.as_str()
     }
 
     /// Return the lazily initialized OCR engine.
     fn engine(&self) -> Result<Rc<ocr_rs::OcrEngine>> {
         if self.engine.empty() {
-            let item = hush(|| ocr::engine(self.lang.as_str(), self.cache.as_path()).map(Rc::new))
+            let item = hush(|| ocr::engine(self.bundle.model, self.cache.as_path()).map(Rc::new))
                 .map_err(|error| error.to_string());
             self.engine.store(item);
         }
@@ -126,7 +166,7 @@ impl std::fmt::Debug for TextDetector {
         item.debug_struct("TextDetector")
             .field("cache", &self.cache)
             .field("threshold", &self.threshold)
-            .field("lang", &self.lang)
+            .field("bundle", &self.bundle)
             .finish()
     }
 }
@@ -134,7 +174,9 @@ impl std::fmt::Debug for TextDetector {
 impl PartialEq for TextDetector {
     /// Compare one detector by its stable configuration fields.
     fn eq(&self, other: &Self) -> bool {
-        self.cache == other.cache && self.threshold == other.threshold && self.lang == other.lang
+        self.cache == other.cache
+            && self.threshold == other.threshold
+            && self.bundle == other.bundle
     }
 }
 
@@ -207,8 +249,22 @@ impl ImageText for TextDetector {
         let image = DynamicImage::ImageLuma8(image.clone());
         let engine = self.engine()?;
         let items = hush(|| Ok(engine.recognize(&image)?))
-            .map_err(|error| anyhow!("OCR failed for '{}': {}", self.lang, error))?;
+            .map_err(|error| anyhow!("OCR failed for '{:?}': {}", self.bundle.model, error))?;
         Ok(extracted(items.as_slice(), self.threshold))
+    }
+}
+
+impl TextJudge for TextDetector {
+    /// Return the OCR route used by this judge.
+    fn gate(&self) -> TextReviewGate {
+        TextReviewGate::Ocr
+    }
+
+    /// Return one typed literal-writing verdict from PP-OCRv5 output.
+    fn review(&self, _encoded: &[u8], grayscale: &GrayImage) -> Result<TextReview> {
+        Ok(TextReview::ocr(
+            ImageText::detected(self, grayscale)?.as_str(),
+        ))
     }
 }
 
@@ -263,7 +319,21 @@ pub(super) fn resolved(lang: String, available: &[String]) -> String {
         .filter(|code| available.iter().any(|item| item == *code))
         .collect::<Vec<_>>();
     if supported.is_empty() {
-        return String::from(DEFAULT_LANG);
+        return String::from("eng");
     }
     supported.join("+")
+}
+
+fn token(model: OcrModel) -> &'static str {
+    match model {
+        OcrModel::Default => "default",
+        OcrModel::En => "eng",
+        OcrModel::Latin => "latin",
+        OcrModel::Cyrillic => "cyrillic",
+        OcrModel::El => "el",
+        OcrModel::Korean => "korean",
+        OcrModel::Arabic => "arabic",
+        OcrModel::Devanagari => "devanagari",
+        OcrModel::Th => "th",
+    }
 }

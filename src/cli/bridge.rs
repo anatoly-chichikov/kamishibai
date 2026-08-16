@@ -196,6 +196,9 @@ pub(super) struct TuiSession {
     fingerprint: Option<u64>,
     lock: Option<File>,
     costs: SessionCostScope,
+    /// Whether this window adopted an id the user already knows. A resumed id
+    /// is a handle someone typed, so it is never rotated away underneath them.
+    resumed: bool,
 }
 
 impl TuiSession {
@@ -211,7 +214,26 @@ impl TuiSession {
             fingerprint: None,
             lock: None,
             costs: SessionCostScope::default(),
+            resumed: false,
         })
+    }
+
+    /// Begin a fresh session through an explicit store for deterministic
+    /// lifecycle tests.
+    #[cfg(test)]
+    fn fresh_in(store: SessionStore) -> Self {
+        Self {
+            store,
+            id: None,
+            created: None,
+            source: String::from("tui"),
+            senses: String::from("custom"),
+            written: None,
+            fingerprint: None,
+            lock: None,
+            costs: SessionCostScope::default(),
+            resumed: false,
+        }
     }
 
     /// Resume an existing on-disk session under its original identity, keeping
@@ -237,6 +259,7 @@ impl TuiSession {
             fingerprint: None,
             lock: None,
             costs,
+            resumed: true,
         })
     }
 
@@ -264,7 +287,36 @@ impl TuiSession {
         self.senses = String::from("custom");
         self.written = None;
         self.fingerprint = None;
+        self.resumed = false;
         Ok(())
+    }
+
+    /// Erase the record this window wrote, then rotate identity and cost scope.
+    ///
+    /// Used when the batch changes the language it is about: the id carries the
+    /// learning code, so the old record would name a language the session is no
+    /// longer about. Only a review-stage record is erased — one that has
+    /// committed a plan, is being generated, or was reopened from disk is left
+    /// exactly as it is, and this window simply keeps writing to it.
+    pub(super) fn discard_and_start_next(&mut self) -> Result<()> {
+        let Some(id) = self.id.clone() else {
+            return Ok(());
+        };
+        if !self.discardable() {
+            return Ok(());
+        }
+        self.store.remove(id.as_str())?;
+        self.start_next_batch()
+    }
+
+    /// Return whether the record this window wrote is pure review scaffolding.
+    fn discardable(&self) -> bool {
+        if self.lock.is_some() || self.resumed {
+            return false;
+        }
+        self.written.as_ref().is_some_and(|record| {
+            record.phase == Phase::Understood && record.drafts.is_empty() && record.worker.is_none()
+        })
     }
 
     /// Close the active run as cancelled, then rotate identity and cost scope.
@@ -754,6 +806,99 @@ mod tests {
                 }),
             ),
             "partial publication tally drifted when cache readiness was not hydrated"
+        );
+    }
+
+    #[test]
+    fn retargeting_a_review_session_leaves_one_session_named_for_the_new_language() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let mut session = TuiSession::fresh_in(store.clone());
+        let french = understood_app();
+        session
+            .save(&french, Path::new("/o"), false)
+            .expect("review session must save");
+        let discarded = session.id.clone().expect("review session must have an id");
+        session
+            .discard_and_start_next()
+            .expect("a review session must rotate on retarget");
+        let german = french.confirmed_learning("de");
+        session
+            .save(&german, Path::new("/o"), false)
+            .expect("retargeted session must save");
+        let minted = session
+            .id
+            .clone()
+            .expect("retargeted session must have an id");
+        let mut listed = std::fs::read_dir(home.path().join("sessions"))
+            .expect("sessions directory must be readable")
+            .map(|entry| entry.expect("entry must read").file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        listed.sort();
+        assert_eq!(
+            (
+                listed,
+                minted.starts_with("de-"),
+                discarded.starts_with("fr-")
+            ),
+            (vec![minted.clone()], true, true),
+            "retargeting must leave exactly one session, named for the language it is now about"
+        );
+    }
+
+    #[test]
+    fn retargeting_never_discards_a_session_the_user_opened_by_id() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let record = app_to_record(
+            &understood_app(),
+            String::from("fr-typed"),
+            String::from("created"),
+            "tui",
+            "primary",
+            "/o",
+            None,
+        );
+        store.create(&record).expect("session must persist");
+        let mut session =
+            TuiSession::resuming_in(&record, store.clone()).expect("session must resume");
+        session
+            .discard_and_start_next()
+            .expect("a resumed session must survive a retarget");
+        assert_eq!(
+            session.id.clone(),
+            Some(String::from("fr-typed")),
+            "a session the user opened by id must keep that id through a retarget"
+        );
+    }
+
+    #[test]
+    fn retargeting_never_discards_a_session_that_committed_a_plan() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let mut session = TuiSession::fresh_in(store.clone());
+        let generating = understood_app()
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![CardDraft::new(
+                "canard",
+                "a duck",
+                LanguagePair::new("fr", "en"),
+            )]);
+        session
+            .save(&generating, Path::new("/o"), false)
+            .expect("committed session must save");
+        let committed = session
+            .id
+            .clone()
+            .expect("committed session must have an id");
+        session
+            .discard_and_start_next()
+            .expect("a committed session must survive a retarget");
+        assert_eq!(
+            session.id.clone(),
+            Some(committed),
+            "a session with a committed plan must never be erased by a language change"
         );
     }
 

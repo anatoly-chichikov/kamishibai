@@ -61,6 +61,32 @@ impl Request {
             safety_settings: Some(GenerationConfig::image_safety()),
         }
     }
+
+    /// Return one text-plus-multiple-images Gemini request.
+    pub(super) fn vision_images(
+        text: String,
+        mime_type: &str,
+        data: Vec<String>,
+        generation_config: GenerationConfig,
+    ) -> Self {
+        let mut parts = Vec::with_capacity(data.len().saturating_add(1));
+        parts.push(RequestPart {
+            text: Some(text),
+            inline_data: None,
+        });
+        parts.extend(data.into_iter().map(|data| RequestPart {
+            text: None,
+            inline_data: Some(RequestInlineData {
+                mime_type: String::from(mime_type),
+                data,
+            }),
+        }));
+        Self {
+            contents: vec![Content { parts }],
+            generation_config: Some(generation_config),
+            safety_settings: Some(GenerationConfig::image_safety()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -196,8 +222,8 @@ impl GenerationConfig {
         }
     }
 
-    /// Return the bounded Gemini 3.5 multimodal recall-review configuration.
-    pub(super) fn recall(schema: Value) -> Result<Self> {
+    /// Return the bounded Gemini 3.5 structured vision-judge configuration.
+    pub(super) fn vision_judge(schema: Value) -> Result<Self> {
         validate_response_schema(&schema)?;
         Ok(Self {
             response_modalities: None,
@@ -207,6 +233,28 @@ impl GenerationConfig {
             response_mime_type: Some(String::from("application/json")),
             response_schema: Some(schema),
             max_output_tokens: Some(256),
+            thinking_config: None,
+            temperature: Some(0),
+            media_resolution: Some(MediaResolution::High),
+        })
+    }
+
+    /// Return the Gemini 3.6 structured vision-judge configuration.
+    pub(super) fn structured_vision_judge(schema: Value) -> Result<Self> {
+        validate_response_schema(&schema)?;
+        Ok(Self {
+            response_modalities: None,
+            image_config: None,
+            speech_config: None,
+            response_format: Some(ResponseFormat {
+                text: TextResponseFormat {
+                    mime_type: String::from("APPLICATION_JSON"),
+                    schema,
+                },
+            }),
+            response_mime_type: None,
+            response_schema: None,
+            max_output_tokens: None,
             thinking_config: None,
             temperature: Some(0),
             media_resolution: Some(MediaResolution::High),

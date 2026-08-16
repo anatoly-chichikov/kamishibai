@@ -4,6 +4,7 @@ mod cards;
 mod document;
 mod font;
 mod layout;
+mod shaping;
 mod thumbnail;
 
 pub use cards::CardSheet;
