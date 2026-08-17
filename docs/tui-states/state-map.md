@@ -14,13 +14,13 @@ All future work references this map instead of re-deriving transitions.
 | Id                | Kind                                                                              | Reference shot                  |
 | ----------------- | --------------------------------------------------------------------------------- | ------------------------------- |
 | `Welcome`         | fullscreen (two stages: pick language → enter key)                                | `32-welcome-language-grid.png` (language step) · `00-welcome.png` (key step, no env key) · `00b-welcome-env.png` (`GEMINI_API_KEY` set) |
-| `YourWords`       | fullscreen                                                                        | `01-your-words.png`             |
-| `WhatIUnderstood` | fullscreen                                                                        | `02-what-i-understood.png` · `24-esc-review-back.png` (current Esc footer) |
+| `YourWords`       | fullscreen                                                                        | `01-your-words.png` · `24-esc-review-back.png` (prefilled after review, clear unarmed) |
+| `WhatIUnderstood` | fullscreen                                                                        | `02-what-i-understood.png`      |
 | Batch generation guidance | compact tags and inline editor above the reviewed candidates on `WhatIUnderstood` | `28-batch-sentence-settings.png` · `29-batch-sentence-settings-narrow.png` |
 | `ChangeSomething` | modal over `WhatIUnderstood`, opened from the `+ add more` row in the sense picker | `03-change-something-modal.png` |
 | `YourCards`       | fullscreen                                                                        | `04-your-cards.png`             |
 | Retry stress      | synthetic `YourCards` gallery with active, inactive, recovered, and terminal attempts | `06b-your-cards-retry-stress.png` |
-| Esc lifecycle     | synthetic armed clear, review back, armed stop, draining stop, and partial-publish states | `23-esc-words-clear.png` through `27-generation-partial.png` |
+| Esc lifecycle     | synthetic armed clear, unarmed prefilled review return, armed stop, draining stop, and partial-publish states | `23-esc-words-clear.png` through `27-generation-partial.png` |
 | Sentence labels   | collapsed three-tag summary starts inline on `audio` and wraps onto `scene` / `picture`; expanded question-led editor sits below every artifact | `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png` |
 | `Done`            | fullscreen                                                                        | `08-done.png`                   |
 | `PickLanguages`   | two scrolling lists over `YourWords` / `WhatIUnderstood`, opened with `Ctrl+L` or either header half | `31-language-pair-modal.png` |
@@ -157,9 +157,9 @@ These are batch preferences, not a new screen or modal. Ordinary upward
 navigation reaches the first word before one more `↑` or `k` opens the nearest
 format row; `S` and mouse opening retain `level` as their initial focus.
 `←/→` moves one adjacent choice without wrapping, `↑/↓` moves between the
-two rows, and `↓` from format or `Esc` closes only this editor while retaining
-both choices and returning to the previously selected word. While it is open,
-its input ownership prevents `Enter`, `D`, `J`, `Space`, or other printable
+two rows, and `Enter`, `Esc`, or `↓` from format closes only this editor while
+retaining both choices and returning to the previously selected word. While it
+is open, its input ownership prevents `D`, `J`, `Space`, or other printable
 keys from leaking into candidate or sense controls. The choices survive sense
 re-review, screen changes, and session resume; only a new batch resets them to
 no target level plus `best fit`, restoring the one-tag summary.
@@ -264,9 +264,9 @@ makes that distinction explicit. Regeneration carries this complete requested
 preset. An explicitly changed or already pinned axis may differ only when the
 result names it in `approx`; the actual attribution and requested target then
 remain visible separately. Returning all chips to their generated defaults and
-leaving only a blank note removes pending automatically. `Enter` is inert while
-the editor is open. `Esc` closes the editor and collapses the card while
-retaining pending; `Ctrl+G` closes it and regenerates every pending card
+leaving only a blank note removes pending automatically. `Enter` or `Esc`
+closes the editor and collapses the card while retaining pending; `Ctrl+G`
+closes it and regenerates every pending card
 together. There is no per-card modal and `R` has no `YourCards` action.
 
 | Scenario | Synthetic reference |
@@ -293,15 +293,16 @@ together. There is no per-card modal and `R` has no `YourCards` action.
     WhatIUnderstood
         ├─ [Enter]/[→] on a row ──► sense picker opens
         │       ├─ [Space] toggle sense · [↑↓]/[j][k] move · [Enter]/[←] done (collapse)
-        │       └─ [Enter] on the "+ add more" row ──► ChangeSomething (bulk modal)
+        │       └─ [Space] on the "+ add more" row ──► ChangeSomething (bulk modal)
         │                                                  ├─ [Enter] send ──► (BulkCorrection busy) ──► WhatIUnderstood
         │                                                  └─ [Esc] cancel ──► WhatIUnderstood
         ├─ [↑/k from first word]/[S]/[click generation guidance] ──► guidance editor open
         │       ├─ [←→] pick · [↑↓] row · [↓ from format] close to words
-        │       ├─ [Esc] close while retaining choices
+        │       ├─ [Enter]/[Esc] close while retaining choices
         │       └─ [Ctrl+G, ≥1 ok row] ──► allocate initial requests ──► YourCards
         ├─ [D] drop selected row ──► last row dropped returns to YourWords (blob cleared)
-        ├─ [Esc, no inner layer] ──► YourWords (blob and selected senses preserved)
+        ├─ [Esc, no inner layer] ──► YourWords (blob and selected senses preserved; clear unarmed)
+        │       └─ [Esc] arm clear ──► [Esc again within 1 s] ──► empty YourWords
         ├─ [Ctrl+L] ──► PickLanguages modal ──► adopt pair; re-read only when required
         └─ [Ctrl+G, ≥1 ok row] ──► (StartGeneration) ──► YourCards
 
@@ -310,12 +311,11 @@ together. There is no per-card modal and `R` has no `YourCards` action.
         ├─ [Enter]/[→]/[Space]/[click tag] ──► expand + live editor on `how should it sound?`
         │       ├─ [←→] pick · [↑↓] row · type under `one more thing`
         │       ├─ every edit ──► pending now; defaults + blank note ──► no pending
-        │       ├─ [Enter] ──► no action
-        │       └─ [Esc] ──► close + collapse while retaining pending
+        │       └─ [Enter]/[Esc] ──► close + collapse while retaining pending
         ├─ [Ctrl+G, pending > 0] ──► regenerate all pending cards in one batch
         ├─ [Ctrl+G, pending = 0] ──► existing retry/rebuild fallback
         ├─ [Esc] arm stop ──► [Esc again within 1 s] ──► drain current artifact, start no next request
-        │       ├─ no complete cards ──► old run Cancelled + rotated session ──► WhatIUnderstood
+        │       ├─ no complete cards ──► old run Cancelled + rotated session ──► empty YourWords
         │       └─ ≥1 complete card ──► publish complete subset ──► Partial final
         └─ queue drained and pending = 0 ──► (StartPublish: deck ──► report busy) ──► published final
                 └─ [Esc] arm new batch ──► [Esc again within 1 s] ──► clean YourWords
@@ -327,7 +327,7 @@ together. There is no per-card modal and `R` has no `YourCards` action.
 ```
 
 `Esc` always closes one layer from inside out: error, modal/editor/expanded
-senses, then the current screen action. `R` has no action on `WhatIUnderstood`
+disclosure, then the current screen action. `R` has no action on `WhatIUnderstood`
 or `YourCards` (the bulk modal is reached only through the `+ add more` row).
 Once a batch is published, double `Esc` starts a clean batch without restarting the app.
 Publishing the deck/PDF is automatic once the generation queue drains — it is
@@ -339,21 +339,23 @@ not a key the user presses.
 | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `Welcome` · pick language   | `←/→` step `my language` · `↑/↓` move one grid line · click picks · `Enter` next · `Ctrl+C` quit             |
 | `Welcome` · enter key       | type/`Cmd+V` paste key · `←/→` move focus (submit ↔ load-from-env, env only) · `Enter` submit · `Esc` back   |
-| `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `Ctrl+L` language · double `Esc` clears nonempty input |
+| `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `[Esc] clear` then `[Esc] again` · `Ctrl+L` language |
 | `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav; `↑`/`k` above the first word opens generation guidance · `Enter`/`→` pick meanings · `D` drop row · `S` guidance alias · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
-| `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter`/`←` done · `Enter` on `+ add more` opens ChangeSomething  |
-| `WhatIUnderstood` generation guidance | `Ctrl+G` make cards · `←→` pick · `↑↓` row · `↓` from format returns to words · `Esc` close (`Enter` and printable review keys inert) |
+| `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter`/`←` done · `Space` on `+ add more` opens ChangeSomething  |
+| `WhatIUnderstood` generation guidance | `Ctrl+G` make cards · `←→` pick · `↑↓` row · `↓` from format returns to words · `Enter`/`Esc` close (printable review keys inert) |
 | `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
 | `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` tune · `↑↓` nav (`Space` is an unadvertised alias) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
-| `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row · text editing under `one more thing` · `Esc` close (`Enter` inert) |
+| `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row · text editing under `one more thing` · `Enter`/`Esc` close |
 | `PickLanguages`             | `↑/↓` pick within a column · `←/→` focus the left / right column · wheel scrolls the column under the pointer · `Enter` confirm · `Esc` cancel |
 | `Done`                      | `Ctrl+G` regenerate failed (only when failures) · `[Esc] new cards` · twice within 1 s starts a clean batch · `Ctrl+C` quit |
 
 The words-clear, generation-stop, new-batch, and quit confirmations use
 independent one-second windows. A destructive first `Esc` changes the footer to
 the sole bright `[Esc] again` action; a different action or timeout disarms it.
-An open inner layer consumes `Esc` before a screen action can arm. While a
+The first `Esc` from review returns to the preserved words without arming their
+clear. The next `Esc` on `YourWords` arms it, and one more clears them. An open
+inner layer consumes `Esc` before a screen action can arm. While a
 confirmed generation stop drains the current provider request, the header says
 `stopping…`; no new request starts. `Ctrl+C` retains its separate double-press
 quit confirmation on every screen.
@@ -441,8 +443,8 @@ or replaces a settled batch with clean `YourWords`; any other key, click, drag,
 scroll, or one-second timeout disarms it. During a confirmed stop the shell keeps
 the session lock and stop intent through the in-flight result and optional subset
 publication. No-output and failed-publication paths durably cancel the old run,
-rotate session identity and cost scope, then return the preserved words and curation
-to `WhatIUnderstood` without an automatic provider restart.
+rotate session identity and cost scope, then start clean `YourWords` without an
+automatic provider restart.
 
 This map documents the state machine only. Widget rendering lives in
 `src/tui/screens/`; the real Gemini passes and the artifact pipeline live in

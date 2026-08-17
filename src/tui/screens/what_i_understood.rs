@@ -771,7 +771,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         }
         hints.push(super::common::FooterHint::secondary("← →", "pick"));
         hints.push(super::common::FooterHint::ghost("↑ ↓", "row"));
-        hints.push(super::common::FooterHint::ghost("Esc", "close"));
+        hints.push(super::common::FooterHint::ghost("Enter/Esc", "close"));
     } else if app.expanded_sense().is_some() {
         let controls = if app.expanded_add_more_focused() {
             DisclosureControls::new(true).with_action("add")

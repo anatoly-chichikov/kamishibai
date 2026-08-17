@@ -99,7 +99,7 @@ fn escape_from_review_returns_to_the_preserved_words() {
             side,
         ),
         (Screen::YourWords, "a", &[0][..], Side::None),
-        "Escape from review lost the typed words or selected meaning"
+        "Escape from review lost the typed words, selected meaning, or arrived with clear already armed"
     );
 }
 

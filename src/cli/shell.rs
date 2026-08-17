@@ -1240,7 +1240,7 @@ where
             self.app = self.app.clone().error_shown(message);
             return true;
         }
-        self.app = self.app.clone().generation_cancelled_to_review();
+        self.app = self.app.clone().starting_new_batch();
         if let Some(notice) = notice {
             self.app = self.app.clone().error_shown(notice);
         }
@@ -2023,6 +2023,57 @@ mod tests {
     }
 
     #[test]
+    fn review_back_resets_the_words_double_escape_confirmation() {
+        let mut shell = shell(review().seeded_blob("whilst\nwreck"));
+        let first = shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must return to the words");
+        let preserved = (
+            shell.app.screen(),
+            shell.app.blob().to_string(),
+            shell.app.candidates().len(),
+            shell.app.word_clear_pending(),
+        );
+        let second = shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must arm the clear");
+        let armed = (
+            shell.app.screen(),
+            shell.app.blob().to_string(),
+            shell.app.candidates().len(),
+            shell.app.word_clear_pending(),
+        );
+        let third = shell
+            .handle(AppEvent::Cancel)
+            .expect("third Escape must confirm the clear");
+        assert_eq!(
+            (
+                first,
+                preserved,
+                second,
+                armed,
+                third,
+                shell.app.screen(),
+                shell.app.blob(),
+                shell.app.candidates().len(),
+                shell.app.word_clear_pending(),
+            ),
+            (
+                Side::None,
+                (Screen::YourWords, String::from("whilst\nwreck"), 1, false),
+                Side::ClearWords,
+                (Screen::YourWords, String::from("whilst\nwreck"), 1, true),
+                Side::ClearWords,
+                Screen::YourWords,
+                "",
+                0,
+                false,
+            ),
+            "review back reused its Escape as the first destructive confirmation"
+        );
+    }
+
+    #[test]
     fn confirmed_words_clear_forgets_the_hidden_review() {
         let mut shell = shell(
             review()
@@ -2187,7 +2238,7 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_stop_without_ready_cards_returns_to_review() {
+    fn confirmed_stop_without_ready_cards_starts_with_empty_words() {
         let mut shell = shell(review().seeded_blob("whilst"));
         shell
             .handle(AppEvent::Generate)
@@ -2209,14 +2260,15 @@ mod tests {
                 shell.app.cards().len(),
                 shell.app.generation_stopping(),
                 shell.engine.is_none(),
+                shell.app.learning_pending(),
             ),
-            (Screen::WhatIUnderstood, "whilst", 1, 0, false, true),
-            "zero-ready stop lost review state or left a committed engine behind"
+            (Screen::YourWords, "", 0, 0, false, true, true),
+            "zero-ready stop kept the cancelled words or left a committed engine behind"
         );
     }
 
     #[test]
-    fn zero_ready_stop_retains_settings_across_rotation_and_recreates_requests() {
+    fn zero_ready_stop_rotates_to_an_unpersisted_clean_batch() {
         let home = tempfile::TempDir::new().expect("tempdir must be created");
         let store = SessionStore::new(home.path());
         let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Mixed);
@@ -2262,51 +2314,34 @@ mod tests {
                 .as_slice(),
         )
         .expect("cancelled session must decode");
-        let mut rotated = std::fs::read_dir(home.path().join("sessions"))
+        let rotated = std::fs::read_dir(home.path().join("sessions"))
             .expect("rotated sessions must remain readable")
             .flatten()
             .filter(|entry| entry.file_name() != "en-old")
-            .map(|entry| {
-                serde_json::from_slice::<SessionRecord>(
-                    std::fs::read(entry.path().join("session.json"))
-                        .expect("preserved review must remain")
-                        .as_slice(),
-                )
-                .expect("preserved review must decode")
-            })
             .collect::<Vec<_>>();
-        let new = rotated
-            .pop()
-            .expect("preserved review must receive a new identity");
         let expected = settings.selections(1);
-        let recreated = drafts_from(&shell.app)
-            .into_iter()
-            .map(|draft| draft.meta_request().cloned())
-            .collect::<Vec<_>>();
         assert_eq!(
             (
                 old.phase,
                 old.sentences,
                 old.drafts[0].meta_request.clone(),
-                new.phase,
-                new.sentences,
-                new.drafts.len(),
+                shell.app.screen(),
+                shell.app.blob(),
+                shell.app.candidates().len(),
                 shell.app.sentence_settings(),
-                recreated,
                 rotated.is_empty(),
             ),
             (
                 Phase::Cancelled,
                 settings,
                 expected[0].clone(),
-                Phase::Understood,
-                settings,
+                Screen::YourWords,
+                "",
                 0,
-                settings,
-                expected,
+                SentenceBatchSettings::default(),
                 true,
             ),
-            "zero-ready stop lost batch settings or failed to recreate initial metadata requests after rotation"
+            "zero-ready stop failed to cancel the old session or persisted state into the clean batch"
         );
     }
 
@@ -2444,13 +2479,13 @@ mod tests {
                 shell.engine.is_none(),
                 shell.app.welcome().notice.clone(),
             ),
-            (Screen::WhatIUnderstood, 0, false, true, None),
+            (Screen::YourWords, 0, false, true, None),
             "a rejected in-flight request reopened key recovery or resumed a confirmed stop"
         );
     }
 
     #[test]
-    fn failed_publish_after_stop_returns_to_review_without_resuming() {
+    fn failed_publish_after_stop_starts_clean_without_resuming() {
         let home = tempfile::tempdir().expect("temp home");
         let store = SessionStore::new(home.path());
         let language_pair = pair();
@@ -2510,50 +2545,39 @@ mod tests {
                 .as_slice(),
         )
         .expect("the cancelled record must decode");
-        let mut next = std::fs::read_dir(home.path().join("sessions"))
+        let next = std::fs::read_dir(home.path().join("sessions"))
             .expect("the sessions directory must list")
             .flatten()
             .filter(|entry| entry.file_name() != "stopped-publish")
-            .map(|entry| {
-                serde_json::from_slice::<SessionRecord>(
-                    std::fs::read(entry.path().join("session.json"))
-                        .expect("the next record must read")
-                        .as_slice(),
-                )
-                .expect("the next record must decode")
-            })
             .collect::<Vec<_>>();
-        let new = next.pop().expect("the preserved review must persist");
         assert_eq!(
             (
                 shell.app.screen(),
                 claimed,
+                shell.app.blob(),
+                shell.app.candidates().len(),
                 shell.app.cards().len(),
                 shell.app.generation_stopping(),
                 shell.engine.is_none(),
                 shell.app.error(),
                 old.phase,
                 old.worker.is_none(),
-                new.phase,
-                new.drafts.len(),
-                new.worker.is_none(),
                 next.is_empty(),
             ),
             (
-                Screen::WhatIUnderstood,
+                Screen::YourWords,
                 true,
+                "",
+                0,
                 0,
                 false,
                 true,
                 Some("publish boom"),
                 Phase::Cancelled,
                 true,
-                Phase::Understood,
-                0,
-                true,
                 true,
             ),
-            "a stopped publish failure left drafts able to auto-resume or reused its identity"
+            "a stopped publish failure kept cancelled input, left drafts able to resume, or persisted a replacement batch"
         );
     }
 
@@ -2716,6 +2740,28 @@ mod tests {
             ),
             (false, Side::None, true, Screen::YourCards, false),
             "Escape armed or cleared a published batch while its sentence editor was open"
+        );
+    }
+
+    #[test]
+    fn escape_closes_an_expanded_card_before_arming_a_new_batch() {
+        let mut shell = shell(failed_without_publication().card_toggle_expanded());
+        let intercepted = shell
+            .handle_new_batch_escape()
+            .expect("Escape eligibility must be checked");
+        let side = shell
+            .handle(AppEvent::Cancel)
+            .expect("Escape must close the card");
+        assert_eq!(
+            (
+                intercepted,
+                side,
+                shell.app.card_expanded(),
+                shell.app.screen(),
+                shell.app.new_batch_pending(),
+            ),
+            (false, Side::None, false, Screen::YourCards, false),
+            "Escape armed a new batch before closing the expanded card"
         );
     }
 

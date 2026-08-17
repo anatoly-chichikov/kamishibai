@@ -289,8 +289,7 @@ fn both_r_keys_are_inert_while_sentence_tags_and_space_open_the_live_editor() {
             && rendered.contains("[← →] pick")
             && rendered.contains("[↑ ↓] row")
             && rendered.contains("[Ctrl+G] regenerate")
-            && rendered.contains("[Esc] close")
-            && !rendered.contains("[Enter]")
+            && rendered.contains("[Enter/Esc] close")
             && !rendered.contains("[R] change")
             && ctrl < arrows,
         "r/R emitted an action, opened the editor, or sentence tags, Space, and the live editor footer drifted apart: {rendered}"
@@ -711,7 +710,7 @@ fn returning_to_the_baseline_with_a_blank_note_automatically_unstages() {
 }
 
 #[test]
-fn enter_is_inert_but_ctrl_g_closes_the_editor_and_requests_all_pending_cards() {
+fn enter_closes_the_editor_and_ctrl_g_requests_all_pending_cards() {
     let opened = transit(
         seeded(card()),
         AppEvent::SentenceLabelFocus(LabelEditorRow::Register),
@@ -739,8 +738,8 @@ fn enter_is_inert_but_ctrl_g_closes_the_editor_and_requests_all_pending_cards() 
         ),
         (
             Side::None,
-            true,
-            true,
+            false,
+            false,
             true,
             Side::RegenerateCards,
             None,
@@ -749,7 +748,7 @@ fn enter_is_inert_but_ctrl_g_closes_the_editor_and_requests_all_pending_cards() 
             true,
             true,
         ),
-        "Enter committed live edits or Ctrl+G failed to hand every staged card to regeneration"
+        "Enter failed to collapse live edits or Ctrl+G failed to hand every staged card to regeneration"
     );
 }
 

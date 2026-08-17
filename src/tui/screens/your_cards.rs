@@ -1656,7 +1656,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             super::common::FooterHint::primary("Ctrl+G", "regenerate"),
             super::common::FooterHint::secondary("← →", "pick"),
             super::common::FooterHint::ghost("↑ ↓", "row"),
-            super::common::FooterHint::ghost("Esc", "close"),
+            super::common::FooterHint::ghost("Enter/Esc", "close"),
         ]
     } else {
         let controls = DisclosureControls::new(app.card_expanded());

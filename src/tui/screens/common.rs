@@ -445,6 +445,12 @@ pub fn sentence_settings_hint() -> FooterHint {
     FooterHint::with("↑", "guidance", Tier::Secondary, 2)
 }
 
+/// The nonempty words action, painted quietly but retained ahead of language
+/// selection when the footer is crowded.
+pub fn clear_words_hint() -> FooterHint {
+    FooterHint::with("Esc", "clear", Tier::Ghost, 1)
+}
+
 /// The finished-screen Escape action and its armed confirmation state.
 pub fn new_batch_hint(pending: bool) -> FooterHint {
     if pending {
@@ -727,6 +733,21 @@ mod tests {
             (new_cards[0].style, new_cards[1].style),
             (quit[0].style, quit[1].style),
             "idle new cards must have exactly the same muted treatment as quit"
+        );
+    }
+
+    #[test]
+    fn clear_words_hint_is_muted_but_outlives_plain_ghosts() {
+        let clear = clear_words_hint();
+        let plain = FooterHint::ghost("Ctrl+L", "languages");
+        let clear_spans = clear.spans();
+        let plain_spans = plain.spans();
+        assert!(
+            clear.tier == Tier::Ghost
+                && clear.keep == 1
+                && clear_spans[0].style == plain_spans[0].style
+                && clear_spans[1].style == plain_spans[1].style,
+            "words clear must stay visually quiet while surviving before ordinary ghost hints"
         );
     }
 

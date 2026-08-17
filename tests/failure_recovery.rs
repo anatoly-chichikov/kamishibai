@@ -245,8 +245,19 @@ fn enter_on_failure_banner_toggles_expansion_without_leaving_your_cards() {
     let app = seeded();
     let (after, side) = transit(app, AppEvent::KeyEnter);
     assert_eq!(
-        (after.screen(), side),
-        (Screen::YourCards, Side::None),
+        (after.screen(), after.card_expanded(), side),
+        (Screen::YourCards, true, Side::None),
         "Enter on the failure banner must just toggle expansion and stay on YourCards"
+    );
+}
+
+#[test]
+fn escape_closes_an_expanded_failure_before_resetting_the_batch() {
+    let opened = transit(seeded(), AppEvent::KeyEnter).0;
+    let (closed, side) = transit(opened, AppEvent::Cancel);
+    assert_eq!(
+        (closed.screen(), closed.card_expanded(), side),
+        (Screen::YourCards, false, Side::None),
+        "Escape on an expanded failure bypassed the disclosure and reached the batch lifecycle"
     );
 }

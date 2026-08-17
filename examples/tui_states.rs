@@ -545,6 +545,7 @@ fn build_states() -> Vec<(String, App)> {
     ];
 
     let review = App::new(pair())
+        .seeded_blob(words_seed)
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("fr")
         .understood(candidates.clone());
@@ -753,7 +754,7 @@ fn build_states() -> Vec<(String, App)> {
         .with_elapsed(Duration::from_secs(142));
 
     let words_clear = base_words.clone().with_word_clear_pending(true);
-    let review_back = review.clone();
+    let review_back = transit(review.clone(), AppEvent::Cancel).0;
     let stop_armed = cards_seed
         .clone()
         .cards_running(Some((2, Artifact::Picture)))
@@ -973,8 +974,38 @@ mod tests {
                 && rendered.contains("what kinds of phrases?")
                 && rendered.contains("b1")
                 && rendered.contains("questions")
-                && rendered.contains("[Esc] close"),
+                && rendered.contains("[Enter/Esc] close"),
             "synthetic generation guidance must show both retained choices and editor rows:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn review_back_state_keeps_words_and_shows_an_unarmed_clear() {
+        let states = build_states();
+        let (_, app) = states
+            .get(23)
+            .expect("review back state must stay at index 23");
+        let backend = TestBackend::new(120, 50);
+        let mut terminal = Terminal::new(backend).expect("backend must initialize");
+        terminal
+            .draw(|frame| draw(frame, app))
+            .expect("review back state must render");
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer[(column, row)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            app.screen() == Screen::YourWords
+                && app.blob() == "dépaysement\nflâner\ncanard\nchouette"
+                && !app.word_clear_pending()
+                && rendered.contains("[Esc] clear")
+                && !rendered.contains("[Esc] again"),
+            "synthetic review back did not preserve an unarmed editable batch:\n{rendered}"
         );
     }
 

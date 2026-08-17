@@ -333,6 +333,7 @@ impl App {
             && self.busy.is_none()
             && self.error.is_none()
             && self.cards.editor.is_none()
+            && !self.cards.expanded
     }
 
     /// Return whether generation has reached a terminal or published view.
@@ -1288,13 +1289,6 @@ impl App {
             stop: GenerationStopState::Inactive,
         };
         self
-    }
-
-    /// Return to review after a stopped run while preserving words and curation.
-    pub fn generation_cancelled_to_review(mut self) -> Self {
-        self.cards = CardsView::default();
-        self.done = DoneArtifacts::default();
-        self.with_screen(Screen::WhatIUnderstood)
     }
 
     /// Return the app with the currently-running artifact recorded so the UI can
