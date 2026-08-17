@@ -226,6 +226,11 @@ impl LocalImageRejections {
     }
 
     /// Decide whether the bounded history requires scene recomposition.
+    ///
+    /// Repeated text or fidelity rejections indict the scene itself — the
+    /// composed props or per-panel demands keep producing prohibited or
+    /// undrawable content — so two of them in a row stop re-rolling the
+    /// same scene and recompose it instead.
     pub(super) fn recompose(&self) -> bool {
         matches!(
             self.recent,
@@ -234,6 +239,10 @@ impl LocalImageRejections {
                 | [
                     Some(LocalImageRejection::Border),
                     Some(LocalImageRejection::Border)
+                ]
+                | [
+                    Some(LocalImageRejection::RecallText),
+                    Some(LocalImageRejection::RecallText)
                 ]
         )
     }

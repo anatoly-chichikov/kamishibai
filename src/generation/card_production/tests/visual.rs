@@ -263,7 +263,7 @@ fn a_rejected_picture_attempt_carries_the_renderer_verdict_and_its_frame() {
     let cache = Cache::new("card", home.path());
     let renderer = production_renderer(
         CountingImageSource::new(image_bytes(GrayImage::from_pixel(16, 16, Luma([0])))),
-        AcceptingRecall,
+        RejectingRecall,
         BorderDetector::new(2, 6, 240, 2),
     )
     .with_attempt_archive(
@@ -274,7 +274,7 @@ fn a_rejected_picture_attempt_carries_the_renderer_verdict_and_its_frame() {
     let archived = archived_sequence(&cache);
     let rejected = renderer.render(&renderable_scene(), &mut NoopProgress);
     let attempt = judged(
-        ArtifactAttempt::unmetered(rejected.map(|_| unreachable!("the border gate must reject"))),
+        ArtifactAttempt::unmetered(rejected.map(|_| unreachable!("the recall gate must reject"))),
         &cache,
         archived,
     );
@@ -288,7 +288,7 @@ fn a_rejected_picture_attempt_carries_the_renderer_verdict_and_its_frame() {
                 .artifact()
                 .and_then(|path| path.file_name().and_then(|name| name.to_str())),
         ),
-        ("border", Some("attempt-0001.png")),
+        ("recall_text", Some("attempt-0001.png")),
         "a rejected picture attempt lost the renderer verdict or the frame it judged"
     );
 }
@@ -320,14 +320,14 @@ fn a_resumed_picture_rejection_carries_its_same_sequence_verdict_and_frame() {
     let archived = archived_sequence(&cache);
     let rejected = production_renderer(
         source.clone(),
-        AcceptingRecall,
-        BorderDetector::new(2, 6, 240, 4),
+        RejectingRecall,
+        BorderDetector::new(2, 6, 240, 2),
     )
     .with_attempt_archive(attempts)
     .render(&renderable_scene(), &mut NoopProgress);
     let attempt = judged(
         ArtifactAttempt::unmetered(
-            rejected.map(|_| unreachable!("the resumed image must fail the stricter border gate")),
+            rejected.map(|_| unreachable!("the resumed image must fail the recall gate")),
         ),
         &cache,
         archived,
@@ -344,7 +344,7 @@ fn a_resumed_picture_rejection_carries_its_same_sequence_verdict_and_frame() {
             source.calls(),
             archived_sequence(&cache),
         ),
-        (true, Some("border"), Some("attempt-0001.png"), 1, 1),
+        (true, Some("recall_text"), Some("attempt-0001.png"), 1, 1),
         "a resumed picture rejection lost its rewritten verdict or immutable frame"
     );
 }

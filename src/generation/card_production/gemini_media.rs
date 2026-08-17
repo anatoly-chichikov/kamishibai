@@ -417,7 +417,7 @@ mod tests {
                 true,
                 Some(true),
                 Some(true),
-                "gemini-3.5-flash-lite,gemini-3.6-flash,gemini-3.6-flash",
+                "gemini-3.7-flash",
                 3,
             ),
             "clean full recall did not run dedicated fidelity before exactly one zoom scan"
@@ -479,7 +479,7 @@ mod tests {
                 Some("BROKEN_SUBJECT_CONTINUITY"),
                 Some(true),
                 Some(false),
-                "gemini-3.5-flash-lite,gemini-3.6-flash",
+                "gemini-3.7-flash",
                 2,
             ),
             "dedicated fidelity rejection changed semantics, ran zoom, or lost typed cost and archive proof"

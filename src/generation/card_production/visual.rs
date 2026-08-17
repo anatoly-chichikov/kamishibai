@@ -23,9 +23,26 @@ use crate::generation::manga::{
 };
 use crate::generation::{SceneComposer, visual_revision};
 use crate::languages::LanguageCatalog;
-use crate::session::{Artifact, ArtifactAttempt, ArtifactFile, CardCell, CardDraft};
+use crate::session::{
+    ARTIFACT_ATTEMPT_CEILING, Artifact, ArtifactAttempt, ArtifactFile, CardCell, CardDraft,
+};
 
 const IMAGE_ATTEMPTS_PER_ARTIFACT: usize = 1;
+
+/// Scene-attempt fallback plus recovery switches for one visual pass.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct VisualPass {
+    fallback: u8,
+    recompose: bool,
+    salvage: bool,
+}
+
+/// Reserved scene attempt plus terminal-salvage switch for one renderer build.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RenderControls {
+    scene_attempt: u8,
+    salvage: bool,
+}
 
 type GeminiIllustration = Illustration<SceneComposer<MeteredGemini>, MangaRenderer<GeminiRecall>>;
 
@@ -76,8 +93,11 @@ impl VisualProduction {
             slot,
             draft,
             Artifact::Scene,
-            draft.artifacts().scene().tally().done(),
-            false,
+            VisualPass {
+                fallback: draft.artifacts().scene().tally().done(),
+                recompose: false,
+                salvage: false,
+            },
             |illustration, sentence, target, progress, _accounting| {
                 illustration.scene_only(sentence, target, progress)
             },
@@ -106,14 +126,18 @@ impl VisualProduction {
         };
         let recover = cursor.recompose(recover);
         let archived = archived_sequence(&cache);
+        let salvage = done.saturating_add(1) >= ARTIFACT_ATTEMPT_CEILING;
         let attempt = if recover {
             let fallback_cache = cache.clone();
             self.generate(
                 slot,
                 draft,
                 Artifact::Picture,
-                draft.artifacts().scene().tally().done(),
-                true,
+                VisualPass {
+                    fallback: draft.artifacts().scene().tally().done(),
+                    recompose: true,
+                    salvage,
+                },
                 move |illustration, sentence, target, progress, accounting| {
                     render_recomposition_with_fallback(
                         &fallback_cache,
@@ -131,8 +155,11 @@ impl VisualProduction {
                 slot,
                 draft,
                 Artifact::Picture,
-                draft.artifacts().scene().tally().done(),
-                false,
+                VisualPass {
+                    fallback: draft.artifacts().scene().tally().done(),
+                    recompose: false,
+                    salvage,
+                },
                 |illustration, sentence, target, progress, _accounting| {
                     illustration.picture_only(sentence, target, progress)
                 },
@@ -157,8 +184,7 @@ impl VisualProduction {
         slot: usize,
         draft: &CardDraft,
         artifact: Artifact,
-        fallback: u8,
-        recompose: bool,
+        pass: VisualPass,
         render: F,
     ) -> ArtifactAttempt<ArtifactFile>
     where
@@ -198,16 +224,20 @@ impl VisualProduction {
             Ok(guard) => guard,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        let scene_attempt = match reserve_scene_attempt(&cache, artifact, fallback, recompose) {
-            Ok(attempt) => attempt,
-            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
-        };
+        let scene_attempt =
+            match reserve_scene_attempt(&cache, artifact, pass.fallback, pass.recompose) {
+                Ok(attempt) => attempt,
+                Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+            };
         let illustration = match self.illustration(
             draft,
             cache.clone(),
             scene_costs.clone(),
             picture_costs.clone(),
-            scene_attempt,
+            RenderControls {
+                scene_attempt,
+                salvage: pass.salvage,
+            },
             accounting.clone(),
         ) {
             Ok(illustration) => illustration,
@@ -255,7 +285,7 @@ impl VisualProduction {
         cache: Cache,
         scene_costs: CostRecorder,
         picture_costs: CostRecorder,
-        scene_attempt: u8,
+        controls: RenderControls,
         accounting: AccountingHealth,
     ) -> Result<GeminiIllustration> {
         let meta = draft
@@ -288,13 +318,18 @@ impl VisualProduction {
             production_renderer(picture_client, recall, BorderDetector::new(6, 24, 240, 10))
                 .with_text_judge(text);
         let renderer = renderer.with_attempt_archive(cache.filepath(IMAGE_ATTEMPTS_DIRECTORY)?);
+        let renderer = if controls.salvage {
+            renderer.with_salvage()
+        } else {
+            renderer
+        };
         Ok(Illustration::new(
             cache,
             SceneComposer::new(
                 scene_client,
                 learning.prompt.as_str(),
                 draft.term(),
-                scene_attempt,
+                controls.scene_attempt,
             ),
             renderer,
         ))

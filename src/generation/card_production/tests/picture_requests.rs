@@ -137,7 +137,7 @@ fn picture_cost_includes_recall_review_without_inflating_image_request_count() {
             true,
             1,
             2,
-            String::from("gemini-3.1-flash-image,gemini-3.5-flash-lite"),
+            String::from("gemini-3.1-flash-image,gemini-3.7-flash"),
             GenerationCost::from_nanos(950_000),
         ),
         "recall review cost was hidden from Picture or counted as another image generation"

@@ -84,6 +84,17 @@ impl TextEvidenceKind {
     fn rejects(self) -> bool {
         !matches!(self, Self::Ambiguous)
     }
+
+    fn weight(self) -> u32 {
+        match self {
+            Self::Writing => 12,
+            Self::MathematicalNotation | Self::TechnicalDiagram => 10,
+            Self::Numeral | Self::InterfaceMark => 8,
+            Self::PseudoWriting => 6,
+            Self::DecorativeGlyphString | Self::SymbolOrEmblem => 5,
+            Self::Ambiguous => 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -149,6 +160,16 @@ impl TextReview {
     #[must_use]
     pub fn gate(&self) -> TextReviewGate {
         self.gate
+    }
+
+    /// Return the weighted quality penalty for detected non-leaking writing.
+    #[must_use]
+    pub(crate) fn penalty(&self) -> u32 {
+        self.evidence
+            .iter()
+            .map(|item| item.kind.weight())
+            .sum::<u32>()
+            .min(40)
     }
 
     /// Return one concise rejection reason grounded in detected writing.

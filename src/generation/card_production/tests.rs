@@ -641,7 +641,7 @@ struct PaidRecall {
 impl RecallJudge for PaidRecall {
     fn review(&self, scene: &Value, _image: &[u8]) -> Result<RecallReview> {
         self.costs.push(CostRecord::new(
-            "gemini-3.5-flash-lite",
+            "gemini-3.7-flash",
             1,
             400,
             25,

@@ -20,8 +20,8 @@ use crate::generation::manga::{
 use crate::generation::prompts::layout_scene_prompt;
 use crate::languages::{LanguageCatalog, LanguageCode, catalog};
 use crate::session::{
-    AxisSet, CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair, LearningGuess,
-    RawInputBatch, Register, Sense, SenseCorrection, SentenceAxis, SentenceKind,
+    ARTIFACT_ATTEMPT_CEILING, AxisSet, CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair,
+    LearningGuess, RawInputBatch, Register, Sense, SenseCorrection, SentenceAxis, SentenceKind,
     SentenceLabelSelection, SentenceLabels, SentenceLevel, Understood, WordCandidate,
 };
 
@@ -59,25 +59,25 @@ fn catalog_url(base: &str) -> String {
     format!("{base}{separator}pageSize=1000")
 }
 
-const TEXT_MODEL: &str = "gemini-3.6-flash";
+const TEXT_MODEL: &str = "gemini-3.7-flash";
 const META_MODEL: &str = TEXT_MODEL;
 const FEATURE_MODEL: &str = "gemini-3.5-flash-lite";
 const SCENE_MODEL: &str = TEXT_MODEL;
 const IMAGE_MODEL: &str = "gemini-3.1-flash-image";
-const RECALL_MODEL: &str = "gemini-3.5-flash-lite";
+const RECALL_MODEL: &str = TEXT_MODEL;
 const FIDELITY_MODEL: &str = TEXT_MODEL;
 const LITERAL_ZOOM_MODEL: &str = TEXT_MODEL;
-const TEXT_JUDGE_MODEL: &str = "gemini-3.5-flash-lite";
+const TEXT_JUDGE_MODEL: &str = TEXT_MODEL;
 const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
 const FEATURE_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const COMPOSER_MAX_OUTPUT_TOKENS: u32 = 8_192;
-const RECALL_MAX_OUTPUT_TOKENS: u32 = 256;
-const RECALL_RECOVERY_MAX_OUTPUT_TOKENS: u32 = 512;
-const FIDELITY_MAX_OUTPUT_TOKENS: u32 = 512;
-const TEXT_JUDGE_MAX_OUTPUT_TOKENS: u32 = 256;
+const RECALL_MAX_OUTPUT_TOKENS: u32 = 1024;
+const RECALL_RECOVERY_MAX_OUTPUT_TOKENS: u32 = 4096;
+const FIDELITY_MAX_OUTPUT_TOKENS: u32 = 2048;
+const TEXT_JUDGE_MAX_OUTPUT_TOKENS: u32 = 1024;
 const MAX_ALTERNATES: usize = 3;
 const TEXT_JUDGE_RECOVERY_MAX_OUTPUT_TOKENS: u32 = 512;
-const LITERAL_ZOOM_MAX_OUTPUT_TOKENS: u32 = 512;
+const LITERAL_ZOOM_MAX_OUTPUT_TOKENS: u32 = 2048;
 const VOICES: [&str; 30] = [
     "Achernar",
     "Achird",
@@ -400,7 +400,8 @@ where
                 &mut observe,
             )
             .context("scene composition request failed")?;
-        compose(composer_raw.as_str(), sentence, target, &selection)
+        let lenient = attempt.saturating_add(1) >= ARTIFACT_ATTEMPT_CEILING;
+        compose(composer_raw.as_str(), sentence, target, &selection, lenient)
             .map_err(|error| error.context(RejectedReply::new("scene composer", composer_raw)))
     }
 
@@ -693,7 +694,9 @@ where
                 prompt.clone(),
                 mime_type,
                 data.clone(),
-                GenerationConfig::vision_judge(schema.clone())?.with_max_output_tokens(tokens),
+                GenerationConfig::vision_judge(schema.clone())?
+                    .with_thinking_level(ThinkingLevel::Low)
+                    .with_max_output_tokens(tokens),
             ))
         };
         let mut metered =
@@ -738,7 +741,7 @@ where
             mime_type,
             encode(image),
             GenerationConfig::structured_vision_judge(schema)?
-                .with_thinking_level(ThinkingLevel::Minimal)
+                .with_thinking_level(ThinkingLevel::Low)
                 .with_max_output_tokens(FIDELITY_MAX_OUTPUT_TOKENS),
         );
         let metered = self.request_metered(FIDELITY_MODEL, &request)?;
@@ -780,7 +783,7 @@ where
             "image/png",
             data,
             GenerationConfig::structured_vision_judge(schema)?
-                .with_thinking_level(ThinkingLevel::Minimal)
+                .with_thinking_level(ThinkingLevel::Low)
                 .with_max_output_tokens(LITERAL_ZOOM_MAX_OUTPUT_TOKENS),
         );
         let metered = self.request_metered(LITERAL_ZOOM_MODEL, &request)?;
@@ -830,7 +833,9 @@ where
                 prompt.clone(),
                 mime_type,
                 data.clone(),
-                GenerationConfig::vision_judge(schema.clone())?.with_max_output_tokens(tokens),
+                GenerationConfig::vision_judge(schema.clone())?
+                    .with_thinking_level(ThinkingLevel::Low)
+                    .with_max_output_tokens(tokens),
             ))
         };
         let mut metered =
@@ -2230,7 +2235,7 @@ mod tests {
                 true,
                 Some("AQID"),
                 Some("WRITING"),
-                Some("gemini-3.5-flash-lite"),
+                Some("gemini-3.7-flash"),
             ),
             "direct text validation lost its prompt, image, schema, verdict, or Flash-tier cost"
         );
@@ -2277,8 +2282,8 @@ mod tests {
                 payload["generationConfig"]["mediaResolution"].as_str()
                     == Some("MEDIA_RESOLUTION_HIGH"),
                 payload["generationConfig"]["thinkingConfig"]["thinkingLevel"].as_str()
-                    == Some("MINIMAL"),
-                payload["generationConfig"]["maxOutputTokens"].as_u64() == Some(512),
+                    == Some("LOW"),
+                payload["generationConfig"]["maxOutputTokens"].as_u64() == Some(2048),
                 payload["generationConfig"]["responseFormat"]["text"]["schema"]["properties"]
                     ["literal_evidence"]["items"]["properties"]["kind"]["enum"]
                     .as_array()
@@ -2289,8 +2294,8 @@ mod tests {
                 payload["generationConfig"]["responseSchema"].is_null(),
                 payload["generationConfig"]["temperature"].as_u64() == Some(0),
                 costs.len() == 1,
-                urls.borrow()[0].ends_with("/gemini-3.6-flash:generateContent"),
-                costs.first().map(CostRecord::model) == Some("gemini-3.6-flash"),
+                urls.borrow()[0].ends_with("/gemini-3.7-flash:generateContent"),
+                costs.first().map(CostRecord::model) == Some("gemini-3.7-flash"),
                 costs.first().map(|cost| cost.cost().nanos()) == Some(525_000),
             ],
             [true; 19],
@@ -2328,7 +2333,7 @@ mod tests {
             [
                 review.is_ok(),
                 requests.borrow().len() == 1,
-                urls.borrow()[0].ends_with("/gemini-3.6-flash:generateContent"),
+                urls.borrow()[0].ends_with("/gemini-3.7-flash:generateContent"),
                 prompt.contains("SCENE FIDELITY REFERENCE")
                     && prompt.contains("\"id\": \"person\"")
                     && !prompt.contains("hidden_focus_term")
@@ -2349,13 +2354,13 @@ mod tests {
                 payload["generationConfig"]["responseMimeType"].is_null()
                     && payload["generationConfig"]["responseSchema"].is_null(),
                 payload["generationConfig"]["thinkingConfig"]["thinkingLevel"].as_str()
-                    == Some("MINIMAL"),
+                    == Some("LOW"),
                 payload["generationConfig"]["mediaResolution"].as_str()
                     == Some("MEDIA_RESOLUTION_HIGH"),
                 payload["generationConfig"]["temperature"].as_u64() == Some(0),
-                payload["generationConfig"]["maxOutputTokens"].as_u64() == Some(512),
+                payload["generationConfig"]["maxOutputTokens"].as_u64() == Some(2048),
                 costs.len() == 1
-                    && costs.first().map(CostRecord::model) == Some("gemini-3.6-flash"),
+                    && costs.first().map(CostRecord::model) == Some("gemini-3.7-flash"),
             ],
             [true; 15],
             "dedicated fidelity request leaked card data or changed its one-shot modern vision contract"
@@ -2460,7 +2465,7 @@ mod tests {
                 costs.first().map(CostRecord::model),
                 costs.first().map(|cost| cost.cost().nanos()),
             ),
-            (true, Some(1), Some("gemini-3.5-flash-lite"), Some(350_800),),
+            (true, Some(1), Some("gemini-3.7-flash"), Some(1_374_000),),
             "invalid recall JSON discarded the billed multimodal Gemini request cost"
         );
     }
@@ -2543,12 +2548,12 @@ mod tests {
             (
                 true,
                 2,
-                Some(256),
-                Some(512),
+                Some(1024),
+                Some(4096),
                 Some("AQID"),
                 Some("AQID"),
                 vec![1, 1],
-                1_040_000,
+                3_720_000,
             ),
             "MAX_TOKENS recovery changed the image, exceeded two reviews, or hid billed usage"
         );

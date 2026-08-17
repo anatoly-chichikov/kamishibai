@@ -302,7 +302,7 @@ fn free_form_completion_keeps_the_legacy_request_bytes() -> Result<()> {
     }))?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let response = client.complete("gemini-3.6-flash", String::from("compose"))?;
+    let response = client.complete("gemini-3.7-flash", String::from("compose"))?;
     assert_eq!(
         (response.as_str(), requests.borrow()[0].1.as_str()),
         ("ok", r#"{"contents":[{"parts":[{"text":"compose"}]}]}"#,),
@@ -320,7 +320,7 @@ fn structured_completion_uses_the_json_response_format() -> Result<()> {
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
     let response = client.complete_json(
-        "gemini-3.6-flash",
+        "gemini-3.7-flash",
         String::from("compose"),
         &json!({"type":"object","additionalProperties":false,"required":["panels"]}),
     )?;
@@ -341,7 +341,7 @@ fn unsupported_response_schema_keywords_fail_before_transport() {
     let transport = FakeTransport::new(Vec::new());
     let requests = transport.requests.clone();
     let result = GeminiClient::new("key", transport).complete_json(
-        "gemini-3.6-flash",
+        "gemini-3.7-flash",
         String::from("compose"),
         &json!({"type":"string","minLength":1}),
     );
@@ -359,17 +359,17 @@ fn malformed_response_subschemas_fail_before_transport() {
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
     let items = client.complete_json(
-        "gemini-3.6-flash",
+        "gemini-3.7-flash",
         String::from("compose"),
         &json!({"type":"array","items":[]}),
     );
     let additional = client.complete_json(
-        "gemini-3.6-flash",
+        "gemini-3.7-flash",
         String::from("compose"),
         &json!({"type":"object","additionalProperties":"false"}),
     );
     let nested = client.complete_json(
-        "gemini-3.6-flash",
+        "gemini-3.7-flash",
         String::from("compose"),
         &json!({
             "type":"object",
@@ -380,12 +380,12 @@ fn malformed_response_subschemas_fail_before_transport() {
         }),
     );
     let nested_items = client.complete_json(
-        "gemini-3.6-flash",
+        "gemini-3.7-flash",
         String::from("compose"),
         &json!({"type":"array","items":{"type":"string","minLength":1}}),
     );
     let prefix_items = client.complete_json(
-        "gemini-3.6-flash",
+        "gemini-3.7-flash",
         String::from("compose"),
         &json!({"type":"array","prefixItems":[{"type":"string","minLength":1}]}),
     );
@@ -411,7 +411,7 @@ fn json_mode_uses_the_legacy_response_mime_type() -> Result<()> {
     }))?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let response = client.complete_json_mode("gemini-3.6-flash", String::from("compose"))?;
+    let response = client.complete_json_mode("gemini-3.7-flash", String::from("compose"))?;
     assert_eq!(
         (response.as_str(), requests.borrow()[0].1.as_str()),
         (
@@ -456,7 +456,7 @@ fn understanding_uses_flash_and_returns_sense_rows() -> Result<()> {
             understood.candidates()[1].ok(),
         ),
         (
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
             true,
             "en",
             "wrecked",
@@ -590,7 +590,7 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
             labels.approx().is_empty(),
         ),
         (
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
             "ˈbɒrəʊ",
             "Can I borrow your pen?",
             "одолжить",
@@ -729,7 +729,7 @@ fn validate_key_lists_models_and_flags_rejected_keys() {
         status: 200,
         body: json!({
             "models": [{
-                "name": "models/gemini-3.6-flash",
+                "name": "models/gemini-3.7-flash",
                 "supportedGenerationMethods": ["generateContent"]
             }]
         })
@@ -943,7 +943,7 @@ fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()
                     "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
                 ),
                 String::from(
-                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
                 ),
             ],
             (
@@ -1394,7 +1394,7 @@ fn recall_review_uses_the_validated_high_resolution_multimodal_contract() -> Res
         ),
         (
             true,
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
             true,
             Some("image/jpeg"),
             Some("AQID"),
@@ -1403,8 +1403,8 @@ fn recall_review_uses_the_validated_high_resolution_multimodal_contract() -> Res
             (Some(2), Some(4)),
             [true, true, true],
             Some(0),
-            Some(256),
-            [true, true, true, true],
+            Some(1024),
+            [false, true, true, true],
         ),
         "recall review stopped sending the actual image through the bounded high-resolution contract"
     );

@@ -59,6 +59,33 @@ impl BorderDetector {
         }
     }
 
+    /// Return one copy with the outer margin painted paper-white.
+    ///
+    /// The layout registry keeps every panel inside the 16..1008 span of the
+    /// 1024 canvas, so the outer strip is reserved gutter space; painting it
+    /// white repairs a bled render without disturbing panel geometry.
+    #[must_use]
+    pub fn repaired(&self, image: &GrayImage) -> GrayImage {
+        let proportional = image.width().min(image.height()) / 64;
+        let band = u32::try_from(self.margin)
+            .unwrap_or(u32::MAX)
+            .saturating_add(2)
+            .max(proportional);
+        let mut repaired = image.clone();
+        let width = repaired.width();
+        let height = repaired.height();
+        for (x, y, pixel) in repaired.enumerate_pixels_mut() {
+            if x < band
+                || y < band
+                || x >= width.saturating_sub(band)
+                || y >= height.saturating_sub(band)
+            {
+                *pixel = image::Luma([255]);
+            }
+        }
+        repaired
+    }
+
     /// Return whether one internal white horizontal or vertical gutter exists.
     pub fn gutter(&self, image: &GrayImage) -> bool {
         self.gutter_within(image, 0, 0, image.width(), image.height())

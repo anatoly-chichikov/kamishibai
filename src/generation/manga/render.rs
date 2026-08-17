@@ -24,8 +24,6 @@ enum RenderRejection {
     Topology(String),
     Ocr(String),
     RecallText(String),
-    Border(String),
-    LegacyGutter(String),
     Other(String),
 }
 
@@ -34,8 +32,8 @@ impl RenderRejection {
         Self::Color(String::from(reason))
     }
 
-    fn topology(reason: &str) -> Self {
-        Self::Topology(String::from(reason))
+    fn topology_scored(reason: String) -> Self {
+        Self::Topology(reason)
     }
 
     fn ocr(reason: String) -> Self {
@@ -44,14 +42,6 @@ impl RenderRejection {
 
     fn recall_text(reason: String) -> Self {
         Self::RecallText(reason)
-    }
-
-    fn border(reason: String) -> Self {
-        Self::Border(reason)
-    }
-
-    fn legacy_gutter(reason: &str) -> Self {
-        Self::LegacyGutter(String::from(reason))
     }
 
     fn other(reason: String) -> Self {
@@ -64,8 +54,6 @@ impl RenderRejection {
             | Self::Topology(reason)
             | Self::Ocr(reason)
             | Self::RecallText(reason)
-            | Self::Border(reason)
-            | Self::LegacyGutter(reason)
             | Self::Other(reason) => reason.as_str(),
         }
     }
@@ -76,8 +64,6 @@ impl RenderRejection {
             Self::Topology(_) => "topology",
             Self::Ocr(_) => "ocr",
             Self::RecallText(_) => "recall_text",
-            Self::Border(_) => "border",
-            Self::LegacyGutter(_) => "legacy_gutter",
             Self::Other(_) => "other",
         }
     }
@@ -126,6 +112,7 @@ pub struct MangaRenderer<J> {
     judge: J,
     border: BorderDetector,
     attempts: Option<PathBuf>,
+    salvage: bool,
 }
 
 impl<J> MangaRenderer<J> {
@@ -141,12 +128,19 @@ impl<J> MangaRenderer<J> {
             judge,
             border,
             attempts: None,
+            salvage: false,
         }
     }
 
     /// Preserve every raw production image attempt and its validation verdict.
     pub fn with_attempt_archive(mut self, directory: PathBuf) -> Self {
         self.attempts = Some(directory);
+        self
+    }
+
+    /// Ship the best non-blocked archived attempt when this attempt is the last.
+    pub fn with_salvage(mut self) -> Self {
+        self.salvage = true;
         self
     }
 
@@ -249,57 +243,44 @@ where
                 continue;
             }
             let gray = image.into_luma8();
-            let failed = self.border.borders(&gray);
-            if !failed.is_empty() {
-                rejection = RenderRejection::border(format!(
-                    "White border missing on: {}",
-                    failed.join(", ")
-                ));
-                record_attempt(
-                    journal.as_ref(),
-                    "rejected",
-                    rejection.category(),
-                    rejection.reason(),
-                )?;
-                progress.retry("Rendering manga", attempt + 1, rejection.reason());
-                continue;
+            let (gray, bytes, repaired) = if self.border.borders(&gray).is_empty() {
+                (gray, bytes, false)
+            } else {
+                let repaired = self.border.repaired(&gray);
+                let mut encoded = Vec::new();
+                if let Err(error) = DynamicImage::ImageLuma8(repaired.clone()).write_to(
+                    &mut std::io::Cursor::new(&mut encoded),
+                    image::ImageFormat::Png,
+                ) {
+                    record_attempt(
+                        journal.as_ref(),
+                        "error",
+                        "border_repair",
+                        error.to_string().as_str(),
+                    )?;
+                    return Err(error.into());
+                }
+                (repaired, encoded, true)
+            };
+            let mut penalties = Scorecard::default();
+            let mut reasons = Vec::new();
+            if repaired {
+                penalties.border = BORDER_REPAIR_PENALTY;
             }
             if has_active_layout(scene) {
-                if panels == 1 && !registry_topology_matches(&self.border, scene, &gray, panels) {
-                    rejection =
-                        RenderRejection::topology("Unexpected internal gutter in one-panel layout");
-                    record_attempt(
-                        journal.as_ref(),
-                        "rejected",
-                        rejection.category(),
-                        rejection.reason(),
-                    )?;
-                    progress.retry("Rendering manga", attempt + 1, rejection.reason());
-                    continue;
-                }
-                if panels > 1 && !registry_topology_matches(&self.border, scene, &gray, panels) {
-                    rejection =
-                        RenderRejection::topology("Registered panel topology was not detected");
-                    record_attempt(
-                        journal.as_ref(),
-                        "rejected",
-                        rejection.category(),
-                        rejection.reason(),
-                    )?;
-                    progress.retry("Rendering manga", attempt + 1, rejection.reason());
-                    continue;
+                if !registry_topology_matches(&self.border, scene, &gray, panels) {
+                    penalties.topology = TOPOLOGY_PENALTY;
+                    reasons.push(String::from(if panels == 1 {
+                        "Unexpected internal gutter in one-panel layout"
+                    } else {
+                        "Registered panel topology was not detected"
+                    }));
                 }
             } else if requires_gutter(scene, panels) && !self.border.gutter(&gray) {
-                rejection = RenderRejection::legacy_gutter("No white gutter found");
-                record_attempt(
-                    journal.as_ref(),
-                    "rejected",
-                    rejection.category(),
-                    rejection.reason(),
-                )?;
-                progress.retry("Rendering manga", attempt + 1, rejection.reason());
-                continue;
+                penalties.topology = TOPOLOGY_PENALTY;
+                reasons.push(String::from("No white gutter found"));
             }
+            let mut ocr_gate = false;
             if let Some(text) = self.text.as_ref() {
                 let archived = journal
                     .as_ref()
@@ -330,21 +311,13 @@ where
                     let _ = journal.record("error", "archive", reason.as_str());
                     return Err(error);
                 }
+                penalties.text = review.penalty();
                 if let Some(reason) = review.rejection() {
-                    rejection = match review.gate() {
-                        TextReviewGate::Ocr => RenderRejection::ocr(reason),
-                        TextReviewGate::LlmJudge => RenderRejection::recall_text(format!(
-                            "Text judge rejected image: {reason}"
-                        )),
-                    };
-                    record_attempt(
-                        journal.as_ref(),
-                        "rejected",
-                        rejection.category(),
-                        rejection.reason(),
-                    )?;
-                    progress.retry("Rendering manga", attempt + 1, rejection.reason());
-                    continue;
+                    ocr_gate = review.gate() == TextReviewGate::Ocr;
+                    reasons.push(match review.gate() {
+                        TextReviewGate::Ocr => reason,
+                        TextReviewGate::LlmJudge => format!("Text judge found writing: {reason}"),
+                    });
                 }
             }
             let review = match self.judge.review(scene, bytes.as_slice()) {
@@ -365,54 +338,127 @@ where
             if let Some(reason) = review.rejection() {
                 rejection =
                     RenderRejection::recall_text(format!("Recall judge rejected image: {reason}"));
-                record_attempt(
+                record_attempt_scored(
                     journal.as_ref(),
                     "rejected",
                     rejection.category(),
                     rejection.reason(),
+                    &penalties,
+                    true,
                 )?;
                 progress.retry("Rendering manga", attempt + 1, rejection.reason());
                 continue;
             }
+            penalties.fidelity = review.fidelity_penalty();
             if let Some(reason) = review.scene_fidelity_rejection() {
-                rejection = RenderRejection::recall_text(format!(
-                    "Scene fidelity judge rejected image: {reason}"
-                ));
-                record_attempt(
+                reasons.push(format!("Scene fidelity judge: {reason}"));
+            }
+            if self.text.is_some() {
+                penalties.literal = review.literal_penalty();
+                if let Some(reason) = review.literal_rejection() {
+                    reasons.push(format!("Literal writing: {reason}"));
+                }
+            }
+            if penalties.total() <= SHIP_PENALTY_CEILING {
+                if !review.inspections_complete() {
+                    let reason = String::from(
+                        "Recall review ended without dedicated fidelity and scale-aware literal inspection",
+                    );
+                    record_attempt(journal.as_ref(), "error", "recall_judge", reason.as_str())?;
+                    return Err(anyhow!(reason));
+                }
+                record_attempt_scored(
                     journal.as_ref(),
-                    "rejected",
-                    rejection.category(),
-                    rejection.reason(),
+                    "accepted",
+                    "accepted",
+                    "",
+                    &penalties,
+                    false,
                 )?;
-                progress.retry("Rendering manga", attempt + 1, rejection.reason());
-                continue;
+                return Ok(DynamicImage::ImageLuma8(gray));
             }
-            if self.text.is_some()
-                && let Some(reason) = review.literal_rejection()
-            {
-                rejection = RenderRejection::recall_text(format!(
-                    "Recall judge found prohibited literal writing after text gate allowed it: {reason}"
-                ));
-                record_attempt(
-                    journal.as_ref(),
-                    "rejected",
-                    rejection.category(),
-                    rejection.reason(),
-                )?;
-                progress.retry("Rendering manga", attempt + 1, rejection.reason());
-                continue;
-            }
-            if !review.inspections_complete() {
-                let reason = String::from(
-                    "Recall review ended without dedicated fidelity and scale-aware literal inspection",
-                );
-                record_attempt(journal.as_ref(), "error", "recall_judge", reason.as_str())?;
-                return Err(anyhow!(reason));
-            }
-            record_attempt(journal.as_ref(), "accepted", "accepted", "")?;
+            rejection = penalties.rejection(ocr_gate, reasons.as_slice());
+            record_attempt_scored(
+                journal.as_ref(),
+                "rejected",
+                rejection.category(),
+                rejection.reason(),
+                &penalties,
+                false,
+            )?;
+            progress.retry("Rendering manga", attempt + 1, rejection.reason());
+        }
+        if self.salvage
+            && let Some(directory) = self.attempts.as_deref()
+            && let Some(bytes) = salvaged_best(directory)
+            && let Ok(image) = image::load_from_memory(bytes.as_slice())
+        {
+            let gray = image.into_luma8();
+            let gray = if self.border.borders(&gray).is_empty() {
+                gray
+            } else {
+                self.border.repaired(&gray)
+            };
             return Ok(DynamicImage::ImageLuma8(gray));
         }
         Err(MangaRenderRejection::new(self.retries, rejection).into())
+    }
+}
+
+const BORDER_REPAIR_PENALTY: u32 = 2;
+const TOPOLOGY_PENALTY: u32 = 40;
+const SHIP_PENALTY_CEILING: u32 = 2;
+
+/// Weighted per-category quality penalties for one judged image attempt.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct Scorecard {
+    border: u32,
+    topology: u32,
+    text: u32,
+    fidelity: u32,
+    literal: u32,
+}
+
+impl Scorecard {
+    fn total(&self) -> u32 {
+        self.border
+            .saturating_add(self.topology)
+            .saturating_add(self.text)
+            .saturating_add(self.fidelity)
+            .saturating_add(self.literal)
+    }
+
+    fn score(&self) -> u32 {
+        100u32.saturating_sub(self.total())
+    }
+
+    fn rejection(&self, ocr_gate: bool, reasons: &[String]) -> RenderRejection {
+        let semantic =
+            self.fidelity
+                .saturating_add(self.literal)
+                .max(if ocr_gate { 0 } else { self.text });
+        let reason = format!("quality score {}/100: {}", self.score(), reasons.join("; "));
+        if self.topology >= semantic && self.topology >= self.text {
+            RenderRejection::topology_scored(reason)
+        } else if ocr_gate && self.text >= semantic {
+            RenderRejection::ocr(reason)
+        } else {
+            RenderRejection::recall_text(reason)
+        }
+    }
+
+    fn encoded(&self, blocker: bool) -> Value {
+        json!({
+            "score": if blocker { 0 } else { self.score() },
+            "blocker": blocker,
+            "penalties": {
+                "border": self.border,
+                "topology": self.topology,
+                "text": self.text,
+                "fidelity": self.fidelity,
+                "literal": self.literal
+            }
+        })
     }
 }
 
@@ -582,25 +628,51 @@ impl AttemptJournal {
     }
 
     fn record(&self, status: &str, category: &str, reason: &str) -> Result<()> {
+        self.write(status, category, reason, None)
+    }
+
+    fn record_scored(
+        &self,
+        status: &str,
+        category: &str,
+        reason: &str,
+        scorecard: &Scorecard,
+        blocker: bool,
+    ) -> Result<()> {
+        self.write(status, category, reason, Some(scorecard.encoded(blocker)))
+    }
+
+    fn write(
+        &self,
+        status: &str,
+        category: &str,
+        reason: &str,
+        scorecard: Option<Value>,
+    ) -> Result<()> {
         let directory = self
             .verdict
             .parent()
             .ok_or_else(|| anyhow!("attempt verdict has no parent directory"))?;
         let mut staged = tempfile::NamedTempFile::new_in(directory)?;
-        serde_json::to_writer_pretty(
-            staged.as_file_mut(),
-            &json!({
-                "sequence": self.sequence,
-                "image": self.image,
-                "text": self.text,
-                "recall": self.recall,
-                "scene": self.scene,
-                "prompt": format!("attempt-{:04}.prompt.txt", self.sequence),
-                "status": status,
-                "category": category,
-                "reason": reason
-            }),
-        )?;
+        let mut verdict = json!({
+            "sequence": self.sequence,
+            "image": self.image,
+            "text": self.text,
+            "recall": self.recall,
+            "scene": self.scene,
+            "prompt": format!("attempt-{:04}.prompt.txt", self.sequence),
+            "status": status,
+            "category": category,
+            "reason": reason
+        });
+        if let (Some(fields), Some(scored)) = (verdict.as_object_mut(), scorecard)
+            && let Some(scored) = scored.as_object()
+        {
+            for (key, value) in scored {
+                fields.insert(key.clone(), value.clone());
+            }
+        }
+        serde_json::to_writer_pretty(staged.as_file_mut(), &verdict)?;
         staged.as_file().sync_all()?;
         staged.persist(self.verdict.as_path())?;
         Ok(())
@@ -636,6 +708,75 @@ fn record_attempt(
         journal.record(status, category, reason)?;
     }
     Ok(())
+}
+
+fn record_attempt_scored(
+    journal: Option<&AttemptJournal>,
+    status: &str,
+    category: &str,
+    reason: &str,
+    scorecard: &Scorecard,
+    blocker: bool,
+) -> Result<()> {
+    if let Some(journal) = journal {
+        journal.record_scored(status, category, reason, scorecard, blocker)?;
+    }
+    Ok(())
+}
+
+/// Select the best non-blocked archived attempt for terminal salvage.
+///
+/// Returns the archived image of the highest-scoring rejected attempt whose
+/// verdict carries a scorecard and no blocker, marking its verdict as
+/// salvaged. Blocked attempts — color or answer leakage — never qualify.
+fn salvaged_best(directory: &Path) -> Option<Vec<u8>> {
+    let entries = fs::read_dir(directory).ok()?;
+    let mut best: Option<(u64, usize, PathBuf, Value)> = None;
+    for entry in entries.filter_map(std::result::Result::ok) {
+        let name = entry.file_name().into_string().ok()?;
+        let Some(sequence) = name
+            .strip_prefix("attempt-")
+            .and_then(|rest| rest.strip_suffix(".json"))
+            .and_then(|digits| digits.parse::<usize>().ok())
+        else {
+            continue;
+        };
+        let Ok(bytes) = fs::read(entry.path()) else {
+            continue;
+        };
+        let Ok(verdict) = serde_json::from_slice::<Value>(bytes.as_slice()) else {
+            continue;
+        };
+        if verdict.get("status").and_then(Value::as_str) != Some("rejected")
+            || verdict.get("blocker").and_then(Value::as_bool) != Some(false)
+        {
+            continue;
+        }
+        let Some(score) = verdict.get("score").and_then(Value::as_u64) else {
+            continue;
+        };
+        if verdict.get("image").and_then(Value::as_str).is_none() {
+            continue;
+        }
+        let replace = best
+            .as_ref()
+            .is_none_or(|(top, at, _, _)| (score, sequence) > (*top, *at));
+        if replace {
+            best = Some((score, sequence, entry.path(), verdict));
+        }
+    }
+    let (_, _, verdict_path, verdict) = best?;
+    let image_name = verdict.get("image").and_then(Value::as_str)?;
+    let image = fs::read(directory.join(image_name)).ok()?;
+    let mut salvaged = verdict;
+    if let Some(fields) = salvaged.as_object_mut() {
+        fields.insert(
+            String::from("status"),
+            Value::String(String::from("salvaged")),
+        );
+        let _ = serde_json::to_vec_pretty(&salvaged).map(|bytes| fs::write(verdict_path, bytes));
+    }
+    Some(image)
 }
 
 fn has_active_layout(scene: &Value) -> bool {
@@ -2143,15 +2284,13 @@ mod tests {
         assert_eq!(
             [
                 RenderRejection::color("color"),
-                RenderRejection::topology("topology"),
+                RenderRejection::topology_scored(String::from("topology")),
                 RenderRejection::ocr(String::from("ocr")),
                 RenderRejection::recall_text(String::from("recall text")),
-                RenderRejection::border(String::from("border")),
-                RenderRejection::legacy_gutter("legacy gutter"),
                 RenderRejection::other(String::from("other")),
             ]
             .map(local),
-            [true; 7],
+            [true; 5],
             "typed manga errors no longer identify every local validation rejection"
         );
     }
@@ -2181,23 +2320,13 @@ mod tests {
         assert_eq!(
             [
                 RenderRejection::color("color"),
-                RenderRejection::topology("topology"),
+                RenderRejection::topology_scored(String::from("topology")),
                 RenderRejection::ocr(String::from("ocr")),
                 RenderRejection::recall_text(String::from("recall text")),
-                RenderRejection::border(String::from("border")),
-                RenderRejection::legacy_gutter("legacy gutter"),
                 RenderRejection::other(String::from("other")),
             ]
             .map(|rejection| rejection.category()),
-            [
-                "color",
-                "topology",
-                "ocr",
-                "recall_text",
-                "border",
-                "legacy_gutter",
-                "other"
-            ],
+            ["color", "topology", "ocr", "recall_text", "other"],
             "typed manga errors collapse distinct validation gates"
         );
     }
@@ -2208,7 +2337,9 @@ mod tests {
         assert_eq!(
             MangaRenderRejection::new(
                 3,
-                RenderRejection::topology("Registered panel topology was not detected"),
+                RenderRejection::topology_scored(String::from(
+                    "Registered panel topology was not detected"
+                )),
             )
             .to_string(),
             String::from("Rejected after 3 attempts: Registered panel topology was not detected"),

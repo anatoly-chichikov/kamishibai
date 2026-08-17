@@ -387,6 +387,27 @@ impl LiteralEvidenceKind {
     fn rejects(self) -> bool {
         !matches!(self, Self::AmbiguousMark)
     }
+
+    fn weight(self) -> u32 {
+        match self {
+            Self::Writing => 12,
+            Self::MathematicalNotation | Self::TechnicalDiagram => 10,
+            Self::Numeral | Self::InterfaceMark => 8,
+            Self::PseudoWriting => 6,
+            Self::DecorativeGlyphString | Self::SymbolOrEmblem => 5,
+            Self::AmbiguousMark => 0,
+        }
+    }
+}
+
+impl SceneFidelityKind {
+    fn weight(self) -> u32 {
+        match self {
+            Self::SubjectContinuity => 20,
+            Self::Subject | Self::Relation => 15,
+            Self::LiteralAnchor => 10,
+        }
+    }
 }
 
 impl RecallKind {
@@ -660,6 +681,35 @@ impl RecallReview {
                 .collect::<Vec<_>>()
                 .join(", "),
         )
+    }
+
+    /// Return the weighted quality penalty for missing required scene content.
+    #[must_use]
+    pub(crate) fn fidelity_penalty(&self) -> u32 {
+        self.scene_fidelity_evidence
+            .iter()
+            .map(|item| item.kind.weight())
+            .sum::<u32>()
+            .min(40)
+    }
+
+    /// Return the weighted quality penalty for non-leaking literal writing.
+    #[must_use]
+    pub(crate) fn literal_penalty(&self) -> u32 {
+        let zoomed = self
+            .literal_evidence
+            .iter()
+            .map(|item| item.kind.weight())
+            .sum::<u32>();
+        let transcribed = self
+            .evidence
+            .iter()
+            .filter(|item| !item.kind.rejects() && significant_literal(item.reading.as_str()))
+            .count();
+        let transcribed = u32::try_from(transcribed)
+            .unwrap_or(u32::MAX)
+            .saturating_mul(8);
+        zoomed.saturating_add(transcribed).min(40)
     }
 
     /// Return significant literal writing transcribed by the downstream review.

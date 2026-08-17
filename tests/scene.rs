@@ -1489,24 +1489,27 @@ fn renderer_archives_dedicated_subject_continuity_rejection_before_zoom() -> Res
     Ok(())
 }
 
-/// The renderer rejects a frame after the last missing-border attempt.
+/// The renderer repairs a bled outer border instead of burning the attempt.
 #[test]
-fn renderer_rejects_a_frame_after_the_last_missing_border_attempt() {
+fn renderer_repairs_a_bled_border_instead_of_rejecting_the_frame() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![GrayImage::from_pixel(16, 16, Luma([0]))]),
         1,
         ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 2),
     );
+    let mut progress = Recorder::default();
+    let rendered = renderer
+        .render(&scene(1, "en"), &mut progress)
+        .expect("a bled border must be repaired, not rejected");
     assert_eq!(
-        renderer
-            .render(&scene(1, "en"), &mut Recorder::default())
-            .unwrap_err()
-            .to_string(),
-        String::from(
-            "Rejected after 1 attempts: White border missing on: top, bottom, left, right"
+        (
+            rendered.to_luma8().get_pixel(0, 0)[0],
+            rendered.to_luma8().get_pixel(8, 8)[0],
+            progress.retries.len(),
         ),
-        "renderer no longer rejects a frame after the last missing border attempt"
+        (255, 0, 0),
+        "renderer rejected a bled frame instead of repairing its paper-white margin"
     );
 }
 
@@ -1524,7 +1527,9 @@ fn renderer_rejects_a_multi_panel_frame_when_no_gutter_appears() {
             .render(&scene(2, "en"), &mut Recorder::default())
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+        ),
         "renderer no longer rejects a multi panel frame when no gutter appears"
     );
 }
@@ -1564,7 +1569,9 @@ fn renderer_accepts_expressive_geometry_while_retaining_recall_and_border_valida
                 (
                     String::from("Rendering manga"),
                     2,
-                    String::from("White border missing on: top, bottom, left, right"),
+                    String::from(
+                        "quality score 58/100: Registered panel topology was not detected"
+                    ),
                 ),
             ],
         ),
@@ -1589,8 +1596,12 @@ fn renderer_rejects_explicit_ordinary_layouts_without_a_gutter() {
     assert_eq!(
         reasons,
         [
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+            ),
         ],
         "ordinary page devices no longer require a straight gutter"
     );
@@ -1628,7 +1639,9 @@ fn renderer_accepts_registry_geometry_while_retaining_recall_and_border_validati
                 (
                     String::from("Rendering manga"),
                     2,
-                    String::from("White border missing on: top, bottom, left, right"),
+                    String::from(
+                        "quality score 58/100: Registered panel topology was not detected"
+                    ),
                 ),
             ],
         ),
@@ -1650,7 +1663,9 @@ fn renderer_rejects_registry_multi_panel_scene_rendered_as_one_splash() {
             .render(&active_layout_scene(2, "en"), &mut Recorder::default())
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+        ),
         "registry renderer still accepts one splash for a multi panel selection"
     );
 }
@@ -2030,7 +2045,9 @@ fn renderer_rejects_open_frame_with_a_blank_source_region() {
             )
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+        ),
         "open frame accepts a blank source as one semantic panel"
     );
 }
@@ -2052,7 +2069,9 @@ fn renderer_rejects_t_grid_for_a_declared_horizontal_triptych() {
             )
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+        ),
         "registry renderer accepts a T grid for a declared horizontal triptych"
     );
 }
@@ -2444,12 +2463,63 @@ fn renderer_archives_zoom_inspection_proof_on_an_accepted_attempt() -> Result<()
     Ok(())
 }
 
-/// Literal-writing rejection retries before the independent semantic recall judge.
+/// The final attempt ships the best archived non-blocked frame instead of failing.
 #[test]
-fn renderer_runs_text_gate_before_the_later_recall_judge() -> Result<()> {
+fn renderer_salvages_the_best_scored_attempt_after_the_final_rejection() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&["missing-required-subject"]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .with_salvage();
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "en"), &mut progress)?;
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            verdict["status"].as_str(),
+            verdict["blocker"].as_bool(),
+            verdict["score"].as_u64().is_some_and(|score| score < 100),
+        ),
+        (false, Some("salvaged"), Some(false), true),
+        "the final rejected attempt was not salvaged from the archive"
+    );
+    Ok(())
+}
+
+/// Answer leakage stays a blocker that salvage never ships.
+#[test]
+fn renderer_never_salvages_an_answer_leaking_attempt() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&["word"]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .with_salvage();
+    assert!(
+        renderer
+            .render(&active_layout_scene(2, "en"), &mut Recorder::default())
+            .is_err(),
+        "an answer-leaking attempt was salvaged into production"
+    );
+    Ok(())
+}
+
+/// Detected literal writing scores the attempt while leakage review still runs.
+#[test]
+fn renderer_scores_text_gate_writing_and_still_reviews_leakage() -> Result<()> {
     let text = ScriptedText::new(&["OPEN", ""]);
     let text_pending = text.values.clone();
-    let recall = ScriptedRecall::new(&[""]);
+    let recall = ScriptedRecall::new(&["", ""]);
     let recall_pending = recall.values.clone();
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
@@ -2466,10 +2536,10 @@ fn renderer_runs_text_gate_before_the_later_recall_judge() -> Result<()> {
             text_pending.borrow().len(),
             recall_pending.borrow().len(),
             progress.retries.len(),
-            progress.retries[0].2.contains("Text judge rejected image"),
+            progress.retries[0].2.contains("Text judge found writing"),
         ),
         (false, 0, 0, 1, true),
-        "literal text rejection did not precede the separate semantic recall review"
+        "detected writing skipped scoring or suppressed the leakage review"
     );
     Ok(())
 }
@@ -2880,11 +2950,13 @@ fn renderer_retries_registry_one_panel_geometry_with_an_internal_gutter() -> Res
             vec![(
                 String::from("Rendering manga"),
                 1,
-                String::from("Unexpected internal gutter in one-panel layout"),
+                String::from(
+                    "quality score 60/100: Unexpected internal gutter in one-panel layout"
+                ),
             )],
-            1,
+            0,
         ),
-        "structurally rejected artwork still consumed a paid recall review"
+        "structurally rejected artwork skipped the leakage review its scorecard requires"
     );
     Ok(())
 }
@@ -2903,7 +2975,9 @@ fn renderer_rejects_registry_one_panel_geometry_split_diagonally() {
             .render(&active_layout_scene(1, "en"), &mut Recorder::default())
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Unexpected internal gutter in one-panel layout"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: Unexpected internal gutter in one-panel layout"
+        ),
         "registry renderer still accepts a diagonal diptych as one splash"
     );
 }
@@ -2953,7 +3027,9 @@ fn renderer_rejects_crossing_with_an_unbroken_gutter() {
             )
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+        ),
         "crossing accepts an ordinary grid without a visible panel connection"
     );
 }
@@ -3116,7 +3192,9 @@ fn renderer_keeps_recall_and_outer_border_checks_for_crossing() {
                 (
                     String::from("Rendering manga"),
                     2,
-                    String::from("White border missing on: top, bottom, left, right"),
+                    String::from(
+                        "quality score 58/100: Registered panel topology was not detected"
+                    ),
                 ),
             ],
         ),
@@ -3144,10 +3222,18 @@ fn renderer_rejects_two_missing_regions_for_structural_devices() {
     assert_eq!(
         reasons,
         [
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+            ),
         ],
         "structural devices erase more than one declared panel relation"
     );
@@ -3173,9 +3259,15 @@ fn renderer_keeps_exact_topology_for_non_merging_devices() {
     assert_eq!(
         reasons,
         [
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: Registered panel topology was not detected"
+            ),
         ],
         "non-merging devices no longer retain exact registry topology"
     );
@@ -3198,7 +3290,9 @@ fn renderer_keeps_one_panel_devices_as_one_region() {
             )
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Unexpected internal gutter in one-panel layout"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: Unexpected internal gutter in one-panel layout"
+        ),
         "one-panel device accepts a hidden split page"
     );
 }

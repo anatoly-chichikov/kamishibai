@@ -270,7 +270,7 @@ fn credential_gemini() -> String {
         let (mut stream, _) = listener.accept().expect("credential request must arrive");
         let mut scratch = [0u8; 65536];
         let _ = stream.read(&mut scratch);
-        let body = r#"{"models":[{"name":"models/gemini-3.6-flash","supportedGenerationMethods":["generateContent"]}]}"#;
+        let body = r#"{"models":[{"name":"models/gemini-3.7-flash","supportedGenerationMethods":["generateContent"]}]}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()

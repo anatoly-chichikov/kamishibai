@@ -7,7 +7,7 @@ use std::collections::HashSet;
 const OPENING: &str = "Create a finished black-and-white manga page in high-contrast Indian ink, with crisp expressive linework and fine screentone shading; keep every visible mark strictly monochrome.";
 const DOMINANT_HIERARCHY: &str = "Make unequal panel size express editorial emphasis, letting the dominant region carry the payoff while smaller regions provide only motivated visual progression.";
 const BALANCED_HIERARCHY: &str = "Keep panel areas balanced so equal editorial emphasis remains clear throughout the motivated visual progression.";
-const CLOSING: &str = "No logos, emblems, icons, symbols, pseudo-writing, glyphs. Badge mounts/grille positions, license plates, destination displays stay blank. Lights/hardware/contours remain physical; surfaces unlettered; gutters/borders paper-white.";
+const CLOSING: &str = "No logos, emblems, icons, symbols, pseudo-writing, glyphs. Badge mounts, plates, displays stay blank. Lights/hardware/contours remain physical; surfaces unlettered; gutters, borders, page-edge margins paper-white.";
 const FILLERS: [&str; 4] = [
     "Keep the visual hierarchy immediate: silhouettes read cleanly, spatial layers stay distinct, and every pose supports the sentence rather than decorative spectacle.",
     "Use deliberate negative space and controlled screentone density so the eye follows the intended edit without losing the focal action.",
@@ -884,7 +884,7 @@ mod tests {
             },
         );
         assert_eq!(
-            digest, "1c828d8fc0f3f601b841299ee2d4a000a40ccadc24e7d65f59301892b78df2cd",
+            digest, "4aa8a2f9c25ccec6a861f610fda6191775c15fef6075ce4ea64a877ece7abd83",
             "production image prose changed without an explicit revision review"
         );
     }
@@ -896,7 +896,7 @@ mod tests {
         assert_eq!(
             (
                 prompt.ends_with(
-                    "No logos, emblems, icons, symbols, pseudo-writing, glyphs. Badge mounts/grille positions, license plates, destination displays stay blank. Lights/hardware/contours remain physical; surfaces unlettered; gutters/borders paper-white.",
+                    "No logos, emblems, icons, symbols, pseudo-writing, glyphs. Badge mounts, plates, displays stay blank. Lights/hardware/contours remain physical; surfaces unlettered; gutters, borders, page-edge margins paper-white.",
                 ),
                 (150..=250).contains(&prompt.split_whitespace().count()),
             ),
