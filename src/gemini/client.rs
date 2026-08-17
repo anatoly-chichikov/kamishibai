@@ -383,7 +383,8 @@ where
                 &mut observe,
             )
             .context("scene feature extraction request failed")?;
-        let features = registry.decode_features(unfence(feature_raw.trim()))?;
+        let lenient = attempt.saturating_add(1) >= ARTIFACT_ATTEMPT_CEILING;
+        let features = registry.decode_features_lenient(unfence(feature_raw.trim()), lenient)?;
         let selection = registry
             .eligible(&features)?
             .rank()?
@@ -400,7 +401,6 @@ where
                 &mut observe,
             )
             .context("scene composition request failed")?;
-        let lenient = attempt.saturating_add(1) >= ARTIFACT_ATTEMPT_CEILING;
         compose(composer_raw.as_str(), sentence, target, &selection, lenient)
             .map_err(|error| error.context(RejectedReply::new("scene composer", composer_raw)))
     }

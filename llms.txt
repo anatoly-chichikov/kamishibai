@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.8.2
+Release: 1.9.0
 
 Overview
 
@@ -21,7 +21,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.8.2/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.9.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -201,7 +201,7 @@ language on every card. Without it, metadata writes the natural example first
 and attributes its honest level afterward. `--types best-fit` leaves each
 example format unconstrained and is the default. `statements`, `questions`,
 and `dialogue` pin that exact format on every selected card. `mixed`
-deterministically gives each complete group of five cards three statements,
+deterministically gives each complete group of three cards one statement,
 one question, and one dialogue; it never assigns requests or exclamations.
 The allocation is stable across retries and process restarts. The retired
 `natural` and `varied` values remain accepted as aliases for `best-fit` and
@@ -556,10 +556,20 @@ has just triggered, from `1` to `retries`. A `fail` step means all retries were
 spent and carries `retries` without `retry`.
 
 `category` is the renderer's verdict slug for a picture the model did draw and a
-local gate rejected — `border`, `topology`, `color`, `ocr`, `recall_text`,
-`legacy_gutter`, `other` — or `error` when infrastructure failed rather than a
-gate rejecting the picture (transport, cache lease, exhausted request budget,
-OCR failure, or Gemini judge failure). Every rejected picture stays on disk under
+local gate rejected — `topology`, `color`, `ocr`, `recall_text`, `other`
+(archives written before 1.9.0 may also carry `border` or `legacy_gutter`) — or
+`error` when infrastructure failed rather than a gate rejecting the picture
+(transport, cache lease, exhausted request budget, OCR failure, or Gemini judge
+failure). Since 1.9.0 every judged attempt verdict also carries a weighted
+scorecard: `score` (0–100), `blocker`, and per-category `penalties`. The only
+blockers are a non-monochrome frame and answer leakage; other findings only
+lower the score. A bled outer border is repaired in place — the reserved
+page-edge margin is painted white — instead of rejecting the frame, and the
+final attempt of a series ships the highest-scoring non-blocked archived frame,
+rewriting that verdict's `status` to `salvaged`, so a card fails only when every
+attempt was blocked or infrastructural. The final scene attempt likewise
+relaxes the image-facing text gate, leaving rendered writing to the image
+judges. Every rejected picture stays on disk under
 `cards/<known>-<learning>/<key>/visual/<revision>/attempts/attempt-NNNN.jpg`
 next to its `attempt-NNNN.json` verdict, the `attempt-NNNN.scene.json` it was
 drawn from, the `attempt-NNNN.prompt.txt` compiled for it, the
