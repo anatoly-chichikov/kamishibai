@@ -146,7 +146,12 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         {
             (app.sentence_settings_advanced(true), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::Submit | AppEvent::KeyEnter)
+        (Screen::WhatIUnderstood, None, AppEvent::KeyEnter)
+            if app.sentence_settings_editor().is_some() =>
+        {
+            (app.sentence_settings_closed(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::Submit)
             if app.sentence_settings_editor().is_some() =>
         {
             (app, Side::None)
@@ -314,6 +319,9 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::Cancel) if app.sentence_editor().is_some() => {
             (app.sentence_editor_closed(), Side::None)
         }
+        (Screen::YourCards, None, AppEvent::Cancel) if app.card_expanded() => {
+            (app.card_toggle_expanded(), Side::None)
+        }
         (Screen::YourCards, None, AppEvent::Cancel)
             if !app.cards().is_empty() && !app.can_start_new_batch() =>
         {
@@ -382,9 +390,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::KeyBackspace) if app.sentence_editor().is_some() => {
             (app.sentence_editor_rubbed(), Side::None)
         }
-        (Screen::YourCards, None, AppEvent::Submit | AppEvent::KeyEnter)
-            if app.sentence_editor().is_some() =>
-        {
+        (Screen::YourCards, None, AppEvent::Submit) if app.sentence_editor().is_some() => {
             (app, Side::None)
         }
         (Screen::YourCards, None, AppEvent::Generate) if app.sentence_editor().is_some() => {

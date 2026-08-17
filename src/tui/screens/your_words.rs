@@ -218,6 +218,9 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     } else {
         hints.push(super::common::FooterHint::primary("Cmd+V", "paste"));
     }
+    if !app.blob().is_empty() {
+        hints.push(super::common::clear_words_hint());
+    }
     hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
     hints.push(super::common::quit_hint(app.quit_pending()));
     super::common::footer_bar(left, hints, width)

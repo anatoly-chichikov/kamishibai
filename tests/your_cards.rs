@@ -756,7 +756,7 @@ fn failure_footer_omits_the_duplicate_terminal_count() {
 }
 
 #[test]
-fn right_and_enter_open_the_editor_while_enter_inside_is_inert_and_escape_collapses() {
+fn right_and_enter_open_the_editor_while_enter_and_escape_close_it() {
     let start = seeded(vec![
         labeled_draft("whilst", ready_artifacts()),
         labeled_draft("at the end", ready_artifacts()),
@@ -790,10 +790,10 @@ fn right_and_enter_open_the_editor_while_enter_inside_is_inert_and_escape_collap
             ),
         ),
         (
-            (0, 1, false, true, true, true, false, true),
-            (true, true, true, true, true, true, Side::None),
+            (0, 1, false, true, true, false, false, true),
+            (true, true, true, false, true, true, Side::None),
         ),
-        "tune controls exposed an editor-free expanded state, Enter closed it, or Esc left it open"
+        "tune controls failed to open on Enter/Right or collapse on Enter/Escape"
     );
 }
 

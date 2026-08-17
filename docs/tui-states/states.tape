@@ -138,7 +138,7 @@ Space
 Sleep 800ms
 Screenshot "live/23-esc-words-clear.png"
 
-# index 23 — collapsed review advertises the harmless Esc back action
+# index 23 — review back preserves words with a fresh unarmed Esc clear
 Type "23"
 Space
 Sleep 800ms

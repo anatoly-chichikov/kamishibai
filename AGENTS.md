@@ -430,12 +430,13 @@ preserving preferences and output location while rotating the persistent
 session identity and cost journal. Any other action or timeout disarms the
 confirmation. Everywhere else `Esc` closes exactly one layer from inside out:
 an error, a modal/editor/expanded sense list, then the current screen action.
-On nonempty `YourWords`, double `Esc` clears the field; on collapsed
-`WhatIUnderstood`, one `Esc` returns to the preserved words; during generation,
-double `Esc` stops after the current request finishes and launches no next
-request. A stop publishes the complete subset as `partial`, or, when no card is
+On nonempty `YourWords`, a quiet `[Esc] clear` precedes the double-`Esc` clear;
+on collapsed `WhatIUnderstood`, one `Esc` returns to the preserved words without
+arming that clear, so it takes two fresh presses there; during generation, double
+`Esc` stops after the current request finishes and launches no next request. A
+stop publishes the complete subset as `partial`, or, when no card is
 complete, closes the old run as `cancelled`, rotates identity and cost scope,
-and returns to the preserved review. While the current request drains the
+and starts clean `YourWords`. While the current request drains the
 header says `stopping…`. The same reset remains available after every card
 terminally gives up and no package can be published, once the publication error
 has been dismissed. `Ctrl+C` keeps an independent double-press quit confirmation.

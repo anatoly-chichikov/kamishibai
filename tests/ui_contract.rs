@@ -195,6 +195,24 @@ fn check_your_words_input_contract(contract: &Contract, errs: &mut Vec<String>) 
             "yw.toggle_my_language does not reveal Ctrl+L language",
         ));
     }
+    let Some(clear_hint) = element_by_id(contract, "yw.footer_clear_words") else {
+        errs.push(String::from("yw.footer_clear_words is missing"));
+        return;
+    };
+    if !text_contains(clear_hint, "[Esc] clear") {
+        errs.push(String::from(
+            "yw.footer_clear_words does not reveal the unarmed clear action",
+        ));
+    }
+    let Some(clear_confirmation) = element_by_id(contract, "yw.footer_clear_confirmation") else {
+        errs.push(String::from("yw.footer_clear_confirmation is missing"));
+        return;
+    };
+    if !text_contains(clear_confirmation, "[Esc] again") {
+        errs.push(String::from(
+            "yw.footer_clear_confirmation does not reveal the armed confirmation",
+        ));
+    }
 }
 
 fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<String>) {
@@ -236,7 +254,7 @@ fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<St
         ));
         return;
     };
-    for text in ["Ctrl+G", "pick", "row", "Esc", "close"] {
+    for text in ["Ctrl+G", "pick", "row", "Enter", "Esc", "close"] {
         if !text_contains(editor, text) {
             errs.push(format!(
                 "wu.footer_sentence_settings_editor does not lock {text:?}"

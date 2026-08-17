@@ -903,7 +903,7 @@ mod tests {
     }
 
     #[test]
-    fn cancelling_without_ready_cards_rotates_into_a_clean_understood_session() {
+    fn cancelling_without_ready_cards_rotates_into_an_unpersisted_clean_batch() {
         let home = tempfile::TempDir::new().expect("tempdir must be created");
         let store = SessionStore::new(home.path());
         let pair = LanguagePair::new("fr", "en");
@@ -928,48 +928,32 @@ mod tests {
         session
             .cancel_and_start_next(&app, Path::new("/o"))
             .expect("active session must cancel and rotate");
-        let review = app.generation_cancelled_to_review();
+        let cleared = app.starting_new_batch();
         session
-            .save(&review, Path::new("/o"), false)
-            .expect("preserved review must save under a new identity");
-        let new_id = session
-            .id
-            .clone()
-            .expect("new session must have an identity");
+            .save(&cleared, Path::new("/o"), false)
+            .expect("an empty next batch must remain unpersisted");
         let old: SessionRecord = serde_json::from_slice(
             std::fs::read(home.path().join("sessions/fr-old/session.json"))
                 .expect("cancelled record must remain")
                 .as_slice(),
         )
         .expect("cancelled record must decode");
-        let new: SessionRecord = serde_json::from_slice(
-            std::fs::read(
-                home.path()
-                    .join("sessions")
-                    .join(new_id)
-                    .join("session.json"),
-            )
-            .expect("preserved review record must exist")
-            .as_slice(),
-        )
-        .expect("preserved review record must decode");
-        let (_, startup) = record_to_app(&new);
+        let rotated = std::fs::read_dir(home.path().join("sessions"))
+            .expect("sessions must remain readable")
+            .flatten()
+            .filter(|entry| entry.file_name() != "fr-old")
+            .collect::<Vec<_>>();
         assert_eq!(
             (
                 old.id.as_str(),
                 old.phase,
                 old.drafts.len(),
                 old.worker.is_none(),
-                new.id != old.id,
-                new.phase,
-                new.drafts.len(),
-                new.words,
-                new.candidates[0]
-                    .clone()
-                    .candidate()
-                    .selected_senses()
-                    .to_vec(),
-                startup.is_none(),
+                session.id.is_none(),
+                cleared.screen(),
+                cleared.blob(),
+                cleared.candidates().len(),
+                rotated.is_empty(),
             ),
             (
                 "fr-old",
@@ -977,13 +961,12 @@ mod tests {
                 1,
                 true,
                 true,
-                Phase::Understood,
+                Screen::YourWords,
+                "",
                 0,
-                vec![String::from("canard"), String::from("flaner")],
-                vec![1],
                 true,
             ),
-            "cancelled generation reused its identity, costs, or lost the preserved review"
+            "cancelled generation reused its identity or persisted the cancelled words into the clean batch"
         );
     }
 

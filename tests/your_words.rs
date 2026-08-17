@@ -129,13 +129,35 @@ fn your_words_footer_keeps_paste_shortcut() {
 }
 
 #[test]
+fn nonempty_words_footer_keeps_escape_clear_at_standard_width() {
+    let app = App::new(LanguagePair::new("en", "ru")).seeded_blob("whilst");
+    let rendered = flatten(&app);
+    assert!(
+        rendered.contains("[Esc] clear") && !rendered.contains("[Esc] again"),
+        "nonempty words did not advertise the unarmed Escape clear action: {rendered}"
+    );
+}
+
+#[test]
+fn raw_nonempty_words_without_a_card_still_advertise_escape_clear() {
+    let app = App::new(LanguagePair::new("en", "ru")).seeded_blob("\n");
+    let rendered = flatten(&app);
+    assert!(
+        rendered.contains("[Cmd+V] paste") && rendered.contains("[Esc] clear"),
+        "raw nonempty input armed by Escape did not advertise its clear action: {rendered}"
+    );
+}
+
+#[test]
 fn armed_words_clear_makes_escape_the_only_primary_action() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .seeded_blob("whilst")
         .with_word_clear_pending(true);
     let rendered = flatten(&app);
     assert!(
-        rendered.contains("[Esc] again") && !rendered.contains("[Ctrl+G] continue"),
+        rendered.contains("[Esc] again")
+            && !rendered.contains("[Esc] clear")
+            && !rendered.contains("[Ctrl+G] continue"),
         "armed words clear competed with another primary footer action: {rendered}"
     );
 }

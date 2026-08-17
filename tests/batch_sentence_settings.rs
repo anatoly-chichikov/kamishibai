@@ -372,22 +372,29 @@ fn re_understanding_and_screen_changes_keep_only_the_durable_choices() {
 }
 
 #[test]
-fn open_editor_owns_enter_drop_navigation_and_printable_keys() {
-    let app = transit(review(2), AppEvent::SentenceSettingsOpen).0;
+fn enter_closes_the_open_editor_while_printable_keys_stay_owned() {
+    let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Questions);
+    let app = transit(
+        review(2).with_sentence_settings(settings),
+        AppEvent::SentenceSettingsOpen,
+    )
+    .0;
     let enter = transit(app.clone(), AppEvent::KeyEnter).0;
     let drop = transit(app.clone(), AppEvent::KeyChar('D')).0;
     let move_key = transit(app.clone(), AppEvent::KeyChar('J')).0;
     let space = transit(app.clone(), AppEvent::KeyChar(' ')).0;
     assert_eq!(
         (
+            enter.sentence_settings_editor(),
+            enter.sentence_settings(),
             enter.candidates().len(),
             enter.expanded_sense(),
             drop.candidates().len(),
             move_key.selected(),
             space.expanded_sense(),
         ),
-        (2, None, 2, 0, None),
-        "an open settings editor must prevent review controls from receiving its keys"
+        (None, settings, 2, None, 2, 0, None),
+        "Enter did not collapse generation guidance or another owned key leaked into review controls"
     );
 }
 
