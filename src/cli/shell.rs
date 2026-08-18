@@ -582,9 +582,15 @@ where
             Artifact::Meta => {
                 ArtifactOutcome::Meta(Box::new(workflow.generate_draft_meta_in(card, &draft)))
             }
-            Artifact::Scene => ArtifactOutcome::Media(workflow.generate_scene_in(card, &draft)),
-            Artifact::Picture => ArtifactOutcome::Media(workflow.generate_picture_in(card, &draft)),
-            Artifact::Sound => ArtifactOutcome::Media(workflow.generate_sound_in(card, &draft)),
+            Artifact::Scene => {
+                ArtifactOutcome::Media(Box::new(workflow.generate_scene_in(card, &draft)))
+            }
+            Artifact::Picture => {
+                ArtifactOutcome::Media(Box::new(workflow.generate_picture_in(card, &draft)))
+            }
+            Artifact::Sound => {
+                ArtifactOutcome::Media(Box::new(workflow.generate_sound_in(card, &draft)))
+            }
         });
         self.artifact_job = Some(PendingArtifactJob {
             job,
@@ -621,7 +627,9 @@ where
                     Artifact::Meta => {
                         ArtifactOutcome::Meta(Box::new(ArtifactAttempt::unmetered(Err(synthetic))))
                     }
-                    _ => ArtifactOutcome::Media(ArtifactAttempt::unmetered(Err(synthetic))),
+                    _ => {
+                        ArtifactOutcome::Media(Box::new(ArtifactAttempt::unmetered(Err(synthetic))))
+                    }
                 };
                 self.apply_artifact_outcome(job.card, job.artifact, outcome);
                 Ok(true)
@@ -656,7 +664,7 @@ where
         let _event = match outcome {
             ArtifactOutcome::Meta(attempt) => engine.applied_revision_attempt(card, *attempt),
             ArtifactOutcome::Media(attempt) => {
-                engine.applied_media_attempt(card, artifact, attempt)
+                engine.applied_media_attempt(card, artifact, *attempt)
             }
         };
         let drafts = engine

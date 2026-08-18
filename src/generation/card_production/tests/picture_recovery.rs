@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn two_recall_text_rejections_keep_the_third_attempt_on_the_current_scene() {
+fn two_recall_text_rejections_enable_third_attempt_recomposition() {
     let recovery = PictureRecovery::default();
     let path = Path::new("cards/local-rejections");
     let first = recovery
@@ -21,8 +21,8 @@ fn two_recall_text_rejections_keep_the_third_attempt_on_the_current_scene() {
         .expect("third attempt must prepare");
     assert_eq!(
         (first, second, third),
-        (false, false, false),
-        "recall-text failures discarded a scene that could still render without text"
+        (false, false, true),
+        "repeated text or fidelity rejections kept re-rolling the same doomed scene"
     );
 }
 

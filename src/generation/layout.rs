@@ -134,6 +134,7 @@ pub(crate) struct LayoutRegistry {
 #[derive(Clone, Debug)]
 pub(crate) struct SceneFeatures {
     value: Value,
+    lenient: bool,
 }
 
 /// Owns the deterministic hard-filter result used for local layout ranking.
@@ -356,20 +357,34 @@ impl LayoutRegistry {
     }
 
     /// Decode one strict flat feature response using this registry's closed enums.
+    #[cfg(test)]
     pub(crate) fn decode_features(&self, raw: &str) -> Result<SceneFeatures> {
+        self.decode_features_lenient(raw, false)
+    }
+
+    /// Decode one feature response, optionally relaxing camera-progression quality rules.
+    ///
+    /// The lenient final scene attempt keeps every structural rule but stops
+    /// rejecting a plan for quality-only camera progression violations, so a
+    /// card ships the best available plan instead of failing.
+    pub(crate) fn decode_features_lenient(
+        &self,
+        raw: &str,
+        lenient: bool,
+    ) -> Result<SceneFeatures> {
         let mut value = serde_json::from_str::<Value>(raw)
             .context("layout feature extractor returned invalid JSON")?;
         normalize_semantic_relation(&mut value)?;
         normalize_coverage_audit(&mut value)?;
         normalize_shots(&mut value)?;
         normalize_camera_arc(&mut value)?;
-        validate_features(&value, contract(&self.value)?)?;
-        Ok(SceneFeatures { value })
+        validate_features(&value, contract(&self.value)?, lenient)?;
+        Ok(SceneFeatures { value, lenient })
     }
 
     /// Apply deterministic hard filters and return only automatic left-to-right templates.
     pub(crate) fn eligible(&self, features: &SceneFeatures) -> Result<EligibleLayouts> {
-        validate_features(&features.value, contract(&self.value)?)?;
+        validate_features(&features.value, contract(&self.value)?, features.lenient)?;
         let root = root_object(&self.value)?;
         let available = array_field(root, "templates")?;
         let mut templates = available
@@ -2145,7 +2160,7 @@ fn validate_policy(value: &Map<String, Value>, ids: &BTreeSet<String>) -> Result
     Ok(())
 }
 
-fn validate_features(value: &Value, contract: &Map<String, Value>) -> Result<()> {
+fn validate_features(value: &Value, contract: &Map<String, Value>, lenient: bool) -> Result<()> {
     let root = root_object(value)?;
     exact_keys(root, &FEATURE_FIELDS, "layout scene features")?;
     let semantic_count = usize_field(root, "semantic_beat_count")?;
@@ -2207,7 +2222,7 @@ fn validate_features(value: &Value, contract: &Map<String, Value>) -> Result<()>
         bail!("layout feature extractor returned a contradictory feature vector");
     }
     let camera_arc = validate_camera_arc(root, panel_count)?;
-    validate_shots(root, semantic_count, panel_count, camera_arc)?;
+    validate_shots(root, semantic_count, panel_count, camera_arc, lenient)?;
     Ok(())
 }
 
@@ -2319,6 +2334,7 @@ fn validate_shots(
     semantic_count: usize,
     panel_count: usize,
     camera_arc: &str,
+    lenient: bool,
 ) -> Result<()> {
     let shots = array_field(root, "shots")?;
     if shots.len() != panel_count {
@@ -2398,7 +2414,9 @@ fn validate_shots(
     if covered.len() != semantic_count {
         bail!("layout shot plan leaves a semantic beat uncovered");
     }
-    validate_camera_progression(camera_arc, &camera_setups, &scales)?;
+    if !lenient {
+        validate_camera_progression(camera_arc, &camera_setups, &scales)?;
+    }
     Ok(())
 }
 
@@ -3210,6 +3228,22 @@ mod tests {
             ),
             (true, true),
             "rising contrast coverage has no compatible canonical layout"
+        );
+    }
+
+    #[test]
+    fn lenient_final_attempt_accepts_a_repeated_adjacent_camera_setup() {
+        let registry = LayoutRegistry::embedded().expect("embedded registry must be valid");
+        let mut raw = feature_json(3, "sequence", "rising", LEFT_TO_RIGHT);
+        raw["shots"][1]["shot_scale"] = json!("wide");
+        let strict = registry.decode_features(&raw.to_string()).is_err();
+        let features = registry
+            .decode_features_lenient(&raw.to_string(), true)
+            .expect("lenient decode must accept a quality-only camera violation");
+        assert_eq!(
+            (strict, registry.eligible(&features).is_ok()),
+            (true, true),
+            "the lenient final scene attempt still rejected a repeated adjacent camera setup"
         );
     }
 

@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{SentenceAxis, SentenceKind, SentenceLabelSelection, SentenceLevel};
 
 const TYPE_MIX_SEED: u64 = 0x6b61_6d69_7368_6962;
-const TYPE_MIX_BAG: [SentenceKind; 5] = [
-    SentenceKind::Statement,
-    SentenceKind::Statement,
+const TYPE_MIX_BAG: [SentenceKind; 3] = [
     SentenceKind::Statement,
     SentenceKind::Question,
     SentenceKind::Dialogue,
@@ -124,8 +122,8 @@ impl SentenceBatchSettings {
 fn mixed_kind(index: usize) -> SentenceKind {
     let cycle = u64::try_from(index / TYPE_MIX_BAG.len()).unwrap_or(u64::MAX);
     let mixed = seeded(cycle ^ TYPE_MIX_SEED);
-    let offset = usize::try_from(mixed % 5).unwrap_or(0);
-    let stride = [1, 2, 3, 4][usize::try_from(mixed / 5 % 4).unwrap_or(0)];
+    let offset = usize::try_from(mixed % 3).unwrap_or(0);
+    let stride = [1, 2][usize::try_from(mixed / 3 % 2).unwrap_or(0)];
     TYPE_MIX_BAG[(offset + index % TYPE_MIX_BAG.len() * stride) % TYPE_MIX_BAG.len()]
 }
 

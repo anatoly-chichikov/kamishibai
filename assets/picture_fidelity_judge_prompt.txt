@@ -6,10 +6,12 @@ SCENE FIDELITY REFERENCE
 {scene_fidelity_json}
 
 Compare the actual pixels against every panel, subject identity, visible anchor, semantic job, literal event, literal anchor, semantic focus, and visual relation in the reference. Ground each clear omission or continuity failure in scene_fidelity_evidence with the required element, what the pixels actually show instead, a coarse image location, and one kind:
-- MISSING_REQUIRED_SUBJECT: a distinct person, animal, or acting object required for a panel or relation is absent;
+- MISSING_REQUIRED_SUBJECT: a distinct person, animal, or acting object is absent from the entire page, or absent from the one panel whose required interaction cannot happen without it;
 - MISSING_REQUIRED_RELATION: the participants may be present, but the required interaction, opposition, transfer, comparison, spatial relation, or emotional relation is absent;
-- MISSING_LITERAL_ANCHOR: a concrete required object, action, condition, or event is absent;
+- MISSING_LITERAL_ANCHOR: a concrete required object, action, condition, or event whose absence leaves the literal event unreadable is absent;
 - BROKEN_SUBJECT_CONTINUITY: the same nonempty subject id is visibly rendered as a different person, animal, or acting object across panels, including substitution of another declared subject; or distinct required subject ids collapse or swap so actions or roles attach to the wrong participant.
+
+Judge meaning, not inventory. The reference always lists more detail than one render can honor, so an omission becomes evidence only when it breaks the sentence: the semantic focus can no longer be inferred from the page, a required interaction has no participants, or subject continuity visibly breaks. A missing background or secondary element — set dressing, furniture, a wall fixture, a decorative prop, weather — is not evidence, and neither is the absence of a subject from one panel while the same subject is clearly present and acting in another panel whose interaction carries the sentence. When the pixels convey a required element through a different but equivalent concrete depiction, treat that requirement as satisfied.
 
 Use scene_fidelity_decision=REJECT when at least one grounded evidence item exists. Otherwise use ALLOW with an empty evidence array. Evidence is authoritative even when the proposed decision contradicts it. Never infer that a required subject, relation, anchor, identity, date, deadline, overdue or missed state, status, data, progress, result, or entry is visible merely because the reference claims it. A blank calendar, document, screen, or board proves only that the carrier is blank; an information-bearing requirement needs an independent pixel-grounded cue.
 

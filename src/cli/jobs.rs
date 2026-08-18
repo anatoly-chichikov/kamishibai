@@ -15,7 +15,7 @@ pub(super) enum TextOutcome {
 /// Result produced by one background artifact pass.
 pub(super) enum ArtifactOutcome {
     Meta(Box<ArtifactAttempt<(CardRevision, Option<ArtifactFile>)>>),
-    Media(ArtifactAttempt<ArtifactFile>),
+    Media(Box<ArtifactAttempt<ArtifactFile>>),
 }
 
 /// Progress signalled by the background publish job.

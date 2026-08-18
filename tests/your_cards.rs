@@ -4,9 +4,9 @@
 use std::path::PathBuf;
 
 use kamishibai::session::{
-    Artifact, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptFault, AxisSet, CardArtifacts,
-    CardDraft, CardMeta, GenerationCost, LanguagePair, Register, SentenceAxis, SentenceKind,
-    SentenceLabelSelection, SentenceLabels, SentenceLevel,
+    Artifact, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptFault, AttemptPenalties,
+    AttemptScorecard, AxisSet, CardArtifacts, CardDraft, CardMeta, GenerationCost, LanguagePair,
+    Register, SentenceAxis, SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel,
 };
 use kamishibai::tui::{
     App, AppEvent, LabelEditorRow, Screen, Side, draw, link_at, scroll_body_width, scroll_viewport,
@@ -231,9 +231,14 @@ fn audio_retry_slot(rejected: usize) -> ArtifactSlot {
 
 fn rejected_attempt() -> AttemptFault {
     AttemptFault::new(
-        "border",
-        "White border missing on: bottom",
+        "topology",
+        "quality score 60/100: found 1 panel region for 2 planned panels",
         Some(PathBuf::from("/tmp/attempt.jpg")),
+        Some(AttemptScorecard::new(
+            60,
+            false,
+            AttemptPenalties::new(40, 0, 0, 0),
+        )),
     )
 }
 
@@ -1734,9 +1739,14 @@ fn open_editor_keeps_the_target_selected_and_names_the_current_actual_value() {
 
 fn rejected_picture_artifacts(image: &str) -> CardArtifacts {
     let picture = ArtifactSlot::fresh(Artifact::Picture).faulted(AttemptFault::new(
-        "border",
-        "White border missing on: bottom",
+        "topology",
+        "quality score 60/100: found 1 panel region for 2 planned panels",
         Some(PathBuf::from(format!("/tmp/{image}"))),
+        Some(AttemptScorecard::new(
+            60,
+            false,
+            AttemptPenalties::new(40, 0, 0, 0),
+        )),
     ));
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
@@ -1953,9 +1963,14 @@ fn rejected_block_sits_below_the_card_behind_a_dashed_rule() {
 fn recovered_picture_artifacts() -> CardArtifacts {
     let picture = ArtifactSlot::fresh(Artifact::Picture)
         .faulted(AttemptFault::new(
-            "border",
-            "White border missing on: bottom",
+            "topology",
+            "quality score 60/100: found 1 panel region for 2 planned panels",
             Some(PathBuf::from("/tmp/attempt-0001.jpg")),
+            Some(AttemptScorecard::new(
+                60,
+                false,
+                AttemptPenalties::new(40, 0, 0, 0),
+            )),
         ))
         .succeeded_with(priced_file("picture.jpg", 67_300_000));
     CardArtifacts::from_parts(

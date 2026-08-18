@@ -93,6 +93,8 @@ fn recall_review(reading: &str) -> RecallReview {
                 "location": "drafting sheet in right panel",
                 "kind": "TECHNICAL_DIAGRAM"
             }],
+            "fidelity_inspected": true,
+            "zoom_inspected": true,
             "reason": "No answer-bearing writing is visible"
         }))
         .expect("technical-diagram recall review must decode");
@@ -107,6 +109,8 @@ fn recall_review(reading: &str) -> RecallReview {
                 "location": "open book in upper panel",
                 "kind": "PSEUDO_WRITING"
             }],
+            "fidelity_inspected": true,
+            "zoom_inspected": true,
             "reason": "No answer-bearing writing is visible"
         }))
         .expect("literal recall review must decode");
@@ -124,6 +128,8 @@ fn recall_review(reading: &str) -> RecallReview {
             }],
             "literal_writing_present": false,
             "literal_evidence": [],
+            "fidelity_inspected": true,
+            "zoom_inspected": true,
             "reason": "No answer-bearing writing is visible"
         }))
         .expect("missing required subject recall review must decode");
@@ -142,9 +148,23 @@ fn recall_review(reading: &str) -> RecallReview {
             "literal_writing_present": false,
             "literal_evidence": [],
             "fidelity_inspected": true,
+            "zoom_inspected": true,
             "reason": "The repeated subject is visibly substituted"
         }))
         .expect("broken subject continuity review must decode");
+    }
+    if reading == "borderless" || reading == "torn" || reading == "breakout" {
+        return serde_json::from_value(json!({
+            "decision": "ALLOW",
+            "evidence": [],
+            "literal_writing_present": false,
+            "literal_evidence": [],
+            "fidelity_inspected": true,
+            "zoom_inspected": true,
+            "page_frame": reading.to_uppercase(),
+            "reason": "No answer-bearing writing is visible"
+        }))
+        .expect("page-frame recall review must decode");
     }
     if let Some(reading) = reading.strip_prefix("unrelated:") {
         return serde_json::from_value(json!({
@@ -1404,14 +1424,14 @@ fn renderer_retries_when_recall_review_finds_the_hidden_answer() -> Result<()> {
     Ok(())
 }
 
+/// A missing-subject finding scores the attempt but no longer burns it.
 #[test]
-fn renderer_retries_and_archives_when_recall_review_finds_a_missing_required_subject() -> Result<()>
-{
+fn renderer_ships_a_missing_subject_finding_with_a_scored_verdict() -> Result<()> {
     let temporary = tempdir()?;
     let renderer = MangaRenderer::new(
-        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
-        2,
-        ScriptedRecall::new(&["missing-required-subject", ""]),
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&["missing-required-subject"]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .with_attempt_archive(temporary.path().to_path_buf());
@@ -1427,31 +1447,32 @@ fn renderer_retries_and_archives_when_recall_review_finds_a_missing_required_sub
         (
             rendered.color().has_color(),
             progress.retries.len(),
-            first["category"].as_str(),
-            recall["decision"].as_str(),
-            recall["scene_fidelity_decision"].as_str(),
+            first["status"].as_str(),
+            first["score"].as_u64(),
+            first["penalties"]["fidelity"].as_u64(),
             recall["scene_fidelity_evidence"][0]["kind"].as_str(),
         ),
         (
             false,
-            1,
-            Some("recall_text"),
-            Some("ALLOW"),
-            Some("REJECT"),
+            0,
+            Some("accepted"),
+            Some(85),
+            Some(15),
             Some("MISSING_REQUIRED_SUBJECT"),
         ),
-        "missing required subject was accepted, lost from the archive, or changed semantic recall"
+        "a missing-subject finding burned the attempt instead of scoring it"
     );
     Ok(())
 }
 
+/// A continuity finding scores the attempt but no longer burns it.
 #[test]
-fn renderer_archives_dedicated_subject_continuity_rejection_before_zoom() -> Result<()> {
+fn renderer_ships_a_continuity_finding_with_a_scored_verdict() -> Result<()> {
     let temporary = tempdir()?;
     let renderer = MangaRenderer::new(
-        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
-        2,
-        ScriptedRecall::new(&["broken-subject-continuity", "zoom-safe"]),
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&["broken-subject-continuity"]),
         BorderDetector::new(2, 6, 240, 1),
     )
     .with_attempt_archive(temporary.path().to_path_buf());
@@ -1467,46 +1488,43 @@ fn renderer_archives_dedicated_subject_continuity_rejection_before_zoom() -> Res
         (
             rendered.color().has_color(),
             verdict["status"].as_str(),
-            verdict["category"].as_str(),
-            recall["decision"].as_str(),
-            recall["scene_fidelity_decision"].as_str(),
+            verdict["score"].as_u64(),
+            verdict["penalties"]["fidelity"].as_u64(),
             recall["scene_fidelity_evidence"][0]["kind"].as_str(),
-            recall["fidelity_inspected"].as_bool(),
-            recall["zoom_inspected"].as_bool(),
         ),
         (
             false,
-            Some("rejected"),
-            Some("recall_text"),
-            Some("ALLOW"),
-            Some("REJECT"),
+            Some("accepted"),
+            Some(80),
+            Some(20),
             Some("BROKEN_SUBJECT_CONTINUITY"),
-            Some(true),
-            Some(false),
         ),
-        "dedicated continuity rejection was accepted, miscategorized, zoomed, or lost from its sidecar"
+        "a continuity finding burned the attempt instead of scoring it"
     );
     Ok(())
 }
 
-/// The renderer rejects a frame after the last missing-border attempt.
+/// The renderer ships a bled frame untouched instead of painting its margin over.
 #[test]
-fn renderer_rejects_a_frame_after_the_last_missing_border_attempt() {
+fn renderer_ships_a_bled_frame_untouched() {
     let renderer = MangaRenderer::new(
         QueueSource::new(vec![GrayImage::from_pixel(16, 16, Luma([0]))]),
         1,
         ScriptedRecall::new(&[""]),
         BorderDetector::new(2, 6, 240, 2),
     );
+    let mut progress = Recorder::default();
+    let rendered = renderer
+        .render(&scene(1, "en"), &mut progress)
+        .expect("a bled frame must ship as drawn, not be rejected");
     assert_eq!(
-        renderer
-            .render(&scene(1, "en"), &mut Recorder::default())
-            .unwrap_err()
-            .to_string(),
-        String::from(
-            "Rejected after 1 attempts: White border missing on: top, bottom, left, right"
+        (
+            rendered.to_luma8().get_pixel(0, 0)[0],
+            rendered.to_luma8().get_pixel(8, 8)[0],
+            progress.retries.len(),
         ),
-        "renderer no longer rejects a frame after the last missing border attempt"
+        (0, 0, 0),
+        "renderer painted over a bled frame instead of shipping it untouched"
     );
 }
 
@@ -1524,7 +1542,9 @@ fn renderer_rejects_a_multi_panel_frame_when_no_gutter_appears() {
             .render(&scene(2, "en"), &mut Recorder::default())
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 2 planned panels"
+        ),
         "renderer no longer rejects a multi panel frame when no gutter appears"
     );
 }
@@ -1564,7 +1584,7 @@ fn renderer_accepts_expressive_geometry_while_retaining_recall_and_border_valida
                 (
                     String::from("Rendering manga"),
                     2,
-                    String::from("White border missing on: top, bottom, left, right"),
+                    String::from("quality score 60/100: found 1 panel region for 3 planned panels"),
                 ),
             ],
         ),
@@ -1589,8 +1609,12 @@ fn renderer_rejects_explicit_ordinary_layouts_without_a_gutter() {
     assert_eq!(
         reasons,
         [
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 2 planned panels"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 2 planned panels"
+            ),
         ],
         "ordinary page devices no longer require a straight gutter"
     );
@@ -1628,7 +1652,7 @@ fn renderer_accepts_registry_geometry_while_retaining_recall_and_border_validati
                 (
                     String::from("Rendering manga"),
                     2,
-                    String::from("White border missing on: top, bottom, left, right"),
+                    String::from("quality score 60/100: found 1 panel region for 2 planned panels"),
                 ),
             ],
         ),
@@ -1650,7 +1674,9 @@ fn renderer_rejects_registry_multi_panel_scene_rendered_as_one_splash() {
             .render(&active_layout_scene(2, "en"), &mut Recorder::default())
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 2 planned panels"
+        ),
         "registry renderer still accepts one splash for a multi panel selection"
     );
 }
@@ -2030,7 +2056,9 @@ fn renderer_rejects_open_frame_with_a_blank_source_region() {
             )
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: found 2 panel regions for 3 planned panels"
+        ),
         "open frame accepts a blank source as one semantic panel"
     );
 }
@@ -2052,7 +2080,9 @@ fn renderer_rejects_t_grid_for_a_declared_horizontal_triptych() {
             )
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: planned panels share one drawn region"
+        ),
         "registry renderer accepts a T grid for a declared horizontal triptych"
     );
 }
@@ -2444,53 +2474,403 @@ fn renderer_archives_zoom_inspection_proof_on_an_accepted_attempt() -> Result<()
     Ok(())
 }
 
-/// Literal-writing rejection retries before the independent semantic recall judge.
+/// The final attempt ships the best archived non-blocked frame instead of failing.
 #[test]
-fn renderer_runs_text_gate_before_the_later_recall_judge() -> Result<()> {
-    let text = ScriptedText::new(&["OPEN", ""]);
-    let text_pending = text.values.clone();
-    let recall = ScriptedRecall::new(&[""]);
-    let recall_pending = recall.values.clone();
+fn renderer_salvages_the_best_scored_attempt_after_the_final_rejection() -> Result<()> {
+    let temporary = tempdir()?;
     let renderer = MangaRenderer::new(
-        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
+        QueueSource::new(vec![GrayImage::from_pixel(32, 32, Luma([0]))]),
+        1,
+        ScriptedRecall::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .with_salvage();
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "en"), &mut progress)?;
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            verdict["status"].as_str(),
+            verdict["blocker"].as_bool(),
+            verdict["score"].as_u64().is_some_and(|score| score < 100),
+        ),
+        (false, Some("salvaged"), Some(false), true),
+        "the final rejected attempt was not salvaged from the archive"
+    );
+    Ok(())
+}
+
+/// Answer leakage stays a blocker that salvage never ships.
+#[test]
+fn renderer_never_salvages_an_answer_leaking_attempt() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&["word"]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .with_salvage();
+    assert!(
+        renderer
+            .render(&active_layout_scene(2, "en"), &mut Recorder::default())
+            .is_err(),
+        "an answer-leaking attempt was salvaged into production"
+    );
+    Ok(())
+}
+
+/// A page with no frame anywhere is blocked when judge and perimeter agree.
+#[test]
+fn renderer_blocks_a_borderless_page_confirmed_by_its_inked_perimeter() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![GrayImage::from_pixel(16, 16, Luma([0]))]),
+        1,
+        ScriptedRecall::new(&["borderless"]),
+        BorderDetector::new(2, 6, 240, 2),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let error = renderer
+        .render(&scene(1, "en"), &mut Recorder::default())
+        .unwrap_err()
+        .to_string();
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            error.as_str(),
+            verdict["category"].as_str(),
+            verdict["blocker"].as_bool(),
+            verdict["score"].as_u64(),
+        ),
+        (
+            "Rejected after 1 attempts: No panel frame anywhere and ink reaches every page edge",
+            Some("borderless"),
+            Some(true),
+            Some(0),
+        ),
+        "a fully borderless page escaped the frame blocker"
+    );
+    Ok(())
+}
+
+/// A mechanically present white margin vetoes a judged borderless verdict.
+#[test]
+fn renderer_keeps_a_framed_page_the_judge_wrongly_calls_borderless() {
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![framed(16, 4)]),
+        1,
+        ScriptedRecall::new(&["borderless"]),
+        BorderDetector::new(2, 6, 240, 2),
+    );
+    assert!(
+        renderer
+            .render(&scene(1, "en"), &mut Recorder::default())
+            .is_ok(),
+        "a judged borderless verdict blocked a page whose white margin mechanically exists"
+    );
+}
+
+/// A terminal judge failure still ships the best archived frame.
+#[test]
+fn renderer_salvages_the_archive_after_a_terminal_judge_failure() -> Result<()> {
+    let temporary = tempdir()?;
+    let first = MangaRenderer::new(
+        QueueSource::new(vec![GrayImage::from_pixel(32, 32, Luma([0]))]),
+        1,
+        ScriptedRecall::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let _ = first.render(&active_layout_scene(2, "en"), &mut Recorder::default());
+    let second = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&[]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .with_salvage();
+    let rendered = second.render(&active_layout_scene(2, "en"), &mut Recorder::default())?;
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (rendered.color().has_color(), verdict["status"].as_str()),
+        (false, Some("salvaged")),
+        "a terminal judge failure lost the archived frames instead of salvaging one"
+    );
+    Ok(())
+}
+
+/// A provider refusal — an exhausted image budget — still ships the archive.
+#[test]
+fn renderer_salvages_the_archive_when_the_provider_refuses() -> Result<()> {
+    let temporary = tempdir()?;
+    let first = MangaRenderer::new(
+        QueueSource::new(vec![GrayImage::from_pixel(32, 32, Luma([0]))]),
+        1,
+        ScriptedRecall::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let _ = first.render(&active_layout_scene(2, "en"), &mut Recorder::default());
+    let second = MangaRenderer::new(
+        QueueSource::new(vec![]),
+        1,
+        ScriptedRecall::new(&[]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .with_salvage();
+    let rendered = second.render(&active_layout_scene(2, "en"), &mut Recorder::default())?;
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (rendered.color().has_color(), verdict["status"].as_str()),
+        (false, Some("salvaged")),
+        "an exhausted image budget failed the card despite salvageable archived frames"
+    );
+    Ok(())
+}
+
+/// The borderless blocker is never salvaged into production.
+#[test]
+fn renderer_never_salvages_a_borderless_attempt() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![GrayImage::from_pixel(16, 16, Luma([0]))]),
+        1,
+        ScriptedRecall::new(&["borderless"]),
+        BorderDetector::new(2, 6, 240, 2),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .with_salvage();
+    assert!(
+        renderer
+            .render(&scene(1, "en"), &mut Recorder::default())
+            .is_err(),
+        "a borderless attempt was salvaged into production"
+    );
+    Ok(())
+}
+
+/// Salvage prefers the archived frame closest to the registered topology.
+#[test]
+fn salvage_prefers_the_closest_topology_among_rejected_frames() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![
+            GrayImage::from_pixel(32, 32, Luma([0])),
+            shifted_t_bottom_panels(),
+        ]),
         2,
+        ScriptedRecall::new(&["", ""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .with_salvage();
+    let rendered = renderer.render(
+        &active_device_scene(t_bottom_layout_scene("en"), "crossing"),
+        &mut Recorder::default(),
+    )?;
+    let first = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    let second = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0002.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            first["status"].as_str(),
+            first["score"].as_u64(),
+            second["status"].as_str(),
+            second["score"].as_u64(),
+        ),
+        (
+            false,
+            Some("rejected"),
+            Some(60),
+            Some("salvaged"),
+            Some(76)
+        ),
+        "salvage shipped a frame farther from the registered topology"
+    );
+    Ok(())
+}
+
+/// A single detected writing finding scores the attempt but ships it anyway.
+#[test]
+fn renderer_ships_single_writing_finding_and_still_reviews_leakage() -> Result<()> {
+    let text = ScriptedText::new(&["OPEN"]);
+    let text_pending = text.values.clone();
+    let recall = ScriptedRecall::new(&["zoom-safe"]);
+    let recall_pending = recall.values.clone();
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
         recall,
         BorderDetector::new(2, 6, 240, 1),
     )
-    .with_text_judge(text);
+    .with_text_judge(text)
+    .with_attempt_archive(temporary.path().to_path_buf());
     let mut progress = Recorder::default();
     let rendered = renderer.render(&active_layout_scene(2, "en"), &mut progress)?;
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
     assert_eq!(
         (
             rendered.color().has_color(),
             text_pending.borrow().len(),
             recall_pending.borrow().len(),
             progress.retries.len(),
-            progress.retries[0].2.contains("Text judge rejected image"),
+            verdict["status"].as_str(),
+            verdict["score"].as_u64(),
+            verdict["penalties"]["text"].as_u64(),
         ),
-        (false, 0, 0, 1, true),
-        "literal text rejection did not precede the separate semantic recall review"
+        (false, 0, 0, 0, Some("accepted"), Some(88), Some(12)),
+        "a single writing finding burned the attempt instead of scoring it"
     );
     Ok(())
 }
 
-/// Grounded downstream transcription closes an OCR false negative before acceptance.
+/// Stacked cosmetic findings ship immediately with their combined score.
 #[test]
-fn renderer_rejects_significant_writing_missed_by_the_first_text_gate() -> Result<()> {
+fn renderer_ships_stacked_cosmetic_findings_immediately() -> Result<()> {
     let temporary = tempdir()?;
     let renderer = MangaRenderer::new(
-        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
-        2,
-        ScriptedRecall::new(&["unrelated:고등학교", ""]),
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&["literal:rows of CJK-like pseudo-glyphs"]),
         BorderDetector::new(2, 6, 240, 1),
     )
-    .with_text_judge(ScriptedText::ocr(&["", ""]))
+    .with_text_judge(ScriptedText::new(&["OPEN"]))
     .with_attempt_archive(temporary.path().to_path_buf());
     let mut progress = Recorder::default();
     let rendered = renderer.render(&active_layout_scene(2, "ko"), &mut progress)?;
-    let first_text = serde_json::from_str::<Value>(&std::fs::read_to_string(
-        temporary.path().join("attempt-0001.text.json"),
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
     )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            progress.retries.len(),
+            verdict["status"].as_str(),
+            verdict["score"].as_u64(),
+        ),
+        (false, 0, Some("accepted"), Some(82)),
+        "stacked cosmetic findings burned the attempt instead of shipping scored"
+    );
+    Ok(())
+}
+
+/// A torn frame line burns the attempt with its finding.
+#[test]
+fn renderer_retries_a_torn_frame_with_its_finding() {
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&["torn"]),
+        BorderDetector::new(2, 6, 240, 1),
+    );
+    assert_eq!(
+        renderer
+            .render(&active_layout_scene(2, "en"), &mut Recorder::default())
+            .unwrap_err()
+            .to_string(),
+        String::from(
+            "Rejected after 1 attempts: quality score 76/100: generation artifact tears the panel frame"
+        ),
+        "a torn frame line escaped the frame-structure gate"
+    );
+}
+
+/// A judged breakout forgives a mechanical topology mismatch and ships.
+#[test]
+fn renderer_ships_a_breakout_page_despite_a_topology_mismatch() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![GrayImage::from_pixel(32, 32, Luma([0]))]),
+        1,
+        ScriptedRecall::new(&["breakout"]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "en"), &mut progress)?;
+    let verdict = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            progress.retries.len(),
+            verdict["status"].as_str(),
+            verdict["score"].as_u64(),
+            verdict["penalties"]["topology"].as_u64(),
+        ),
+        (false, 0, Some("accepted"), Some(92), Some(8)),
+        "a judged breakout page was rejected for its mechanical topology mismatch"
+    );
+    Ok(())
+}
+
+/// A transcribed reading the OCR gate missed scores the attempt but ships it.
+#[test]
+fn renderer_ships_transcribed_writing_the_first_text_gate_missed() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&["unrelated:고등학교"]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_text_judge(ScriptedText::ocr(&[""]))
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "ko"), &mut progress)?;
+    let first = serde_json::from_str::<Value>(&std::fs::read_to_string(
+        temporary.path().join("attempt-0001.json"),
+    )?)?;
+    assert_eq!(
+        (
+            rendered.color().has_color(),
+            progress.retries.len(),
+            first["status"].as_str(),
+            first["score"].as_u64(),
+            first["penalties"]["literal"].as_u64(),
+        ),
+        (false, 0, Some("accepted"), Some(92), Some(8)),
+        "a single transcribed reading burned the attempt instead of scoring it"
+    );
+    Ok(())
+}
+
+/// A grounded pseudo-writing finding scores the attempt but no longer burns it.
+#[test]
+fn renderer_ships_grounded_pseudo_writing_with_a_scored_verdict() -> Result<()> {
+    let temporary = tempdir()?;
+    let renderer = MangaRenderer::new(
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
+        ScriptedRecall::new(&["literal:rows of CJK-like pseudo-glyphs"]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_text_judge(ScriptedText::ocr(&[""]))
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let mut progress = Recorder::default();
+    let rendered = renderer.render(&active_layout_scene(2, "ko"), &mut progress)?;
     let first_recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
         temporary.path().join("attempt-0001.recall.json"),
     )?)?;
@@ -2501,104 +2881,37 @@ fn renderer_rejects_significant_writing_missed_by_the_first_text_gate() -> Resul
         (
             rendered.color().has_color(),
             progress.retries.len(),
-            [
-                first_text["gate"].as_str(),
-                first_text["decision"].as_str(),
-                first_recall["decision"].as_str(),
-                first_recall["evidence"][0]["kind"].as_str(),
-                first["status"].as_str(),
-                first["category"].as_str(),
-            ],
-            first["reason"]
-                .as_str()
-                .is_some_and(|reason| reason.contains("고등학교")),
+            first_recall["literal_evidence"][0]["kind"].as_str(),
+            first["status"].as_str(),
+            first["score"].as_u64(),
+            first["penalties"]["literal"].as_u64(),
         ),
         (
             false,
-            1,
-            [
-                Some("OCR"),
-                Some("ALLOW"),
-                Some("ALLOW"),
-                Some("UNRELATED"),
-                Some("rejected"),
-                Some("recall_text"),
-            ],
-            true,
+            0,
+            Some("PSEUDO_WRITING"),
+            Some("accepted"),
+            Some(94),
+            Some(6)
         ),
-        "grounded downstream writing escaped after the first text gate missed it"
+        "a single pseudo-writing finding burned the attempt instead of scoring it"
     );
     Ok(())
 }
 
-/// Grounded pseudo-writing rejection closes an OCR false negative before acceptance.
+/// A grounded technical-diagram finding scores the attempt but no longer burns it.
 #[test]
-fn renderer_rejects_grounded_pseudo_writing_missed_by_ocr() -> Result<()> {
+fn renderer_ships_grounded_technical_diagram_with_a_scored_verdict() -> Result<()> {
     let temporary = tempdir()?;
     let renderer = MangaRenderer::new(
-        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
-        2,
-        ScriptedRecall::new(&["literal:rows of CJK-like pseudo-glyphs", ""]),
-        BorderDetector::new(2, 6, 240, 1),
-    )
-    .with_text_judge(ScriptedText::ocr(&["", ""]))
-    .with_attempt_archive(temporary.path().to_path_buf());
-    let mut progress = Recorder::default();
-    let rendered = renderer.render(&active_layout_scene(2, "ko"), &mut progress)?;
-    let first_recall = serde_json::from_str::<Value>(&std::fs::read_to_string(
-        temporary.path().join("attempt-0001.recall.json"),
-    )?)?;
-    let first = serde_json::from_str::<Value>(&std::fs::read_to_string(
-        temporary.path().join("attempt-0001.json"),
-    )?)?;
-    assert_eq!(
-        (
-            rendered.color().has_color(),
-            progress.retries.len(),
-            [
-                first_recall["decision"].as_str(),
-                first_recall["literal_writing_present"]
-                    .as_bool()
-                    .map(|value| { if value { "present" } else { "absent" } }),
-                first_recall["literal_evidence"][0]["kind"].as_str(),
-                first["status"].as_str(),
-                first["category"].as_str(),
-            ],
-            first["reason"]
-                .as_str()
-                .is_some_and(|reason| reason.contains("rows of CJK-like pseudo-glyphs")),
-        ),
-        (
-            false,
-            1,
-            [
-                Some("ALLOW"),
-                Some("present"),
-                Some("PSEUDO_WRITING"),
-                Some("rejected"),
-                Some("recall_text"),
-            ],
-            true,
-        ),
-        "grounded pseudo-writing escaped after OCR missed it or changed semantic recall"
-    );
-    Ok(())
-}
-
-/// Grounded technical-diagram rejection closes a visual classifier false negative.
-#[test]
-fn renderer_rejects_grounded_technical_diagram_missed_by_ocr() -> Result<()> {
-    let temporary = tempdir()?;
-    let renderer = MangaRenderer::new(
-        QueueSource::new(vec![rectangular_panels(), rectangular_panels()]),
-        2,
+        QueueSource::new(vec![rectangular_panels()]),
+        1,
         ScriptedRecall::new(&[
             "technical:architectural floor plan with conventional room lines and symbols",
-            "",
         ]),
         BorderDetector::new(2, 6, 240, 1),
     )
-    .with_text_judge(ScriptedText::ocr(&["", ""]))
+    .with_text_judge(ScriptedText::ocr(&[""]))
     .with_attempt_archive(temporary.path().to_path_buf());
     let mut progress = Recorder::default();
     let rendered = renderer.render(&active_layout_scene(2, "hi"), &mut progress)?;
@@ -2612,32 +2925,20 @@ fn renderer_rejects_grounded_technical_diagram_missed_by_ocr() -> Result<()> {
         (
             rendered.color().has_color(),
             progress.retries.len(),
-            [
-                first_recall["decision"].as_str(),
-                first_recall["literal_writing_present"]
-                    .as_bool()
-                    .map(|value| { if value { "present" } else { "absent" } }),
-                first_recall["literal_evidence"][0]["kind"].as_str(),
-                first["status"].as_str(),
-                first["category"].as_str(),
-            ],
-            first["reason"].as_str().is_some_and(|reason| {
-                reason.contains("architectural floor plan with conventional room lines and symbols")
-            }),
+            first_recall["literal_evidence"][0]["kind"].as_str(),
+            first["status"].as_str(),
+            first["score"].as_u64(),
+            first["penalties"]["literal"].as_u64(),
         ),
         (
             false,
-            1,
-            [
-                Some("ALLOW"),
-                Some("present"),
-                Some("TECHNICAL_DIAGRAM"),
-                Some("rejected"),
-                Some("recall_text"),
-            ],
-            true,
+            0,
+            Some("TECHNICAL_DIAGRAM"),
+            Some("accepted"),
+            Some(90),
+            Some(10),
         ),
-        "grounded technical diagram escaped after OCR missed it or changed semantic recall"
+        "a single technical-diagram finding burned the attempt instead of scoring it"
     );
     Ok(())
 }
@@ -2880,11 +3181,11 @@ fn renderer_retries_registry_one_panel_geometry_with_an_internal_gutter() -> Res
             vec![(
                 String::from("Rendering manga"),
                 1,
-                String::from("Unexpected internal gutter in one-panel layout"),
+                String::from("quality score 60/100: found 2 panel regions for 1 planned panel"),
             )],
-            1,
+            0,
         ),
-        "structurally rejected artwork still consumed a paid recall review"
+        "structurally rejected artwork skipped the leakage review its scorecard requires"
     );
     Ok(())
 }
@@ -2903,7 +3204,9 @@ fn renderer_rejects_registry_one_panel_geometry_split_diagonally() {
             .render(&active_layout_scene(1, "en"), &mut Recorder::default())
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Unexpected internal gutter in one-panel layout"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: found 2 panel regions for 1 planned panel"
+        ),
         "registry renderer still accepts a diagonal diptych as one splash"
     );
 }
@@ -2953,7 +3256,9 @@ fn renderer_rejects_crossing_with_an_unbroken_gutter() {
             )
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+        String::from(
+            "Rejected after 1 attempts: quality score 76/100: panel geometry misses the planned layout"
+        ),
         "crossing accepts an ordinary grid without a visible panel connection"
     );
 }
@@ -3116,7 +3421,7 @@ fn renderer_keeps_recall_and_outer_border_checks_for_crossing() {
                 (
                     String::from("Rendering manga"),
                     2,
-                    String::from("White border missing on: top, bottom, left, right"),
+                    String::from("quality score 60/100: found 1 panel region for 3 planned panels"),
                 ),
             ],
         ),
@@ -3144,10 +3449,18 @@ fn renderer_rejects_two_missing_regions_for_structural_devices() {
     assert_eq!(
         reasons,
         [
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 3 planned panels"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 3 planned panels"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 3 planned panels"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 3 planned panels"
+            ),
         ],
         "structural devices erase more than one declared panel relation"
     );
@@ -3173,9 +3486,15 @@ fn renderer_keeps_exact_topology_for_non_merging_devices() {
     assert_eq!(
         reasons,
         [
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
-            String::from("Rejected after 1 attempts: Registered panel topology was not detected"),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 2 planned panels"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 2 planned panels"
+            ),
+            String::from(
+                "Rejected after 1 attempts: quality score 60/100: found 1 panel region for 2 planned panels"
+            ),
         ],
         "non-merging devices no longer retain exact registry topology"
     );
@@ -3198,7 +3517,9 @@ fn renderer_keeps_one_panel_devices_as_one_region() {
             )
             .unwrap_err()
             .to_string(),
-        String::from("Rejected after 1 attempts: Unexpected internal gutter in one-panel layout"),
+        String::from(
+            "Rejected after 1 attempts: quality score 60/100: found 2 panel regions for 1 planned panel"
+        ),
         "one-panel device accepts a hidden split page"
     );
 }

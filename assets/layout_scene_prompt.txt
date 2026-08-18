@@ -61,8 +61,10 @@ SPECIAL-DEVICE SELECTION:
 PURELY VISUAL:
 
 - No captions, speech bubbles, sound effects, letters, numbers, logos, signs, labels, interface text, or legible writing.
-- Avoid text-bearing props altogether when possible. Paper, forms, books, signs, phones, tickets, clocks, gauges, and screens must be featureless, turned away, fully obscured, or replaced by a non-textual physical action.
-- Never describe blank lines, boxes, clock indicators, form fields, charts, keyboard legends, branded silhouettes, or pseudo-writing; image models often turn them into visible text.
+- Never plan an information-display prop. Blueprints, schematics, floor plans, drafting sheets, ledgers, calendars, charts, graphs, documents, forms, newspapers, open books, whiteboards, noticeboards, scoreboards, populated screens, clock faces, and gauge dials are banned outright, even described as blank, because image models cover them with visible writing. Carry the same meaning through bodies, gestures, objects, environment, light, and composition instead: a halted project reads through still tools and locked equipment, quantity through physical piles, time pressure through long shadows or a burning candle.
+- Any remaining paper, phone, ticket, or screen must be featureless, turned away, fully obscured, or replaced by a non-textual physical action.
+- Never describe blank lines, boxes, clock indicators, form fields, keyboard legends, branded silhouettes, or pseudo-writing; image models often turn them into visible text.
+- Declare a subject inside a panel only when that panel's own shot depends on it; when the panel's anchor is carried by environment or objects alone, leave the subject to the panels where it acts. Never demand more than the panel's shot can legibly hold.
 - Never put a printed state name, letter, numeral, legend, interface mark, or other writing cue into description, pose, focus, environment, semantic_job, literal_event, memory_hook, or any other image-facing string. Express device state only through unlabeled physical position, light, shape, or contact.
 - For every switch, breaker, button, lever, dial, or gauge, show one static unlabeled physical position per panel. Never describe a mechanical control as mid-motion or combine its before and after positions in the same panel; when a stated change needs both states, use distinct adjacent planned shots.
 - Set motion_treatment=none whenever a mechanical control is the decisive subject; communicate the state through its stable physical orientation and the sentence-grounded consequence.

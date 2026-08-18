@@ -43,6 +43,17 @@ A technical plan must be TECHNICAL_DIAGRAM even when it contains no readable cha
 
 A deliberate logo, badge, insignia, transit mark, or brand-like icon is SYMBOL_OR_EMBLEM even when it cannot be recognized or read. An isolated glyph enclosed or placed as an emblem is also SYMBOL_OR_EMBLEM when it is a distinct inner graphic independent of its physical housing. Enclosure or centering alone is insufficient: ordinary object contours, mechanical hardware, lights, or genuinely blank geometric panels are not evidence, nor are blank plates or displays, headlights, taillights, lamps, reflectors, bolts, screws, handles, latches, hinges, vents, grilles, couplers, wipers, or door and window seams. If no distinct applied inner graphic can be grounded, classify the mark as AMBIGUOUS_MARK.
 
+PAGE-FRAME POLICY
+
+Classify how the page presents its panel-frame structure into page_frame:
+- FRAMED: the page reads as a manga page with clean visible frame structure — panel border lines, white gutters between panels, or a white page margin;
+- BLEED: frame structure is clearly present somewhere, but at least one panel extends over the page edge or the outer margin is partly covered by artwork; this is an accepted stylistic device, never a defect;
+- BREAKOUT: a subject or panel content deliberately crosses a panel border into a neighboring panel, or one composition intentionally spans several panel areas — a figure stepping out of its frame, a splash spreading across half the page — while the remaining frame lines stay clean and deliberate; this is an accepted stylistic device, never a defect;
+- TORN: the frame lines themselves carry a generation artifact — smeared, broken, doubled, or garbage-filled border segments that read as rendering damage rather than an intentional device;
+- BORDERLESS: nowhere in the entire image is any panel border line, white gutter, or page margin visible — the picture is one single unframed full-page image with no frame structure at all.
+
+Precedence: choose BORDERLESS only under that strict everywhere-absent condition; otherwise choose TORN whenever any border segment reads as damaged, even when other panels also bleed or break out; otherwise choose BREAKOUT or BLEED for the intact stylistic devices; otherwise FRAMED. Never classify a clean deliberate crossing as TORN — TORN requires visible damage on the frame lines themselves. This classification is independent of every other decision and never influences them.
+
 SEMANTIC ANSWER-LEAKAGE POLICY
 
 Judge only the meaning of literal writing visible inside the illustration. Meaning conveyed by people, objects, actions, emotions, pictorial symbols, setting, or composition is an intended mnemonic and must never count as leakage.

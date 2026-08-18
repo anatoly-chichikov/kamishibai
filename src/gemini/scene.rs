@@ -30,11 +30,16 @@ struct Eyeline<'a> {
 }
 
 /// Merge one registry-composer response and replace its topology with canonical geometry.
+///
+/// A lenient pass — the final scene attempt — downgrades the image-facing
+/// text gate so a card ships the best available scene instead of failing;
+/// rendered writing is still judged and scored against the image itself.
 pub(super) fn compose(
     raw: &str,
     sentence: &str,
     target: &str,
     selection: &LayoutSelection,
+    lenient: bool,
 ) -> Result<Value> {
     let decoded = decode_composer(unfence(raw.trim()))?;
     let mut fields = decoded
@@ -72,7 +77,7 @@ pub(super) fn compose(
     normalize_eyeline_policy(&mut scene)?;
     normalize_match_on_action(&mut scene)?;
     normalize_subject_expressions(&mut scene)?;
-    validate_dynamic(&scene)?;
+    validate_dynamic(&scene, lenient)?;
     specialize(&mut scene)?;
     enforce(&mut scene);
     validate(&scene)?;
@@ -702,7 +707,7 @@ fn strip_agent_policy(root: &mut Map<String, Value>) {
     }
 }
 
-fn validate_dynamic(scene: &Value) -> Result<()> {
+fn validate_dynamic(scene: &Value, lenient: bool) -> Result<()> {
     if scene
         .pointer("/manga_panel/meta/spec_version")
         .and_then(Value::as_str)
@@ -724,7 +729,9 @@ fn validate_dynamic(scene: &Value) -> Result<()> {
         bail!("manga_panel.panel_layout.special_device_budget must equal 1");
     }
     validate_semantic(root)?;
-    validate_image_facing_text(root)?;
+    if !lenient {
+        validate_image_facing_text(root)?;
+    }
     let panels = root
         .get("panels")
         .and_then(Value::as_array)
@@ -1324,6 +1331,9 @@ fn negated(words: &[&str], index: usize) -> bool {
 }
 
 /// Validate one persisted scene against the current production scene contract.
+///
+/// A persisted scene may have been committed by the lenient final attempt, so
+/// the image-facing text gate never re-rejects it here.
 pub(crate) fn validate_cached(scene: &Value) -> Result<()> {
     if scene
         .pointer("/manga_panel/meta/spec_version")
@@ -1332,7 +1342,7 @@ pub(crate) fn validate_cached(scene: &Value) -> Result<()> {
     {
         bail!("cached scene must use production spec version {DYNAMIC_SPEC}");
     }
-    validate_dynamic(scene)?;
+    validate_dynamic(scene, true)?;
     validate(scene)
 }
 
@@ -2932,7 +2942,7 @@ mod tests {
         );
         let scene = scene("inset", "establisher", "detail", "", vec![parent, child]);
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "valid inset scene failed dynamic validation"
         );
     }
@@ -2942,7 +2952,7 @@ mod tests {
         let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
         scene["manga_panel"]["semantic_spine"] = json!({});
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "dynamic scene without its semantic payload unexpectedly passed validation"
         );
     }
@@ -2952,7 +2962,7 @@ mod tests {
         let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
         scene["manga_panel"]["semantic_spine"]["visual_relation"] = json!("contrast");
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "contrast visual relation failed dynamic validation"
         );
     }
@@ -2962,7 +2972,7 @@ mod tests {
         let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
         scene["manga_panel"]["panels"][0]["scene"]["camera"] = Value::Null;
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "dynamic panel without camera direction unexpectedly passed validation"
         );
     }
@@ -2970,7 +2980,7 @@ mod tests {
     #[test]
     fn registered_camera_program_accepts_one_coherent_continuity_plan() {
         assert!(
-            validate_dynamic(&registered_camera_scene()).is_ok(),
+            validate_dynamic(&registered_camera_scene(), false).is_ok(),
             "coherent registered camera program failed validation"
         );
     }
@@ -2983,7 +2993,7 @@ mod tests {
         scene["manga_panel"]["panels"][1]["continuity"]["axis_relation_from_previous"] =
             json!("not_applicable");
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "unexecuted scene-level axis preservation unexpectedly passed validation"
         );
     }
@@ -2994,7 +3004,7 @@ mod tests {
         scene["manga_panel"]["panels"][1]["continuity"]["screen_direction"] =
             json!("right_to_left");
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "panel screen direction drifted away from the camera plan"
         );
     }
@@ -3005,7 +3015,7 @@ mod tests {
         scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["eyeline_policy"] =
             json!("matched");
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "matched eyeline policy passed without one executed eyeline"
         );
     }
@@ -3022,7 +3032,7 @@ mod tests {
             "direction": "screen_right"
         });
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "eyeline with an invisible looker unexpectedly passed validation"
         );
     }
@@ -3045,7 +3055,7 @@ mod tests {
             "direction": "screen_left"
         });
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "one matched eyeline relationship flipped screen direction"
         );
     }
@@ -3071,7 +3081,7 @@ mod tests {
         normalize_eyelines(&mut scene).expect("matched eyelines must normalize");
         assert_eq!(
             (
-                validate_dynamic(&scene).is_ok(),
+                validate_dynamic(&scene, false).is_ok(),
                 scene["manga_panel"]["panels"][1]["continuity"]["eyeline"]["direction"].as_str(),
             ),
             (true, Some("screen_left")),
@@ -3092,12 +3102,12 @@ mod tests {
             json!("not_applicable");
         scene["manga_panel"]["panels"][1]["continuity"]["axis_relation_from_previous"] =
             json!("deliberate_break");
-        let rejected_before = validate_dynamic(&scene).is_err();
+        let rejected_before = validate_dynamic(&scene, false).is_err();
         normalize_camera_axis(&mut scene).expect("the camera axis must normalize");
         assert_eq!(
             (
                 rejected_before,
-                validate_dynamic(&scene).is_ok(),
+                validate_dynamic(&scene, false).is_ok(),
                 scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["axis_mode"]
                     .clone(),
             ),
@@ -3113,12 +3123,12 @@ mod tests {
         let mut scene = registered_camera_scene();
         scene["manga_panel"]["panels"][1]["continuity"]["axis_relation_from_previous"] =
             json!("deliberate_break");
-        let rejected_before = validate_dynamic(&scene).is_err();
+        let rejected_before = validate_dynamic(&scene, false).is_err();
         normalize_camera_axis(&mut scene).expect("the camera axis must normalize");
         assert_eq!(
             (
                 rejected_before,
-                validate_dynamic(&scene).is_ok(),
+                validate_dynamic(&scene, false).is_ok(),
                 scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["axis_mode"]
                     .clone(),
             ),
@@ -3134,12 +3144,12 @@ mod tests {
         let mut scene = registered_camera_scene();
         scene["manga_panel"]["panels"][1]["continuity"]["screen_direction"] =
             json!("toward_camera");
-        let rejected_before = validate_dynamic(&scene).is_err();
+        let rejected_before = validate_dynamic(&scene, false).is_err();
         normalize_camera_axis(&mut scene).expect("the camera axis must normalize");
         assert_eq!(
             (
                 rejected_before,
-                validate_dynamic(&scene).is_ok(),
+                validate_dynamic(&scene, false).is_ok(),
                 scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["screen_direction"]
                     .clone(),
             ),
@@ -3167,12 +3177,12 @@ mod tests {
         let mut scene = registered_camera_scene();
         scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["eyeline_policy"] =
             json!("matched");
-        let rejected_before = validate_dynamic(&scene).is_err();
+        let rejected_before = validate_dynamic(&scene, false).is_err();
         normalize_eyeline_policy(&mut scene).expect("the eyeline policy must normalize");
         assert_eq!(
             (
                 rejected_before,
-                validate_dynamic(&scene).is_ok(),
+                validate_dynamic(&scene, false).is_ok(),
                 scene["manga_panel"]["page_design"]["camera_arc"]["continuity"]["eyeline_policy"]
                     .clone(),
             ),
@@ -3199,7 +3209,7 @@ mod tests {
                 "direction": direction
             });
         }
-        let rejected_before = validate_dynamic(&scene).is_err();
+        let rejected_before = validate_dynamic(&scene, false).is_err();
         normalize_eyeline_policy(&mut scene).expect("the eyeline policy must normalize");
         assert_eq!(
             (
@@ -3232,12 +3242,12 @@ mod tests {
             "subject_id": "traveler",
             "action": "continuing one step"
         });
-        let rejected_before = validate_dynamic(&scene).is_err();
+        let rejected_before = validate_dynamic(&scene, false).is_err();
         normalize_match_on_action(&mut scene).expect("optional edit continuity must normalize");
         assert_eq!(
             (
                 rejected_before,
-                validate_dynamic(&scene).is_ok(),
+                validate_dynamic(&scene, false).is_ok(),
                 scene["manga_panel"]["panels"][1]["continuity"]["match_on_action"].clone(),
             ),
             (
@@ -3263,7 +3273,7 @@ mod tests {
         normalize_match_on_action(&mut scene).expect("supported edit continuity must normalize");
         assert_eq!(
             (
-                validate_dynamic(&scene).is_ok(),
+                validate_dynamic(&scene, false).is_ok(),
                 scene["manga_panel"]["panels"][1]["continuity"]["match_on_action"].clone(),
             ),
             (
@@ -3282,13 +3292,13 @@ mod tests {
     fn blank_subject_expression_gets_one_safe_visible_default() {
         let mut scene = registered_camera_scene();
         scene["manga_panel"]["panels"][0]["scene"]["subjects"][0]["expression"] = json!("   ");
-        let rejected_before = validate_dynamic(&scene).is_err();
+        let rejected_before = validate_dynamic(&scene, false).is_err();
         normalize_subject_expressions(&mut scene)
             .expect("blank visible expressions must normalize");
         assert_eq!(
             (
                 rejected_before,
-                validate_dynamic(&scene).is_ok(),
+                validate_dynamic(&scene, false).is_ok(),
                 scene["manga_panel"]["panels"][0]["scene"]["subjects"][0]["expression"].as_str(),
             ),
             (true, true, Some("scene-consistent visible state")),
@@ -3308,7 +3318,7 @@ mod tests {
         normalize_camera_subjects(&mut scene).expect("group support must materialize");
         assert_eq!(
             (
-                validate_dynamic(&scene).is_ok(),
+                validate_dynamic(&scene, false).is_ok(),
                 scene["manga_panel"]["panels"][0]["scene"]["subjects"]
                     .as_array()
                     .map(Vec::len),
@@ -3329,7 +3339,7 @@ mod tests {
         normalize_camera_subjects(&mut scene).expect("visible subject must materialize");
         assert_eq!(
             (
-                validate_dynamic(&scene).is_ok(),
+                validate_dynamic(&scene, false).is_ok(),
                 scene["manga_panel"]["panels"][0]["scene"]["subjects"][0]["id"].as_str(),
             ),
             (true, Some("scene_anchor")),
@@ -3356,7 +3366,7 @@ mod tests {
         let mut scene = scene("none", "", "", "", vec![panel("peak", 16, 16, 992, 992)]);
         scene["manga_panel"]["panels"][0]["scene"]["description"] = Value::Null;
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "dynamic panel without its visible description unexpectedly passed validation"
         );
     }
@@ -3367,7 +3377,7 @@ mod tests {
         scene["manga_panel"]["panels"][0]["scene"]["environment"]["midground"] =
             json!(["paper with non-textual geometric and mathematical-style diagrams"]);
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "the accepted Ukrainian paper-and-diagrams scene escaped image-facing validation"
         );
     }
@@ -3379,7 +3389,7 @@ mod tests {
             "visible_anchor": "Project site environment with blueprints and workspace."
         });
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "the accepted Hindi blueprint anchor escaped image-facing validation"
         );
     }
@@ -3434,7 +3444,7 @@ mod tests {
             "source_support": "The student was writing the final equation on paper"
         });
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "source-support evidence was mistaken for an image-facing writing request"
         );
     }
@@ -3446,7 +3456,7 @@ mod tests {
             "visible_anchor": "A hand rapidly writing the final correct steps of the solution on paper"
         });
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "the accepted Ukrainian writing action escaped shot-anchor validation"
         );
     }
@@ -3587,7 +3597,7 @@ mod tests {
         panel["shot_contract"]["visible_anchor"] =
             json!("A person pinching the bridge of their nose over a heavily annotated document");
         assert!(
-            validate_dynamic(&scene("none", "", "", "", vec![panel])).is_err(),
+            validate_dynamic(&scene("none", "", "", "", vec![panel]), false).is_err(),
             "the accepted overthink scene made forbidden document markings carry its frustration anchor"
         );
     }
@@ -3707,7 +3717,7 @@ mod tests {
             json!("The abrupt transition from rushed page-turning to sparse incomplete text");
         scene["manga_panel"]["semantic_spine"]["visual_relation"] = json!("contrast");
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "the accepted rushed scene made forbidden sparse text carry its semantic ending"
         );
     }
@@ -3733,7 +3743,7 @@ mod tests {
         );
         scene["manga_panel"]["semantic_spine"]["visual_relation"] = json!("contrast");
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "the accepted far-fetched scene made a blank calendar carry an invisible overdue deadline"
         );
     }
@@ -3745,8 +3755,23 @@ mod tests {
             "A blank calendar hangs in the background while a traveler closes the office door"
         ]);
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "a benign blank background calendar became an information-bearing contradiction"
+        );
+    }
+
+    #[test]
+    fn final_attempt_leniency_ships_a_scene_the_text_gate_would_reject() {
+        let mut scene = scene("none", "", "", "", vec![panel("p1", 16, 16, 992, 992)]);
+        scene["manga_panel"]["panels"][0]["scene"]["environment"]["background"] =
+            json!(["An architect unrolls a detailed blueprint across the drafting table"]);
+        assert_eq!(
+            (
+                validate_dynamic(&scene, false).is_err(),
+                validate_dynamic(&scene, true).is_ok(),
+            ),
+            (true, true),
+            "the lenient final scene attempt still failed the image-facing text gate"
         );
     }
 
@@ -3818,7 +3843,7 @@ mod tests {
         scene["manga_panel"]["panels"][0]["semantic_job"] =
             json!("Reveal the photographs without text or labels");
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "a prohibition on visible text was mistaken for a request to render it"
         );
     }
@@ -3829,7 +3854,7 @@ mod tests {
         scene["manga_panel"]["panels"][0]["scene"]["description"] =
             json!("A traveler is drawing a plain curtain across the window");
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "a benign drawing action unrelated to visible marks was rejected"
         );
     }
@@ -3841,7 +3866,7 @@ mod tests {
         panel["scene"]["subjects"] = json!([]);
         let scene = scene("none", "", "", "", vec![panel]);
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "macro environmental panel without subjects failed validation"
         );
     }
@@ -3852,7 +3877,7 @@ mod tests {
         panel["scene"]["subjects"] = json!([]);
         let scene = scene("none", "", "", "", vec![panel]);
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "mono panel without subjects unexpectedly passed validation"
         );
     }
@@ -3863,7 +3888,7 @@ mod tests {
         panel["scene"]["camera"]["shot_scale"] = json!("medium_close");
         let scene = scene("none", "", "", "", vec![panel]);
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "selected medium-close cinematic shot failed dynamic validation"
         );
     }
@@ -3875,7 +3900,7 @@ mod tests {
         second["transition_from_previous"] = json!("scene_to_scene");
         let scene = scene("none", "", "", "", vec![first, second]);
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "valid scene-to-scene transition failed dynamic validation"
         );
     }
@@ -3887,7 +3912,7 @@ mod tests {
         panel["scene"]["subjects"] = json!([]);
         let scene = scene("none", "", "", "", vec![panel]);
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "amorphic environmental panel without subjects failed validation"
         );
     }
@@ -3906,7 +3931,7 @@ mod tests {
         );
         let scene = scene("overlap", "impact", "wide", "", vec![back, front]);
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "valid overlap scene failed dynamic validation"
         );
     }
@@ -3923,7 +3948,7 @@ mod tests {
             vec![arrival, climb],
         );
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "valid master view scene failed dynamic validation"
         );
     }
@@ -3940,7 +3965,7 @@ mod tests {
             vec![source, target],
         );
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "valid crossing scene failed dynamic validation"
         );
     }
@@ -3949,7 +3974,7 @@ mod tests {
     fn diagonal_pair_passes_dynamic_validation() {
         let scene = diagonal_scene("tension", "release");
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "valid diagonal pair failed dynamic validation"
         );
     }
@@ -3967,7 +3992,7 @@ mod tests {
         );
         let scene = scene("diagonal_release", "release", "", "", vec![release]);
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "valid single diagonal panel failed dynamic validation"
         );
     }
@@ -3976,7 +4001,7 @@ mod tests {
     fn diagonal_references_must_name_the_trapezoid_panels() {
         let scene = diagonal_scene("release", "");
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "diagonal release with incomplete trapezoid references unexpectedly passed validation"
         );
     }
@@ -3995,7 +4020,7 @@ mod tests {
         );
         let scene = scene("open_frame", "release", "", "", vec![setup, release]);
         assert!(
-            validate_dynamic(&scene).is_ok(),
+            validate_dynamic(&scene, false).is_ok(),
             "valid open frame scene failed dynamic validation"
         );
     }
@@ -4014,7 +4039,7 @@ mod tests {
         );
         let scene = scene("open_frame", "setup", "", "", vec![setup, release]);
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "open frame with a contradictory source unexpectedly passed validation"
         );
     }
@@ -4033,7 +4058,7 @@ mod tests {
         );
         let scene = scene("overlap", "wide", "impact", "", vec![back, front]);
         assert!(
-            validate_dynamic(&scene).is_err(),
+            validate_dynamic(&scene, false).is_err(),
             "contradictory overlap references unexpectedly passed validation"
         );
     }

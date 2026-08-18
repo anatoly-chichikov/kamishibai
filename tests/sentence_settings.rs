@@ -61,7 +61,7 @@ fn exact_type_modes_pin_every_final_draft() {
 }
 
 #[test]
-fn mixed_types_are_deterministic_weighted_and_never_forced() {
+fn mixed_types_are_deterministic_even_and_never_forced() {
     let settings = SentenceBatchSettings::new(None, SentenceTypeMix::Mixed);
     let first = settings.selections(100);
     let second = settings.selections(100);
@@ -92,7 +92,7 @@ fn mixed_types_are_deterministic_weighted_and_never_forced() {
                 SentenceKind::Statement | SentenceKind::Question | SentenceKind::Dialogue
             )),
         ),
-        (true, 60, 20, 20, true),
+        (true, 34, 33, 33, true),
         "mixed allocation was unstable, unweighted, or used a forced sentence type"
     );
 }

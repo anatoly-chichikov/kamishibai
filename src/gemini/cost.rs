@@ -74,7 +74,7 @@ fn output_tokens(usage: &UsageMetadata) -> u64 {
 
 fn rates(model: &str) -> Rates {
     match model {
-        "gemini-3.6-flash" => Rates {
+        "gemini-3.7-flash" | "gemini-3.6-flash" => Rates {
             input_nanos: GEMINI_3_6_FLASH_INPUT_NANOS,
             output_nanos: GEMINI_3_6_FLASH_OUTPUT_NANOS,
             thinking_nanos: GEMINI_3_6_FLASH_OUTPUT_NANOS,

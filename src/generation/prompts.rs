@@ -28,7 +28,7 @@ const PICTURE_LITERAL_ZOOM_JUDGE_SCHEMA: &str =
 const PICTURE_TEXT_JUDGE_PROMPT: &str = include_str!("../../assets/picture_text_judge_prompt.txt");
 const PICTURE_TEXT_JUDGE_SCHEMA: &str = include_str!("../../assets/picture_text_judge_schema.json");
 const LAYOUT_POLICY_VERSION: &str =
-    "kamishibai-layout-registry-production-v53-writing-surface-locality-gate";
+    "kamishibai-layout-registry-production-v55-graded-topology-and-borderless-blocker";
 static VISUAL_REVISION: OnceLock<String> = OnceLock::new();
 
 /// Return the embedded shared audio prompt template.
