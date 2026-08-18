@@ -357,6 +357,18 @@ enum SceneFidelityDecision {
     Reject,
 }
 
+/// How the page presents its panel-frame structure.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum PageFrame {
+    #[default]
+    Framed,
+    Bleed,
+    Breakout,
+    Torn,
+    Borderless,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 enum SceneFidelityKind {
     #[serde(rename = "MISSING_REQUIRED_SUBJECT")]
@@ -540,6 +552,8 @@ pub struct RecallReview {
     fidelity_inspected: bool,
     #[serde(default)]
     zoom_inspected: bool,
+    #[serde(default)]
+    page_frame: PageFrame,
     reason: String,
 }
 
@@ -578,26 +592,41 @@ impl RecallReview {
         self.decision == RecallDecision::Allow
     }
 
-    /// Return whether a clean full-frame verdict needs dedicated fidelity inspection.
+    /// Return whether a leak-free full-frame verdict needs dedicated fidelity
+    /// inspection. Fidelity and literal findings no longer stop the chain —
+    /// they only lower the score, so the inspections that guard acceptance
+    /// must complete regardless of them.
     pub(crate) fn needs_fidelity(&self) -> bool {
-        self.allows()
-            && self.scene_fidelity_rejection().is_none()
-            && self.literal_rejection().is_none()
-            && !self.fidelity_inspected
+        self.allows() && !self.fidelity_inspected
     }
 
-    /// Return whether a clean full-frame verdict still needs enlarged literal inspection.
+    /// Return whether a leak-free full-frame verdict still needs enlarged
+    /// literal inspection.
     pub(crate) fn needs_zoom(&self) -> bool {
-        self.allows()
-            && self.scene_fidelity_rejection().is_none()
-            && self.literal_rejection().is_none()
-            && self.fidelity_inspected
-            && !self.zoom_inspected
+        self.allows() && self.fidelity_inspected && !self.zoom_inspected
     }
 
     /// Return whether every downstream defense required for acceptance ran.
     pub(crate) fn inspections_complete(&self) -> bool {
         self.fidelity_inspected && self.zoom_inspected
+    }
+
+    /// Return whether the judge saw no panel-frame structure anywhere on the page.
+    #[must_use]
+    pub fn frame_borderless(&self) -> bool {
+        self.page_frame == PageFrame::Borderless
+    }
+
+    /// Return whether the frame lines themselves carry a generation artifact.
+    #[must_use]
+    pub fn frame_torn(&self) -> bool {
+        self.page_frame == PageFrame::Torn
+    }
+
+    /// Return whether panel content deliberately crosses its frame as a device.
+    #[must_use]
+    pub fn frame_breakout(&self) -> bool {
+        self.page_frame == PageFrame::Breakout
     }
 
     /// Merge dedicated fidelity evidence while preserving semantic and literal verdicts.
@@ -1578,12 +1607,12 @@ mod tests {
             (
                 true,
                 true,
-                false,
+                true,
                 Some("REJECT"),
                 Some("BROKEN_SUBJECT_CONTINUITY"),
                 Some(true),
             ),
-            "dedicated continuity evidence escaped rejection, changed semantic recall, or lost archive proof"
+            "dedicated continuity evidence escaped its finding, changed semantic recall, or stopped the zoom stage"
         );
     }
 
@@ -1619,6 +1648,30 @@ mod tests {
             archived["fidelity_inspected"].as_bool(),
             Some(false),
             "old recall sidecar falsely claimed dedicated fidelity inspection"
+        );
+    }
+
+    #[test]
+    fn old_recall_sidecar_without_page_frame_reads_as_framed() {
+        let review = RecallReview::decode(
+            r#"{"decision":"ALLOW","evidence":[],"literal_writing_present":false,"literal_evidence":[],"reason":"Archived before the page-frame classification"}"#,
+        )
+        .expect("old recall sidecar must decode");
+        assert!(
+            !review.frame_borderless(),
+            "a legacy sidecar without page_frame was read as a borderless verdict"
+        );
+    }
+
+    #[test]
+    fn borderless_page_frame_verdict_is_reported() {
+        let review = RecallReview::decode(
+            r#"{"decision":"ALLOW","evidence":[],"literal_writing_present":false,"literal_evidence":[],"page_frame":"BORDERLESS","reason":"No frame structure is visible"}"#,
+        )
+        .expect("borderless recall verdict must decode");
+        assert!(
+            review.frame_borderless(),
+            "a judged borderless page was not reported by the review"
         );
     }
 }

@@ -141,10 +141,10 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
 
 /// Production registry builds reject clause-local writing-dependent scene surfaces.
 #[test]
-fn production_registry_uses_the_version_fifty_four_visual_revision() {
+fn production_registry_uses_the_version_fifty_five_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "227471d78346f9906cb8a76386ad11acf0738e7bca148e0760b555bc08d4c615",
+        "1d2c8ce2b3a7a4e1fff92226310f4daaa48871a7d409ce25e182fea4fd936186",
         "production registry visual revision drifted without a policy-version change"
     );
 }

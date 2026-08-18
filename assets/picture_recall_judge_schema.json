@@ -115,6 +115,16 @@
         ]
       }
     },
+    "page_frame": {
+      "type": "STRING",
+      "enum": [
+        "FRAMED",
+        "BLEED",
+        "BREAKOUT",
+        "TORN",
+        "BORDERLESS"
+      ]
+    },
     "reason": {
       "type": "STRING"
     }
@@ -126,6 +136,7 @@
     "scene_fidelity_evidence",
     "literal_writing_present",
     "literal_evidence",
+    "page_frame",
     "reason"
   ]
 }

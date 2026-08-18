@@ -11,6 +11,7 @@ const REGION_BRIGHTNESS_MARGIN: u8 = 20;
 const RAIL_SEARCH: u32 = 3;
 const WHITE_COVERAGE: u64 = 99;
 const RELAXED_EDGE_BRIGHTNESS: u8 = 230;
+const PERIMETER_WHITE_LIMIT: u64 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Axis {
@@ -59,18 +60,16 @@ impl BorderDetector {
         }
     }
 
-    /// Return one copy with the outer margin painted paper-white.
+    /// Return one measurement copy with the outer margin painted paper-white.
     ///
     /// The layout registry keeps every panel inside the 16..1008 span of the
-    /// 1024 canvas, so the outer strip is reserved gutter space; painting it
-    /// white repairs a bled render without disturbing panel geometry.
+    /// 1024 canvas, so whitening the reserved outer strip normalises a bled
+    /// render for the topology matchers, which are calibrated against a clean
+    /// page margin. The copy is never shipped — a partial bleed stays in the
+    /// published frame exactly as the model drew it.
     #[must_use]
     pub fn repaired(&self, image: &GrayImage) -> GrayImage {
-        let proportional = image.width().min(image.height()) / 64;
-        let band = u32::try_from(self.margin)
-            .unwrap_or(u32::MAX)
-            .saturating_add(2)
-            .max(proportional);
+        let band = self.band(image);
         let mut repaired = image.clone();
         let width = repaired.width();
         let height = repaired.height();
@@ -84,6 +83,45 @@ impl BorderDetector {
             }
         }
         repaired
+    }
+
+    /// Return whether ink reaches every page edge with no white margin anywhere.
+    ///
+    /// A page whose whole perimeter band holds almost no near-white pixels has
+    /// no outer frame at all. One bleeding panel beside an otherwise white
+    /// margin never trips this, so the check corroborates a judge's borderless
+    /// verdict instead of policing partial bleeds.
+    #[must_use]
+    pub fn perimeter_inked(&self, image: &GrayImage) -> bool {
+        let band = self.band(image).min(image.width()).min(image.height());
+        if band == 0 {
+            return false;
+        }
+        let edges = [
+            (0, 0, image.width(), band),
+            (0, image.height().saturating_sub(band), image.width(), band),
+            (0, 0, band, image.height()),
+            (image.width().saturating_sub(band), 0, band, image.height()),
+        ];
+        edges.iter().all(|(x, y, width, height)| {
+            white_share_below(
+                image,
+                *x,
+                *y,
+                *width,
+                *height,
+                self.brightness,
+                PERIMETER_WHITE_LIMIT,
+            )
+        })
+    }
+
+    fn band(&self, image: &GrayImage) -> u32 {
+        let proportional = image.width().min(image.height()) / 64;
+        u32::try_from(self.margin)
+            .unwrap_or(u32::MAX)
+            .saturating_add(2)
+            .max(proportional)
     }
 
     /// Return whether one internal white horizontal or vertical gutter exists.
@@ -448,6 +486,27 @@ where
     matched.saturating_mul(COVERAGE_SCALE) >= u64::from(total).saturating_mul(required)
 }
 
+fn white_share_below(
+    image: &GrayImage,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    brightness: u8,
+    limit: u64,
+) -> bool {
+    let mut white = 0_u64;
+    for ypos in y..y.saturating_add(height).min(image.height()) {
+        for xpos in x..x.saturating_add(width).min(image.width()) {
+            if image.get_pixel(xpos, ypos)[0] >= brightness {
+                white = white.saturating_add(1);
+            }
+        }
+    }
+    let area = u64::from(width).saturating_mul(u64::from(height));
+    area > 0 && white.saturating_mul(COVERAGE_SCALE) < area.saturating_mul(limit)
+}
+
 fn band_mean_above(
     image: &GrayImage,
     x: u32,
@@ -549,6 +608,34 @@ mod tests {
             BorderDetector::new(2, 6, 240, 10).borders(&image),
             vec![String::from("top"), String::from("bottom")],
             "two imperfect edges incorrectly consumed one fourth-edge allowance"
+        );
+    }
+
+    /// A fully inked page with no margin anywhere trips the perimeter check.
+    #[test]
+    fn perimeter_check_flags_a_fully_inked_page() {
+        assert!(
+            BorderDetector::new(2, 6, 240, 10).perimeter_inked(&GrayImage::from_pixel(
+                64,
+                64,
+                Luma([0])
+            )),
+            "a page inked to every edge was not flagged as having no margin"
+        );
+    }
+
+    /// One surviving white margin proves frame structure and clears the check.
+    #[test]
+    fn perimeter_check_accepts_a_page_with_one_white_margin() {
+        let mut image = GrayImage::from_pixel(64, 64, Luma([0]));
+        for y in 0..12 {
+            for x in 0..64 {
+                image.put_pixel(x, y, Luma([255]));
+            }
+        }
+        assert!(
+            !BorderDetector::new(2, 6, 240, 10).perimeter_inked(&image),
+            "a page with one white margin was flagged as fully inked"
         );
     }
 

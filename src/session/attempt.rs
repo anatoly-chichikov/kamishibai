@@ -62,38 +62,111 @@ impl AttemptTally {
     }
 }
 
+/// Per-category quality penalties of one judged picture attempt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AttemptPenalties {
+    topology: u32,
+    text: u32,
+    fidelity: u32,
+    literal: u32,
+}
+
+impl AttemptPenalties {
+    /// Create one penalty set from the four judged categories.
+    pub fn new(topology: u32, text: u32, fidelity: u32, literal: u32) -> Self {
+        Self {
+            topology,
+            text,
+            fidelity,
+            literal,
+        }
+    }
+
+    /// Return every category slug paired with its penalty, in verdict order.
+    #[must_use]
+    pub fn each(&self) -> [(&'static str, u32); 4] {
+        [
+            ("topology", self.topology),
+            ("text", self.text),
+            ("fidelity", self.fidelity),
+            ("literal", self.literal),
+        ]
+    }
+}
+
+/// Weighted verdict of one judged picture attempt, read back from its archive.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AttemptScorecard {
+    score: u32,
+    blocker: bool,
+    penalties: AttemptPenalties,
+}
+
+impl AttemptScorecard {
+    /// Create one scorecard from its score, blocker flag, and penalties.
+    pub fn new(score: u32, blocker: bool, penalties: AttemptPenalties) -> Self {
+        Self {
+            score,
+            blocker,
+            penalties,
+        }
+    }
+
+    /// Return the 0–100 quality score of the judged attempt.
+    #[must_use]
+    pub fn score(&self) -> u32 {
+        self.score
+    }
+
+    /// Return whether the attempt was blocked outright instead of scored down.
+    #[must_use]
+    pub fn blocker(&self) -> bool {
+        self.blocker
+    }
+
+    /// Return the per-category penalties behind the score.
+    #[must_use]
+    pub fn penalties(&self) -> AttemptPenalties {
+        self.penalties
+    }
+}
+
 /// Why one spent attempt did not produce its artifact.
 ///
-/// `category` is the stable slug the renderer and the console share (`border`,
-/// `topology`, `ocr`, `recall_text`, `color`, `legacy_gutter`, `other`, `error`);
+/// `category` is the stable slug the renderer and the console share
+/// (`borderless`, `topology`, `ocr`, `recall_text`, `color`, `other`, `error`);
 /// `reason` is the sentence shown to the user; `artifact` points at whatever
 /// this attempt did produce before it was rejected — the archived picture of a
 /// picture attempt — and stays empty when the attempt failed before producing
-/// anything at all.
+/// anything at all; `scorecard` carries the weighted verdict when the attempt
+/// was judged rather than lost to infrastructure.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AttemptFault {
     category: String,
     reason: String,
     artifact: Option<PathBuf>,
+    scorecard: Option<AttemptScorecard>,
 }
 
 impl AttemptFault {
-    /// Create one fault from its category slug, reason, and rejected artifact.
+    /// Create one fault from its category slug, reason, artifact, and scorecard.
     pub fn new(
         category: impl Into<String>,
         reason: impl Into<String>,
         artifact: Option<PathBuf>,
+        scorecard: Option<AttemptScorecard>,
     ) -> Self {
         Self {
             category: category.into(),
             reason: reason.into(),
             artifact,
+            scorecard,
         }
     }
 
     /// Create one fault for a failure that never reached a provider verdict.
     pub fn failed(reason: impl Into<String>) -> Self {
-        Self::new("error", reason, None)
+        Self::new("error", reason, None, None)
     }
 
     /// Return the stable category slug.
@@ -110,6 +183,11 @@ impl AttemptFault {
     /// survived it.
     pub fn artifact(&self) -> Option<&Path> {
         self.artifact.as_deref()
+    }
+
+    /// Return the weighted verdict of this attempt, when one was judged.
+    pub fn scorecard(&self) -> Option<AttemptScorecard> {
+        self.scorecard
     }
 }
 
@@ -170,8 +248,9 @@ mod tests {
     fn faulted_log_pairs_every_spent_attempt_with_its_reason() {
         let log = AttemptLog::new(3)
             .faulted(AttemptFault::new(
-                "border",
-                "White border missing on: bottom",
+                "topology",
+                "Registered panel topology was not detected",
+                None,
                 None,
             ))
             .faulted(AttemptFault::failed("cache lock timeout"));

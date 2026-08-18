@@ -126,7 +126,8 @@ impl VisualProduction {
         };
         let recover = cursor.recompose(recover);
         let archived = archived_sequence(&cache);
-        let salvage = done.saturating_add(1) >= ARTIFACT_ATTEMPT_CEILING;
+        let salvage = done.saturating_add(1) >= ARTIFACT_ATTEMPT_CEILING
+            || archived >= usize::from(ARTIFACT_ATTEMPT_CEILING);
         let attempt = if recover {
             let fallback_cache = cache.clone();
             self.generate(

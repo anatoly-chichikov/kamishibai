@@ -385,6 +385,12 @@ enum Event<'a> {
         category: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        score: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        blocker: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        penalties: Option<std::collections::BTreeMap<&'static str, u32>>,
     },
     Publishing,
     Warning {
@@ -421,6 +427,7 @@ impl Reporter for JsonReporter {
             } => ("retry", Some(retry), Some(retries), fault),
             StepOutcome::Failed { retries, fault } => ("fail", None, Some(retries), fault),
         };
+        let scorecard = fault.and_then(AttemptFault::scorecard);
         stream(&Event::Step {
             term,
             artifact: artifact.label(),
@@ -429,6 +436,9 @@ impl Reporter for JsonReporter {
             retries,
             category: fault.map(AttemptFault::category),
             reason: fault.map(AttemptFault::reason),
+            score: scorecard.map(|card| card.score()),
+            blocker: scorecard.map(|card| card.blocker()),
+            penalties: scorecard.map(|card| card.penalties().each().into_iter().collect()),
         });
     }
 

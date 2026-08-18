@@ -163,11 +163,21 @@ impl TextReview {
     }
 
     /// Return the weighted quality penalty for detected non-leaking writing.
+    ///
+    /// A finding whose transcription holds no alphanumeric run of at least two
+    /// characters is recognizer noise, not writing; it keeps only a trace
+    /// weight so it can neither burn an attempt nor visibly drag the score.
     #[must_use]
     pub(crate) fn penalty(&self) -> u32 {
         self.evidence
             .iter()
-            .map(|item| item.kind.weight())
+            .map(|item| {
+                if legible_run(item.reading.as_str()) {
+                    item.kind.weight()
+                } else {
+                    item.kind.weight().min(NOISE_WEIGHT)
+                }
+            })
             .sum::<u32>()
             .min(40)
     }
@@ -234,6 +244,25 @@ struct LlmTextReview {
     reason: String,
 }
 
+const NOISE_WEIGHT: u32 = 2;
+
+/// Return whether one transcription holds an alphanumeric run of two or more
+/// characters — the minimum for a reading to be writing rather than noise.
+fn legible_run(reading: &str) -> bool {
+    let mut run = 0usize;
+    for character in reading.chars() {
+        if character.is_alphanumeric() {
+            run += 1;
+            if run >= 2 {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
+}
+
 /// Return whether one grounded reading violates the literal-writing policy.
 pub(super) fn significant_literal(found: &str) -> bool {
     if found.chars().any(char::is_numeric) {
@@ -263,6 +292,18 @@ mod tests {
             ["", "un", "OPEN", "ש", "7"].map(|found| TextReview::ocr(found).allows()),
             [true, true, false, false, false],
             "OCR significance policy accepted writing or rejected low-signal Latin glyphs"
+        );
+    }
+
+    #[test]
+    fn recognizer_noise_without_a_legible_run_keeps_only_a_trace_penalty() {
+        assert_eq!(
+            (
+                TextReview::ocr("\\,w/4/").penalty(),
+                TextReview::ocr("sale").penalty(),
+            ),
+            (2, 12),
+            "recognizer gibberish was weighted like real writing"
         );
     }
 

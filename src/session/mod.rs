@@ -20,7 +20,7 @@ pub use crate::application::{
     BulkCorrection, CardCorrection, CardMetaGeneration, LearningTarget, Understanding,
 };
 pub(crate) use attempt::ARTIFACT_ATTEMPT_CEILING;
-pub use attempt::{AttemptFault, AttemptLog, AttemptTally};
+pub use attempt::{AttemptFault, AttemptLog, AttemptPenalties, AttemptScorecard, AttemptTally};
 pub use bridge::{drafts_from_document, from_entry, to_document, to_entry};
 pub(crate) use cache::CandidateRecord;
 pub use cache::{CachedUnderstanding, CardMetaCache};

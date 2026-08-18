@@ -373,23 +373,28 @@ fn rejected_regions(
     let Some(offset) = rejected_rows_offset(draft, width) else {
         return Vec::new();
     };
-    rejected_attempts(draft)
-        .into_iter()
-        .enumerate()
-        .filter_map(|(row, attempt)| {
-            let absolute = pane_row + offset + row;
-            let screen_row = visible_content_row(body_start, body_height, absolute, scroll)?;
-            Some(rejected_link_columns(attempt, width).into_iter().map(
-                move |(start, end, target)| LinkRegion {
+    let mut regions = Vec::new();
+    let mut cursor = 0usize;
+    for attempt in rejected_attempts(draft) {
+        let absolute = pane_row + offset + cursor;
+        let (height, columns) = rejected_link_columns(attempt, width);
+        cursor += height;
+        let Some(screen_row) = visible_content_row(body_start, body_height, absolute, scroll)
+        else {
+            continue;
+        };
+        regions.extend(
+            columns
+                .into_iter()
+                .map(move |(start, end, target)| LinkRegion {
                     row: screen_row,
                     hit_start: body_x.saturating_add(start),
                     hit_end: body_x.saturating_add(end),
                     target: target.to_string_lossy().into_owned(),
-                },
-            ))
-        })
-        .flatten()
-        .collect()
+                }),
+        );
+    }
+    regions
 }
 
 fn banner_visible(app: &App) -> bool {

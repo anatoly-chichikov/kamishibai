@@ -21,10 +21,10 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use kamishibai::session::{
-    Artifact, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptFault, AxisSet, CardArtifacts,
-    CardDraft, CardMeta, GenerationCost, LanguagePair, Register, SentenceAxis,
-    SentenceBatchSettings, SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel,
-    SentenceTypeMix, WordCandidate,
+    Artifact, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptFault, AttemptPenalties,
+    AttemptScorecard, AxisSet, CardArtifacts, CardDraft, CardMeta, GenerationCost, LanguagePair,
+    Register, SentenceAxis, SentenceBatchSettings, SentenceKind, SentenceLabelSelection,
+    SentenceLabels, SentenceLevel, SentenceTypeMix, WordCandidate,
 };
 use kamishibai::tui::{
     App, AppEvent, BusyKind, KeySource, ModalKind, MousePointer, PickerSection, Screen, draw,
@@ -204,13 +204,15 @@ fn recovered_cached_artifacts() -> CardArtifacts {
     let picture = ArtifactSlot::fresh(Artifact::Picture)
         .faulted(rejected_frame(
             1,
-            "border",
-            "White border missing on: bottom",
+            "topology",
+            "quality score 68/100: planned panels share one drawn region",
+            Some(scored(68, 32, 0, 0, 0)),
         ))
         .faulted(rejected_frame(
             2,
             "topology",
-            "Registered panel topology was not detected",
+            "quality score 60/100: found 1 panel region for 3 planned panels",
+            Some(scored(60, 40, 0, 0, 0)),
         ))
         .succeeded_with(ArtifactFile::new(
             "a345532c.jpg",
@@ -241,12 +243,30 @@ fn recovered_cached_artifacts() -> CardArtifacts {
     )
 }
 
-fn rejected_frame(sequence: usize, category: &str, reason: &str) -> AttemptFault {
+fn rejected_frame(
+    sequence: usize,
+    category: &str,
+    reason: &str,
+    scorecard: Option<AttemptScorecard>,
+) -> AttemptFault {
     AttemptFault::new(
         category,
         reason,
         Some(std::env::temp_dir().join(format!("attempt-{sequence:04}.jpg"))),
+        scorecard,
     )
+}
+
+fn scored(score: u32, topology: u32, text: u32, fidelity: u32, literal: u32) -> AttemptScorecard {
+    AttemptScorecard::new(
+        score,
+        false,
+        AttemptPenalties::new(topology, text, fidelity, literal),
+    )
+}
+
+fn blocked() -> AttemptScorecard {
+    AttemptScorecard::new(0, true, AttemptPenalties::new(0, 0, 0, 0))
 }
 
 fn retrying_artifacts() -> CardArtifacts {
@@ -256,13 +276,15 @@ fn retrying_artifacts() -> CardArtifacts {
         ArtifactSlot::fresh(Artifact::Picture)
             .faulted(rejected_frame(
                 1,
-                "border",
-                "White border missing on: bottom",
+                "topology",
+                "quality score 68/100: planned panels share one drawn region",
+                Some(scored(68, 32, 0, 0, 0)),
             ))
             .faulted(rejected_frame(
                 2,
                 "topology",
-                "Registered panel topology was not detected",
+                "quality score 60/100: found 1 panel region for 3 planned panels",
+                Some(scored(60, 40, 0, 0, 0)),
             )),
         ArtifactSlot::fresh(Artifact::Sound),
     )
@@ -286,8 +308,9 @@ fn making_picture_artifacts() -> CardArtifacts {
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
         ArtifactSlot::fresh(Artifact::Picture).faulted(rejected_frame(
             1,
-            "border",
-            "White border missing on: top, left",
+            "topology",
+            "quality score 76/100: panel geometry misses the planned layout",
+            Some(scored(76, 24, 0, 0, 0)),
         )),
         ArtifactSlot::fresh(Artifact::Sound),
     )
@@ -295,17 +318,33 @@ fn making_picture_artifacts() -> CardArtifacts {
 
 fn failed_picture_artifacts() -> CardArtifacts {
     let mut picture = ArtifactSlot::fresh(Artifact::Picture);
-    for (sequence, category, reason) in [
-        (1, "border", "White border missing on: bottom"),
-        (2, "topology", "Registered panel topology was not detected"),
+    for (sequence, category, reason, scorecard) in [
+        (
+            1,
+            "topology",
+            "quality score 68/100: planned panels share one drawn region",
+            Some(scored(68, 32, 0, 0, 0)),
+        ),
+        (
+            2,
+            "ocr",
+            "quality score 88/100: PP-OCRv5 detected 'sale'",
+            Some(scored(88, 0, 12, 0, 0)),
+        ),
         (
             3,
             "recall_text",
             "Recall judge rejected image: visible answer",
+            Some(blocked()),
         ),
-        (4, "layout", "Safe text region left no room for the target"),
+        (
+            4,
+            "borderless",
+            "No panel frame anywhere and ink reaches every page edge",
+            Some(blocked()),
+        ),
     ] {
-        picture = picture.faulted(rejected_frame(sequence, category, reason));
+        picture = picture.faulted(rejected_frame(sequence, category, reason, scorecard));
     }
     CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
@@ -344,11 +383,13 @@ fn retry_stress_fault(kind: Artifact, sequence: usize) -> AttemptFault {
             "schema",
             format!("scene response {sequence} did not match the schema"),
             Some(std::env::temp_dir().join(format!("scene-{sequence:04}.json"))),
+            None,
         ),
         Artifact::Picture => rejected_frame(
             sequence,
             "recall_text",
             "Recall judge rejected image: visible answer",
+            Some(blocked()),
         ),
     }
 }

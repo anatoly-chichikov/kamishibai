@@ -2,8 +2,8 @@
 
 use anyhow::{Result, anyhow};
 use kamishibai::session::{
-    Artifact, ArtifactAttempt, ArtifactFile, AttemptFault, CardDraft, CardMeta, EngineEvent,
-    GenerationCost, LanguagePair, SessionEngine,
+    Artifact, ArtifactAttempt, ArtifactFile, AttemptFault, AttemptPenalties, AttemptScorecard,
+    CardDraft, CardMeta, EngineEvent, GenerationCost, LanguagePair, SessionEngine,
 };
 use kamishibai::tui::{App, Screen, draw};
 use ratatui::Terminal;
@@ -97,7 +97,7 @@ fn engine_retry_event_renders_only_a_card_head_attempt_summary() -> Result<()> {
 }
 
 #[test]
-fn rejected_attempt_names_its_reason_in_the_expanded_card() -> Result<()> {
+fn rejected_attempt_shows_its_scorecard_in_the_expanded_card() -> Result<()> {
     let mut engine = SessionEngine::start(vec![draft("in the end")]);
     engine.applied_meta(0, Ok((meta_for("in the end"), None)));
     engine.applied_media(
@@ -109,9 +109,14 @@ fn rejected_attempt_names_its_reason_in_the_expanded_card() -> Result<()> {
         0,
         Artifact::Picture,
         ArtifactAttempt::new(Err(anyhow!("rejected")), None).with_fault(AttemptFault::new(
-            "border",
-            "White border missing on: bottom",
+            "topology",
+            "quality score 60/100: found 1 panel region for 2 planned panels; Text judge found writing: simulated text rows on a poster",
             Some(std::env::temp_dir().join("attempt-0001.jpg")),
+            Some(AttemptScorecard::new(
+                60,
+                false,
+                AttemptPenalties::new(32, 8, 0, 0),
+            )),
         )),
     );
     let app = App::new(LanguagePair::new("en", "ru"))
@@ -123,8 +128,43 @@ fn rejected_attempt_names_its_reason_in_the_expanded_card() -> Result<()> {
     assert!(
         rendered.contains("rejected attempts")
             && rendered.contains("attempt-0001.jpg")
-            && rendered.contains("border · White border missing on: bottom"),
-        "the expanded card must name why the picture was rejected and which frame it was: {rendered}"
+            && rendered.contains("60/100")
+            && rendered.contains("· found 1 panel region for 2 planned panels")
+            && rendered.contains("· writing: simulated text rows on a poster")
+            && !rendered.contains("quality score"),
+        "the expanded card must show the score and each judge finding on its own row: {rendered}"
+    );
+    Ok(())
+}
+
+#[test]
+fn unjudged_failure_keeps_its_reason_in_the_expanded_card() -> Result<()> {
+    let mut engine = SessionEngine::start(vec![draft("in the end")]);
+    engine.applied_meta(0, Ok((meta_for("in the end"), None)));
+    engine.applied_media(
+        0,
+        Artifact::Scene,
+        Ok(file_for("in the end", Artifact::Scene)),
+    );
+    engine.applied_media_attempt(
+        0,
+        Artifact::Picture,
+        ArtifactAttempt::new(Err(anyhow!("rejected")), None).with_fault(AttemptFault::new(
+            "error",
+            "connection reset by peer",
+            None,
+            None,
+        )),
+    );
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::YourCards)
+        .confirmed_learning("en")
+        .cards_started(engine.drafts().to_vec())
+        .card_revealed(0);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("· connection reset by peer"),
+        "an unjudged failure lost the only reason it could show: {rendered}"
     );
     Ok(())
 }

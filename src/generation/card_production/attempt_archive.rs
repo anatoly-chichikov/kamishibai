@@ -10,7 +10,9 @@ use serde_json::Value;
 
 use crate::gemini::RejectedReply;
 use crate::generation::artifact_cache::{Cache, IMAGE_ATTEMPTS_DIRECTORY};
-use crate::session::{ArtifactAttempt, ArtifactFile, AttemptFault};
+use crate::session::{
+    ArtifactAttempt, ArtifactFile, AttemptFault, AttemptPenalties, AttemptScorecard,
+};
 
 /// One archived verdict together with the picture it judged.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -64,8 +66,35 @@ pub(super) fn latest_verdict(cache: &Cache) -> Option<ArchivedVerdict> {
             category,
             member(&value, "reason").unwrap_or_else(|| String::from("attempt was rejected")),
             member(&value, "image").map(|name| directory.join(name)),
+            scorecard(&value),
         ),
     })
+}
+
+fn scorecard(value: &Value) -> Option<AttemptScorecard> {
+    let score = counted(value, "score")?;
+    let blocker = value
+        .get("blocker")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let penalties = value.get("penalties")?;
+    Some(AttemptScorecard::new(
+        score,
+        blocker,
+        AttemptPenalties::new(
+            counted(penalties, "topology").unwrap_or(0),
+            counted(penalties, "text").unwrap_or(0),
+            counted(penalties, "fidelity").unwrap_or(0),
+            counted(penalties, "literal").unwrap_or(0),
+        ),
+    ))
+}
+
+fn counted(value: &Value, key: &str) -> Option<u32> {
+    value
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|number| u32::try_from(number).ok())
 }
 
 fn verdicts(cache: &Cache) -> Vec<(usize, PathBuf)> {
@@ -109,7 +138,7 @@ pub(super) fn archived_reply(
         return attempt;
     };
     match store_reply(cache, reply.body()) {
-        Ok(path) => attempt.with_fault(AttemptFault::new("error", reason, Some(path))),
+        Ok(path) => attempt.with_fault(AttemptFault::new("error", reason, Some(path), None)),
         Err(_) => attempt,
     }
 }
@@ -171,7 +200,7 @@ mod tests {
         archive(
             &cache,
             1,
-            json!({"status": "rejected", "category": "border", "reason": "White border missing on: bottom", "image": "attempt-0001.jpg"}),
+            json!({"status": "rejected", "category": "topology", "reason": "Registered panel topology was not detected", "image": "attempt-0001.jpg"}),
         );
         let fault = latest_verdict(&cache)
             .expect("archived rejection must be readable")
@@ -185,8 +214,35 @@ mod tests {
                     .map(|path| path.file_name().and_then(|name| name.to_str())
                         == Some("attempt-0001.jpg")),
             ),
-            ("border", "White border missing on: bottom", Some(true)),
+            (
+                "topology",
+                "Registered panel topology was not detected",
+                Some(true)
+            ),
             "archived rejection lost the category, reason, or picture the user needs"
+        );
+    }
+
+    #[test]
+    fn archived_scorecard_travels_with_the_fault() {
+        let root = tempdir().expect("temporary cache root must be creatable");
+        let cache = Cache::new("card", root.path());
+        archive(
+            &cache,
+            1,
+            json!({"status": "rejected", "category": "topology", "reason": "quality score 68/100: Registered panel topology was not detected", "image": "attempt-0001.jpg", "score": 68, "blocker": false, "penalties": {"topology": 32, "text": 0, "fidelity": 0, "literal": 0}}),
+        );
+        let fault = latest_verdict(&cache)
+            .expect("archived scored rejection must be readable")
+            .fault();
+        assert_eq!(
+            fault.scorecard().map(|card| (
+                card.score(),
+                card.blocker(),
+                card.penalties().each()[0]
+            )),
+            Some((68, false, ("topology", 32))),
+            "the archived scorecard was lost on its way into the attempt fault"
         );
     }
 

@@ -425,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn dedicated_fidelity_rejection_skips_zoom_and_preserves_semantic_allow() {
+    fn dedicated_fidelity_rejection_still_completes_zoom_and_preserves_semantic_allow() {
         let transport = ScriptedTransport::new(vec![
             json!({
                 "decision": "ALLOW",
@@ -443,6 +443,11 @@ mod tests {
                     "kind": "BROKEN_SUBJECT_CONTINUITY"
                 }],
                 "reason": "The repeated subject is substituted"
+            }),
+            json!({
+                "literal_writing_present": false,
+                "literal_evidence": [],
+                "reason": "No writing is visible at any scale"
             }),
         ]);
         let requests = transport.requests.clone();
@@ -471,39 +476,63 @@ mod tests {
                 cost.requests(),
             ),
             (
-                2,
+                3,
                 true,
                 true,
                 None,
                 Some("REJECT"),
                 Some("BROKEN_SUBJECT_CONTINUITY"),
                 Some(true),
-                Some(false),
+                Some(true),
                 "gemini-3.7-flash",
-                2,
+                3,
             ),
-            "dedicated fidelity rejection changed semantics, ran zoom, or lost typed cost and archive proof"
+            "a score-only fidelity finding stopped the inspection chain before zoom"
         );
     }
 
     #[test]
-    fn scale_aware_recall_skips_zoom_after_any_full_review_rejection() {
-        let full_reviews = [
-            json!({
-                "decision": "REJECT",
-                "evidence": [{
-                    "reading": "misunderstanding",
-                    "location": "upper sign",
-                    "kind": "FOCUS"
-                }],
-                "literal_writing_present": true,
-                "literal_evidence": [{
-                    "description": "the word misunderstanding",
-                    "location": "upper sign",
-                    "kind": "WRITING"
-                }],
-                "reason": "The hidden answer is visible"
-            }),
+    fn scale_aware_recall_skips_zoom_only_after_answer_leakage() {
+        let transport = ScriptedTransport::new(vec![json!({
+            "decision": "REJECT",
+            "evidence": [{
+                "reading": "misunderstanding",
+                "location": "upper sign",
+                "kind": "FOCUS"
+            }],
+            "literal_writing_present": true,
+            "literal_evidence": [{
+                "description": "the word misunderstanding",
+                "location": "upper sign",
+                "kind": "WRITING"
+            }],
+            "reason": "The hidden answer is visible"
+        })]);
+        let requests = transport.requests.clone();
+        let directory = tempdir().expect("skip-path recall cache must be created");
+        let costs = CostRecorder::new(
+            Cache::new("skip-scale-aware-recall", directory.path()),
+            Artifact::Picture,
+        );
+        let recall = GeminiRecall::new(GeminiClient::new("key", transport), recall_card(), costs);
+        let review = recall
+            .review(&recall_scene(), source_png().as_slice())
+            .expect("a leaking full review must return without further requests");
+        assert_eq!(
+            (
+                requests.borrow().len(),
+                serde_json::to_value(review).expect("leaking review must serialize")
+                    ["zoom_inspected"]
+                    .as_bool(),
+            ),
+            (1, Some(false)),
+            "the inspection chain kept spending requests after answer leakage"
+        );
+    }
+
+    #[test]
+    fn cosmetic_full_review_findings_still_complete_the_inspection_chain() {
+        let transport = ScriptedTransport::new(vec![
             json!({
                 "decision": "ALLOW",
                 "evidence": [],
@@ -516,44 +545,35 @@ mod tests {
                 "reason": "No answer-bearing writing is visible"
             }),
             json!({
-                "decision": "ALLOW",
-                "evidence": [],
                 "scene_fidelity_decision": "ALLOW",
-                "scene_fidelity_evidence": [{
-                    "requirement": "panel p1 requires both confused people",
-                    "observed": "only one person is visible",
-                    "location": "full image",
-                    "kind": "MISSING_REQUIRED_SUBJECT"
-                }],
+                "scene_fidelity_evidence": [],
+                "reason": "Every required subject and relation is visible"
+            }),
+            json!({
                 "literal_writing_present": false,
                 "literal_evidence": [],
-                "reason": "No answer-bearing writing is visible"
+                "reason": "No writing is visible at any scale"
             }),
-        ];
-        let outcomes = full_reviews.map(|full| {
-            let transport = ScriptedTransport::new(vec![full]);
-            let requests = transport.requests.clone();
-            let directory = tempdir().expect("skip-path recall cache must be created");
-            let costs = CostRecorder::new(
-                Cache::new("skip-scale-aware-recall", directory.path()),
-                Artifact::Picture,
-            );
-            let recall =
-                GeminiRecall::new(GeminiClient::new("key", transport), recall_card(), costs);
-            let review = recall
-                .review(&recall_scene(), source_png().as_slice())
-                .expect("full rejection must return without a zoom request");
+        ]);
+        let requests = transport.requests.clone();
+        let directory = tempdir().expect("cosmetic-chain recall cache must be created");
+        let costs = CostRecorder::new(
+            Cache::new("cosmetic-chain-recall", directory.path()),
+            Artifact::Picture,
+        );
+        let recall = GeminiRecall::new(GeminiClient::new("key", transport), recall_card(), costs);
+        let review = recall
+            .review(&recall_scene(), source_png().as_slice())
+            .expect("a cosmetic finding must not abort the inspection chain");
+        assert_eq!(
             (
                 requests.borrow().len(),
-                serde_json::to_value(review)
-                    .expect("full rejection must serialize")["zoom_inspected"]
+                serde_json::to_value(review).expect("cosmetic review must serialize")
+                    ["zoom_inspected"]
                     .as_bool(),
-            )
-        });
-        assert_eq!(
-            outcomes,
-            [(1, Some(false)), (1, Some(false)), (1, Some(false))],
-            "scale-aware recall ran after the full review had already rejected the image"
+            ),
+            (3, Some(true)),
+            "a cosmetic full-review finding stopped the inspection chain before zoom"
         );
     }
 }

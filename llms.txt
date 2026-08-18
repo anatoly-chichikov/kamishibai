@@ -529,13 +529,16 @@ Wait events
 `generate --wait` and `regenerate --wait` emit NDJSON lines on stderr. The final
 session document still goes to stdout. `retry` and `retries` appear only on
 retry or failure, and so do `category` and `reason`, which name why the try that
-just failed was spent.
+just failed was spent. When the failed try was judged rather than lost to
+infrastructure, the same event also carries its weighted verdict: `score`
+(0–100), `blocker`, and the per-category `penalties` object (`topology`, `text`,
+`fidelity`, `literal`); an unjudged failure omits all three.
 
 Examples:
 
 ```json
 {"event": "generating", "cards": 2}
-{"event": "step", "term": "canard", "artifact": "picture", "status": "retry", "retry": 1, "retries": 3, "category": "border", "reason": "White border missing on: bottom"}
+{"event": "step", "term": "canard", "artifact": "picture", "status": "retry", "retry": 1, "retries": 3, "category": "topology", "reason": "quality score 68/100: planned panels share one drawn region", "score": 68, "blocker": false, "penalties": {"fidelity": 0, "literal": 0, "text": 0, "topology": 32}}
 {"event": "step", "term": "canard", "artifact": "picture", "status": "ok"}
 {"event": "publishing"}
 {"event": "warning", "message": "..."}
@@ -556,15 +559,32 @@ has just triggered, from `1` to `retries`. A `fail` step means all retries were
 spent and carries `retries` without `retry`.
 
 `category` is the renderer's verdict slug for a picture the model did draw and a
-local gate rejected — `topology`, `color`, `ocr`, `recall_text`, `other`
-(archives written before 1.9.0 may also carry `border` or `legacy_gutter`) — or
-`error` when infrastructure failed rather than a gate rejecting the picture
-(transport, cache lease, exhausted request budget, OCR failure, or Gemini judge
-failure). Since 1.9.0 every judged attempt verdict also carries a weighted
-scorecard: `score` (0–100), `blocker`, and per-category `penalties`. The only
-blockers are a non-monochrome frame and answer leakage; other findings only
-lower the score. A bled outer border is repaired in place — the reserved
-page-edge margin is painted white — instead of rejecting the frame, and the
+local gate rejected — `topology`, `color`, `borderless`, `ocr`, `recall_text`,
+`other` (archives written before 1.9.0 may also carry `border` or
+`legacy_gutter`) — or `error` when infrastructure failed rather than a gate
+rejecting the picture (transport, cache lease, exhausted request budget, OCR
+failure, or Gemini judge failure). Since 1.9.0 every judged attempt verdict also
+carries a weighted scorecard: `score` (0–100), `blocker`, and per-category
+`penalties` (`topology`, `text`, `fidelity`, `literal`). The topology penalty is
+graded by distance from the registered layout, so topology failures order
+meaningfully, and the reason names the concrete mismatch. The only
+blockers are a non-monochrome frame, answer leakage, and a fully borderless page
+— the recall judge's `page_frame` verdict
+(`framed`/`bleed`/`breakout`/`torn`/`borderless`) blocks only when the page
+perimeter is also mechanically inked. Retries are gated only by blockers and
+frame structure: an attempt ships whenever it is not blocked and its topology
+penalty stays under the retry floor (24). Every text, fidelity, and literal
+finding — numerals, pseudo-writing, diagrams, non-leaking writing, missing
+anchors, continuity — is score-only: recorded in the verdict and the events,
+never spending a paid retry. A judged `breakout` (content deliberately crossing
+a panel border) downgrades a mechanical topology mismatch to score-only, while
+`torn` (frame lines carrying generation artifacts) raises topology to the retry
+floor. A text-gate transcription with no alphanumeric run of at least two
+characters is recognizer noise and keeps only a trace weight. Every terminal
+failure of the final attempt — rejection, judge or transport error, exhausted
+picture-request budget — funnels through the salvage seam, so a card fails only
+when its archive is empty or every archived frame was blocked. A partially bled outer border is an accepted stylistic
+device and ships exactly as drawn; nothing is painted over. The
 final attempt of a series ships the highest-scoring non-blocked archived frame,
 rewriting that verdict's `status` to `salvaged`, so a card fails only when every
 attempt was blocked or infrastructural. The final scene attempt likewise
@@ -575,8 +595,8 @@ next to its `attempt-NNNN.json` verdict, the `attempt-NNNN.scene.json` it was
 drawn from, the `attempt-NNNN.prompt.txt` compiled for it, the
 `attempt-NNNN.text.json` literal-writing verdict when that gate ran, and the
 `attempt-NNNN.recall.json` merged review (independent answer-leakage,
-scene-fidelity, and literal-policy verdicts plus explicit proof of dedicated
-fidelity and zoom inspection) only when the picture advanced to those later
+scene-fidelity, literal-policy, and page-frame verdicts plus explicit proof of
+dedicated fidelity and zoom inspection) only when the picture advanced to those later
 gates. A rejected frame can therefore be read against its own scene
 and every gate that actually reviewed it after the run. A scene step
 that fails after the model answered

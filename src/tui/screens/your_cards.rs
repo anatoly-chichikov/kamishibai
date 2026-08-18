@@ -817,7 +817,7 @@ fn detail_pane(draft: &CardDraft, width: usize, pending: bool) -> DetailPane<'_>
         lines.extend(
             attempts
                 .into_iter()
-                .map(|attempt| rejected_row(attempt, width).line),
+                .flat_map(|attempt| rejected_row(attempt, width).lines()),
         );
         Some(start)
     };
@@ -871,27 +871,33 @@ pub(crate) fn rejected_attempts(draft: &CardDraft) -> Vec<RejectedAttempt<'_>> {
         .collect()
 }
 
-/// One rendered rejected-attempt row together with the click targets on it.
+/// One rendered rejected attempt: its header row carrying the click targets,
+/// plus one indented finding row per judge verdict beneath it.
 pub(crate) struct RejectedRow<'a> {
-    line: Line<'a>,
+    lines: Vec<Line<'a>>,
     links: Vec<(u16, u16, PathBuf)>,
 }
 
-/// Render one rejected attempt: which try it was, whatever that try produced
-/// before it was thrown away, and the gate that rejected it. A try that never
-/// produced anything leaves the middle column blank — the reason already says
-/// what happened. The archived file is the click target, so the row is built
-/// once and reused by the hit-tester instead of being measured twice.
+impl<'a> RejectedRow<'a> {
+    /// Return every rendered row of this attempt, header first.
+    pub(crate) fn lines(self) -> Vec<Line<'a>> {
+        self.lines
+    }
+
+    /// Return how many body rows this attempt occupies.
+    pub(crate) fn height(&self) -> usize {
+        self.lines.len()
+    }
+}
+
+/// Render one rejected attempt as a short header — which try it was, whatever
+/// that try produced before it was thrown away, and its verdict word (the
+/// quality score, `blocked`, or the raw category of an unjudged failure) —
+/// followed by one indented `·` row per judge finding, in the judge's own
+/// words. The archived file on the header is the click target, so the block is
+/// built once and reused by the hit-tester instead of being measured twice.
 pub(crate) fn rejected_row<'a>(attempt: RejectedAttempt<'_>, width: usize) -> RejectedRow<'a> {
     let step = format!("{} {}", step_name(attempt.artifact), attempt.index);
-    let used = super::common::display_width(REJECTED_INDENT)
-        + 2
-        + REJECTED_STEP_COL_CHARS.max(super::common::display_width(step.as_str()) + 2)
-        + REJECTED_FILE_COL_CHARS;
-    let reason = clip(
-        format!("{} · {}", attempt.fault.category(), attempt.fault.reason()).as_str(),
-        width.saturating_sub(used).max(12),
-    );
     let mut spans = vec![
         Span::styled(REJECTED_INDENT, palette::base()),
         Span::styled("✗ ", palette::dim()),
@@ -924,11 +930,63 @@ pub(crate) fn rejected_row<'a>(attempt: RejectedAttempt<'_>, width: usize) -> Re
             palette::dim(),
         )),
     }
-    spans.push(Span::styled(reason, palette::dim()));
-    RejectedRow {
-        line: Line::from(spans),
-        links,
+    spans.push(Span::styled(verdict_word(attempt.fault), palette::dim()));
+    let mut lines = vec![Line::from(spans)];
+    let bullet = format!("{REJECTED_INDENT}  · ");
+    let room = width
+        .saturating_sub(super::common::display_width(bullet.as_str()))
+        .max(12);
+    for finding in findings(attempt.fault) {
+        lines.push(Line::from(vec![
+            Span::styled(bullet.clone(), palette::dim()),
+            Span::styled(clip(finding.as_str(), room), palette::dim()),
+        ]));
     }
+    RejectedRow { lines, links }
+}
+
+/// Return the one-word verdict for a rejected attempt's header row: the
+/// quality score of a judged frame, `blocked` for a blocked one, and the raw
+/// category of a failure that never got a verdict.
+fn verdict_word(fault: &AttemptFault) -> String {
+    match fault.scorecard() {
+        Some(scorecard) if scorecard.blocker() => String::from("blocked"),
+        Some(scorecard) => format!("{}/100", scorecard.score()),
+        None => String::from(fault.category()),
+    }
+}
+
+/// Split one fault's reason into the judge findings behind it, in the judge's
+/// own grounded words: the machine score prefix is dropped, gate prefixes are
+/// shortened to `missing:` / `writing:`, and each finding becomes its own row.
+fn findings(fault: &AttemptFault) -> Vec<String> {
+    let reason = fault.reason();
+    let reason = reason
+        .strip_prefix("Recall judge rejected image: ")
+        .unwrap_or(reason);
+    let reason = if reason.starts_with("quality score ") {
+        reason
+            .split_once(": ")
+            .map_or(reason, |(_, findings)| findings)
+    } else {
+        reason
+    };
+    reason
+        .split("; ")
+        .map(|finding| {
+            let finding = finding.trim();
+            if let Some(rest) = finding.strip_prefix("Scene fidelity judge: ") {
+                format!("missing: {rest}")
+            } else if let Some(rest) = finding.strip_prefix("Literal writing: ") {
+                format!("writing: {rest}")
+            } else if let Some(rest) = finding.strip_prefix("Text judge found writing: ") {
+                format!("writing: {rest}")
+            } else {
+                String::from(finding)
+            }
+        })
+        .filter(|finding| !finding.is_empty())
+        .collect()
 }
 
 fn archive_label(path: Option<&Path>) -> Option<String> {
@@ -1568,12 +1626,15 @@ pub(crate) fn rejected_rows_offset(draft: &CardDraft, width: usize) -> Option<us
     detail_pane(draft, width, draft.staged_rewrite().is_some()).rejected_start
 }
 
-/// Click targets on one rejected row: the archived frame and its scene.
+/// Click targets on one rejected attempt's header row, together with how many
+/// body rows the whole attempt block occupies below the header.
 pub(crate) fn rejected_link_columns(
     attempt: RejectedAttempt<'_>,
     width: usize,
-) -> Vec<(u16, u16, PathBuf)> {
-    rejected_row(attempt, width).links
+) -> (usize, Vec<(u16, u16, PathBuf)>) {
+    let row = rejected_row(attempt, width);
+    let height = row.height();
+    (height, row.links)
 }
 
 /// Return one card's known Gemini cost across generated artifacts.

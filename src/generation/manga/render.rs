@@ -21,6 +21,7 @@ use super::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RenderRejection {
     Color(String),
+    Borderless(String),
     Topology(String),
     Ocr(String),
     RecallText(String),
@@ -30,6 +31,10 @@ enum RenderRejection {
 impl RenderRejection {
     fn color(reason: &str) -> Self {
         Self::Color(String::from(reason))
+    }
+
+    fn borderless(reason: &str) -> Self {
+        Self::Borderless(String::from(reason))
     }
 
     fn topology_scored(reason: String) -> Self {
@@ -51,6 +56,7 @@ impl RenderRejection {
     fn reason(&self) -> &str {
         match self {
             Self::Color(reason)
+            | Self::Borderless(reason)
             | Self::Topology(reason)
             | Self::Ocr(reason)
             | Self::RecallText(reason)
@@ -61,6 +67,7 @@ impl RenderRejection {
     fn category(&self) -> &'static str {
         match self {
             Self::Color(_) => "color",
+            Self::Borderless(_) => "borderless",
             Self::Topology(_) => "topology",
             Self::Ocr(_) => "ocr",
             Self::RecallText(_) => "recall_text",
@@ -205,7 +212,7 @@ where
                         Err(error) => {
                             let reason = error.to_string();
                             record_attempt(journal.as_ref(), "error", "provider", reason.as_str())?;
-                            return Err(error);
+                            return self.rescued(error);
                         }
                     };
                     if let Some(journal) = journal.as_mut()
@@ -213,7 +220,7 @@ where
                     {
                         let reason = error.to_string();
                         let _ = journal.record("error", "archive", reason.as_str());
-                        return Err(error);
+                        return self.rescued(error);
                     }
                     (journal, bytes)
                 }
@@ -228,7 +235,7 @@ where
                         "transport_or_decode",
                         error.to_string().as_str(),
                     )?;
-                    return Err(error.into());
+                    return self.rescued(error.into());
                 }
             };
             if color_detected(&image) {
@@ -243,42 +250,21 @@ where
                 continue;
             }
             let gray = image.into_luma8();
-            let (gray, bytes, repaired) = if self.border.borders(&gray).is_empty() {
-                (gray, bytes, false)
-            } else {
-                let repaired = self.border.repaired(&gray);
-                let mut encoded = Vec::new();
-                if let Err(error) = DynamicImage::ImageLuma8(repaired.clone()).write_to(
-                    &mut std::io::Cursor::new(&mut encoded),
-                    image::ImageFormat::Png,
-                ) {
-                    record_attempt(
-                        journal.as_ref(),
-                        "error",
-                        "border_repair",
-                        error.to_string().as_str(),
-                    )?;
-                    return Err(error.into());
-                }
-                (repaired, encoded, true)
-            };
+            let leveled =
+                (!self.border.borders(&gray).is_empty()).then(|| self.border.repaired(&gray));
+            let measured = leveled.as_ref().unwrap_or(&gray);
             let mut penalties = Scorecard::default();
             let mut reasons = Vec::new();
-            if repaired {
-                penalties.border = BORDER_REPAIR_PENALTY;
-            }
             if has_active_layout(scene) {
-                if !registry_topology_matches(&self.border, scene, &gray, panels) {
-                    penalties.topology = TOPOLOGY_PENALTY;
-                    reasons.push(String::from(if panels == 1 {
-                        "Unexpected internal gutter in one-panel layout"
-                    } else {
-                        "Registered panel topology was not detected"
-                    }));
+                if !registry_topology_matches(&self.border, scene, measured, panels) {
+                    let (penalty, finding) =
+                        topology_penalty(&self.border, scene, measured, panels);
+                    penalties.topology = penalty;
+                    reasons.push(finding);
                 }
-            } else if requires_gutter(scene, panels) && !self.border.gutter(&gray) {
+            } else if requires_gutter(scene, panels) && !self.border.gutter(measured) {
                 penalties.topology = TOPOLOGY_PENALTY;
-                reasons.push(String::from("No white gutter found"));
+                reasons.push(String::from("no white gutter separates the panels"));
             }
             let mut ocr_gate = false;
             if let Some(text) = self.text.as_ref() {
@@ -299,7 +285,7 @@ where
                                 text.gate().error_category(),
                                 reason.as_str(),
                             )?;
-                            return Err(error);
+                            return self.rescued(error);
                         }
                     },
                 };
@@ -309,7 +295,7 @@ where
                 {
                     let reason = error.to_string();
                     let _ = journal.record("error", "archive", reason.as_str());
-                    return Err(error);
+                    return self.rescued(error);
                 }
                 penalties.text = review.penalty();
                 if let Some(reason) = review.rejection() {
@@ -325,7 +311,7 @@ where
                 Err(error) => {
                     let reason = error.to_string();
                     record_attempt(journal.as_ref(), "error", "recall_judge", reason.as_str())?;
-                    return Err(error);
+                    return self.rescued(error);
                 }
             };
             if let Some(journal) = journal.as_mut()
@@ -333,7 +319,7 @@ where
             {
                 let reason = error.to_string();
                 let _ = journal.record("error", "archive", reason.as_str());
-                return Err(error);
+                return self.rescued(error);
             }
             if let Some(reason) = review.rejection() {
                 rejection =
@@ -349,6 +335,28 @@ where
                 progress.retry("Rendering manga", attempt + 1, rejection.reason());
                 continue;
             }
+            if review.frame_borderless() && self.border.perimeter_inked(&gray) {
+                rejection = RenderRejection::borderless(
+                    "No panel frame anywhere and ink reaches every page edge",
+                );
+                record_attempt_scored(
+                    journal.as_ref(),
+                    "rejected",
+                    rejection.category(),
+                    rejection.reason(),
+                    &penalties,
+                    true,
+                )?;
+                progress.retry("Rendering manga", attempt + 1, rejection.reason());
+                continue;
+            }
+            if review.frame_torn() {
+                penalties.topology = penalties.topology.max(TOPOLOGY_PENALTY_FLOOR);
+                reasons.push(String::from("generation artifact tears the panel frame"));
+            } else if review.frame_breakout() && penalties.topology >= TOPOLOGY_PENALTY_FLOOR {
+                penalties.topology = BREAKOUT_TOPOLOGY_PENALTY;
+                reasons.push(String::from("deliberate panel breakout keeps the frame"));
+            }
             penalties.fidelity = review.fidelity_penalty();
             if let Some(reason) = review.scene_fidelity_rejection() {
                 reasons.push(format!("Scene fidelity judge: {reason}"));
@@ -359,13 +367,13 @@ where
                     reasons.push(format!("Literal writing: {reason}"));
                 }
             }
-            if penalties.total() <= SHIP_PENALTY_CEILING {
+            if penalties.topology < TOPOLOGY_PENALTY_FLOOR {
                 if !review.inspections_complete() {
                     let reason = String::from(
                         "Recall review ended without dedicated fidelity and scale-aware literal inspection",
                     );
                     record_attempt(journal.as_ref(), "error", "recall_judge", reason.as_str())?;
-                    return Err(anyhow!(reason));
+                    return self.rescued(anyhow!(reason));
                 }
                 record_attempt_scored(
                     journal.as_ref(),
@@ -388,31 +396,39 @@ where
             )?;
             progress.retry("Rendering manga", attempt + 1, rejection.reason());
         }
+        self.rescued(MangaRenderRejection::new(self.retries, rejection).into())
+    }
+}
+
+impl<J> MangaRenderer<J> {
+    /// Resolve one terminal failure of the final attempt: ship the best
+    /// non-blocked archived frame when salvage is armed, keep the failure
+    /// otherwise.
+    ///
+    /// Every terminal path funnels through here — an exhausted retry loop, a
+    /// provider or judge error, an exhausted picture-request budget surfacing
+    /// as a provider refusal — so a card can only fail when its archive is
+    /// empty or every archived frame was blocked.
+    fn rescued(&self, error: anyhow::Error) -> Result<DynamicImage> {
         if self.salvage
             && let Some(directory) = self.attempts.as_deref()
             && let Some(bytes) = salvaged_best(directory)
             && let Ok(image) = image::load_from_memory(bytes.as_slice())
         {
-            let gray = image.into_luma8();
-            let gray = if self.border.borders(&gray).is_empty() {
-                gray
-            } else {
-                self.border.repaired(&gray)
-            };
-            return Ok(DynamicImage::ImageLuma8(gray));
+            return Ok(DynamicImage::ImageLuma8(image.into_luma8()));
         }
-        Err(MangaRenderRejection::new(self.retries, rejection).into())
+        Err(error)
     }
 }
 
-const BORDER_REPAIR_PENALTY: u32 = 2;
 const TOPOLOGY_PENALTY: u32 = 40;
-const SHIP_PENALTY_CEILING: u32 = 2;
+const TOPOLOGY_PENALTY_FLOOR: u32 = 24;
+const TOPOLOGY_DEVIATION_STEP: u32 = 8;
+const BREAKOUT_TOPOLOGY_PENALTY: u32 = 8;
 
 /// Weighted per-category quality penalties for one judged image attempt.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Scorecard {
-    border: u32,
     topology: u32,
     text: u32,
     fidelity: u32,
@@ -421,8 +437,7 @@ pub(crate) struct Scorecard {
 
 impl Scorecard {
     fn total(&self) -> u32 {
-        self.border
-            .saturating_add(self.topology)
+        self.topology
             .saturating_add(self.text)
             .saturating_add(self.fidelity)
             .saturating_add(self.literal)
@@ -452,7 +467,6 @@ impl Scorecard {
             "score": if blocker { 0 } else { self.score() },
             "blocker": blocker,
             "penalties": {
-                "border": self.border,
                 "topology": self.topology,
                 "text": self.text,
                 "fidelity": self.fidelity,
@@ -818,6 +832,61 @@ fn registry_topology_matches(
         return crossing_regions_match(border, scene, image);
     }
     strict_topology_matches(border, scene, declared, image, panels)
+}
+
+/// Grade one failed panel-topology check by its distance from the registered
+/// layout and describe what the page actually drew.
+///
+/// The registered matchers stay the only source of "correct"; this measure only
+/// orders failures so retries and the salvage pass can prefer the closest frame.
+/// The deviation counts missing or surplus panel regions plus declared panels
+/// whose centres share one region, and each step adds `TOPOLOGY_DEVIATION_STEP`
+/// above `TOPOLOGY_PENALTY_FLOOR`, saturating at the flat `TOPOLOGY_PENALTY`.
+/// The returned finding names the concrete mismatch instead of a generic
+/// verdict, so the user can read what went wrong from the attempt row.
+fn topology_penalty(
+    border: &BorderDetector,
+    scene: &Value,
+    image: &image::GrayImage,
+    panels: usize,
+) -> (u32, String) {
+    let unmeasured = String::from("the planned panel grid was not detected");
+    let Some(declared) = scene
+        .pointer("/manga_panel/panels")
+        .and_then(Value::as_array)
+        .filter(|declared| declared.len() == panels)
+    else {
+        return (TOPOLOGY_PENALTY, unmeasured);
+    };
+    let Some(centers) = panel_centers(scene, declared, image) else {
+        return (TOPOLOGY_PENALTY, unmeasured);
+    };
+    let (regions, labels) = border.region_measure(image, centers.as_slice());
+    let distinct = labels
+        .iter()
+        .flatten()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .len();
+    let deviation = regions
+        .abs_diff(panels)
+        .saturating_add(panels.saturating_sub(distinct));
+    let finding = if regions != panels {
+        let regions_word = if regions == 1 { "region" } else { "regions" };
+        let panels_word = if panels == 1 { "panel" } else { "panels" };
+        format!("found {regions} panel {regions_word} for {panels} planned {panels_word}")
+    } else if distinct < panels {
+        String::from("planned panels share one drawn region")
+    } else if panels == 1 {
+        String::from("an internal gutter splits the single planned panel")
+    } else {
+        String::from("panel geometry misses the planned layout")
+    };
+    let deviation = u32::try_from(deviation).unwrap_or(u32::MAX);
+    let penalty = TOPOLOGY_PENALTY_FLOOR
+        .saturating_add(deviation.saturating_mul(TOPOLOGY_DEVIATION_STEP))
+        .min(TOPOLOGY_PENALTY);
+    (penalty, finding)
 }
 
 fn strict_topology_matches(
