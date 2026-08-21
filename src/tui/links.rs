@@ -22,7 +22,7 @@ use super::screens::what_i_understood::{
     SentenceSettingsControl, alternate_at, sentence_settings_control_at,
 };
 use super::screens::your_cards::{
-    artifact_file_label, card_range_at, detail_pane_height, head_rows_for, rejected_attempts,
+    artifact_file_label, card_layout, card_range_at, head_rows_for, rejected_attempts,
     rejected_link_columns, rejected_rows_offset, sentence_editor_control_at,
     sentence_label_extra_rows, sentence_tag_hit_at, sentence_tags_visible, step_rows_for,
 };
@@ -304,14 +304,9 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
         };
         let head_height = head_rows_for(draft, width);
         let steps = step_rows_for(draft, running);
-        let detail = if expanded {
-            detail_pane_height(draft, width)
-        } else {
-            0
-        };
         let labels = sentence_label_extra_rows(draft, running, editor, expanded, width);
-        let trailing = usize::from(!steps.is_empty() || detail > 0 || labels > 0);
-        let card_total = head_height + steps.len() + labels + detail + trailing;
+        let (rows, trailing) = card_layout(draft, running, expanded, editor, width);
+        let card_total = rows + trailing;
         for (step_idx, artifact) in steps.iter().enumerate() {
             let absolute = content_row + head_height + step_idx;
             let Some(screen_row) = visible_content_row(
@@ -344,7 +339,7 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
                 target: file.path().to_string_lossy().into_owned(),
             });
         }
-        if detail > 0 {
+        if expanded {
             links.extend(rejected_regions(
                 draft,
                 body_x,

@@ -52,7 +52,7 @@ const STEPS: [(&str, Artifact); 4] = [
 ];
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
 
-struct CollapsedLabels {
+struct SummaryLabels {
     tags: super::sentence_labels::HeadTagsLayout,
     start: usize,
 }
@@ -220,8 +220,8 @@ fn card_block<'a>(
             super::common::CARD_DETAIL_COLUMN,
             super::common::CARD_DETAIL_COLUMN,
         ));
-    } else if let Some(labels) = collapsed_labels(draft, running, width) {
-        lines.extend(collapsed_step_lines(step_lines, labels));
+    } else if let Some(labels) = summary_labels(draft, running, width) {
+        lines.extend(summary_step_lines(step_lines, labels));
     } else {
         lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
     }
@@ -234,11 +234,11 @@ fn card_block<'a>(
     lines
 }
 
-fn collapsed_labels(
+fn summary_labels(
     draft: &CardDraft,
     running: Option<Artifact>,
     width: usize,
-) -> Option<CollapsedLabels> {
+) -> Option<SummaryLabels> {
     let steps = step_rows_for(draft, running);
     if !steps.contains(&Artifact::Sound) {
         return None;
@@ -263,7 +263,7 @@ fn collapsed_labels(
         {
             return None;
         }
-        return Some(CollapsedLabels {
+        return Some(SummaryLabels {
             tags: unwrapped,
             start,
         });
@@ -284,12 +284,12 @@ fn collapsed_labels(
     {
         return None;
     }
-    Some(CollapsedLabels { tags, start })
+    Some(SummaryLabels { tags, start })
 }
 
-fn collapsed_step_lines<'a>(
+fn summary_step_lines<'a>(
     steps: Vec<(Artifact, ArtifactLine<'a>)>,
-    labels: CollapsedLabels,
+    labels: SummaryLabels,
 ) -> Vec<Line<'a>> {
     steps
         .into_iter()
@@ -1455,7 +1455,7 @@ pub(crate) fn sentence_tag_hit_at(
     let Some(meta) = meta_step_index(draft, running) else {
         return false;
     };
-    let Some(labels) = collapsed_labels(draft, running, width) else {
+    let Some(labels) = summary_labels(draft, running, width) else {
         return false;
     };
     let steps = step_rows_for(draft, running);
@@ -1478,7 +1478,7 @@ pub(crate) fn sentence_tags_visible(
     running: Option<Artifact>,
     width: usize,
 ) -> bool {
-    collapsed_labels(draft, running, width).is_some()
+    summary_labels(draft, running, width).is_some()
 }
 
 /// Return the expanded sentence-editor control at one cell relative to the
@@ -1527,7 +1527,11 @@ pub(crate) fn step_rows_for(draft: &CardDraft, running: Option<Artifact>) -> Vec
         .collect()
 }
 
-fn card_layout(
+/// Row count and trailing-gap count of one rendered card block. The single
+/// source of card height for the renderer, the scroll clamp, and the click
+/// hit-tester in `tui::links`, so the three cannot drift apart.
+#[must_use]
+pub(crate) fn card_layout(
     draft: &CardDraft,
     running: Option<Artifact>,
     expanded: bool,
