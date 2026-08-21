@@ -297,8 +297,8 @@ together. There is no per-card modal and `R` has no `YourCards` action.
         └─ [Esc] arm clear ──► [Esc again within 1 s] ──► empty YourWords
 
     WhatIUnderstood
-        ├─ [Enter] on a row ──► sense picker opens
-        │       ├─ [Space] toggle sense · [↑↓]/[j][k] move · [Enter] done (collapse)
+        ├─ [Enter] on a head ──► its sense list opens inline (several may stay open; [C] collapses all)
+        │       ├─ [Space] toggle sense (commits immediately) · [↑↓]/[j][k] walk in, through, and out without closing · [Enter]/[Esc] close this list
         │       └─ [Space] on the "+ add more" row ──► ChangeSomething (bulk modal)
         │                                                  ├─ [Enter] send ──► (BulkCorrection busy) ──► WhatIUnderstood
         │                                                  └─ [Esc] cancel ──► WhatIUnderstood
@@ -316,9 +316,9 @@ together. There is no per-card modal and `R` has no `YourCards` action.
     YourCards
         ├─ [↑↓] nav
         ├─ [Enter]/[Space]/[click tag] ──► expand + live editor on `how should it sound?`
-        │       ├─ [←→] pick · [↑↓] row · type under `one more thing`
+        │       ├─ [←→] pick · [↑↓] row, exiting past register/note onto a card head (editor parks, card stays expanded; [C] collapses all)
         │       ├─ every edit ──► pending now; defaults + blank note ──► no pending
-        │       └─ [Enter]/[Esc] ──► close + collapse while retaining pending
+        │       └─ [Enter] close + collapse · [Esc] park, [Esc] again collapse — pending retained either way
         ├─ [Ctrl+G, pending > 0] ──► regenerate all pending cards in one batch
         ├─ [Ctrl+G, pending = 0] ──► existing retry/rebuild fallback
         ├─ [Esc] arm stop ──► [Esc again within 1 s] ──► drain current artifact, start no next request
@@ -333,9 +333,13 @@ together. There is no per-card modal and `R` has no `YourCards` action.
         └─ [Ctrl+C] twice within 1 s ──► exit
 ```
 
-`Esc` always closes one layer from inside out: error, modal/editor/expanded
-disclosure, then the current screen action. `R` has no action on `WhatIUnderstood`
-or `YourCards` (the bulk modal is reached only through the `+ add more` row).
+`Esc` always closes one layer from inside out: error, modal, then on
+`YourCards` the editor first (parking it, the card stays expanded) and the
+card's expansion second, on `WhatIUnderstood` the focused open sense list,
+then the current screen action. Open blocks the focus is not on never
+intercept `Esc`; `C` collapses them all at once. `R` has no action on
+`WhatIUnderstood` or `YourCards` (the bulk modal is reached only through the
+`+ add more` row).
 Once a batch is published, double `Esc` starts a clean batch without restarting the app.
 Publishing the deck/PDF is automatic once the generation queue drains — it is
 not a key the user presses.
@@ -347,13 +351,12 @@ not a key the user presses.
 | `Welcome` · pick language   | `←/→` step `my language` · `↑/↓` move one grid line · click picks · `Enter` next · `Ctrl+C` quit             |
 | `Welcome` · enter key       | type/`Cmd+V` paste key · `←/→` move focus (submit ↔ load-from-env, env only) · `Enter` submit · `Esc` back   |
 | `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue (inert over the 60-word limit) · `[Esc] clear` then `[Esc] again` · `Ctrl+L` language |
-| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav; `↑`/`k` above the first word opens generation guidance · `Enter` pick meanings · `D` drop row · `S` guidance alias · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
-| `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter` done · `Space` on `+ add more` opens ChangeSomething · side arrows inert |
+| `WhatIUnderstood` (walk)    | `↑↓`/`j`/`k` walk through heads and open sense lists without closing them; `↑`/`k` above the first word opens generation guidance · `Enter` on a head toggles its meanings, `Enter` inside a list closes it · `Space` toggles the focused sense (committed immediately) · `Space` on `+ add more` opens ChangeSomething · `D` drop row · `S` guidance alias · `C` collapse all open lists · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` collapses the focused open list, else back · side arrows inert |
 | `WhatIUnderstood` generation guidance | `Ctrl+G` make cards · `←→` pick · `↑↓` row · `↓` from format returns to words · `Enter`/`Esc` close (printable review keys inert) |
 | `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
-| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter` tune · `↑↓` nav (`Space` is an unadvertised alias; side arrows inert) · `Tab`/`Shift+Tab` jump to the next/previous unfinished card (wraps; inert with the editor open) · double `Esc` stops active generation |
+| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter` tune (reopens a parked head; `Space` is an unadvertised alias; side arrows inert) · `↑↓` walk through cards and the open editor's rows, parking the editor on exit while its card stays expanded · `C` collapse all expanded cards · `Tab`/`Shift+Tab` park the editor and jump to the next/previous unfinished card (wraps) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
-| `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row · text editing under `one more thing` · `Enter`/`Esc` close |
+| `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row (walking past register or note exits onto a card head, parking the editor) · text editing under `one more thing` · `Enter` closes editor and card · `Esc` parks the editor, second `Esc` collapses the card |
 | `PickLanguages`             | `↑/↓` pick within a column · `←/→` focus the left / right column · wheel scrolls the column under the pointer · `Enter` confirm · `Esc` cancel |
 | `Done`                      | `Ctrl+G` regenerate failed (only when failures) · `[Esc] new cards` · twice within 1 s starts a clean batch · `Ctrl+C` quit |
 

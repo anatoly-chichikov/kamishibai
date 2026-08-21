@@ -190,5 +190,12 @@ Sleep 800ms
 Screenshot "live/32-welcome-language-grid.png"
 Sleep 250ms
 
+# index 31 — two parked cards stay expanded while the walk stands on a third
+Type "31"
+Space
+Sleep 800ms
+Screenshot "live/33-your-cards-parked.png"
+Sleep 250ms
+
 Type "q"
 Sleep 250ms

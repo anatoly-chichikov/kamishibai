@@ -10,7 +10,7 @@ use kamishibai::session::{
     LanguagePair, LearningTarget, MAX_PLAN_CARDS, RawInputBatch, Sense, Understanding, Understood,
     WordCandidate,
 };
-use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, draw, to_app, transit};
+use kamishibai::tui::{App, AppEvent, ModalKind, ReviewFocus, Screen, Side, draw, to_app, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::{Color, Modifier};
@@ -316,9 +316,11 @@ fn enter_on_multi_sense_word_expands_the_sense_list() {
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
-    let rendered = flat(&opened);
+    let inside = transit(opened.clone(), AppEvent::NavNext).0;
+    let rendered = flat(&inside);
     assert!(
-        opened.expanded_sense().is_some()
+        opened.review_focus() == ReviewFocus::Head(0)
+            && inside.sense_list_open(0)
             && rendered.contains("[Space] select")
             && rendered.contains("[Ctrl+G] generate")
             && rendered.contains("✓ [фин.] Сущ. «банк»")
@@ -334,7 +336,8 @@ fn expanded_sense_focus_moves_inside_without_dimming_the_parent() {
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
-    let opened = transit(app, AppEvent::KeyEnter).0;
+    let head = transit(app, AppEvent::KeyEnter).0;
+    let opened = transit(head, AppEvent::NavNext).0;
     let second = transit(opened.clone(), AppEvent::NavNext).0;
     let third = transit(second.clone(), AppEvent::NavNext).0;
     let add_more = transit(third, AppEvent::NavNext).0;
@@ -375,7 +378,7 @@ fn right_arrow_on_a_collapsed_multi_sense_row_keeps_the_list_closed() {
         .understood(vec![bank_candidate()]);
     let pressed = transit(app, to_app(press(KeyCode::Right)).expect("map")).0;
     assert!(
-        pressed.expanded_sense().is_none(),
+        !pressed.sense_list_open(0),
         "a side arrow opened the sense list even though only Enter may open it"
     );
 }
@@ -387,14 +390,13 @@ fn left_arrow_inside_an_open_sense_list_keeps_it_open_with_selection_intact() {
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
-    let second = transit(opened, AppEvent::NavNext).0;
+    let first = transit(opened, AppEvent::NavNext).0;
+    let second = transit(first, AppEvent::NavNext).0;
     let third = transit(second, AppEvent::NavNext).0;
     let toggled = transit(third, AppEvent::KeyChar(' ')).0;
     let pressed = transit(toggled, to_app(press(KeyCode::Left)).expect("map")).0;
     assert!(
-        pressed
-            .expanded_sense()
-            .is_some_and(|item| item.selected == [0, 2]),
+        pressed.sense_list_open(0) && pressed.candidates()[0].selected_senses() == [0, 2],
         "a side arrow closed the sense list even though only Enter and Esc may close it"
     );
 }
@@ -406,11 +408,12 @@ fn moving_inside_expanded_senses_moves_cursor_without_changing_selection() {
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
-    let second = transit(opened, AppEvent::NavNext).0;
+    let first = transit(opened, AppEvent::NavNext).0;
+    let second = transit(first, AppEvent::NavNext).0;
     let third = transit(second, AppEvent::NavNext).0;
     let rendered = flat(&third);
     assert!(
-        third.expanded_sense().map(|item| item.cursor) == Some(2)
+        third.review_focus() == ReviewFocus::Sense { row: 0, index: 2 }
             && third.candidates()[0].selected() == 0
             && rendered.contains("✓ [фин.] Сущ. «банк»")
             && rendered.contains("[авиац.] Гл. «наклонять(ся)»"),
@@ -429,13 +432,14 @@ fn space_toggles_the_focused_sense_and_enter_commits_the_selection() {
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
-    let second = transit(opened, AppEvent::NavNext).0;
+    let first = transit(opened, AppEvent::NavNext).0;
+    let second = transit(first, AppEvent::NavNext).0;
     let third = transit(second, AppEvent::NavNext).0;
     let toggled = transit(third, AppEvent::KeyChar(' ')).0;
     let confirmed = transit(toggled, AppEvent::KeyEnter).0;
     let rendered = flat(&confirmed);
     assert!(
-        confirmed.expanded_sense().is_none()
+        !confirmed.sense_list_open(0)
             && confirmed.candidates()[0].selected_senses() == [0, 2]
             && rendered.contains("2/3")
             && !rendered.contains("✓"),
@@ -450,24 +454,25 @@ fn footer_card_count_updates_before_sense_picker_closes() {
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
-    let second = transit(opened, AppEvent::NavNext).0;
+    let first = transit(opened, AppEvent::NavNext).0;
+    let second = transit(first, AppEvent::NavNext).0;
     let selected = transit(second, AppEvent::KeyChar(' ')).0;
     let selected_footer = flat(&selected);
     let deselected = transit(selected.clone(), AppEvent::KeyChar(' ')).0;
     let deselected_footer = flat(&deselected);
     assert_eq!(
         (
-            selected.expanded_sense().is_some(),
+            selected.sense_list_open(0),
             selected.candidates()[0].selected_count(),
             selected_footer.contains("2 cards"),
             selected_footer.contains("2/3"),
-            deselected.expanded_sense().is_some(),
+            deselected.sense_list_open(0),
             deselected.candidates()[0].selected_count(),
             deselected_footer.contains("1 card"),
             deselected_footer.contains("1/3"),
         ),
-        (true, 1, true, true, true, 1, true, true),
-        "the footer must preview the open sense selection without committing it"
+        (true, 2, true, true, true, 1, true, true),
+        "the footer must track each committed sense toggle while the list stays open"
     );
 }
 
@@ -478,41 +483,42 @@ fn ctrl_g_from_expanded_senses_commits_selection_and_starts_generation() {
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
-    let second = transit(opened, AppEvent::NavNext).0;
+    let first = transit(opened, AppEvent::NavNext).0;
+    let second = transit(first, AppEvent::NavNext).0;
     let third = transit(second, AppEvent::NavNext).0;
     let toggled = transit(third, AppEvent::KeyChar(' ')).0;
     let (next, side) = transit(toggled, AppEvent::Generate);
     assert_eq!(
         (
             next.screen(),
-            next.expanded_sense(),
             next.candidates()[0].selected_senses().to_vec(),
             side,
         ),
-        (Screen::YourCards, None, vec![0, 2], Side::StartGeneration,),
-        "Ctrl+G from an expanded sense picker must commit current choices and start generation"
+        (Screen::YourCards, vec![0, 2], Side::StartGeneration,),
+        "Ctrl+G from an open sense list must use the committed choices and start generation"
     );
 }
 
 #[test]
-fn escape_closes_the_sense_list_without_changing_selection() {
+fn escape_collapses_the_focused_sense_list_and_keeps_committed_selection() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
-    let second = transit(opened, AppEvent::NavNext).0;
+    let first = transit(opened, AppEvent::NavNext).0;
+    let second = transit(first, AppEvent::NavNext).0;
     let third = transit(second, AppEvent::NavNext).0;
     let toggled = transit(third, AppEvent::KeyChar(' ')).0;
-    let cancelled = transit(toggled, AppEvent::Cancel).0;
-    let rendered = flat(&cancelled);
+    let collapsed = transit(toggled, AppEvent::Cancel).0;
+    let rendered = flat(&collapsed);
     assert!(
-        cancelled.expanded_sense().is_none()
-            && cancelled.candidates()[0].selected_senses() == [0]
-            && rendered.contains("1/3")
+        !collapsed.sense_list_open(0)
+            && collapsed.candidates()[0].selected_senses() == [0, 2]
+            && rendered.contains("2/3")
             && rendered.contains("банк")
-            && !rendered.contains("наклонять"),
-        "Esc from an expanded sense list must discard uncommitted multi-select changes: {rendered}"
+            && rendered.contains("наклонять"),
+        "Esc from an open sense list must collapse it while every committed toggle survives: {rendered}"
     );
 }
 
@@ -550,7 +556,7 @@ fn enter_on_single_sense_word_opens_picker_with_add_more() {
     let rendered = flat(&next);
     assert!(
         next.modal().is_none()
-            && next.expanded_sense().is_some()
+            && next.sense_list_open(0)
             && side == Side::None
             && rendered.contains("+ add more"),
         "Enter on a single-sense row must open the picker with add more instead of a modal: {rendered}"
@@ -564,14 +570,15 @@ fn space_on_add_more_opens_missing_meanings_modal() {
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let opened = transit(app, AppEvent::KeyEnter).0;
-    let second = transit(opened, AppEvent::NavNext).0;
+    let first = transit(opened, AppEvent::NavNext).0;
+    let second = transit(first, AppEvent::NavNext).0;
     let third = transit(second, AppEvent::NavNext).0;
     let add_more = transit(third, AppEvent::NavNext).0;
     let (modal, side) = transit(add_more, AppEvent::KeyChar(' '));
     let rendered = flat(&modal);
     assert!(
         modal.modal() == Some(ModalKind::ChangeSomething)
-            && modal.expanded_sense().is_some()
+            && modal.sense_list_open(0)
             && side == Side::None
             && rendered.contains("what meanings did we miss?"),
         "Space on add more must open the missing-meanings modal without closing the picker: {rendered}"
@@ -593,7 +600,7 @@ fn appended_narrow_sense_is_selected_and_the_list_stays_open() {
         );
     let rendered = flat(&app);
     assert!(
-        app.expanded_sense().is_some()
+        app.sense_list_open(0)
             && rendered.contains("1/4")
             && rendered.contains("✓ [покер] Сущ. «банк»"),
         "add more must append a tagged sense, select it, and keep the list open: {rendered}"
@@ -622,11 +629,11 @@ fn empty_add_more_result_shows_minimal_notice_without_adding_senses() {
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
         .understood(vec![bank_candidate()])
-        .senses_expanded()
+        .sense_list_toggled()
         .senses_appended_to_selected(Vec::new(), None);
     let rendered = flat(&app);
     assert!(
-        app.expanded_sense().is_some()
+        app.sense_list_open(0)
             && rendered.contains("nothing to add")
             && rendered.contains("1/3")
             && !rendered.contains("1/4"),
@@ -795,7 +802,7 @@ fn drop_selected_removes_candidate_and_make_cards_advances_to_your_cards() {
         .collect();
     assert_eq!(
         (
-            after_pick.expanded_sense().is_some(),
+            after_pick.sense_list_open(after_pick.selected()),
             pick_side,
             after_make.screen(),
             make_side,
@@ -945,5 +952,114 @@ fn a_plan_exactly_at_the_card_ceiling_still_starts_generation() {
         transit(app, AppEvent::Generate).1,
         Side::StartGeneration,
         "a plan sitting exactly on the card ceiling was refused"
+    );
+}
+
+#[test]
+fn two_candidates_keep_their_sense_lists_open_at_once() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate(), bank_candidate()]);
+    let first_open = transit(app, AppEvent::KeyEnter).0;
+    let second_head = (0..5).fold(first_open, |walked, _| transit(walked, AppEvent::NavNext).0);
+    let both_open = transit(second_head, AppEvent::KeyEnter).0;
+    assert!(
+        both_open.sense_list_open(0) && both_open.sense_list_open(1),
+        "opening the second sense list collapsed the first instead of keeping both inline"
+    );
+}
+
+#[test]
+fn down_from_the_last_sense_row_moves_to_the_next_candidate_head_leaving_the_list_open() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate(), bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let walked = (0..5).fold(opened, |walked, _| transit(walked, AppEvent::NavNext).0);
+    assert!(
+        walked.review_focus() == ReviewFocus::Head(1) && walked.sense_list_open(0),
+        "walking out of the open list bottom closed it instead of passing through to the next word"
+    );
+}
+
+#[test]
+fn up_from_a_candidate_head_reenters_the_previous_open_list_at_its_add_more_row() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate(), bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let second_head = (0..5).fold(opened, |walked, _| transit(walked, AppEvent::NavNext).0);
+    let reentered = transit(second_head, AppEvent::NavPrev).0;
+    assert_eq!(
+        reentered.review_focus(),
+        ReviewFocus::Sense { row: 0, index: 3 },
+        "walking up past a head skipped the previous open list instead of entering its add-more row"
+    );
+}
+
+#[test]
+fn space_commits_a_sense_toggle_into_the_candidate_immediately() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let first = transit(opened, AppEvent::NavNext).0;
+    let second = transit(first, AppEvent::NavNext).0;
+    let toggled = transit(second, AppEvent::KeyChar(' ')).0;
+    assert_eq!(
+        toggled.candidates()[0].selected_senses(),
+        [0, 1],
+        "a Space toggle stayed tentative instead of committing into the candidate"
+    );
+}
+
+#[test]
+fn space_cannot_deselect_the_last_selected_sense() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let first = transit(opened, AppEvent::NavNext).0;
+    let toggled = transit(first, AppEvent::KeyChar(' ')).0;
+    assert_eq!(
+        toggled.candidates()[0].selected_senses(),
+        [0],
+        "Space removed the only selected sense and left the word with no meaning"
+    );
+}
+
+#[test]
+fn c_collapses_every_expanded_block_on_what_i_understood() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate(), bank_candidate()]);
+    let first_open = transit(app, AppEvent::KeyEnter).0;
+    let second_head = (0..5).fold(first_open, |walked, _| transit(walked, AppEvent::NavNext).0);
+    let both_open = transit(second_head, AppEvent::KeyEnter).0;
+    let collapsed = transit(both_open, AppEvent::KeyChar('c')).0;
+    assert!(
+        !collapsed.any_sense_list_open() && collapsed.review_focus() == ReviewFocus::Head(1),
+        "collapse all left a sense list open or moved the walk off its row"
+    );
+}
+
+#[test]
+fn c_is_swallowed_while_generation_guidance_is_open() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let guided = transit(opened, AppEvent::KeyChar('S')).0;
+    let pressed = transit(guided, AppEvent::KeyChar('c')).0;
+    assert!(
+        pressed.sense_list_open(0) && pressed.sentence_settings_editor().is_some(),
+        "a printable key leaked through the open guidance editor into collapse all"
     );
 }

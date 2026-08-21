@@ -484,3 +484,14 @@ fn an_oversized_word_list_replaces_the_continue_hint_with_the_limit() {
         "an oversized word list still advertised the key that would not work: {rendered}"
     );
 }
+
+#[test]
+fn c_keeps_typing_into_the_blob_instead_of_collapsing() {
+    let app = App::new(LanguagePair::new("en", "ru"));
+    let typed = transit(app, AppEvent::KeyChar('c')).0;
+    assert_eq!(
+        typed.blob(),
+        "c",
+        "a plain c on the words screen was stolen from text entry"
+    );
+}

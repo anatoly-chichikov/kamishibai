@@ -779,7 +779,7 @@ fn failure_footer_omits_the_duplicate_terminal_count() {
 }
 
 #[test]
-fn enter_opens_the_editor_while_enter_and_escape_close_it() {
+fn enter_opens_the_editor_while_enter_closes_and_escape_peels_layers() {
     let start = seeded(vec![
         labeled_draft("whilst", ready_artifacts()),
         labeled_draft("at the end", ready_artifacts()),
@@ -788,7 +788,8 @@ fn enter_opens_the_editor_while_enter_and_escape_close_it() {
     let opened = transit(after_down.clone(), AppEvent::KeyEnter).0;
     let moved_inside = transit(opened.clone(), AppEvent::CursorLeft).0;
     let (entered_inside, enter_side) = transit(opened.clone(), AppEvent::KeyEnter);
-    let closed = transit(opened.clone(), AppEvent::Cancel).0;
+    let parked = transit(opened.clone(), AppEvent::Cancel).0;
+    let collapsed = transit(parked.clone(), AppEvent::Cancel).0;
     assert_eq!(
         (
             (
@@ -798,22 +799,23 @@ fn enter_opens_the_editor_while_enter_and_escape_close_it() {
                 opened.card_expanded(),
                 moved_inside.card_expanded(),
                 entered_inside.card_expanded(),
-                closed.card_expanded(),
+                parked.card_expanded(),
+                collapsed.card_expanded(),
             ),
             (
                 start.sentence_editor().is_none(),
                 opened.sentence_editor().is_some(),
                 moved_inside.sentence_editor().is_some(),
                 entered_inside.sentence_editor().is_some(),
-                closed.sentence_editor().is_none(),
+                parked.sentence_editor().is_none(),
                 enter_side,
             ),
         ),
         (
-            (0, 1, false, true, true, false, false),
+            (0, 1, false, true, true, false, true, false),
             (true, true, true, false, true, Side::None),
         ),
-        "tune controls failed to open on Enter or collapse on Enter/Escape"
+        "tune controls failed to open on Enter, close on Enter, or peel editor then expansion on Escape"
     );
 }
 
@@ -1514,7 +1516,8 @@ fn closed_pending_card_shows_the_staged_tags_and_bulk_regeneration_footer() {
     let staged = seeded(vec![labeled_draft("whilst", ready_artifacts())])
         .sentence_editor_opened_for_register()
         .sentence_editor_axis_chosen(2);
-    let app = transit(staged, AppEvent::Cancel).0;
+    let parked = transit(staged, AppEvent::Cancel).0;
+    let app = transit(parked, AppEvent::Cancel).0;
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let formal = position_of(&buffer, "formal");
@@ -2110,7 +2113,7 @@ fn tab_walks_only_the_unfinished_cards_and_wraps() {
 }
 
 #[test]
-fn tab_is_inert_while_the_sentence_editor_is_open() {
+fn tab_parks_the_editor_and_jumps_to_the_next_unfinished_card() {
     let start = seeded(vec![
         labeled_draft("whilst", ready_artifacts()),
         labeled_draft("wreck", CardArtifacts::default()),
@@ -2118,9 +2121,13 @@ fn tab_is_inert_while_the_sentence_editor_is_open() {
     let opened = transit(start, AppEvent::KeyEnter).0;
     let jumped = transit(opened.clone(), AppEvent::NextUnfinished).0;
     assert_eq!(
-        (jumped.card_selected(), jumped.sentence_editor().is_some()),
-        (opened.card_selected(), true),
-        "the jump key moved the cursor out from under an open editor"
+        (
+            jumped.card_selected(),
+            jumped.sentence_editor().is_none(),
+            jumped.card_expanded_at(0),
+        ),
+        (1, true, true),
+        "the jump key failed to park the open editor and land on the unfinished card"
     );
 }
 
@@ -2172,5 +2179,133 @@ fn an_open_card_stops_the_viewport_following_the_engine() {
         opened.following_card(),
         None,
         "the viewport moved out from under a card the reader had opened"
+    );
+}
+
+#[test]
+fn down_from_the_note_row_parks_the_editor_on_the_next_card_head() {
+    let opened = seeded(vec![
+        labeled_draft("whilst", ready_artifacts()),
+        labeled_draft("at the end", ready_artifacts()),
+    ])
+    .sentence_editor_opened_for_note();
+    let walked = transit(opened, AppEvent::NavNext).0;
+    assert_eq!(
+        (
+            walked.card_selected(),
+            walked.sentence_editor().is_none(),
+            walked.card_expanded_at(0),
+        ),
+        (1, true, true),
+        "walking below the note row failed to park the editor on the next card head"
+    );
+}
+
+#[test]
+fn up_from_the_register_row_parks_the_editor_on_this_card_head() {
+    let opened = seeded(vec![
+        labeled_draft("whilst", ready_artifacts()),
+        labeled_draft("at the end", ready_artifacts()),
+    ])
+    .sentence_editor_opened_for_register();
+    let walked = transit(opened, AppEvent::NavPrev).0;
+    assert_eq!(
+        (
+            walked.card_selected(),
+            walked.sentence_editor().is_none(),
+            walked.card_expanded_at(0),
+        ),
+        (0, true, true),
+        "walking above the register row failed to park the editor on its own card head"
+    );
+}
+
+#[test]
+fn walking_into_a_parked_card_lands_on_its_head_not_inside() {
+    let parked = seeded(vec![
+        labeled_draft("whilst", ready_artifacts()),
+        labeled_draft("at the end", ready_artifacts()),
+    ])
+    .sentence_editor_opened_for_note();
+    let below = transit(parked, AppEvent::NavNext).0;
+    let back = transit(below, AppEvent::NavPrev).0;
+    assert_eq!(
+        (
+            back.card_selected(),
+            back.sentence_editor().is_none(),
+            back.card_expanded_at(0),
+        ),
+        (0, true, true),
+        "walking back onto a parked card entered its editor instead of landing on the head"
+    );
+}
+
+#[test]
+fn enter_on_a_parked_tunable_head_reopens_the_editor() {
+    let parked = transit(
+        seeded(vec![labeled_draft("whilst", ready_artifacts())])
+            .sentence_editor_opened_for_register(),
+        AppEvent::Cancel,
+    )
+    .0;
+    let reopened = transit(parked, AppEvent::KeyEnter).0;
+    assert!(
+        reopened.sentence_editor().is_some() && reopened.card_expanded(),
+        "Enter on a parked tunable head collapsed the card instead of reopening its editor"
+    );
+}
+
+#[test]
+fn a_parked_card_renders_its_meta_preview_with_the_compact_tag_summary() {
+    let parked = transit(
+        seeded(vec![labeled_draft("whilst", ready_artifacts())])
+            .sentence_editor_opened_for_register(),
+        AppEvent::Cancel,
+    )
+    .0;
+    let rendered = flat(&parked);
+    assert!(
+        parked.card_expanded()
+            && parked.sentence_editor().is_none()
+            && rendered.contains("casual")
+            && rendered.contains("b1")
+            && rendered.contains("statement")
+            && rendered.contains("the phrase")
+            && !rendered.contains("how should it sound?"),
+        "a parked card lost its tag summary or meta preview, or kept unfocused carousels: {rendered}"
+    );
+}
+
+#[test]
+fn c_collapses_every_parked_card_on_your_cards() {
+    let first_parked = transit(
+        seeded(vec![
+            labeled_draft("whilst", ready_artifacts()),
+            labeled_draft("at the end", ready_artifacts()),
+        ])
+        .sentence_editor_opened_for_note(),
+        AppEvent::NavNext,
+    )
+    .0;
+    let second_open = transit(first_parked, AppEvent::KeyEnter).0;
+    let second_parked = transit(second_open, AppEvent::Cancel).0;
+    let collapsed = transit(second_parked, AppEvent::KeyChar('c')).0;
+    assert!(
+        !collapsed.any_card_expanded(),
+        "collapse all left a parked card expanded"
+    );
+}
+
+#[test]
+fn c_is_swallowed_while_the_note_row_owns_typing() {
+    let opened =
+        seeded(vec![labeled_draft("whilst", ready_artifacts())]).sentence_editor_opened_for_note();
+    let typed = transit(opened, AppEvent::KeyChar('c')).0;
+    assert!(
+        typed
+            .sentence_editor()
+            .is_some_and(|editor| editor.note().value().contains('c'))
+            && typed.card_expanded(),
+        "a printable key leaked through the note row into collapse all"
     );
 }

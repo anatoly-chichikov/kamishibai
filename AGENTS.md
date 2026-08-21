@@ -95,7 +95,9 @@ An artifact gets one plain try plus three retries on top of it — `ARTIFACT_ATT
 
 `CardPhase` (`src/session/draft.rs`) is the one derived vocabulary for where a card stands: `Adjusted`, `Failed`, `Working`, `Ready`, checked in that order because a staged rewrite sits on top of intact artifacts and would otherwise report as ready. `App::card_census` folds the batch once and backs `cards_ready` / `cards_failed` / `cards_pending`, whose meanings are unchanged; `working` is the exclusive remainder and stays private to `src/tui/app.rs`, where it only answers whether any card is left unfinished (`[Tab] next`). The status line of a live batch names progress exactly once, as the ready count against the batch size, and then `<n> pending`, cost, and elapsed time — a second count of the cards still owed would only restate `ready` against the total while naming a concurrency the sequential engine never has. One word means one thing across title, hint, footer, and step glyph.
 
-The viewport rides the engine: a new or restarted batch arms following, `cards_running` then carries the selection onto the card being built, and `Shell::follow_running_card` scrolls to it once per loop pass beside the existing clamp. Any manual scroll, arrow, or jump breaks the ride; the per-frame clamp and the snap itself must never break it. An open card suppresses following rather than clearing it, so closing the card resumes the ride. `Tab` and `Shift+Tab` jump to the next and previous card that is not `Ready`, wrapping (unlike the saturating arrows) and inert while the sentence editor is open; both are layout-independent because they carry no character, and both must sit in the `follow_focus` set in `src/cli/terminal.rs` or the selection moves without the viewport. The footer advertises `[Tab] next` only while unfinished cards remain. Card numbers are absolute batch positions and never renumber.
+The viewport rides the engine: a new or restarted batch arms following, `cards_running` then carries the selection onto the card being built, and `Shell::follow_running_card` scrolls to it once per loop pass beside the existing clamp. Any manual scroll, arrow, or jump breaks the ride; the per-frame clamp and the snap itself must never break it. An expanded **focused** card suppresses following rather than clearing it, so collapsing (or walking off) that card resumes the ride; a ride that lands on a parked expanded card pauses the same way until that card is collapsed. `Tab` and `Shift+Tab` jump to the next and previous card that is not `Ready`, wrapping (unlike the saturating arrows); with the sentence editor open they park it (close it, leaving its card expanded — every edit is already staged) and jump. Both are layout-independent because they carry no character, and both must sit in the `follow_focus` set in `src/cli/terminal.rs` or the selection moves without the viewport. The footer advertises `[Tab] next` only while unfinished cards remain. Card numbers are absolute batch positions and never renumber.
+
+One keyboard grammar covers the whole TUI: `↑↓` move focus vertically — through lists, editor rows, and straight through expanded blocks; `←→` act only inside the focused horizontal control (carousels, text cursors, picker columns, the Welcome language strip) and never open or close anything; `Enter` opens the focused disclosure and confirm-closes it; `Space` marks or acts on the focused item; `Esc` closes one layer; `C` collapses every expanded block on the review and cards screens (a plain Latin letter, like `D`/`S`). Expanded blocks are pass-through views: leaving one does not close it. On `WhatIUnderstood` several sense lists may stay open at once (`ReviewFocus` + `OpenSenseLists` in `src/tui/app.rs`), `↓` from a head enters its open list, `↓` from the `+ add more` row moves to the next word, and a `Space` toggle commits into the candidate immediately — there is no tentative selection, so Esc collapses the focused list without discarding anything and `Ctrl+G` needs no commit step. On `YourCards` expansion is per-card (`ExpandedCards`): walking off a card with an open editor parks it — the editor closes, the card stays expanded showing its meta preview, attempts, and the compact tag summary — while `Enter` on a parked tunable head reopens the editor and `Enter` inside the editor still closes editor and card together.
 
 ## Batch limits
 
@@ -196,7 +198,8 @@ From the repo root:
    the open batch-settings pair `live/28-batch-sentence-settings.png` and
    `live/29-batch-sentence-settings-narrow.png`, plus the two language-pair shots
    `live/30-plausible-alternates.png` and `live/31-language-pair-modal.png`, plus
-   the Welcome language grid `live/32-welcome-language-grid.png`.
+   the Welcome language grid `live/32-welcome-language-grid.png`, plus the
+   parked multi-expanded cards shot `live/33-your-cards-parked.png`.
    All are 2x except S10 and the narrow
    batch-settings frame, which come from `states-narrow.tape` at 1200 px. Both synthetic tapes jump to each state
    by **absolute index** (`Type "<n>"` then `Space`) and keep a uniform 800 ms settle after
@@ -352,15 +355,16 @@ card. The tape may continue afterward to capture the separate open-card screensh
 ### Synthetic and edge-case shots
 
 The review, six environment/modal/failure/retry PNGs, twelve sentence-label scenarios,
-five Esc lifecycle PNGs, two batch-settings PNGs, two language-pair PNGs, and the
-Welcome language grid listed in step 3 are produced
+five Esc lifecycle PNGs, two batch-settings PNGs, two language-pair PNGs, the
+Welcome language grid, and the parked multi-expanded cards view listed in step 3 are produced
 reproducibly by `states.tape` and `states-narrow.tape`, which drive
 `examples/tui_states.rs` through the same EN→FR flow without Gemini. The sentence-label
 scenarios keep the established indices 0–10 intact: S1 is index 6, S2 replaces the removed
 per-card modal at index 7, S3–S9 are indices 11–17, S10–S12 are indices 18–20, the retry
 stress gallery is index 21, the Esc clear/back/stop/drain/partial states are indices 22–26,
 the open generation-guidance editor is index 27, the `also plausible` alternates row is
-index 28, the language-pair modal is index 29, and the Welcome language grid is index 30.
+index 28, the language-pair modal is index 29, the Welcome language grid is index 30,
+and the parked multi-expanded cards view is index 31.
 When the design changes, edit the demo data in
 `examples/tui_states.rs` and re-run both synthetic tapes. If you add or reorder states in
 the vector, update the absolute indices in both tapes and in the
@@ -396,9 +400,11 @@ the card head instead of adding volatile status beside the tags. At narrow
 widths whole tags may continue at the same tag-column on the `scene` and
 `picture` rows; if a wrapped tag or an audio tail would collide, the complete
 inline summary is hidden and the card head remains the mouse entry into tuning.
-Opening the card removes that compact summary and puts the already-open
-editor below all four artifact rows, separated from `picture` by exactly one
-blank row, before the expanded metadata and never to the artifacts' right. If
+Opening the editor removes that compact summary and puts it
+below all four artifact rows, separated from `picture` by exactly one
+blank row, before the expanded metadata and never to the artifacts' right. A
+parked expanded card (editor closed, block kept open by the walk) keeps the
+compact tag summary on its artifact rows above the meta preview. If
 the focused editor block fits the viewport, opening it anchors the selected card
 head at the top of the body; shorter viewports instead scroll only far enough to
 keep the focused row visible.
@@ -444,7 +450,11 @@ again`; the second starts a clean `YourWords` batch in the same process,
 preserving preferences and output location while rotating the persistent
 session identity and cost journal. Any other action or timeout disarms the
 confirmation. Everywhere else `Esc` closes exactly one layer from inside out:
-an error, a modal/editor/expanded sense list, then the current screen action.
+an error, a modal, then on `YourCards` the editor first and the card's
+expansion second (two presses peel an open editor down to a collapsed card),
+on `WhatIUnderstood` the focused open sense list, then the current screen
+action. Open blocks the focus is not on do not intercept `Esc` — `C` sweeps
+them all at once.
 On nonempty `YourWords`, a quiet `[Esc] clear` precedes the double-`Esc` clear;
 on collapsed `WhatIUnderstood`, one `Esc` returns to the preserved words without
 arming that clear, so it takes two fresh presses there; during generation, double

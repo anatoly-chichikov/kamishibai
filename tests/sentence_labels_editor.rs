@@ -610,7 +610,7 @@ fn both_cells_of_each_direction_chevron_move_its_own_carousel() {
 }
 
 #[test]
-fn chip_and_note_edits_stage_immediately_and_escape_collapses_without_rollback() {
+fn chip_and_note_edits_stage_immediately_and_escape_peels_layers_without_rollback() {
     let opened = transit(
         seeded(card()),
         AppEvent::SentenceLabelFocus(LabelEditorRow::Register),
@@ -628,7 +628,8 @@ fn chip_and_note_edits_stage_immediately_and_escape_collapses_without_rollback()
         AppEvent::KeyChar('x'),
     )
     .0;
-    let closed = transit(note.clone(), AppEvent::Cancel).0;
+    let parked = transit(note.clone(), AppEvent::Cancel).0;
+    let closed = transit(parked.clone(), AppEvent::Cancel).0;
     let changed_rewrite = changed.cards()[0]
         .rewrite()
         .expect("chip edit must stage immediately");
@@ -648,6 +649,8 @@ fn chip_and_note_edits_stage_immediately_and_escape_collapses_without_rollback()
             note.cards()[0]
                 .rewrite()
                 .map(kamishibai::session::CardRewrite::note),
+            parked.sentence_editor(),
+            parked.card_expanded(),
             closed.sentence_editor(),
             closed.card_expanded(),
             closed_rewrite.note(),
@@ -661,12 +664,14 @@ fn chip_and_note_edits_stage_immediately_and_escape_collapses_without_rollback()
             vec![SentenceAxis::Register],
             Some("x"),
             None,
+            true,
+            None,
             false,
             "x",
             true,
             true
         ),
-        "live staging lost an edit, invalidated artifacts early, or failed to collapse without rollback"
+        "live staging lost an edit, invalidated artifacts early, or Esc failed to peel the editor then the expansion without rollback"
     );
 }
 

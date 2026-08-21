@@ -160,7 +160,7 @@ fn cards_paragraph(app: &App, width: usize) -> Paragraph<'_> {
     let running_target = app.cards_running_target();
     for (index, draft) in app.cards().iter().enumerate() {
         let focused = index == app.card_selected();
-        let expanded = focused && app.card_expanded();
+        let expanded = app.card_expanded_at(index);
         let running_for_card =
             running_target.and_then(|(card, kind)| if card == index { Some(kind) } else { None });
         lines.extend(card_block(
@@ -210,18 +210,16 @@ fn card_block<'a>(
             (*kind, if pending { line.muted() } else { line })
         })
         .collect::<Vec<_>>();
-    if expanded {
+    if let Some(editor) = editor {
         lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
-        if let Some(editor) = editor {
-            lines.push(Line::from(""));
-            lines.extend(super::sentence_labels::editor_lines(
-                editor,
-                draft.meta().and_then(CardMeta::sentence_labels),
-                width,
-                super::common::CARD_DETAIL_COLUMN,
-                super::common::CARD_DETAIL_COLUMN,
-            ));
-        }
+        lines.push(Line::from(""));
+        lines.extend(super::sentence_labels::editor_lines(
+            editor,
+            draft.meta().and_then(CardMeta::sentence_labels),
+            width,
+            super::common::CARD_DETAIL_COLUMN,
+            super::common::CARD_DETAIL_COLUMN,
+        ));
     } else if let Some(labels) = collapsed_labels(draft, running, width) {
         lines.extend(collapsed_step_lines(step_lines, labels));
     } else {
@@ -1339,7 +1337,7 @@ pub(crate) fn card_range_at(app: &App, width: usize, row: usize) -> Option<(usiz
     for (index, draft) in app.cards().iter().enumerate() {
         let running =
             running_target.and_then(|(card, artifact)| (card == index).then_some(artifact));
-        let expanded = index == app.card_selected() && app.card_expanded();
+        let expanded = app.card_expanded_at(index);
         let editor = if index == app.card_selected() {
             app.sentence_editor()
         } else {
@@ -1368,7 +1366,7 @@ pub(crate) fn focused_card_range(app: &App, width: usize) -> Option<(u16, u16)> 
     for (idx, draft) in app.cards().iter().enumerate() {
         let running_for_card =
             running_target.and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
-        let expanded = idx == app.card_selected() && app.card_expanded();
+        let expanded = app.card_expanded_at(idx);
         let editor = if idx == app.card_selected() {
             app.sentence_editor()
         } else {
@@ -1421,7 +1419,7 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
     for (idx, draft) in app.cards().iter().enumerate() {
         let running_for_card =
             running_target.and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
-        let expanded = idx == app.card_selected() && app.card_expanded();
+        let expanded = app.card_expanded_at(idx);
         let editor = if idx == app.card_selected() {
             app.sentence_editor()
         } else {
@@ -1604,7 +1602,8 @@ pub(crate) fn sentence_editor_cursor_for(app: &App, width: usize) -> Option<(usi
                     .saturating_add(row),
             ));
         }
-        let (rows, trailing) = card_layout(draft, running, false, None, width);
+        let (rows, trailing) =
+            card_layout(draft, running, app.card_expanded_at(index), None, width);
         offset = offset.saturating_add(rows).saturating_add(trailing);
     }
     None
@@ -1730,6 +1729,9 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             hints.push(super::common::FooterHint::secondary("Tab", "next"));
         }
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        if app.any_card_expanded() {
+            hints.push(super::common::FooterHint::ghost("C", "collapse"));
+        }
         if app.can_start_new_batch() {
             hints.push(super::common::new_batch_hint(app.new_batch_pending()));
         }

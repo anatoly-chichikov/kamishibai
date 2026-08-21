@@ -16,7 +16,7 @@ use ratatui::widgets::Paragraph;
 use super::ScreenView;
 use crate::session::RawInputBatch;
 use crate::session::{Sense, WordCandidate};
-use crate::tui::app::App;
+use crate::tui::app::{App, ReviewFocus};
 use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
 
@@ -100,19 +100,25 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
     let selected = if app.sentence_settings_editor().is_some() {
         usize::MAX
     } else {
-        app.selected()
+        match app.review_focus() {
+            ReviewFocus::Head(row) => row,
+            ReviewFocus::Sense { .. } => usize::MAX,
+        }
     };
     for (index, candidate) in app.candidates().iter().enumerate() {
-        let expanded = app.expanded_sense();
-        if expanded.as_ref().map(|item| item.row) == Some(index) {
-            let expanded = expanded
-                .as_ref()
-                .expect("invariant: row is the expanded one");
+        if app.sense_list_open(index) && candidate.ok() {
+            let cursor = match app.review_focus() {
+                ReviewFocus::Sense {
+                    row,
+                    index: position,
+                } if row == index => position,
+                _ => usize::MAX,
+            };
             lines.extend(candidate_line(
                 index,
                 candidate,
                 selected,
-                Some(expanded.selected.len()),
+                Some(candidate.selected_count()),
                 Gloss::Sentence(sense_text(candidate.sense())),
                 term_width,
                 width,
@@ -121,14 +127,14 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 lines.extend(sense_line(
                     sense_index,
                     sense,
-                    expanded.cursor,
-                    &expanded.selected,
+                    cursor,
+                    candidate.selected_senses(),
                     term_width,
                     width,
                 ));
             }
             lines.push(add_more_line(
-                expanded.cursor == candidate.senses().len(),
+                cursor == candidate.senses().len(),
                 term_width,
                 width,
             ));
@@ -156,9 +162,8 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
 /// zero when neither set is populated. Used by the scroll clamp in `tui::app`.
 pub(crate) fn content_height(app: &App, width: usize) -> u16 {
     if !app.candidates().is_empty() {
-        let expanded_row = app.expanded_sense().map(|item| item.row);
         let term_width = candidate_label_width(app.candidates(), 12);
-        let total = candidate_content_height(app, width, expanded_row, term_width)
+        let total = candidate_content_height(app, width, term_width)
             .saturating_add(review_prefix_height(app, width));
         return u16::try_from(total).unwrap_or(u16::MAX);
     }
@@ -257,17 +262,17 @@ fn review_prefix_height(app: &App, width: usize) -> usize {
         .saturating_add(usize::from(!app.alternates().is_empty()))
 }
 
-fn candidate_content_height(
-    app: &App,
-    width: usize,
-    expanded_row: Option<usize>,
-    term_width: usize,
-) -> usize {
+fn candidate_content_height(app: &App, width: usize, term_width: usize) -> usize {
     app.candidates()
         .iter()
         .enumerate()
         .map(|(index, candidate)| {
-            candidate_rows(candidate, expanded_row == Some(index), term_width, width)
+            candidate_rows(
+                candidate,
+                app.sense_list_open(index) && candidate.ok(),
+                term_width,
+                width,
+            )
         })
         .sum()
 }
@@ -284,8 +289,7 @@ pub(crate) fn sentence_settings_control_at(
     }
     if row == 0 {
         let summary_width = settings_summary_line(app).width();
-        return (app.expanded_sense().is_none() && column < summary_width)
-            .then_some(SentenceSettingsControl::Open);
+        return (column < summary_width).then_some(SentenceSettingsControl::Open);
     }
     let focused = app.sentence_settings_editor()?;
     let editor_row = row.checked_sub(1)?;
@@ -341,8 +345,8 @@ fn candidate_line<'a>(
     width: u16,
 ) -> Vec<Line<'a>> {
     let expanded = expanded_count.is_some();
-    let is_selected = index == selected && !expanded;
-    let is_expanded_parent = index == selected && expanded;
+    let is_selected = index == selected;
+    let is_expanded_parent = expanded && !is_selected;
     let row_style = if is_selected {
         palette::highlight()
     } else {
@@ -552,7 +556,6 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
     if app.candidates().is_empty() {
         return None;
     }
-    let expanded_row = app.expanded_sense().map(|item| item.row);
     let term_width = candidate_label_width(app.candidates(), 12);
     if let Some(focused) = app.sentence_settings_editor() {
         let (start, height) = super::sentence_labels::batch_editor_focus_range(
@@ -565,21 +568,16 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
             u16::try_from(height).unwrap_or(u16::MAX),
         ));
     }
-    let selected = app.selected().min(app.candidates().len() - 1);
+    let focus = app.review_focus();
+    let target = focus.row().min(app.candidates().len() - 1);
     let mut offset = review_prefix_height(app, width);
     for (index, candidate) in app.candidates().iter().enumerate() {
-        if index != selected {
-            offset = offset.saturating_add(candidate_rows(
-                candidate,
-                expanded_row == Some(index),
-                term_width,
-                width,
-            ));
+        let open = app.sense_list_open(index) && candidate.ok();
+        if index != target {
+            offset = offset.saturating_add(candidate_rows(candidate, open, term_width, width));
             continue;
         }
-        if let Some(expanded) = app.expanded_sense()
-            && expanded.row == selected
-        {
+        if open && let ReviewFocus::Sense { index: cursor, .. } = focus {
             offset = offset.saturating_add(candidate_line_rows(
                 candidate,
                 GlossKind::Sentence,
@@ -587,20 +585,30 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
                 term_width,
                 width,
             ));
-            for sense in candidate.senses().iter().take(expanded.cursor) {
+            for sense in candidate.senses().iter().take(cursor) {
                 offset = offset.saturating_add(sense_rows(sense, term_width, width));
             }
-            let height = if expanded.cursor == candidate.senses().len() {
+            let height = if cursor >= candidate.senses().len() {
                 1
             } else {
-                sense_rows(&candidate.senses()[expanded.cursor], term_width, width)
+                sense_rows(&candidate.senses()[cursor], term_width, width)
             };
             return Some((
                 u16::try_from(offset).unwrap_or(u16::MAX),
                 u16::try_from(height).unwrap_or(u16::MAX),
             ));
         }
-        let height = candidate_rows(candidate, false, term_width, width);
+        let height = if open {
+            candidate_line_rows(
+                candidate,
+                GlossKind::Sentence,
+                sense_text(candidate.sense()).as_str(),
+                term_width,
+                width,
+            )
+        } else {
+            candidate_rows(candidate, false, term_width, width)
+        };
         return Some((
             u16::try_from(offset).unwrap_or(u16::MAX),
             u16::try_from(height).unwrap_or(u16::MAX),
@@ -768,7 +776,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         hints.push(super::common::FooterHint::secondary("← →", "pick"));
         hints.push(super::common::FooterHint::ghost("↑ ↓", "row"));
         hints.push(super::common::FooterHint::ghost("Enter/Esc", "close"));
-    } else if app.expanded_sense().is_some() {
+    } else if matches!(app.review_focus(), ReviewFocus::Sense { .. }) {
         let controls = if app.expanded_add_more_focused() {
             DisclosureControls::new(true).with_action("add")
         } else {
@@ -782,6 +790,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         }
         hints.push(controls.secondary_toggle());
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        hints.push(super::common::FooterHint::ghost("C", "collapse"));
     } else {
         if count > 0 {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
@@ -793,6 +802,9 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         hints.push(super::common::back_hint());
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        if app.any_sense_list_open() {
+            hints.push(super::common::FooterHint::ghost("C", "collapse"));
+        }
         hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
     }
     if app.sentence_settings_editor().is_none() {
@@ -802,19 +814,9 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
 }
 
 fn review_card_count(app: &App) -> usize {
-    let expanded = app.expanded_sense();
     app.candidates()
         .iter()
-        .enumerate()
-        .filter(|(_, candidate)| candidate.ok())
-        .map(|(row, candidate)| {
-            expanded
-                .as_ref()
-                .filter(|selection| selection.row == row)
-                .map_or_else(
-                    || candidate.selected_count(),
-                    |selection| selection.selected.len(),
-                )
-        })
+        .filter(|candidate| candidate.ok())
+        .map(WordCandidate::selected_count)
         .sum()
 }

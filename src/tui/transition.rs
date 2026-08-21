@@ -1,7 +1,7 @@
 use crate::languages::catalog;
 use crate::session::{MAX_INTAKE_WORDS, MAX_PLAN_CARDS, RawInputBatch};
 
-use super::app::App;
+use super::app::{App, ReviewFocus};
 use super::disclosure::{DisclosureControls, DisclosureIntent};
 use super::event::AppEvent;
 use super::picker::{LanguageChoice, PickerCursor, PickerSection, learning_target};
@@ -92,7 +92,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (app.sentence_settings_closed(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsOpen)
-            if app.expanded_sense().is_none() && !app.candidates().is_empty() =>
+            if !app.candidates().is_empty() =>
         {
             (app.sentence_settings_opened(), Side::None)
         }
@@ -160,12 +160,18 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (app, Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('s' | 'S'))
-            if app.expanded_sense().is_none() && !app.candidates().is_empty() =>
+            if matches!(app.review_focus(), ReviewFocus::Head(_))
+                && !app.candidates().is_empty() =>
         {
             (app.sentence_settings_opened(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::Cancel) if app.expanded_sense().is_some() => {
-            (app.senses_cancelled(), Side::None)
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('c' | 'C'))
+            if app.any_sense_list_open() =>
+        {
+            (app.sense_lists_collapsed(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::Cancel) if app.focused_sense_list_open() => {
+            (app.sense_list_closed(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::Cancel) => {
             let choice = LanguageChoice::new(app.pair().known().to_string(), learning_target(None));
@@ -175,60 +181,34 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 Side::None,
             )
         }
-        (Screen::WhatIUnderstood, None, event)
-            if matches!(sense_controls(&app).intent(&event), DisclosureIntent::Close) =>
+        (Screen::WhatIUnderstood, None, AppEvent::KeyEnter)
+            if matches!(app.review_focus(), ReviewFocus::Sense { .. }) =>
         {
-            (app.senses_confirmed(), Side::None)
+            (app.sense_list_closed(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, event)
-            if sense_controls(&app).intent(&event) == DisclosureIntent::Action =>
-        {
-            if app.expanded_add_more_focused() {
-                (app.with_modal(ModalKind::ChangeSomething), Side::None)
-            } else {
-                (app.sense_toggled(), Side::None)
-            }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) => {
+            (app.sense_list_toggled(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, event)
-            if sense_controls(&app).intent(&event) == DisclosureIntent::Open =>
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar(' '))
+            if app.expanded_add_more_focused() =>
         {
-            if app.selected_can_expand_senses() {
-                (app.senses_expanded(), Side::None)
-            } else {
-                (app, Side::None)
-            }
+            (app.with_modal(ModalKind::ChangeSomething), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar(' '))
+            if matches!(app.review_focus(), ReviewFocus::Sense { .. }) =>
+        {
+            (app.sense_toggled(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::CursorLeft) => (app, Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::CursorRight) => (app, Side::None),
-        (Screen::WhatIUnderstood, None, AppEvent::NavPrev) if app.expanded_sense().is_some() => {
-            (app.sense_previous(), Side::None)
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::NavNext) if app.expanded_sense().is_some() => {
-            (app.sense_next(), Side::None)
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::NavPrev)
-            if app.expanded_sense().is_none()
-                && app.sentence_settings_editor().is_none()
-                && app.selected() == 0
-                && !app.candidates().is_empty() =>
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev | AppEvent::KeyChar('k' | 'K'))
+            if app.review_focus() == ReviewFocus::Head(0) && !app.candidates().is_empty() =>
         {
             (
                 app.sentence_settings_opened()
                     .sentence_settings_focused(BatchSettingsRow::Types),
                 Side::None,
             )
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K'))
-            if app.expanded_sense().is_some() =>
-        {
-            (app.sense_previous(), Side::None)
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('j'))
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('J'))
-            if app.expanded_sense().is_some() =>
-        {
-            (app.sense_next(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('d'))
         | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('D')) => {
@@ -244,24 +224,12 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 (next, Side::None)
             }
         }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K')) => {
-            if app.selected() == 0 && !app.candidates().is_empty() {
-                (
-                    app.sentence_settings_opened()
-                        .sentence_settings_focused(BatchSettingsRow::Types),
-                    Side::None,
-                )
-            } else {
-                (app.selected_previous(), Side::None)
-            }
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev | AppEvent::KeyChar('k' | 'K')) => {
+            (app.review_focus_previous(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('j'))
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('J')) => {
-            (app.selected_next(), Side::None)
+        (Screen::WhatIUnderstood, None, AppEvent::NavNext | AppEvent::KeyChar('j' | 'J')) => {
+            (app.review_focus_next(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::NavPrev) => (app.selected_previous(), Side::None),
-        (Screen::WhatIUnderstood, None, AppEvent::NavNext) => (app.selected_next(), Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::OpenPreferredLanguagePicker) => (
             open_language_picker(app, PickerSection::Learning),
             Side::None,
@@ -315,7 +283,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             adopt_languages(app, choice)
         }
         (Screen::YourCards, None, AppEvent::Cancel) if app.sentence_editor().is_some() => {
-            (app.sentence_editor_closed(), Side::None)
+            (app.sentence_editor_parked(), Side::None)
         }
         (Screen::YourCards, None, AppEvent::Cancel) if app.card_expanded() => {
             (app.card_toggle_expanded(), Side::None)
@@ -360,12 +328,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 Side::None,
             )
         }
-        (Screen::YourCards, None, AppEvent::NavPrev) if app.sentence_editor().is_some() => {
-            (app.sentence_editor_row_previous(), Side::None)
-        }
-        (Screen::YourCards, None, AppEvent::NavNext) if app.sentence_editor().is_some() => {
-            (app.sentence_editor_row_next(), Side::None)
-        }
         (Screen::YourCards, None, AppEvent::CursorLeft) if app.sentence_editor().is_some() => {
             let next = if sentence_note_focused(&app) {
                 app.sentence_editor_cursor_left()
@@ -397,16 +359,20 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::KeyChar(' ')) if app.card_tunable() => {
             (app.sentence_editor_opened_for_register(), Side::None)
         }
-        (Screen::YourCards, None, AppEvent::NextUnfinished) if app.sentence_editor().is_none() => {
-            (app.card_jumped(true), Side::None)
+        (Screen::YourCards, None, AppEvent::KeyChar('c' | 'C')) if app.any_card_expanded() => {
+            (app.cards_collapsed(), Side::None)
         }
-        (Screen::YourCards, None, AppEvent::PreviousUnfinished)
-            if app.sentence_editor().is_none() =>
-        {
+        (Screen::YourCards, None, AppEvent::NextUnfinished) => (app.card_jumped(true), Side::None),
+        (Screen::YourCards, None, AppEvent::PreviousUnfinished) => {
             (app.card_jumped(false), Side::None)
         }
-        (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_selected_previous(), Side::None),
-        (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
+        (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_focus_previous(), Side::None),
+        (Screen::YourCards, None, AppEvent::NavNext) => (app.card_focus_next(), Side::None),
+        (Screen::YourCards, None, AppEvent::KeyEnter)
+            if app.card_expanded() && app.sentence_editor().is_none() && app.card_tunable() =>
+        {
+            (app.sentence_editor_opened_for_register(), Side::None)
+        }
         (Screen::YourCards, None, event)
             if matches!(
                 DisclosureControls::new(app.card_expanded()).intent(&event),
@@ -429,22 +395,12 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
     }
 }
 
-fn sense_controls(app: &App) -> DisclosureControls {
-    let controls = DisclosureControls::new(app.expanded_sense().is_some());
-    if app.expanded_sense().is_some() {
-        controls.with_action("select")
-    } else {
-        controls
-    }
-}
-
 fn sentence_note_focused(app: &App) -> bool {
     app.sentence_editor()
         .is_some_and(|editor| editor.row() == LabelEditorRow::Note)
 }
 
 fn start_generation(app: App) -> (App, Side) {
-    let app = app.senses_confirmed();
     if !app.candidates().iter().any(|candidate| candidate.ok()) {
         return (app, Side::None);
     }

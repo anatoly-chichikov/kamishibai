@@ -21,7 +21,7 @@ mod sentence_editor;
 mod text_field;
 mod transition;
 
-pub use app::{App, BusyKind, BusyView, WelcomeView};
+pub use app::{App, BusyKind, BusyView, ReviewFocus, WelcomeView};
 pub use event::{AppEvent, EditingOwner};
 pub use input::to_app;
 pub use links::{

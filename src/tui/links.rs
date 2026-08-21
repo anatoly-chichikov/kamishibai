@@ -185,7 +185,6 @@ pub fn sentence_label_event_at(
         None
     };
     let head_start = card_start;
-    let expanded = selected && app.card_expanded();
     let head_height = head_rows_for(draft, width);
     let head_end = head_start.saturating_add(head_height);
     let running = app
@@ -200,7 +199,7 @@ pub fn sentence_label_event_at(
     let attributed = labels.is_some()
         || staged.is_some_and(crate::session::SentenceLabelSelection::attributed)
         || editor.is_some_and(|editor| editor.selection().attributed());
-    if !expanded
+    if editor.is_none()
         && (!attributed
             || !steps.contains(&crate::session::Artifact::Sound)
             || !sentence_tags_visible(draft, running, width))
@@ -210,7 +209,7 @@ pub fn sentence_label_event_at(
     {
         return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
     }
-    if !expanded {
+    if editor.is_none() {
         let tag_row = content_row.checked_sub(meta_row)?;
         if sentence_tag_hit_at(draft, running, width, tag_row, column) {
             return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
@@ -297,7 +296,7 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
         let running = app
             .cards_running_target()
             .and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
-        let expanded = idx == app.card_selected() && app.card_expanded();
+        let expanded = app.card_expanded_at(idx);
         let editor = if idx == app.card_selected() {
             app.sentence_editor()
         } else {
