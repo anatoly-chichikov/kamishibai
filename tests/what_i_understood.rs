@@ -1065,18 +1065,19 @@ fn c_collapses_open_lists_and_closes_guidance_together() {
 }
 
 #[test]
-fn c_opens_every_reviewable_sense_list_when_none_is_open() {
+fn c_opens_only_multi_sense_lists_when_none_is_open() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
         .understood(vec![
             bank_candidate(),
+            single_candidate(),
             WordCandidate::new("сообщение", "Слово на русском, не на target-языке.", false),
         ]);
     let expanded = transit(app, AppEvent::KeyChar('c')).0;
     assert!(
-        expanded.sense_list_open(0) && !expanded.sense_list_open(1),
-        "the collapse toggle failed to open every reviewable list while skipping off-language rows"
+        expanded.sense_list_open(0) && !expanded.sense_list_open(1) && !expanded.sense_list_open(2),
+        "the collapse toggle opened single-sense or off-language rows instead of only multi-meaning lists"
     );
 }
 

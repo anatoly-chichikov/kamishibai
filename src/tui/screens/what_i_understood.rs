@@ -804,7 +804,11 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         if app.any_sense_list_open() {
             hints.push(super::common::FooterHint::secondary("C", "collapse"));
-        } else if app.candidates().iter().any(WordCandidate::ok) {
+        } else if app
+            .candidates()
+            .iter()
+            .any(|candidate| candidate.ok() && candidate.has_multiple_senses())
+        {
             hints.push(super::common::FooterHint::ghost("C", "expand"));
         }
         hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));

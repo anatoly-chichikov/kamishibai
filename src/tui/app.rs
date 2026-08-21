@@ -1142,7 +1142,8 @@ impl App {
         self
     }
 
-    /// Return the app with every reviewable row's sense list opened.
+    /// Return the app with every multi-meaning row's sense list opened;
+    /// single-sense and off-language rows stay closed.
     #[must_use]
     pub fn sense_lists_expanded_all(mut self) -> Self {
         self.review.open = OpenSenseLists(
@@ -1150,7 +1151,7 @@ impl App {
                 .candidates
                 .iter()
                 .enumerate()
-                .filter(|(_, candidate)| candidate.ok())
+                .filter(|(_, candidate)| candidate.ok() && candidate.has_multiple_senses())
                 .map(|(row, _)| row)
                 .collect(),
         );

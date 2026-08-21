@@ -366,7 +366,7 @@ Contract(
                             kind: KeyHint(Footer),
                             text: Literal("[C] expand"),
                             source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 795),
-                            purpose: "toggle direction two: open every reviewable sense list when none is open; off-language rows stay closed",
+                            purpose: "toggle direction two: open every multi-meaning sense list when none is open; single-sense and off-language rows stay closed",
                             importance: 3,
                             usefulness: 4,
                             health: Working,
