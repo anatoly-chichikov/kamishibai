@@ -653,7 +653,7 @@ mod tests {
     fn crowded_hints() -> Vec<FooterHint> {
         vec![
             FooterHint::primary("Ctrl+G", "generate"),
-            FooterHint::secondary("Enter/→", "toggle"),
+            FooterHint::secondary("Enter", "toggle"),
             FooterHint::secondary("D", "drop"),
             FooterHint::ghost("↑↓", "nav"),
             quit_hint(false),
@@ -714,7 +714,7 @@ mod tests {
         let hints = vec![
             new_batch_hint(true),
             FooterHint::primary("Ctrl+G", "regenerate"),
-            FooterHint::secondary("Enter/→", "tune"),
+            FooterHint::secondary("Enter", "tune"),
             FooterHint::ghost("↑↓", "nav"),
             quit_hint(false),
         ];

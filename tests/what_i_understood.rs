@@ -7,7 +7,8 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::session::LearningGuess;
 use kamishibai::session::{
-    LanguagePair, LearningTarget, RawInputBatch, Sense, Understanding, Understood, WordCandidate,
+    LanguagePair, LearningTarget, MAX_PLAN_CARDS, RawInputBatch, Sense, Understanding, Understood,
+    WordCandidate,
 };
 use kamishibai::tui::{App, AppEvent, ModalKind, Screen, Side, draw, to_app, transit};
 use ratatui::Terminal;
@@ -251,7 +252,7 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
             && rendered.contains("expel")
             && rendered.contains("at the end")
             && rendered.contains("[↑↓]")
-            && rendered.contains("[Enter/→] toggle")
+            && rendered.contains("[Enter] toggle")
             && rendered.contains("[Ctrl+G]")
             && rendered.contains("generate")
             && rendered.contains("[Esc] back")
@@ -367,21 +368,34 @@ fn expanded_sense_focus_moves_inside_without_dimming_the_parent() {
 }
 
 #[test]
-fn right_arrow_opens_and_left_arrow_closes_the_sense_list() {
+fn right_arrow_on_a_collapsed_multi_sense_row_keeps_the_list_closed() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
-    let opened = transit(app, to_app(press(KeyCode::Right)).expect("map")).0;
+    let pressed = transit(app, to_app(press(KeyCode::Right)).expect("map")).0;
+    assert!(
+        pressed.expanded_sense().is_none(),
+        "a side arrow opened the sense list even though only Enter may open it"
+    );
+}
+
+#[test]
+fn left_arrow_inside_an_open_sense_list_keeps_it_open_with_selection_intact() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
     let second = transit(opened, AppEvent::NavNext).0;
     let third = transit(second, AppEvent::NavNext).0;
     let toggled = transit(third, AppEvent::KeyChar(' ')).0;
-    let closed = transit(toggled, to_app(press(KeyCode::Left)).expect("map")).0;
+    let pressed = transit(toggled, to_app(press(KeyCode::Left)).expect("map")).0;
     assert!(
-        closed.expanded_sense().is_none()
-            && closed.candidates()[0].selected_senses() == [0, 2]
-            && flat(&closed).contains("2/3"),
-        "Right arrow must open the picker and left arrow must close it with current selections applied"
+        pressed
+            .expanded_sense()
+            .is_some_and(|item| item.selected == [0, 2]),
+        "a side arrow closed the sense list even though only Enter and Esc may close it"
     );
 }
 
@@ -898,5 +912,38 @@ fn clicking_a_plausible_language_rereads_the_batch_as_that_language() {
             )
         )),
         "clicking a plausible language must reread the batch as it, keeping the known half"
+    );
+}
+
+#[test]
+fn an_oversized_plan_never_starts_generation() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(many_candidates(MAX_PLAN_CARDS + 1));
+    let (after, side) = transit(app, AppEvent::Generate);
+    assert_eq!(
+        (
+            side,
+            after.screen(),
+            after
+                .review_notice()
+                .is_some_and(|notice| notice.contains("card limit"))
+        ),
+        (Side::None, Screen::WhatIUnderstood, true),
+        "an oversized plan started generating instead of asking for fewer senses"
+    );
+}
+
+#[test]
+fn a_plan_exactly_at_the_card_ceiling_still_starts_generation() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(many_candidates(MAX_PLAN_CARDS));
+    assert_eq!(
+        transit(app, AppEvent::Generate).1,
+        Side::StartGeneration,
+        "a plan sitting exactly on the card ceiling was refused"
     );
 }

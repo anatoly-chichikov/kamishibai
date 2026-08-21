@@ -10,7 +10,7 @@ use std::time::Duration;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::languages::catalog;
-use kamishibai::session::{LanguagePair, LearningDetection, ScriptDetection};
+use kamishibai::session::{LanguagePair, LearningDetection, MAX_INTAKE_WORDS, ScriptDetection};
 use kamishibai::tui::{
     App, AppEvent, BusyKind, Screen, Side, draw, scroll_body_width, scroll_viewport, to_app,
     transit,
@@ -444,5 +444,43 @@ fn preference_store_feeds_my_language_into_the_initial_pair() {
         app.pair().known(),
         "es",
         "persisted my language must feed into the initial pair at app start"
+    );
+}
+
+#[test]
+fn an_oversized_word_list_never_starts_the_understanding_pass() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob(long_blob(MAX_INTAKE_WORDS + 1))
+        .confirmed_learning("en");
+    let (after, side) = transit(app, AppEvent::Generate);
+    assert_eq!(
+        (side, after.screen(), after.error().is_none()),
+        (Side::None, Screen::YourWords, true),
+        "an oversized word list was sent to the provider instead of being refused quietly"
+    );
+}
+
+#[test]
+fn a_word_list_exactly_at_the_ceiling_still_starts_the_pass() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob(long_blob(MAX_INTAKE_WORDS))
+        .confirmed_learning("en");
+    assert_eq!(
+        transit(app, AppEvent::Generate).1,
+        Side::RunUnderstanding,
+        "a batch sitting exactly on the ceiling was refused"
+    );
+}
+
+#[test]
+fn an_oversized_word_list_replaces_the_continue_hint_with_the_limit() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob(long_blob(MAX_INTAKE_WORDS + 5))
+        .confirmed_learning("en");
+    let rendered = flatten(&app);
+    assert!(
+        rendered.contains(&format!("over the {MAX_INTAKE_WORDS}-word limit"))
+            && !rendered.contains("[Ctrl+G] continue"),
+        "an oversized word list still advertised the key that would not work: {rendered}"
     );
 }

@@ -174,6 +174,7 @@ where
         let rect = terminal_rect(terminal)?;
         let (viewport, body_width) = scroll_frame(shell.app(), rect);
         dirty |= shell.reclamp_scroll(viewport, body_width);
+        dirty |= shell.follow_running_card(viewport, body_width);
         if dirty {
             terminal.draw(|frame| draw(frame, shell.app()))?;
             write_pointer_at(terminal, shell.app(), rect, mouse_position);
@@ -251,6 +252,8 @@ where
                             | AppEvent::KeyBackspace
                             | AppEvent::NavPrev
                             | AppEvent::NavNext
+                            | AppEvent::NextUnfinished
+                            | AppEvent::PreviousUnfinished
                             | AppEvent::CursorLeft
                             | AppEvent::CursorRight
                     );

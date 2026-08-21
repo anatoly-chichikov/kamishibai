@@ -11,7 +11,8 @@ use crate::cli::console::{HumanReporter, JsonReporter, Reporter, drafts_for};
 use crate::cli::error::{json_line, operational_hint, usage, usage_hint};
 use crate::runtime::locations::{SystemContext, cache_root};
 use crate::session::{
-    CardDraft, CardMetaCache, CardRewrite, LanguagePair, SentenceLabelSelection, WordCandidate,
+    CardDraft, CardMetaCache, CardRewrite, LanguagePair, MAX_PLAN_CARDS, SentenceLabelSelection,
+    WordCandidate,
 };
 
 use super::args::{GenerateArgs, RegenerateArgs};
@@ -49,7 +50,7 @@ pub(super) fn run_session(
         refuse_staged_rewrites(record)?;
         refuse_if_live(store, record)?;
         resume(record, resume_cancelled);
-        ensure_plan(record);
+        ensure_plan(record)?;
         if record.drafts.is_empty() {
             return Err(usage(
                 "nothing to generate — select at least one card first",
@@ -129,9 +130,12 @@ fn run_wait(store: &SessionStore, id: &str, render: Render, intro: Option<String
 }
 
 /// Derive the committed plan from the curated candidates when none is committed.
-fn ensure_plan(record: &mut SessionRecord) {
+///
+/// Refuses a fresh plan larger than the batch ceiling. A plan already committed
+/// is left alone, so a batch created before the ceiling existed still generates.
+fn ensure_plan(record: &mut SessionRecord) -> Result<()> {
     if !record.drafts.is_empty() {
-        return;
+        return Ok(());
     }
     let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let candidates: Vec<WordCandidate> = record
@@ -140,6 +144,17 @@ fn ensure_plan(record: &mut SessionRecord) {
         .map(|stored| stored.clone().candidate())
         .collect();
     let drafts = drafts_for(&candidates, &pair);
+    if drafts.len() > MAX_PLAN_CARDS {
+        return Err(usage_hint(
+            format!(
+                "too many cards: this plan makes {} cards, at most {MAX_PLAN_CARDS} per batch",
+                drafts.len()
+            ),
+            format!(
+                "Run exclude to drop cards, or select --sense to keep fewer senses, until the plan is {MAX_PLAN_CARDS} or fewer"
+            ),
+        ));
+    }
     let requests = record.sentences.selections(drafts.len());
     record.drafts = drafts
         .into_iter()
@@ -149,6 +164,7 @@ fn ensure_plan(record: &mut SessionRecord) {
             None => record_of(&draft),
         })
         .collect();
+    Ok(())
 }
 
 /// Activate every staged adjustment (`--pending`), retry unfinished committed
@@ -533,7 +549,7 @@ mod tests {
             SentenceTypeMix::Mixed,
         ));
         let expected = record.sentences.selections(2);
-        ensure_plan(&mut record);
+        ensure_plan(&mut record).expect("a two-card plan must commit");
         assert_eq!(
             record
                 .drafts

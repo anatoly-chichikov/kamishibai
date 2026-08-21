@@ -183,7 +183,11 @@ gets the natural sentence required by its approved understanding and only then
 receives a descriptive level; that default initial generation does not target
 a band. An explicit batch-level choice is the initial-generation exception and
 constrains every draft. A later per-card level change becomes a rewrite constraint. Every
-card head keeps `term → target sentence`.
+card head keeps `term → target sentence`. The term is `DIM` for as long as the
+card is missing any of its four artifacts and turns `FG` exactly when the last
+one lands, so brightness reads as built; a card that terminally gave up never
+holds all four and stays `DIM`, and a card carrying a staged rewrite stays
+muted beside its struck sentence.
 The artifacts begin immediately after the last line of that head, including
 when the target sentence wraps, and remain an uninterrupted left column in
 `meta`, `audio`, `scene`, `picture` order, including their size and final `$…`
@@ -216,8 +220,9 @@ rule, or filled backing behind the labels.
 If the complete atomic set cannot fit even that way, the card head remains the
 mouse entry into tuning. There is no grammar axis or grammar row.
 
-`Enter`, `→`, `Space`, or a tag click immediately expands the focused card and
-opens the inline editor on `how should it sound?`. The head remains `term →
+`Enter`, `Space`, or a tag click immediately expands the focused card and
+opens the inline editor on `how should it sound?`; side arrows never open or
+close anything — they only move inside the focused horizontal control. The head remains `term →
 target sentence` and all four artifact rows stay together above it. The
 collapsed inline summary disappears; exactly one blank row separates `picture`
 from the editor, which renders below the complete artifact block, before the
@@ -243,7 +248,7 @@ cell of a segment belongs to the same clickable target. The nearest marker uses
 axis with no selected value, `—` is flanked by one two-cell marker on each side
 inside the same shared track; both cells of either marker are clickable. Legacy
 metadata renders no collapsed inline summary but remains tunable through this
-same below-artifacts editor. The collapsed footer advertises only `[Enter/→]
+same below-artifacts editor. The collapsed footer advertises only `[Enter]
 tune`; `Space` remains an unadvertised keyboard alias.
 
 The expanded metadata that follows the editor uses statement and noun labels
@@ -287,12 +292,13 @@ together. There is no per-card modal and `R` has no `YourCards` action.
 ## Transitions
 
 ```
-    YourWords ──[Ctrl+G, blob not blank]──► (Understanding busy) ──► WhatIUnderstood
+    YourWords ──[Ctrl+G, blob not blank and ≤ 60 lines]──► (Understanding busy) ──► WhatIUnderstood
+        ├─ [Ctrl+G, > 60 lines] ──► inert; footer reads `over the 60-word limit` and drops `[Ctrl+G] continue`
         └─ [Esc] arm clear ──► [Esc again within 1 s] ──► empty YourWords
 
     WhatIUnderstood
-        ├─ [Enter]/[→] on a row ──► sense picker opens
-        │       ├─ [Space] toggle sense · [↑↓]/[j][k] move · [Enter]/[←] done (collapse)
+        ├─ [Enter] on a row ──► sense picker opens
+        │       ├─ [Space] toggle sense · [↑↓]/[j][k] move · [Enter] done (collapse)
         │       └─ [Space] on the "+ add more" row ──► ChangeSomething (bulk modal)
         │                                                  ├─ [Enter] send ──► (BulkCorrection busy) ──► WhatIUnderstood
         │                                                  └─ [Esc] cancel ──► WhatIUnderstood
@@ -304,11 +310,12 @@ together. There is no per-card modal and `R` has no `YourCards` action.
         ├─ [Esc, no inner layer] ──► YourWords (blob and selected senses preserved; clear unarmed)
         │       └─ [Esc] arm clear ──► [Esc again within 1 s] ──► empty YourWords
         ├─ [Ctrl+L] ──► PickLanguages modal ──► adopt pair; re-read only when required
+        ├─ [Ctrl+G, > 80 cards selected] ──► inert; notice reads `over the 80-card limit — deselect senses`
         └─ [Ctrl+G, ≥1 ok row] ──► (StartGeneration) ──► YourCards
 
     YourCards
         ├─ [↑↓] nav
-        ├─ [Enter]/[→]/[Space]/[click tag] ──► expand + live editor on `how should it sound?`
+        ├─ [Enter]/[Space]/[click tag] ──► expand + live editor on `how should it sound?`
         │       ├─ [←→] pick · [↑↓] row · type under `one more thing`
         │       ├─ every edit ──► pending now; defaults + blank note ──► no pending
         │       └─ [Enter]/[Esc] ──► close + collapse while retaining pending
@@ -339,12 +346,12 @@ not a key the user presses.
 | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `Welcome` · pick language   | `←/→` step `my language` · `↑/↓` move one grid line · click picks · `Enter` next · `Ctrl+C` quit             |
 | `Welcome` · enter key       | type/`Cmd+V` paste key · `←/→` move focus (submit ↔ load-from-env, env only) · `Enter` submit · `Esc` back   |
-| `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `[Esc] clear` then `[Esc] again` · `Ctrl+L` language |
-| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav; `↑`/`k` above the first word opens generation guidance · `Enter`/`→` pick meanings · `D` drop row · `S` guidance alias · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
-| `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter`/`←` done · `Space` on `+ add more` opens ChangeSomething  |
+| `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue (inert over the 60-word limit) · `[Esc] clear` then `[Esc] again` · `Ctrl+L` language |
+| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav; `↑`/`k` above the first word opens generation guidance · `Enter` pick meanings · `D` drop row · `S` guidance alias · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
+| `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter` done · `Space` on `+ add more` opens ChangeSomething · side arrows inert |
 | `WhatIUnderstood` generation guidance | `Ctrl+G` make cards · `←→` pick · `↑↓` row · `↓` from format returns to words · `Enter`/`Esc` close (printable review keys inert) |
 | `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
-| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` tune · `↑↓` nav (`Space` is an unadvertised alias) · double `Esc` stops active generation |
+| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter` tune · `↑↓` nav (`Space` is an unadvertised alias; side arrows inert) · `Tab`/`Shift+Tab` jump to the next/previous unfinished card (wraps; inert with the editor open) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
 | `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row · text editing under `one more thing` · `Enter`/`Esc` close |
 | `PickLanguages`             | `↑/↓` pick within a column · `←/→` focus the left / right column · wheel scrolls the column under the pointer · `Enter` confirm · `Esc` cancel |
@@ -388,7 +395,7 @@ not forwarded to card generation.
   to 3 retries. Every active attempt uses the same spinner and `ai is working…`
   text. An inactive retry row keeps only its dot, artifact label, and known cost;
   the card head summarizes spent retries once as `↻N` after its total cost.
-- Rejected attempts: expanding the card (Enter/→) reveals, below the card body and
+- Rejected attempts: expanding the card (Enter) reveals, below the card body and
   behind a dashed rule, a `rejected attempts` block:
   one row per failure, naming the gate (`border`, `topology`, `recall_text`, …) and its
   reason. A row links to whatever its own try left behind — the archived frame for a

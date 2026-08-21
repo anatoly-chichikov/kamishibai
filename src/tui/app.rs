@@ -6,7 +6,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::application::LearningTarget;
 use crate::session::{
-    Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, SentenceBatchSettings,
+    Artifact, CardArtifacts, CardDraft, CardPhase, LanguagePair, Sense, SentenceBatchSettings,
     SentenceLabelSelection, WordCandidate,
 };
 
@@ -153,6 +153,7 @@ pub struct CardsView {
     pub running: Option<(usize, Artifact)>,
     editor: Option<SentenceLabelsEditor>,
     stop: GenerationStopState,
+    following: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -162,6 +163,41 @@ enum GenerationStopState {
     Pending,
     Stopping,
     Cancelling,
+}
+
+/// How many cards of the batch stand in each phase.
+///
+/// `ready`, `failed` and `adjusted` keep the counts the status line has always
+/// shown and may overlap: a card whose artifacts are all present still counts
+/// as ready while it carries a staged rewrite. `working` is the exclusive
+/// remainder and stays internal: the status line derives progress from `ready`
+/// against the batch size, so the count only answers whether any card is left
+/// unfinished.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CardCensus {
+    pub ready: usize,
+    working: usize,
+    pub failed: usize,
+    pub adjusted: usize,
+}
+
+impl CardCensus {
+    /// Return whether any card still owes work — building, failed, or adjusted.
+    #[must_use]
+    pub fn unfinished(&self) -> bool {
+        self.working > 0 || self.failed > 0 || self.adjusted > 0
+    }
+
+    /// Return the census with one more card folded in.
+    #[must_use]
+    fn counting(mut self, draft: &CardDraft) -> Self {
+        let artifacts = draft.artifacts();
+        self.ready += usize::from(artifacts.all_ready());
+        self.failed += usize::from(artifacts.has_failed());
+        self.adjusted += usize::from(draft.staged_rewrite().is_some());
+        self.working += usize::from(draft.phase() == CardPhase::Working);
+        self
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -546,6 +582,7 @@ impl App {
     /// head row, so the clamp must agree with the renderer about that width.
     /// A zero `viewport` clamps to zero.
     pub fn body_scrolled(mut self, delta: i32, viewport: u16, body_width: u16) -> Self {
+        self.cards.following = false;
         let max = self
             .body_content_height(body_width)
             .saturating_sub(viewport);
@@ -795,6 +832,24 @@ impl App {
     /// Return the short review notice, if any.
     pub fn review_notice(&self) -> Option<&str> {
         self.review.notice.as_deref()
+    }
+
+    /// Return the app carrying one short review notice.
+    #[must_use]
+    pub fn review_noticed(mut self, message: impl Into<String>) -> Self {
+        self.review.notice = Some(message.into());
+        self
+    }
+
+    /// Return how many cards the confirmed sense selection would commit.
+    #[must_use]
+    pub fn review_cards(&self) -> usize {
+        self.review
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.ok())
+            .map(WordCandidate::selected_count)
+            .sum()
     }
 
     /// Return the durable sentence preferences chosen for this reviewed batch.
@@ -1105,14 +1160,19 @@ impl App {
         self.cards.drafts.as_slice()
     }
 
-    /// Return how many cards carry a live pending rewrite.
+    /// Return how many cards stand in each phase, in one pass over the batch.
     #[must_use]
-    pub fn cards_pending(&self) -> usize {
+    pub fn card_census(&self) -> CardCensus {
         self.cards
             .drafts
             .iter()
-            .filter(|draft| draft.staged_rewrite().is_some())
-            .count()
+            .fold(CardCensus::default(), CardCensus::counting)
+    }
+
+    /// Return how many cards carry a live pending rewrite.
+    #[must_use]
+    pub fn cards_pending(&self) -> usize {
+        self.card_census().adjusted
     }
 
     /// Return whether the focused card can open its sentence-label editor.
@@ -1287,15 +1347,45 @@ impl App {
             running: None,
             editor: None,
             stop: GenerationStopState::Inactive,
+            following: true,
         };
         self
     }
 
     /// Return the app with the currently-running artifact recorded so the UI can
-    /// render an inline spinner instead of "queued".
+    /// render an inline spinner instead of "queued". While the view still
+    /// follows the engine and no card is open, the selection rides along, which
+    /// is what lets the viewport stay on the card being built.
     pub fn cards_running(mut self, target: Option<(usize, Artifact)>) -> Self {
         self.cards.running = target;
+        if let Some((card, _)) = target
+            && self.cards.following
+            && !self.cards.expanded
+            && card < self.cards.drafts.len()
+        {
+            self.cards.selected = card;
+        }
         self
+    }
+
+    /// Return the app with the viewport riding the engine again.
+    #[must_use]
+    pub fn cards_following(mut self) -> Self {
+        self.cards.following = true;
+        self
+    }
+
+    /// Return the card the viewport should ride while the batch builds.
+    ///
+    /// Following is suppressed rather than cleared while a card is open, so
+    /// closing that card resumes the ride. An open sentence editor implies an
+    /// expanded card, so this one check covers both.
+    #[must_use]
+    pub fn following_card(&self) -> Option<usize> {
+        if !self.cards.following || self.cards.expanded {
+            return None;
+        }
+        self.cards.running.map(|(card, _)| card)
     }
 
     /// Return which (card, artifact) pair is being worked on right now, if any.
@@ -1317,9 +1407,34 @@ impl App {
         self
     }
 
+    /// Return the app with the card cursor on the next card that is not finished,
+    /// wrapping past the end of the batch. Unfinished means any phase but
+    /// `CardPhase::Ready`, so a card carrying a staged rewrite is a stop on the
+    /// walk. Leaves the app untouched when every card is finished.
+    #[must_use]
+    pub fn card_jumped(mut self, forward: bool) -> Self {
+        let total = self.cards.drafts.len();
+        if total == 0 {
+            return self;
+        }
+        let step = if forward { 1 } else { total - 1 };
+        let Some(next) = (1..=total)
+            .map(|offset| (self.cards.selected + offset * step) % total)
+            .find(|index| self.cards.drafts[*index].phase() != CardPhase::Ready)
+        else {
+            return self;
+        };
+        self.cards.editor = None;
+        self.cards.expanded = false;
+        self.cards.following = false;
+        self.cards.selected = next;
+        self
+    }
+
     /// Return the app with card cursor moved down (saturates).
     pub fn card_selected_next(mut self) -> Self {
         self.cards.editor = None;
+        self.cards.following = false;
         if !self.cards.drafts.is_empty() {
             let last = self.cards.drafts.len() - 1;
             if self.cards.selected < last {
@@ -1333,6 +1448,7 @@ impl App {
     /// Return the app with card cursor moved up (saturates).
     pub fn card_selected_previous(mut self) -> Self {
         self.cards.editor = None;
+        self.cards.following = false;
         if self.cards.selected > 0 {
             self.cards.selected -= 1;
             self.cards.expanded = false;
@@ -1481,20 +1597,12 @@ impl App {
 
     /// Return the count of ready cards for the status line.
     pub fn cards_ready(&self) -> usize {
-        self.cards
-            .drafts
-            .iter()
-            .filter(|draft| draft.artifacts().all_ready())
-            .count()
+        self.card_census().ready
     }
 
     /// Return the count of failed cards for the status line.
     pub fn cards_failed(&self) -> usize {
-        self.cards
-            .drafts
-            .iter()
-            .filter(|draft| draft.artifacts().has_failed())
-            .count()
+        self.card_census().failed
     }
 
     /// Return the artifact-specific display hint for the focused card.

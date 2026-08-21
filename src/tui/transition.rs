@@ -1,4 +1,5 @@
 use crate::languages::catalog;
+use crate::session::{MAX_INTAKE_WORDS, MAX_PLAN_CARDS, RawInputBatch};
 
 use super::app::App;
 use super::disclosure::{DisclosureControls, DisclosureIntent};
@@ -61,11 +62,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
     match (app.screen(), app.modal(), event) {
         (Screen::Welcome, _, e) => welcome(app, e),
         (Screen::YourWords, None, AppEvent::Generate) => {
-            if app
-                .blob()
-                .chars()
-                .any(|character| !character.is_whitespace())
-            {
+            let batch = RawInputBatch::new(app.blob());
+            if batch.has_content() && batch.word_count() <= MAX_INTAKE_WORDS {
                 (app, Side::RunUnderstanding)
             } else {
                 (app, Side::None)
@@ -399,6 +397,14 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::KeyChar(' ')) if app.card_tunable() => {
             (app.sentence_editor_opened_for_register(), Side::None)
         }
+        (Screen::YourCards, None, AppEvent::NextUnfinished) if app.sentence_editor().is_none() => {
+            (app.card_jumped(true), Side::None)
+        }
+        (Screen::YourCards, None, AppEvent::PreviousUnfinished)
+            if app.sentence_editor().is_none() =>
+        {
+            (app.card_jumped(false), Side::None)
+        }
         (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_selected_previous(), Side::None),
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
         (Screen::YourCards, None, event)
@@ -441,6 +447,14 @@ fn start_generation(app: App) -> (App, Side) {
     let app = app.senses_confirmed();
     if !app.candidates().iter().any(|candidate| candidate.ok()) {
         return (app, Side::None);
+    }
+    if app.review_cards() > MAX_PLAN_CARDS {
+        return (
+            app.review_noticed(format!(
+                "over the {MAX_PLAN_CARDS}-card limit — deselect senses"
+            )),
+            Side::None,
+        );
     }
     (app.with_screen(Screen::YourCards), Side::StartGeneration)
 }
@@ -572,6 +586,12 @@ fn adopt_languages(app: App, choice: LanguageChoice) -> (App, Side) {
         return (app, Side::None);
     }
     let rereads = rereads(&app, &choice);
+    if rereads && RawInputBatch::new(app.blob()).word_count() > MAX_INTAKE_WORDS {
+        return (
+            app.review_noticed("too many words to re-read — start a new batch"),
+            Side::None,
+        );
+    }
     let next = app.languages_adopted(&choice);
     if rereads {
         return (next, Side::AdoptLanguagesAndRunUnderstanding(choice));

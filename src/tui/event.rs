@@ -69,6 +69,10 @@ pub enum AppEvent {
     NavPrev,
     /// Arrow down or j — next row.
     NavNext,
+    /// Tab — jump the card cursor to the next card that is not finished yet.
+    NextUnfinished,
+    /// Shift+Tab — jump the card cursor to the previous card that is not finished yet.
+    PreviousUnfinished,
     /// Session engine emitted understanding pass result.
     UnderstandingReady,
     /// Session engine emitted bulk correction result.

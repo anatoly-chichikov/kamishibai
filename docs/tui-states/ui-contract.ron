@@ -342,7 +342,7 @@ Contract(
                         Element(
                             id: ElementId("wu.footer_toggle_senses"),
                             kind: KeyHint(Footer),
-                            text: Literal("[Enter/→] toggle"),
+                            text: Literal("[Enter] toggle"),
                             source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 616),
                             purpose: "open or close the focused sense list",
                             importance: 4,
@@ -793,7 +793,7 @@ Contract(
                         Element(
                             id: ElementId("yc.footer_tune_card"),
                             kind: KeyHint(Footer),
-                            text: Literal("[Enter/→] tune"),
+                            text: Literal("[Enter] tune"),
                             source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 1634),
                             purpose: "advertise the only visible tuning hint: expand the focused card and open its editor on how should it sound?",
                             importance: 5,
@@ -806,7 +806,7 @@ Contract(
                             kind: HiddenKeyBinding,
                             text: Literal("[Space] tune"),
                             source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 18),
-                            purpose: "retain Space as an unadvertised alias for the visible Enter/right tuning action",
+                            purpose: "retain Space as an unadvertised alias for the visible Enter tuning action",
                             importance: 3,
                             usefulness: 4,
                             health: Working,
@@ -848,7 +848,7 @@ Contract(
                         Element(
                             id: ElementId("yc.footer_keep_going"),
                             kind: KeyHint(Footer),
-                            text: Literal("[Enter/→] tune"),
+                            text: Literal("[Enter] tune"),
                             source: SourceRef(file: "src/tui/screens/your_cards.rs", line: 1634),
                             purpose: "keep the same visible tuning action when failures exist",
                             importance: 5,

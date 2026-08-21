@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
+use crate::session::{MAX_INTAKE_WORDS, RawInputBatch};
 use crate::tui::app::App;
 use crate::tui::palette;
 
@@ -202,6 +203,13 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         ));
         left.push(Span::styled(format!(" {noun}"), palette::dim()));
     }
+    let over_limit = count > MAX_INTAKE_WORDS;
+    if over_limit {
+        left.push(Span::styled(
+            format!(" · over the {MAX_INTAKE_WORDS}-word limit"),
+            palette::dim(),
+        ));
+    }
     if app.word_clear_pending() {
         return super::common::footer_bar(
             left,
@@ -213,12 +221,14 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         );
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
-    if count > 0 {
+    if over_limit {
+        hints.push(super::common::clear_words_hint());
+    } else if count > 0 {
         hints.push(super::common::FooterHint::primary("Ctrl+G", "continue"));
     } else {
         hints.push(super::common::FooterHint::primary("Cmd+V", "paste"));
     }
-    if !app.blob().is_empty() {
+    if !over_limit && !app.blob().is_empty() {
         hints.push(super::common::clear_words_hint());
     }
     hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
@@ -227,8 +237,5 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
 }
 
 fn word_count(blob: &str) -> usize {
-    blob.split('\n')
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .count()
+    RawInputBatch::new(blob).word_count()
 }

@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 
-use crate::session::{CardDraft, drafts_from_document};
+use crate::session::{CardDraft, MAX_PLAN_CARDS, drafts_from_document};
 use crate::tui::{App, Screen};
 use crate::vocabulary::VocabularyDocument;
 
@@ -24,6 +24,12 @@ impl StartupCards {
     /// Build startup cards from an already validated vocabulary document.
     pub(super) fn from_document(document: &VocabularyDocument) -> Result<Self> {
         let (pair, drafts) = drafts_from_document(document)?;
+        if drafts.len() > MAX_PLAN_CARDS {
+            bail!(
+                "Expected at most {MAX_PLAN_CARDS} entries but found {}",
+                drafts.len()
+            );
+        }
         let learning = pair.learning().to_string();
         let app = App::new(pair)
             .confirmed_learning(learning)

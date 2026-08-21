@@ -112,6 +112,11 @@ fn position_of(buffer: &Buffer, needle: &str) -> (u16, u16) {
     panic!("the rendered screen never showed '{needle}':\n{rendered}");
 }
 
+fn term_ink(buffer: &Buffer, term: &str) -> Color {
+    let (column, row) = position_of(buffer, term);
+    buffer[(column, row)].fg
+}
+
 fn row_text(buffer: &Buffer, row: u16) -> String {
     (0..buffer.area.width)
         .map(|column| buffer[(column, row)].symbol())
@@ -355,7 +360,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
         .find("[Ctrl+G] regenerate")
         .expect("card footer must show regeneration");
     let tune = rendered
-        .find("[Enter/→] tune")
+        .find("[Enter] tune")
         .expect("card footer must show tuning");
     let target = rendered
         .find("whilst → Example with whilst.")
@@ -378,9 +383,9 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
             && rendered.contains("✓ scene")
             && rendered.contains("✓ picture")
             && rendered.contains("RU → EN")
-            && rendered.contains("[↑↓] nav")
-            && rendered.contains("[Enter/→] tune")
-            && !rendered.contains("[Enter/→] toggle")
+            && rendered.contains("[Tab] next")
+            && rendered.contains("[Enter] tune")
+            && !rendered.contains("[Enter] toggle")
             && !rendered.contains("[Space] tune")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
@@ -390,6 +395,19 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
             && ctrl < tune
             && target < picture,
         "each generated card must keep its target in the head before artifact steps: {rendered}"
+    );
+}
+
+#[test]
+fn a_finished_batch_drops_the_jump_hint_and_keeps_plain_navigation() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+    ]);
+    let rendered = flat(&app);
+    assert!(
+        !rendered.contains("[Tab] next") && rendered.contains("[↑↓] nav"),
+        "a batch with nothing left to build still advertised the unfinished jump: {rendered}"
     );
 }
 
@@ -409,8 +427,8 @@ fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
         rendered.contains("your cards")
             && rendered.contains("all done")
             && rendered.contains("[↑↓] nav")
-            && rendered.contains("[Enter/→] tune")
-            && !rendered.contains("[Enter/→] toggle")
+            && rendered.contains("[Enter] tune")
+            && !rendered.contains("[Enter] toggle")
             && !rendered.contains("[Space] tune")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
@@ -472,7 +490,7 @@ fn armed_generation_stop_makes_escape_the_only_primary_action() {
     assert!(
         rendered.contains("[Esc] again")
             && !rendered.contains("[Ctrl+G] regenerate")
-            && !rendered.contains("[Enter/→] tune"),
+            && !rendered.contains("[Enter] tune"),
         "armed generation stop competed with generation actions: {rendered}"
     );
 }
@@ -484,7 +502,7 @@ fn draining_generation_says_stopping_without_offering_more_work() {
     assert!(
         rendered.contains("stopping…")
             && !rendered.contains("[Ctrl+G] regenerate")
-            && !rendered.contains("[Enter/→] tune")
+            && !rendered.contains("[Enter] tune")
             && !rendered.contains("[Esc] again"),
         "draining generation looked active or offered another action: {rendered}"
     );
@@ -761,44 +779,51 @@ fn failure_footer_omits_the_duplicate_terminal_count() {
 }
 
 #[test]
-fn right_and_enter_open_the_editor_while_enter_and_escape_close_it() {
+fn enter_opens_the_editor_while_enter_and_escape_close_it() {
     let start = seeded(vec![
         labeled_draft("whilst", ready_artifacts()),
         labeled_draft("at the end", ready_artifacts()),
     ]);
     let after_down = transit(start.clone(), AppEvent::NavNext).0;
-    let opened_right = transit(after_down.clone(), AppEvent::CursorRight).0;
-    let moved_inside = transit(opened_right.clone(), AppEvent::CursorLeft).0;
-    let (entered_inside, enter_side) = transit(opened_right.clone(), AppEvent::KeyEnter);
-    let closed = transit(opened_right.clone(), AppEvent::Cancel).0;
-    let opened_enter = transit(after_down.clone(), AppEvent::KeyEnter).0;
+    let opened = transit(after_down.clone(), AppEvent::KeyEnter).0;
+    let moved_inside = transit(opened.clone(), AppEvent::CursorLeft).0;
+    let (entered_inside, enter_side) = transit(opened.clone(), AppEvent::KeyEnter);
+    let closed = transit(opened.clone(), AppEvent::Cancel).0;
     assert_eq!(
         (
             (
                 start.card_selected(),
                 after_down.card_selected(),
                 start.card_expanded(),
-                opened_right.card_expanded(),
+                opened.card_expanded(),
                 moved_inside.card_expanded(),
                 entered_inside.card_expanded(),
                 closed.card_expanded(),
-                opened_enter.card_expanded(),
             ),
             (
                 start.sentence_editor().is_none(),
-                opened_right.sentence_editor().is_some(),
+                opened.sentence_editor().is_some(),
                 moved_inside.sentence_editor().is_some(),
                 entered_inside.sentence_editor().is_some(),
                 closed.sentence_editor().is_none(),
-                opened_enter.sentence_editor().is_some(),
                 enter_side,
             ),
         ),
         (
-            (0, 1, false, true, true, false, false, true),
-            (true, true, true, false, true, true, Side::None),
+            (0, 1, false, true, true, false, false),
+            (true, true, true, false, true, Side::None),
         ),
-        "tune controls failed to open on Enter/Right or collapse on Enter/Escape"
+        "tune controls failed to open on Enter or collapse on Enter/Escape"
+    );
+}
+
+#[test]
+fn right_arrow_on_a_collapsed_tunable_card_keeps_the_editor_closed() {
+    let start = seeded(vec![labeled_draft("whilst", ready_artifacts())]);
+    let pressed = transit(start, AppEvent::CursorRight).0;
+    assert!(
+        pressed.sentence_editor().is_none() && !pressed.card_expanded(),
+        "a side arrow opened the card editor even though only Enter may open it"
     );
 }
 
@@ -1571,6 +1596,28 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
 }
 
 #[test]
+fn the_term_stays_gray_until_the_card_holds_its_last_artifact() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("terroir", ready_artifacts()),
+        draft("wreck", partial_priced_artifacts()),
+        draft("bof", failed_artifacts()),
+    ]);
+    let buffer = rendered_buffer(&app);
+    let white = Color::Rgb(0xe6, 0xe3, 0xda);
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    assert_eq!(
+        (
+            term_ink(&buffer, "terroir"),
+            term_ink(&buffer, "wreck"),
+            term_ink(&buffer, "bof"),
+        ),
+        (white, gray, gray),
+        "the card term lit up before the card held all four artifacts"
+    );
+}
+
+#[test]
 fn active_rewrite_shows_normal_generation_without_pending_tags_or_count() {
     let baseline = SentenceLabelSelection::from_labels(
         labeled_meta_for("whilst")
@@ -1599,7 +1646,7 @@ fn active_rewrite_shows_normal_generation_without_pending_tags_or_count() {
             && !rendered.contains("b1")
             && !rendered.contains("statement")
             && !rendered.contains("Example with whilst.")
-            && !rendered.contains("[Enter/→] tune")
+            && !rendered.contains("[Enter] tune")
             && !rendered.contains("[Space] tune"),
         "active rewrite retained staged styling or exposed stale generated metadata: {rendered}"
     );
@@ -1996,5 +2043,134 @@ fn a_finished_artifact_keeps_attempt_history_only_in_the_card_head_and_details()
             && expanded.contains("rejected attempts")
             && expanded.contains("picture 1"),
         "a finished artifact duplicated or hid its attempt history: {rendered}"
+    );
+}
+
+#[test]
+fn the_footer_states_the_progress_of_a_live_batch_only_as_the_ready_count() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+        draft("in the end", retrying_artifacts()),
+        draft("wreck", CardArtifacts::default()),
+    ]);
+    let rendered = flat(&app);
+    let footer = row_containing(&rendered, "step 3/3");
+    assert!(
+        footer.contains("2/4 ready") && !footer.contains("building"),
+        "the status bar repeated the ready count as a second progress number: {footer}"
+    );
+}
+
+#[test]
+fn the_footer_keeps_regenerate_when_the_census_crowds_a_narrow_bar() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("in the end", retrying_artifacts()),
+        draft("wreck", CardArtifacts::default()),
+    ]);
+    let buffer = rendered_buffer_at(&app, 72, 40);
+    let footer = (0..buffer.area.height)
+        .map(|row| row_text(&buffer, row))
+        .find(|row| row.contains("step 3/3"))
+        .expect("narrow status bar must exist");
+    assert!(
+        footer.contains("[Ctrl+G] regenerate"),
+        "a crowded status bar shed the screen's main action: {footer}"
+    );
+}
+
+#[test]
+fn tab_walks_only_the_unfinished_cards_and_wraps() {
+    let drafts = (0..20)
+        .map(|index| {
+            let artifacts = if index == 7 || index == 13 {
+                CardArtifacts::default()
+            } else {
+                ready_artifacts()
+            };
+            draft(&format!("word-{index:02}"), artifacts)
+        })
+        .collect();
+    let start = seeded(drafts);
+    let first = transit(start.clone(), AppEvent::NextUnfinished).0;
+    let second = transit(first.clone(), AppEvent::NextUnfinished).0;
+    let wrapped = transit(second.clone(), AppEvent::NextUnfinished).0;
+    let backwards = transit(second.clone(), AppEvent::PreviousUnfinished).0;
+    assert_eq!(
+        (
+            first.card_selected(),
+            second.card_selected(),
+            wrapped.card_selected(),
+            backwards.card_selected()
+        ),
+        (7, 13, 7, 7),
+        "the jump key walked finished cards instead of cycling the unfinished ones"
+    );
+}
+
+#[test]
+fn tab_is_inert_while_the_sentence_editor_is_open() {
+    let start = seeded(vec![
+        labeled_draft("whilst", ready_artifacts()),
+        labeled_draft("wreck", CardArtifacts::default()),
+    ]);
+    let opened = transit(start, AppEvent::KeyEnter).0;
+    let jumped = transit(opened.clone(), AppEvent::NextUnfinished).0;
+    assert_eq!(
+        (jumped.card_selected(), jumped.sentence_editor().is_some()),
+        (opened.card_selected(), true),
+        "the jump key moved the cursor out from under an open editor"
+    );
+}
+
+#[test]
+fn following_moves_the_selection_onto_the_card_the_engine_started() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+        draft("in the end", CardArtifacts::default()),
+        draft("wreck", CardArtifacts::default()),
+    ])
+    .cards_running(Some((3, Artifact::Meta)));
+    assert_eq!(
+        (app.card_selected(), app.following_card()),
+        (3, Some(3)),
+        "the view stayed behind while the engine moved on to another card"
+    );
+}
+
+#[test]
+fn scrolling_away_stops_the_viewport_following_the_engine() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+        draft("in the end", CardArtifacts::default()),
+        draft("wreck", CardArtifacts::default()),
+    ])
+    .body_scrolled(3, 10, 100)
+    .cards_running(Some((3, Artifact::Meta)));
+    assert_eq!(
+        (app.card_selected(), app.following_card()),
+        (0, None),
+        "the viewport chased the engine after the reader had scrolled away"
+    );
+}
+
+#[test]
+fn an_open_card_stops_the_viewport_following_the_engine() {
+    let opened = transit(
+        seeded(vec![
+            draft("whilst", ready_artifacts()),
+            draft("wreck", CardArtifacts::default()),
+        ]),
+        AppEvent::KeyEnter,
+    )
+    .0
+    .cards_running(Some((1, Artifact::Meta)));
+    assert_eq!(
+        opened.following_card(),
+        None,
+        "the viewport moved out from under a card the reader had opened"
     );
 }

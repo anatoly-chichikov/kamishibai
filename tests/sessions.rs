@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use assert_cmd::Command;
 use kamishibai::generation::artifact_cache::VISUAL_DIRECTORY;
 use kamishibai::generation::visual_revision;
-use kamishibai::session::{CardCell, LanguagePair};
+use kamishibai::session::{CardCell, LanguagePair, MAX_INTAKE_WORDS, MAX_PLAN_CARDS};
 use tempfile::TempDir;
 
 const CARDS_JSON: &str = r#"{
@@ -2351,4 +2351,78 @@ fn result_without_an_id_on_an_unpublished_session_exits_not_ready() {
         (Some(4), true),
         "result without an id on an unpublished session must exit 4 naming the resolved session"
     );
+}
+
+/// Build a cards JSON carrying `count` distinct entries.
+fn many_cards_json(count: usize) -> String {
+    let entries = (0..count)
+        .map(|index| {
+            format!(
+                r#"{{
+      "term": "mot-{index:03}",
+      "meaning": "a word",
+      "pronunciation": "mo",
+      "transcription": "lə mo",
+      "importance": 5,
+      "source": {{
+        "sentence": "The word number {index} appears here.",
+        "lang": "en",
+        "highlight": "word",
+        "hint": "a unit of language",
+        "context": "language and study"
+      }},
+      "target": {{ "sentence": "Le mot numéro {index} apparaît ici.", "lang": "fr" }}
+    }}"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n    ");
+    format!("{{\n  \"entries\": [\n    {entries}\n  ]\n}}")
+}
+
+#[test]
+fn invoking_new_with_too_many_words_exits_with_the_usage_code() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let mut command = cli(cache.path());
+    command.arg("new");
+    for index in 0..=MAX_INTAKE_WORDS {
+        command.args(["--word", &format!("word-{index:03}")]);
+    }
+    command.assert().code(2);
+}
+
+#[test]
+fn importing_more_cards_than_the_ceiling_exits_with_the_usage_code() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    let cards = cache.path().join("too-many.json");
+    fs::write(&cards, many_cards_json(MAX_PLAN_CARDS + 1)).expect("the cards JSON must write");
+    cli(cache.path())
+        .args([
+            "new",
+            "--build",
+            cards.to_str().expect("cards path is utf8"),
+            "--out",
+            out.path().to_str().expect("out path is utf8"),
+        ])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn importing_exactly_the_card_ceiling_is_accepted() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    let cards = cache.path().join("full.json");
+    fs::write(&cards, many_cards_json(MAX_PLAN_CARDS)).expect("the cards JSON must write");
+    cli(cache.path())
+        .args([
+            "new",
+            "--build",
+            cards.to_str().expect("cards path is utf8"),
+            "--out",
+            out.path().to_str().expect("out path is utf8"),
+        ])
+        .assert()
+        .success();
 }

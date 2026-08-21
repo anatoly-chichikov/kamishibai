@@ -390,6 +390,7 @@ fn card_head<'a>(
     } else {
         palette::dim2()
     };
+    let built = draft.artifacts().all_ready();
     let term_style = if pending {
         if focused {
             palette::highlight_dim()
@@ -397,11 +398,11 @@ fn card_head<'a>(
             palette::dim()
         }
     } else {
-        match (progressed, focused) {
+        match (built, focused) {
             (true, true) => palette::highlight().add_modifier(Modifier::BOLD),
             (true, false) => palette::base(),
             (false, true) => palette::highlight_dim(),
-            (false, false) => palette::dim2(),
+            (false, false) => palette::dim(),
         }
     };
     let sentence_base = if focused {
@@ -1658,11 +1659,8 @@ pub(crate) fn total_cost(app: &App) -> Option<GenerationCost> {
 fn footer(app: &App, width: u16) -> Paragraph<'static> {
     let done = app.done_artifacts();
     let published = !done.deck.is_empty();
-    let ready = if published {
-        done.cards
-    } else {
-        app.cards_ready()
-    };
+    let census = app.card_census();
+    let ready = if published { done.cards } else { census.ready };
     let total = if published {
         done.cards.saturating_add(done.failed)
     } else {
@@ -1683,10 +1681,10 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             palette::dim(),
         ));
     }
-    if app.cards_pending() > 0 {
+    if census.adjusted > 0 {
         left.push(super::common::status_sep());
         left.push(Span::styled(
-            app.cards_pending().to_string(),
+            census.adjusted.to_string(),
             palette::base().add_modifier(Modifier::BOLD),
         ));
         left.push(Span::styled(" pending", palette::dim()));
@@ -1724,9 +1722,12 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         let mut hints = Vec::new();
         hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
         if app.card_tunable() {
-            hints.push(super::common::FooterHint::secondary("Enter/→", "tune"));
+            hints.push(super::common::FooterHint::secondary("Enter", "tune"));
         } else {
             hints.push(controls.secondary_toggle());
+        }
+        if census.unfinished() {
+            hints.push(super::common::FooterHint::secondary("Tab", "next"));
         }
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         if app.can_start_new_batch() {

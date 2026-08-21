@@ -24,12 +24,12 @@ pub use attempt::{AttemptFault, AttemptLog, AttemptPenalties, AttemptScorecard, 
 pub use bridge::{drafts_from_document, from_entry, to_document, to_entry};
 pub(crate) use cache::CandidateRecord;
 pub use cache::{CachedUnderstanding, CardMetaCache};
-pub use candidate::{RawInputBatch, Sense, WordCandidate};
+pub use candidate::{IntakeTooLarge, MAX_INTAKE_WORDS, RawInputBatch, Sense, WordCandidate};
 pub use cost::{CostRecord, GenerationCost};
 pub use detection::{LearningDetection, LearningGuess, ScriptDetection};
 pub use draft::{
     Artifact, ArtifactAttempt, ArtifactCosts, ArtifactFile, ArtifactSlot, CardArtifacts, CardDraft,
-    CardMeta, CardRewrite,
+    CardMeta, CardPhase, CardRewrite, MAX_PLAN_CARDS,
 };
 pub use engine::{EngineEvent, SessionEngine};
 pub use labels::{

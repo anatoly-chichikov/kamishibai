@@ -14,6 +14,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
+use crate::session::RawInputBatch;
 use crate::session::{Sense, WordCandidate};
 use crate::tui::app::App;
 use crate::tui::disclosure::DisclosureControls;
@@ -161,12 +162,7 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
             .saturating_add(review_prefix_height(app, width));
         return u16::try_from(total).unwrap_or(u16::MAX);
     }
-    let typed = app
-        .blob()
-        .split('\n')
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .count();
+    let typed = RawInputBatch::new(app.blob()).word_count();
     u16::try_from(typed).unwrap_or(u16::MAX)
 }
 

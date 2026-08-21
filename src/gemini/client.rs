@@ -69,6 +69,13 @@ const FIDELITY_MODEL: &str = TEXT_MODEL;
 const LITERAL_ZOOM_MODEL: &str = TEXT_MODEL;
 const TEXT_JUDGE_MODEL: &str = TEXT_MODEL;
 const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
+/// Output ceiling for one intake chunk.
+///
+/// Twenty words of the worst-case polysemous shape bill about 11.4k tokens, so
+/// this leaves room to spare. It is deliberately low enough that reaching it
+/// takes well under the transport timeout, which is what turns a truncated
+/// reply into a named refusal instead of a hang.
+const INTAKE_MAX_OUTPUT_TOKENS: u32 = 16_384;
 const FEATURE_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const COMPOSER_MAX_OUTPUT_TOKENS: u32 = 8_192;
 const RECALL_MAX_OUTPUT_TOKENS: u32 = 1024;
@@ -492,7 +499,7 @@ where
         let catalog = catalog();
         let prompt = render_intake_prompt(raw.text(), known, target, &catalog)?;
         let decoded: IntakeResponse =
-            serde_json::from_str(unfence(self.text(TEXT_MODEL, prompt)?.trim()))?;
+            serde_json::from_str(unfence(self.intake_text(prompt)?.trim()))?;
         let guess = match target {
             LearningTarget::Detect => {
                 let alternates = supported_alternates(
@@ -924,6 +931,30 @@ where
 
     fn text(&self, model: &str, prompt: String) -> Result<String> {
         Ok(self.text_metered(model, prompt)?.0)
+    }
+
+    /// Run the batch-wide intake prompt under an explicit output ceiling.
+    ///
+    /// Kept apart from `text_metered` on purpose: that helper is shared with the
+    /// free-form completion path, whose request bytes are frozen by contract.
+    fn intake_text(&self, prompt: String) -> Result<String> {
+        let request = Request::text(
+            prompt,
+            Some(GenerationConfig::bounded_text(INTAKE_MAX_OUTPUT_TOKENS)),
+            None,
+        );
+        let metered = self.request_metered(TEXT_MODEL, &request)?;
+        if metered.response.finish_reason() == Some("MAX_TOKENS") {
+            bail!(
+                "Gemini understanding hit the {}-token output ceiling; retry to resume from the words already understood",
+                INTAKE_MAX_OUTPUT_TOKENS
+            );
+        }
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!("No text content in Gemini understanding response");
+        }
+        Ok(raw)
     }
 
     fn text_metered(&self, model: &str, prompt: String) -> Result<(String, CostRecord)> {

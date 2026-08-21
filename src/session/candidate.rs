@@ -1,3 +1,33 @@
+use thiserror::Error;
+
+/// Largest number of vocabulary lines one understanding pass accepts.
+///
+/// The intake call is the only Gemini request that carries the whole batch, and
+/// it is neither streamed nor retried. A polysemous list costs roughly 570
+/// billed tokens per word, so beyond this many lines one request stops fitting
+/// inside the 300-second transport timeout even after chunking hides the
+/// per-request cost.
+pub const MAX_INTAKE_WORDS: usize = 60;
+
+/// Raised when a batch carries more vocabulary lines than one intake accepts.
+#[derive(Debug, Error)]
+#[error("too many words: {count} lines, at most {ceiling} per batch")]
+pub struct IntakeTooLarge {
+    count: usize,
+    ceiling: usize,
+}
+
+impl IntakeTooLarge {
+    /// Create the refusal for one oversized batch.
+    #[must_use]
+    pub fn new(count: usize) -> Self {
+        Self {
+            count,
+            ceiling: MAX_INTAKE_WORDS,
+        }
+    }
+}
+
 /// Raw user input captured on the `Your words` screen.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RawInputBatch {
@@ -20,6 +50,24 @@ impl RawInputBatch {
         self.text
             .chars()
             .any(|character| !character.is_whitespace())
+    }
+
+    /// Return how many vocabulary lines the blob carries.
+    ///
+    /// One line is one word to understand: surrounding whitespace is trimmed
+    /// and blank lines are dropped. Every surface counts the batch this way, so
+    /// the number the footer shows is the number the limit is checked against.
+    #[must_use]
+    pub fn word_count(&self) -> usize {
+        self.lines().count()
+    }
+
+    /// Return the trimmed, non-empty vocabulary lines in input order.
+    pub fn lines(&self) -> impl Iterator<Item = &str> {
+        self.text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
     }
 }
 

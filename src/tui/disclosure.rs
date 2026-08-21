@@ -42,8 +42,6 @@ impl DisclosureControls {
         match event {
             AppEvent::KeyEnter if self.open => DisclosureIntent::Close,
             AppEvent::KeyEnter => DisclosureIntent::Open,
-            AppEvent::CursorRight if !self.open => DisclosureIntent::Open,
-            AppEvent::CursorLeft if self.open => DisclosureIntent::Close,
             AppEvent::KeyChar(' ') if self.open && self.action.is_some() => {
                 DisclosureIntent::Action
             }
@@ -53,15 +51,11 @@ impl DisclosureControls {
 
     /// Return the secondary footer hint for the open/close toggle.
     pub(crate) fn secondary_toggle(self) -> FooterHint {
-        FooterHint::secondary(self.toggle_key(), "toggle")
+        FooterHint::secondary("Enter", "toggle")
     }
 
     /// Return the Space action hint when the open pane has an action.
     pub(crate) fn primary_action(self) -> Option<FooterHint> {
         self.action.map(|label| FooterHint::primary("Space", label))
-    }
-
-    fn toggle_key(self) -> &'static str {
-        if self.open { "Enter/←" } else { "Enter/→" }
     }
 }

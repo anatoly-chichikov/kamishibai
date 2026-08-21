@@ -1478,3 +1478,49 @@ fn tts_generation_does_not_hide_non_quota_failures() {
         "tts generation no longer surfaces non-quota failures immediately"
     );
 }
+
+/// The batch-wide intake call bounds its own output so a truncation is named.
+#[test]
+fn understanding_bounds_its_output_tokens() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"target_lang\":\"FR\",\"items\":[{\"term\":\"chat\",\"senses\":[{\"understanding\":\"a cat\",\"tag\":null}],\"selected\":0,\"ok\":true}]}"
+                }]
+            }
+        }]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    client.understand(&RawInputBatch::new("chat"), "RU", &LearningTarget::Detect)?;
+    let sent = requests.borrow()[0].1.clone();
+    assert!(
+        sent.contains(r#""maxOutputTokens":16384"#),
+        "the batch-wide intake request went out with no output ceiling: {sent}"
+    );
+    Ok(())
+}
+
+/// A truncated intake reply names the ceiling instead of leaking a parse error.
+#[test]
+fn truncated_understanding_names_the_output_ceiling() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "finishReason": "MAX_TOKENS",
+            "content": {
+                "parts": [{"text": "{\"target_lang\":\"FR\",\"items\":[{\"term\":\"cha"}]
+            }
+        }]
+    }))?)]);
+    let client = GeminiClient::new("key", transport);
+    let refused = client.understand(&RawInputBatch::new("chat"), "RU", &LearningTarget::Detect);
+    let message = refused
+        .expect_err("a truncated intake reply must be refused")
+        .to_string();
+    assert!(
+        message.contains("16384-token output ceiling"),
+        "a truncated intake reply surfaced as something other than the ceiling: {message}"
+    );
+    Ok(())
+}
