@@ -348,7 +348,7 @@ fn columns_of(buffer: &Buffer, needle: &str) -> Vec<u16> {
 }
 
 #[test]
-fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_marks() {
+fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_chips() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("at the end", ready_artifacts()),
@@ -366,8 +366,8 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
         .find("whilst → Example with whilst.")
         .expect("first card head must be visible");
     let picture = rendered
-        .find("✓ picture")
-        .expect("first card picture step must be visible");
+        .find("▣")
+        .expect("first card picture chip must be visible");
     assert!(
         rendered.contains("building your cards")
             && rendered.contains("2/4 ready")
@@ -380,8 +380,9 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
             && rendered.contains("wreck")
             && rendered.contains("Example with wreck.")
             && rendered.contains("whilst → Example with whilst.")
-            && rendered.contains("✓ scene")
-            && rendered.contains("✓ picture")
+            && rendered.contains("🗀")
+            && !rendered.contains("✓ scene")
+            && !rendered.contains("✓ picture")
             && rendered.contains("RU → EN")
             && rendered.contains("[Tab] next")
             && rendered.contains("[Enter] tune")
@@ -394,7 +395,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
             && !rendered.contains("queued")
             && ctrl < tune
             && target < picture,
-        "each generated card must keep its target in the head before artifact steps: {rendered}"
+        "each generated card must keep its target in the head before its chip row: {rendered}"
     );
 }
 
@@ -441,18 +442,36 @@ fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
 }
 
 #[test]
-fn your_cards_shows_card_asset_and_total_costs_when_finished() {
+fn a_collapsed_card_hides_per_artifact_costs_and_keeps_the_head_total() {
     let app = seeded(vec![draft("whilst", priced_artifacts())]);
     let rendered = flat(&app);
     assert!(
         rendered.contains("whilst → Example with whilst.  $.0808")
-            && rendered.contains("meta.json           1 B  $.0015")
+            && rendered.contains("$0.08")
+            && !rendered.contains("meta.json")
+            && !rendered.contains("$.0015")
+            && !rendered.contains("$.0100")
+            && !rendered.contains("$.0020")
+            && !rendered.contains("$.0673")
+            && !rendered.contains("total cost"),
+        "a collapsed card must keep only the head total while per-artifact costs stay inside: {rendered}"
+    );
+}
+
+#[test]
+fn an_expanded_card_keeps_detailed_artifact_rows_with_size_and_cost() {
+    let app = transit(
+        seeded(vec![draft("whilst", priced_artifacts())]),
+        AppEvent::KeyEnter,
+    )
+    .0;
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("meta.json           1 B  $.0015")
             && rendered.contains("audio.wav           1 B  $.0100")
             && rendered.contains("scene.json          1 B  $.0020")
-            && rendered.contains("picture.jpg         1 B  $.0673")
-            && rendered.contains("$0.08")
-            && !rendered.contains("total cost"),
-        "finished cards must show detailed costs and a simplified total in dollars: {rendered}"
+            && rendered.contains("picture.jpg         1 B  $.0673"),
+        "the expanded card must keep its detailed artifact rows with size and cost: {rendered}"
     );
 }
 
@@ -552,11 +571,15 @@ fn partial_publish_reserves_and_links_the_same_banner_rows() {
 
 #[test]
 fn your_cards_marks_cached_artifacts_next_to_the_file_metadata() {
-    let app = seeded(vec![draft("whilst", cached_artifacts())]);
+    let app = transit(
+        seeded(vec![draft("whilst", cached_artifacts())]),
+        AppEvent::KeyEnter,
+    )
+    .0;
     let rendered = flat(&app);
     assert!(
         rendered.contains("meta.json           1 B  cached"),
-        "cached artifact rows must say cached in the same dim metadata slot as prices: {rendered}"
+        "expanded cached artifact rows must say cached in the same dim metadata slot as prices: {rendered}"
     );
 }
 
@@ -604,16 +627,19 @@ fn untouched_card_shows_only_a_dim_term_with_no_step_rows() {
 fn retry_state_moves_its_spent_attempt_count_to_the_card_head() {
     let app = seeded(vec![draft("in the end", retrying_artifacts())]);
     let rendered = flat(&app);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "in the end →");
     let head = row_containing(&rendered, "in the end →");
-    let picture = row_containing(&rendered, "picture");
-    assert!(
-        head.contains("$.1234  ↻1")
-            && picture.contains("$.1234")
-            && !picture.contains("retry")
-            && !picture.contains("paused")
-            && !picture.contains('✗')
-            && rendered.contains("$0.12"),
-        "retrying state duplicated its attempt count outside the card head: {rendered}"
+    assert_eq!(
+        (
+            head.contains("$.1234  ↻1"),
+            buffer[(21, head_row + 1)].symbol(),
+            rendered.contains("picture"),
+            rendered.matches("$.1234").count(),
+            rendered.contains("$0.12"),
+        ),
+        (true, "·", false, 1, true),
+        "retrying state must keep the spent count on the head and a dim dot at the picture chip: {rendered}"
     );
 }
 
@@ -666,7 +692,7 @@ fn meta_less_retry_badge_uses_the_last_available_head_cells() {
 }
 
 #[test]
-fn narrow_retry_suffix_wraps_with_the_head_without_shifting_artifact_links() {
+fn narrow_retry_suffix_wraps_with_the_head_without_shifting_the_chip_row() {
     let app = seeded(vec![labeled_draft(
         "interdependently",
         recovered_priced_artifacts(2),
@@ -674,16 +700,16 @@ fn narrow_retry_suffix_wraps_with_the_head_without_shifting_artifact_links() {
     let terminal = Rect::new(0, 0, 60, 30);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
     let (_, head_row) = position_of(&buffer, "interdependently →");
-    let (meta_column, meta_row) = position_of(&buffer, "meta.json");
+    let (folder_column, folder_row) = position_of(&buffer, "🗀");
     let head = row_text(&buffer, head_row);
     assert_eq!(
         (
             head.contains("$.0808  ↻2"),
-            meta_row.saturating_sub(head_row),
-            link_at(&app, terminal, meta_column, meta_row),
+            folder_row.saturating_sub(head_row),
+            link_at(&app, terminal, folder_column, folder_row),
         ),
-        (true, 2, Some(String::from("/tmp/meta.json"))),
-        "the combined cost and retry suffix drifted from wrapped-head layout or its artifact hit map"
+        (true, 2, Some(String::from("/tmp"))),
+        "the combined cost and retry suffix drifted from wrapped-head layout or the folder chip hit map"
     );
 }
 
@@ -728,27 +754,25 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
     let failed = draft("move on", rejected_picture_artifacts_with(4)).with_costs(costs);
     let app = seeded(vec![recovered, retrying, failed]).cards_running(Some((1, Artifact::Picture)));
     let rendered = flat(&app);
-    let ready = row_containing(&rendered, "picture.jpg");
-    let active = row_containing(&rendered, "ai is working…");
-    let failed = row_containing(&rendered, "gave up");
+    let buffer = rendered_buffer(&app);
     let recovered_head = row_containing(&rendered, "whilst →");
     let active_head = row_containing(&rendered, "commodity →");
     let failed_head = row_containing(&rendered, "move on →");
-    assert!(
-        recovered_head.contains("$.0673  ↻1")
-            && active_head.contains("$.2148  ↻3")
-            && failed_head.contains("$.2148  ↻3")
-            && ready.contains("$.0673")
-            && active.contains("picture")
-            && !active.contains("retry")
-            && !active.contains("$.1738")
-            && failed.contains("$.1738")
-            && !failed.contains("after")
-            && !rendered.contains("paused")
-            && !rendered.contains("1 ✗")
-            && !rendered.contains("3 ✗")
-            && !rendered.contains("4 ✗"),
-        "artifact rows retained retry history instead of leaving it on their card heads: {rendered}"
+    let (_, active_head_row) = position_of(&buffer, "commodity →");
+    let (_, failed_head_row) = position_of(&buffer, "move on →");
+    assert_eq!(
+        (
+            recovered_head.contains("$.0673  ↻1"),
+            active_head.contains("$.2148  ↻3"),
+            failed_head.contains("$.2148  ↻3"),
+            row_text(&buffer, active_head_row + 1).contains("ai is working…"),
+            buffer[(21, failed_head_row + 1)].symbol(),
+            rendered.contains("gave up"),
+            rendered.contains("$.1738"),
+            rendered.contains("paused"),
+        ),
+        (true, true, true, true, "✗", false, false, false),
+        "chip rows must keep only current work while card heads keep the history: {rendered}"
     );
 }
 
@@ -756,14 +780,31 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
 fn failure_banner_appears_when_any_card_exhausts_its_retries() {
     let app = seeded(vec![draft("wreck", failed_artifacts())]);
     let rendered = flat(&app);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "wreck →");
+    assert_eq!(
+        (
+            buffer[(21, head_row + 1)].symbol(),
+            rendered.contains("gave up"),
+            row_containing(&rendered, "wreck →").contains("$.3210  ↻3"),
+            rendered.contains("$0.32"),
+        ),
+        ("✗", false, true, true),
+        "a terminal card must mark its failed chip with a dim cross and keep gave up inside: {rendered}"
+    );
+}
+
+#[test]
+fn an_expanded_failed_card_still_says_gave_up_on_its_artifact_row() {
+    let app = transit(
+        seeded(vec![draft("wreck", failed_artifacts())]),
+        AppEvent::KeyEnter,
+    )
+    .0;
+    let rendered = flat(&app);
     assert!(
-        rendered.contains("gave up")
-            && !rendered.contains("gave up after")
-            && rendered.contains("✗")
-            && rendered.contains("picture")
-            && rendered.contains("$.3210")
-            && rendered.contains("$0.32"),
-        "your cards must mark the card as `gave up` and show the ✗ on the failed step: {rendered}"
+        rendered.contains("gave up") && !rendered.contains("gave up after"),
+        "the expanded failed card must keep the gave up wording on its artifact row: {rendered}"
     );
 }
 
@@ -884,7 +925,7 @@ fn expanding_a_card_keeps_the_focused_editor_row_visible_when_it_cannot_fit() {
             expanded.card_expanded(),
             expanded.sentence_editor().is_some(),
         ),
-        (before.saturating_add(2), true, true),
+        (before.saturating_add(5), true, true),
         "an editor taller than the viewport did not retain focused-row scroll fallback"
     );
 }
@@ -1049,68 +1090,34 @@ fn moving_down_moves_the_white_question_focus_to_the_next_carousel() {
 }
 
 #[test]
-fn collapsed_priced_artifacts_put_all_tags_on_audio_after_three_plain_gaps() {
-    let terminal = Rect::new(0, 0, 120, 50);
+fn the_tag_summary_follows_the_chips_on_the_single_collapsed_row() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst →");
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (cost_column, _) = position_of(&buffer, "$.0015");
     let (register_column, register_row) = position_of(&buffer, "casual");
     let (kind_column, kind_row) = position_of(&buffer, "statement");
     let (level_column, level_row) = position_of(&buffer, "b1");
-    let (_, audio_row) = position_of(&buffer, "audio.wav");
-    let (_, scene_row) = position_of(&buffer, "scene.json");
-    let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
-    let dim2 = Color::Rgb(0x5a, 0x59, 0x53);
     let ink = Color::Rgb(0x0e, 0x0e, 0x10);
     let tag = Color::Rgb(0x8b, 0x8a, 0x83);
     assert_eq!(
         (
-            (
-                rendered.contains("sentence:"),
-                (meta_row..=picture_row).any(|row| row_text(&buffer, row).contains('│')),
-                buffer[(cost_column, meta_row)].fg,
-                head_row + 1 == meta_row,
-            ),
-            (
-                register_column
-                    == cost_column
-                        + u16::try_from("$.0015".chars().count()).expect("cost width must fit")
-                        + 4,
-                buffer[(register_column - 2, audio_row)].symbol(),
-                buffer[(register_column - 2, audio_row)].bg != tag,
-            ),
-            (
-                (audio_row, scene_row, picture_row),
-                (register_row, kind_row, level_row),
-                (register_column, kind_column, level_column),
-            ),
-            (
-                chip_has_style(&buffer, "casual", ink, tag),
-                chip_has_style(&buffer, "statement", ink, tag),
-                chip_has_style(&buffer, "b1", ink, tag),
-                link_at(&app, terminal, picture_column, picture_row),
-            ),
+            (register_row, kind_row, level_row),
+            (register_column, kind_column, level_column),
+            rendered.contains("sentence:"),
+            chip_has_style(&buffer, "casual", ink, tag),
+            chip_has_style(&buffer, "statement", ink, tag),
+            chip_has_style(&buffer, "b1", ink, tag),
         ),
         (
-            (false, false, dim2, true),
-            (true, " ", true),
-            (
-                (meta_row + 1, meta_row + 2, meta_row + 3),
-                (audio_row, audio_row, audio_row),
-                (
-                    cost_column
-                        + u16::try_from("$.0015".chars().count()).expect("cost width must fit")
-                        + 4,
-                    register_column + 9,
-                    register_column + 21,
-                ),
-            ),
-            (true, true, true, Some(String::from("/tmp/picture.jpg"))),
+            (head_row + 1, head_row + 1, head_row + 1),
+            (27, 36, 48),
+            false,
+            true,
+            true,
+            true,
         ),
-        "collapsed priced artifacts retained chrome or detached the three tags from audio after three plain gaps"
+        "the collapsed tag summary must sit on the chip row after the three chips"
     );
 }
 
@@ -1141,207 +1148,59 @@ fn audio_progress_keeps_collapsed_tags_in_one_column() {
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let active_row = row_containing(&rendered, "ai is working…");
-    let retry_row = rendered
-        .lines()
-        .find(|line| line.contains("· audio") && line.contains("$.0021"))
-        .expect("inactive audio retry row must remain visible");
-    let recovered_row = rendered
-        .lines()
-        .find(|line| line.contains("audio.wav") && line.contains("$.0021"))
-        .expect("recovered audio row must remain visible");
+    let (_, ready_head) = position_of(&buffer, "ready →");
+    let (_, retry_head) = position_of(&buffer, "retry →");
+    let (_, recovered_head) = position_of(&buffer, "recovered →");
     assert_eq!(
         (
             columns_of(&buffer, "casual"),
-            column_of(active_row, "ai is working…") < column_of(active_row, "casual"),
-            column_of(retry_row, "$.0021") < column_of(retry_row, "casual"),
-            column_of(recovered_row, "$.0021") < column_of(recovered_row, "casual"),
+            column_of(active_row, "ai is working…") > column_of(active_row, "casual"),
+            buffer[(16, ready_head + 1)].symbol(),
+            buffer[(16, retry_head + 1)].symbol(),
+            buffer[(16, recovered_head + 1)].symbol(),
             rendered.matches("↻2").count(),
-            rendered.contains("retry 2/3"),
-            rendered.contains("paused"),
+            rendered.contains("$.0021"),
+        ),
+        (vec![27, 27, 27, 27], true, "♪", "·", "♪", 2, false),
+        "audio progress must keep one tag column on the chip rows without per-artifact costs:\n{rendered}"
+    );
+}
+
+#[test]
+fn a_recovered_picture_keeps_a_plain_white_chip_and_its_history_on_the_head() {
+    let app = seeded(vec![labeled_draft("whilst", recovered_priced_artifacts(2))]);
+    let rendered = flat(&app);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst →");
+    let cream = Color::Rgb(0xe6, 0xe3, 0xda);
+    assert_eq!(
+        (
+            buffer[(21, head_row + 1)].symbol(),
+            buffer[(21, head_row + 1)].bg,
+            row_containing(&rendered, "whilst →").contains("↻2"),
             rendered.contains("2 ✗"),
         ),
-        (
-            vec![45, 45, 45, 45],
-            true,
-            true,
-            true,
-            2,
-            false,
-            false,
-            false
-        ),
-        "audio progress moved its collapsed labels or left volatile status before them:\n{rendered}"
+        ("▣", cream, true, false),
+        "a recovered picture must render a plain white chip while the head keeps the history"
     );
 }
 
 #[test]
-fn narrow_audio_retry_keeps_cost_and_hides_the_whole_tag_summary() {
-    let draft = labeled_draft("retry", audio_progress_artifacts(audio_retry_slot(2))).with_costs(
-        ArtifactCosts::default().charged(Artifact::Sound, GenerationCost::from_nanos(2_100_000)),
-    );
-    let app = seeded(vec![draft]);
-    let buffer = rendered_buffer_at(&app, 70, 30);
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let audio_row = (meta_row..buffer.area.height)
-        .find(|row| row_text(&buffer, *row).contains("· audio"))
-        .expect("inactive audio retry row must remain visible");
-    let artifacts = (meta_row..=audio_row)
-        .map(|row| row_text(&buffer, row))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_eq!(
-        (
-            artifacts.contains("$.0021"),
-            artifacts.contains("retry 2/3"),
-            artifacts.contains("paused"),
-            artifacts.contains("2 ✗"),
-            artifacts.contains("casual"),
-            artifacts.contains("statement"),
-            artifacts.contains("b1"),
-        ),
-        (true, false, false, false, false, false, false),
-        "narrow audio retry clipped its cost or sliced the compact tag summary:\n{artifacts}"
-    );
-}
-
-#[test]
-fn recovered_picture_keeps_collapsed_tags_at_the_audio_anchor() {
-    let app = seeded(vec![labeled_draft("whilst", recovered_priced_artifacts(2))]);
-    let buffer = rendered_buffer(&app);
-    let (audio_cost_column, audio_row) = position_of(&buffer, "$.0100");
-    let (register_column, register_row) = position_of(&buffer, "casual");
-    let (_, picture_row) = position_of(&buffer, "picture.jpg");
-    let picture = row_text(&buffer, picture_row);
-    assert_eq!(
-        (
-            register_column,
-            register_row,
-            picture_row,
-            picture.contains("2 ✗"),
-        ),
-        (
-            audio_cost_column
-                + u16::try_from("$.0100".chars().count()).expect("cost width must fit")
-                + 4,
-            audio_row,
-            audio_row + 2,
-            false,
-        ),
-        "a recovered picture moved collapsed sentence tags or retained a local attempt tally"
-    );
-}
-
-#[test]
-fn narrow_recovered_picture_uses_all_three_tag_rows_without_a_local_tally() {
-    let buffer = rendered_buffer_at(
-        &seeded(vec![labeled_draft("whilst", recovered_priced_artifacts(2))]),
-        60,
-        30,
-    );
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (_, audio_row) = position_of(&buffer, "audio.wav");
-    let (_, scene_row) = position_of(&buffer, "scene.json");
-    let (_, picture_row) = position_of(&buffer, "picture.jpg");
-    let (_, register_row) = position_of(&buffer, "casual");
-    let (_, kind_row) = position_of(&buffer, "statement");
-    let (_, level_row) = position_of(&buffer, "b1");
-    let artifact_rows = (meta_row..=picture_row)
-        .map(|row| row_text(&buffer, row))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_eq!(
-        (
-            (register_row, kind_row, level_row),
-            (audio_row, scene_row, picture_row),
-            artifact_rows.contains("2 ✗"),
-        ),
-        (
-            (audio_row, scene_row, picture_row),
-            (meta_row + 1, meta_row + 2, meta_row + 3),
-            false,
-        ),
-        "narrow sentence tags failed to reclaim the rows freed by the local tally"
-    );
-}
-
-#[test]
-fn collapsed_cached_artifacts_put_all_tags_after_the_common_status_gap() {
+fn collapsed_cached_artifacts_keep_tags_on_the_chip_row_without_status_text() {
     let app = seeded(vec![labeled_draft("whilst", cached_artifacts())]);
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (cached_column, _) = position_of(&buffer, "cached");
-    let (_, audio_row) = position_of(&buffer, "audio");
-    let (_, scene_row) = position_of(&buffer, "scene");
-    let (_, picture_row) = position_of(&buffer, "picture");
+    let (_, head_row) = position_of(&buffer, "whilst →");
     let (register_column, register_row) = position_of(&buffer, "casual");
-    let (_, kind_row) = position_of(&buffer, "statement");
-    let (_, level_row) = position_of(&buffer, "b1");
-    let dim2 = Color::Rgb(0x5a, 0x59, 0x53);
     assert_eq!(
         (
-            (
-                rendered.contains("sentence:"),
-                (meta_row..=picture_row).any(|row| row_text(&buffer, row).contains('│')),
-                buffer[(cached_column, meta_row)].fg,
-            ),
-            (
-                register_column
-                    == cached_column
-                        + u16::try_from("cached".chars().count()).expect("cached width must fit")
-                        + 4,
-                buffer[(register_column - 2, audio_row)].symbol(),
-            ),
-            (
-                (audio_row, scene_row, picture_row),
-                (register_row, kind_row, level_row),
-            ),
+            rendered.contains("cached"),
+            rendered.contains("meta.json"),
+            (register_column, register_row),
+            buffer[(11, head_row + 1)].symbol(),
         ),
-        (
-            (false, false, dim2),
-            (true, " "),
-            (
-                (meta_row + 1, meta_row + 2, meta_row + 3),
-                (audio_row, audio_row, audio_row),
-            ),
-        ),
-        "cached artifacts retained chrome or failed to align all collapsed tags after audio status"
-    );
-}
-
-#[test]
-fn narrow_collapsed_tags_wrap_only_across_the_three_plain_artifact_rows() {
-    let terminal = Rect::new(0, 0, 60, 30);
-    let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let rendered = flat(&app);
-    let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (_, audio_row) = position_of(&buffer, "audio.wav");
-    let (_, scene_row) = position_of(&buffer, "scene.json");
-    let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
-    let (_, register_row) = position_of(&buffer, "casual");
-    let (_, kind_row) = position_of(&buffer, "statement");
-    let (_, level_row) = position_of(&buffer, "b1");
-    let artifact_rows = (meta_row..=picture_row)
-        .map(|row| row_text(&buffer, row))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_eq!(
-        (
-            (
-                rendered.contains("sentence:"),
-                artifact_rows.contains('│'),
-                (audio_row, scene_row, picture_row),
-            ),
-            (register_row, kind_row, level_row),
-            link_at(&app, terminal, picture_column, picture_row),
-        ),
-        (
-            (false, false, (meta_row + 1, meta_row + 2, meta_row + 3)),
-            (audio_row, scene_row, picture_row),
-            Some(String::from("/tmp/picture.jpg")),
-        ),
-        "narrow collapsed tags escaped the audio-to-picture rows or retained sentence chrome"
+        (false, false, (27, head_row + 1), "🗀"),
+        "cached artifacts must collapse to plain white chips with the tags right after them"
     );
 }
 
@@ -1352,21 +1211,146 @@ fn too_narrow_collapsed_card_hides_the_atomic_tag_summary() {
         50,
         30,
     );
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (_, picture_row) = position_of(&buffer, "picture.jpg");
-    let artifact_rows = (meta_row..=picture_row)
-        .map(|row| row_text(&buffer, row))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let (_, chip_row) = position_of(&buffer, "🗀");
+    let chips = row_text(&buffer, chip_row);
     assert_eq!(
         (
-            artifact_rows.contains('│'),
-            artifact_rows.contains("casual"),
-            artifact_rows.contains("b1"),
-            artifact_rows.contains("statement"),
+            chips.contains("🗀"),
+            chips.contains("♪"),
+            chips.contains("▣"),
+            chips.contains("casual"),
+            chips.contains("statement"),
+            chips.contains("b1"),
         ),
-        (false, false, false, false),
-        "too-narrow collapsed layout sliced an atomic tag beside the artifact status"
+        (true, true, true, false, false, false),
+        "too-narrow collapsed layout must keep the chips and hide the whole tag summary"
+    );
+}
+
+#[test]
+fn ready_chips_render_black_glyphs_on_the_white_tag_background() {
+    let app = seeded(vec![draft("whilst", priced_artifacts())]);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst →");
+    let ink = Color::Rgb(0x0e, 0x0e, 0x10);
+    let cream = Color::Rgb(0xe6, 0xe3, 0xda);
+    let cells = [11u16, 16, 21]
+        .into_iter()
+        .map(|column| {
+            let cell = &buffer[(column, head_row + 1)];
+            (cell.symbol().to_string(), cell.fg, cell.bg)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        cells,
+        vec![
+            (String::from("🗀"), ink, cream),
+            (String::from("♪"), ink, cream),
+            (String::from("▣"), ink, cream),
+        ],
+        "ready chips must render their glyphs as dark ink on the white tag background"
+    );
+}
+
+#[test]
+fn chips_appear_progressively_and_queued_positions_render_nothing() {
+    let app = seeded(vec![draft("whilst", partial_priced_artifacts())]);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst →");
+    let chips = row_text(&buffer, head_row + 1);
+    assert_eq!(
+        (
+            chips.contains("🗀"),
+            chips.contains("♪"),
+            chips.contains("▣"),
+            chips.contains("queued"),
+        ),
+        (true, false, false, false),
+        "queued positions must stay blank while finished chips appear one by one"
+    );
+}
+
+#[test]
+fn scene_and_picture_work_share_one_spinner_at_the_picture_position() {
+    let artifacts = CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene),
+        ArtifactSlot::fresh(Artifact::Picture),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    );
+    let app = seeded(vec![draft("whilst", artifacts)]).cards_running(Some((0, Artifact::Scene)));
+    let rendered = flat(&app);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst →");
+    let chips = row_text(&buffer, head_row + 1);
+    assert_eq!(
+        (
+            buffer[(21, head_row + 1)].symbol() != " ",
+            chips.contains("ai is working…"),
+            rendered.contains("scene"),
+        ),
+        (true, true, false),
+        "scene work must spin at the picture position with the working phrase on the chip row"
+    );
+}
+
+#[test]
+fn a_ready_scene_with_a_queued_picture_keeps_a_dim_dot_trace() {
+    let artifacts = CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        ArtifactSlot::fresh(Artifact::Picture),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    );
+    let app = seeded(vec![draft("whilst", artifacts)]);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst →");
+    assert_eq!(
+        buffer[(21, head_row + 1)].symbol(),
+        "·",
+        "a paid ready scene with its picture still owed must leave a dim dot at the picture position"
+    );
+}
+
+#[test]
+fn a_discarded_artifact_renders_a_dim_slash_at_its_chip_position() {
+    let artifacts = CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        ArtifactSlot::fresh(Artifact::Picture).discard(),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    );
+    let app = seeded(vec![draft("whilst", artifacts)]);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst →");
+    assert_eq!(
+        buffer[(21, head_row + 1)].symbol(),
+        "⊘",
+        "a discarded artifact must keep its dim slash at the chip position"
+    );
+}
+
+#[test]
+fn a_staged_rewrite_mutes_the_chips_and_keeps_the_staged_tags_visible() {
+    let staged = seeded(vec![labeled_draft("whilst", ready_artifacts())])
+        .sentence_editor_opened_for_register()
+        .sentence_editor_axis_chosen(2);
+    let parked = transit(staged, AppEvent::Cancel).0;
+    let app = transit(parked, AppEvent::Cancel).0;
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst");
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let cream = Color::Rgb(0xe6, 0xe3, 0xda);
+    let folder = &buffer[(11, head_row + 1)];
+    assert_eq!(
+        (
+            folder.symbol(),
+            folder.fg,
+            folder.bg,
+            row_text(&buffer, head_row + 1).contains("formal"),
+        ),
+        ("🗀", gray, cream, true),
+        "a staged rewrite must mute the chip glyphs while the staged tags stay visible"
     );
 }
 
@@ -1824,23 +1808,46 @@ fn cell_of(app: &App, needle: &str) -> (u16, u16) {
 }
 
 #[test]
-fn collapsed_tags_keep_the_meta_artifact_link_on_its_rendered_row() {
+fn clicking_the_folder_chip_targets_the_cards_cache_folder() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let (artifact_column, artifact_row) = cell_of(&app, "meta.json");
-    let (_, audio_row) = cell_of(&app, "audio.wav");
-    let (_, tags_row) = cell_of(&app, "casual");
+    let (folder_column, folder_row) = cell_of(&app, "🗀");
     assert_eq!(
-        (
-            tags_row,
-            link_at(
-                &app,
-                Rect::new(0, 0, 120, 50),
-                artifact_column,
-                artifact_row,
-            ),
-        ),
-        (audio_row, Some(String::from("/tmp/meta.json"))),
-        "the collapsed audio-row tags shifted or swallowed the meta artifact link"
+        link_at(&app, Rect::new(0, 0, 120, 50), folder_column, folder_row),
+        Some(String::from("/tmp")),
+        "the folder chip must target the folder holding the card's assets"
+    );
+}
+
+#[test]
+fn clicking_the_sound_chip_opens_the_audio_file() {
+    let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
+    let (_, chip_row) = cell_of(&app, "🗀");
+    assert_eq!(
+        link_at(&app, Rect::new(0, 0, 120, 50), 16, chip_row),
+        Some(String::from("/tmp/audio.wav")),
+        "the sound chip must target the generated audio file"
+    );
+}
+
+#[test]
+fn clicking_the_picture_chip_opens_the_rendered_page() {
+    let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
+    let (_, chip_row) = cell_of(&app, "🗀");
+    assert_eq!(
+        link_at(&app, Rect::new(0, 0, 120, 50), 21, chip_row),
+        Some(String::from("/tmp/picture.jpg")),
+        "the picture chip must target the rendered picture"
+    );
+}
+
+#[test]
+fn the_chip_gap_between_two_chips_is_not_a_link() {
+    let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
+    let (_, chip_row) = cell_of(&app, "🗀");
+    assert_eq!(
+        link_at(&app, Rect::new(0, 0, 120, 50), 13, chip_row),
+        None,
+        "the gap between two chips must stay inert"
     );
 }
 
@@ -1879,19 +1886,15 @@ fn expanded_editor_below_artifacts_keeps_the_meta_link_on_its_rendered_row() {
 }
 
 #[test]
-fn narrow_sentence_tags_keep_the_downstream_picture_link_aligned() {
+fn a_narrow_chip_row_keeps_the_picture_chip_clickable() {
     let terminal = Rect::new(0, 0, 50, 30);
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
+    let (_, chip_row) = position_of(&buffer, "🗀");
     assert_eq!(
-        (
-            picture_row,
-            link_at(&app, terminal, picture_column, picture_row),
-        ),
-        (meta_row + 3, Some(String::from("/tmp/picture.jpg"))),
-        "wrapped sentence tags detached the downstream picture link from its rendered row"
+        link_at(&app, terminal, 21, chip_row),
+        Some(String::from("/tmp/picture.jpg")),
+        "the narrow chip row lost the picture chip click target"
     );
 }
 
@@ -1917,14 +1920,16 @@ fn expanded_sentence_editor_keeps_the_downstream_picture_link_aligned() {
 }
 
 #[test]
-fn scrolled_sentence_sections_keep_the_selected_artifact_link_aligned() {
-    let terminal = Rect::new(0, 0, 120, 16);
-    let selected = (0..3).fold(
+fn scrolled_chip_rows_keep_the_selected_folder_chip_aligned() {
+    let terminal = Rect::new(0, 0, 120, 10);
+    let selected = (0..5).fold(
         seeded(vec![
             labeled_draft("one", linked_artifacts("one")),
             labeled_draft("two", linked_artifacts("two")),
             labeled_draft("three", linked_artifacts("three")),
             labeled_draft("four", linked_artifacts("four")),
+            labeled_draft("five", linked_artifacts("five")),
+            labeled_draft("six", linked_artifacts("six")),
         ]),
         |app, _| transit(app, AppEvent::NavNext).0,
     );
@@ -1932,16 +1937,16 @@ fn scrolled_sentence_sections_keep_the_selected_artifact_link_aligned() {
     let body_width = scroll_body_width(terminal);
     let app = selected.body_scroll_to_selection(viewport, body_width);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
-    let (_, term_row) = position_of(&buffer, "four");
-    let artifact_row = term_row + 1;
+    let (_, term_row) = position_of(&buffer, "six →");
+    let chip_row = term_row + 1;
     assert_eq!(
         (
             app.body_scroll() > 0,
-            row_text(&buffer, artifact_row).contains("meta.json"),
-            link_at(&app, terminal, 10, artifact_row),
+            row_text(&buffer, chip_row).contains("🗀"),
+            link_at(&app, terminal, 11, chip_row),
         ),
-        (true, true, Some(String::from("/tmp/four.json"))),
-        "scrolling a card with collapsed tags detached its artifact click target from the file row"
+        (true, true, Some(String::from("/tmp"))),
+        "scrolling a collapsed card detached its folder chip click target from the chip row"
     );
 }
 
@@ -2036,13 +2041,13 @@ fn a_finished_artifact_keeps_attempt_history_only_in_the_card_head_and_details()
     let collapsed = seeded(vec![draft("whilst", recovered_picture_artifacts())]);
     let rendered = flat(&collapsed);
     let head = row_containing(&rendered, "whilst →");
-    let picture = row_containing(&rendered, "picture.jpg");
     let expanded = flat(&transit(collapsed, AppEvent::KeyEnter).0);
     assert!(
         head.contains("$.0673  ↻1")
-            && picture.contains("✓ picture.jpg")
-            && !picture.contains("1 ✗")
-            && !picture.contains("1 rejected")
+            && !rendered.contains("picture.jpg")
+            && !rendered.contains("1 ✗")
+            && !rendered.contains("1 rejected")
+            && expanded.contains("✓ picture.jpg")
             && expanded.contains("rejected attempts")
             && expanded.contains("picture 1"),
         "a finished artifact duplicated or hid its attempt history: {rendered}"

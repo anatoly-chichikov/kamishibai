@@ -191,19 +191,20 @@ mod tests {
     }
 
     #[test]
-    fn artifact_file_labels_get_the_hand_pointer_and_plain_cells_get_the_arrow() {
+    fn chip_cells_get_the_hand_pointer_and_plain_cells_get_the_arrow() {
         let app = App::new(pair())
             .with_screen(Screen::YourCards)
             .confirmed_learning("en")
             .cards_started(vec![card("whilst")]);
         assert_eq!(
             (
-                mouse_pointer_at(&app, terminal(), 9, 5),
-                mouse_pointer_at(&app, terminal(), 10, 5),
-                mouse_pointer_at(&app, terminal(), 18, 5),
-                mouse_pointer_at(&app, terminal(), 19, 5),
-                mouse_pointer_at(&app, terminal(), 33, 5),
-                mouse_pointer_at(&app, terminal(), 7, 5),
+                mouse_pointer_at(&app, terminal(), 9, 4),
+                mouse_pointer_at(&app, terminal(), 10, 4),
+                mouse_pointer_at(&app, terminal(), 12, 4),
+                mouse_pointer_at(&app, terminal(), 13, 4),
+                mouse_pointer_at(&app, terminal(), 15, 4),
+                mouse_pointer_at(&app, terminal(), 20, 4),
+                mouse_pointer_at(&app, terminal(), 23, 4),
                 mouse_pointer_at(&app, terminal(), 10, 3),
             ),
             (
@@ -211,11 +212,12 @@ mod tests {
                 MousePointer::Hand,
                 MousePointer::Hand,
                 MousePointer::Arrow,
-                MousePointer::Arrow,
+                MousePointer::Hand,
+                MousePointer::Hand,
                 MousePointer::Arrow,
                 MousePointer::Hand,
             ),
-            "file-backed rows and the legacy tuning head must use the hand while inert cells keep the arrow"
+            "chip cells and the tuning head must use the hand while the gaps keep the arrow"
         );
     }
 

@@ -51,6 +51,20 @@ const STEPS: [(&str, Artifact); 4] = [
     ("picture", Artifact::Picture),
 ];
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
+const AI_WORKING: &str = "ai is working…";
+const CHIP_ICONS: [&str; 3] = ["🗀", "♪", "▣"];
+const CHIP_GAP: usize = 2;
+const CHIP_TAG_GAP: usize = 3;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ChipState {
+    Hidden,
+    Ready,
+    Active,
+    Failed,
+    Discarded,
+    Paused,
+}
 
 struct SummaryLabels {
     tags: super::sentence_labels::HeadTagsLayout,
@@ -196,34 +210,38 @@ fn card_block<'a>(
     lines.extend(card_head(
         draft, idx, focused, expanded, progressed, pending, width,
     ));
-    let step_lines = steps
-        .iter()
-        .map(|kind| {
-            let slot = slot_for(artifacts, *kind);
-            let line = artifact_line(
-                *kind,
-                slot,
-                running,
-                spinner_frame,
-                *kind == Artifact::Meta && draft.meta().is_some(),
-            );
-            (*kind, if pending { line.muted() } else { line })
-        })
-        .collect::<Vec<_>>();
-    if let Some(editor) = editor {
-        lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
-        lines.push(Line::from(""));
-        lines.extend(super::sentence_labels::editor_lines(
-            editor,
-            draft.meta().and_then(CardMeta::sentence_labels),
-            width,
-            super::common::CARD_DETAIL_COLUMN,
-            super::common::CARD_DETAIL_COLUMN,
-        ));
-    } else if let Some(labels) = summary_labels(draft, running, width) {
-        lines.extend(summary_step_lines(step_lines, labels));
-    } else {
-        lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
+    if editor.is_some() || expanded {
+        let step_lines = steps
+            .iter()
+            .map(|kind| {
+                let slot = slot_for(artifacts, *kind);
+                let line = artifact_line(
+                    *kind,
+                    slot,
+                    running,
+                    spinner_frame,
+                    *kind == Artifact::Meta && draft.meta().is_some(),
+                );
+                (*kind, if pending { line.muted() } else { line })
+            })
+            .collect::<Vec<_>>();
+        if let Some(editor) = editor {
+            lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
+            lines.push(Line::from(""));
+            lines.extend(super::sentence_labels::editor_lines(
+                editor,
+                draft.meta().and_then(CardMeta::sentence_labels),
+                width,
+                super::common::CARD_DETAIL_COLUMN,
+                super::common::CARD_DETAIL_COLUMN,
+            ));
+        } else if let Some(labels) = summary_labels(draft, running, width) {
+            lines.extend(summary_step_lines(step_lines, labels));
+        } else {
+            lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
+        }
+    } else if progressed {
+        lines.push(chip_row(draft, running, spinner_frame, pending, width));
     }
     if expanded {
         lines.extend(detail_pane(draft, width, pending).lines);
@@ -320,6 +338,243 @@ fn summary_step_lines<'a>(
             full
         })
         .collect()
+}
+
+fn chip_icon_width() -> usize {
+    CHIP_ICONS
+        .iter()
+        .map(|icon| super::common::display_width(icon))
+        .max()
+        .unwrap_or(1)
+}
+
+fn chip_cell_width() -> usize {
+    chip_icon_width().saturating_add(2)
+}
+
+fn chip_start(position: usize) -> usize {
+    super::common::CARD_DETAIL_COLUMN + position * (chip_cell_width() + CHIP_GAP)
+}
+
+fn chip_tag_start() -> usize {
+    chip_start(CHIP_ICONS.len()) - CHIP_GAP + CHIP_TAG_GAP
+}
+
+fn chip_states(draft: &CardDraft, running: Option<Artifact>) -> [ChipState; 3] {
+    let artifacts = draft.artifacts();
+    [
+        slot_chip_state(
+            artifacts.meta(),
+            draft.meta().is_some(),
+            running == Some(Artifact::Meta),
+        ),
+        slot_chip_state(artifacts.sound(), false, running == Some(Artifact::Sound)),
+        picture_chip_state(artifacts.scene(), artifacts.picture(), running),
+    ]
+}
+
+fn slot_chip_state(slot: &ArtifactSlot, stored: bool, active: bool) -> ChipState {
+    if slot.ready() || stored {
+        return ChipState::Ready;
+    }
+    if slot.discarded() {
+        return ChipState::Discarded;
+    }
+    if slot.failed_terminally() {
+        return ChipState::Failed;
+    }
+    if active {
+        return ChipState::Active;
+    }
+    if slot.tally().retry().is_some() {
+        return ChipState::Paused;
+    }
+    ChipState::Hidden
+}
+
+fn picture_chip_state(
+    scene: &ArtifactSlot,
+    picture: &ArtifactSlot,
+    running: Option<Artifact>,
+) -> ChipState {
+    if picture.ready() {
+        return ChipState::Ready;
+    }
+    if picture.discarded() || scene.discarded() {
+        return ChipState::Discarded;
+    }
+    if scene.failed_terminally() || picture.failed_terminally() {
+        return ChipState::Failed;
+    }
+    if matches!(running, Some(Artifact::Scene | Artifact::Picture)) {
+        return ChipState::Active;
+    }
+    if scene.tally().retry().is_some() || picture.tally().retry().is_some() || scene.ready() {
+        return ChipState::Paused;
+    }
+    ChipState::Hidden
+}
+
+fn chip_cell<'a>(position: usize, state: ChipState, spinner_frame: usize) -> Span<'a> {
+    let icon = CHIP_ICONS[position];
+    let icon_pad = " ".repeat(chip_icon_width() - super::common::display_width(icon));
+    match state {
+        ChipState::Ready => Span::styled(
+            format!(" {icon}{icon_pad} "),
+            super::sentence_labels::tag_style(true),
+        ),
+        ChipState::Active => Span::styled(
+            format!(" {}{icon_pad} ", SPINNER_FRAMES[spinner_frame]),
+            palette::base(),
+        ),
+        ChipState::Failed => Span::styled(format!(" ✗{icon_pad} "), palette::dim()),
+        ChipState::Discarded => Span::styled(format!(" ⊘{icon_pad} "), palette::dim()),
+        ChipState::Paused => Span::styled(format!(" ·{icon_pad} "), palette::dim()),
+        ChipState::Hidden => Span::styled(" ".repeat(chip_cell_width()), palette::base()),
+    }
+}
+
+fn chip_tags(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+    width: usize,
+) -> Option<super::sentence_labels::HeadTagsLayout> {
+    let tags = summary_tags_layout(draft, usize::MAX)?;
+    let working = chip_working_width(draft, running);
+    if chip_tag_start()
+        .saturating_add(tags.row_width(0))
+        .saturating_add(working)
+        > width
+    {
+        return None;
+    }
+    Some(tags)
+}
+
+fn chip_working_width(draft: &CardDraft, running: Option<Artifact>) -> usize {
+    if chip_states(draft, running)
+        .into_iter()
+        .any(|state| state == ChipState::Active)
+    {
+        2 + super::common::display_width(AI_WORKING)
+    } else {
+        0
+    }
+}
+
+fn chip_row<'a>(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+    spinner_frame: usize,
+    pending: bool,
+    width: usize,
+) -> Line<'a> {
+    let states = chip_states(draft, running);
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    spans.push(Span::styled(
+        " ".repeat(super::common::CARD_DETAIL_COLUMN),
+        palette::base(),
+    ));
+    for (position, state) in states.into_iter().enumerate() {
+        if position > 0 {
+            spans.push(Span::styled(" ".repeat(CHIP_GAP), palette::base()));
+        }
+        let cell = chip_cell(position, state, spinner_frame);
+        spans.push(if pending {
+            Span {
+                style: cell.style.fg(palette::DIM),
+                ..cell
+            }
+        } else {
+            cell
+        });
+    }
+    let block_end = chip_start(CHIP_ICONS.len()) - CHIP_GAP;
+    let active = states.into_iter().any(|state| state == ChipState::Active);
+    if let Some(tags) = chip_tags(draft, running, width) {
+        spans.push(Span::styled(
+            " ".repeat(chip_tag_start() - block_end),
+            palette::base(),
+        ));
+        spans.extend(tags.spans_from(0, 0, palette::base()));
+        if active {
+            spans.push(Span::styled("  ", palette::base()));
+            spans.push(Span::styled(AI_WORKING, palette::dim()));
+        }
+    } else if active {
+        spans.push(Span::styled(
+            " ".repeat(chip_tag_start() - block_end),
+            palette::base(),
+        ));
+        spans.push(Span::styled(AI_WORKING, palette::dim()));
+    }
+    Line::from(spans)
+}
+
+/// Click targets on one collapsed card's chip row, as body-relative column
+/// ranges: the folder chip opens the card's cache folder (the parent of the
+/// meta file), the sound chip opens the audio file, and the picture chip opens
+/// the rendered page. Only a ready chip whose file is known is clickable.
+#[must_use]
+pub(crate) fn chip_link_columns(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+) -> Vec<(u16, u16, PathBuf)> {
+    let artifacts = draft.artifacts();
+    let targets = [
+        artifacts
+            .meta()
+            .file()
+            .and_then(|file| file.path().parent().map(Path::to_path_buf)),
+        artifacts
+            .sound()
+            .file()
+            .map(|file| file.path().to_path_buf()),
+        artifacts
+            .picture()
+            .file()
+            .map(|file| file.path().to_path_buf()),
+    ];
+    chip_states(draft, running)
+        .into_iter()
+        .zip(targets)
+        .enumerate()
+        .filter_map(|(position, (state, target))| {
+            if state != ChipState::Ready {
+                return None;
+            }
+            let start = u16::try_from(chip_start(position)).unwrap_or(u16::MAX);
+            let end = u16::try_from(chip_start(position) + chip_cell_width()).unwrap_or(u16::MAX);
+            Some((start, end, target?))
+        })
+        .collect()
+}
+
+/// Return whether the chip-row tag summary fits on one collapsed card.
+#[must_use]
+pub(crate) fn chip_tags_visible(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+    width: usize,
+) -> bool {
+    chip_tags(draft, running, width).is_some()
+}
+
+/// Return whether one chip-row cell belongs to a summary tag.
+#[must_use]
+pub(crate) fn chip_tag_hit_at(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+    width: usize,
+    column: usize,
+) -> bool {
+    let Some(tags) = chip_tags(draft, running, width) else {
+        return false;
+    };
+    let Some(column) = column.checked_sub(chip_tag_start()) else {
+        return false;
+    };
+    tags.hit_at(0, column)
 }
 
 fn paint_sentence_editor_cursor(frame: &mut Frame, area: Rect, app: &App) {
@@ -701,7 +956,7 @@ fn step_state<'a>(
             status_style: row_fg,
             label_style: row_fg,
             line: ArtifactLine {
-                core: vec![Span::styled(String::from("ai is working…"), palette::dim())],
+                core: vec![Span::styled(String::from(AI_WORKING), palette::dim())],
                 tail: Vec::new(),
             },
         };
@@ -1539,14 +1794,18 @@ pub(crate) fn card_layout(
     width: usize,
 ) -> (usize, usize) {
     let steps = step_rows_for(draft, running);
-    let labels = sentence_label_extra_rows(draft, running, editor, expanded, width);
-    let mut rows = head_rows(draft, width)
-        .saturating_add(steps.len())
-        .saturating_add(labels);
-    if expanded {
-        rows = rows.saturating_add(detail_pane_height(draft, width));
+    let progressed = !steps.is_empty();
+    let mut rows = head_rows(draft, width);
+    if editor.is_some() || expanded {
+        let labels = sentence_label_extra_rows(draft, running, editor, expanded, width);
+        rows = rows.saturating_add(steps.len()).saturating_add(labels);
+        if expanded {
+            rows = rows.saturating_add(detail_pane_height(draft, width));
+        }
+    } else {
+        rows = rows.saturating_add(usize::from(progressed));
     }
-    let trailing = usize::from(!steps.is_empty() || labels > 0 || expanded);
+    let trailing = usize::from(progressed || expanded);
     (rows, trailing)
 }
 

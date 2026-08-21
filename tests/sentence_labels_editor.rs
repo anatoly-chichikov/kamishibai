@@ -787,12 +787,11 @@ fn repeating_the_active_legacy_chip_restores_the_empty_baseline() {
 }
 
 #[test]
-fn collapsed_audio_row_tags_hit_only_their_boxes_not_the_plain_gap_or_artifacts() {
+fn chip_row_tags_hit_only_their_boxes_not_the_chips_or_gaps() {
     let terminal = Rect::new(0, 0, 120, 50);
     let collapsed = seeded(priced_card_for("whilst"));
     let term = cell_of(&collapsed, "whilst", 120, 50);
-    let meta = cell_of(&collapsed, "meta.json", 120, 50);
-    let audio = cell_of(&collapsed, "audio.wav", 120, 50);
+    let folder = cell_of(&collapsed, "🗀", 120, 50);
     let register = cell_of(&collapsed, "casual", 120, 50);
     let kind = cell_of(&collapsed, "statement", 120, 50);
     let level = cell_of(&collapsed, "b1", 120, 50);
@@ -800,6 +799,7 @@ fn collapsed_audio_row_tags_hit_only_their_boxes_not_the_plain_gap_or_artifacts(
     let first_gap = (kind.0 - 2, kind.1);
     let second_gap = (level.0 - 2, level.1);
     let status_gap = (register.0 - 2, register.1);
+    let chip_gap = (folder.0 + 3, folder.1);
     let arrow = (
         term.0 + u16::try_from("whilst".chars().count()).expect("term width must fit") + 1,
         term.1,
@@ -830,12 +830,12 @@ fn collapsed_audio_row_tags_hit_only_their_boxes_not_the_plain_gap_or_artifacts(
                 mouse_pointer_at(&collapsed, terminal, status_gap.0, status_gap.1),
             ),
             (
-                sentence_label_event_at(&collapsed, terminal, meta.0, meta.1),
-                mouse_pointer_at(&collapsed, terminal, meta.0, meta.1),
-                sentence_label_event_at(&collapsed, terminal, audio.0, audio.1),
-                mouse_pointer_at(&collapsed, terminal, audio.0, audio.1),
+                sentence_label_event_at(&collapsed, terminal, folder.0, folder.1),
+                mouse_pointer_at(&collapsed, terminal, folder.0, folder.1),
+                sentence_label_event_at(&collapsed, terminal, chip_gap.0, chip_gap.1),
+                mouse_pointer_at(&collapsed, terminal, chip_gap.0, chip_gap.1),
             ),
-            (meta.1, audio.1, register.1, level.1, kind.1),
+            (folder.1, register.1, kind.1, level.1),
         ),
         (
             (
@@ -855,10 +855,10 @@ fn collapsed_audio_row_tags_hit_only_their_boxes_not_the_plain_gap_or_artifacts(
                 MousePointer::Arrow,
             ),
             (None, MousePointer::Arrow, None, MousePointer::Arrow),
-            (None, MousePointer::Hand, None, MousePointer::Hand),
-            (meta.1, meta.1 + 1, audio.1, audio.1, audio.1),
+            (None, MousePointer::Hand, None, MousePointer::Arrow),
+            (term.1 + 1, folder.1, folder.1, folder.1),
         ),
-        "collapsed audio-row tags leaked hits into the status gap, artifact cells, inter-chip gaps, or head"
+        "chip-row tags leaked hits into the status gap, chip cells, inter-chip gaps, or head"
     );
 }
 
@@ -906,12 +906,10 @@ fn partial_narrow_card_hides_atomic_tags_and_keeps_the_card_head_entry() {
 }
 
 #[test]
-fn narrow_layout_keeps_wrapped_sentence_tags_clickable_on_the_three_artifact_rows() {
+fn narrow_layout_keeps_the_chip_row_tags_clickable_on_one_row() {
     let terminal = Rect::new(0, 0, 60, 30);
     let collapsed = seeded(priced_card_for("whilst"));
-    let audio = cell_of(&collapsed, "audio", 60, 30);
-    let scene = cell_of(&collapsed, "scene", 60, 30);
-    let picture = cell_of(&collapsed, "picture", 60, 30);
+    let folder = cell_of(&collapsed, "🗀", 60, 30);
     let register = cell_of(&collapsed, "casual", 60, 30);
     let kind = cell_of(&collapsed, "statement", 60, 30);
     let level = cell_of(&collapsed, "b1", 60, 30);
@@ -927,7 +925,7 @@ fn narrow_layout_keeps_wrapped_sentence_tags_clickable_on_the_three_artifact_row
             mouse_pointer_at(&collapsed, terminal, kind.0, kind.1),
         ),
         (
-            (audio.1, scene.1, picture.1),
+            (folder.1, folder.1, folder.1),
             focus.clone(),
             MousePointer::Hand,
             focus.clone(),
@@ -935,7 +933,7 @@ fn narrow_layout_keeps_wrapped_sentence_tags_clickable_on_the_three_artifact_row
             focus,
             MousePointer::Hand,
         ),
-        "narrow layout detached wrapped sentence tags from the three plain artifact rows or their hit regions"
+        "narrow layout detached the chip-row tags from their single row or their hit regions"
     );
 }
 
@@ -948,7 +946,7 @@ fn clicking_an_unfocused_cards_tags_selects_it_and_opens_its_editor() {
     ]);
     let term = cell_of(&collapsed, "thereafter", 120, 50);
     let first_tag = cell_of(&collapsed, "casual", 120, 50);
-    let tag = (first_tag.0, term.1 + 2);
+    let tag = (first_tag.0, term.1 + 1);
     let event = sentence_label_event_at(&collapsed, terminal, tag.0, tag.1)
         .expect("the unfocused card tag must be a mouse target");
     let opened = transit(collapsed, event).0;
