@@ -1162,7 +1162,8 @@ fn ctrl_g_keeps_multiple_independent_pending_cards_in_one_bulk_request() {
         AppEvent::SentenceLabelChoose(LabelEditorRow::Register, 2),
     )
     .0;
-    let collapsed = transit(first, AppEvent::Cancel).0;
+    let parked = transit(first, AppEvent::Cancel).0;
+    let collapsed = transit(parked, AppEvent::Cancel).0;
     let selected = transit(collapsed, AppEvent::NavNext).0;
     let second = transit(selected, AppEvent::SentenceLabelFocus(LabelEditorRow::Note)).0;
     let second = transit(second, AppEvent::KeyChar('x')).0;

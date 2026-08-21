@@ -1142,6 +1142,22 @@ impl App {
         self
     }
 
+    /// Return the app with every reviewable row's sense list opened.
+    #[must_use]
+    pub fn sense_lists_expanded_all(mut self) -> Self {
+        self.review.open = OpenSenseLists(
+            self.review
+                .candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| candidate.ok())
+                .map(|(row, _)| row)
+                .collect(),
+        );
+        self.review.focus = ReviewFocus::Head(self.review.focus.row());
+        self
+    }
+
     /// Return the app with the review walk moved one position down, entering
     /// and leaving open sense lists without closing them.
     #[must_use]
@@ -1339,6 +1355,14 @@ impl App {
         self
     }
 
+    /// Return the app with every card's block expanded, editors closed.
+    #[must_use]
+    pub fn cards_expanded_all(mut self) -> Self {
+        self.cards.editor = None;
+        self.cards.expanded = ExpandedCards((0..self.cards.drafts.len()).collect());
+        self
+    }
+
     /// Return the app with the editor parked: closed while its card stays
     /// expanded, every staged edit already living in the draft.
     #[must_use]
@@ -1347,29 +1371,35 @@ impl App {
         self
     }
 
-    /// Return the app with the card walk moved one position down: through the
-    /// open editor's rows, then out onto the next card head, parking the
-    /// editor without collapsing its card.
+    /// Return the app with the card walk moved one position down: from an
+    /// expanded head into its own editor, through the editor's rows, then out
+    /// onto the next card head, parking the editor without collapsing its
+    /// card. The walk saturates inside the last card's editor.
     #[must_use]
     pub fn card_focus_next(mut self) -> Self {
-        if let Some(editor) = self.cards.editor.take()
-            && editor.row() != LabelEditorRow::Note
-        {
-            self.cards.editor = Some(editor.row_next());
-            return self;
+        let last = self.cards.drafts.len().saturating_sub(1);
+        if let Some(editor) = self.cards.editor.take() {
+            if editor.row() != LabelEditorRow::Note {
+                self.cards.editor = Some(editor.row_next());
+                return self;
+            }
+            if self.cards.selected >= last {
+                self.cards.editor = Some(editor);
+                return self;
+            }
+        } else if self.card_expanded() && self.card_tunable() {
+            return self.sentence_editor_opened_for_register();
         }
         self.cards.following = false;
-        if !self.cards.drafts.is_empty() {
-            let last = self.cards.drafts.len() - 1;
-            if self.cards.selected < last {
-                self.cards.selected += 1;
-            }
+        if !self.cards.drafts.is_empty() && self.cards.selected < last {
+            self.cards.selected += 1;
         }
         self
     }
 
     /// Return the app with the card walk moved one position up: through the
-    /// open editor's rows, then out onto this card's own head.
+    /// open editor's rows onto this card's own head, and from a head into the
+    /// previous card — entering a parked card's editor at its note row.
     #[must_use]
     pub fn card_focus_previous(mut self) -> Self {
         if let Some(editor) = self.cards.editor.take() {
@@ -1383,6 +1413,9 @@ impl App {
         self.cards.following = false;
         if self.cards.selected > 0 {
             self.cards.selected -= 1;
+            if self.card_expanded() && self.card_tunable() {
+                return self.sentence_editor_opened_for_note();
+            }
         }
         self
     }

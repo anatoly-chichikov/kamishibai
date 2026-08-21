@@ -793,6 +793,11 @@ fn detail_pane(draft: &CardDraft, width: usize, pending: bool) -> DetailPane<'_>
     lines.push(Line::from(""));
     if let Some(meta) = draft.meta() {
         lines.extend(meta_preview(meta, indent, width, pending));
+    } else if let Some(previous) = draft
+        .rewrite()
+        .and_then(crate::session::CardRewrite::previous)
+    {
+        lines.extend(meta_preview(previous, indent, width, true));
     } else {
         lines.push(Line::from(vec![
             Span::styled(indent, palette::base()),
@@ -1725,12 +1730,15 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         } else {
             hints.push(controls.secondary_toggle());
         }
+        if app.any_card_expanded() {
+            hints.push(super::common::FooterHint::secondary("C", "collapse"));
+        }
         if census.unfinished() {
             hints.push(super::common::FooterHint::secondary("Tab", "next"));
         }
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
-        if app.any_card_expanded() {
-            hints.push(super::common::FooterHint::ghost("C", "collapse"));
+        if !app.any_card_expanded() && !app.cards().is_empty() {
+            hints.push(super::common::FooterHint::ghost("C", "expand"));
         }
         if app.can_start_new_batch() {
             hints.push(super::common::new_batch_hint(app.new_batch_pending()));

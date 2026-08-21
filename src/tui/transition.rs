@@ -154,6 +154,18 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         {
             (app, Side::None)
         }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('c' | 'C'))
+            if !app.candidates().is_empty() =>
+        {
+            if app.any_sense_list_open() || app.sentence_settings_editor().is_some() {
+                (
+                    app.sentence_settings_closed().sense_lists_collapsed(),
+                    Side::None,
+                )
+            } else {
+                (app.sense_lists_expanded_all(), Side::None)
+            }
+        }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar(_))
             if app.sentence_settings_editor().is_some() =>
         {
@@ -164,11 +176,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 && !app.candidates().is_empty() =>
         {
             (app.sentence_settings_opened(), Side::None)
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('c' | 'C'))
-            if app.any_sense_list_open() =>
-        {
-            (app.sense_lists_collapsed(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::Cancel) if app.focused_sense_list_open() => {
             (app.sense_list_closed(), Side::None)
@@ -344,6 +351,15 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             };
             (next, Side::None)
         }
+        (Screen::YourCards, None, AppEvent::KeyChar('c' | 'C'))
+            if !sentence_note_focused(&app) && !app.cards().is_empty() =>
+        {
+            if app.any_card_expanded() {
+                (app.cards_collapsed(), Side::None)
+            } else {
+                (app.cards_expanded_all(), Side::None)
+            }
+        }
         (Screen::YourCards, None, AppEvent::KeyChar(symbol)) if app.sentence_editor().is_some() => {
             (app.sentence_editor_typed(symbol), Side::None)
         }
@@ -358,9 +374,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::YourCards, None, AppEvent::KeyChar(' ')) if app.card_tunable() => {
             (app.sentence_editor_opened_for_register(), Side::None)
-        }
-        (Screen::YourCards, None, AppEvent::KeyChar('c' | 'C')) if app.any_card_expanded() => {
-            (app.cards_collapsed(), Side::None)
         }
         (Screen::YourCards, None, AppEvent::NextUnfinished) => (app.card_jumped(true), Side::None),
         (Screen::YourCards, None, AppEvent::PreviousUnfinished) => {

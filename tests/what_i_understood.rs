@@ -1050,7 +1050,7 @@ fn c_collapses_every_expanded_block_on_what_i_understood() {
 }
 
 #[test]
-fn c_is_swallowed_while_generation_guidance_is_open() {
+fn c_collapses_open_lists_and_closes_guidance_together() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
@@ -1059,7 +1059,59 @@ fn c_is_swallowed_while_generation_guidance_is_open() {
     let guided = transit(opened, AppEvent::KeyChar('S')).0;
     let pressed = transit(guided, AppEvent::KeyChar('c')).0;
     assert!(
-        pressed.sense_list_open(0) && pressed.sentence_settings_editor().is_some(),
-        "a printable key leaked through the open guidance editor into collapse all"
+        !pressed.any_sense_list_open() && pressed.sentence_settings_editor().is_none(),
+        "collapse all left the guidance editor or an open sense list behind"
+    );
+}
+
+#[test]
+fn c_opens_every_reviewable_sense_list_when_none_is_open() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![
+            bank_candidate(),
+            WordCandidate::new("сообщение", "Слово на русском, не на target-языке.", false),
+        ]);
+    let expanded = transit(app, AppEvent::KeyChar('c')).0;
+    assert!(
+        expanded.sense_list_open(0) && !expanded.sense_list_open(1),
+        "the collapse toggle failed to open every reviewable list while skipping off-language rows"
+    );
+}
+
+#[test]
+fn focused_add_more_row_highlight_starts_where_sense_row_highlights_start() {
+    fn first_highlighted_column(app: &App, needle: &str) -> Option<u16> {
+        let backend = TestBackend::new(140, 24);
+        let mut terminal = Terminal::new(backend).expect("backend");
+        terminal.draw(|frame| draw(frame, app)).expect("draw");
+        let buffer = terminal.backend().buffer();
+        for row in 0..buffer.area.height {
+            let rendered = (0..buffer.area.width)
+                .map(|column| buffer[(column, row)].symbol())
+                .collect::<String>();
+            if rendered.contains(needle) {
+                return (0..buffer.area.width)
+                    .find(|column| buffer[(*column, row)].bg == Color::Rgb(0x1c, 0x1c, 0x1f));
+            }
+        }
+        None
+    }
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let first = transit(opened, AppEvent::NavNext).0;
+    let on_sense = transit(first, AppEvent::NavNext).0;
+    let add_more = (0..2).fold(on_sense.clone(), |walked, _| {
+        transit(walked, AppEvent::NavNext).0
+    });
+    assert!(
+        first_highlighted_column(&add_more, "+ add more").is_some()
+            && first_highlighted_column(&add_more, "+ add more")
+                == first_highlighted_column(&on_sense, "«берег»"),
+        "the focused add-more row painted a shorter highlight than the sense rows"
     );
 }

@@ -711,7 +711,7 @@ fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
         palette::base()
     };
     let mut spans = vec![
-        Span::styled(" ".repeat(indent), palette::base()),
+        Span::styled(" ".repeat(indent), pad_style),
         Span::styled(marker, style),
         Span::styled(text, style),
     ];
@@ -790,7 +790,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         }
         hints.push(controls.secondary_toggle());
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
-        hints.push(super::common::FooterHint::ghost("C", "collapse"));
+        hints.push(super::common::FooterHint::secondary("C", "collapse"));
     } else {
         if count > 0 {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
@@ -803,7 +803,9 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         if app.any_sense_list_open() {
-            hints.push(super::common::FooterHint::ghost("C", "collapse"));
+            hints.push(super::common::FooterHint::secondary("C", "collapse"));
+        } else if app.candidates().iter().any(WordCandidate::ok) {
+            hints.push(super::common::FooterHint::ghost("C", "expand"));
         }
         hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
     }

@@ -2221,7 +2221,7 @@ fn up_from_the_register_row_parks_the_editor_on_this_card_head() {
 }
 
 #[test]
-fn walking_into_a_parked_card_lands_on_its_head_not_inside() {
+fn walking_back_onto_a_parked_card_reenters_its_editor_at_the_note_row() {
     let parked = seeded(vec![
         labeled_draft("whilst", ready_artifacts()),
         labeled_draft("at the end", ready_artifacts()),
@@ -2232,11 +2232,80 @@ fn walking_into_a_parked_card_lands_on_its_head_not_inside() {
     assert_eq!(
         (
             back.card_selected(),
-            back.sentence_editor().is_none(),
+            back.sentence_editor()
+                .map(kamishibai::tui::SentenceLabelsEditor::row),
             back.card_expanded_at(0),
         ),
-        (0, true, true),
-        "walking back onto a parked card entered its editor instead of landing on the head"
+        (0, Some(LabelEditorRow::Note), true),
+        "walking back onto a parked card stopped at the head instead of reentering its tune rows"
+    );
+}
+
+#[test]
+fn down_from_a_parked_expanded_head_enters_its_editor_on_register() {
+    let parked = transit(
+        seeded(vec![
+            labeled_draft("whilst", ready_artifacts()),
+            labeled_draft("at the end", ready_artifacts()),
+        ])
+        .sentence_editor_opened_for_register(),
+        AppEvent::Cancel,
+    )
+    .0;
+    let entered = transit(parked, AppEvent::NavNext).0;
+    assert_eq!(
+        (
+            entered.card_selected(),
+            entered
+                .sentence_editor()
+                .map(kamishibai::tui::SentenceLabelsEditor::row),
+        ),
+        (0, Some(LabelEditorRow::Register)),
+        "walking down from an expanded head skipped its own tune rows"
+    );
+}
+
+#[test]
+fn down_at_the_last_note_row_stays_inside_the_editor() {
+    let opened =
+        seeded(vec![labeled_draft("whilst", ready_artifacts())]).sentence_editor_opened_for_note();
+    let pressed = transit(opened, AppEvent::NavNext).0;
+    assert!(
+        pressed
+            .sentence_editor()
+            .is_some_and(|editor| editor.row() == LabelEditorRow::Note),
+        "the walk fell off the bottom of the last card and cycled its editor"
+    );
+}
+
+#[test]
+fn an_expanded_card_with_an_active_rewrite_keeps_its_previous_meta_visible() {
+    let rewriting = labeled_draft("whilst", ready_artifacts())
+        .staging_rewrite(
+            kamishibai::session::SentenceLabelSelection::empty()
+                .choosing(SentenceAxis::Register, 2),
+            "make it formal",
+        )
+        .starting_rewrite();
+    let app = seeded(vec![rewriting]).cards_running(Some((0, Artifact::Meta)));
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let rendered = flat(&opened);
+    assert!(
+        rendered.contains("the phrase")
+            && rendered.contains("Example with whilst.")
+            && !rendered.contains("meta not generated yet"),
+        "expanding a card mid-rewrite hid its previous meta instead of showing it struck: {rendered}"
+    );
+}
+
+#[test]
+fn c_collapses_all_from_a_carousel_row_of_the_open_editor() {
+    let opened = seeded(vec![labeled_draft("whilst", ready_artifacts())])
+        .sentence_editor_opened_for_register();
+    let collapsed = transit(opened, AppEvent::KeyChar('c')).0;
+    assert!(
+        !collapsed.any_card_expanded() && collapsed.sentence_editor().is_none(),
+        "collapse all was swallowed by a carousel row that owns no typing"
     );
 }
 
@@ -2307,5 +2376,20 @@ fn c_is_swallowed_while_the_note_row_owns_typing() {
             .is_some_and(|editor| editor.note().value().contains('c'))
             && typed.card_expanded(),
         "a printable key leaked through the note row into collapse all"
+    );
+}
+
+#[test]
+fn c_expands_every_card_when_none_is_expanded() {
+    let collapsed = seeded(vec![
+        labeled_draft("whilst", ready_artifacts()),
+        draft("wreck", CardArtifacts::default()),
+    ]);
+    let expanded = transit(collapsed, AppEvent::KeyChar('c')).0;
+    assert!(
+        expanded.card_expanded_at(0)
+            && expanded.card_expanded_at(1)
+            && expanded.sentence_editor().is_none(),
+        "the collapse toggle failed to expand every card from the fully collapsed view"
     );
 }

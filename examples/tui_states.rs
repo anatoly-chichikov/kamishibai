@@ -720,7 +720,7 @@ fn build_states() -> Vec<(String, App)> {
         .sentence_editor_parked()
         .card_revealed(1)
         .sentence_editor_parked()
-        .card_focus_next();
+        .card_jumped(true);
     let legacy = cards_with_first(legacy_card(
         "dépaysement",
         "Ce dépaysement l'a réveillée d'un coup.",
