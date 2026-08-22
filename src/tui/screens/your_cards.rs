@@ -1750,7 +1750,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         let mut hints = Vec::new();
         hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
         if app.card_tunable() {
-            hints.push(super::common::FooterHint::secondary("Enter", "tune"));
+            hints.push(super::common::FooterHint::secondary("Enter/→", "tune"));
         } else {
             hints.push(controls.secondary_toggle());
         }

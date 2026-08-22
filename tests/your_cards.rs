@@ -364,7 +364,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
         .find("[Ctrl+G] regenerate")
         .expect("card footer must show regeneration");
     let tune = rendered
-        .find("[Enter] tune")
+        .find("[Enter/→] tune")
         .expect("card footer must show tuning");
     let target = rendered
         .find("whilst → Example with whilst.")
@@ -389,8 +389,8 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
             && !rendered.contains("picture")
             && rendered.contains("RU → EN")
             && rendered.contains("[Tab] next")
-            && rendered.contains("[Enter] tune")
-            && !rendered.contains("[Enter] toggle")
+            && rendered.contains("[Enter/→] tune")
+            && !rendered.contains("[Enter/→] toggle")
             && !rendered.contains("[Space] tune")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
@@ -432,8 +432,8 @@ fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
         rendered.contains("your cards")
             && rendered.contains("all done")
             && rendered.contains("[↑↓] nav")
-            && rendered.contains("[Enter] tune")
-            && !rendered.contains("[Enter] toggle")
+            && rendered.contains("[Enter/→] tune")
+            && !rendered.contains("[Enter/→] toggle")
             && !rendered.contains("[Space] tune")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
@@ -517,7 +517,7 @@ fn armed_generation_stop_makes_escape_the_only_primary_action() {
     assert!(
         rendered.contains("[Esc] again")
             && !rendered.contains("[Ctrl+G] regenerate")
-            && !rendered.contains("[Enter] tune"),
+            && !rendered.contains("[Enter/→] tune"),
         "armed generation stop competed with generation actions: {rendered}"
     );
 }
@@ -529,7 +529,7 @@ fn draining_generation_says_stopping_without_offering_more_work() {
     assert!(
         rendered.contains("stopping…")
             && !rendered.contains("[Ctrl+G] regenerate")
-            && !rendered.contains("[Enter] tune")
+            && !rendered.contains("[Enter/→] tune")
             && !rendered.contains("[Esc] again"),
         "draining generation looked active or offered another action: {rendered}"
     );
@@ -863,12 +863,27 @@ fn enter_opens_the_editor_while_enter_closes_and_escape_peels_layers() {
 }
 
 #[test]
-fn right_arrow_on_a_collapsed_tunable_card_keeps_the_editor_closed() {
+fn the_side_arrows_open_and_close_the_focused_card_without_touching_its_carousels() {
     let start = seeded(vec![labeled_draft("whilst", ready_artifacts())]);
-    let pressed = transit(start, AppEvent::CursorRight).0;
-    assert!(
-        pressed.sentence_editor().is_none() && !pressed.card_expanded(),
-        "a side arrow opened the card editor even though only Enter may open it"
+    let opened = transit(start, AppEvent::CursorRight).0;
+    let parked = transit(opened.clone(), AppEvent::Cancel).0;
+    let reopened = transit(parked.clone(), AppEvent::CursorRight).0;
+    let collapsed = transit(parked, AppEvent::CursorLeft).0;
+    assert_eq!(
+        (
+            (opened.card_expanded(), opened.sentence_editor().is_some()),
+            (
+                reopened.card_expanded(),
+                reopened.sentence_editor().is_some()
+            ),
+            (
+                collapsed.card_expanded(),
+                collapsed.sentence_editor().is_some()
+            ),
+            opened.cards_pending(),
+        ),
+        ((true, true), (true, true), (false, false), 0),
+        "the side arrows must open the card, reopen a parked head, and collapse it without staging an edit"
     );
 }
 
@@ -1600,7 +1615,7 @@ fn active_rewrite_shows_normal_generation_without_pending_tags_or_count() {
             && !rendered.contains("b1")
             && !rendered.contains("statement")
             && !rendered.contains("Example with whilst.")
-            && !rendered.contains("[Enter] tune")
+            && !rendered.contains("[Enter/→] tune")
             && !rendered.contains("[Space] tune"),
         "active rewrite retained staged styling or exposed stale generated metadata: {rendered}"
     );

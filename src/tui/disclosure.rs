@@ -38,10 +38,17 @@ impl DisclosureControls {
     }
 
     /// Classify a raw app event against the shared disclosure contract.
+    ///
+    /// The side arrows belong to the focused horizontal control wherever one
+    /// exists — a carousel, a text cursor, a picker column. A row that owns no
+    /// such control lets them through to its own disclosure, so `→` opens what
+    /// `Enter` opens and `←` closes what `Esc` closes.
     pub(crate) fn intent(self, event: &AppEvent) -> DisclosureIntent {
         match event {
             AppEvent::KeyEnter if self.open => DisclosureIntent::Close,
             AppEvent::KeyEnter => DisclosureIntent::Open,
+            AppEvent::CursorRight if !self.open => DisclosureIntent::Open,
+            AppEvent::CursorLeft if self.open => DisclosureIntent::Close,
             AppEvent::KeyChar(' ') if self.open && self.action.is_some() => {
                 DisclosureIntent::Action
             }
@@ -51,11 +58,15 @@ impl DisclosureControls {
 
     /// Return the secondary footer hint for the open/close toggle.
     pub(crate) fn secondary_toggle(self) -> FooterHint {
-        FooterHint::secondary("Enter", "toggle")
+        FooterHint::secondary(self.toggle_key(), "toggle")
     }
 
     /// Return the Space action hint when the open pane has an action.
     pub(crate) fn primary_action(self) -> Option<FooterHint> {
         self.action.map(|label| FooterHint::primary("Space", label))
+    }
+
+    fn toggle_key(self) -> &'static str {
+        if self.open { "Enter/←" } else { "Enter/→" }
     }
 }

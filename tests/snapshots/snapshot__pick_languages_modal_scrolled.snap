@@ -21,4 +21,4 @@ expression: "render_sized(&opened_picker(), 96, 20)"
              └───────────────────────────────────────────────────────────────────┘              
                                                       ai may be wrong, please verify results    
                                                                                                 
-    step 2/3  nothing to make  [Enter] toggle  [Esc] back  [D] drop  [↑↓] nav  [Ctrl+C] quit
+    step 2/3  nothing to make          [Enter/→] toggle  [Esc] back  [D] drop  [Ctrl+C] quit

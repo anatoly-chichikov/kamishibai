@@ -252,7 +252,7 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
             && rendered.contains("expel")
             && rendered.contains("at the end")
             && rendered.contains("[↑↓]")
-            && rendered.contains("[Enter] toggle")
+            && rendered.contains("[Enter/→] toggle")
             && rendered.contains("[Ctrl+G]")
             && rendered.contains("generate")
             && rendered.contains("[Esc] back")
@@ -371,20 +371,20 @@ fn expanded_sense_focus_moves_inside_without_dimming_the_parent() {
 }
 
 #[test]
-fn right_arrow_on_a_collapsed_multi_sense_row_keeps_the_list_closed() {
+fn right_arrow_on_a_collapsed_multi_sense_row_opens_its_list() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
         .understood(vec![bank_candidate()]);
     let pressed = transit(app, to_app(press(KeyCode::Right)).expect("map")).0;
     assert!(
-        !pressed.sense_list_open(0),
-        "a side arrow opened the sense list even though only Enter may open it"
+        pressed.sense_list_open(0),
+        "the right arrow left the focused sense list closed"
     );
 }
 
 #[test]
-fn left_arrow_inside_an_open_sense_list_keeps_it_open_with_selection_intact() {
+fn left_arrow_inside_an_open_sense_list_closes_it_with_the_selection_kept() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
@@ -396,8 +396,8 @@ fn left_arrow_inside_an_open_sense_list_keeps_it_open_with_selection_intact() {
     let toggled = transit(third, AppEvent::KeyChar(' ')).0;
     let pressed = transit(toggled, to_app(press(KeyCode::Left)).expect("map")).0;
     assert!(
-        pressed.sense_list_open(0) && pressed.candidates()[0].selected_senses() == [0, 2],
-        "a side arrow closed the sense list even though only Enter and Esc may close it"
+        !pressed.sense_list_open(0) && pressed.candidates()[0].selected_senses() == [0, 2],
+        "the left arrow either kept the sense list open or discarded what was already committed"
     );
 }
 

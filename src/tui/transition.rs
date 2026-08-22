@@ -206,6 +206,14 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         {
             (app.sense_toggled(), Side::None)
         }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorRight)
+            if !app.focused_sense_list_open() =>
+        {
+            (app.sense_list_toggled(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorLeft) if app.focused_sense_list_open() => {
+            (app.sense_list_closed(), Side::None)
+        }
         (Screen::WhatIUnderstood, None, AppEvent::CursorLeft) => (app, Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::CursorRight) => (app, Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::NavPrev | AppEvent::KeyChar('k' | 'K'))
@@ -381,7 +389,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_focus_previous(), Side::None),
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_focus_next(), Side::None),
-        (Screen::YourCards, None, AppEvent::KeyEnter)
+        (Screen::YourCards, None, AppEvent::KeyEnter | AppEvent::CursorRight)
             if app.card_expanded() && app.sentence_editor().is_none() && app.card_tunable() =>
         {
             (app.sentence_editor_opened_for_register(), Side::None)
