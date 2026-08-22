@@ -134,9 +134,18 @@ proceed to card generation as separate cards, while `ok=false` rows stay visible
 with a struck-through term so the user can see what was rejected and why. The
 row is the reference implementation of the shared grammar — index `Ink::Aside`,
 term `Ink::Subject`, dash `Ink::Aside`, gloss `Ink::Detail` — and the cursor
-changes none of it, only the `HL` background beneath the whole line. A chosen
-sense is marked by its `✓` plus the step from `Ink::Detail` to `Ink::Subject`;
-an unchosen one and the `+ add more` row stay at `Ink::Detail`.
+changes none of it, only the `HL` background beneath the whole line. An open
+sense list continues that ladder rather than breaking it: a chosen sense is
+marked by its `✓` and reads at `Ink::Detail`, exactly like the same gloss on a
+collapsed row, while an unchosen one sits a rank below at `Ink::Aside`. The
+`+ add more` row is an action rather than a meaning and stays at `Ink::Detail`.
+The head of an open word stops repeating one of the senses listed beneath it:
+it carries the `multiple meanings:` heading whenever there is more than one
+sense to choose between — the same heading a collapsed word with several chosen
+meanings shows, so the heading appears exactly when the `X/Y` counter does — and
+carries nothing at all when the list below holds a single row. One `head_gloss`
+answers the renderer, the height counter, and both scroll-snap sites, and
+`screen_lines_match_the_counted_height` fails if they ever disagree.
 
 ## Batch generation guidance
 

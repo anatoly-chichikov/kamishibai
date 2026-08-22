@@ -197,5 +197,13 @@ Sleep 800ms
 Screenshot "live/33-your-cards-parked.png"
 Sleep 250ms
 
+# index 32 — an open sense list: the head names its meanings instead of
+# repeating one, and the rows step down from chosen to unchosen
+Type "32"
+Space
+Sleep 800ms
+Screenshot "live/34-open-sense-list.png"
+Sleep 250ms
+
 Type "q"
 Sleep 250ms

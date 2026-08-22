@@ -23,7 +23,7 @@ use crossterm::terminal::{
 use kamishibai::session::{
     Artifact, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptFault, AttemptPenalties,
     AttemptScorecard, AxisSet, CardArtifacts, CardDraft, CardMeta, GenerationCost, LanguagePair,
-    Register, SentenceAxis, SentenceBatchSettings, SentenceKind, SentenceLabelSelection,
+    Register, Sense, SentenceAxis, SentenceBatchSettings, SentenceKind, SentenceLabelSelection,
     SentenceLabels, SentenceLevel, SentenceTypeMix, WordCandidate,
 };
 use kamishibai::tui::{
@@ -603,6 +603,32 @@ fn build_states() -> Vec<(String, App)> {
         .clone()
         .with_alternates(vec![String::from("EN"), String::from("NL")]);
 
+    let polysemous = App::new(pair())
+        .seeded_blob("canard\nchouette")
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("fr")
+        .understood(vec![
+            WordCandidate::with_senses(
+                "canard",
+                vec![
+                    Sense::tagged("noun; a duck on a pond or a plate", "animal"),
+                    Sense::tagged("noun; a planted newspaper hoax", "press"),
+                    Sense::tagged("noun; a wrong note held far too long", "music"),
+                ],
+                0,
+                true,
+            ),
+            WordCandidate::new(
+                "chouette",
+                "noun an owl; colloquially an adjective meaning neat or lovely",
+                true,
+            ),
+        ])
+        .sense_list_toggled()
+        .review_focus_next()
+        .review_focus_next()
+        .sense_toggled();
+
     let language_pair_modal = transit(
         review.clone(),
         AppEvent::OpenLanguagePicker(PickerSection::Learning),
@@ -936,6 +962,10 @@ fn build_states() -> Vec<(String, App)> {
         (
             String::from("20 · Your cards · parked multi-expanded"),
             parked_multi,
+        ),
+        (
+            String::from("02f · What I understood · open sense list"),
+            polysemous,
         ),
     ]
 }

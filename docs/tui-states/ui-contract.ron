@@ -298,7 +298,7 @@ Contract(
                                 Bind(DataPath("WordCandidate::sense().tag() when present")),
                             ]),
                             source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 101),
-                            purpose: "shows one row per candidate: target word, selected/total sense count, first selected support-language sense, and optional sense tag",
+                            purpose: "shows one row per candidate: target word, selected/total sense count, and — while the list is collapsed — the first selected support-language sense with its optional tag; opening the list retitles the head to the multiple meanings: heading whenever there is more than one sense to pick from, and empties the column entirely when there is one, so the head never repeats a row listed beneath it; inside the list a chosen sense reads at Ink::Detail like the same gloss on a collapsed row and an unchosen one a rank below at Ink::Aside",
                             importance: 5,
                             usefulness: 5,
                             health: Working,
