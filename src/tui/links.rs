@@ -13,19 +13,16 @@ use super::event::AppEvent;
 use super::picker::{LanguageChoice, PickerSection, learning_target};
 use super::screen::{Screen, WelcomeFocus, WelcomeStage};
 use super::screens::banner;
-use super::screens::common::{
-    CARD_DETAIL_COLUMN, GUTTER, TOP_MARGIN, display_width, frame_rects, language_chip,
-};
+use super::screens::common::{GUTTER, TOP_MARGIN, display_width, frame_rects, language_chip};
 use super::screens::sentence_labels::EditorControl;
 use super::screens::welcome;
 use super::screens::what_i_understood::{
     SentenceSettingsControl, alternate_at, sentence_settings_control_at,
 };
 use super::screens::your_cards::{
-    artifact_file_label, card_layout, card_range_at, chip_link_columns, chip_tag_hit_at,
-    chip_tags_visible, head_rows_for, rejected_attempts, rejected_link_columns,
+    StepRow, card_layout, card_range_at, head_rows_for, rejected_attempts, rejected_link_columns,
     rejected_rows_offset, sentence_editor_control_at, sentence_label_extra_rows,
-    sentence_tag_hit_at, sentence_tags_visible, step_rows_for,
+    sentence_tag_hit_at, sentence_tags_visible, step_link_region, step_rows_for,
 };
 use super::sentence_editor::LabelEditorRow;
 
@@ -192,31 +189,12 @@ pub fn sentence_label_event_at(
         .cards_running_target()
         .and_then(|(running_card, artifact)| (running_card == card).then_some(artifact));
     let steps = step_rows_for(draft, running);
-    let expanded = app.card_expanded_at(card);
     let attributed = labels.is_some()
         || staged.is_some_and(crate::session::SentenceLabelSelection::attributed)
         || editor.is_some_and(|editor| editor.selection().attributed());
-    if editor.is_none() && !expanded {
-        if (!attributed || !chip_tags_visible(draft, running, width))
-            && app.card_tunable_at(card)
-            && content_row >= head_start
-            && content_row < head_end
-        {
-            return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
-        }
-        if content_row == head_end && chip_tag_hit_at(draft, running, width, column) {
-            return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
-        }
-        return None;
-    }
-    let meta_row = head_end.saturating_add(
-        steps
-            .iter()
-            .position(|artifact| *artifact == crate::session::Artifact::Meta)?,
-    );
     if editor.is_none()
         && (!attributed
-            || !steps.contains(&crate::session::Artifact::Sound)
+            || !steps.contains(&StepRow::Voice)
             || !sentence_tags_visible(draft, running, width))
         && app.card_tunable_at(card)
         && content_row >= head_start
@@ -225,14 +203,14 @@ pub fn sentence_label_event_at(
         return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
     }
     if editor.is_none() {
-        let tag_row = content_row.checked_sub(meta_row)?;
+        let tag_row = content_row.checked_sub(head_end)?;
         if sentence_tag_hit_at(draft, running, width, tag_row, column) {
             return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
         }
         return None;
     }
     let editor = editor?;
-    let editor_row = content_row.checked_sub(meta_row)?;
+    let editor_row = content_row.checked_sub(head_end)?;
     match sentence_editor_control_at(draft, running, editor, width, editor_row, column)? {
         EditorControl::Chip(row, index) => Some(AppEvent::SentenceLabelChoose(row, index)),
         EditorControl::Advance(row, forward) => Some(AppEvent::SentenceLabelAdvance(row, forward)),
@@ -322,56 +300,25 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
         let labels = sentence_label_extra_rows(draft, running, editor, expanded, width);
         let (rows, trailing) = card_layout(draft, running, expanded, editor, width);
         let card_total = rows + trailing;
-        if expanded || editor.is_some() {
-            for (step_idx, artifact) in steps.iter().enumerate() {
-                let absolute = content_row + head_height + step_idx;
-                let Some(screen_row) = visible_content_row(
-                    body_y + banner_rows,
-                    body_height,
-                    absolute,
-                    app.body_scroll(),
-                ) else {
-                    continue;
-                };
-                let slot = match artifact {
-                    crate::session::Artifact::Meta => draft.artifacts().meta(),
-                    crate::session::Artifact::Sound => draft.artifacts().sound(),
-                    crate::session::Artifact::Scene => draft.artifacts().scene(),
-                    crate::session::Artifact::Picture => draft.artifacts().picture(),
-                };
-                let Some(file) = slot.file() else {
-                    continue;
-                };
-                let label = artifact_file_label(*artifact, file);
-                let label_start = body_x
-                    + u16::try_from(CARD_DETAIL_COLUMN)
-                        .expect("invariant: card detail column must fit in u16");
-                let label_end = label_start.saturating_add(
-                    u16::try_from(display_width(label.as_str())).unwrap_or(u16::MAX),
-                );
-                links.push(LinkRegion {
-                    row: screen_row,
-                    hit_start: label_start,
-                    hit_end: label_end,
-                    target: file.path().to_string_lossy().into_owned(),
-                });
-            }
-        } else if !steps.is_empty()
-            && let Some(screen_row) = visible_content_row(
+        for (step_idx, step) in steps.iter().enumerate() {
+            let absolute = content_row + head_height + step_idx;
+            let Some(screen_row) = visible_content_row(
                 body_y + banner_rows,
                 body_height,
-                content_row + head_height,
+                absolute,
                 app.body_scroll(),
-            )
-        {
-            links.extend(chip_link_columns(draft, running).into_iter().map(
-                |(start, end, target)| LinkRegion {
-                    row: screen_row,
-                    hit_start: body_x.saturating_add(start),
-                    hit_end: body_x.saturating_add(end),
-                    target: target.to_string_lossy().into_owned(),
-                },
-            ));
+            ) else {
+                continue;
+            };
+            let Some((start, end, target)) = step_link_region(draft, *step) else {
+                continue;
+            };
+            links.push(LinkRegion {
+                row: screen_row,
+                hit_start: body_x.saturating_add(start),
+                hit_end: body_x.saturating_add(end),
+                target: target.to_string_lossy().into_owned(),
+            });
         }
         if expanded {
             links.extend(rejected_regions(

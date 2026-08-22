@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn chip_cells_get_the_hand_pointer_and_plain_cells_get_the_arrow() {
+    fn step_row_labels_get_the_hand_pointer_and_plain_cells_get_the_arrow() {
         let app = App::new(pair())
             .with_screen(Screen::YourCards)
             .confirmed_learning("en")
@@ -200,22 +200,22 @@ mod tests {
             (
                 mouse_pointer_at(&app, terminal(), 9, 4),
                 mouse_pointer_at(&app, terminal(), 10, 4),
-                mouse_pointer_at(&app, terminal(), 12, 4),
-                mouse_pointer_at(&app, terminal(), 14, 4),
+                mouse_pointer_at(&app, terminal(), 15, 4),
                 mouse_pointer_at(&app, terminal(), 16, 4),
-                mouse_pointer_at(&app, terminal(), 17, 4),
+                mouse_pointer_at(&app, terminal(), 10, 5),
+                mouse_pointer_at(&app, terminal(), 10, 6),
                 mouse_pointer_at(&app, terminal(), 10, 3),
             ),
             (
                 MousePointer::Arrow,
                 MousePointer::Hand,
                 MousePointer::Hand,
-                MousePointer::Hand,
-                MousePointer::Hand,
                 MousePointer::Arrow,
                 MousePointer::Hand,
+                MousePointer::Hand,
+                MousePointer::Hand,
             ),
-            "badge glyph zones and the tuning head must use the hand while the frame keeps the arrow"
+            "step-row labels and the tuning head must use the hand while plain cells keep the arrow"
         );
     }
 

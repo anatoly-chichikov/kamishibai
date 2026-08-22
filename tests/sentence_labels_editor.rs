@@ -787,11 +787,11 @@ fn repeating_the_active_legacy_chip_restores_the_empty_baseline() {
 }
 
 #[test]
-fn chip_row_tags_hit_only_their_boxes_not_the_chips_or_gaps() {
+fn voice_row_tags_hit_only_their_boxes_not_the_labels_or_gaps() {
     let terminal = Rect::new(0, 0, 120, 50);
     let collapsed = seeded(priced_card_for("whilst"));
     let term = cell_of(&collapsed, "whilst", 120, 50);
-    let folder = cell_of(&collapsed, "✎", 120, 50);
+    let folder = cell_of(&collapsed, "folder", 120, 50);
     let register = cell_of(&collapsed, "casual", 120, 50);
     let kind = cell_of(&collapsed, "statement", 120, 50);
     let level = cell_of(&collapsed, "b1", 120, 50);
@@ -856,9 +856,9 @@ fn chip_row_tags_hit_only_their_boxes_not_the_chips_or_gaps() {
             ),
             (None, MousePointer::Arrow, None, MousePointer::Arrow),
             (None, MousePointer::Hand, None, MousePointer::Arrow),
-            (term.1 + 1, folder.1, folder.1, folder.1),
+            (term.1 + 1, folder.1 + 1, folder.1 + 1, folder.1 + 1),
         ),
-        "chip-row tags leaked hits into the status gap, chip cells, inter-chip gaps, or head"
+        "voice-row tags leaked hits into the status gap, row labels, inter-tag gaps, or head"
     );
 }
 
@@ -906,10 +906,10 @@ fn partial_narrow_card_hides_atomic_tags_and_keeps_the_card_head_entry() {
 }
 
 #[test]
-fn narrow_layout_keeps_the_chip_row_tags_clickable_on_one_row() {
+fn narrow_layout_wraps_the_tags_onto_the_scene_row_and_keeps_them_clickable() {
     let terminal = Rect::new(0, 0, 60, 30);
     let collapsed = seeded(priced_card_for("whilst"));
-    let folder = cell_of(&collapsed, "✎", 60, 30);
+    let folder = cell_of(&collapsed, "folder", 60, 30);
     let register = cell_of(&collapsed, "casual", 60, 30);
     let kind = cell_of(&collapsed, "statement", 60, 30);
     let level = cell_of(&collapsed, "b1", 60, 30);
@@ -925,7 +925,7 @@ fn narrow_layout_keeps_the_chip_row_tags_clickable_on_one_row() {
             mouse_pointer_at(&collapsed, terminal, kind.0, kind.1),
         ),
         (
-            (folder.1, folder.1, folder.1),
+            (folder.1 + 1, folder.1 + 1, folder.1 + 2),
             focus.clone(),
             MousePointer::Hand,
             focus.clone(),
@@ -933,7 +933,7 @@ fn narrow_layout_keeps_the_chip_row_tags_clickable_on_one_row() {
             focus,
             MousePointer::Hand,
         ),
-        "narrow layout detached the chip-row tags from their single row or their hit regions"
+        "narrow layout detached the wrapped tags from the voice and scene rows or their hit regions"
     );
 }
 
@@ -946,7 +946,7 @@ fn clicking_an_unfocused_cards_tags_selects_it_and_opens_its_editor() {
     ]);
     let term = cell_of(&collapsed, "thereafter", 120, 50);
     let first_tag = cell_of(&collapsed, "casual", 120, 50);
-    let tag = (first_tag.0, term.1 + 1);
+    let tag = (first_tag.0, term.1 + 2);
     let event = sentence_label_event_at(&collapsed, terminal, tag.0, tag.1)
         .expect("the unfocused card tag must be a mouse target");
     let opened = transit(collapsed, event).0;

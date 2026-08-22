@@ -107,8 +107,8 @@ fn your_cards_surfaces_failure_banner_when_any_card_fails_terminally() {
     let app = seeded();
     let rendered = flat(&app);
     assert!(
-        rendered.contains("✗") && !rendered.contains("gave up"),
-        "the collapsed failed card must show a dim ✗ chip and keep gave up for the expanded view: {rendered}"
+        rendered.contains("gave up") && rendered.contains("✗") && rendered.contains("scene"),
+        "your cards must show `gave up` and ✗ on the failed scene row: {rendered}"
     );
 }
 
