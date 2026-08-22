@@ -331,7 +331,7 @@ fn enter_on_multi_sense_word_expands_the_sense_list() {
 }
 
 #[test]
-fn expanded_sense_focus_moves_inside_without_dimming_the_parent() {
+fn an_open_sense_list_reads_as_three_steps_below_a_heading() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
@@ -342,15 +342,15 @@ fn expanded_sense_focus_moves_inside_without_dimming_the_parent() {
     let third = transit(second.clone(), AppEvent::NavNext).0;
     let add_more = transit(third, AppEvent::NavNext).0;
     let foreground = Color::Rgb(0xe6, 0xe3, 0xda);
-    let muted = Color::Rgb(0x8b, 0x8a, 0x83);
-    let aside = Color::Rgb(0x5a, 0x59, 0x53);
+    let chosen = Color::Rgb(0x8b, 0x8a, 0x83);
+    let unchosen = Color::Rgb(0x5a, 0x59, 0x53);
     let background = Color::Rgb(0x0e, 0x0e, 0x10);
     let highlight = Color::Rgb(0x26, 0x26, 0x2a);
     assert_eq!(
         (
             style_of(&opened, "bank"),
             style_of(&opened, "1/3"),
-            style_of(&opened, "[фин.]"),
+            style_of(&opened, "multiple meanings:"),
             style_of(&opened, "✓"),
             style_of(&second, "✓"),
             style_of(&second, "Сущ. «берег»"),
@@ -359,15 +359,53 @@ fn expanded_sense_focus_moves_inside_without_dimming_the_parent() {
         ),
         (
             (foreground, background, Modifier::empty()),
-            (aside, background, Modifier::empty()),
-            (muted, background, Modifier::empty()),
-            (foreground, highlight, Modifier::empty()),
-            (foreground, background, Modifier::empty()),
-            (muted, highlight, Modifier::empty()),
-            (muted, background, Modifier::empty()),
-            (muted, highlight, Modifier::empty()),
+            (unchosen, background, Modifier::empty()),
+            (chosen, background, Modifier::empty()),
+            (chosen, highlight, Modifier::empty()),
+            (chosen, background, Modifier::empty()),
+            (unchosen, highlight, Modifier::empty()),
+            (unchosen, background, Modifier::empty()),
+            (chosen, highlight, Modifier::empty()),
         ),
-        "expanded focus must move by background alone, leaving chosen senses bright and unchosen ones quiet"
+        "an open list must step down from the word to its chosen senses to the rest, moving only its background as the cursor walks"
+    );
+}
+
+#[test]
+fn an_open_head_names_its_meanings_instead_of_repeating_one_of_them() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let head = flat(&opened)
+        .lines()
+        .find(|line| line.contains("bank 1/3"))
+        .map(String::from)
+        .expect("invariant: the open head row must be rendered");
+    assert_eq!(
+        head.trim_end(),
+        "    01  bank 1/3      multiple meanings:",
+        "an open head must name what is listed below it rather than repeat its first sense"
+    );
+}
+
+#[test]
+fn an_open_head_of_a_single_sense_word_says_nothing_beside_its_term() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![single_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let head = flat(&opened)
+        .lines()
+        .find(|line| line.contains("bittersweet"))
+        .map(String::from)
+        .expect("invariant: the open head row must be rendered");
+    assert_eq!(
+        head.trim_end(),
+        "    01  bittersweet",
+        "a single-sense head must not repeat the one row listed under it"
     );
 }
 

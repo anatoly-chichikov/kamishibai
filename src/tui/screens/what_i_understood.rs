@@ -57,6 +57,15 @@ impl ScreenView for WhatIUnderstood {
 }
 
 fn body(app: &App, width: u16) -> Paragraph<'_> {
+    Paragraph::new(body_lines(app, width)).style(palette::base())
+}
+
+/// Build every body line of the review screen in render order.
+///
+/// `content_height` counts the same rows without building them, and the two
+/// must agree or the scroll clamp walks past content that is really there —
+/// `screen_lines_match_the_counted_height` pins that.
+fn body_lines(app: &App, width: u16) -> Vec<Line<'_>> {
     if app.candidates().is_empty() {
         let typed: Vec<&str> = app
             .blob()
@@ -76,18 +85,17 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 .enumerate()
                 .map(|(index, line)| pending_line(index, line, term_width, width))
                 .collect::<Vec<_>>();
-            return Paragraph::new(lines).style(palette::base());
+            return lines;
         }
         let copy = if app.learning_pending() {
             "understanding your words…"
         } else {
             "nothing left to review"
         };
-        return Paragraph::new(Line::from(Span::styled(
+        return vec![Line::from(Span::styled(
             copy,
             palette::Ink::Detail.on(false),
-        )))
-        .style(palette::base());
+        ))];
     }
     let term_width = candidate_label_width(app.candidates(), 12);
     let mut lines = vec![settings_summary_line(app)];
@@ -122,7 +130,7 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 candidate,
                 selected,
                 Some(candidate.selected_count()),
-                Gloss::Sentence(sense_text(candidate.sense())),
+                head_gloss(candidate, true),
                 term_width,
                 width,
             ));
@@ -151,13 +159,13 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 candidate,
                 selected,
                 None,
-                Gloss::Sentence(sense_text(candidate.sense())),
+                head_gloss(candidate, false),
                 term_width,
                 width,
             ));
         }
     }
-    Paragraph::new(lines).style(palette::base())
+    lines
 }
 
 /// Total number of lines `body` will render for the current state of `app`.
@@ -329,11 +337,55 @@ fn pending_line<'a>(index: usize, raw: &'a str, term_width: usize, width: u16) -
 }
 
 /// What fills the gloss column of a candidate row: an active-sense `Sentence`
-/// introduced by an em-dash, or a plain `Heading` label (the multi-meaning
-/// header) with no dash — a label is not a sentence, so it carries no dash.
+/// introduced by an em-dash, a plain `Heading` label (the multi-meaning header)
+/// with no dash — a label is not a sentence, so it carries no dash — or
+/// `Silent`, the column deliberately left empty because everything it could say
+/// is already listed underneath.
 enum Gloss {
     Sentence(String),
     Heading(String),
+    Silent,
+}
+
+impl Gloss {
+    /// Width of the separator this gloss is introduced by.
+    fn separator(&self) -> &'static str {
+        match self {
+            Self::Sentence(_) => "  —  ",
+            Self::Heading(_) => "  ",
+            Self::Silent => "",
+        }
+    }
+
+    /// The text this gloss puts in the column, empty when it says nothing.
+    fn text(&self) -> &str {
+        match self {
+            Self::Sentence(text) | Self::Heading(text) => text.as_str(),
+            Self::Silent => "",
+        }
+    }
+}
+
+/// Return what the head row of one candidate says in its gloss column.
+///
+/// An open list already enumerates every sense underneath the head, so the head
+/// stops repeating one of them: it carries the meanings heading when there is
+/// more than one sense to choose between — the same heading a collapsed word
+/// with several chosen meanings shows — and says nothing at all when the list
+/// below holds a single row. The heading therefore appears exactly when the
+/// `X/Y` counter does.
+fn head_gloss(candidate: &WordCandidate, open: bool) -> Gloss {
+    if open {
+        return if candidate.has_multiple_senses() {
+            Gloss::Heading(String::from(MEANINGS_LABEL))
+        } else {
+            Gloss::Silent
+        };
+    }
+    if candidate.ok() && candidate.selected_count() > 1 {
+        return Gloss::Heading(String::from(MEANINGS_LABEL));
+    }
+    Gloss::Sentence(sense_text(candidate.sense()))
 }
 
 fn candidate_line<'a>(
@@ -369,10 +421,8 @@ fn candidate_line<'a>(
     if pad_after_label > 0 {
         spans.push(Span::styled(" ".repeat(pad_after_label), row_style));
     }
-    let (separator, gloss) = match gloss {
-        Gloss::Sentence(text) => ("  —  ", text),
-        Gloss::Heading(text) => ("  ", text),
-    };
+    let separator = gloss.separator();
+    let gloss = String::from(gloss.text());
     let gloss_start = 4 + term_width + super::common::display_width(separator);
     let available = (width as usize).saturating_sub(gloss_start).max(1);
     let chunks = super::common::wrap_words(gloss.as_str(), available, available);
@@ -412,9 +462,9 @@ fn sense_line<'a>(
     let checked = selected.contains(&index);
     let marker = if checked { "  ✓ " } else { "    " };
     let style = if checked {
-        palette::Ink::Subject.on(focused)
-    } else {
         palette::Ink::Detail.on(focused)
+    } else {
+        palette::Ink::Aside.on(focused)
     };
     let text = sense_text(sense);
     let indent = 4 + term_width + 5;
@@ -442,65 +492,44 @@ pub(crate) fn candidate_rows(
     term_width: usize,
     width: usize,
 ) -> usize {
+    let head = candidate_line_rows(
+        candidate,
+        &head_gloss(candidate, expanded),
+        term_width,
+        width,
+    );
     if expanded {
-        let parent = candidate_line_rows(
-            candidate,
-            GlossKind::Sentence,
-            sense_text(candidate.sense()).as_str(),
-            term_width,
-            width,
-        );
         let senses = candidate
             .senses()
             .iter()
             .map(|sense| sense_rows(sense, term_width, width))
             .sum::<usize>();
-        parent.saturating_add(senses).saturating_add(1)
-    } else if candidate.ok() && candidate.selected_count() > 1 {
-        let header = candidate_line_rows(
-            candidate,
-            GlossKind::Heading,
-            MEANINGS_LABEL,
-            term_width,
-            width,
-        );
+        return head.saturating_add(senses).saturating_add(1);
+    }
+    if candidate.ok() && candidate.selected_count() > 1 {
         let selected = candidate
             .selected_senses()
             .iter()
             .map(|index| selected_meaning_rows(&candidate.senses()[*index], term_width, width))
             .sum::<usize>();
-        header.saturating_add(selected)
-    } else {
-        candidate_line_rows(
-            candidate,
-            GlossKind::Sentence,
-            sense_text(candidate.sense()).as_str(),
-            term_width,
-            width,
-        )
+        return head.saturating_add(selected);
     }
-}
-
-enum GlossKind {
-    Sentence,
-    Heading,
+    head
 }
 
 fn candidate_line_rows(
     candidate: &WordCandidate,
-    kind: GlossKind,
-    gloss: &str,
+    gloss: &Gloss,
     term_width: usize,
     width: usize,
 ) -> usize {
-    let separator_width = match kind {
-        GlossKind::Sentence => 5,
-        GlossKind::Heading => 2,
-    };
+    let separator_width = super::common::display_width(gloss.separator());
     let label_width = candidate_label_len(candidate);
     let gloss_start = 4 + term_width.max(label_width) + separator_width;
     let available = width.saturating_sub(gloss_start).max(1);
-    super::common::wrap_words(gloss, available, available).len()
+    super::common::wrap_words(gloss.text(), available, available)
+        .len()
+        .max(1)
 }
 
 fn sense_rows(sense: &Sense, term_width: usize, width: usize) -> usize {
@@ -546,8 +575,7 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
         if open && let ReviewFocus::Sense { index: cursor, .. } = focus {
             offset = offset.saturating_add(candidate_line_rows(
                 candidate,
-                GlossKind::Sentence,
-                sense_text(candidate.sense()).as_str(),
+                &head_gloss(candidate, true),
                 term_width,
                 width,
             ));
@@ -565,13 +593,7 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
             ));
         }
         let height = if open {
-            candidate_line_rows(
-                candidate,
-                GlossKind::Sentence,
-                sense_text(candidate.sense()).as_str(),
-                term_width,
-                width,
-            )
+            candidate_line_rows(candidate, &head_gloss(candidate, true), term_width, width)
         } else {
             candidate_rows(candidate, false, term_width, width)
         };
@@ -584,8 +606,9 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
 }
 
 /// Render a collapsed word that has several selected meanings: a header row
-/// (`NN  term  X/Y  —  multiple meanings:`) followed by one dimmed, read-only
-/// line per selected meaning. Navigation never lands on the meaning rows.
+/// (`NN  term  X/Y  multiple meanings:`, a label and so introduced by no dash)
+/// followed by one dimmed, read-only line per selected meaning. Navigation
+/// never lands on the meaning rows.
 fn candidate_block<'a>(
     index: usize,
     candidate: &'a WordCandidate,
@@ -599,7 +622,7 @@ fn candidate_block<'a>(
         candidate,
         selected,
         None,
-        Gloss::Heading(String::from(MEANINGS_LABEL)),
+        head_gloss(candidate, false),
         term_width,
         width,
     ));
@@ -791,4 +814,57 @@ fn review_card_count(app: &App) -> usize {
         .filter(|candidate| candidate.ok())
         .map(WordCandidate::selected_count)
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::LanguagePair;
+    use crate::tui::Screen;
+
+    fn wordy() -> WordCandidate {
+        WordCandidate::with_senses(
+            "bank",
+            vec![
+                Sense::plain(
+                    "A financial institution that takes deposits from the public, lends them out at interest, keeps its customers' current accounts, and stores their valuables in a guarded vault downstairs.",
+                ),
+                Sense::plain("The sloping side of a river."),
+                Sense::tagged("To tilt an aircraft into a turn.", "aviation"),
+            ],
+            0,
+            true,
+        )
+    }
+
+    fn review(candidates: Vec<WordCandidate>) -> App {
+        App::new(LanguagePair::new("en", "ru"))
+            .with_screen(Screen::WhatIUnderstood)
+            .confirmed_learning("en")
+            .understood(candidates)
+    }
+
+    #[test]
+    fn screen_lines_match_the_counted_height() {
+        let single = WordCandidate::new("bittersweet", "Both glad and sad at once.", true);
+        let shapes = [
+            review(vec![wordy()]),
+            review(vec![wordy()]).sense_list_toggled(),
+            review(vec![single.clone()]),
+            review(vec![single]).sense_list_toggled(),
+        ];
+        let counted = shapes
+            .iter()
+            .map(|app| {
+                (
+                    body_lines(app, 90).len(),
+                    usize::from(content_height(app, 90)),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            counted.iter().all(|(drawn, counted)| drawn == counted),
+            "the renderer and the scroll clamp disagreed on a review shape, got {counted:?}"
+        );
+    }
 }
