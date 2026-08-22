@@ -882,7 +882,7 @@ fn too_narrow_atomic_tags_keep_the_card_head_as_the_editor_entry() {
 
 #[test]
 fn partial_narrow_card_hides_atomic_tags_and_keeps_the_card_head_entry() {
-    let terminal = Rect::new(0, 0, 60, 30);
+    let terminal = Rect::new(0, 0, 46, 30);
     let collapsed = seeded(partial_card_for("whilst")).cards_running(Some((0, Artifact::Sound)));
     let term = cell_of(&collapsed, "whilst", terminal.width, terminal.height);
     let rendered = flat_at(&collapsed, terminal.width, terminal.height);
@@ -907,12 +907,12 @@ fn partial_narrow_card_hides_atomic_tags_and_keeps_the_card_head_entry() {
 
 #[test]
 fn narrow_layout_wraps_the_tags_onto_the_manga_row_and_keeps_them_clickable() {
-    let terminal = Rect::new(0, 0, 49, 30);
+    let terminal = Rect::new(0, 0, 50, 30);
     let collapsed = seeded(priced_card_for("whilst"));
-    let scene = cell_of(&collapsed, "scene", 49, 30);
-    let register = cell_of(&collapsed, "casual", 49, 30);
-    let kind = cell_of(&collapsed, "statement", 49, 30);
-    let level = cell_of(&collapsed, "b1", 49, 30);
+    let scene = cell_of(&collapsed, "scene", 50, 30);
+    let register = cell_of(&collapsed, "casual", 50, 30);
+    let kind = cell_of(&collapsed, "statement", 50, 30);
+    let level = cell_of(&collapsed, "b1", 50, 30);
     let focus = Some(AppEvent::SentenceLabelOpen(0, LabelEditorRow::Register));
     assert_eq!(
         (

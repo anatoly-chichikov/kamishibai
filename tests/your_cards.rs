@@ -395,7 +395,6 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
             && !rendered.contains("[D] drop")
-            && !rendered.contains("ai is working…")
             && !rendered.contains("queued")
             && ctrl < tune
             && target < picture,
@@ -440,7 +439,7 @@ fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
             && rendered.contains("[Esc] new cards")
             && new_cards < quit
             && !rendered.contains("[D] drop")
-            && !rendered.contains("ai is working…"),
+            && !rendered.contains('◐'),
         "published footer must offer new cards before quit and omit stale toggle, Space, or drop hooks: {rendered}"
     );
 }
@@ -775,7 +774,7 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
     let failed = draft("move on", rejected_picture_artifacts_with(4)).with_costs(costs);
     let app = seeded(vec![recovered, retrying, failed]).cards_running(Some((1, Artifact::Picture)));
     let rendered = flat(&app);
-    let active = row_containing(&rendered, "ai is working…");
+    let active = row_containing(&rendered, "◐ manga");
     let failed = row_containing(&rendered, "✗ manga");
     let recovered_head = row_containing(&rendered, "whilst →");
     let active_head = row_containing(&rendered, "commodity →");
@@ -1128,7 +1127,7 @@ fn the_tag_summary_sits_on_the_voice_row_at_the_fixed_column() {
         ),
         (
             (head_row + 2, head_row + 2, head_row + 2),
-            (26, 35, 47),
+            (27, 36, 48),
             false,
             true,
             true,
@@ -1139,7 +1138,7 @@ fn the_tag_summary_sits_on_the_voice_row_at_the_fixed_column() {
 }
 
 #[test]
-fn audio_progress_keeps_one_tag_column_and_hides_only_the_busy_rows_summary() {
+fn audio_progress_keeps_collapsed_tags_in_one_column() {
     let ready = labeled_draft(
         "ready",
         audio_progress_artifacts(
@@ -1164,7 +1163,7 @@ fn audio_progress_keeps_one_tag_column_and_hides_only_the_busy_rows_summary() {
         seeded(vec![ready, active, retry, recovered]).cards_running(Some((1, Artifact::Sound)));
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
-    let active_row = row_containing(&rendered, "ai is working…");
+    let active_row = row_containing(&rendered, "◐ voice");
     let (_, ready_head) = position_of(&buffer, "ready →");
     let (_, retry_head) = position_of(&buffer, "retry →");
     let (_, recovered_head) = position_of(&buffer, "recovered →");
@@ -1178,8 +1177,8 @@ fn audio_progress_keeps_one_tag_column_and_hides_only_the_busy_rows_summary() {
             rendered.matches("↻2").count(),
             rendered.matches("$.0021").count(),
         ),
-        (vec![26, 26, 26], false, "✓", "·", "✓", 2, 3),
-        "audio progress must keep one tag column on the idle voice rows and drop the busy row's summary:\n{rendered}"
+        (vec![27, 27, 27, 27], true, "✓", "·", "✓", 2, 3),
+        "audio progress must keep one tag column on every voice row, busy or idle:\n{rendered}"
     );
 }
 
@@ -1214,7 +1213,7 @@ fn collapsed_cached_artifacts_keep_tags_beside_their_cache_note() {
             (register_column, register_row),
             buffer[(10, head_row + 1)].symbol(),
         ),
-        (3, false, (26, head_row + 2), "s"),
+        (3, false, (27, head_row + 2), "s"),
         "cached artifacts must collapse to ready rows that name the cache hit and keep the tag column"
     );
 }
@@ -1286,13 +1285,12 @@ fn scene_and_picture_work_share_one_spinner_on_the_manga_row() {
     let manga = row_text(&buffer, head_row + 3);
     assert_eq!(
         (
-            buffer[(8, head_row + 3)].symbol() != " ",
-            manga.contains("manga"),
-            manga.contains("ai is working…"),
+            buffer[(8, head_row + 3)].symbol(),
+            manga.trim_end().ends_with("manga"),
             rendered.contains("picture"),
         ),
-        (true, true, true, false),
-        "scene and picture work must spin on the single manga row with the working phrase beside it"
+        ("◐", true, false),
+        "scene and picture work must spin on the single manga row with nothing but the glyph beside it"
     );
 }
 
@@ -1608,14 +1606,14 @@ fn active_rewrite_shows_normal_generation_without_pending_tags_or_count() {
             && app.cards()[0]
                 .rewrite()
                 .is_some_and(kamishibai::session::CardRewrite::started)
-            && rendered.contains("ai is working…")
+            && rendered.contains('◐')
             && !rendered.contains("pending")
             && !rendered.contains("formal")
             && !rendered.contains("casual")
             && !rendered.contains("b1")
             && !rendered.contains("statement")
             && !rendered.contains("Example with whilst.")
-            && !rendered.contains("[Enter/→] tune")
+            && !rendered.contains("] tune")
             && !rendered.contains("[Space] tune"),
         "active rewrite retained staged styling or exposed stale generated metadata: {rendered}"
     );

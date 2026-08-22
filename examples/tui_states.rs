@@ -968,7 +968,7 @@ mod tests {
             .join("\n");
         assert!(
             [
-                "ai is working…",
+                "◐ ",
                 "✗ manga",
                 "↻1",
                 "↻2",

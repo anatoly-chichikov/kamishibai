@@ -35,7 +35,7 @@ const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
 const STEP_LABEL_COL_CHARS: usize = 7;
 const STEP_COST_COL_CHARS: usize = 6;
-const SENTENCE_TAG_GAP: usize = 2;
+const SENTENCE_TAG_GAP: usize = 3;
 const SENTENCE_TAG_START: usize = super::common::CARD_DETAIL_COLUMN
     + STEP_LABEL_COL_CHARS
     + STEP_COST_COL_CHARS
@@ -44,7 +44,6 @@ const SECTION_GAP_ROWS: usize = 1;
 const FACT_LABEL_COLUMN: usize = 29;
 const STEP_ROWS: [StepRow; 3] = [StepRow::Scene, StepRow::Voice, StepRow::Manga];
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
-const AI_WORKING: &str = "ai is working…";
 const CACHED_NOTE: &str = "cached";
 
 /// One rendered artifact row of a card block, named after what the card gets
@@ -761,9 +760,7 @@ fn step_state<'a>(
             glyph: String::from(SPINNER_FRAMES[spinner_frame]),
             status_style: palette::base(),
             label_style: palette::base(),
-            line: ArtifactLine {
-                spans: vec![Span::styled(String::from(AI_WORKING), palette::dim())],
-            },
+            line: ArtifactLine { spans: Vec::new() },
         },
         RowState::Paused => StepState {
             glyph: String::from("·"),
