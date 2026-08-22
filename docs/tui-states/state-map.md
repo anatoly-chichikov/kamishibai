@@ -21,7 +21,7 @@ All future work references this map instead of re-deriving transitions.
 | `YourCards`       | fullscreen                                                                        | `04-your-cards.png`             |
 | Retry stress      | synthetic `YourCards` gallery with active, inactive, recovered, and terminal attempts | `06b-your-cards-retry-stress.png` |
 | Esc lifecycle     | synthetic armed clear, unarmed prefilled review return, armed stop, draining stop, and partial-publish states | `23-esc-words-clear.png` through `27-generation-partial.png` |
-| Sentence labels   | collapsed three-tag summary sits on the single chip row after the three chips; expanded question-led editor sits below every artifact | `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png` |
+| Sentence labels   | three-tag summary anchors on the `voice` row and wraps onto `scene`; expanded question-led editor sits below the step rows | `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png` |
 | `Done`            | fullscreen                                                                        | `08-done.png`                   |
 | `PickLanguages`   | two scrolling lists over `YourWords` / `WhatIUnderstood`, opened with `Ctrl+L` or either header half | `31-language-pair-modal.png` |
 | Busy              | one universal blocking overlay on any screen                                      | `01b-busy.png`                  |
@@ -61,8 +61,8 @@ The retry stress gallery is index 21. Esc lifecycle states are indices 22–26,
 and the open generation guidance is index 27, appended so the established absolute
 indices remain stable. The stress gallery's six cards preserve valid pipeline
 order while showing the identical active-attempt copy (`ai is working…`),
-inactive retries as a `·` at their badge position, a recovered artifact as a
-plain badge glyph, and a terminal failure as a `✗` in the badge together.
+inactive retries as a `·` row with only its label and known cost, a recovered
+artifact as a plain ready row, and a terminal `✗ … gave up` row together.
 Their card heads carry the complete retry summary as `↻1`, `↻2`, or `↻3`
 after the total cost.
 
@@ -189,24 +189,27 @@ card is missing any of its four artifacts and turns `FG` exactly when the last
 one lands, so brightness reads as built; a card that terminally gave up never
 holds all four and stays `DIM`, and a card carrying a staged rewrite stays
 muted beside its struck sentence.
-A collapsed card renders one chip row immediately after the last line of that
-head, including when the target sentence wraps: a single gray badge styled
-exactly like an unpinned tag, holding three fixed glyph positions — ✎ meta,
-♪ sound, ◉ picture. A ready artifact shows its dark glyph, the active
-artifact renders the spinner at its position with a trailing dim
-`ai is working…`, a terminal failure is `✗`, a discarded artifact `⊘`,
-spent-but-idle progress `·`, and a queued position stays a blank cell inside
-the badge; scene work shares the picture position. Each ready glyph zone with
-a known file is clickable — the meta glyph opens the card's cache folder in
-the system file manager while the sound and picture glyphs open their files.
-Per-artifact sizes, costs, file links, and the `cached` note
-appear only inside the expanded card, whose four artifact rows keep the
-`meta`, `audio`, `scene`, `picture` order. No `sentence:` heading or separator
-glyph is drawn anywhere. The three labels start together in one fixed column
-after the badge:
+Every card state renders the same step block immediately after the last line
+of that head, including when the target sentence wraps: up to three
+old-style rows — `folder` (meta), `voice` (audio), `scene` (the whole visual
+phase) — each a state glyph, a word label, and its own incremental cost. A
+row appears only once its work started. A ready row shows `✓` and an
+underlined label that clicks open — `folder` the card's cache cell in the
+system file manager, `voice` the audio file, `scene` the rendered page; a
+label without a recorded target stays plain. The active row shows the
+spinner and `ai is working…`, a terminal failure `✗ … gave up` plus cost, a
+discarded artifact `⊘ discarded`, an inactive retry (or a ready scene whose
+picture is still owed) `·` plus any known cost. File names, sizes, and the
+`cached` note are gone everywhere. Costs are incremental per row: `folder`
+folds the meta and scene spend, `voice` and `scene` carry only their own
+artifact, retries included; the head keeps the card total. No `sentence:`
+heading or separator glyph is drawn anywhere. The three labels start
+together in one fixed column on the `voice` row:
 
 ```text
-✎ ♪ ◉   formal statement b1
+✓ folder        $.0035
+✓ voice         $.0100          formal statement b1
+✓ scene         $.0673
 ```
 
 The actual register, sentence-type, and CEFR values replace the three
@@ -216,11 +219,11 @@ the compact target sentence's foreground — while explicitly changed or exactly
 fulfilled pinned tags use a white background without bold. If a target is only
 fulfilled as a best effort, its atomic group is the gray actual tag, muted
 `· aimed for`, and the requested white tag. Adjacent axis groups have one
-ordinary-background space between them. On the parked expanded card the tags
-keep their audio-row anchor and may wrap onto the `scene` and `picture` rows.
+ordinary-background space between them. At narrow widths whole groups may
+wrap from the `voice` row onto the `scene` row at that same column.
 Retry history appears once in the card head instead of beside the tags; when
-the complete chip-row sequence cannot fit, the whole summary is hidden while
-the chips and the working phrase remain. There is no vertical rail, rule, or
+the complete sequence cannot fit even wrapped, the whole summary is hidden
+while the step rows remain. There is no vertical rail, rule, or
 filled backing behind the labels.
 If the complete atomic set cannot fit even that way, the card head remains the
 mouse entry into tuning. There is no grammar axis or grammar row.
@@ -228,11 +231,10 @@ mouse entry into tuning. There is no grammar axis or grammar row.
 `Enter`, `Space`, or a tag click immediately expands the focused card and
 opens the inline editor on `how should it sound?`; side arrows never open or
 close anything — they only move inside the focused horizontal control. The head remains `term →
-target sentence`, the chip row gives way to the four artifact rows, and they
-stay together above the editor. The
-chip-row summary disappears; exactly one blank row separates `picture`
-from the editor, which renders below the complete artifact block, before the
-expanded metadata and never beside the artifacts. Its three carousel questions
+target sentence` and the three step rows stay together above the editor. The
+inline tag summary disappears; exactly one blank row separates `scene`
+from the editor, which renders below the complete step block, before the
+expanded metadata and never beside the rows. Its three carousel questions
 are `how should it sound?`, `what kind of phrase?`, and `what's the desired level?`.
 The following note row is labelled `one more thing` and uses the single-line
 `TextField` with the placeholder `say what should change`.
@@ -265,10 +267,9 @@ pronunciation` for transcription, `worth learning` for importance, and `the
 right context` for non-empty context.
 
 Every chip or note edit is pending immediately: the old target sentence is
-struck through and its current metadata and the collapsed chip glyphs are
-muted. While the
+struck through and its current metadata and step rows are muted. While the
 editor is open, its white selected chips show the staged choices below the
-artifacts; after it closes, the staged choices return on the chip row as
+rows; after it closes, the staged choices return on the `voice` row as
 summary tags, gray for unchanged values and white without bold for changed or
 pinned values. The editor carousel remains on the requested target; when it
 differs from the generated attribution, muted `current` plus the actual value
