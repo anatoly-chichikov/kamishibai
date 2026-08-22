@@ -383,13 +383,32 @@ change becomes a rewrite constraint. Legacy `easy`, `takes practice`/`balanced`,
 and `challenging`/`stretch` cache values reopen as `a2`, `b1`, and `b2`
 respectively.
 
-A card head that holds all four artifacts turns its term `FG` **and bold** and
-lights its target sentence `FG`; while any artifact is still owed — including a
-terminally failed card, which never holds all four — term and sentence stay
-`DIM`, and a card with a staged rewrite keeps the muted pending term beside its
-struck sentence. Weight and brightness therefore mean built, never focused:
-selection is the row's `HL` background alone, and nothing on the head goes bold
-for being selected. Every card state renders the same **step block**
+One grammar of colour covers the whole TUI, and each of its three channels
+carries exactly one meaning (`src/tui/palette.rs`). **Ink is rank inside the
+row, never state**: `Ink::Subject` (`FG`) is what you came for — a built term,
+a chosen value, a destination file, a broken artifact; `Ink::Detail` (`DIM`) is
+whatever explains it — glosses, sentences, questions, labels; `Ink::Aside`
+(`DIM2`) is the bookkeeping beside it — indices, costs, timings, separators,
+inactive markers; `rule()` draws structure. **Background is focus and nothing
+else**: the row under the cursor takes `HL` (`#26262a`, raised so it carries the
+signal alone) and keeps the same inks as its neighbours. **Weight is one thing**:
+`Modifier::BOLD` marks a card that holds all four artifacts, and appears nowhere
+else in the application. Two consequences follow: an **underline means
+clickable** and takes its brightness from its rank, so the same affordance reads
+at three depths without three link colours; and a **background behind a tag or
+chip means the user asked for that value**, so a model-chosen value is plain
+text and a pinned one is a white block.
+
+A card head that holds all four artifacts turns its term `FG` **and bold**; its
+target sentence stays `DIM` whatever happens, because the word is the subject of
+the row and the sentence explains it. While any artifact is still owed —
+including a terminally failed card, which never holds all four — the term stays
+`DIM` too, and a card with a staged rewrite keeps that muted term beside its
+struck sentence. The glyph, the number, the `→` and the trailing cost are
+`Ink::Aside`, which makes the head the same row as a `WhatIUnderstood`
+candidate: index, term, separator, explanation. Weight and brightness therefore
+mean built, never focused: selection is the row's `HL` background alone, and
+nothing on the head goes bold for being selected. Every card state renders the same **step block**
 beginning immediately after the last line of the head's target sentence,
 including when that sentence wraps: up to three old-style rows — `scene`
 (the written material, i.e. the meta slot), `voice` (audio), `manga` (the whole
@@ -397,10 +416,14 @@ visual phase) — each a state glyph, a five-letter label, and its own
 incremental cost (`StepRow` in `src/tui/screens/your_cards.rs`). Every state
 starts in one shared value column right after the seven-cell label column.
 A row appears only once its work started.
-A ready row shows `✓` and an underlined label that clicks open: `scene` the
-card's cache cell (the parent of `meta.json`) with the system handler,
-`voice` the audio file, `manga` the rendered page; a label without a
-recorded target renders plain and does not click. A ready row states either
+A ready row shows a quiet `Ink::Aside` `✓` and an `Ink::Detail` label,
+underlined when it clicks open: `scene` the card's cache cell (the parent of
+`meta.json`) with the system handler, `voice` the audio file, `manga` the
+rendered page; a label without a recorded target renders plain and does not
+click. The one artifact that terminally gave up is the exception and the only
+`Ink::Subject` span a card block ever draws — its `✗` and its label both — so a
+healthy screen holds no bright spot outside its built terms and a broken card
+announces itself without a word of status. A ready row states either
 its incremental cost or, when it cost nothing because the artifact came back
 from the cache, `cached` — never both, and never an empty value column for a
 cache hit. The active row is its spinner and its label alone — no words, no
@@ -420,7 +443,9 @@ narrow widths whole tags may
 continue at that same column on the `manga` row, and when the complete atomic
 sequence cannot fit the whole summary hides while
 the rows remain and the card head stays the mouse entry into tuning. A staged
-rewrite mutes the step rows while the staged tags remain visible. Retry
+rewrite parks the step rows one rank quieter (`Ink::Aside`) while the staged
+tags remain visible; the expanded preview, which reads a rank higher, parks at
+`DIM`. Retry
 history lives on the card head instead of adding volatile status beside the
 tags.
 The tune rows sit
@@ -429,10 +454,11 @@ blank row, before the expanded metadata and never to the rows' right. If
 the live editor block fits the viewport, lighting it anchors the selected card
 head at the top of the body; shorter viewports instead scroll only far enough to
 keep the focused row visible.
-Unchanged actual tags use a gray background; explicitly changed or exactly
-fulfilled pinned tags use a white background with dark letters and no bold. If
+Unchanged actual tags carry no background at all and read as plain `Ink::Aside`
+text; explicitly changed or exactly fulfilled pinned tags use a white background
+with dark letters and no bold. If
 a pinned target could not be fulfilled exactly, the generated actual value stays
-gray and is followed by muted `· aimed for` plus the requested value in a white
+plain and is followed by muted `· aimed for` plus the requested value in a white
 tag. The actual value remains the attribution of what was generated; the white
 value remains the target for a later regeneration. Legacy cached approximation
 records that predate separate actual-value storage show only muted `aimed for`
@@ -441,7 +467,8 @@ plus the requested white tag and never invent an actual value.
 The editor's three carousel questions are `how should it sound?`, `what kind of
 phrase?`, and `what's the desired level?`. The note label is `one more thing`, and its
 placeholder is `say what should change`. The active carousel question is white
-and bold, and the selected chip has a white background. Every carousel is
+(`Ink::Subject`) against `Ink::Aside` for the rest, and the selected chip has a
+white background. Every carousel is
 permanently bracketed by the two-cell direction controls `< ` and ` >`; both
 cells are clickable, focus that control's own row, and move one adjacent choice
 without wrapping past either boundary. All three tracks use one render-time
@@ -452,8 +479,9 @@ as its choice index increases. Every adjacent step transfers one hidden-choice
 segment from the trailing rail to the leading rail. Segment widths differ by at most one cell,
 spare cells go nearest the selected chip on each side, and every cell of a
 segment belongs to the same clickable target. The nearest marker uses
-`DIM2`, the next farther marker uses `RULE`, and every marker farther away uses
-`HL`, saturating at `HL`. A legacy axis with no selected value shows `—` with
+`DIM2`, the next farther marker uses `RULE`, and every marker farther away is the
+page background — the rail fades out rather than stopping, and it deliberately
+does not borrow the cursor highlight, so it cannot brighten when a row does. A legacy axis with no selected value shows `—` with
 one two-cell marker on each side inside the shared track; both cells of either
 marker are clickable.
 

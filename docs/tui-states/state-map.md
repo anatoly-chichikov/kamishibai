@@ -131,7 +131,12 @@ those sentences instead of maintaining a parallel taxonomy.
 
 `WhatIUnderstood` renders one row per candidate: included selected senses
 proceed to card generation as separate cards, while `ok=false` rows stay visible
-with a struck-through term so the user can see what was rejected and why.
+with a struck-through term so the user can see what was rejected and why. The
+row is the reference implementation of the shared grammar — index `Ink::Aside`,
+term `Ink::Subject`, dash `Ink::Aside`, gloss `Ink::Detail` — and the cursor
+changes none of it, only the `HL` background beneath the whole line. A chosen
+sense is marked by its `✓` plus the step from `Ink::Detail` to `Ink::Subject`;
+an unchosen one and the `+ add more` row stay at `Ink::Detail`.
 
 ## Batch generation guidance
 
@@ -150,9 +155,10 @@ are `what's the desired level?` with `best fit`, `a1`, `a2`, `b1`, `b2`, `c1`,
 `c2`, and `what kinds of phrases?` with `best fit`, `statements`, `questions`,
 `dialogue`, `mixed`. They use
 the same fixed-track marker and two-cell `< ` / ` >` hit geometry as the
-per-card editor. The focused label is white and bold, the selected chip is
-inverted, and the entire block follows the ordinary body scroll so a short
-viewport brings the focused row into view.
+per-card editor. The focused label is white (`Ink::Subject`) against
+`Ink::Aside` for the others, the selected chip is inverted, and the entire block
+follows the ordinary body scroll so a short viewport brings the focused row into
+view.
 
 These are batch preferences, not a new screen or modal. Ordinary upward
 navigation reaches the first word before one more `↑` or `k` opens the nearest
@@ -184,20 +190,24 @@ gets the natural sentence required by its approved understanding and only then
 receives a descriptive level; that default initial generation does not target
 a band. An explicit batch-level choice is the initial-generation exception and
 constrains every draft. A later per-card level change becomes a rewrite constraint. Every
-card head keeps `term → target sentence`. Term and sentence are `DIM` for as
-long as the card is missing any of its four artifacts, and when the last one
-lands the term turns `FG` **and bold** while the sentence turns `FG`, so weight
-and brightness read as built; a card that terminally gave up never holds all
-four and stays `DIM`, and a card carrying a staged rewrite stays muted beside
-its struck sentence. Nothing on the head goes bold for being selected —
-selection is the `HL` row background alone.
+card head keeps `term → target sentence`. The term is `DIM` for as long as the
+card is missing any of its four artifacts, and when the last one lands it turns
+`FG` **and bold**; the target sentence stays `DIM` throughout, because the word
+is the subject of the row and the sentence is what explains it. Glyph, number,
+`→`, and trailing cost are `Ink::Aside`, which makes the head structurally the
+same row as a `WhatIUnderstood` candidate. A card that terminally gave up never
+holds all four and stays `DIM`, and a card carrying a staged rewrite stays muted
+beside its struck sentence. Nothing on the head goes bold for being selected —
+selection is the `HL` row background (`#26262a`) alone, and it changes neither
+ink nor weight anywhere in the application.
 Every card state renders the same step block immediately after the last line
 of that head, including when the target sentence wraps: up to three
 old-style rows — `scene` (the written material, i.e. the meta slot), `voice`
 (audio), `manga` (the whole visual phase) — each a state glyph, a five-letter
 label, and its own incremental cost in one shared value column. A
-row appears only once its work started. A ready row shows `✓` and an
-underlined label that clicks open — `scene` the card's cache cell in the
+row appears only once its work started. A ready row shows a quiet `Ink::Aside`
+`✓` and an `Ink::Detail`, underlined label that clicks open — `scene` the card's
+cache cell in the
 system file manager, `voice` the audio file, `manga` the rendered page; a
 label without a recorded target stays plain. A ready row states either its
 cost or, when the artifact came back free from the cache, `cached` — never
@@ -219,12 +229,12 @@ later on the `voice` row, but only while the card is collapsed:
 ```
 
 The actual register, sentence-type, and CEFR values replace the three
-example values. Each value remains a separate tag with dark `BG` letters.
-Unchanged actual tags use the gray `DIM` background — the same color used for
-the compact target sentence's foreground — while explicitly changed or exactly
-fulfilled pinned tags use a white background without bold. If a target is only
-fulfilled as a best effort, its atomic group is the gray actual tag, muted
-`· aimed for`, and the requested white tag. Adjacent axis groups have one
+example values. A background behind a tag means the user asked for that value, so an unchanged
+actual tag carries none and reads as plain `Ink::Aside` text, while an
+explicitly changed or exactly fulfilled pinned tag is a white block with dark
+letters and no bold. If a target is only fulfilled as a best effort, its atomic
+group is the plain actual tag, muted `· aimed for`, and the requested white
+tag. Adjacent axis groups have one
 ordinary-background space between them. At narrow widths whole groups may
 wrap from the `voice` row onto the `manga` row at that same column.
 Retry history appears once in the card head instead of beside the tags; when
@@ -251,7 +261,8 @@ are `how should it sound?`, `what kind of phrase?`, and `what's the desired leve
 The following note row is labelled `one more thing` and uses the single-line
 `TextField` with the placeholder `say what should change`.
 
-The active question is white and bold. The selected chip has a white background.
+The active question is white (`Ink::Subject`) while the others are
+`Ink::Aside`. The selected chip has a white background.
 Every carousel is permanently bracketed by the two-cell direction controls
 `< ` and ` >`; both cells are clickable, focus that control's own row, and move
 one adjacent choice without wrapping past either boundary. All three tracks use
@@ -263,8 +274,8 @@ into one marker segment per hidden choice; every adjacent step transfers exactly
 segment from the trailing side to the leading side. Segment widths differ by at
 most one cell, spare cells sit nearest the selected chip on each side, and every
 cell of a segment belongs to the same clickable target. The nearest marker uses
-`DIM2`, the next farther marker uses `RULE`, and every marker farther away uses
-`HL`, saturating at `HL`. On a legacy
+`DIM2`, the next farther marker uses `RULE`, and every marker farther away is the
+page background, so the rail fades out without borrowing the cursor highlight. On a legacy
 axis with no selected value, `—` is flanked by one two-cell marker on each side
 inside the same shared track; both cells of either marker are clickable. Legacy
 metadata renders no collapsed inline summary but remains tunable through this
@@ -283,8 +294,8 @@ Every chip or note edit is pending immediately: the old target sentence is
 struck through and its current metadata and step rows are muted. While the
 editor is open, its white selected chips show the staged choices below the
 rows; after it closes, the staged choices return on the `voice` row as
-summary tags, gray for unchanged values and white without bold for changed or
-pinned values. The editor carousel remains on the requested target; when it
+summary tags, plain text for unchanged values and a white block without bold for
+changed or pinned values. The editor carousel remains on the requested target; when it
 differs from the generated attribution, muted `current` plus the actual value
 makes that distinction explicit. Regeneration carries this complete requested
 preset. An explicitly changed or already pinned axis may differ only when the
@@ -449,8 +460,10 @@ not forwarded to card generation.
 - `body` renders the active screen. Modals are rendered last by drawing into a
   centered rectangle over `body` using `Clear + Block::bordered()`.
 - `footer` renders the active screen's keyboard hints as a tiered, width-aware
-  status bar: the primary action leads in bright ink, secondary actions follow,
-  and conventional keys (navigation, quit) are dimmed. When the row is too narrow
+  status bar: three steps of one ink each — the primary action in `Ink::Subject`,
+  secondary actions in `Ink::Detail`, and conventional keys (navigation, quit) in
+  `Ink::Aside`; key and label always share their tier's ink, and no footer hint is
+  ever bold. When the row is too narrow
   the dim hints are shed first — the primary action and quit never clip. The
   finished final permanently shows `[Esc] new cards` in the same muted treatment
   as quit and directly before it. The first `Esc` changes that action to `[Esc]
