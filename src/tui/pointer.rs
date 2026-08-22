@@ -200,8 +200,8 @@ mod tests {
             (
                 mouse_pointer_at(&app, terminal(), 9, 4),
                 mouse_pointer_at(&app, terminal(), 10, 4),
+                mouse_pointer_at(&app, terminal(), 14, 4),
                 mouse_pointer_at(&app, terminal(), 15, 4),
-                mouse_pointer_at(&app, terminal(), 16, 4),
                 mouse_pointer_at(&app, terminal(), 10, 5),
                 mouse_pointer_at(&app, terminal(), 10, 6),
                 mouse_pointer_at(&app, terminal(), 10, 3),

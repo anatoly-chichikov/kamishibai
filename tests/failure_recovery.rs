@@ -107,8 +107,8 @@ fn your_cards_surfaces_failure_banner_when_any_card_fails_terminally() {
     let app = seeded();
     let rendered = flat(&app);
     assert!(
-        rendered.contains("gave up") && rendered.contains("✗") && rendered.contains("scene"),
-        "your cards must show `gave up` and ✗ on the failed scene row: {rendered}"
+        rendered.contains("✗ manga") && !rendered.contains("gave up"),
+        "your cards must mark the failed manga row with a bare ✗: {rendered}"
     );
 }
 

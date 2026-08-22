@@ -82,17 +82,6 @@ impl HeadTagsLayout {
             .unwrap_or(0)
     }
 
-    /// Return the exclusive column occupied by one rendered tag row.
-    #[must_use]
-    pub(crate) fn row_width(&self, row: usize) -> usize {
-        self.tags
-            .iter()
-            .filter(|tag| tag.row == row)
-            .map(|tag| tag.end)
-            .max()
-            .unwrap_or(0)
-    }
-
     /// Render one tag row from an existing prefix column.
     #[must_use]
     pub(crate) fn spans_from(

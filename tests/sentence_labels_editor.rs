@@ -791,7 +791,7 @@ fn voice_row_tags_hit_only_their_boxes_not_the_labels_or_gaps() {
     let terminal = Rect::new(0, 0, 120, 50);
     let collapsed = seeded(priced_card_for("whilst"));
     let term = cell_of(&collapsed, "whilst", 120, 50);
-    let folder = cell_of(&collapsed, "folder", 120, 50);
+    let scene = cell_of(&collapsed, "scene", 120, 50);
     let register = cell_of(&collapsed, "casual", 120, 50);
     let kind = cell_of(&collapsed, "statement", 120, 50);
     let level = cell_of(&collapsed, "b1", 120, 50);
@@ -799,7 +799,7 @@ fn voice_row_tags_hit_only_their_boxes_not_the_labels_or_gaps() {
     let first_gap = (kind.0 - 2, kind.1);
     let second_gap = (level.0 - 2, level.1);
     let status_gap = (register.0 - 2, register.1);
-    let chip_gap = (folder.0 + 7, folder.1);
+    let chip_gap = (scene.0 + 7, scene.1);
     let arrow = (
         term.0 + u16::try_from("whilst".chars().count()).expect("term width must fit") + 1,
         term.1,
@@ -830,12 +830,12 @@ fn voice_row_tags_hit_only_their_boxes_not_the_labels_or_gaps() {
                 mouse_pointer_at(&collapsed, terminal, status_gap.0, status_gap.1),
             ),
             (
-                sentence_label_event_at(&collapsed, terminal, folder.0, folder.1),
-                mouse_pointer_at(&collapsed, terminal, folder.0, folder.1),
+                sentence_label_event_at(&collapsed, terminal, scene.0, scene.1),
+                mouse_pointer_at(&collapsed, terminal, scene.0, scene.1),
                 sentence_label_event_at(&collapsed, terminal, chip_gap.0, chip_gap.1),
                 mouse_pointer_at(&collapsed, terminal, chip_gap.0, chip_gap.1),
             ),
-            (folder.1, register.1, kind.1, level.1),
+            (scene.1, register.1, kind.1, level.1),
         ),
         (
             (
@@ -856,7 +856,7 @@ fn voice_row_tags_hit_only_their_boxes_not_the_labels_or_gaps() {
             ),
             (None, MousePointer::Arrow, None, MousePointer::Arrow),
             (None, MousePointer::Hand, None, MousePointer::Arrow),
-            (term.1 + 1, folder.1 + 1, folder.1 + 1, folder.1 + 1),
+            (term.1 + 1, scene.1 + 1, scene.1 + 1, scene.1 + 1),
         ),
         "voice-row tags leaked hits into the status gap, row labels, inter-tag gaps, or head"
     );
@@ -864,7 +864,7 @@ fn voice_row_tags_hit_only_their_boxes_not_the_labels_or_gaps() {
 
 #[test]
 fn too_narrow_atomic_tags_keep_the_card_head_as_the_editor_entry() {
-    let terminal = Rect::new(0, 0, 45, 30);
+    let terminal = Rect::new(0, 0, 38, 30);
     let collapsed = seeded(priced_card_for("whilst"));
     let term = cell_of(&collapsed, "whilst", terminal.width, terminal.height);
     assert_eq!(
@@ -906,13 +906,13 @@ fn partial_narrow_card_hides_atomic_tags_and_keeps_the_card_head_entry() {
 }
 
 #[test]
-fn narrow_layout_wraps_the_tags_onto_the_scene_row_and_keeps_them_clickable() {
-    let terminal = Rect::new(0, 0, 60, 30);
+fn narrow_layout_wraps_the_tags_onto_the_manga_row_and_keeps_them_clickable() {
+    let terminal = Rect::new(0, 0, 49, 30);
     let collapsed = seeded(priced_card_for("whilst"));
-    let folder = cell_of(&collapsed, "folder", 60, 30);
-    let register = cell_of(&collapsed, "casual", 60, 30);
-    let kind = cell_of(&collapsed, "statement", 60, 30);
-    let level = cell_of(&collapsed, "b1", 60, 30);
+    let scene = cell_of(&collapsed, "scene", 49, 30);
+    let register = cell_of(&collapsed, "casual", 49, 30);
+    let kind = cell_of(&collapsed, "statement", 49, 30);
+    let level = cell_of(&collapsed, "b1", 49, 30);
     let focus = Some(AppEvent::SentenceLabelOpen(0, LabelEditorRow::Register));
     assert_eq!(
         (
@@ -925,7 +925,7 @@ fn narrow_layout_wraps_the_tags_onto_the_scene_row_and_keeps_them_clickable() {
             mouse_pointer_at(&collapsed, terminal, kind.0, kind.1),
         ),
         (
-            (folder.1 + 1, folder.1 + 1, folder.1 + 2),
+            (scene.1 + 1, scene.1 + 1, scene.1 + 2),
             focus.clone(),
             MousePointer::Hand,
             focus.clone(),
@@ -933,7 +933,7 @@ fn narrow_layout_wraps_the_tags_onto_the_scene_row_and_keeps_them_clickable() {
             focus,
             MousePointer::Hand,
         ),
-        "narrow layout detached the wrapped tags from the voice and scene rows or their hit regions"
+        "narrow layout detached the wrapped tags from the voice and manga rows or their hit regions"
     );
 }
 

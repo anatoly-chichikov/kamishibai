@@ -969,7 +969,7 @@ mod tests {
         assert!(
             [
                 "ai is working…",
-                "gave up",
+                "✗ manga",
                 "↻1",
                 "↻2",
                 "↻3",
@@ -983,7 +983,7 @@ mod tests {
                     "retry 1/3",
                     "retry 2/3",
                     "retry 3/3",
-                    "gave up after",
+                    "gave up",
                     "1 ✗",
                     "2 ✗",
                     "3 ✗",

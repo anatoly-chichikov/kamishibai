@@ -18,7 +18,8 @@ use ratatui::widgets::Paragraph;
 use super::ScreenView;
 use crate::markdown::{parse_markdown, to_ratatui};
 use crate::session::{
-    Artifact, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, CardMeta, GenerationCost,
+    Artifact, ArtifactFile, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, CardMeta,
+    GenerationCost,
 };
 use crate::tui::app::App;
 use crate::tui::disclosure::DisclosureControls;
@@ -32,27 +33,30 @@ const HINT_STOPPING: &str = "stopping…";
 const HINT_DONE: &str = "all done";
 const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
-const STEP_LABEL_COL_CHARS: usize = 8;
-const STEP_STATE_COL_CHARS: usize = 14;
-const SENTENCE_TAG_GAP: usize = 3;
+const STEP_LABEL_COL_CHARS: usize = 7;
+const STEP_COST_COL_CHARS: usize = 6;
+const SENTENCE_TAG_GAP: usize = 2;
 const SENTENCE_TAG_START: usize = super::common::CARD_DETAIL_COLUMN
     + STEP_LABEL_COL_CHARS
-    + STEP_STATE_COL_CHARS
+    + STEP_COST_COL_CHARS
     + SENTENCE_TAG_GAP;
 const SECTION_GAP_ROWS: usize = 1;
 const FACT_LABEL_COLUMN: usize = 29;
-const STEP_ROWS: [StepRow; 3] = [StepRow::Folder, StepRow::Voice, StepRow::Scene];
+const STEP_ROWS: [StepRow; 3] = [StepRow::Scene, StepRow::Voice, StepRow::Manga];
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
 const AI_WORKING: &str = "ai is working…";
+const CACHED_NOTE: &str = "cached";
 
-/// One rendered artifact row of a card block: `folder` covers the card's
-/// cache cell (meta plus scene work), `voice` the audio, and `scene` the
-/// whole visual phase up to the rendered page.
+/// One rendered artifact row of a card block, named after what the card gets
+/// out of it: `scene` is the written material — the `Artifact::Meta` slot,
+/// whose click target is the card's whole cache cell; `voice` is the audio;
+/// and `manga` folds `Artifact::Scene` and `Artifact::Picture` into the one
+/// visual phase that ends at the rendered page.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum StepRow {
-    Folder,
-    Voice,
     Scene,
+    Voice,
+    Manga,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -71,26 +75,20 @@ struct SummaryLabels {
 }
 
 struct ArtifactLine<'a> {
-    core: Vec<Span<'a>>,
-    tail: Vec<Span<'a>>,
+    spans: Vec<Span<'a>>,
 }
 
 impl<'a> ArtifactLine<'a> {
-    fn core_width(&self) -> usize {
-        spans_width(self.core.as_slice())
+    fn width(&self) -> usize {
+        spans_width(self.spans.as_slice())
     }
 
-    fn tail_width(&self) -> usize {
-        spans_width(self.tail.as_slice())
-    }
-
-    fn into_line(mut self) -> Line<'a> {
-        self.core.append(&mut self.tail);
-        Line::from(self.core)
+    fn into_line(self) -> Line<'a> {
+        Line::from(self.spans)
     }
 
     fn muted(mut self) -> Self {
-        for span in self.core.iter_mut().chain(self.tail.iter_mut()) {
+        for span in &mut self.spans {
             span.style = span.style.fg(palette::DIM);
         }
         self
@@ -248,34 +246,19 @@ fn summary_labels(
     if !steps.contains(&StepRow::Voice) {
         return None;
     }
-    let voice = step_line(draft, StepRow::Voice, running, 0);
     let start = SENTENCE_TAG_START;
-    if voice.core_width() > start {
+    if step_line(draft, StepRow::Voice, running, 0).width() > start {
         return None;
     }
-    let unwrapped = summary_tags_layout(draft, usize::MAX)?;
-    if voice.tail_width() > 0 {
-        if start
-            .saturating_add(unwrapped.row_width(0))
-            .saturating_add(voice.tail_width())
-            > width
-        {
-            return None;
-        }
-        return Some(SummaryLabels {
-            tags: unwrapped,
-            start,
-        });
-    }
     let content_width = width.saturating_sub(start);
-    if unwrapped.minimum_width() > content_width {
+    if summary_tags_layout(draft, usize::MAX)?.minimum_width() > content_width {
         return None;
     }
     let tags = summary_tags_layout(draft, content_width)?;
     if tags.occupies(2) {
         return None;
     }
-    if [StepRow::Voice, StepRow::Scene]
+    if [StepRow::Voice, StepRow::Manga]
         .into_iter()
         .enumerate()
         .any(|(row, step)| {
@@ -301,16 +284,6 @@ fn summary_step_lines<'a>(
             if !labels.tags.occupies(row) {
                 return line.into_line();
             }
-            if step == StepRow::Voice {
-                let mut spans = line.core;
-                spans.push(Span::styled(
-                    " ".repeat(labels.start.saturating_sub(spans_width(spans.as_slice()))),
-                    palette::base(),
-                ));
-                spans.extend(labels.tags.spans_from(row, 0, palette::base()));
-                spans.extend(line.tail);
-                return Line::from(spans);
-            }
             let mut full = line.into_line();
             full.spans.push(Span::styled(
                 " ".repeat(labels.start.saturating_sub(full.width())),
@@ -326,7 +299,7 @@ fn summary_step_lines<'a>(
 fn row_state(draft: &CardDraft, row: StepRow, running: Option<Artifact>) -> RowState {
     let artifacts = draft.artifacts();
     match row {
-        StepRow::Folder => slot_row_state(
+        StepRow::Scene => slot_row_state(
             artifacts.meta(),
             draft.meta().is_some(),
             running == Some(Artifact::Meta),
@@ -334,7 +307,7 @@ fn row_state(draft: &CardDraft, row: StepRow, running: Option<Artifact>) -> RowS
         StepRow::Voice => {
             slot_row_state(artifacts.sound(), false, running == Some(Artifact::Sound))
         }
-        StepRow::Scene => scene_row_state(artifacts.scene(), artifacts.picture(), running),
+        StepRow::Manga => manga_row_state(artifacts.scene(), artifacts.picture(), running),
     }
 }
 
@@ -357,7 +330,7 @@ fn slot_row_state(slot: &ArtifactSlot, stored: bool, active: bool) -> RowState {
     RowState::Hidden
 }
 
-fn scene_row_state(
+fn manga_row_state(
     scene: &ArtifactSlot,
     picture: &ArtifactSlot,
     running: Option<Artifact>,
@@ -383,11 +356,11 @@ fn scene_row_state(
 fn row_visible(draft: &CardDraft, row: StepRow, running: Option<Artifact>) -> bool {
     let artifacts = draft.artifacts();
     match row {
-        StepRow::Folder => {
+        StepRow::Scene => {
             draft.meta().is_some() || slot_visible(artifacts.meta(), Artifact::Meta, running)
         }
         StepRow::Voice => slot_visible(artifacts.sound(), Artifact::Sound, running),
-        StepRow::Scene => {
+        StepRow::Manga => {
             slot_visible(artifacts.scene(), Artifact::Scene, running)
                 || slot_visible(artifacts.picture(), Artifact::Picture, running)
         }
@@ -396,15 +369,15 @@ fn row_visible(draft: &CardDraft, row: StepRow, running: Option<Artifact>) -> bo
 
 fn row_name(row: StepRow) -> &'static str {
     match row {
-        StepRow::Folder => "folder",
-        StepRow::Voice => "voice",
         StepRow::Scene => "scene",
+        StepRow::Voice => "voice",
+        StepRow::Manga => "manga",
     }
 }
 
 fn row_cost(artifacts: &CardArtifacts, row: StepRow) -> Option<GenerationCost> {
     match row {
-        StepRow::Folder => {
+        StepRow::Scene => {
             let cost = [artifacts.meta().cost(), artifacts.scene().cost()]
                 .into_iter()
                 .flatten()
@@ -412,14 +385,23 @@ fn row_cost(artifacts: &CardArtifacts, row: StepRow) -> Option<GenerationCost> {
             (cost.nanos() != 0).then_some(cost)
         }
         StepRow::Voice => artifacts.sound().cost(),
-        StepRow::Scene => artifacts.picture().cost(),
+        StepRow::Manga => artifacts.picture().cost(),
     }
+}
+
+fn row_cached(artifacts: &CardArtifacts, row: StepRow) -> bool {
+    let slot = match row {
+        StepRow::Scene => artifacts.meta(),
+        StepRow::Voice => artifacts.sound(),
+        StepRow::Manga => artifacts.picture(),
+    };
+    slot.file().is_some_and(ArtifactFile::cached)
 }
 
 fn row_target(draft: &CardDraft, row: StepRow) -> Option<PathBuf> {
     let artifacts = draft.artifacts();
     match row {
-        StepRow::Folder => artifacts
+        StepRow::Scene => artifacts
             .meta()
             .file()
             .and_then(|file| file.path().parent().map(Path::to_path_buf)),
@@ -427,16 +409,16 @@ fn row_target(draft: &CardDraft, row: StepRow) -> Option<PathBuf> {
             .sound()
             .file()
             .map(|file| file.path().to_path_buf()),
-        StepRow::Scene => artifacts
+        StepRow::Manga => artifacts
             .picture()
             .file()
             .map(|file| file.path().to_path_buf()),
     }
 }
 
-/// Click target of one step row as body-relative label columns: `folder`
+/// Click target of one step row as body-relative label columns: `scene`
 /// opens the card's cache cell (the parent of the meta file), `voice` opens
-/// the audio file, and `scene` opens the rendered page. `None` while the
+/// the audio file, and `manga` opens the rendered page. `None` while the
 /// row's target file is not recorded yet.
 #[must_use]
 pub(crate) fn step_link_region(draft: &CardDraft, row: StepRow) -> Option<(u16, u16, PathBuf)> {
@@ -503,7 +485,7 @@ fn card_head<'a>(
         " "
     };
     let glyph_style = if focused && !pending {
-        palette::highlight().add_modifier(Modifier::BOLD)
+        palette::highlight()
     } else if focused {
         palette::highlight_dim()
     } else {
@@ -516,26 +498,23 @@ fn card_head<'a>(
     } else {
         palette::dim2()
     };
-    let built = draft.artifacts().all_ready();
-    let term_style = if pending {
-        if focused {
-            palette::highlight_dim()
-        } else {
-            palette::dim()
-        }
+    let built = draft.artifacts().all_ready() && !pending;
+    let lit = if focused {
+        palette::highlight()
     } else {
-        match (built, focused) {
-            (true, true) => palette::highlight().add_modifier(Modifier::BOLD),
-            (true, false) => palette::base(),
-            (false, true) => palette::highlight_dim(),
-            (false, false) => palette::dim(),
-        }
+        palette::base()
     };
-    let sentence_base = if focused {
+    let muted = if focused {
         palette::highlight_dim()
     } else {
         palette::dim()
     };
+    let term_style = if built {
+        lit.add_modifier(Modifier::BOLD)
+    } else {
+        muted
+    };
+    let sentence_base = if built { lit } else { muted };
     let sentence_style = if pending {
         sentence_base.add_modifier(Modifier::CROSSED_OUT)
     } else {
@@ -617,14 +596,14 @@ fn summary_tags_layout(
 
 fn sentence_tag_row(step: StepRow) -> Option<usize> {
     match step {
-        StepRow::Folder => None,
+        StepRow::Scene => None,
         StepRow::Voice => Some(0),
-        StepRow::Scene => Some(1),
+        StepRow::Manga => Some(1),
     }
 }
 
 fn step_line_width(draft: &CardDraft, running: Option<Artifact>, step: StepRow) -> usize {
-    step_line(draft, step, running, 0).into_line().width()
+    step_line(draft, step, running, 0).width()
 }
 
 fn spans_width(spans: &[Span<'_>]) -> usize {
@@ -720,22 +699,19 @@ fn step_line<'a>(
 ) -> ArtifactLine<'a> {
     let state = step_state(draft, row, running, spinner_frame);
     let label = row_name(row);
-    let mut core: Vec<Span<'a>> = Vec::new();
-    core.push(Span::styled(
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    spans.push(Span::styled(
         " ".repeat(super::common::CARD_DETAIL_COLUMN.saturating_sub(2)),
         palette::base(),
     ));
-    core.push(Span::styled(
+    spans.push(Span::styled(
         format!("{} ", state.glyph),
         state.status_style,
     ));
-    core.push(Span::styled(String::from(label), state.label_style));
-    core.push(Span::styled(" ".repeat(label_gap(label)), palette::dim()));
-    core.extend(state.line.core);
-    ArtifactLine {
-        core,
-        tail: state.line.tail,
-    }
+    spans.push(Span::styled(String::from(label), state.label_style));
+    spans.push(Span::styled(" ".repeat(label_gap(label)), palette::dim()));
+    spans.extend(state.line.spans);
+    ArtifactLine { spans }
 }
 
 fn muted_line(mut line: Line<'_>) -> Line<'_> {
@@ -753,84 +729,75 @@ fn step_state<'a>(
 ) -> StepState<'a> {
     let cost = row_cost(draft.artifacts(), row);
     match row_state(draft, row, running) {
-        RowState::Ready => {
-            let mut core: Vec<Span<'a>> = Vec::new();
-            push_row_cost(&mut core, cost);
-            StepState {
-                glyph: String::from("✓"),
-                status_style: palette::base(),
-                label_style: if row_target(draft, row).is_some() {
-                    palette::link()
-                } else {
-                    palette::base()
-                },
-                line: ArtifactLine {
-                    core,
-                    tail: Vec::new(),
-                },
-            }
-        }
+        RowState::Ready => StepState {
+            glyph: String::from("✓"),
+            status_style: palette::base(),
+            label_style: if row_target(draft, row).is_some() {
+                palette::link()
+            } else {
+                palette::base()
+            },
+            line: ArtifactLine {
+                spans: ready_value(cost, row_cached(draft.artifacts(), row)),
+            },
+        },
         RowState::Discarded => StepState {
             glyph: String::from("⊘"),
             status_style: palette::dim(),
             label_style: palette::dim(),
             line: ArtifactLine {
-                core: vec![Span::styled(String::from("discarded"), palette::dim())],
-                tail: Vec::new(),
+                spans: vec![Span::styled(String::from("discarded"), palette::dim())],
             },
         },
-        RowState::Failed => {
-            let mut core = vec![Span::styled(String::from("gave up"), palette::dim())];
-            push_row_cost(&mut core, cost);
-            StepState {
-                glyph: String::from("✗"),
-                status_style: palette::base(),
-                label_style: palette::base(),
-                line: ArtifactLine {
-                    core,
-                    tail: Vec::new(),
-                },
-            }
-        }
+        RowState::Failed => StepState {
+            glyph: String::from("✗"),
+            status_style: palette::base(),
+            label_style: palette::base(),
+            line: ArtifactLine {
+                spans: row_cost_spans(cost),
+            },
+        },
         RowState::Active => StepState {
             glyph: String::from(SPINNER_FRAMES[spinner_frame]),
             status_style: palette::base(),
             label_style: palette::base(),
             line: ArtifactLine {
-                core: vec![Span::styled(String::from(AI_WORKING), palette::dim())],
-                tail: Vec::new(),
+                spans: vec![Span::styled(String::from(AI_WORKING), palette::dim())],
             },
         },
-        RowState::Paused => {
-            let mut core = Vec::new();
-            push_row_cost(&mut core, cost);
-            StepState {
-                glyph: String::from("·"),
-                status_style: palette::base(),
-                label_style: palette::base(),
-                line: ArtifactLine {
-                    core,
-                    tail: Vec::new(),
-                },
-            }
-        }
+        RowState::Paused => StepState {
+            glyph: String::from("·"),
+            status_style: palette::base(),
+            label_style: palette::base(),
+            line: ArtifactLine {
+                spans: row_cost_spans(cost),
+            },
+        },
         RowState::Hidden => StepState {
             glyph: String::from("○"),
             status_style: palette::dim2(),
             label_style: palette::dim2(),
             line: ArtifactLine {
-                core: vec![Span::styled(String::from("queued"), palette::dim())],
-                tail: Vec::new(),
+                spans: vec![Span::styled(String::from("queued"), palette::dim())],
             },
         },
     }
 }
 
-fn push_row_cost<'a>(note: &mut Vec<Span<'a>>, cost: Option<GenerationCost>) {
-    if let Some(cost) = cost {
-        note.push(Span::styled("  ", palette::dim()));
-        note.push(Span::styled(cost.dollars(), palette::dim2()));
+/// A finished row states either what it cost or that it cost nothing because
+/// the artifact came back from the cache — never both, and never nothing when
+/// the file is a cache hit.
+fn ready_value<'a>(cost: Option<GenerationCost>, cached: bool) -> Vec<Span<'a>> {
+    match (cost, cached) {
+        (Some(cost), _) => vec![Span::styled(cost.dollars(), palette::dim2())],
+        (None, true) => vec![Span::styled(String::from(CACHED_NOTE), palette::dim2())],
+        (None, false) => Vec::new(),
     }
+}
+
+fn row_cost_spans<'a>(cost: Option<GenerationCost>) -> Vec<Span<'a>> {
+    cost.map(|cost| vec![Span::styled(cost.dollars(), palette::dim2())])
+        .unwrap_or_default()
 }
 
 fn step_name(kind: Artifact) -> &'static str {

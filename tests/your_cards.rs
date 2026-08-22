@@ -117,6 +117,11 @@ fn term_ink(buffer: &Buffer, term: &str) -> Color {
     buffer[(column, row)].fg
 }
 
+fn term_is_bold(buffer: &Buffer, term: &str) -> bool {
+    let (column, row) = position_of(buffer, term);
+    buffer[(column, row)].modifier.contains(Modifier::BOLD)
+}
+
 fn row_text(buffer: &Buffer, row: u16) -> String {
     (0..buffer.area.width)
         .map(|column| buffer[(column, row)].symbol())
@@ -152,6 +157,10 @@ fn priced_file(name: &str, nanos: u64) -> ArtifactFile {
 
 fn cached_file(name: &str) -> ArtifactFile {
     ArtifactFile::new(name, PathBuf::from(format!("/tmp/{name}")), "1 B", true)
+}
+
+fn cached_priced_file(name: &str, nanos: u64) -> ArtifactFile {
+    cached_file(name).with_cost(GenerationCost::from_nanos(nanos))
 }
 
 fn priced_artifacts() -> CardArtifacts {
@@ -330,11 +339,6 @@ fn row_containing<'a>(rendered: &'a str, needle: &str) -> &'a str {
         .expect("rendered card row must exist")
 }
 
-fn column_of(row: &str, needle: &str) -> usize {
-    let offset = row.find(needle).expect("rendered card cell must exist");
-    row[..offset].chars().count()
-}
-
 fn columns_of(buffer: &Buffer, needle: &str) -> Vec<u16> {
     (0..buffer.area.height)
         .filter_map(|row| {
@@ -366,8 +370,8 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
         .find("whilst → Example with whilst.")
         .expect("first card head must be visible");
     let picture = rendered
-        .find("✓ scene")
-        .expect("first card scene row must be visible");
+        .find("✓ manga")
+        .expect("first card manga row must be visible");
     assert!(
         rendered.contains("building your cards")
             && rendered.contains("2/4 ready")
@@ -380,7 +384,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
             && rendered.contains("wreck")
             && rendered.contains("Example with wreck.")
             && rendered.contains("whilst → Example with whilst.")
-            && rendered.contains("✓ folder")
+            && rendered.contains("✓ scene")
             && rendered.contains("✓ voice")
             && !rendered.contains("picture")
             && rendered.contains("RU → EN")
@@ -395,7 +399,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
             && !rendered.contains("queued")
             && ctrl < tune
             && target < picture,
-        "each generated card must keep its target in the head before its chip row: {rendered}"
+        "each generated card must keep its target in the head before its step rows: {rendered}"
     );
 }
 
@@ -445,19 +449,19 @@ fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
 fn step_rows_carry_their_own_incremental_costs() {
     let app = seeded(vec![draft("whilst", priced_artifacts())]);
     let rendered = flat(&app);
-    let folder = row_containing(&rendered, "folder");
-    let voice = row_containing(&rendered, "voice");
     let scene = row_containing(&rendered, "scene");
+    let voice = row_containing(&rendered, "voice");
+    let manga = row_containing(&rendered, "manga");
     assert!(
         rendered.contains("whilst → Example with whilst.  $.0808")
-            && folder.contains("$.0035")
+            && scene.contains("$.0035")
             && voice.contains("$.0100")
-            && scene.contains("$.0673")
+            && manga.contains("$.0673")
             && rendered.contains("$0.08")
             && !rendered.contains("meta.json")
             && !rendered.contains("1 B")
             && !rendered.contains("total cost"),
-        "the folder row must fold the meta and scene spend while voice and scene keep their own: {rendered}"
+        "the scene row must fold the metadata and composition spend while voice and manga keep their own: {rendered}"
     );
 }
 
@@ -470,9 +474,9 @@ fn an_expanded_card_keeps_the_same_three_step_rows() {
     .0;
     let rendered = flat(&app);
     assert!(
-        rendered.contains("✓ folder")
+        rendered.contains("✓ scene")
             && rendered.contains("✓ voice")
-            && rendered.contains("✓ scene")
+            && rendered.contains("✓ manga")
             && !rendered.contains("meta.json")
             && !rendered.contains("1 B"),
         "the expanded card must keep the same three step rows without file names or sizes: {rendered}"
@@ -574,12 +578,29 @@ fn partial_publish_reserves_and_links_the_same_banner_rows() {
 }
 
 #[test]
-fn cached_artifacts_render_no_cached_note_and_no_cost() {
+fn a_free_row_names_the_cache_hit_instead_of_leaving_its_value_blank() {
     let app = seeded(vec![draft("whilst", cached_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("✓ folder") && !rendered.contains("cached") && !rendered.contains('$'),
-        "fully cached rows must render as plain ready rows without a cached note or a price: {rendered}"
+        rendered.contains("✓ scene  cached") && !rendered.contains('$'),
+        "a row that cost nothing because its artifact came back from the cache must say so: {rendered}"
+    );
+}
+
+#[test]
+fn a_priced_row_keeps_only_the_money_even_when_its_file_was_a_cache_hit() {
+    let artifacts = CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta)
+            .succeeded_with(cached_priced_file("meta.json", 1_500_000)),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded_with(cached_file("scene.json")),
+        ArtifactSlot::fresh(Artifact::Picture).succeeded_with(cached_file("picture.jpg")),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded_with(cached_file("audio.wav")),
+    );
+    let rendered = flat(&seeded(vec![draft("whilst", artifacts)]));
+    let scene = row_containing(&rendered, "scene");
+    assert!(
+        scene.contains("$.0015") && !scene.contains("cached"),
+        "a row that recorded a price must state the money alone, never the cache note beside it: {rendered}"
     );
 }
 
@@ -616,7 +637,7 @@ fn untouched_card_shows_only_a_dim_term_with_no_step_rows() {
         rendered.contains("ancient")
             && !rendered.contains("meta")
             && !rendered.contains("audio")
-            && !rendered.contains("scene")
+            && !rendered.contains("manga")
             && !rendered.contains("picture")
             && !rendered.contains("queued"),
         "untouched card must collapse to its term row alone, no artifact lines: {rendered}"
@@ -628,18 +649,18 @@ fn retry_state_moves_its_spent_attempt_count_to_the_card_head() {
     let app = seeded(vec![draft("in the end", retrying_artifacts())]);
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
-    let (_, scene_row) = position_of(&buffer, "scene");
+    let (_, manga_row) = position_of(&buffer, "manga");
     let head = row_containing(&rendered, "in the end →");
     assert_eq!(
         (
             head.contains("$.1234  ↻1"),
-            buffer[(8, scene_row)].symbol(),
-            row_text(&buffer, scene_row).contains("$.1234"),
+            buffer[(8, manga_row)].symbol(),
+            row_text(&buffer, manga_row).contains("$.1234"),
             rendered.contains("retry"),
             rendered.contains("$0.12"),
         ),
         (true, "·", true, false, true),
-        "retrying state must keep the spent count on the head and a dot on its scene row: {rendered}"
+        "retrying state must keep the spent count on the head and a dot on its manga row: {rendered}"
     );
 }
 
@@ -700,16 +721,16 @@ fn narrow_retry_suffix_wraps_with_the_head_without_shifting_the_step_rows() {
     let terminal = Rect::new(0, 0, 60, 30);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
     let (_, head_row) = position_of(&buffer, "interdependently →");
-    let (folder_column, folder_row) = position_of(&buffer, "folder");
+    let (scene_column, scene_row) = position_of(&buffer, "scene");
     let head = row_text(&buffer, head_row);
     assert_eq!(
         (
             head.contains("$.0808  ↻2"),
-            folder_row.saturating_sub(head_row),
-            link_at(&app, terminal, folder_column, folder_row),
+            scene_row.saturating_sub(head_row),
+            link_at(&app, terminal, scene_column, scene_row),
         ),
         (true, 2, Some(String::from("/tmp"))),
-        "the combined cost and retry suffix drifted from wrapped-head layout or the folder row hit map"
+        "the combined cost and retry suffix drifted from wrapped-head layout or the scene row hit map"
     );
 }
 
@@ -755,7 +776,7 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
     let app = seeded(vec![recovered, retrying, failed]).cards_running(Some((1, Artifact::Picture)));
     let rendered = flat(&app);
     let active = row_containing(&rendered, "ai is working…");
-    let failed = row_containing(&rendered, "gave up");
+    let failed = row_containing(&rendered, "✗ manga");
     let recovered_head = row_containing(&rendered, "whilst →");
     let active_head = row_containing(&rendered, "commodity →");
     let failed_head = row_containing(&rendered, "move on →");
@@ -763,15 +784,15 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
         recovered_head.contains("$.0673  ↻1")
             && active_head.contains("$.2148  ↻3")
             && failed_head.contains("$.2148  ↻3")
-            && active.contains("scene")
+            && active.contains("manga")
             && !active.contains("retry")
             && !active.contains("$.1738")
-            && failed.contains("scene")
+            && !failed.contains("gave up")
             && failed.contains("$.1738")
             && !rendered.contains("paused")
             && !rendered.contains("1 ✗")
             && !rendered.contains("3 ✗"),
-        "scene rows retained retry history instead of leaving it on their card heads: {rendered}"
+        "manga rows retained retry history instead of leaving it on their card heads: {rendered}"
     );
 }
 
@@ -779,15 +800,13 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
 fn failure_banner_appears_when_any_card_exhausts_its_retries() {
     let app = seeded(vec![draft("wreck", failed_artifacts())]);
     let rendered = flat(&app);
-    let scene = row_containing(&rendered, "gave up");
+    let manga = row_containing(&rendered, "✗ manga");
     assert!(
-        scene.contains("✗")
-            && scene.contains("scene")
-            && scene.contains("$.3210")
-            && !rendered.contains("gave up after")
+        manga.contains("$.3210")
+            && !rendered.contains("gave up")
             && row_containing(&rendered, "wreck →").contains("$.3210  ↻3")
             && rendered.contains("$0.32"),
-        "your cards must mark the failed scene row with ✗ and gave up plus its own cost: {rendered}"
+        "your cards must mark the failed manga row with a bare ✗ and its own cost: {rendered}"
     );
 }
 
@@ -918,7 +937,7 @@ fn expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane() {
     let start = seeded(vec![draft("whilst", ready_artifacts())]);
     let expanded = transit(start, AppEvent::KeyEnter).0;
     let rendered = flat(&expanded);
-    let artifact_lines = rendered.matches("scene").count();
+    let artifact_lines = rendered.matches("manga").count();
     assert!(
         expanded.card_expanded()
             && expanded.sentence_editor().is_some()
@@ -1094,7 +1113,7 @@ fn the_tag_summary_sits_on_the_voice_row_at_the_fixed_column() {
         ),
         (
             (head_row + 2, head_row + 2, head_row + 2),
-            (36, 45, 57),
+            (26, 35, 47),
             false,
             true,
             true,
@@ -1105,7 +1124,7 @@ fn the_tag_summary_sits_on_the_voice_row_at_the_fixed_column() {
 }
 
 #[test]
-fn audio_progress_keeps_collapsed_tags_in_one_column() {
+fn audio_progress_keeps_one_tag_column_and_hides_only_the_busy_rows_summary() {
     let ready = labeled_draft(
         "ready",
         audio_progress_artifacts(
@@ -1137,15 +1156,15 @@ fn audio_progress_keeps_collapsed_tags_in_one_column() {
     assert_eq!(
         (
             columns_of(&buffer, "casual"),
-            column_of(active_row, "ai is working…") < column_of(active_row, "casual"),
+            active_row.contains("casual"),
             buffer[(8, ready_head + 2)].symbol(),
             buffer[(8, retry_head + 2)].symbol(),
             buffer[(8, recovered_head + 2)].symbol(),
             rendered.matches("↻2").count(),
             rendered.matches("$.0021").count(),
         ),
-        (vec![36, 36, 36, 36], true, "✓", "·", "✓", 2, 3),
-        "audio progress must keep one tag column on the voice rows with only their own costs:\n{rendered}"
+        (vec![26, 26, 26], false, "✓", "·", "✓", 2, 3),
+        "audio progress must keep one tag column on the idle voice rows and drop the busy row's summary:\n{rendered}"
     );
 }
 
@@ -1162,12 +1181,12 @@ fn a_recovered_picture_keeps_a_plain_check_and_its_history_on_the_head() {
             rendered.contains("2 ✗"),
         ),
         ("✓", true, false),
-        "a recovered picture must render a plain ready scene row while the head keeps the history"
+        "a recovered picture must render a plain ready manga row while the head keeps the history"
     );
 }
 
 #[test]
-fn collapsed_cached_artifacts_keep_tags_on_the_voice_row_without_status_text() {
+fn collapsed_cached_artifacts_keep_tags_beside_their_cache_note() {
     let app = seeded(vec![labeled_draft("whilst", cached_artifacts())]);
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
@@ -1175,13 +1194,13 @@ fn collapsed_cached_artifacts_keep_tags_on_the_voice_row_without_status_text() {
     let (register_column, register_row) = position_of(&buffer, "casual");
     assert_eq!(
         (
-            rendered.contains("cached"),
+            rendered.matches("cached").count(),
             rendered.contains("meta.json"),
             (register_column, register_row),
             buffer[(10, head_row + 1)].symbol(),
         ),
-        (false, false, (36, head_row + 2), "f"),
-        "cached artifacts must collapse to plain ready rows with the tags on the voice row"
+        (3, false, (26, head_row + 2), "s"),
+        "cached artifacts must collapse to ready rows that name the cache hit and keep the tag column"
     );
 }
 
@@ -1189,19 +1208,19 @@ fn collapsed_cached_artifacts_keep_tags_on_the_voice_row_without_status_text() {
 fn too_narrow_collapsed_card_hides_the_atomic_tag_summary() {
     let buffer = rendered_buffer_at(
         &seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        45,
+        38,
         30,
     );
-    let (_, folder_row) = position_of(&buffer, "folder");
-    let rows = (folder_row..folder_row + 3)
+    let (_, scene_row) = position_of(&buffer, "scene");
+    let rows = (scene_row..scene_row + 3)
         .map(|row| row_text(&buffer, row))
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(
         (
-            rows.contains("folder"),
-            rows.contains("voice"),
             rows.contains("scene"),
+            rows.contains("voice"),
+            rows.contains("manga"),
             rows.contains("casual"),
             rows.contains("statement"),
             rows.contains("b1"),
@@ -1214,10 +1233,10 @@ fn too_narrow_collapsed_card_hides_the_atomic_tag_summary() {
 #[test]
 fn ready_step_labels_render_as_underlined_links() {
     let app = seeded(vec![draft("whilst", priced_artifacts())]);
-    let folder = matching_cells(&app, "folder");
+    let scene = matching_cells(&app, "scene");
     assert!(
-        !folder.is_empty()
-            && folder
+        !scene.is_empty()
+            && scene
                 .iter()
                 .all(|(_, _, modifier)| modifier.contains(Modifier::UNDERLINED)),
         "a ready row label with a known target must render as an underlined link"
@@ -1229,16 +1248,16 @@ fn only_started_rows_render_and_queued_rows_stay_hidden() {
     let app = seeded(vec![draft("whilst", partial_priced_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("✓ folder")
+        rendered.contains("✓ scene")
             && !rendered.contains("voice")
-            && !rendered.contains("scene")
+            && !rendered.contains("manga")
             && !rendered.contains("queued"),
-        "rows that never started must stay hidden while the folder row appears first: {rendered}"
+        "rows that never started must stay hidden while the scene row appears first: {rendered}"
     );
 }
 
 #[test]
-fn scene_and_picture_work_share_one_spinner_on_the_scene_row() {
+fn scene_and_picture_work_share_one_spinner_on_the_manga_row() {
     let artifacts = CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene),
@@ -1249,16 +1268,16 @@ fn scene_and_picture_work_share_one_spinner_on_the_scene_row() {
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst →");
-    let scene = row_text(&buffer, head_row + 3);
+    let manga = row_text(&buffer, head_row + 3);
     assert_eq!(
         (
             buffer[(8, head_row + 3)].symbol() != " ",
-            scene.contains("scene"),
-            scene.contains("ai is working…"),
+            manga.contains("manga"),
+            manga.contains("ai is working…"),
             rendered.contains("picture"),
         ),
         (true, true, true, false),
-        "scene work must spin on the single scene row with the working phrase beside it"
+        "scene and picture work must spin on the single manga row with the working phrase beside it"
     );
 }
 
@@ -1276,12 +1295,12 @@ fn a_ready_scene_with_a_queued_picture_keeps_a_dim_dot_trace() {
     assert_eq!(
         buffer[(8, head_row + 3)].symbol(),
         "·",
-        "a paid ready scene with its picture still owed must leave a dim dot on the scene row"
+        "a paid ready scene with its picture still owed must leave a dim dot on the manga row"
     );
 }
 
 #[test]
-fn a_discarded_artifact_renders_a_dim_slash_on_its_scene_row() {
+fn a_discarded_artifact_renders_a_dim_slash_on_its_manga_row() {
     let artifacts = CardArtifacts::from_parts(
         ArtifactSlot::fresh(Artifact::Meta).succeeded(),
         ArtifactSlot::fresh(Artifact::Scene).succeeded(),
@@ -1294,7 +1313,7 @@ fn a_discarded_artifact_renders_a_dim_slash_on_its_scene_row() {
     assert_eq!(
         buffer[(8, head_row + 3)].symbol(),
         "⊘",
-        "a discarded artifact must keep its dim slash on the scene row"
+        "a discarded artifact must keep its dim slash on the manga row"
     );
 }
 
@@ -1308,14 +1327,14 @@ fn a_staged_rewrite_mutes_the_step_rows_and_keeps_the_staged_tags_visible() {
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst");
     let gray = Color::Rgb(0x8b, 0x8a, 0x83);
-    let folder_label = &buffer[(10, head_row + 1)];
+    let scene_label = &buffer[(10, head_row + 1)];
     assert_eq!(
         (
-            folder_label.symbol(),
-            folder_label.fg,
+            scene_label.symbol(),
+            scene_label.fg,
             row_text(&buffer, head_row + 2).contains("formal"),
         ),
-        ("f", gray, true),
+        ("s", gray, true),
         "a staged rewrite must mute the step rows while the staged tags stay visible"
     );
 }
@@ -1331,15 +1350,15 @@ fn expanded_sentence_editor_starts_below_the_complete_artifact_block() {
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst →");
-    let (folder_column, folder_row) = position_of(&buffer, "folder");
-    let (_, voice_row) = position_of(&buffer, "voice");
     let (scene_column, scene_row) = position_of(&buffer, "scene");
+    let (_, voice_row) = position_of(&buffer, "voice");
+    let (manga_column, manga_row) = position_of(&buffer, "manga");
     let (sound_column, sound_row) = position_of(&buffer, "how should it sound?");
     let (kind_column, kind_row) = position_of(&buffer, "what kind of phrase?");
     let (level_column, level_row) = position_of(&buffer, "what's the desired level?");
     let (note_column, note_row) = position_of(&buffer, "one more thing");
     let section_has_no_pipe =
-        (folder_row..=note_row).all(|row| !row_text(&buffer, row).contains('│'));
+        (scene_row..=note_row).all(|row| !row_text(&buffer, row).contains('│'));
     assert_eq!(
         (
             (
@@ -1347,23 +1366,23 @@ fn expanded_sentence_editor_starts_below_the_complete_artifact_block() {
                 app.sentence_editor().is_some(),
                 rendered.contains("sentence:"),
                 section_has_no_pipe,
-                head_row + 1 == folder_row,
-                sound_row == scene_row + 2 && row_text(&buffer, scene_row + 1).trim().is_empty(),
+                head_row + 1 == scene_row,
+                sound_row == manga_row + 2 && row_text(&buffer, manga_row + 1).trim().is_empty(),
             ),
             (
-                (voice_row, scene_row),
+                (voice_row, manga_row),
                 (sound_row, kind_row, level_row, note_row),
             ),
             (sound_column, kind_column, level_column, note_column),
-            link_at(&app, terminal, scene_column, scene_row),
+            link_at(&app, terminal, manga_column, manga_row),
         ),
         (
             (true, true, false, true, true, true),
             (
-                (folder_row + 1, folder_row + 2),
-                (scene_row + 2, scene_row + 3, scene_row + 4, scene_row + 5),
+                (scene_row + 1, scene_row + 2),
+                (manga_row + 2, manga_row + 3, manga_row + 4, manga_row + 5),
             ),
-            (folder_column, folder_column, folder_column, folder_column),
+            (scene_column, scene_column, scene_column, scene_column),
             Some(String::from("/tmp/picture.jpg")),
         ),
         "expanded editor remained beside the step rows or retained the old sentence pane"
@@ -1380,9 +1399,9 @@ fn narrow_expanded_sentence_editor_starts_below_the_artifact_block() {
     .0;
     let rendered = flat(&app);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
-    let (folder_column, folder_row) = position_of(&buffer, "folder");
-    let (_, voice_row) = position_of(&buffer, "voice");
     let (scene_column, scene_row) = position_of(&buffer, "scene");
+    let (_, voice_row) = position_of(&buffer, "voice");
+    let (manga_column, manga_row) = position_of(&buffer, "manga");
     let (sound_column, sound_row) = position_of(&buffer, "how should it sound?");
     let (kind_column, kind_row) = position_of(&buffer, "what kind of phrase?");
     let (level_column, level_row) = position_of(&buffer, "what's the desired level?");
@@ -1390,15 +1409,15 @@ fn narrow_expanded_sentence_editor_starts_below_the_artifact_block() {
     let (_, b1_row) = position_of(&buffer, "b1");
     let (note_column, note_row) = position_of(&buffer, "one more thing");
     let section_has_no_pipe =
-        (folder_row..=note_row).all(|row| !row_text(&buffer, row).contains('│'));
+        (scene_row..=note_row).all(|row| !row_text(&buffer, row).contains('│'));
     assert_eq!(
         (
             (
                 rendered.contains("sentence:"),
                 section_has_no_pipe,
-                !row_text(&buffer, folder_row - 1).trim().is_empty(),
-                sound_row == scene_row + 2 && row_text(&buffer, scene_row + 1).trim().is_empty(),
-                (voice_row, scene_row),
+                !row_text(&buffer, scene_row - 1).trim().is_empty(),
+                sound_row == manga_row + 2 && row_text(&buffer, manga_row + 1).trim().is_empty(),
+                (voice_row, manga_row),
             ),
             (
                 (sound_column, kind_column, level_column, note_column),
@@ -1411,19 +1430,19 @@ fn narrow_expanded_sentence_editor_starts_below_the_artifact_block() {
                     note_row,
                 ),
             ),
-            link_at(&app, terminal, scene_column, scene_row),
+            link_at(&app, terminal, manga_column, manga_row),
         ),
         (
-            (false, true, true, true, (folder_row + 1, folder_row + 2)),
+            (false, true, true, true, (scene_row + 1, scene_row + 2)),
             (
-                (folder_column, folder_column, folder_column, folder_column,),
+                (scene_column, scene_column, scene_column, scene_column,),
                 (
-                    scene_row + 2,
-                    scene_row + 4,
-                    scene_row + 5,
-                    scene_row + 6,
-                    scene_row + 7,
-                    scene_row + 8,
+                    manga_row + 2,
+                    manga_row + 4,
+                    manga_row + 5,
+                    manga_row + 6,
+                    manga_row + 7,
+                    manga_row + 8,
                 ),
             ),
             Some(String::from("/tmp/picture.jpg")),
@@ -1477,7 +1496,7 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
     let buffer = rendered_buffer(&app);
     let target = matching_cells(&app, "Example with whilst.");
     let source = matching_cells(&app, "source sentence with whilst");
-    let step = matching_cells(&app, "✓ folder");
+    let step = matching_cells(&app, "✓ scene");
     let (term_column, term_row) = position_of(&buffer, "whilst");
     let term = (0.."whilst".chars().count())
         .map(|offset| {
@@ -1520,7 +1539,7 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
 }
 
 #[test]
-fn the_term_stays_gray_until_the_card_holds_its_last_artifact() {
+fn a_built_card_turns_its_term_bold_and_lights_its_sentence() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("terroir", ready_artifacts()),
@@ -1532,12 +1551,23 @@ fn the_term_stays_gray_until_the_card_holds_its_last_artifact() {
     let gray = Color::Rgb(0x8b, 0x8a, 0x83);
     assert_eq!(
         (
-            term_ink(&buffer, "terroir"),
-            term_ink(&buffer, "wreck"),
-            term_ink(&buffer, "bof"),
+            (
+                term_ink(&buffer, "terroir"),
+                term_ink(&buffer, "wreck"),
+                term_ink(&buffer, "bof"),
+            ),
+            (
+                term_is_bold(&buffer, "terroir"),
+                term_is_bold(&buffer, "wreck"),
+                term_is_bold(&buffer, "bof"),
+            ),
+            (
+                term_ink(&buffer, "Example with terroir."),
+                term_ink(&buffer, "Example with wreck."),
+            ),
         ),
-        (white, gray, gray),
-        "the card term lit up before the card held all four artifacts"
+        ((white, gray, gray), (true, false, false), (white, gray)),
+        "brightness and weight must read as built rather than as focus"
     );
 }
 
@@ -1745,13 +1775,13 @@ fn cell_of(app: &App, needle: &str) -> (u16, u16) {
 }
 
 #[test]
-fn clicking_the_folder_label_targets_the_cards_cache_folder() {
+fn clicking_the_scene_label_row_targets_the_cards_cache_folder() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let (folder_column, folder_row) = cell_of(&app, "folder");
+    let (scene_column, scene_row) = cell_of(&app, "scene");
     assert_eq!(
-        link_at(&app, Rect::new(0, 0, 120, 50), folder_column, folder_row),
+        link_at(&app, Rect::new(0, 0, 120, 50), scene_column, scene_row),
         Some(String::from("/tmp")),
-        "the folder row must target the folder holding the card's assets"
+        "the scene row must target the folder holding the card's assets"
     );
 }
 
@@ -1767,36 +1797,36 @@ fn clicking_the_voice_label_opens_the_audio_file() {
 }
 
 #[test]
-fn clicking_the_scene_label_opens_the_rendered_page() {
+fn clicking_the_manga_label_opens_the_rendered_page() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let (scene_column, scene_row) = cell_of(&app, "scene");
+    let (manga_column, manga_row) = cell_of(&app, "manga");
     assert_eq!(
-        link_at(&app, Rect::new(0, 0, 120, 50), scene_column, scene_row),
+        link_at(&app, Rect::new(0, 0, 120, 50), manga_column, manga_row),
         Some(String::from("/tmp/picture.jpg")),
-        "the scene row must target the rendered picture"
+        "the manga row must target the rendered picture"
     );
 }
 
 #[test]
 fn the_cell_after_a_row_label_is_not_a_link() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let (_, folder_row) = cell_of(&app, "folder");
+    let (_, scene_row) = cell_of(&app, "scene");
     assert_eq!(
-        link_at(&app, Rect::new(0, 0, 120, 50), 17, folder_row),
+        link_at(&app, Rect::new(0, 0, 120, 50), 15, scene_row),
         None,
         "the gap after a row label must stay inert"
     );
 }
 
 #[test]
-fn expanded_editor_below_step_rows_keeps_the_folder_link_on_its_rendered_row() {
+fn expanded_editor_below_step_rows_keeps_the_scene_link_on_its_rendered_row() {
     let app = transit(
         seeded(vec![labeled_draft("whilst", priced_artifacts())]),
         AppEvent::KeyEnter,
     )
     .0;
-    let (folder_column, folder_row) = cell_of(&app, "folder");
-    let (_, scene_row) = cell_of(&app, "scene");
+    let (scene_column, scene_row) = cell_of(&app, "scene");
+    let (_, manga_row) = cell_of(&app, "manga");
     let (editor_column, editor_row) = cell_of(&app, "how should it sound?");
     assert_eq!(
         (
@@ -1804,29 +1834,29 @@ fn expanded_editor_below_step_rows_keeps_the_folder_link_on_its_rendered_row() {
             app.sentence_editor().is_some(),
             editor_column,
             editor_row,
-            link_at(&app, Rect::new(0, 0, 120, 50), folder_column, folder_row),
+            link_at(&app, Rect::new(0, 0, 120, 50), scene_column, scene_row),
         ),
         (
             true,
             true,
-            folder_column,
-            scene_row + 2,
+            scene_column,
+            manga_row + 2,
             Some(String::from("/tmp")),
         ),
-        "the editor below the step rows shifted or swallowed the folder link"
+        "the editor below the step rows shifted or swallowed the scene link"
     );
 }
 
 #[test]
-fn a_narrow_card_keeps_the_scene_label_clickable() {
+fn a_narrow_card_keeps_the_manga_label_clickable() {
     let terminal = Rect::new(0, 0, 45, 30);
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
-    let (scene_column, scene_row) = position_of(&buffer, "scene");
+    let (manga_column, manga_row) = position_of(&buffer, "manga");
     assert_eq!(
-        link_at(&app, terminal, scene_column, scene_row),
+        link_at(&app, terminal, manga_column, manga_row),
         Some(String::from("/tmp/picture.jpg")),
-        "the narrow card lost the scene label click target"
+        "the narrow card lost the manga label click target"
     );
 }
 
@@ -1839,17 +1869,17 @@ fn expanded_sentence_editor_keeps_the_downstream_picture_link_aligned() {
     )
     .0;
     let buffer = rendered_buffer(&app);
-    let (_, folder_row) = position_of(&buffer, "folder");
-    let (scene_column, scene_row) = position_of(&buffer, "scene");
+    let (_, scene_row) = position_of(&buffer, "scene");
+    let (manga_column, manga_row) = position_of(&buffer, "manga");
     assert_eq!(
-        (scene_row, link_at(&app, terminal, scene_column, scene_row),),
-        (folder_row + 2, Some(String::from("/tmp/picture.jpg"))),
-        "expanded sentence editor detached the downstream scene link from its rendered row"
+        (manga_row, link_at(&app, terminal, manga_column, manga_row),),
+        (scene_row + 2, Some(String::from("/tmp/picture.jpg"))),
+        "expanded sentence editor detached the downstream manga link from its rendered row"
     );
 }
 
 #[test]
-fn scrolled_cards_keep_the_selected_folder_link_aligned() {
+fn scrolled_cards_keep_the_selected_scene_link_aligned() {
     let terminal = Rect::new(0, 0, 120, 10);
     let selected = (0..5).fold(
         seeded(vec![
@@ -1867,15 +1897,15 @@ fn scrolled_cards_keep_the_selected_folder_link_aligned() {
     let app = selected.body_scroll_to_selection(viewport, body_width);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
     let (_, term_row) = position_of(&buffer, "six →");
-    let folder_row = term_row + 1;
+    let scene_row = term_row + 1;
     assert_eq!(
         (
             app.body_scroll() > 0,
-            row_text(&buffer, folder_row).contains("folder"),
-            link_at(&app, terminal, 11, folder_row),
+            row_text(&buffer, scene_row).contains("scene"),
+            link_at(&app, terminal, 11, scene_row),
         ),
         (true, true, Some(String::from("/tmp"))),
-        "scrolling a collapsed card detached its folder click target from its row"
+        "scrolling a collapsed card detached its scene click target from its row"
     );
 }
 
@@ -1970,11 +2000,11 @@ fn a_finished_artifact_keeps_attempt_history_only_in_the_card_head_and_details()
     let collapsed = seeded(vec![draft("whilst", recovered_picture_artifacts())]);
     let rendered = flat(&collapsed);
     let head = row_containing(&rendered, "whilst →");
-    let scene = row_containing(&rendered, "scene");
+    let manga = row_containing(&rendered, "manga");
     let expanded = flat(&transit(collapsed, AppEvent::KeyEnter).0);
     assert!(
         head.contains("$.0673  ↻1")
-            && scene.contains("$.0673")
+            && manga.contains("$.0673")
             && !rendered.contains("picture.jpg")
             && !rendered.contains("1 ✗")
             && !rendered.contains("1 rejected")
