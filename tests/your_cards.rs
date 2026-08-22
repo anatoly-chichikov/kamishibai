@@ -332,6 +332,11 @@ fn seeded(drafts: Vec<CardDraft>) -> App {
         .cards_started(drafts)
 }
 
+fn tuning(app: App) -> App {
+    let expanded = transit(app, AppEvent::KeyEnter).0;
+    transit(expanded, AppEvent::NavNext).0
+}
+
 fn row_containing<'a>(rendered: &'a str, needle: &str) -> &'a str {
     rendered
         .lines()
@@ -364,8 +369,8 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
         .find("[Ctrl+G] regenerate")
         .expect("card footer must show regeneration");
     let tune = rendered
-        .find("[Enter/→] tune")
-        .expect("card footer must show tuning");
+        .find("[Enter/→] toggle")
+        .expect("card footer must show its disclosure key");
     let target = rendered
         .find("whilst → Example with whilst.")
         .expect("first card head must be visible");
@@ -389,9 +394,8 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
             && !rendered.contains("picture")
             && rendered.contains("RU → EN")
             && rendered.contains("[Tab] next")
-            && rendered.contains("[Enter/→] tune")
-            && !rendered.contains("[Enter/→] toggle")
-            && !rendered.contains("[Space] tune")
+            && rendered.contains("[Enter/→] toggle")
+            && !rendered.contains("] tune")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
             && !rendered.contains("[D] drop")
@@ -431,9 +435,8 @@ fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
         rendered.contains("your cards")
             && rendered.contains("all done")
             && rendered.contains("[↑↓] nav")
-            && rendered.contains("[Enter/→] tune")
-            && !rendered.contains("[Enter/→] toggle")
-            && !rendered.contains("[Space] tune")
+            && rendered.contains("[Enter/→] toggle")
+            && !rendered.contains("] tune")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
             && rendered.contains("[Esc] new cards")
@@ -516,7 +519,7 @@ fn armed_generation_stop_makes_escape_the_only_primary_action() {
     assert!(
         rendered.contains("[Esc] again")
             && !rendered.contains("[Ctrl+G] regenerate")
-            && !rendered.contains("[Enter/→] tune"),
+            && !rendered.contains("] tune"),
         "armed generation stop competed with generation actions: {rendered}"
     );
 }
@@ -528,7 +531,7 @@ fn draining_generation_says_stopping_without_offering_more_work() {
     assert!(
         rendered.contains("stopping…")
             && !rendered.contains("[Ctrl+G] regenerate")
-            && !rendered.contains("[Enter/→] tune")
+            && !rendered.contains("] tune")
             && !rendered.contains("[Esc] again"),
         "draining generation looked active or offered another action: {rendered}"
     );
@@ -821,16 +824,17 @@ fn failure_footer_omits_the_duplicate_terminal_count() {
 }
 
 #[test]
-fn enter_opens_the_editor_while_enter_closes_and_escape_peels_layers() {
+fn enter_opens_the_card_while_the_walk_opens_its_editor_and_escape_peels_layers() {
     let start = seeded(vec![
         labeled_draft("whilst", ready_artifacts()),
         labeled_draft("at the end", ready_artifacts()),
     ]);
     let after_down = transit(start.clone(), AppEvent::NavNext).0;
-    let opened = transit(after_down.clone(), AppEvent::KeyEnter).0;
-    let moved_inside = transit(opened.clone(), AppEvent::CursorLeft).0;
-    let (entered_inside, enter_side) = transit(opened.clone(), AppEvent::KeyEnter);
-    let parked = transit(opened.clone(), AppEvent::Cancel).0;
+    let expanded = transit(after_down.clone(), AppEvent::KeyEnter).0;
+    let tuned = transit(expanded.clone(), AppEvent::NavNext).0;
+    let moved_inside = transit(tuned.clone(), AppEvent::CursorLeft).0;
+    let (entered_inside, enter_side) = transit(tuned.clone(), AppEvent::KeyEnter);
+    let parked = transit(tuned.clone(), AppEvent::Cancel).0;
     let collapsed = transit(parked.clone(), AppEvent::Cancel).0;
     assert_eq!(
         (
@@ -838,7 +842,7 @@ fn enter_opens_the_editor_while_enter_closes_and_escape_peels_layers() {
                 start.card_selected(),
                 after_down.card_selected(),
                 start.card_expanded(),
-                opened.card_expanded(),
+                expanded.card_expanded(),
                 moved_inside.card_expanded(),
                 entered_inside.card_expanded(),
                 parked.card_expanded(),
@@ -846,7 +850,8 @@ fn enter_opens_the_editor_while_enter_closes_and_escape_peels_layers() {
             ),
             (
                 start.sentence_editor().is_none(),
-                opened.sentence_editor().is_some(),
+                expanded.sentence_editor().is_none(),
+                tuned.sentence_editor().is_some(),
                 moved_inside.sentence_editor().is_some(),
                 entered_inside.sentence_editor().is_some(),
                 parked.sentence_editor().is_none(),
@@ -855,34 +860,30 @@ fn enter_opens_the_editor_while_enter_closes_and_escape_peels_layers() {
         ),
         (
             (0, 1, false, true, true, false, true, false),
-            (true, true, true, false, true, Side::None),
+            (true, true, true, true, false, true, Side::None),
         ),
-        "tune controls failed to open on Enter, close on Enter, or peel editor then expansion on Escape"
+        "Enter must open the card without its editor, the walk must open the editor, and Escape must peel editor then expansion"
     );
 }
 
 #[test]
-fn the_side_arrows_open_and_close_the_focused_card_without_touching_its_carousels() {
+fn the_side_arrows_open_and_close_the_focused_card_without_entering_its_editor() {
     let start = seeded(vec![labeled_draft("whilst", ready_artifacts())]);
     let opened = transit(start, AppEvent::CursorRight).0;
-    let parked = transit(opened.clone(), AppEvent::Cancel).0;
-    let reopened = transit(parked.clone(), AppEvent::CursorRight).0;
-    let collapsed = transit(parked, AppEvent::CursorLeft).0;
+    let again = transit(opened.clone(), AppEvent::CursorRight).0;
+    let collapsed = transit(opened.clone(), AppEvent::CursorLeft).0;
     assert_eq!(
         (
             (opened.card_expanded(), opened.sentence_editor().is_some()),
-            (
-                reopened.card_expanded(),
-                reopened.sentence_editor().is_some()
-            ),
+            (again.card_expanded(), again.sentence_editor().is_some()),
             (
                 collapsed.card_expanded(),
                 collapsed.sentence_editor().is_some()
             ),
             opened.cards_pending(),
         ),
-        ((true, true), (true, true), (false, false), 0),
-        "the side arrows must open the card, reopen a parked head, and collapse it without staging an edit"
+        ((true, false), (true, false), (false, false), 0),
+        "the side arrows must open and close the card without ever falling into its editor"
     );
 }
 
@@ -902,9 +903,7 @@ fn opening_an_editor_anchors_the_card_head_when_focused_content_fits() {
             .0
             .body_scroll_to_selection(viewport, body_width)
     });
-    let opened = transit(selected, AppEvent::KeyEnter)
-        .0
-        .body_scroll_to_selection(viewport, body_width);
+    let opened = tuning(selected).body_scroll_to_selection(viewport, body_width);
     let buffer = rendered_buffer_at(&opened, terminal.width, terminal.height);
     let (_, card_row) = position_of(&buffer, "five");
     assert_eq!(
@@ -932,9 +931,7 @@ fn expanding_a_card_keeps_the_focused_editor_row_visible_when_it_cannot_fit() {
             .body_scroll_to_selection(6, 120)
     });
     let before = selected.body_scroll();
-    let expanded = transit(selected, AppEvent::KeyEnter)
-        .0
-        .body_scroll_to_selection(6, 120);
+    let expanded = tuning(selected).body_scroll_to_selection(6, 120);
     assert_eq!(
         (
             expanded.body_scroll(),
@@ -949,7 +946,7 @@ fn expanding_a_card_keeps_the_focused_editor_row_visible_when_it_cannot_fit() {
 #[test]
 fn expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane() {
     let start = seeded(vec![draft("whilst", ready_artifacts())]);
-    let expanded = transit(start, AppEvent::KeyEnter).0;
+    let expanded = tuning(start);
     let rendered = flat(&expanded);
     let artifact_lines = rendered.matches("manga").count();
     assert!(
@@ -980,11 +977,7 @@ fn expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane() {
 
 #[test]
 fn expanded_editor_replaces_the_chip_grid_with_focused_question_carousels() {
-    let app = transit(
-        seeded(vec![labeled_draft("whilst", ready_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+    let app = tuning(seeded(vec![labeled_draft("whilst", ready_artifacts())]));
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let sound = position_of(&buffer, "how should it sound?");
@@ -1077,11 +1070,7 @@ fn expanded_editor_replaces_the_chip_grid_with_focused_question_carousels() {
 
 #[test]
 fn moving_down_moves_the_white_question_focus_to_the_next_carousel() {
-    let opened = transit(
-        seeded(vec![labeled_draft("whilst", ready_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+    let opened = tuning(seeded(vec![labeled_draft("whilst", ready_artifacts())]));
     let app = transit(opened, AppEvent::NavNext).0;
     let buffer = rendered_buffer(&app);
     let sound = position_of(&buffer, "how should it sound?");
@@ -1355,11 +1344,7 @@ fn a_staged_rewrite_mutes_the_step_rows_and_keeps_the_staged_tags_visible() {
 #[test]
 fn expanded_sentence_editor_starts_below_the_complete_artifact_block() {
     let terminal = Rect::new(0, 0, 120, 50);
-    let app = transit(
-        seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+    let app = tuning(seeded(vec![labeled_draft("whilst", priced_artifacts())]));
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst →");
@@ -1405,11 +1390,7 @@ fn expanded_sentence_editor_starts_below_the_complete_artifact_block() {
 #[test]
 fn narrow_expanded_sentence_editor_starts_below_the_artifact_block() {
     let terminal = Rect::new(0, 0, 50, 50);
-    let app = transit(
-        seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+    let app = tuning(seeded(vec![labeled_draft("whilst", priced_artifacts())]));
     let rendered = flat(&app);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
     let (scene_column, scene_row) = position_of(&buffer, "scene");
@@ -1613,8 +1594,7 @@ fn active_rewrite_shows_normal_generation_without_pending_tags_or_count() {
             && !rendered.contains("b1")
             && !rendered.contains("statement")
             && !rendered.contains("Example with whilst.")
-            && !rendered.contains("] tune")
-            && !rendered.contains("[Space] tune"),
+            && !rendered.contains("] tune"),
         "active rewrite retained staged styling or exposed stale generated metadata: {rendered}"
     );
 }
@@ -1833,11 +1813,7 @@ fn the_cell_after_a_row_label_is_not_a_link() {
 
 #[test]
 fn expanded_editor_below_step_rows_keeps_the_scene_link_on_its_rendered_row() {
-    let app = transit(
-        seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+    let app = tuning(seeded(vec![labeled_draft("whilst", priced_artifacts())]));
     let (scene_column, scene_row) = cell_of(&app, "scene");
     let (_, manga_row) = cell_of(&app, "manga");
     let (editor_column, editor_row) = cell_of(&app, "how should it sound?");
@@ -1876,11 +1852,7 @@ fn a_narrow_card_keeps_the_manga_label_clickable() {
 #[test]
 fn expanded_sentence_editor_keeps_the_downstream_picture_link_aligned() {
     let terminal = Rect::new(0, 0, 120, 50);
-    let app = transit(
-        seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+    let app = tuning(seeded(vec![labeled_draft("whilst", priced_artifacts())]));
     let buffer = rendered_buffer(&app);
     let (_, scene_row) = position_of(&buffer, "scene");
     let (manga_column, manga_row) = position_of(&buffer, "manga");
@@ -2096,7 +2068,7 @@ fn tab_parks_the_editor_and_jumps_to_the_next_unfinished_card() {
         labeled_draft("whilst", ready_artifacts()),
         labeled_draft("wreck", CardArtifacts::default()),
     ]);
-    let opened = transit(start, AppEvent::KeyEnter).0;
+    let opened = tuning(start);
     let jumped = transit(opened.clone(), AppEvent::NextUnfinished).0;
     assert_eq!(
         (
@@ -2288,22 +2260,32 @@ fn c_collapses_all_from_a_carousel_row_of_the_open_editor() {
 }
 
 #[test]
-fn enter_on_a_parked_tunable_head_reopens_the_editor() {
+fn an_open_tunable_card_advertises_the_walk_into_its_editor() {
+    let collapsed = seeded(vec![labeled_draft("whilst", ready_artifacts())]);
+    let expanded = transit(collapsed.clone(), AppEvent::KeyEnter).0;
+    assert!(
+        !flat(&collapsed).contains("[↓] tune") && flat(&expanded).contains("[↓] tune"),
+        "the footer never names the gesture that opens the tune rows"
+    );
+}
+
+#[test]
+fn enter_on_a_parked_tunable_head_collapses_the_card() {
     let parked = transit(
         seeded(vec![labeled_draft("whilst", ready_artifacts())])
             .sentence_editor_opened_for_register(),
         AppEvent::Cancel,
     )
     .0;
-    let reopened = transit(parked, AppEvent::KeyEnter).0;
+    let closed = transit(parked, AppEvent::KeyEnter).0;
     assert!(
-        reopened.sentence_editor().is_some() && reopened.card_expanded(),
-        "Enter on a parked tunable head collapsed the card instead of reopening its editor"
+        !closed.card_expanded() && closed.sentence_editor().is_none(),
+        "Enter on a parked tunable head fell back into tuning instead of closing the card"
     );
 }
 
 #[test]
-fn a_parked_card_renders_its_meta_preview_with_the_compact_tag_summary() {
+fn an_open_card_drops_the_tag_summary_and_keeps_its_meta_preview() {
     let parked = transit(
         seeded(vec![labeled_draft("whilst", ready_artifacts())])
             .sentence_editor_opened_for_register(),
@@ -2314,12 +2296,12 @@ fn a_parked_card_renders_its_meta_preview_with_the_compact_tag_summary() {
     assert!(
         parked.card_expanded()
             && parked.sentence_editor().is_none()
-            && rendered.contains("casual")
-            && rendered.contains("b1")
-            && rendered.contains("statement")
+            && !rendered.contains("casual")
+            && !rendered.contains("b1")
+            && !rendered.contains("statement")
             && rendered.contains("the phrase")
             && !rendered.contains("how should it sound?"),
-        "a parked card lost its tag summary or meta preview, or kept unfocused carousels: {rendered}"
+        "an open card kept the tag summary, lost its meta preview, or kept unfocused carousels: {rendered}"
     );
 }
 

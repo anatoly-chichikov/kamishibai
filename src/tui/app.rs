@@ -1430,13 +1430,13 @@ impl App {
     /// Return the app with the focused card expanded and its note row editing.
     #[must_use]
     pub fn sentence_editor_opened_for_note(self) -> Self {
-        self.sentence_editor_opened(LabelEditorRow::Note)
+        self.sentence_editor_opened_for(LabelEditorRow::Note)
     }
 
     /// Return the app with the focused card expanded and its register row editing.
     #[must_use]
     pub fn sentence_editor_opened_for_register(self) -> Self {
-        self.sentence_editor_opened(LabelEditorRow::Register)
+        self.sentence_editor_opened_for(LabelEditorRow::Register)
     }
 
     /// Return the app with the sentence-label editor and focused card collapsed.
@@ -1514,7 +1514,12 @@ impl App {
         self
     }
 
-    fn sentence_editor_opened(mut self, row: LabelEditorRow) -> Self {
+    /// Return the app with the focused card expanded and its editor open on one
+    /// row. Expansion alone never opens the editor — this is the only door, and
+    /// the walk (`↓` from the head, `↑` from below) and a tag click are what go
+    /// through it.
+    #[must_use]
+    pub fn sentence_editor_opened_for(mut self, row: LabelEditorRow) -> Self {
         if !self.card_tunable() {
             return self;
         }
@@ -1640,9 +1645,6 @@ impl App {
             self.cards.expanded = std::mem::take(&mut self.cards.expanded).without(selected);
             return self;
         }
-        if self.card_tunable() {
-            return self.sentence_editor_opened_for_register();
-        }
         self.cards.expanded = std::mem::take(&mut self.cards.expanded).with(selected);
         self
     }
@@ -1652,9 +1654,6 @@ impl App {
         if card < self.cards.drafts.len() {
             self.cards.editor = None;
             self.cards.selected = card;
-            if self.card_tunable() {
-                return self.sentence_editor_opened_for_register();
-            }
             self.cards.expanded = std::mem::take(&mut self.cards.expanded).with(card);
         }
         self

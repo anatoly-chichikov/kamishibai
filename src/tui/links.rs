@@ -177,6 +177,7 @@ pub fn sentence_label_event_at(
         .and_then(crate::session::CardMeta::sentence_labels);
     let staged = draft.staged_rewrite().map(|rewrite| rewrite.selection());
     let selected = card == app.card_selected();
+    let expanded = app.card_expanded_at(card);
     let editor = if selected {
         app.sentence_editor()
     } else {
@@ -195,7 +196,7 @@ pub fn sentence_label_event_at(
     if editor.is_none()
         && (!attributed
             || !steps.contains(&StepRow::Voice)
-            || !sentence_tags_visible(draft, running, width))
+            || !sentence_tags_visible(draft, running, expanded, width))
         && app.card_tunable_at(card)
         && content_row >= head_start
         && content_row < head_end
@@ -204,7 +205,7 @@ pub fn sentence_label_event_at(
     }
     if editor.is_none() {
         let tag_row = content_row.checked_sub(head_end)?;
-        if sentence_tag_hit_at(draft, running, width, tag_row, column) {
+        if sentence_tag_hit_at(draft, running, expanded, width, tag_row, column) {
             return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
         }
         return None;

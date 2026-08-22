@@ -252,20 +252,18 @@ fn enter_on_failure_banner_toggles_expansion_without_leaving_your_cards() {
 }
 
 #[test]
-fn escape_peels_an_expanded_failure_before_resetting_the_batch() {
+fn escape_closes_an_expanded_failure_before_reaching_the_batch_lifecycle() {
     let opened = transit(seeded(), AppEvent::KeyEnter).0;
-    let (parked, first_side) = transit(opened, AppEvent::Cancel);
-    let (closed, second_side) = transit(parked.clone(), AppEvent::Cancel);
+    let (closed, side) = transit(opened.clone(), AppEvent::Cancel);
     assert_eq!(
         (
             closed.screen(),
-            parked.card_expanded(),
-            parked.sentence_editor().is_none(),
+            opened.card_expanded(),
+            opened.sentence_editor().is_none(),
             closed.card_expanded(),
-            first_side,
-            second_side,
+            side,
         ),
-        (Screen::YourCards, true, true, false, Side::None, Side::None),
-        "Escape on an expanded failure bypassed the disclosure layers and reached the batch lifecycle"
+        (Screen::YourCards, true, true, false, Side::None),
+        "Escape on an expanded failure bypassed the card's own disclosure and reached the batch lifecycle"
     );
 }

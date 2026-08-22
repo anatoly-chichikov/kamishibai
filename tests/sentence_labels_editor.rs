@@ -238,7 +238,7 @@ fn choice_regions(
 }
 
 #[test]
-fn both_r_keys_are_inert_while_sentence_tags_and_space_open_the_live_editor() {
+fn both_r_keys_are_inert_while_space_opens_the_card_and_a_tag_opens_the_live_editor() {
     let collapsed = seeded(card());
     let (lowercase, lowercase_side) = transit(collapsed.clone(), AppEvent::KeyChar('r'));
     let (uppercase, uppercase_side) = transit(collapsed.clone(), AppEvent::KeyChar('R'));
@@ -261,9 +261,7 @@ fn both_r_keys_are_inert_while_sentence_tags_and_space_open_the_live_editor() {
             && lowercase_side == Side::None
             && uppercase_side == Side::None
             && spaced.card_expanded()
-            && spaced
-                .sentence_editor()
-                .is_some_and(|editor| editor.row() == LabelEditorRow::Register)
+            && spaced.sentence_editor().is_none()
             && opened.card_expanded()
             && opened
                 .sentence_editor()
@@ -292,7 +290,7 @@ fn both_r_keys_are_inert_while_sentence_tags_and_space_open_the_live_editor() {
             && rendered.contains("[Enter/Esc] close")
             && !rendered.contains("[R] change")
             && ctrl < arrows,
-        "r/R emitted an action, opened the editor, or sentence tags, Space, and the live editor footer drifted apart: {rendered}"
+        "r/R emitted an action, Space fell into the editor, or the tag hit and live editor footer drifted apart: {rendered}"
     );
 }
 
@@ -759,7 +757,11 @@ fn enter_closes_the_editor_and_ctrl_g_requests_all_pending_cards() {
 
 #[test]
 fn repeating_the_active_legacy_chip_restores_the_empty_baseline() {
-    let opened = transit(seeded(legacy_card()), AppEvent::KeyChar(' ')).0;
+    let opened = transit(
+        seeded(legacy_card()),
+        AppEvent::SentenceLabelFocus(LabelEditorRow::Register),
+    )
+    .0;
     let selected = transit(
         opened,
         AppEvent::SentenceLabelChoose(LabelEditorRow::Register, 0),
@@ -962,23 +964,24 @@ fn clicking_an_unfocused_cards_tags_selects_it_and_opens_its_editor() {
 }
 
 #[test]
-fn expanded_editor_removes_the_collapsed_summary_tag_open_hit() {
+fn an_open_card_removes_the_collapsed_summary_tag_open_hit() {
     let terminal = Rect::new(0, 0, 120, 50);
     let collapsed = seeded(priced_card_for("whilst"));
     let tag = cell_of(&collapsed, "casual", 120, 50);
     let opened = transit(collapsed, AppEvent::KeyEnter).0;
+    let rendered = flat(&opened);
     let event = sentence_label_event_at(&opened, terminal, tag.0, tag.1);
     assert_eq!(
         (
             opened.card_expanded(),
-            opened.sentence_editor().is_some(),
+            rendered.contains("casual"),
             matches!(
                 event,
                 Some(AppEvent::SentenceLabelOpen(_, LabelEditorRow::Register))
             ),
         ),
-        (true, true, false),
-        "expanded editor left a phantom collapsed-summary open hit"
+        (true, false, false),
+        "an open card kept its collapsed summary or a phantom hit where the tags used to be"
     );
 }
 
@@ -1017,7 +1020,11 @@ fn clicking_the_legacy_card_head_opens_its_unattributed_editor() {
 
 #[test]
 fn legacy_editor_keeps_its_questions_visible_around_empty_axes() {
-    let opened = transit(seeded(legacy_card()), AppEvent::KeyChar(' ')).0;
+    let opened = transit(
+        seeded(legacy_card()),
+        AppEvent::SentenceLabelFocus(LabelEditorRow::Register),
+    )
+    .0;
     let rendered = flat(&opened);
     let question = cell_of(&opened, "how should it sound?", 120, 50);
     let backend = TestBackend::new(120, 50);
@@ -1212,7 +1219,7 @@ fn an_active_rewrite_cannot_reopen_or_read_as_pending_during_meta_generation() {
                 .rewrite()
                 .map(kamishibai::session::CardRewrite::started),
         ),
-        (Side::None, Side::None, None, false, 0, None, Some(true)),
+        (Side::None, Side::None, None, true, 0, None, Some(true)),
         "active metadata generation reopened the editor or masqueraded as a staged rewrite"
     );
 }

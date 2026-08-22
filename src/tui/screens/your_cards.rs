@@ -222,7 +222,7 @@ fn card_block<'a>(
             super::common::CARD_DETAIL_COLUMN,
             super::common::CARD_DETAIL_COLUMN,
         ));
-    } else if let Some(labels) = summary_labels(draft, running, width) {
+    } else if let Some(labels) = summary_labels(draft, running, expanded, width) {
         lines.extend(summary_step_lines(step_lines, labels));
     } else {
         lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
@@ -236,11 +236,18 @@ fn card_block<'a>(
     lines
 }
 
+/// The tag summary belongs to the collapsed card alone: an open block already
+/// shows the card's own metadata, and repeating the tags there only invites the
+/// reader to reach for controls that live one row further down.
 fn summary_labels(
     draft: &CardDraft,
     running: Option<Artifact>,
+    expanded: bool,
     width: usize,
 ) -> Option<SummaryLabels> {
+    if expanded {
+        return None;
+    }
     let steps = step_rows_for(draft, running);
     if !steps.contains(&StepRow::Voice) {
         return None;
@@ -1487,11 +1494,12 @@ pub(crate) fn head_rows_for(draft: &CardDraft, width: usize) -> usize {
 pub(crate) fn sentence_tag_hit_at(
     draft: &CardDraft,
     running: Option<Artifact>,
+    expanded: bool,
     width: usize,
     row: usize,
     column: usize,
 ) -> bool {
-    let Some(labels) = summary_labels(draft, running, width) else {
+    let Some(labels) = summary_labels(draft, running, expanded, width) else {
         return false;
     };
     let steps = step_rows_for(draft, running);
@@ -1512,9 +1520,10 @@ pub(crate) fn sentence_tag_hit_at(
 pub(crate) fn sentence_tags_visible(
     draft: &CardDraft,
     running: Option<Artifact>,
+    expanded: bool,
     width: usize,
 ) -> bool {
-    summary_labels(draft, running, width).is_some()
+    summary_labels(draft, running, expanded, width).is_some()
 }
 
 /// Return the expanded sentence-editor control at one cell relative to the
@@ -1746,10 +1755,9 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         let controls = DisclosureControls::new(app.card_expanded());
         let mut hints = Vec::new();
         hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
-        if app.card_tunable() {
-            hints.push(super::common::FooterHint::secondary("Enter/→", "tune"));
-        } else {
-            hints.push(controls.secondary_toggle());
+        hints.push(controls.secondary_toggle());
+        if app.card_expanded() && app.card_tunable() {
+            hints.push(super::common::FooterHint::secondary("↓", "tune"));
         }
         if app.any_card_expanded() {
             hints.push(super::common::FooterHint::secondary("C", "collapse"));

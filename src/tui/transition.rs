@@ -312,7 +312,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             if app.card_tunable_at(card) =>
         {
             (
-                app.card_revealed(card).sentence_editor_focused(row),
+                app.card_revealed(card).sentence_editor_opened_for(row),
                 Side::None,
             )
         }
@@ -320,8 +320,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             let next = if app.sentence_editor().is_some() {
                 app.sentence_editor_focused(row)
             } else {
-                app.sentence_editor_opened_for_register()
-                    .sentence_editor_focused(row)
+                app.sentence_editor_opened_for(row)
             };
             (next, Side::None)
         }
@@ -380,8 +379,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::Generate) if app.sentence_editor().is_some() => {
             (app.sentence_editor_closed(), Side::RegenerateCards)
         }
-        (Screen::YourCards, None, AppEvent::KeyChar(' ')) if app.card_tunable() => {
-            (app.sentence_editor_opened_for_register(), Side::None)
+        (Screen::YourCards, None, AppEvent::KeyChar(' ')) if !app.cards().is_empty() => {
+            (app.card_toggle_expanded(), Side::None)
         }
         (Screen::YourCards, None, AppEvent::NextUnfinished) => (app.card_jumped(true), Side::None),
         (Screen::YourCards, None, AppEvent::PreviousUnfinished) => {
@@ -389,11 +388,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_focus_previous(), Side::None),
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_focus_next(), Side::None),
-        (Screen::YourCards, None, AppEvent::KeyEnter | AppEvent::CursorRight)
-            if app.card_expanded() && app.sentence_editor().is_none() && app.card_tunable() =>
-        {
-            (app.sentence_editor_opened_for_register(), Side::None)
-        }
         (Screen::YourCards, None, event)
             if matches!(
                 DisclosureControls::new(app.card_expanded()).intent(&event),
