@@ -2285,7 +2285,7 @@ fn enter_on_a_parked_tunable_head_collapses_the_card() {
 }
 
 #[test]
-fn an_open_card_drops_the_tag_summary_and_keeps_its_meta_preview() {
+fn an_open_card_shows_its_tune_rows_inactive_above_the_meta_preview() {
     let parked = transit(
         seeded(vec![labeled_draft("whilst", ready_artifacts())])
             .sentence_editor_opened_for_register(),
@@ -2293,15 +2293,56 @@ fn an_open_card_drops_the_tag_summary_and_keeps_its_meta_preview() {
     )
     .0;
     let rendered = flat(&parked);
-    assert!(
-        parked.card_expanded()
-            && parked.sentence_editor().is_none()
-            && !rendered.contains("casual")
-            && !rendered.contains("b1")
-            && !rendered.contains("statement")
-            && rendered.contains("the phrase")
-            && !rendered.contains("how should it sound?"),
-        "an open card kept the tag summary, lost its meta preview, or kept unfocused carousels: {rendered}"
+    let buffer = rendered_buffer(&parked);
+    let question = position_of(&buffer, "how should it sound?");
+    assert_eq!(
+        (
+            (parked.card_expanded(), parked.sentence_editor().is_some()),
+            (
+                row_containing(&rendered, "✓ voice").contains("casual"),
+                rendered.contains("what kind of phrase?"),
+                rendered.contains("one more thing"),
+                rendered.contains("the phrase"),
+            ),
+            (
+                buffer[question].fg,
+                buffer[question].modifier.contains(Modifier::BOLD),
+            ),
+        ),
+        (
+            (true, false),
+            (false, true, true, true),
+            (Color::Rgb(0x5a, 0x59, 0x53), false),
+        ),
+        "an open card must show its tune rows inactive above the meta preview, with no tag summary left on the step rows"
+    );
+}
+
+#[test]
+fn walking_into_an_open_card_lights_its_first_question_alone() {
+    let open = transit(
+        seeded(vec![labeled_draft("whilst", ready_artifacts())]),
+        AppEvent::KeyEnter,
+    )
+    .0;
+    let tuned = transit(open, AppEvent::NavNext).0;
+    let buffer = rendered_buffer(&tuned);
+    let sound = position_of(&buffer, "how should it sound?");
+    let kind = position_of(&buffer, "what kind of phrase?");
+    assert_eq!(
+        (
+            buffer[sound].fg,
+            buffer[sound].modifier.contains(Modifier::BOLD),
+            buffer[kind].fg,
+            buffer[kind].modifier.contains(Modifier::BOLD),
+        ),
+        (
+            Color::Rgb(0xe6, 0xe3, 0xda),
+            true,
+            Color::Rgb(0x5a, 0x59, 0x53),
+            false,
+        ),
+        "walking into an open card failed to light its first question alone"
     );
 }
 

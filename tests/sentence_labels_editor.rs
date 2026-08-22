@@ -974,7 +974,10 @@ fn an_open_card_removes_the_collapsed_summary_tag_open_hit() {
     assert_eq!(
         (
             opened.card_expanded(),
-            rendered.contains("casual"),
+            rendered
+                .lines()
+                .find(|line| line.contains("voice"))
+                .is_some_and(|line| line.contains("casual")),
             matches!(
                 event,
                 Some(AppEvent::SentenceLabelOpen(_, LabelEditorRow::Register))
@@ -982,6 +985,23 @@ fn an_open_card_removes_the_collapsed_summary_tag_open_hit() {
         ),
         (true, false, false),
         "an open card kept its collapsed summary or a phantom hit where the tags used to be"
+    );
+}
+
+#[test]
+fn clicking_a_chevron_on_an_open_card_opens_its_editor_and_stages_the_move() {
+    let terminal = Rect::new(0, 0, 120, 50);
+    let opened = transit(seeded(card()), AppEvent::KeyEnter).0;
+    let chevron = cell_of(&opened, ">", 120, 50);
+    let event = sentence_label_event_at(&opened, terminal, chevron.0, chevron.1)
+        .expect("the tune rows of an open card must stay clickable");
+    let advanced = transit(opened, event).0;
+    assert!(
+        advanced
+            .sentence_editor()
+            .is_some_and(|editor| editor.row() == LabelEditorRow::Register)
+            && advanced.cards_pending() == 1,
+        "clicking a chevron on an open card failed to hand it the keyboard and stage the move"
     );
 }
 

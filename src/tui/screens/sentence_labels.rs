@@ -217,14 +217,18 @@ pub(crate) fn head_tags_layout(
     Some(HeadTagsLayout { tags })
 }
 
+/// Render the four tune rows of one card. `focused` is what separates the live
+/// editor from the same rows merely on display under an open card: unfocused,
+/// no question is lit, no chevron is bright, and the note owns no cursor.
 pub(crate) fn editor_lines(
     editor: &SentenceLabelsEditor,
     current: Option<&SentenceLabels>,
+    focused: bool,
     width: usize,
     first_start: usize,
     fallback_start: usize,
 ) -> Vec<Line<'static>> {
-    editor_layout(editor, current, width, first_start, fallback_start).lines
+    editor_layout(editor, current, focused, width, first_start, fallback_start).lines
 }
 
 /// Return the exclusive editor row needed to keep the focused control visible.
@@ -236,7 +240,7 @@ pub(crate) fn editor_focus_end(
     first_start: usize,
     fallback_start: usize,
 ) -> usize {
-    let layout = editor_layout(editor, current, width, first_start, fallback_start);
+    let layout = editor_layout(editor, current, true, width, first_start, fallback_start);
     if editor.row() == LabelEditorRow::Note {
         return layout.note_row + 1;
     }
@@ -254,7 +258,7 @@ pub(crate) fn editor_cursor(
     first_start: usize,
     fallback_start: usize,
 ) -> Option<(usize, usize)> {
-    editor_layout(editor, current, width, first_start, fallback_start).cursor
+    editor_layout(editor, current, true, width, first_start, fallback_start).cursor
 }
 
 pub(crate) fn editor_control_at(
@@ -266,7 +270,7 @@ pub(crate) fn editor_control_at(
     first_start: usize,
     fallback_start: usize,
 ) -> Option<EditorControl> {
-    let layout = editor_layout(editor, current, width, first_start, fallback_start);
+    let layout = editor_layout(editor, current, true, width, first_start, fallback_start);
     if row == layout.note_row && column >= layout.note_start && column < width {
         return Some(EditorControl::Note);
     }
@@ -362,6 +366,7 @@ fn label_tag(token: &str, pinned: bool) -> Span<'static> {
 fn editor_layout(
     editor: &SentenceLabelsEditor,
     current: Option<&SentenceLabels>,
+    focused: bool,
     width: usize,
     first_start: usize,
     fallback_start: usize,
@@ -382,7 +387,7 @@ fn editor_layout(
         LabelEditorRow::Level,
     ] {
         let (mut rendered, mut regions) =
-            axis_lines(editor, current, row, width, lines.len(), indent);
+            axis_lines(editor, current, focused, row, width, lines.len(), indent);
         lines.append(&mut rendered);
         chips.append(&mut regions);
         row_ends.push((row, lines.len()));
@@ -391,13 +396,13 @@ fn editor_layout(
     let note_start = indent + question_column();
     let mut note = row_prefix(
         row_label(LabelEditorRow::Note),
-        editor.row() == LabelEditorRow::Note,
+        focused && editor.row() == LabelEditorRow::Note,
         indent,
         question_column(),
     );
     note.extend(TextField::new(editor.note().value(), NOTE_PLACEHOLDER).spans());
     lines.push(Line::from(note));
-    let cursor = if editor.row() == LabelEditorRow::Note {
+    let cursor = if focused && editor.row() == LabelEditorRow::Note {
         Some((
             note_start + super::common::display_width(editor.note().before_cursor()),
             note_row,
@@ -442,9 +447,11 @@ fn selector_width(editor: &SentenceLabelsEditor) -> usize {
     .expect("invariant: sentence-label editor must expose at least one axis")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn axis_lines(
     editor: &SentenceLabelsEditor,
     current: Option<&SentenceLabels>,
+    focused: bool,
     row: LabelEditorRow,
     width: usize,
     first_row: usize,
@@ -461,7 +468,7 @@ fn axis_lines(
         CarouselAxis {
             row,
             label: row_label(row),
-            focused: editor.row() == row,
+            focused: focused && editor.row() == row,
             selected,
         },
         count,

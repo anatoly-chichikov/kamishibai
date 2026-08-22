@@ -317,28 +317,21 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             )
         }
         (Screen::YourCards, None, AppEvent::SentenceLabelFocus(row)) if app.card_tunable() => {
-            let next = if app.sentence_editor().is_some() {
-                app.sentence_editor_focused(row)
-            } else {
-                app.sentence_editor_opened_for(row)
-            };
-            (next, Side::None)
+            (live_sentence_editor(app, row), Side::None)
         }
         (Screen::YourCards, None, AppEvent::SentenceLabelChoose(row, index))
-            if app.sentence_editor().is_some() =>
+            if app.card_tunable() =>
         {
             (
-                app.sentence_editor_focused(row)
-                    .sentence_editor_axis_chosen(index),
+                live_sentence_editor(app, row).sentence_editor_axis_chosen(index),
                 Side::None,
             )
         }
         (Screen::YourCards, None, AppEvent::SentenceLabelAdvance(row, forward))
-            if app.sentence_editor().is_some() =>
+            if app.card_tunable() =>
         {
             (
-                app.sentence_editor_focused(row)
-                    .sentence_editor_axis_advanced(forward),
+                live_sentence_editor(app, row).sentence_editor_axis_advanced(forward),
                 Side::None,
             )
         }
@@ -408,6 +401,17 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (_, _, AppEvent::Redraw) => (app, Side::None),
         (_, _, _) => (app, Side::None),
     }
+}
+
+/// Return the app with the focused card's editor live on one row, opening it
+/// when the card was merely displaying those rows. A click on a tune control
+/// says "tune this" and "pick this" at once, so it must not need the block to
+/// already own the keyboard.
+fn live_sentence_editor(app: App, row: LabelEditorRow) -> App {
+    if app.sentence_editor().is_some() {
+        return app.sentence_editor_focused(row);
+    }
+    app.sentence_editor_opened_for(row)
 }
 
 fn sentence_note_focused(app: &App) -> bool {

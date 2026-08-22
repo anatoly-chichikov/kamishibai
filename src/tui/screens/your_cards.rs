@@ -24,7 +24,7 @@ use crate::session::{
 use crate::tui::app::App;
 use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
-use crate::tui::sentence_editor::SentenceLabelsEditor;
+use crate::tui::sentence_editor::{LabelEditorRow, SentenceLabelsEditor};
 
 const HEADLINE_WORKING: &str = "building your cards";
 const HEADLINE_DONE: &str = "your cards";
@@ -212,12 +212,13 @@ fn card_block<'a>(
             (*row, if pending { line.muted() } else { line })
         })
         .collect::<Vec<_>>();
-    if let Some(editor) = editor {
+    if let Some(tune) = tune_rows(draft, expanded, editor) {
         lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
         lines.push(Line::from(""));
         lines.extend(super::sentence_labels::editor_lines(
-            editor,
+            &tune.editor,
             draft.meta().and_then(CardMeta::sentence_labels),
+            tune.focused,
             width,
             super::common::CARD_DETAIL_COLUMN,
             super::common::CARD_DETAIL_COLUMN,
@@ -234,6 +235,35 @@ fn card_block<'a>(
         lines.push(Line::from(""));
     }
     lines
+}
+
+/// The tune rows one card renders, and whether they own the keyboard.
+///
+/// An open tunable card always shows them, so opening a card immediately says
+/// what can be changed about it; only the walk into the block makes them live.
+struct TuneRows {
+    editor: SentenceLabelsEditor,
+    focused: bool,
+}
+
+fn tune_rows(
+    draft: &CardDraft,
+    expanded: bool,
+    editor: Option<&SentenceLabelsEditor>,
+) -> Option<TuneRows> {
+    if !expanded {
+        return None;
+    }
+    if let Some(editor) = editor {
+        return Some(TuneRows {
+            editor: editor.clone(),
+            focused: true,
+        });
+    }
+    draft.tunable().then(|| TuneRows {
+        editor: SentenceLabelsEditor::seeded(draft, LabelEditorRow::Register),
+        focused: false,
+    })
 }
 
 /// The tag summary belongs to the collapsed card alone: an open block already
@@ -1526,20 +1556,24 @@ pub(crate) fn sentence_tags_visible(
     summary_labels(draft, running, expanded, width).is_some()
 }
 
-/// Return the expanded sentence-editor control at one cell relative to the
-/// card's first step row.
+/// Return the tune-row control at one cell relative to the card's first step
+/// row. The rows are clickable whether or not they are live: a click is how the
+/// mouse says both "tune this card" and "pin this value" in one gesture.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn sentence_editor_control_at(
     draft: &CardDraft,
     running: Option<Artifact>,
-    editor: &SentenceLabelsEditor,
+    editor: Option<&SentenceLabelsEditor>,
+    expanded: bool,
     width: usize,
     row: usize,
     column: usize,
 ) -> Option<super::sentence_labels::EditorControl> {
+    let tune = tune_rows(draft, expanded, editor)?;
     let steps = step_rows_for(draft, running);
     let row = row.checked_sub(steps.len().saturating_add(SECTION_GAP_ROWS))?;
     super::sentence_labels::editor_control_at(
-        editor,
+        &tune.editor,
         draft.meta().and_then(CardMeta::sentence_labels),
         width,
         column,
@@ -1590,15 +1624,13 @@ pub(crate) fn sentence_label_extra_rows(
     expanded: bool,
     width: usize,
 ) -> usize {
-    if !expanded {
-        return 0;
-    }
-    editor
-        .map(|editor| {
+    tune_rows(draft, expanded, editor)
+        .map(|tune| {
             SECTION_GAP_ROWS.saturating_add(
                 super::sentence_labels::editor_lines(
-                    editor,
+                    &tune.editor,
                     draft.meta().and_then(CardMeta::sentence_labels),
+                    tune.focused,
                     width,
                     super::common::CARD_DETAIL_COLUMN,
                     super::common::CARD_DETAIL_COLUMN,

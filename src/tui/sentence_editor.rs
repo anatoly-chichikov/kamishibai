@@ -1,7 +1,8 @@
 //! Pure state for editing one card's sentence labels and rewrite note.
 
 use crate::session::{
-    SentenceAxis, SentenceBatchSettings, SentenceLabelSelection, SentenceLevel, SentenceTypeMix,
+    CardDraft, CardMeta, SentenceAxis, SentenceBatchSettings, SentenceLabelSelection,
+    SentenceLevel, SentenceTypeMix,
 };
 
 /// One focusable row inside the generation-guidance editor.
@@ -270,6 +271,31 @@ impl SentenceLabelsEditor {
             row,
             note,
         }
+    }
+
+    /// Create the editor one card would edit with: the generated labels as the
+    /// baseline, and the staged rewrite — when the card carries one — as the
+    /// working selection and note.
+    ///
+    /// Both the live editor and the inactive rows an open card displays are
+    /// seeded here, so what the user reads before touching anything is exactly
+    /// what they would start editing.
+    #[must_use]
+    pub fn seeded(draft: &CardDraft, row: LabelEditorRow) -> Self {
+        let baseline = draft
+            .meta()
+            .and_then(CardMeta::sentence_labels)
+            .map(SentenceLabelSelection::from_labels)
+            .unwrap_or_else(SentenceLabelSelection::empty);
+        let Some(rewrite) = draft.staged_rewrite() else {
+            return Self::new(baseline.clone(), baseline, row, NoteDraft::default());
+        };
+        Self::new(
+            baseline,
+            rewrite.selection().clone(),
+            row,
+            NoteDraft::new(rewrite.note()),
+        )
     }
 
     /// Return the current working sentence-label selection.

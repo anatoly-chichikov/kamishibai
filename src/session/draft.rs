@@ -756,6 +756,13 @@ impl CardDraft {
         self.rewrite.as_ref().filter(|rewrite| !rewrite.started())
     }
 
+    /// Return whether this card's sentence labels can be edited: it has the
+    /// metadata they describe, and no rewrite of its own is already running.
+    #[must_use]
+    pub fn tunable(&self) -> bool {
+        self.meta.is_some() && (self.rewrite.is_none() || self.staged_rewrite().is_some())
+    }
+
     /// Return where this card stands in the batch.
     #[must_use]
     pub fn phase(&self) -> CardPhase {

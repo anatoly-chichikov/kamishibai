@@ -193,7 +193,7 @@ pub fn sentence_label_event_at(
     let attributed = labels.is_some()
         || staged.is_some_and(crate::session::SentenceLabelSelection::attributed)
         || editor.is_some_and(|editor| editor.selection().attributed());
-    if editor.is_none()
+    if !expanded
         && (!attributed
             || !steps.contains(&StepRow::Voice)
             || !sentence_tags_visible(draft, running, expanded, width))
@@ -203,19 +203,31 @@ pub fn sentence_label_event_at(
     {
         return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
     }
-    if editor.is_none() {
-        let tag_row = content_row.checked_sub(head_end)?;
-        if sentence_tag_hit_at(draft, running, expanded, width, tag_row, column) {
+    let block_row = content_row.checked_sub(head_end)?;
+    if !expanded {
+        if sentence_tag_hit_at(draft, running, expanded, width, block_row, column) {
             return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
         }
         return None;
     }
-    let editor = editor?;
-    let editor_row = content_row.checked_sub(head_end)?;
-    match sentence_editor_control_at(draft, running, editor, width, editor_row, column)? {
+    let control =
+        sentence_editor_control_at(draft, running, editor, expanded, width, block_row, column)?;
+    if !selected {
+        return Some(AppEvent::SentenceLabelOpen(card, control_row(&control)));
+    }
+    match control {
         EditorControl::Chip(row, index) => Some(AppEvent::SentenceLabelChoose(row, index)),
         EditorControl::Advance(row, forward) => Some(AppEvent::SentenceLabelAdvance(row, forward)),
         EditorControl::Note => Some(AppEvent::SentenceLabelFocus(LabelEditorRow::Note)),
+    }
+}
+
+/// The row a tune control belongs to, used to carry a click on an unfocused
+/// card into that card's own editor before anything is changed.
+fn control_row(control: &EditorControl) -> LabelEditorRow {
+    match control {
+        EditorControl::Chip(row, _) | EditorControl::Advance(row, _) => *row,
+        EditorControl::Note => LabelEditorRow::Note,
     }
 }
 

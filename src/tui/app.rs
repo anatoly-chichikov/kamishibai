@@ -8,12 +8,12 @@ use unicode_width::UnicodeWidthStr;
 use crate::application::LearningTarget;
 use crate::session::{
     Artifact, CardArtifacts, CardDraft, CardPhase, LanguagePair, Sense, SentenceBatchSettings,
-    SentenceLabelSelection, WordCandidate,
+    WordCandidate,
 };
 
 use super::picker::{LanguageChoice, PickerCursor, PickerSection};
 use super::screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
-use super::sentence_editor::{BatchSettingsRow, LabelEditorRow, NoteDraft, SentenceLabelsEditor};
+use super::sentence_editor::{BatchSettingsRow, LabelEditorRow, SentenceLabelsEditor};
 
 /// The immutable shell state carried between transitions.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1320,10 +1320,7 @@ impl App {
     /// Return whether one card can open its sentence-label editor.
     #[must_use]
     pub fn card_tunable_at(&self, card: usize) -> bool {
-        self.cards.drafts.get(card).is_some_and(|draft| {
-            draft.meta().is_some()
-                && (draft.rewrite().is_none() || draft.staged_rewrite().is_some())
-        })
+        self.cards.drafts.get(card).is_some_and(CardDraft::tunable)
     }
 
     /// Return the currently focused card index.
@@ -1514,10 +1511,10 @@ impl App {
         self
     }
 
-    /// Return the app with the focused card expanded and its editor open on one
-    /// row. Expansion alone never opens the editor — this is the only door, and
-    /// the walk (`↓` from the head, `↑` from below) and a tag click are what go
-    /// through it.
+    /// Return the app with the focused card expanded and its editor live on one
+    /// row. Expansion alone only displays those rows — this is what hands them
+    /// the keyboard, and the walk (`↓` from the head, `↑` from below) and a
+    /// click on one of the controls are what go through it.
     #[must_use]
     pub fn sentence_editor_opened_for(mut self, row: LabelEditorRow) -> Self {
         if !self.card_tunable() {
@@ -1526,8 +1523,7 @@ impl App {
         let Some(draft) = self.cards.drafts.get(self.cards.selected) else {
             return self;
         };
-        let (baseline, selection, note) = sentence_editor_seed(draft);
-        self.cards.editor = Some(SentenceLabelsEditor::new(baseline, selection, row, note));
+        self.cards.editor = Some(SentenceLabelsEditor::seeded(draft, row));
         self.cards.expanded = std::mem::take(&mut self.cards.expanded).with(self.cards.selected);
         self
     }
@@ -1874,24 +1870,6 @@ impl App {
         self.blob_cursor = 0;
         self
     }
-}
-
-fn sentence_editor_seed(
-    draft: &CardDraft,
-) -> (SentenceLabelSelection, SentenceLabelSelection, NoteDraft) {
-    let baseline = draft
-        .meta()
-        .and_then(|meta| meta.sentence_labels())
-        .map(SentenceLabelSelection::from_labels)
-        .unwrap_or_else(SentenceLabelSelection::empty);
-    if let Some(rewrite) = draft.staged_rewrite() {
-        return (
-            baseline,
-            rewrite.selection().clone(),
-            NoteDraft::new(rewrite.note()),
-        );
-    }
-    (baseline.clone(), baseline, NoteDraft::default())
 }
 
 fn boundary_at_or_before(text: &str, cursor: usize) -> usize {
