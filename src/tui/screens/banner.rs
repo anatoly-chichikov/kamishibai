@@ -97,10 +97,10 @@ pub fn widget(app: &App) -> Paragraph<'static> {
         let display = display(label, path);
         let spans: Vec<Span<'static>> = vec![
             Span::styled("│ ", palette::base()),
-            Span::styled(GLYPH, palette::dim()),
-            Span::styled(String::from(*label), palette::link()),
+            Span::styled(GLYPH, palette::Ink::Detail.on(false)),
+            Span::styled(String::from(*label), palette::Ink::Subject.link(false)),
             Span::styled(" ".repeat(padding), palette::base()),
-            Span::styled(display, palette::dim()),
+            Span::styled(display, palette::Ink::Detail.on(false)),
         ];
         lines.push(Line::from(spans));
     }

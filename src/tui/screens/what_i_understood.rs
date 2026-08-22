@@ -83,8 +83,11 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
         } else {
             "nothing left to review"
         };
-        return Paragraph::new(Line::from(Span::styled(copy, palette::dim())))
-            .style(palette::base());
+        return Paragraph::new(Line::from(Span::styled(
+            copy,
+            palette::Ink::Detail.on(false),
+        )))
+        .style(palette::base());
     }
     let term_width = candidate_label_width(app.candidates(), 12);
     let mut lines = vec![settings_summary_line(app)];
@@ -173,7 +176,10 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
 
 fn settings_summary_line(app: &App) -> Line<'static> {
     let settings = app.sentence_settings();
-    let mut spans = vec![Span::styled(format!("{SETTINGS_LABEL}  "), palette::dim())];
+    let mut spans = vec![Span::styled(
+        format!("{SETTINGS_LABEL}  "),
+        palette::Ink::Detail.on(false),
+    )];
     if app.sentence_settings_editor().is_some() {
         return Line::from(spans);
     }
@@ -212,14 +218,19 @@ fn alternates_line(app: &App) -> Option<Line<'static>> {
     if codes.is_empty() {
         return None;
     }
-    let mut spans = vec![Span::styled(ALTERNATES_LABEL, palette::dim2())];
+    let mut spans = vec![Span::styled(
+        ALTERNATES_LABEL,
+        palette::Ink::Aside.on(false),
+    )];
     for (index, code) in codes.iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(ALTERNATES_SEPARATOR, palette::rule()));
         }
         spans.push(Span::styled(
             code.to_uppercase(),
-            palette::dim().add_modifier(Modifier::UNDERLINED),
+            palette::Ink::Detail
+                .on(false)
+                .add_modifier(Modifier::UNDERLINED),
         ));
     }
     Some(Line::from(spans))
@@ -310,9 +321,9 @@ fn pending_line<'a>(index: usize, raw: &'a str, term_width: usize, width: u16) -
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled(
         format!("{:0>2}  ", index + 1),
-        palette::dim2(),
+        palette::Ink::Aside.on(false),
     ));
-    spans.push(Span::styled(term, palette::dim()));
+    spans.push(Span::styled(term, palette::Ink::Detail.on(false)));
     if pad > 0 {
         spans.push(Span::styled(" ".repeat(pad), palette::base()));
     }
@@ -348,41 +359,42 @@ fn candidate_line<'a>(
     let is_selected = index == selected;
     let is_expanded_parent = expanded && !is_selected;
     let row_style = if is_selected {
-        palette::highlight()
+        palette::Ink::Subject.on(true)
     } else {
         palette::base()
     };
     let num_style = if is_selected {
-        palette::highlight().add_modifier(Modifier::BOLD)
+        palette::Ink::Subject.on(true).add_modifier(Modifier::BOLD)
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     let term_style = if !candidate.ok() {
-        on_selected_row(palette::dim(), is_selected).add_modifier(Modifier::CROSSED_OUT)
+        on_selected_row(palette::Ink::Detail.on(false), is_selected)
+            .add_modifier(Modifier::CROSSED_OUT)
     } else if is_expanded_parent {
         palette::base()
     } else if is_selected {
-        palette::highlight().add_modifier(Modifier::BOLD)
+        palette::Ink::Subject.on(true).add_modifier(Modifier::BOLD)
     } else {
         palette::base()
     };
     let dash_style = if !candidate.ok() {
-        on_selected_row(palette::dim2(), is_selected)
+        on_selected_row(palette::Ink::Aside.on(false), is_selected)
     } else if is_expanded_parent {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     } else if is_selected {
-        palette::highlight_dim()
+        palette::Ink::Detail.on(true)
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     let gloss_style = if !candidate.ok() {
-        on_selected_row(palette::dim(), is_selected)
+        on_selected_row(palette::Ink::Detail.on(false), is_selected)
     } else if is_expanded_parent {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     } else if is_selected {
-        palette::highlight_dim().add_modifier(Modifier::BOLD)
+        palette::Ink::Detail.on(true).add_modifier(Modifier::BOLD)
     } else {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     };
     let label_width = candidate_label_len(candidate);
     let indicator = inline_indicator(candidate, expanded_count);
@@ -439,16 +451,16 @@ fn sense_line<'a>(
     let checked = selected.contains(&index);
     let marker = if checked { "  ✓ " } else { "    " };
     let style = if focused {
-        palette::highlight().add_modifier(Modifier::BOLD)
+        palette::Ink::Subject.on(true).add_modifier(Modifier::BOLD)
     } else if checked {
         palette::base()
     } else {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     };
     let text = sense_text(sense);
     let indent = 4 + term_width + 5;
     let pad_style = if focused {
-        palette::highlight()
+        palette::Ink::Subject.on(true)
     } else {
         palette::base()
     };
@@ -658,7 +670,7 @@ fn selected_meaning_line<'a>(sense: &'a Sense, term_width: usize, width: u16) ->
         marker,
         text.as_str(),
         indent,
-        palette::dim(),
+        palette::Ink::Detail.on(false),
         palette::base(),
         width,
     )
@@ -701,12 +713,12 @@ fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
     let text = "+ add more";
     let used = indent + super::common::display_width(marker) + super::common::display_width(text);
     let style = if focused {
-        palette::highlight().add_modifier(Modifier::BOLD)
+        palette::Ink::Subject.on(true).add_modifier(Modifier::BOLD)
     } else {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     };
     let pad_style = if focused {
-        palette::highlight()
+        palette::Ink::Subject.on(true)
     } else {
         palette::base()
     };
@@ -751,7 +763,7 @@ fn candidate_label_len(candidate: &WordCandidate) -> usize {
 
 fn footer(app: &App, width: u16) -> Paragraph<'static> {
     let mut left: Vec<Span<'static>> = Vec::new();
-    left.push(Span::styled("step 2/3", palette::dim2()));
+    left.push(Span::styled("step 2/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
     let count = review_card_count(app);
     if count > 0 {
@@ -760,13 +772,22 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             palette::base().add_modifier(Modifier::BOLD),
         ));
         let noun = if count == 1 { "card" } else { "cards" };
-        left.push(Span::styled(format!(" {noun}"), palette::dim()));
+        left.push(Span::styled(
+            format!(" {noun}"),
+            palette::Ink::Detail.on(false),
+        ));
     } else {
-        left.push(Span::styled("nothing to make", palette::dim2()));
+        left.push(Span::styled(
+            "nothing to make",
+            palette::Ink::Aside.on(false),
+        ));
     }
     if let Some(message) = app.review_notice() {
         left.push(super::common::status_sep());
-        left.push(Span::styled(message.to_string(), palette::dim()));
+        left.push(Span::styled(
+            message.to_string(),
+            palette::Ink::Detail.on(false),
+        ));
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if app.sentence_settings_editor().is_some() {

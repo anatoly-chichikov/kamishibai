@@ -167,14 +167,20 @@ fn intro(width: u16) -> Paragraph<'static> {
             format!("{current} {word}")
         };
         if candidate.chars().count() > max_chars && !current.is_empty() {
-            lines.push(Line::from(Span::styled(current.clone(), palette::dim())));
+            lines.push(Line::from(Span::styled(
+                current.clone(),
+                palette::Ink::Detail.on(false),
+            )));
             current = String::from(word);
         } else {
             current = candidate;
         }
     }
     if !current.is_empty() {
-        lines.push(Line::from(Span::styled(current, palette::dim())));
+        lines.push(Line::from(Span::styled(
+            current,
+            palette::Ink::Detail.on(false),
+        )));
     }
     Paragraph::new(lines).style(palette::base())
 }
@@ -208,7 +214,7 @@ fn language_lines(app: &App, area: Rect) -> Vec<Line<'static>> {
         let mut spans = step_label(false);
         spans.push(Span::styled(
             PickerSection::Known.row_text(picked),
-            palette::dim(),
+            palette::Ink::Detail.on(false),
         ));
         return vec![Line::from(spans)];
     }
@@ -234,12 +240,12 @@ fn step_label(active: bool) -> Vec<Span<'static>> {
     let num_style = if active {
         palette::base()
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     let label_style = if active {
         palette::base()
     } else {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     };
     vec![
         Span::styled("01  ", num_style),
@@ -256,13 +262,13 @@ fn input_row(app: &App) -> (Vec<Span<'static>>, u16) {
     let num_style = if active {
         palette::base()
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     spans.push(Span::styled("02  ", num_style));
     let label_style = if active || !welcome.key.is_empty() {
         palette::base()
     } else {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     };
     spans.push(Span::styled(
         super::common::pad_right("gemini api key", 16),
@@ -271,7 +277,10 @@ fn input_row(app: &App) -> (Vec<Span<'static>>, u16) {
     spans.push(chevron(active));
     if !active {
         if !welcome.key.is_empty() {
-            spans.push(Span::styled(masked(welcome.key.as_str()), palette::dim()));
+            spans.push(Span::styled(
+                masked(welcome.key.as_str()),
+                palette::Ink::Detail.on(false),
+            ));
         }
         return (spans, 0);
     }
@@ -346,7 +355,7 @@ fn chip(label: &str, focused: bool) -> Span<'static> {
     if focused {
         Span::styled(text, palette::invert().add_modifier(Modifier::BOLD))
     } else {
-        Span::styled(text, palette::dim())
+        Span::styled(text, palette::Ink::Detail.on(false))
     }
 }
 
@@ -373,7 +382,10 @@ fn key_underline_row(app: &App) -> Paragraph<'static> {
     let indent = " ".repeat(usize::from(FIELD_INDENT));
     Paragraph::new(Line::from(vec![
         Span::raw(indent),
-        Span::styled("─".repeat(usize::from(KEY_FIELD_WIDTH)), palette::dim()),
+        Span::styled(
+            "─".repeat(usize::from(KEY_FIELD_WIDTH)),
+            palette::Ink::Detail.on(false),
+        ),
     ]))
     .style(palette::base())
 }
@@ -405,7 +417,10 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         WelcomeStage::PickLanguage => "step 1/2",
         WelcomeStage::EnterKey => "step 2/2",
     };
-    let left: Vec<Span<'static>> = vec![Span::styled(String::from(counter), palette::dim2())];
+    let left: Vec<Span<'static>> = vec![Span::styled(
+        String::from(counter),
+        palette::Ink::Aside.on(false),
+    )];
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     match welcome.stage {
         WelcomeStage::PickLanguage => {

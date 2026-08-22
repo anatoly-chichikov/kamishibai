@@ -67,7 +67,11 @@ fn message_panel(message: &str) -> Paragraph<'_> {
 }
 
 fn hint_panel() -> Paragraph<'static> {
-    Paragraph::new(Line::from(Span::styled(HINT, palette::dim()))).style(palette::base())
+    Paragraph::new(Line::from(Span::styled(
+        HINT,
+        palette::Ink::Detail.on(false),
+    )))
+    .style(palette::base())
 }
 
 /// Size the panel to the message it carries.

@@ -162,7 +162,10 @@ fn cards_paragraph(app: &App, width: usize) -> Paragraph<'_> {
     let mut lines: Vec<Line<'_>> = Vec::new();
     if app.cards().is_empty() {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("preparing cards…", palette::dim())));
+        lines.push(Line::from(Span::styled(
+            "preparing cards…",
+            palette::Ink::Detail.on(false),
+        )));
         return Paragraph::new(lines).style(palette::base());
     }
     let spinner_frame =
@@ -507,7 +510,7 @@ fn card_head<'a>(
     width: usize,
 ) -> Vec<Line<'a>> {
     let row_style = if focused {
-        palette::highlight()
+        palette::Ink::Subject.on(true)
     } else {
         palette::base()
     };
@@ -521,29 +524,29 @@ fn card_head<'a>(
         " "
     };
     let glyph_style = if focused && !pending {
-        palette::highlight()
+        palette::Ink::Subject.on(true)
     } else if focused {
-        palette::highlight_dim()
+        palette::Ink::Detail.on(true)
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     let num_style = if focused && !pending {
-        palette::highlight()
+        palette::Ink::Subject.on(true)
     } else if focused {
-        palette::highlight_dim()
+        palette::Ink::Detail.on(true)
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     let built = draft.artifacts().all_ready() && !pending;
     let lit = if focused {
-        palette::highlight()
+        palette::Ink::Subject.on(true)
     } else {
         palette::base()
     };
     let muted = if focused {
-        palette::highlight_dim()
+        palette::Ink::Detail.on(true)
     } else {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     };
     let term_style = if built {
         lit.add_modifier(Modifier::BOLD)
@@ -563,9 +566,9 @@ fn card_head<'a>(
     head_spans.push(Span::styled(format!("{:0>2}  ", idx + 1), num_style));
     head_spans.push(Span::styled(String::from(draft.term()), term_style));
     let suffix_style = if focused {
-        palette::highlight_dim()
+        palette::Ink::Detail.on(true)
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     let Some(meta) = draft.meta() else {
         let suffix = visible_card_head_suffix(draft, head_used, width);
@@ -745,7 +748,10 @@ fn step_line<'a>(
         state.status_style,
     ));
     spans.push(Span::styled(String::from(label), state.label_style));
-    spans.push(Span::styled(" ".repeat(label_gap(label)), palette::dim()));
+    spans.push(Span::styled(
+        " ".repeat(label_gap(label)),
+        palette::Ink::Detail.on(false),
+    ));
     spans.extend(state.line.spans);
     ArtifactLine { spans }
 }
@@ -769,7 +775,7 @@ fn step_state<'a>(
             glyph: String::from("✓"),
             status_style: palette::base(),
             label_style: if row_target(draft, row).is_some() {
-                palette::link()
+                palette::Ink::Subject.link(false)
             } else {
                 palette::base()
             },
@@ -779,10 +785,13 @@ fn step_state<'a>(
         },
         RowState::Discarded => StepState {
             glyph: String::from("⊘"),
-            status_style: palette::dim(),
-            label_style: palette::dim(),
+            status_style: palette::Ink::Detail.on(false),
+            label_style: palette::Ink::Detail.on(false),
             line: ArtifactLine {
-                spans: vec![Span::styled(String::from("discarded"), palette::dim())],
+                spans: vec![Span::styled(
+                    String::from("discarded"),
+                    palette::Ink::Detail.on(false),
+                )],
             },
         },
         RowState::Failed => StepState {
@@ -809,10 +818,13 @@ fn step_state<'a>(
         },
         RowState::Hidden => StepState {
             glyph: String::from("○"),
-            status_style: palette::dim2(),
-            label_style: palette::dim2(),
+            status_style: palette::Ink::Aside.on(false),
+            label_style: palette::Ink::Aside.on(false),
             line: ArtifactLine {
-                spans: vec![Span::styled(String::from("queued"), palette::dim())],
+                spans: vec![Span::styled(
+                    String::from("queued"),
+                    palette::Ink::Detail.on(false),
+                )],
             },
         },
     }
@@ -823,14 +835,17 @@ fn step_state<'a>(
 /// the file is a cache hit.
 fn ready_value<'a>(cost: Option<GenerationCost>, cached: bool) -> Vec<Span<'a>> {
     match (cost, cached) {
-        (Some(cost), _) => vec![Span::styled(cost.dollars(), palette::dim2())],
-        (None, true) => vec![Span::styled(String::from(CACHED_NOTE), palette::dim2())],
+        (Some(cost), _) => vec![Span::styled(cost.dollars(), palette::Ink::Aside.on(false))],
+        (None, true) => vec![Span::styled(
+            String::from(CACHED_NOTE),
+            palette::Ink::Aside.on(false),
+        )],
         (None, false) => Vec::new(),
     }
 }
 
 fn row_cost_spans<'a>(cost: Option<GenerationCost>) -> Vec<Span<'a>> {
-    cost.map(|cost| vec![Span::styled(cost.dollars(), palette::dim2())])
+    cost.map(|cost| vec![Span::styled(cost.dollars(), palette::Ink::Aside.on(false))])
         .unwrap_or_default()
 }
 
@@ -871,7 +886,7 @@ fn detail_pane(draft: &CardDraft, width: usize, pending: bool) -> DetailPane<'_>
     } else {
         lines.push(Line::from(vec![
             Span::styled(indent, palette::base()),
-            Span::styled("meta not generated yet", palette::dim2()),
+            Span::styled("meta not generated yet", palette::Ink::Aside.on(false)),
         ]));
     }
     let attempts = rejected_attempts(draft);
@@ -885,7 +900,7 @@ fn detail_pane(draft: &CardDraft, width: usize, pending: bool) -> DetailPane<'_>
         ));
         lines.push(Line::from(vec![
             Span::styled(indent, palette::base()),
-            Span::styled("rejected attempts", palette::dim2()),
+            Span::styled("rejected attempts", palette::Ink::Aside.on(false)),
         ]));
         let start = lines.len();
         lines.extend(
@@ -979,10 +994,10 @@ pub(crate) fn rejected_row<'a>(attempt: RejectedAttempt<'_>, width: usize) -> Re
     let step = format!("{} {}", step_name(attempt.artifact), attempt.index);
     let mut spans = vec![
         Span::styled(REJECTED_INDENT, palette::base()),
-        Span::styled("✗ ", palette::dim()),
+        Span::styled("✗ ", palette::Ink::Detail.on(false)),
         Span::styled(
             pad_right(step.as_str(), REJECTED_STEP_COL_CHARS),
-            palette::dim(),
+            palette::Ink::Detail.on(false),
         ),
     ];
     let mut links: Vec<(u16, u16, PathBuf)> = Vec::new();
@@ -1001,15 +1016,18 @@ pub(crate) fn rejected_row<'a>(attempt: RejectedAttempt<'_>, width: usize) -> Re
             );
             spans.push(Span::styled(
                 column_gap(column, files_start + REJECTED_FILE_COL_CHARS),
-                palette::dim(),
+                palette::Ink::Detail.on(false),
             ));
         }
         None => spans.push(Span::styled(
             " ".repeat(REJECTED_FILE_COL_CHARS),
-            palette::dim(),
+            palette::Ink::Detail.on(false),
         )),
     }
-    spans.push(Span::styled(verdict_word(attempt.fault), palette::dim()));
+    spans.push(Span::styled(
+        verdict_word(attempt.fault),
+        palette::Ink::Detail.on(false),
+    ));
     let mut lines = vec![Line::from(spans)];
     let bullet = format!("{REJECTED_INDENT}  · ");
     let room = width
@@ -1017,8 +1035,8 @@ pub(crate) fn rejected_row<'a>(attempt: RejectedAttempt<'_>, width: usize) -> Re
         .max(12);
     for finding in findings(attempt.fault) {
         lines.push(Line::from(vec![
-            Span::styled(bullet.clone(), palette::dim()),
-            Span::styled(clip(finding.as_str(), room), palette::dim()),
+            Span::styled(bullet.clone(), palette::Ink::Detail.on(false)),
+            Span::styled(clip(finding.as_str(), room), palette::Ink::Detail.on(false)),
         ]));
     }
     RejectedRow { lines, links }
@@ -1083,7 +1101,9 @@ fn push_link<'a>(
     let width = super::common::display_width(label.as_str());
     spans.push(Span::styled(
         label,
-        palette::dim2().add_modifier(Modifier::UNDERLINED),
+        palette::Ink::Aside
+            .on(false)
+            .add_modifier(Modifier::UNDERLINED),
     ));
     if let Some(target) = target {
         links.push((
@@ -1127,7 +1147,7 @@ fn meta_preview<'a>(
     let label = |text: &'static str| {
         Line::from(vec![
             Span::styled(indent, palette::base()),
-            Span::styled(text, palette::dim2()),
+            Span::styled(text, palette::Ink::Aside.on(false)),
         ])
     };
     lines.push(label("the phrase"));
@@ -1209,7 +1229,7 @@ fn fact_lines(
     if !inline {
         let mut lines = vec![Line::from(vec![
             Span::styled(indent, palette::base()),
-            Span::styled(label, palette::dim2()),
+            Span::styled(label, palette::Ink::Aside.on(false)),
         ])];
         lines.extend(values.into_iter().map(|value| {
             Line::from(vec![
@@ -1230,7 +1250,7 @@ fn fact_lines(
             };
             Line::from(vec![
                 Span::styled(indent, palette::base()),
-                Span::styled(label, palette::dim2()),
+                Span::styled(label, palette::Ink::Aside.on(false)),
                 Span::styled(value, palette::base()),
             ])
         })
@@ -1733,18 +1753,21 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         app.cards().len()
     };
     let mut left: Vec<Span<'static>> = Vec::new();
-    left.push(Span::styled("step 3/3", palette::dim2()));
+    left.push(Span::styled("step 3/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
     left.push(Span::styled(
         ready.to_string(),
         palette::base().add_modifier(Modifier::BOLD),
     ));
-    left.push(Span::styled(format!("/{total} ready"), palette::dim()));
+    left.push(Span::styled(
+        format!("/{total} ready"),
+        palette::Ink::Detail.on(false),
+    ));
     if published && done.failed > 0 {
         left.push(super::common::status_sep());
         left.push(Span::styled(
             format!("{} omitted", done.failed),
-            palette::dim(),
+            palette::Ink::Detail.on(false),
         ));
     }
     if census.adjusted > 0 {
@@ -1753,7 +1776,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             census.adjusted.to_string(),
             palette::base().add_modifier(Modifier::BOLD),
         ));
-        left.push(Span::styled(" pending", palette::dim()));
+        left.push(Span::styled(" pending", palette::Ink::Detail.on(false)));
     }
     if let Some(cost) = total_cost(app) {
         left.push(super::common::status_sep());
@@ -1763,7 +1786,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         ));
     }
     left.push(super::common::status_sep());
-    left.push(Span::styled(elapsed(app), palette::dim2()));
+    left.push(Span::styled(elapsed(app), palette::Ink::Aside.on(false)));
     let hints = if app.generation_stopping() {
         vec![super::common::quit_hint(app.quit_pending())]
     } else if app.generation_stop_pending() {

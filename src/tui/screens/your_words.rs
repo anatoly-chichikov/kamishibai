@@ -112,7 +112,10 @@ fn highlight_strip(body: Rect, row: usize) -> Option<Rect> {
 fn paint_strip(frame: &mut Frame, area: Rect) {
     let filler = " ".repeat(area.width as usize);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(filler, palette::highlight()))),
+        Paragraph::new(Line::from(Span::styled(
+            filler,
+            palette::Ink::Subject.on(true),
+        ))),
         area,
     );
 }
@@ -131,9 +134,9 @@ fn gutter(app: &App) -> Paragraph<'static> {
         let style = if index >= actual {
             palette::base().fg(palette::RULE)
         } else if index == active && !app.blob().is_empty() {
-            palette::highlight().add_modifier(Modifier::BOLD)
+            palette::Ink::Subject.on(true).add_modifier(Modifier::BOLD)
         } else {
-            palette::dim2()
+            palette::Ink::Aside.on(false)
         };
         lines.push(Line::from(Span::styled(label, style)));
     }
@@ -164,7 +167,7 @@ fn body_lines(app: &App, width: u16) -> Vec<Line<'static>> {
 
 fn line_for_row(index: usize, raw: &str, active: usize, width: u16) -> Line<'static> {
     let style = if index == active {
-        palette::highlight()
+        palette::Ink::Subject.on(true)
     } else {
         palette::base()
     };
@@ -174,7 +177,10 @@ fn line_for_row(index: usize, raw: &str, active: usize, width: u16) -> Line<'sta
         let used = super::common::display_width(raw);
         let pad = (width as usize).saturating_sub(used);
         if pad > 0 {
-            spans.push(Span::styled(" ".repeat(pad), palette::highlight()));
+            spans.push(Span::styled(
+                " ".repeat(pad),
+                palette::Ink::Subject.on(true),
+            ));
         }
     }
     Line::from(spans)
@@ -184,30 +190,36 @@ fn placeholder_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(""),
         Line::from(""),
-        Line::from(Span::styled(PLACEHOLDER_HINT, palette::dim2())),
+        Line::from(Span::styled(
+            PLACEHOLDER_HINT,
+            palette::Ink::Aside.on(false),
+        )),
     ]
 }
 
 fn footer(app: &App, width: u16) -> Paragraph<'static> {
     let count = word_count(app.blob());
     let mut left: Vec<Span<'static>> = Vec::new();
-    left.push(Span::styled("step 1/3", palette::dim2()));
+    left.push(Span::styled("step 1/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
     if count == 0 {
-        left.push(Span::styled("empty", palette::dim2()));
+        left.push(Span::styled("empty", palette::Ink::Aside.on(false)));
     } else {
         let noun = if count == 1 { "card" } else { "cards" };
         left.push(Span::styled(
             count.to_string(),
             palette::base().add_modifier(Modifier::BOLD),
         ));
-        left.push(Span::styled(format!(" {noun}"), palette::dim()));
+        left.push(Span::styled(
+            format!(" {noun}"),
+            palette::Ink::Detail.on(false),
+        ));
     }
     let over_limit = count > MAX_INTAKE_WORDS;
     if over_limit {
         left.push(Span::styled(
             format!(" · over the {MAX_INTAKE_WORDS}-word limit"),
-            palette::dim(),
+            palette::Ink::Detail.on(false),
         ));
     }
     if app.word_clear_pending() {

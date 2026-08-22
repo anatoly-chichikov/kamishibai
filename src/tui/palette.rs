@@ -1,51 +1,75 @@
 //! Static monochrome palette for the Kamishibai TUI.
 //!
-//! Values mirror the locked design tokens in
-//! `kamishibai-simple/project/styles.css` (`:root`). The TUI is pure
-//! manga-ink — no accent hue is allowed. Every screen reads colors through
-//! this module so the rendered terminal stays in lock-step with the design.
+//! The TUI is pure manga-ink — no accent hue is allowed. Three channels carry
+//! every distinction the screens draw, and each channel carries exactly one
+//! meaning: [`Ink`] ranks a span inside the row it belongs to, the `HL`
+//! background marks the row under the cursor and nothing else, and
+//! `Modifier::BOLD` marks a finished card and nothing else. Underlining a span
+//! says it opens something when clicked; its brightness still comes from its
+//! rank.
 
 use ratatui::style::{Color, Modifier, Style};
 
-/// Terminal background. Matches `--bg: #0e0e10`.
+/// Terminal background.
 pub const BG: Color = Color::Rgb(0x0e, 0x0e, 0x10);
-/// Primary ink color for ordinary text. Matches `--fg: #e6e3da`.
+/// Primary ink for the subject of a row.
 pub const FG: Color = Color::Rgb(0xe6, 0xe3, 0xda);
-/// Muted ink for secondary copy and dividers. Matches `--dim: #8b8a83`.
+/// Muted ink for the copy that explains the subject.
 pub const DIM: Color = Color::Rgb(0x8b, 0x8a, 0x83);
-/// Deeper muted ink for placeholder rows and pending steps. Matches `--dim2: #5a5953`.
+/// Deeper muted ink for the bookkeeping beside the subject.
 pub const DIM2: Color = Color::Rgb(0x5a, 0x59, 0x53);
-/// Border color for rules, dashed dividers, and outlined chips. Matches `--rule: #2a2a2d`.
+/// Border color for rules, dashed dividers, and outlined chips.
 pub const RULE: Color = Color::Rgb(0x2a, 0x2a, 0x2d);
-/// Row highlight background — selected lines use this. Matches `--hl: #1c1c1f`.
+/// Row highlight background — the row under the cursor uses this.
 pub const HL: Color = Color::Rgb(0x1c, 0x1c, 0x1f);
 
-/// Return the base paragraph style (paper ink on terminal-dark background).
+/// Rank a span holds inside the row it belongs to.
+///
+/// The rank answers "how much of this row is this span", never "what state is
+/// this row in": focus moves the background, completion moves the weight, and
+/// neither of them repaints the ink.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Ink {
+    /// The thing the row is about — a term, a chosen value, a broken artifact.
+    Subject,
+    /// The copy that explains the subject — glosses, sentences, questions.
+    Detail,
+    /// Bookkeeping beside the subject — indices, costs, timings, separators.
+    Aside,
+}
+
+impl Ink {
+    /// Return the style this rank takes on a row that is or is not focused.
+    #[must_use]
+    pub fn on(self, focused: bool) -> Style {
+        Style::default()
+            .bg(if focused { HL } else { BG })
+            .fg(self.color())
+    }
+
+    /// Return the style of a span at this rank that opens something when clicked.
+    #[must_use]
+    pub fn link(self, focused: bool) -> Style {
+        self.on(focused).add_modifier(Modifier::UNDERLINED)
+    }
+
+    /// Return the ink this rank writes with.
+    #[must_use]
+    pub fn color(self) -> Color {
+        match self {
+            Self::Subject => FG,
+            Self::Detail => DIM,
+            Self::Aside => DIM2,
+        }
+    }
+}
+
+/// Return the base paragraph style — subject ink on the terminal background.
 pub fn base() -> Style {
     Style::default().bg(BG).fg(FG)
 }
 
-/// Return the style for a muted / dim span (`--dim`).
-pub fn dim() -> Style {
-    Style::default().bg(BG).fg(DIM)
-}
-
-/// Return the style for the deepest muted span (`--dim2`).
-pub fn dim2() -> Style {
-    Style::default().bg(BG).fg(DIM2)
-}
-
-/// Return the style for a row highlighted as selected (background `--hl`, ink `--fg`).
-pub fn highlight() -> Style {
-    Style::default().bg(HL).fg(FG)
-}
-
-/// Return the style for a dim span over a highlighted row.
-pub fn highlight_dim() -> Style {
-    Style::default().bg(HL).fg(DIM)
-}
-
-/// Return the inverse style: black ink on cream block (used by titles).
+/// Return the inverse style: dark ink on a cream block, used by titles and chips.
 pub fn invert() -> Style {
     Style::default().bg(FG).fg(BG)
 }
@@ -53,12 +77,4 @@ pub fn invert() -> Style {
 /// Return the style used to draw `--rule` lines.
 pub fn rule() -> Style {
     Style::default().bg(BG).fg(RULE)
-}
-
-/// Return the underlined link style — pure mono, no color shift.
-pub fn link() -> Style {
-    Style::default()
-        .bg(BG)
-        .fg(FG)
-        .add_modifier(Modifier::UNDERLINED)
 }

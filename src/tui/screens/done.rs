@@ -73,7 +73,7 @@ fn card_summary(app: &App) -> Paragraph<'_> {
     if app.cards().is_empty() {
         lines.push(Line::from(Span::styled(
             "no cards in this batch",
-            palette::dim(),
+            palette::Ink::Detail.on(false),
         )));
     } else {
         for (index, draft) in app.cards().iter().enumerate() {
@@ -84,13 +84,16 @@ fn card_summary(app: &App) -> Paragraph<'_> {
             };
             let mut spans = vec![
                 Span::styled(format!(" {glyph} "), palette::base()),
-                Span::styled(format!("{:0>2}  ", index + 1), palette::dim2()),
+                Span::styled(
+                    format!("{:0>2}  ", index + 1),
+                    palette::Ink::Aside.on(false),
+                ),
                 Span::styled(String::from(draft.term()), palette::base()),
             ];
             if let Some(cost) = super::your_cards::card_cost(draft) {
                 spans.push(Span::styled(
                     format!("  {}", cost.dollars()),
-                    palette::dim2(),
+                    palette::Ink::Aside.on(false),
                 ));
             }
             lines.push(Line::from(spans));
@@ -118,19 +121,25 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         app.cards_failed()
     };
     let mut left: Vec<Span<'static>> = Vec::new();
-    left.push(Span::styled("step 3/3", palette::dim2()));
+    left.push(Span::styled("step 3/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
     left.push(Span::styled(
         format!("{ready}/{total} ready"),
-        palette::dim(),
+        palette::Ink::Detail.on(false),
     ));
     if failed > 0 {
         left.push(super::common::status_sep());
-        left.push(Span::styled(format!("{failed} gave up"), palette::dim()));
+        left.push(Span::styled(
+            format!("{failed} gave up"),
+            palette::Ink::Detail.on(false),
+        ));
     }
     if let Some(cost) = super::your_cards::total_cost(app) {
         left.push(super::common::status_sep());
-        left.push(Span::styled(cost.dollars_cents(), palette::dim()));
+        left.push(Span::styled(
+            cost.dollars_cents(),
+            palette::Ink::Detail.on(false),
+        ));
     }
     if app.new_batch_pending() {
         return super::common::footer_bar(

@@ -32,7 +32,7 @@ impl<'a> TextField<'a> {
         if self.value.is_empty() {
             vec![Span::styled(
                 String::from(self.placeholder),
-                palette::dim2(),
+                palette::Ink::Aside.on(false),
             )]
         } else {
             vec![Span::styled(self.value.to_string(), palette::base())]

@@ -220,7 +220,7 @@ fn headings(focused: PickerSection) -> Vec<Span<'static>> {
         let style = if section == focused {
             palette::base().add_modifier(Modifier::BOLD)
         } else {
-            palette::dim2()
+            palette::Ink::Aside.on(false)
         };
         vec![Span::styled(String::from(section.heading()), style)]
     })
@@ -231,7 +231,7 @@ fn arrow() -> Span<'static> {
     let lead = (COLUMN_GAP - 1) / 2;
     Span::styled(
         format!("{}→{}", " ".repeat(lead), " ".repeat(COLUMN_GAP - 1 - lead)),
-        palette::dim(),
+        palette::Ink::Detail.on(false),
     )
 }
 
@@ -300,7 +300,7 @@ fn row_style(selected: bool, focused: bool) -> Style {
     match (selected, focused) {
         (true, true) => palette::invert().add_modifier(Modifier::BOLD),
         (true, false) => palette::invert(),
-        (false, _) => palette::dim(),
+        (false, _) => palette::Ink::Detail.on(false),
     }
 }
 
@@ -313,7 +313,7 @@ fn scrollbar_cell(total: usize, offset: usize, row: usize, visible: usize) -> Sp
     let first = offset * visible / total;
     let height = (visible * visible).div_ceil(total).max(1);
     if row >= first && row < first + height {
-        return Span::styled("┃", palette::dim());
+        return Span::styled("┃", palette::Ink::Detail.on(false));
     }
     Span::styled("│", palette::rule())
 }

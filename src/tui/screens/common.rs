@@ -70,7 +70,7 @@ pub fn paint_rules(frame: &mut Frame, rects: &ScreenFrame) {
 fn ai_disclaimer() -> Paragraph<'static> {
     Paragraph::new(AI_DISCLAIMER)
         .alignment(Alignment::Right)
-        .style(palette::dim2())
+        .style(palette::Ink::Aside.on(false))
 }
 
 fn disclaimer_rect(area: Rect) -> Rect {
@@ -187,7 +187,7 @@ pub fn header(
     ));
     if !hint.is_empty() {
         spans.push(Span::styled(" ".repeat(hint_lead), palette::base()));
-        spans.push(Span::styled(hint, palette::dim()));
+        spans.push(Span::styled(hint, palette::Ink::Detail.on(false)));
     }
     spans.push(Span::styled(" ".repeat(gap), palette::base()));
     if !chip.is_empty() {
@@ -312,8 +312,11 @@ impl FooterHint {
                 palette::base().add_modifier(Modifier::BOLD),
                 palette::base(),
             ),
-            Tier::Secondary => (palette::base().add_modifier(Modifier::BOLD), palette::dim()),
-            Tier::Ghost => (palette::dim2(), palette::dim2()),
+            Tier::Secondary => (
+                palette::base().add_modifier(Modifier::BOLD),
+                palette::Ink::Detail.on(false),
+            ),
+            Tier::Ghost => (palette::Ink::Aside.on(false), palette::Ink::Aside.on(false)),
         };
         vec![
             Span::styled(format!("[{}]", self.key), key_style),
@@ -642,12 +645,15 @@ mod tests {
     fn status() -> Vec<Span<'static>> {
         vec![Span::styled(
             String::from("step 2/3  nothing to make"),
-            palette::dim2(),
+            palette::Ink::Aside.on(false),
         )]
     }
 
     fn short_status() -> Vec<Span<'static>> {
-        vec![Span::styled(String::from("step 2/3"), palette::dim2())]
+        vec![Span::styled(
+            String::from("step 2/3"),
+            palette::Ink::Aside.on(false),
+        )]
     }
 
     fn crowded_hints() -> Vec<FooterHint> {

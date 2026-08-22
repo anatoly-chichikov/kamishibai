@@ -342,11 +342,11 @@ fn tag_spans(source: &TagSource<'_>, axis: SentenceAxis) -> (Vec<Span<'static>>,
     let spans = match (actual, requested) {
         (Some(actual), Some(requested)) if actual != requested => vec![
             label_tag(actual, false),
-            Span::styled(" · aimed for ", palette::dim2()),
+            Span::styled(" · aimed for ", palette::Ink::Aside.on(false)),
             label_tag(requested, true),
         ],
         (None, Some(requested)) => vec![
-            Span::styled("aimed for ", palette::dim2()),
+            Span::styled("aimed for ", palette::Ink::Aside.on(false)),
             label_tag(requested, true),
         ],
         (Some(actual), _) => vec![label_tag(actual, source.pinned(axis))],
@@ -510,7 +510,8 @@ fn append_current(
             .expect("invariant: every sentence-label axis must render a carousel line");
         line.spans
             .push(Span::styled(same_line_gap, palette::base()));
-        line.spans.push(Span::styled(label, palette::dim2()));
+        line.spans
+            .push(Span::styled(label, palette::Ink::Aside.on(false)));
         line.spans.push(Span::styled(actual, palette::base()));
         return;
     }
@@ -521,7 +522,7 @@ fn append_current(
     };
     lines.push(Line::from(vec![
         Span::styled(" ".repeat(start), palette::base()),
-        Span::styled(label, palette::dim2()),
+        Span::styled(label, palette::Ink::Aside.on(false)),
         Span::styled(actual, palette::base()),
     ]));
 }
@@ -624,7 +625,7 @@ fn carousel_lines<Row: Copy>(
         spans.push(span);
         regions.push(region);
         used += MARKER_WIDTH;
-        spans.push(Span::styled(" — ", palette::dim2()));
+        spans.push(Span::styled(" — ", palette::Ink::Aside.on(false)));
         used += 3;
         let (span, region) = marker(row, screen_row, 0, 1, used, MARKER_WIDTH);
         spans.push(span);
@@ -745,7 +746,7 @@ fn chevron<Row: Copy>(
     let style = if focused {
         palette::base()
     } else {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     };
     (
         Span::styled(text, style),
@@ -828,7 +829,7 @@ fn row_prefix(
     let style = if focused {
         palette::base().add_modifier(Modifier::BOLD)
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     vec![
         Span::styled(" ".repeat(indent), palette::base()),
