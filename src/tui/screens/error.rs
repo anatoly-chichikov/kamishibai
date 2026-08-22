@@ -5,7 +5,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
@@ -60,7 +60,7 @@ pub fn draw(frame: &mut Frame, area: Rect, _app: &App, message: &str) {
 fn message_panel(message: &str) -> Paragraph<'_> {
     Paragraph::new(Span::styled(
         String::from(message),
-        palette::base().add_modifier(Modifier::BOLD),
+        palette::Ink::Subject.on(false),
     ))
     .wrap(Wrap { trim: false })
     .style(palette::base())

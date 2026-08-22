@@ -22,7 +22,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
@@ -218,7 +218,7 @@ fn across(
 fn headings(focused: PickerSection) -> Vec<Span<'static>> {
     across(arrow(), |section| {
         let style = if section == focused {
-            palette::base().add_modifier(Modifier::BOLD)
+            palette::Ink::Subject.on(false)
         } else {
             palette::Ink::Aside.on(false)
         };
@@ -294,12 +294,14 @@ fn scrolling_cell(
     ]
 }
 
-/// Paint one row. The pick of each column stays inverted so the pair reads at
-/// a glance; only the focused column's pick is also bold.
+/// Paint one row. The live pick — the one the arrows move — is the inverted
+/// block; the other column's pick keeps its subject ink on the cursor
+/// background, so the pair still reads at a glance without two blocks fighting
+/// over which one the keyboard owns.
 fn row_style(selected: bool, focused: bool) -> Style {
     match (selected, focused) {
-        (true, true) => palette::invert().add_modifier(Modifier::BOLD),
-        (true, false) => palette::invert(),
+        (true, true) => palette::invert(),
+        (true, false) => palette::Ink::Subject.on(true),
         (false, _) => palette::Ink::Detail.on(false),
     }
 }

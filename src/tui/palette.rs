@@ -21,7 +21,7 @@ pub const DIM2: Color = Color::Rgb(0x5a, 0x59, 0x53);
 /// Border color for rules, dashed dividers, and outlined chips.
 pub const RULE: Color = Color::Rgb(0x2a, 0x2a, 0x2d);
 /// Row highlight background — the row under the cursor uses this.
-pub const HL: Color = Color::Rgb(0x1c, 0x1c, 0x1f);
+pub const HL: Color = Color::Rgb(0x26, 0x26, 0x2a);
 
 /// Rank a span holds inside the row it belongs to.
 ///

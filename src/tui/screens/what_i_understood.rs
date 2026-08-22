@@ -338,14 +338,6 @@ enum Gloss {
     Heading(String),
 }
 
-fn on_selected_row(style: Style, selected: bool) -> Style {
-    if selected {
-        style.bg(palette::HL)
-    } else {
-        style
-    }
-}
-
 fn candidate_line<'a>(
     index: usize,
     candidate: &'a WordCandidate,
@@ -355,47 +347,18 @@ fn candidate_line<'a>(
     term_width: usize,
     width: u16,
 ) -> Vec<Line<'a>> {
-    let expanded = expanded_count.is_some();
     let is_selected = index == selected;
-    let is_expanded_parent = expanded && !is_selected;
-    let row_style = if is_selected {
-        palette::Ink::Subject.on(true)
+    let row_style = palette::Ink::Detail.on(is_selected);
+    let num_style = palette::Ink::Aside.on(is_selected);
+    let term_style = if candidate.ok() {
+        palette::Ink::Subject.on(is_selected)
     } else {
-        palette::base()
-    };
-    let num_style = if is_selected {
-        palette::Ink::Subject.on(true).add_modifier(Modifier::BOLD)
-    } else {
-        palette::Ink::Aside.on(false)
-    };
-    let term_style = if !candidate.ok() {
-        on_selected_row(palette::Ink::Detail.on(false), is_selected)
+        palette::Ink::Detail
+            .on(is_selected)
             .add_modifier(Modifier::CROSSED_OUT)
-    } else if is_expanded_parent {
-        palette::base()
-    } else if is_selected {
-        palette::Ink::Subject.on(true).add_modifier(Modifier::BOLD)
-    } else {
-        palette::base()
     };
-    let dash_style = if !candidate.ok() {
-        on_selected_row(palette::Ink::Aside.on(false), is_selected)
-    } else if is_expanded_parent {
-        palette::Ink::Detail.on(false)
-    } else if is_selected {
-        palette::Ink::Detail.on(true)
-    } else {
-        palette::Ink::Aside.on(false)
-    };
-    let gloss_style = if !candidate.ok() {
-        on_selected_row(palette::Ink::Detail.on(false), is_selected)
-    } else if is_expanded_parent {
-        palette::Ink::Detail.on(false)
-    } else if is_selected {
-        palette::Ink::Detail.on(true).add_modifier(Modifier::BOLD)
-    } else {
-        palette::Ink::Detail.on(false)
-    };
+    let dash_style = palette::Ink::Aside.on(is_selected);
+    let gloss_style = palette::Ink::Detail.on(is_selected);
     let label_width = candidate_label_len(candidate);
     let indicator = inline_indicator(candidate, expanded_count);
     let pad_after_label = term_width.saturating_sub(label_width);
@@ -450,21 +413,14 @@ fn sense_line<'a>(
     let focused = index == cursor;
     let checked = selected.contains(&index);
     let marker = if checked { "  ✓ " } else { "    " };
-    let style = if focused {
-        palette::Ink::Subject.on(true).add_modifier(Modifier::BOLD)
-    } else if checked {
-        palette::base()
+    let style = if checked {
+        palette::Ink::Subject.on(focused)
     } else {
-        palette::Ink::Detail.on(false)
+        palette::Ink::Detail.on(focused)
     };
     let text = sense_text(sense);
     let indent = 4 + term_width + 5;
-    let pad_style = if focused {
-        palette::Ink::Subject.on(true)
-    } else {
-        palette::base()
-    };
-    marked_lines(marker, text.as_str(), indent, style, pad_style, width)
+    marked_lines(marker, text.as_str(), indent, style, style, width)
 }
 
 fn sense_text(sense: &Sense) -> String {
@@ -712,24 +668,15 @@ fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
     let marker = "    ";
     let text = "+ add more";
     let used = indent + super::common::display_width(marker) + super::common::display_width(text);
-    let style = if focused {
-        palette::Ink::Subject.on(true).add_modifier(Modifier::BOLD)
-    } else {
-        palette::Ink::Detail.on(false)
-    };
-    let pad_style = if focused {
-        palette::Ink::Subject.on(true)
-    } else {
-        palette::base()
-    };
+    let style = palette::Ink::Detail.on(focused);
     let mut spans = vec![
-        Span::styled(" ".repeat(indent), pad_style),
+        Span::styled(" ".repeat(indent), style),
         Span::styled(marker, style),
         Span::styled(text, style),
     ];
     let pad = (width as usize).saturating_sub(used);
     if pad > 0 {
-        spans.push(Span::styled(" ".repeat(pad), pad_style));
+        spans.push(Span::styled(" ".repeat(pad), style));
     }
     Line::from(spans)
 }
@@ -769,7 +716,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     if count > 0 {
         left.push(Span::styled(
             count.to_string(),
-            palette::base().add_modifier(Modifier::BOLD),
+            palette::Ink::Subject.on(false),
         ));
         let noun = if count == 1 { "card" } else { "cards" };
         left.push(Span::styled(

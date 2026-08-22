@@ -7,7 +7,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
@@ -59,10 +59,7 @@ fn panel(busy: &BusyView) -> Paragraph<'static> {
     let line = Line::from(vec![
         Span::styled(spinner(busy), palette::base()),
         Span::styled("  ", palette::base()),
-        Span::styled(
-            String::from(label),
-            palette::base().add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(String::from(label), palette::Ink::Subject.on(false)),
     ]);
     Paragraph::new(vec![Line::from(""), line, Line::from("")]).style(palette::base())
 }

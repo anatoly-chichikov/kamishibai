@@ -509,11 +509,7 @@ fn card_head<'a>(
     pending: bool,
     width: usize,
 ) -> Vec<Line<'a>> {
-    let row_style = if focused {
-        palette::Ink::Subject.on(true)
-    } else {
-        palette::base()
-    };
+    let row_style = palette::Ink::Detail.on(focused);
     let glyph = if expanded {
         "▾"
     } else if card_finished(draft) {
@@ -523,53 +519,27 @@ fn card_head<'a>(
     } else {
         " "
     };
-    let glyph_style = if focused && !pending {
-        palette::Ink::Subject.on(true)
-    } else if focused {
-        palette::Ink::Detail.on(true)
-    } else {
-        palette::Ink::Aside.on(false)
-    };
-    let num_style = if focused && !pending {
-        palette::Ink::Subject.on(true)
-    } else if focused {
-        palette::Ink::Detail.on(true)
-    } else {
-        palette::Ink::Aside.on(false)
-    };
+    let aside_style = palette::Ink::Aside.on(focused);
     let built = draft.artifacts().all_ready() && !pending;
-    let lit = if focused {
-        palette::Ink::Subject.on(true)
-    } else {
-        palette::base()
-    };
-    let muted = if focused {
-        palette::Ink::Detail.on(true)
-    } else {
-        palette::Ink::Detail.on(false)
-    };
     let term_style = if built {
-        lit.add_modifier(Modifier::BOLD)
+        palette::Ink::Subject
+            .on(focused)
+            .add_modifier(Modifier::BOLD)
     } else {
-        muted
+        palette::Ink::Detail.on(focused)
     };
-    let sentence_base = if built { lit } else { muted };
     let sentence_style = if pending {
-        sentence_base.add_modifier(Modifier::CROSSED_OUT)
+        row_style.add_modifier(Modifier::CROSSED_OUT)
     } else {
-        sentence_base
+        row_style
     };
     let term_width = super::common::display_width(draft.term());
     let head_used = HEAD_PREFIX_CHARS + term_width;
     let mut head_spans: Vec<Span<'a>> = Vec::new();
-    head_spans.push(Span::styled(format!(" {glyph} "), glyph_style));
-    head_spans.push(Span::styled(format!("{:0>2}  ", idx + 1), num_style));
+    head_spans.push(Span::styled(format!(" {glyph} "), aside_style));
+    head_spans.push(Span::styled(format!("{:0>2}  ", idx + 1), aside_style));
     head_spans.push(Span::styled(String::from(draft.term()), term_style));
-    let suffix_style = if focused {
-        palette::Ink::Detail.on(true)
-    } else {
-        palette::Ink::Aside.on(false)
-    };
+    let suffix_style = aside_style;
     let Some(meta) = draft.meta() else {
         let suffix = visible_card_head_suffix(draft, head_used, width);
         let suffix_width = suffix
@@ -595,7 +565,7 @@ fn card_head<'a>(
     let mut chunks = chunks.into_iter();
     let first = chunks.next().unwrap_or_default();
     let first_width = super::common::display_width(first.as_str());
-    head_spans.push(Span::styled(HEAD_ARROW, sentence_base));
+    head_spans.push(Span::styled(HEAD_ARROW, aside_style));
     head_spans.push(Span::styled(first, sentence_style));
     let mut first_used = sentence_start + first_width;
     if let Some(label) = suffix.as_ref() {
@@ -1382,16 +1352,20 @@ fn split_token(text: &str, width: usize) -> Vec<String> {
     parts
 }
 
-/// Repaint one markdown-rendered line with the preview palette and prepend the
-/// shared indent span. The markdown layer emits neutral spans carrying only
-/// BOLD / ITALIC modifiers — we keep those and force the foreground colour to
-/// `palette::base()` so context blends with the surrounding preview rows.
+/// Repaint one wrapped preview line and prepend the shared indent span.
+///
+/// The markdown layer emits neutral spans carrying only BOLD / ITALIC
+/// modifiers and no ink of their own, so they inherit the preview base; a span
+/// that already named its rank — the taught word inside its own sentence —
+/// keeps it.
 fn restyle_with_indent(line: Line<'static>, indent: &'static str) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len() + 1);
     spans.push(Span::styled(indent, palette::base()));
     for span in line.spans {
-        let style = palette::base().add_modifier(span.style.add_modifier);
-        spans.push(Span::styled(span.content, style));
+        spans.push(Span::styled(
+            span.content,
+            palette::base().patch(span.style),
+        ));
     }
     Line::from(spans)
 }
@@ -1402,20 +1376,18 @@ fn highlight_lines<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -
     if highlight.is_empty() {
         return value_lines(sentence, indent, width, palette::base());
     }
+    let around = palette::Ink::Detail.on(false);
     let line = if let Some(pos) = sentence.find(highlight) {
         let head = &sentence[..pos];
         let middle = &sentence[pos..pos + highlight.len()];
         let tail = &sentence[pos + highlight.len()..];
         Line::from(vec![
-            Span::styled(head.to_string(), palette::base()),
-            Span::styled(
-                middle.to_string(),
-                palette::base().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(tail.to_string(), palette::base()),
+            Span::styled(head.to_string(), around),
+            Span::styled(middle.to_string(), palette::Ink::Subject.on(false)),
+            Span::styled(tail.to_string(), around),
         ])
     } else {
-        Line::from(vec![Span::styled(sentence.to_string(), palette::base())])
+        Line::from(vec![Span::styled(sentence.to_string(), around)])
     };
     let indent_w = super::common::display_width(indent);
     let inner = width.saturating_sub(indent_w).max(20);
@@ -1757,7 +1729,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     left.push(super::common::status_sep());
     left.push(Span::styled(
         ready.to_string(),
-        palette::base().add_modifier(Modifier::BOLD),
+        palette::Ink::Subject.on(false),
     ));
     left.push(Span::styled(
         format!("/{total} ready"),
@@ -1774,7 +1746,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         left.push(super::common::status_sep());
         left.push(Span::styled(
             census.adjusted.to_string(),
-            palette::base().add_modifier(Modifier::BOLD),
+            palette::Ink::Subject.on(false),
         ));
         left.push(Span::styled(" pending", palette::Ink::Detail.on(false)));
     }
@@ -1782,7 +1754,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         left.push(super::common::status_sep());
         left.push(Span::styled(
             cost.dollars_cents(),
-            palette::base().add_modifier(Modifier::BOLD),
+            palette::Ink::Subject.on(false),
         ));
     }
     left.push(super::common::status_sep());

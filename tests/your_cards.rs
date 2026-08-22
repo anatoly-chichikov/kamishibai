@@ -46,7 +46,7 @@ fn selected_label_highlighted(app: &App, needle: &str) -> bool {
         if let Some(start) = rendered.find(needle) {
             let column = rendered[..start].chars().count() as u16;
             return (0..needle.chars().count()).all(|offset| {
-                buffer[(column + offset as u16, row)].bg == Color::Rgb(0x1c, 0x1c, 0x1f)
+                buffer[(column + offset as u16, row)].bg == Color::Rgb(0x26, 0x26, 0x2a)
             });
         }
     }
@@ -991,7 +991,6 @@ fn expanded_editor_replaces_the_chip_grid_with_focused_question_carousels() {
     let bg = Color::Rgb(0x0e, 0x0e, 0x10);
     let dim2 = Color::Rgb(0x5a, 0x59, 0x53);
     let rule = Color::Rgb(0x2a, 0x2a, 0x2d);
-    let highlight = Color::Rgb(0x1c, 0x1c, 0x1f);
     let casual_end = casual.0 + u16::try_from("casual".chars().count()).expect("casual width");
     let b1_end = b1.0 + u16::try_from("b1".chars().count()).expect("b1 width");
     let statement_end =
@@ -1058,7 +1057,7 @@ fn expanded_editor_replaces_the_chip_grid_with_focused_question_carousels() {
             (bg, fg, dim2, dim2, dim2, dim2, dim2, rule, rule, rule,),
             (
                 (dim2, dim2, dim2, dim2, dim2, dim2, dim2, rule, rule, rule,),
-                (dim2, dim2, dim2, rule, rule, rule, highlight, highlight),
+                (dim2, dim2, dim2, rule, rule, rule, bg, bg),
             ),
             (
                 false, false, false, false, false, false, false, false, false, false
@@ -1069,7 +1068,7 @@ fn expanded_editor_replaces_the_chip_grid_with_focused_question_carousels() {
 }
 
 #[test]
-fn moving_down_moves_the_white_question_focus_to_the_next_carousel() {
+fn moving_down_moves_the_lit_question_to_the_next_carousel() {
     let opened = tuning(seeded(vec![labeled_draft("whilst", ready_artifacts())]));
     let app = transit(opened, AppEvent::NavNext).0;
     let buffer = rendered_buffer(&app);
@@ -1088,9 +1087,9 @@ fn moving_down_moves_the_white_question_focus_to_the_next_carousel() {
             Color::Rgb(0x5a, 0x59, 0x53),
             false,
             Color::Rgb(0xe6, 0xe3, 0xda),
-            true,
+            false,
         ),
-        "moving down left the white question focus on the previous carousel"
+        "moving down left the lit question on the previous carousel"
     );
 }
 
@@ -1533,7 +1532,7 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
 }
 
 #[test]
-fn a_built_card_turns_its_term_bold_and_lights_its_sentence() {
+fn a_built_card_turns_its_term_bold_and_leaves_its_sentence_quiet() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("terroir", ready_artifacts()),
@@ -1560,8 +1559,8 @@ fn a_built_card_turns_its_term_bold_and_lights_its_sentence() {
                 term_ink(&buffer, "Example with wreck."),
             ),
         ),
-        ((white, gray, gray), (true, false, false), (white, gray)),
-        "brightness and weight must read as built rather than as focus"
+        ((white, gray, gray), (true, false, false), (gray, gray)),
+        "weight and brightness must read as built on the term alone, never on the sentence"
     );
 }
 
@@ -2338,7 +2337,7 @@ fn walking_into_an_open_card_lights_its_first_question_alone() {
         ),
         (
             Color::Rgb(0xe6, 0xe3, 0xda),
-            true,
+            false,
             Color::Rgb(0x5a, 0x59, 0x53),
             false,
         ),

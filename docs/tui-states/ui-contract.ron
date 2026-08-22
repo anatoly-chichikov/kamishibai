@@ -433,7 +433,7 @@ Contract(
                             id: ElementId("wu.footer_back"),
                             kind: KeyHint(Footer),
                             text: Literal("[Esc] back"),
-                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 797),
+                            source: SourceRef(file: "src/tui/screens/what_i_understood.rs", line: 770),
                             purpose: "return to YourWords with the blob and selected senses intact and without arming their destructive clear when no inner layer is open",
                             importance: 4,
                             usefulness: 5,

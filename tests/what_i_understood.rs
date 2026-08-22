@@ -98,7 +98,7 @@ fn has_highlight_after_text(app: &App, needle: &str) -> bool {
                 return false;
             };
             return ((last_text + 1)..buffer.area.width)
-                .any(|column| buffer[(column, row)].bg == Color::Rgb(0x1c, 0x1c, 0x1f));
+                .any(|column| buffer[(column, row)].bg == Color::Rgb(0x26, 0x26, 0x2a));
         }
     }
     false
@@ -115,13 +115,13 @@ fn highlight_is_contiguous(app: &App, needle: &str) -> bool {
             .collect::<String>();
         if rendered.contains(needle) {
             let highlighted = (0..buffer.area.width)
-                .filter(|column| buffer[(*column, row)].bg == Color::Rgb(0x1c, 0x1c, 0x1f))
+                .filter(|column| buffer[(*column, row)].bg == Color::Rgb(0x26, 0x26, 0x2a))
                 .collect::<Vec<_>>();
             let Some((first, last)) = highlighted.first().zip(highlighted.last()) else {
                 return false;
             };
             return (*first..=*last)
-                .all(|column| buffer[(column, row)].bg == Color::Rgb(0x1c, 0x1c, 0x1f));
+                .all(|column| buffer[(column, row)].bg == Color::Rgb(0x26, 0x26, 0x2a));
         }
     }
     false
@@ -343,8 +343,9 @@ fn expanded_sense_focus_moves_inside_without_dimming_the_parent() {
     let add_more = transit(third, AppEvent::NavNext).0;
     let foreground = Color::Rgb(0xe6, 0xe3, 0xda);
     let muted = Color::Rgb(0x8b, 0x8a, 0x83);
+    let aside = Color::Rgb(0x5a, 0x59, 0x53);
     let background = Color::Rgb(0x0e, 0x0e, 0x10);
-    let highlight = Color::Rgb(0x1c, 0x1c, 0x1f);
+    let highlight = Color::Rgb(0x26, 0x26, 0x2a);
     assert_eq!(
         (
             style_of(&opened, "bank"),
@@ -358,15 +359,15 @@ fn expanded_sense_focus_moves_inside_without_dimming_the_parent() {
         ),
         (
             (foreground, background, Modifier::empty()),
+            (aside, background, Modifier::empty()),
             (muted, background, Modifier::empty()),
-            (muted, background, Modifier::empty()),
-            (foreground, highlight, Modifier::BOLD),
+            (foreground, highlight, Modifier::empty()),
             (foreground, background, Modifier::empty()),
-            (foreground, highlight, Modifier::BOLD),
+            (muted, highlight, Modifier::empty()),
             (muted, background, Modifier::empty()),
-            (foreground, highlight, Modifier::BOLD),
+            (muted, highlight, Modifier::empty()),
         ),
-        "expanded focus must move from an ordinary parent into a bright focused choice while selected context stays readable"
+        "expanded focus must move by background alone, leaving chosen senses bright and unchosen ones quiet"
     );
 }
 
@@ -703,7 +704,7 @@ fn support_language_rerun_preserves_selected_sense_by_index() {
 }
 
 #[test]
-fn what_i_understood_styles_selected_row_distinctly_from_others() {
+fn the_selected_review_row_differs_from_its_neighbours_by_background_alone() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
@@ -718,11 +719,14 @@ fn what_i_understood_styles_selected_row_distinctly_from_others() {
                 .candidates()
                 .to_vec(),
         );
-    assert!(
-        modifiers(&app, "sincerely")
-            .iter()
-            .any(|modifier| modifier.contains(Modifier::BOLD)),
-        "the selected term on the gloss list must render in bold"
+    assert_eq!(
+        style_of(&app, "sincerely"),
+        (
+            Color::Rgb(0xe6, 0xe3, 0xda),
+            Color::Rgb(0x26, 0x26, 0x2a),
+            Modifier::empty()
+        ),
+        "the selected term must keep its ordinary ink and take only the cursor background"
     );
 }
 
@@ -758,7 +762,7 @@ fn selected_off_language_row_keeps_one_contiguous_highlight() {
             false,
         )]);
     let dim = Color::Rgb(0x8b, 0x8a, 0x83);
-    let highlight = Color::Rgb(0x1c, 0x1c, 0x1f);
+    let highlight = Color::Rgb(0x26, 0x26, 0x2a);
     assert_eq!(
         (
             highlight_is_contiguous(&app, "Это слово не относится"),
@@ -1094,7 +1098,7 @@ fn focused_add_more_row_highlight_starts_where_sense_row_highlights_start() {
                 .collect::<String>();
             if rendered.contains(needle) {
                 return (0..buffer.area.width)
-                    .find(|column| buffer[(*column, row)].bg == Color::Rgb(0x1c, 0x1c, 0x1f));
+                    .find(|column| buffer[(*column, row)].bg == Color::Rgb(0x26, 0x26, 0x2a));
             }
         }
         None

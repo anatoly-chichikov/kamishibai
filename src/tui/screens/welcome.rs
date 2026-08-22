@@ -13,7 +13,6 @@ use std::rc::Rc;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -307,7 +306,7 @@ fn input_lines(app: &App, width: u16) -> (Paragraph<'static>, Paragraph<'static>
         );
     };
     let notice_width = u16::try_from(notice.chars().count()).unwrap_or(u16::MAX);
-    let notice_span = Span::styled(notice, palette::base().add_modifier(Modifier::BOLD));
+    let notice_span = Span::styled(notice, palette::Ink::Subject.on(false));
     if FIELD_INDENT + KEY_FIELD_WIDTH + TRAILING_GAP + notice_width <= width {
         let pad = usize::from(KEY_FIELD_WIDTH.saturating_sub(value_width) + TRAILING_GAP);
         spans.push(Span::raw(" ".repeat(pad)));
@@ -353,7 +352,7 @@ fn button_spans(app: &App) -> Vec<Span<'static>> {
 fn chip(label: &str, focused: bool) -> Span<'static> {
     let text = format!(" {label} ");
     if focused {
-        Span::styled(text, palette::invert().add_modifier(Modifier::BOLD))
+        Span::styled(text, palette::invert())
     } else {
         Span::styled(text, palette::Ink::Detail.on(false))
     }
@@ -367,7 +366,7 @@ fn chip_width(label: &str) -> u16 {
 /// active row, blank on the inactive one, so both rows stay aligned.
 fn chevron(active: bool) -> Span<'static> {
     if active {
-        Span::styled("› ", palette::base().add_modifier(Modifier::BOLD))
+        Span::styled("› ", palette::Ink::Subject.on(false))
     } else {
         Span::styled("  ", palette::base())
     }

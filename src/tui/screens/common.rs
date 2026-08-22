@@ -15,6 +15,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use super::ScreenView;
 use crate::tui::app::App;
 use crate::tui::palette;
+use crate::tui::screen::Screen;
 
 /// Horizontal breathing room applied to every screen's content column.
 pub const GUTTER: u16 = 4;
@@ -181,10 +182,7 @@ pub fn header(
     }
     let gap = width.saturating_sub(used);
     let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::styled(
-        title_block,
-        palette::invert().add_modifier(Modifier::BOLD),
-    ));
+    spans.push(Span::styled(title_block, palette::invert()));
     if !hint.is_empty() {
         spans.push(Span::styled(" ".repeat(hint_lead), palette::base()));
         spans.push(Span::styled(hint, palette::Ink::Detail.on(false)));
@@ -224,12 +222,15 @@ fn take_chars(text: &str, limit: usize) -> String {
     split_display_prefix(text, limit).0.to_string()
 }
 
-/// Build the language chip — bold bright `support → target`.
+/// Build the language chip — `support → target` in the header's right corner.
 ///
 /// Reading order is `support → target` so the user reads "from your language
-/// into the language i'm learning". The whole chip — both languages and the
-/// arrow between them — is rendered in bold bright `palette::base()`,
-/// matching the title block on the opposite side of the header.
+/// into the language i'm learning". The chip is standing chrome, not the
+/// subject of any screen, so both codes read as `Ink::Detail` and the arrow
+/// between them as `Ink::Aside`. The codes carry the link underline only on
+/// the two screens where clicking them still reopens the pair; on `YourCards`
+/// and `Done` the batch pair is frozen and an underline would promise an
+/// action that does nothing.
 pub fn language_chip(app: &App) -> Vec<Span<'static>> {
     let known = app.pair().known().to_uppercase();
     let learning_text = if app.learning_pending() {
@@ -237,23 +238,30 @@ pub fn language_chip(app: &App) -> Vec<Span<'static>> {
     } else {
         app.pair().learning().to_uppercase()
     };
-    let style = palette::base().add_modifier(Modifier::BOLD);
+    let live = matches!(app.screen(), Screen::YourWords | Screen::WhatIUnderstood);
+    let code = if live {
+        palette::Ink::Detail.link(false)
+    } else {
+        palette::Ink::Detail.on(false)
+    };
     vec![
-        Span::styled(known, style),
-        Span::styled(" → ", style),
-        Span::styled(learning_text, style),
+        Span::styled(known, code),
+        Span::styled(" → ", palette::Ink::Aside.on(false)),
+        Span::styled(learning_text, code),
     ]
 }
 
-/// Color weight of a footer key hint. This only paints the hint; how soon a
-/// hint is shed on a narrow bar is decided by `FooterHint::keep`, not by tier.
+/// Rank of a footer key hint — key and label share one ink, so the three tiers
+/// read as three steps of brightness rather than as three weights. This only
+/// paints the hint; how soon a hint is shed on a narrow bar is decided by
+/// `FooterHint::keep`, not by tier.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
-    /// The one action that advances the screen — brightest.
+    /// The one action that advances the screen — `Ink::Subject`.
     Primary,
-    /// A useful but non-advancing action — bold key, dim label.
+    /// A useful but non-advancing action — `Ink::Detail`.
     Secondary,
-    /// Conventional or omnipresent keys (navigation, quit) — fully dim.
+    /// Conventional or omnipresent keys (navigation, quit) — `Ink::Aside`.
     Ghost,
 }
 
@@ -281,12 +289,12 @@ impl FooterHint {
         Self::with(key, label, Tier::Primary, 3)
     }
 
-    /// A secondary action — bold key, dim label, dropped before the quit hint.
+    /// A secondary action — one step quieter, dropped before the quit hint.
     pub fn secondary(key: &str, label: &str) -> Self {
         Self::with(key, label, Tier::Secondary, 1)
     }
 
-    /// A conventional or omnipresent key — fully dim, the first to be dropped.
+    /// A conventional or omnipresent key — quietest, the first to be dropped.
     pub fn ghost(key: &str, label: &str) -> Self {
         Self::with(key, label, Tier::Ghost, 0)
     }
@@ -307,20 +315,14 @@ impl FooterHint {
     /// Paint the hint as `[KEY] label` spans, colored by its tier. Used by the
     /// status bar and by modal action rows so every hint stays in lock-step.
     pub fn spans(&self) -> Vec<Span<'static>> {
-        let (key_style, label_style) = match self.tier {
-            Tier::Primary => (
-                palette::base().add_modifier(Modifier::BOLD),
-                palette::base(),
-            ),
-            Tier::Secondary => (
-                palette::base().add_modifier(Modifier::BOLD),
-                palette::Ink::Detail.on(false),
-            ),
-            Tier::Ghost => (palette::Ink::Aside.on(false), palette::Ink::Aside.on(false)),
+        let style = match self.tier {
+            Tier::Primary => palette::Ink::Subject.on(false),
+            Tier::Secondary => palette::Ink::Detail.on(false),
+            Tier::Ghost => palette::Ink::Aside.on(false),
         };
         vec![
-            Span::styled(format!("[{}]", self.key), key_style),
-            Span::styled(format!(" {}", self.label), label_style),
+            Span::styled(format!("[{}]", self.key), style),
+            Span::styled(format!(" {}", self.label), style),
         ]
     }
 }
@@ -728,6 +730,32 @@ mod tests {
         assert!(
             line.contains("[Esc] again") && !line.contains("Ctrl+G"),
             "a cramped footer hid the armed Escape confirmation behind a regular action: {line}"
+        );
+    }
+
+    #[test]
+    fn the_three_footer_tiers_separate_by_ink_and_never_by_weight() {
+        let inks = [
+            FooterHint::primary("Ctrl+G", "generate"),
+            FooterHint::secondary("Enter", "tune"),
+            FooterHint::ghost("↑↓", "nav"),
+        ]
+        .map(|hint| {
+            let spans = hint.spans();
+            (
+                spans[0].style.fg,
+                spans[1].style.fg,
+                spans[0].style.add_modifier | spans[1].style.add_modifier,
+            )
+        });
+        assert_eq!(
+            inks,
+            [
+                (Some(palette::FG), Some(palette::FG), Modifier::empty()),
+                (Some(palette::DIM), Some(palette::DIM), Modifier::empty()),
+                (Some(palette::DIM2), Some(palette::DIM2), Modifier::empty()),
+            ],
+            "footer tiers must read as three steps of brightness, not as three weights"
         );
     }
 

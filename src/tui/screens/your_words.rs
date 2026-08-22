@@ -10,7 +10,6 @@ use std::borrow::Cow;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -134,7 +133,7 @@ fn gutter(app: &App) -> Paragraph<'static> {
         let style = if index >= actual {
             palette::base().fg(palette::RULE)
         } else if index == active && !app.blob().is_empty() {
-            palette::Ink::Subject.on(true).add_modifier(Modifier::BOLD)
+            palette::Ink::Aside.on(true)
         } else {
             palette::Ink::Aside.on(false)
         };
@@ -208,7 +207,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         let noun = if count == 1 { "card" } else { "cards" };
         left.push(Span::styled(
             count.to_string(),
-            palette::base().add_modifier(Modifier::BOLD),
+            palette::Ink::Subject.on(false),
         ));
         left.push(Span::styled(
             format!(" {noun}"),

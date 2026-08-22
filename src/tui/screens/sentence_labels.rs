@@ -1,6 +1,6 @@
 //! Sentence-label tags and in-card editor rendering.
 
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::session::{SentenceAxis, SentenceBatchSettings, SentenceLabelSelection, SentenceLabels};
@@ -588,10 +588,7 @@ fn carousel_lines<Row: Copy>(
             .expect("invariant: selected sentence-label choice must have a token");
         let chip = format!(" {token} ");
         let start = used;
-        spans.push(Span::styled(
-            chip,
-            palette::invert().add_modifier(Modifier::BOLD),
-        ));
+        spans.push(Span::styled(chip, palette::invert()));
         used += super::common::display_width(token) + 2;
         regions.push(ChipRegion {
             row: screen_row,
@@ -788,11 +785,17 @@ fn empty_marker(width: usize) -> Span<'static> {
     Span::styled(" ".repeat(width), marker_style(usize::MAX))
 }
 
+/// Paint one rail segment by how far its choice sits from the selected chip.
+///
+/// The rail fades out rather than stopping: the nearest hidden choice is the
+/// brightest segment, the next one is a rule line, and everything beyond it is
+/// the page itself. The far segment is deliberately the background and not the
+/// cursor highlight — the rail must not brighten when the row highlight does.
 fn marker_style(distance: usize) -> Style {
     let background = match distance {
         1 => palette::DIM2,
         2 => palette::RULE,
-        _ => palette::HL,
+        _ => palette::BG,
     };
     Style::default().bg(background).fg(palette::BG)
 }
@@ -827,7 +830,7 @@ fn row_prefix(
     question_width: usize,
 ) -> Vec<Span<'static>> {
     let style = if focused {
-        palette::base().add_modifier(Modifier::BOLD)
+        palette::Ink::Subject.on(false)
     } else {
         palette::Ink::Aside.on(false)
     };
