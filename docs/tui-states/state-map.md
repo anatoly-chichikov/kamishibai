@@ -61,10 +61,10 @@ The retry stress gallery is index 21. Esc lifecycle states are indices 22–26,
 and the open generation guidance is index 27, appended so the established absolute
 indices remain stable. The stress gallery's six cards preserve valid pipeline
 order while showing the identical active-attempt copy (`ai is working…`),
-inactive retries as a dim `·` at their chip position, a recovered artifact as a
-plain white chip, and a terminal failure as a dim `✗` chip together. Their card
-heads carry the complete retry summary as `↻1`, `↻2`, or `↻3` after the total
-cost.
+inactive retries as a `·` at their badge position, a recovered artifact as a
+plain badge glyph, and a terminal failure as a `✗` in the badge together.
+Their card heads carry the complete retry summary as `↻1`, `↻2`, or `↻3`
+after the total cost.
 
 Every blocking text phase uses one universal overlay on top of the current
 screen: first understanding, bulk correction, the Welcome key check, and the two
@@ -190,22 +190,23 @@ one lands, so brightness reads as built; a card that terminally gave up never
 holds all four and stays `DIM`, and a card carrying a staged rewrite stays
 muted beside its struck sentence.
 A collapsed card renders one chip row immediately after the last line of that
-head, including when the target sentence wraps: three fixed positions for
-🗀 folder (meta), ♪ sound, and ▣ picture. A ready artifact is a white
-pinned-tag chip with a dark glyph, the active artifact renders the spinner at
-its position with a trailing dim `ai is working…`, a terminal failure is a dim
-`✗`, a discarded artifact a dim `⊘`, spent-but-idle progress a dim `·`, and a
-queued position stays blank; scene work shares the picture position. Each
-ready chip with a known file is clickable — the folder chip opens the card's
-cache folder in the system file manager while the sound and picture chips open
-their files. Per-artifact sizes, costs, file links, and the `cached` note
+head, including when the target sentence wraps: a single gray badge styled
+exactly like an unpinned tag, holding three fixed glyph positions — ✎ meta,
+♪ sound, ◉ picture. A ready artifact shows its dark glyph, the active
+artifact renders the spinner at its position with a trailing dim
+`ai is working…`, a terminal failure is `✗`, a discarded artifact `⊘`,
+spent-but-idle progress `·`, and a queued position stays a blank cell inside
+the badge; scene work shares the picture position. Each ready glyph zone with
+a known file is clickable — the meta glyph opens the card's cache folder in
+the system file manager while the sound and picture glyphs open their files.
+Per-artifact sizes, costs, file links, and the `cached` note
 appear only inside the expanded card, whose four artifact rows keep the
 `meta`, `audio`, `scene`, `picture` order. No `sentence:` heading or separator
 glyph is drawn anywhere. The three labels start together in one fixed column
-after the chips:
+after the badge:
 
 ```text
-🗀  ♪  ▣   formal statement b1
+✎ ♪ ◉   formal statement b1
 ```
 
 The actual register, sentence-type, and CEFR values replace the three

@@ -201,23 +201,21 @@ mod tests {
                 mouse_pointer_at(&app, terminal(), 9, 4),
                 mouse_pointer_at(&app, terminal(), 10, 4),
                 mouse_pointer_at(&app, terminal(), 12, 4),
-                mouse_pointer_at(&app, terminal(), 13, 4),
-                mouse_pointer_at(&app, terminal(), 15, 4),
-                mouse_pointer_at(&app, terminal(), 20, 4),
-                mouse_pointer_at(&app, terminal(), 23, 4),
+                mouse_pointer_at(&app, terminal(), 14, 4),
+                mouse_pointer_at(&app, terminal(), 16, 4),
+                mouse_pointer_at(&app, terminal(), 17, 4),
                 mouse_pointer_at(&app, terminal(), 10, 3),
             ),
             (
                 MousePointer::Arrow,
                 MousePointer::Hand,
                 MousePointer::Hand,
-                MousePointer::Arrow,
                 MousePointer::Hand,
                 MousePointer::Hand,
                 MousePointer::Arrow,
                 MousePointer::Hand,
             ),
-            "chip cells and the tuning head must use the hand while the gaps keep the arrow"
+            "badge glyph zones and the tuning head must use the hand while the frame keeps the arrow"
         );
     }
 

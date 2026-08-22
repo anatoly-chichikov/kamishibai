@@ -52,8 +52,7 @@ const STEPS: [(&str, Artifact); 4] = [
 ];
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
 const AI_WORKING: &str = "ai is working…";
-const CHIP_ICONS: [&str; 3] = ["🗀", "♪", "▣"];
-const CHIP_GAP: usize = 2;
+const CHIP_ICONS: [&str; 3] = ["✎", "♪", "◉"];
 const CHIP_TAG_GAP: usize = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -348,16 +347,24 @@ fn chip_icon_width() -> usize {
         .unwrap_or(1)
 }
 
-fn chip_cell_width() -> usize {
-    chip_icon_width().saturating_add(2)
+fn chip_zone_width() -> usize {
+    chip_icon_width().saturating_add(1)
+}
+
+fn chip_block_width() -> usize {
+    CHIP_ICONS.len() * chip_zone_width() + 1
 }
 
 fn chip_start(position: usize) -> usize {
-    super::common::CARD_DETAIL_COLUMN + position * (chip_cell_width() + CHIP_GAP)
+    super::common::CARD_DETAIL_COLUMN + position * chip_zone_width()
+}
+
+fn chip_block_end() -> usize {
+    super::common::CARD_DETAIL_COLUMN + chip_block_width()
 }
 
 fn chip_tag_start() -> usize {
-    chip_start(CHIP_ICONS.len()) - CHIP_GAP + CHIP_TAG_GAP
+    chip_block_end() + CHIP_TAG_GAP
 }
 
 fn chip_states(draft: &CardDraft, running: Option<Artifact>) -> [ChipState; 3] {
@@ -415,23 +422,31 @@ fn picture_chip_state(
     ChipState::Hidden
 }
 
-fn chip_cell<'a>(position: usize, state: ChipState, spinner_frame: usize) -> Span<'a> {
+fn chip_glyph(position: usize, state: ChipState, spinner_frame: usize) -> String {
     let icon = CHIP_ICONS[position];
     let icon_pad = " ".repeat(chip_icon_width() - super::common::display_width(icon));
     match state {
-        ChipState::Ready => Span::styled(
-            format!(" {icon}{icon_pad} "),
-            super::sentence_labels::tag_style(true),
-        ),
-        ChipState::Active => Span::styled(
-            format!(" {}{icon_pad} ", SPINNER_FRAMES[spinner_frame]),
-            palette::base(),
-        ),
-        ChipState::Failed => Span::styled(format!(" ✗{icon_pad} "), palette::dim()),
-        ChipState::Discarded => Span::styled(format!(" ⊘{icon_pad} "), palette::dim()),
-        ChipState::Paused => Span::styled(format!(" ·{icon_pad} "), palette::dim()),
-        ChipState::Hidden => Span::styled(" ".repeat(chip_cell_width()), palette::base()),
+        ChipState::Ready => format!("{icon}{icon_pad}"),
+        ChipState::Active => format!("{}{icon_pad}", SPINNER_FRAMES[spinner_frame]),
+        ChipState::Failed => format!("✗{icon_pad}"),
+        ChipState::Discarded => format!("⊘{icon_pad}"),
+        ChipState::Paused => format!("·{icon_pad}"),
+        ChipState::Hidden => " ".repeat(chip_icon_width()),
     }
+}
+
+fn chip_badge<'a>(states: [ChipState; 3], spinner_frame: usize, pending: bool) -> Span<'a> {
+    let style = if pending {
+        super::sentence_labels::tag_style(false).fg(palette::DIM2)
+    } else {
+        super::sentence_labels::tag_style(false)
+    };
+    let glyphs = states
+        .into_iter()
+        .enumerate()
+        .map(|(position, state)| format!(" {}", chip_glyph(position, state, spinner_frame)))
+        .collect::<String>();
+    Span::styled(format!("{glyphs} "), style)
 }
 
 fn chip_tags(
@@ -475,46 +490,27 @@ fn chip_row<'a>(
         " ".repeat(super::common::CARD_DETAIL_COLUMN),
         palette::base(),
     ));
-    for (position, state) in states.into_iter().enumerate() {
-        if position > 0 {
-            spans.push(Span::styled(" ".repeat(CHIP_GAP), palette::base()));
-        }
-        let cell = chip_cell(position, state, spinner_frame);
-        spans.push(if pending {
-            Span {
-                style: cell.style.fg(palette::DIM),
-                ..cell
-            }
-        } else {
-            cell
-        });
-    }
-    let block_end = chip_start(CHIP_ICONS.len()) - CHIP_GAP;
+    spans.push(chip_badge(states, spinner_frame, pending));
     let active = states.into_iter().any(|state| state == ChipState::Active);
     if let Some(tags) = chip_tags(draft, running, width) {
-        spans.push(Span::styled(
-            " ".repeat(chip_tag_start() - block_end),
-            palette::base(),
-        ));
+        spans.push(Span::styled(" ".repeat(CHIP_TAG_GAP), palette::base()));
         spans.extend(tags.spans_from(0, 0, palette::base()));
         if active {
             spans.push(Span::styled("  ", palette::base()));
             spans.push(Span::styled(AI_WORKING, palette::dim()));
         }
     } else if active {
-        spans.push(Span::styled(
-            " ".repeat(chip_tag_start() - block_end),
-            palette::base(),
-        ));
+        spans.push(Span::styled(" ".repeat(CHIP_TAG_GAP), palette::base()));
         spans.push(Span::styled(AI_WORKING, palette::dim()));
     }
     Line::from(spans)
 }
 
-/// Click targets on one collapsed card's chip row, as body-relative column
-/// ranges: the folder chip opens the card's cache folder (the parent of the
-/// meta file), the sound chip opens the audio file, and the picture chip opens
-/// the rendered page. Only a ready chip whose file is known is clickable.
+/// Click targets on one collapsed card's chip badge, as body-relative column
+/// ranges over the three glyph zones: the meta glyph opens the card's cache
+/// folder (the parent of the meta file), the sound glyph opens the audio
+/// file, and the picture glyph opens the rendered page. Only a ready glyph
+/// whose file is known is clickable.
 #[must_use]
 pub(crate) fn chip_link_columns(
     draft: &CardDraft,
@@ -543,8 +539,13 @@ pub(crate) fn chip_link_columns(
             if state != ChipState::Ready {
                 return None;
             }
+            let zone_end = if position + 1 == CHIP_ICONS.len() {
+                chip_block_end()
+            } else {
+                chip_start(position + 1)
+            };
             let start = u16::try_from(chip_start(position)).unwrap_or(u16::MAX);
-            let end = u16::try_from(chip_start(position) + chip_cell_width()).unwrap_or(u16::MAX);
+            let end = u16::try_from(zone_end).unwrap_or(u16::MAX);
             Some((start, end, target?))
         })
         .collect()

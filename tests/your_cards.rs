@@ -366,7 +366,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_chips() {
         .find("whilst → Example with whilst.")
         .expect("first card head must be visible");
     let picture = rendered
-        .find("▣")
+        .find("◉")
         .expect("first card picture chip must be visible");
     assert!(
         rendered.contains("building your cards")
@@ -380,7 +380,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_chips() {
             && rendered.contains("wreck")
             && rendered.contains("Example with wreck.")
             && rendered.contains("whilst → Example with whilst.")
-            && rendered.contains("🗀")
+            && rendered.contains("✎")
             && !rendered.contains("✓ scene")
             && !rendered.contains("✓ picture")
             && rendered.contains("RU → EN")
@@ -633,7 +633,7 @@ fn retry_state_moves_its_spent_attempt_count_to_the_card_head() {
     assert_eq!(
         (
             head.contains("$.1234  ↻1"),
-            buffer[(21, head_row + 1)].symbol(),
+            buffer[(15, head_row + 1)].symbol(),
             rendered.contains("picture"),
             rendered.matches("$.1234").count(),
             rendered.contains("$0.12"),
@@ -700,7 +700,7 @@ fn narrow_retry_suffix_wraps_with_the_head_without_shifting_the_chip_row() {
     let terminal = Rect::new(0, 0, 60, 30);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
     let (_, head_row) = position_of(&buffer, "interdependently →");
-    let (folder_column, folder_row) = position_of(&buffer, "🗀");
+    let (folder_column, folder_row) = position_of(&buffer, "✎");
     let head = row_text(&buffer, head_row);
     assert_eq!(
         (
@@ -766,7 +766,7 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
             active_head.contains("$.2148  ↻3"),
             failed_head.contains("$.2148  ↻3"),
             row_text(&buffer, active_head_row + 1).contains("ai is working…"),
-            buffer[(21, failed_head_row + 1)].symbol(),
+            buffer[(15, failed_head_row + 1)].symbol(),
             rendered.contains("gave up"),
             rendered.contains("$.1738"),
             rendered.contains("paused"),
@@ -784,7 +784,7 @@ fn failure_banner_appears_when_any_card_exhausts_its_retries() {
     let (_, head_row) = position_of(&buffer, "wreck →");
     assert_eq!(
         (
-            buffer[(21, head_row + 1)].symbol(),
+            buffer[(15, head_row + 1)].symbol(),
             rendered.contains("gave up"),
             row_containing(&rendered, "wreck →").contains("$.3210  ↻3"),
             rendered.contains("$0.32"),
@@ -1111,13 +1111,13 @@ fn the_tag_summary_follows_the_chips_on_the_single_collapsed_row() {
         ),
         (
             (head_row + 1, head_row + 1, head_row + 1),
-            (27, 36, 48),
+            (21, 30, 42),
             false,
             true,
             true,
             true,
         ),
-        "the collapsed tag summary must sit on the chip row after the three chips"
+        "the collapsed tag summary must sit on the chip row after the chip badge"
     );
 }
 
@@ -1155,33 +1155,33 @@ fn audio_progress_keeps_collapsed_tags_in_one_column() {
         (
             columns_of(&buffer, "casual"),
             column_of(active_row, "ai is working…") > column_of(active_row, "casual"),
-            buffer[(16, ready_head + 1)].symbol(),
-            buffer[(16, retry_head + 1)].symbol(),
-            buffer[(16, recovered_head + 1)].symbol(),
+            buffer[(13, ready_head + 1)].symbol(),
+            buffer[(13, retry_head + 1)].symbol(),
+            buffer[(13, recovered_head + 1)].symbol(),
             rendered.matches("↻2").count(),
             rendered.contains("$.0021"),
         ),
-        (vec![27, 27, 27, 27], true, "♪", "·", "♪", 2, false),
+        (vec![21, 21, 21, 21], true, "♪", "·", "♪", 2, false),
         "audio progress must keep one tag column on the chip rows without per-artifact costs:\n{rendered}"
     );
 }
 
 #[test]
-fn a_recovered_picture_keeps_a_plain_white_chip_and_its_history_on_the_head() {
+fn a_recovered_picture_keeps_a_plain_badge_glyph_and_its_history_on_the_head() {
     let app = seeded(vec![labeled_draft("whilst", recovered_priced_artifacts(2))]);
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst →");
-    let cream = Color::Rgb(0xe6, 0xe3, 0xda);
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
     assert_eq!(
         (
-            buffer[(21, head_row + 1)].symbol(),
-            buffer[(21, head_row + 1)].bg,
+            buffer[(15, head_row + 1)].symbol(),
+            buffer[(15, head_row + 1)].bg,
             row_containing(&rendered, "whilst →").contains("↻2"),
             rendered.contains("2 ✗"),
         ),
-        ("▣", cream, true, false),
-        "a recovered picture must render a plain white chip while the head keeps the history"
+        ("◉", gray, true, false),
+        "a recovered picture must render a plain badge glyph while the head keeps the history"
     );
 }
 
@@ -1199,8 +1199,8 @@ fn collapsed_cached_artifacts_keep_tags_on_the_chip_row_without_status_text() {
             (register_column, register_row),
             buffer[(11, head_row + 1)].symbol(),
         ),
-        (false, false, (27, head_row + 1), "🗀"),
-        "cached artifacts must collapse to plain white chips with the tags right after them"
+        (false, false, (21, head_row + 1), "✎"),
+        "cached artifacts must collapse to the plain gray badge with the tags right after it"
     );
 }
 
@@ -1208,16 +1208,16 @@ fn collapsed_cached_artifacts_keep_tags_on_the_chip_row_without_status_text() {
 fn too_narrow_collapsed_card_hides_the_atomic_tag_summary() {
     let buffer = rendered_buffer_at(
         &seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        50,
+        45,
         30,
     );
-    let (_, chip_row) = position_of(&buffer, "🗀");
+    let (_, chip_row) = position_of(&buffer, "✎");
     let chips = row_text(&buffer, chip_row);
     assert_eq!(
         (
-            chips.contains("🗀"),
+            chips.contains("✎"),
             chips.contains("♪"),
-            chips.contains("▣"),
+            chips.contains("◉"),
             chips.contains("casual"),
             chips.contains("statement"),
             chips.contains("b1"),
@@ -1228,13 +1228,13 @@ fn too_narrow_collapsed_card_hides_the_atomic_tag_summary() {
 }
 
 #[test]
-fn ready_chips_render_black_glyphs_on_the_white_tag_background() {
+fn ready_glyphs_render_dark_ink_on_the_gray_tag_background() {
     let app = seeded(vec![draft("whilst", priced_artifacts())]);
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst →");
     let ink = Color::Rgb(0x0e, 0x0e, 0x10);
-    let cream = Color::Rgb(0xe6, 0xe3, 0xda);
-    let cells = [11u16, 16, 21]
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let cells = [11u16, 13, 15]
         .into_iter()
         .map(|column| {
             let cell = &buffer[(column, head_row + 1)];
@@ -1244,11 +1244,11 @@ fn ready_chips_render_black_glyphs_on_the_white_tag_background() {
     assert_eq!(
         cells,
         vec![
-            (String::from("🗀"), ink, cream),
-            (String::from("♪"), ink, cream),
-            (String::from("▣"), ink, cream),
+            (String::from("✎"), ink, gray),
+            (String::from("♪"), ink, gray),
+            (String::from("◉"), ink, gray),
         ],
-        "ready chips must render their glyphs as dark ink on the white tag background"
+        "ready glyphs must render as dark ink on the single gray tag-style badge"
     );
 }
 
@@ -1260,9 +1260,9 @@ fn chips_appear_progressively_and_queued_positions_render_nothing() {
     let chips = row_text(&buffer, head_row + 1);
     assert_eq!(
         (
-            chips.contains("🗀"),
+            chips.contains("✎"),
             chips.contains("♪"),
-            chips.contains("▣"),
+            chips.contains("◉"),
             chips.contains("queued"),
         ),
         (true, false, false, false),
@@ -1285,7 +1285,7 @@ fn scene_and_picture_work_share_one_spinner_at_the_picture_position() {
     let chips = row_text(&buffer, head_row + 1);
     assert_eq!(
         (
-            buffer[(21, head_row + 1)].symbol() != " ",
+            buffer[(15, head_row + 1)].symbol() != " ",
             chips.contains("ai is working…"),
             rendered.contains("scene"),
         ),
@@ -1306,7 +1306,7 @@ fn a_ready_scene_with_a_queued_picture_keeps_a_dim_dot_trace() {
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst →");
     assert_eq!(
-        buffer[(21, head_row + 1)].symbol(),
+        buffer[(15, head_row + 1)].symbol(),
         "·",
         "a paid ready scene with its picture still owed must leave a dim dot at the picture position"
     );
@@ -1324,7 +1324,7 @@ fn a_discarded_artifact_renders_a_dim_slash_at_its_chip_position() {
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst →");
     assert_eq!(
-        buffer[(21, head_row + 1)].symbol(),
+        buffer[(15, head_row + 1)].symbol(),
         "⊘",
         "a discarded artifact must keep its dim slash at the chip position"
     );
@@ -1339,18 +1339,18 @@ fn a_staged_rewrite_mutes_the_chips_and_keeps_the_staged_tags_visible() {
     let app = transit(parked, AppEvent::Cancel).0;
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst");
+    let dim2 = Color::Rgb(0x5a, 0x59, 0x53);
     let gray = Color::Rgb(0x8b, 0x8a, 0x83);
-    let cream = Color::Rgb(0xe6, 0xe3, 0xda);
-    let folder = &buffer[(11, head_row + 1)];
+    let meta_glyph = &buffer[(11, head_row + 1)];
     assert_eq!(
         (
-            folder.symbol(),
-            folder.fg,
-            folder.bg,
+            meta_glyph.symbol(),
+            meta_glyph.fg,
+            meta_glyph.bg,
             row_text(&buffer, head_row + 1).contains("formal"),
         ),
-        ("🗀", gray, cream, true),
-        "a staged rewrite must mute the chip glyphs while the staged tags stay visible"
+        ("✎", dim2, gray, true),
+        "a staged rewrite must mute the badge glyphs while the staged tags stay visible"
     );
 }
 
@@ -1810,7 +1810,7 @@ fn cell_of(app: &App, needle: &str) -> (u16, u16) {
 #[test]
 fn clicking_the_folder_chip_targets_the_cards_cache_folder() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let (folder_column, folder_row) = cell_of(&app, "🗀");
+    let (folder_column, folder_row) = cell_of(&app, "✎");
     assert_eq!(
         link_at(&app, Rect::new(0, 0, 120, 50), folder_column, folder_row),
         Some(String::from("/tmp")),
@@ -1821,9 +1821,9 @@ fn clicking_the_folder_chip_targets_the_cards_cache_folder() {
 #[test]
 fn clicking_the_sound_chip_opens_the_audio_file() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let (_, chip_row) = cell_of(&app, "🗀");
+    let (_, chip_row) = cell_of(&app, "✎");
     assert_eq!(
-        link_at(&app, Rect::new(0, 0, 120, 50), 16, chip_row),
+        link_at(&app, Rect::new(0, 0, 120, 50), 12, chip_row),
         Some(String::from("/tmp/audio.wav")),
         "the sound chip must target the generated audio file"
     );
@@ -1832,22 +1832,22 @@ fn clicking_the_sound_chip_opens_the_audio_file() {
 #[test]
 fn clicking_the_picture_chip_opens_the_rendered_page() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let (_, chip_row) = cell_of(&app, "🗀");
+    let (_, chip_row) = cell_of(&app, "✎");
     assert_eq!(
-        link_at(&app, Rect::new(0, 0, 120, 50), 21, chip_row),
+        link_at(&app, Rect::new(0, 0, 120, 50), 15, chip_row),
         Some(String::from("/tmp/picture.jpg")),
         "the picture chip must target the rendered picture"
     );
 }
 
 #[test]
-fn the_chip_gap_between_two_chips_is_not_a_link() {
+fn the_cell_after_the_chip_badge_is_not_a_link() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let (_, chip_row) = cell_of(&app, "🗀");
+    let (_, chip_row) = cell_of(&app, "✎");
     assert_eq!(
-        link_at(&app, Rect::new(0, 0, 120, 50), 13, chip_row),
+        link_at(&app, Rect::new(0, 0, 120, 50), 18, chip_row),
         None,
-        "the gap between two chips must stay inert"
+        "the gap after the chip badge must stay inert"
     );
 }
 
@@ -1886,15 +1886,15 @@ fn expanded_editor_below_artifacts_keeps_the_meta_link_on_its_rendered_row() {
 }
 
 #[test]
-fn a_narrow_chip_row_keeps_the_picture_chip_clickable() {
-    let terminal = Rect::new(0, 0, 50, 30);
+fn a_narrow_chip_row_keeps_the_picture_glyph_clickable() {
+    let terminal = Rect::new(0, 0, 45, 30);
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
-    let (_, chip_row) = position_of(&buffer, "🗀");
+    let (_, chip_row) = position_of(&buffer, "✎");
     assert_eq!(
-        link_at(&app, terminal, 21, chip_row),
+        link_at(&app, terminal, 15, chip_row),
         Some(String::from("/tmp/picture.jpg")),
-        "the narrow chip row lost the picture chip click target"
+        "the narrow chip row lost the picture glyph click target"
     );
 }
 
@@ -1942,7 +1942,7 @@ fn scrolled_chip_rows_keep_the_selected_folder_chip_aligned() {
     assert_eq!(
         (
             app.body_scroll() > 0,
-            row_text(&buffer, chip_row).contains("🗀"),
+            row_text(&buffer, chip_row).contains("✎"),
             link_at(&app, terminal, 11, chip_row),
         ),
         (true, true, Some(String::from("/tmp"))),

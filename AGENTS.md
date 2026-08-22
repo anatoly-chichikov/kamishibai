@@ -389,29 +389,31 @@ built rather than started; a terminally failed card never holds all four and
 stays `DIM`, and a card with a staged rewrite keeps the muted pending term
 beside its struck sentence. A collapsed card is the head plus one **chip
 row** beginning immediately after the last line of the head's target sentence,
-including when that sentence wraps: three fixed positions — 🗀 folder (meta),
-♪ sound, ▣ picture (`CHIP_ICONS` in `src/tui/screens/your_cards.rs`), no
-scene position. A ready artifact renders as a white pinned-tag chip
-(`palette::invert()`, dark glyph on the cream background); the active artifact
+including when that sentence wraps: a single gray badge styled exactly like an
+unpinned tag (`tag_style(false)` — bg `DIM`, dark glyphs) holding three fixed
+glyph positions — ✎ meta, ♪ sound, ◉ picture (`CHIP_ICONS` in
+`src/tui/screens/your_cards.rs`), no scene position. A ready artifact shows
+its glyph; the active artifact
 renders the spinner at its position with one trailing dim `ai is working…` at
-the end of the row; a terminal failure is a dim `✗` (the words `gave up`
-appear only inside the expanded card); a discarded artifact is a dim `⊘`;
+the end of the row; a terminal failure is `✗` (the words `gave up`
+appear only inside the expanded card); a discarded artifact is `⊘`;
 spent-but-idle progress (an inactive retry, or a ready scene whose picture is
-still owed) is a dim `·`; a queued position stays blank. Scene work shares the
-picture position. Each ready chip with a known file is a click target: the
-folder chip opens the card's cache cell (the parent of `meta.json`) with the
-system handler, the sound and picture chips open `audio.wav` and
-`picture.jpg`; a ready chip without a recorded file renders but does not
+still owed) is `·`; a queued position stays a blank cell inside the badge.
+Scene work shares the
+picture position. Each ready glyph zone with a known file is a click target:
+the meta glyph opens the card's cache cell (the parent of `meta.json`) with
+the system handler, the sound and picture glyphs open `audio.wav` and
+`picture.jpg`; a ready glyph without a recorded file renders but does not
 click. Per-artifact sizes, costs, file links, and the `cached` note appear
 only inside the expanded card, whose four artifact rows keep the `meta`,
 `audio`, `scene`, `picture` order. No `sentence:` heading or separator glyph
 is drawn anywhere. Register, phrase kind, and level appear as three
-consecutive tags at one fixed column after the chips on the same row; when
+consecutive tags at one fixed column after the badge on the same row; when
 that complete atomic sequence (plus the working tail) cannot fit, the whole
-summary hides while the chips remain and the card head stays the mouse entry
-into tuning. A staged rewrite mutes the chip glyphs (the white background
-stays) while the staged tags remain visible. Retry history lives on the card
-head instead of adding volatile status beside the tags.
+summary hides while the badge remains and the card head stays the mouse entry
+into tuning. A staged rewrite dims the badge glyphs to `DIM2` (the gray
+background stays) while the staged tags remain visible. Retry history lives
+on the card head instead of adding volatile status beside the tags.
 Opening the editor replaces the chip row with the four artifact rows and puts
 the summary
 below them, separated from `picture` by exactly one
