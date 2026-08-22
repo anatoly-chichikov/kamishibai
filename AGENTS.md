@@ -393,11 +393,11 @@ inactive markers; `rule()` draws structure. **Background is focus and nothing
 else**: the row under the cursor takes `HL` (`#26262a`, raised so it carries the
 signal alone) and keeps the same inks as its neighbours. **Weight is one thing**:
 `Modifier::BOLD` marks a card that holds all four artifacts, and appears nowhere
-else in the application. Two consequences follow: an **underline means
+else in the application. One consequence follows: an **underline means
 clickable** and takes its brightness from its rank, so the same affordance reads
-at three depths without three link colours; and a **background behind a tag or
-chip means the user asked for that value**, so a model-chosen value is plain
-text and a pinned one is a white block.
+at three depths without three link colours. The label chips are the deliberate
+exception to "ink is rank" — the three sentence-label values read as one
+attribution strip, so both states are blocks and only their brightness changes.
 
 A card head that holds all four artifacts turns its term `FG` **and bold**; its
 target sentence stays `DIM` whatever happens, because the word is the subject of
@@ -454,11 +454,11 @@ blank row, before the expanded metadata and never to the rows' right. If
 the live editor block fits the viewport, lighting it anchors the selected card
 head at the top of the body; shorter viewports instead scroll only far enough to
 keep the focused row visible.
-Unchanged actual tags carry no background at all and read as plain `Ink::Aside`
-text; explicitly changed or exactly fulfilled pinned tags use a white background
-with dark letters and no bold. If
+Unchanged actual tags use a gray `DIM` background with dark letters; explicitly
+changed or exactly fulfilled pinned tags use a white background with dark
+letters and no bold. If
 a pinned target could not be fulfilled exactly, the generated actual value stays
-plain and is followed by muted `· aimed for` plus the requested value in a white
+gray and is followed by muted `· aimed for` plus the requested value in a white
 tag. The actual value remains the attribution of what was generated; the white
 value remains the target for a later regeneration. Legacy cached approximation
 records that predate separate actual-value storage show only muted `aimed for`

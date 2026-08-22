@@ -1102,8 +1102,8 @@ fn the_tag_summary_sits_on_the_voice_row_at_the_fixed_column() {
     let (register_column, register_row) = position_of(&buffer, "casual");
     let (kind_column, kind_row) = position_of(&buffer, "statement");
     let (level_column, level_row) = position_of(&buffer, "b1");
-    let ink = Color::Rgb(0x5a, 0x59, 0x53);
-    let tag = Color::Rgb(0x0e, 0x0e, 0x10);
+    let ink = Color::Rgb(0x0e, 0x0e, 0x10);
+    let tag = Color::Rgb(0x8b, 0x8a, 0x83);
     assert_eq!(
         (
             (register_row, kind_row, level_row),
@@ -1455,7 +1455,7 @@ fn closed_pending_card_shows_the_staged_tags_and_bulk_regeneration_footer() {
     let buffer = rendered_buffer(&app);
     let formal = position_of(&buffer, "formal");
     let ink = Color::Rgb(0x0e, 0x0e, 0x10);
-    let plain = Color::Rgb(0x5a, 0x59, 0x53);
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
     let white = Color::Rgb(0xe6, 0xe3, 0xda);
     assert!(
         app.cards()[0].rewrite().is_some()
@@ -1468,11 +1468,11 @@ fn closed_pending_card_shows_the_staged_tags_and_bulk_regeneration_footer() {
             && rendered.contains("statement")
             && rendered.contains("casual")
             && rendered.contains("· aimed for")
-            && chip_has_style(&buffer, "casual", plain, ink)
+            && chip_has_style(&buffer, "casual", ink, gray)
             && chip_has_style(&buffer, "formal", ink, white)
             && !buffer[formal].modifier.contains(Modifier::BOLD)
-            && chip_has_style(&buffer, "b1", plain, ink)
-            && chip_has_style(&buffer, "statement", plain, ink)
+            && chip_has_style(&buffer, "b1", ink, gray)
+            && chip_has_style(&buffer, "statement", ink, gray)
             && rendered.contains("1 pending")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
@@ -1672,7 +1672,7 @@ fn best_effort_axes_show_the_actual_value_and_requested_target() {
     let aimed = position_of(&buffer, "aimed for");
     let requested = position_of(&buffer, "formal");
     let ink = Color::Rgb(0x0e, 0x0e, 0x10);
-    let plain = Color::Rgb(0x5a, 0x59, 0x53);
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
     let white = Color::Rgb(0xe6, 0xe3, 0xda);
     let quiet = Color::Rgb(0x5a, 0x59, 0x53);
     let background = Color::Rgb(0x0e, 0x0e, 0x10);
@@ -1685,14 +1685,14 @@ fn best_effort_axes_show_the_actual_value_and_requested_target() {
             && aimed.1 == requested.1
             && actual.0 < aimed.0
             && aimed.0 < requested.0
-            && chip_has_style(&buffer, "casual", plain, ink)
+            && chip_has_style(&buffer, "casual", ink, gray)
             && chip_has_style(&buffer, "formal", ink, white)
             && matching_cells(&app, "aimed for")
                 .iter()
                 .all(|(fg, bg, _)| *fg == quiet && *bg == background)
             && !buffer[requested].modifier.contains(Modifier::BOLD)
-            && chip_has_style(&buffer, "b2", plain, ink)
-            && chip_has_style(&buffer, "statement", plain, ink),
+            && chip_has_style(&buffer, "b2", ink, gray)
+            && chip_has_style(&buffer, "statement", ink, gray),
         "the compact tags hid the actual value, target, or restrained best-effort styling: {rendered}"
     );
 }

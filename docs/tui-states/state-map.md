@@ -229,12 +229,11 @@ later on the `voice` row, but only while the card is collapsed:
 ```
 
 The actual register, sentence-type, and CEFR values replace the three
-example values. A background behind a tag means the user asked for that value, so an unchanged
-actual tag carries none and reads as plain `Ink::Aside` text, while an
-explicitly changed or exactly fulfilled pinned tag is a white block with dark
-letters and no bold. If a target is only fulfilled as a best effort, its atomic
-group is the plain actual tag, muted `· aimed for`, and the requested white
-tag. Adjacent axis groups have one
+example values. Each value remains a separate tag with dark `BG` letters.
+Unchanged actual tags use the gray `DIM` background while explicitly changed or
+exactly fulfilled pinned tags use a white background without bold. If a target
+is only fulfilled as a best effort, its atomic group is the gray actual tag,
+muted `· aimed for`, and the requested white tag. Adjacent axis groups have one
 ordinary-background space between them. At narrow widths whole groups may
 wrap from the `voice` row onto the `manga` row at that same column.
 Retry history appears once in the card head instead of beside the tags; when
@@ -294,8 +293,8 @@ Every chip or note edit is pending immediately: the old target sentence is
 struck through and its current metadata and step rows are muted. While the
 editor is open, its white selected chips show the staged choices below the
 rows; after it closes, the staged choices return on the `voice` row as
-summary tags, plain text for unchanged values and a white block without bold for
-changed or pinned values. The editor carousel remains on the requested target; when it
+summary tags, gray for unchanged values and white without bold for changed or
+pinned values. The editor carousel remains on the requested target; when it
 differs from the generated attribution, muted `current` plus the actual value
 makes that distinction explicit. Regeneration carries this complete requested
 preset. An explicitly changed or already pinned axis may differ only when the

@@ -329,15 +329,15 @@ pub(crate) fn batch_editor_control_at(
 
 /// Return the shared compact-label style used before and after generation.
 ///
-/// A background behind a tag says one thing: you asked for this value. What
-/// the model chose on its own is bookkeeping about the card and reads as plain
-/// aside-rank text, so a card nobody pinned anything on carries no block at
-/// all and a pinned axis is the only one that pops.
+/// Both states are blocks, because the three values read as one attribution
+/// strip rather than as three loose words: what the model chose sits on the
+/// muted `DIM` block, and what the user pinned or the model fulfilled exactly
+/// sits on the bright inverted one.
 pub(crate) fn tag_style(pinned: bool) -> Style {
     if pinned {
         palette::invert()
     } else {
-        palette::Ink::Aside.on(false)
+        Style::default().bg(palette::DIM).fg(palette::BG)
     }
 }
 
