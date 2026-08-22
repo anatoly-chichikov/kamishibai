@@ -228,9 +228,7 @@ fn alternates_line(app: &App) -> Option<Line<'static>> {
         }
         spans.push(Span::styled(
             code.to_uppercase(),
-            palette::Ink::Detail
-                .on(false)
-                .add_modifier(Modifier::UNDERLINED),
+            palette::Ink::Detail.link(false),
         ));
     }
     Some(Line::from(spans))

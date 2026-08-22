@@ -248,8 +248,8 @@ fn summary_reuses_muted_default_and_brightens_only_explicit_guidance() {
         ),
         (
             (
+                Color::Rgb(0x5a, 0x59, 0x53),
                 Color::Rgb(0x0e, 0x0e, 0x10),
-                Color::Rgb(0x8b, 0x8a, 0x83),
                 Modifier::empty(),
             ),
             (

@@ -9,6 +9,7 @@ use std::borrow::Cow;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -77,18 +78,25 @@ fn card_summary(app: &App) -> Paragraph<'_> {
         )));
     } else {
         for (index, draft) in app.cards().iter().enumerate() {
-            let glyph = if draft.artifacts().has_failed() {
-                "✗"
+            let failed = draft.artifacts().has_failed();
+            let glyph = if failed { "✗" } else { "✓" };
+            let glyph_style = if failed {
+                palette::Ink::Subject.on(false)
             } else {
-                "✓"
+                palette::Ink::Aside.on(false)
+            };
+            let term_style = if draft.artifacts().all_ready() {
+                palette::Ink::Subject.on(false).add_modifier(Modifier::BOLD)
+            } else {
+                palette::Ink::Detail.on(false)
             };
             let mut spans = vec![
-                Span::styled(format!(" {glyph} "), palette::base()),
+                Span::styled(format!(" {glyph} "), glyph_style),
                 Span::styled(
                     format!("{:0>2}  ", index + 1),
                     palette::Ink::Aside.on(false),
                 ),
-                Span::styled(String::from(draft.term()), palette::base()),
+                Span::styled(String::from(draft.term()), term_style),
             ];
             if let Some(cost) = super::your_cards::card_cost(draft) {
                 spans.push(Span::styled(
@@ -124,7 +132,11 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     left.push(Span::styled("step 3/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
     left.push(Span::styled(
-        format!("{ready}/{total} ready"),
+        ready.to_string(),
+        palette::Ink::Subject.on(false),
+    ));
+    left.push(Span::styled(
+        format!("/{total} ready"),
         palette::Ink::Detail.on(false),
     ));
     if failed > 0 {
@@ -138,7 +150,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         left.push(super::common::status_sep());
         left.push(Span::styled(
             cost.dollars_cents(),
-            palette::Ink::Detail.on(false),
+            palette::Ink::Subject.on(false),
         ));
     }
     if app.new_batch_pending() {

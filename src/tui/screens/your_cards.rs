@@ -86,9 +86,11 @@ impl<'a> ArtifactLine<'a> {
         Line::from(self.spans)
     }
 
+    /// Drop the whole row one rank, so a staged rewrite reads as parked work
+    /// without ever making a span brighter than it was.
     fn muted(mut self) -> Self {
         for span in &mut self.spans {
-            span.style = span.style.fg(palette::DIM);
+            span.style = span.style.fg(palette::DIM2);
         }
         self
     }
@@ -726,6 +728,9 @@ fn step_line<'a>(
     ArtifactLine { spans }
 }
 
+/// Drop one expanded-preview line a rank while its rewrite is staged. The
+/// preview reads at subject rank, so a rank quieter is `DIM`; the step rows
+/// already sit a rank below it and park at `DIM2` through `ArtifactLine`.
 fn muted_line(mut line: Line<'_>) -> Line<'_> {
     for span in &mut line.spans {
         span.style = span.style.fg(palette::DIM);
@@ -733,6 +738,12 @@ fn muted_line(mut line: Line<'_>) -> Line<'_> {
     line
 }
 
+/// Paint one step row by what it needs from the reader.
+///
+/// A card that is building or built asks for nothing, so its whole block sits
+/// at detail and aside rank; the one artifact that terminally gave up is the
+/// only subject-rank span the block ever draws, which makes a broken card the
+/// only bright thing on an otherwise quiet screen.
 fn step_state<'a>(
     draft: &CardDraft,
     row: StepRow,
@@ -740,14 +751,16 @@ fn step_state<'a>(
     spinner_frame: usize,
 ) -> StepState<'a> {
     let cost = row_cost(draft.artifacts(), row);
+    let detail = palette::Ink::Detail.on(false);
+    let aside = palette::Ink::Aside.on(false);
     match row_state(draft, row, running) {
         RowState::Ready => StepState {
             glyph: String::from("✓"),
-            status_style: palette::base(),
+            status_style: aside,
             label_style: if row_target(draft, row).is_some() {
-                palette::Ink::Subject.link(false)
+                palette::Ink::Detail.link(false)
             } else {
-                palette::base()
+                detail
             },
             line: ArtifactLine {
                 spans: ready_value(cost, row_cached(draft.artifacts(), row)),
@@ -755,46 +768,40 @@ fn step_state<'a>(
         },
         RowState::Discarded => StepState {
             glyph: String::from("⊘"),
-            status_style: palette::Ink::Detail.on(false),
-            label_style: palette::Ink::Detail.on(false),
+            status_style: aside,
+            label_style: detail,
             line: ArtifactLine {
-                spans: vec![Span::styled(
-                    String::from("discarded"),
-                    palette::Ink::Detail.on(false),
-                )],
+                spans: vec![Span::styled(String::from("discarded"), aside)],
             },
         },
         RowState::Failed => StepState {
             glyph: String::from("✗"),
-            status_style: palette::base(),
-            label_style: palette::base(),
+            status_style: palette::Ink::Subject.on(false),
+            label_style: palette::Ink::Subject.on(false),
             line: ArtifactLine {
                 spans: row_cost_spans(cost),
             },
         },
         RowState::Active => StepState {
             glyph: String::from(SPINNER_FRAMES[spinner_frame]),
-            status_style: palette::base(),
-            label_style: palette::base(),
+            status_style: detail,
+            label_style: detail,
             line: ArtifactLine { spans: Vec::new() },
         },
         RowState::Paused => StepState {
             glyph: String::from("·"),
-            status_style: palette::base(),
-            label_style: palette::base(),
+            status_style: aside,
+            label_style: detail,
             line: ArtifactLine {
                 spans: row_cost_spans(cost),
             },
         },
         RowState::Hidden => StepState {
             glyph: String::from("○"),
-            status_style: palette::Ink::Aside.on(false),
-            label_style: palette::Ink::Aside.on(false),
+            status_style: aside,
+            label_style: aside,
             line: ArtifactLine {
-                spans: vec![Span::styled(
-                    String::from("queued"),
-                    palette::Ink::Detail.on(false),
-                )],
+                spans: vec![Span::styled(String::from("queued"), aside)],
             },
         },
     }
@@ -1069,12 +1076,7 @@ fn push_link<'a>(
     target: Option<&Path>,
 ) -> usize {
     let width = super::common::display_width(label.as_str());
-    spans.push(Span::styled(
-        label,
-        palette::Ink::Aside
-            .on(false)
-            .add_modifier(Modifier::UNDERLINED),
-    ));
+    spans.push(Span::styled(label, palette::Ink::Aside.link(false)));
     if let Some(target) = target {
         links.push((
             u16::try_from(column).unwrap_or(u16::MAX),
@@ -1387,7 +1389,7 @@ fn highlight_lines<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -
             Span::styled(tail.to_string(), around),
         ])
     } else {
-        Line::from(vec![Span::styled(sentence.to_string(), around)])
+        Line::from(vec![Span::styled(sentence.to_string(), palette::base())])
     };
     let indent_w = super::common::display_width(indent);
     let inner = width.saturating_sub(indent_w).max(20);

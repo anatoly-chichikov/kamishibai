@@ -1102,8 +1102,8 @@ fn the_tag_summary_sits_on_the_voice_row_at_the_fixed_column() {
     let (register_column, register_row) = position_of(&buffer, "casual");
     let (kind_column, kind_row) = position_of(&buffer, "statement");
     let (level_column, level_row) = position_of(&buffer, "b1");
-    let ink = Color::Rgb(0x0e, 0x0e, 0x10);
-    let tag = Color::Rgb(0x8b, 0x8a, 0x83);
+    let ink = Color::Rgb(0x5a, 0x59, 0x53);
+    let tag = Color::Rgb(0x0e, 0x0e, 0x10);
     assert_eq!(
         (
             (register_row, kind_row, level_row),
@@ -1327,7 +1327,7 @@ fn a_staged_rewrite_mutes_the_step_rows_and_keeps_the_staged_tags_visible() {
     let app = transit(parked, AppEvent::Cancel).0;
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst");
-    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let parked = Color::Rgb(0x5a, 0x59, 0x53);
     let scene_label = &buffer[(10, head_row + 1)];
     assert_eq!(
         (
@@ -1335,7 +1335,7 @@ fn a_staged_rewrite_mutes_the_step_rows_and_keeps_the_staged_tags_visible() {
             scene_label.fg,
             row_text(&buffer, head_row + 2).contains("formal"),
         ),
-        ("s", gray, true),
+        ("s", parked, true),
         "a staged rewrite must mute the step rows while the staged tags stay visible"
     );
 }
@@ -1455,7 +1455,7 @@ fn closed_pending_card_shows_the_staged_tags_and_bulk_regeneration_footer() {
     let buffer = rendered_buffer(&app);
     let formal = position_of(&buffer, "formal");
     let ink = Color::Rgb(0x0e, 0x0e, 0x10);
-    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let plain = Color::Rgb(0x5a, 0x59, 0x53);
     let white = Color::Rgb(0xe6, 0xe3, 0xda);
     assert!(
         app.cards()[0].rewrite().is_some()
@@ -1468,11 +1468,11 @@ fn closed_pending_card_shows_the_staged_tags_and_bulk_regeneration_footer() {
             && rendered.contains("statement")
             && rendered.contains("casual")
             && rendered.contains("· aimed for")
-            && chip_has_style(&buffer, "casual", ink, gray)
+            && chip_has_style(&buffer, "casual", plain, ink)
             && chip_has_style(&buffer, "formal", ink, white)
             && !buffer[formal].modifier.contains(Modifier::BOLD)
-            && chip_has_style(&buffer, "b1", ink, gray)
-            && chip_has_style(&buffer, "statement", ink, gray)
+            && chip_has_style(&buffer, "b1", plain, ink)
+            && chip_has_style(&buffer, "statement", plain, ink)
             && rendered.contains("1 pending")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
@@ -1519,7 +1519,7 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
                 }),
             !step.is_empty()
                 && step.iter().all(|(fg, _, modifier)| {
-                    *fg == Color::Rgb(0x8b, 0x8a, 0x83) && !modifier.contains(Modifier::CROSSED_OUT)
+                    *fg == Color::Rgb(0x5a, 0x59, 0x53) && !modifier.contains(Modifier::CROSSED_OUT)
                 }),
             chip_has_style(&buffer, "formal", ink, chip),
             chip_has_style(&buffer, "b1", ink, chip),
@@ -1528,6 +1528,31 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
         ),
         (true, true, true, true, true, true, true, true),
         "pending editor struck non-sentence content, exposed summary tags, or dimmed selected choices"
+    );
+}
+
+#[test]
+fn a_broken_artifact_is_the_only_bright_span_in_its_step_block() {
+    let app = seeded(vec![draft("bof", failed_artifacts())]);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "bof");
+    let white = Color::Rgb(0xe6, 0xe3, 0xda);
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let quiet = Color::Rgb(0x5a, 0x59, 0x53);
+    let cross = &buffer[(8, head_row + 2)];
+    let tick = &buffer[(8, head_row + 1)];
+    assert_eq!(
+        (
+            (cross.symbol(), cross.fg),
+            (
+                buffer[(10, head_row + 2)].symbol(),
+                buffer[(10, head_row + 2)].fg
+            ),
+            (tick.symbol(), tick.fg),
+            buffer[(10, head_row + 1)].fg,
+        ),
+        (("✗", white), ("m", white), ("✓", quiet), gray),
+        "a broken artifact must be the one bright thing while every finished neighbour stays quiet"
     );
 }
 
@@ -1647,7 +1672,7 @@ fn best_effort_axes_show_the_actual_value_and_requested_target() {
     let aimed = position_of(&buffer, "aimed for");
     let requested = position_of(&buffer, "formal");
     let ink = Color::Rgb(0x0e, 0x0e, 0x10);
-    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let plain = Color::Rgb(0x5a, 0x59, 0x53);
     let white = Color::Rgb(0xe6, 0xe3, 0xda);
     let quiet = Color::Rgb(0x5a, 0x59, 0x53);
     let background = Color::Rgb(0x0e, 0x0e, 0x10);
@@ -1660,14 +1685,14 @@ fn best_effort_axes_show_the_actual_value_and_requested_target() {
             && aimed.1 == requested.1
             && actual.0 < aimed.0
             && aimed.0 < requested.0
-            && chip_has_style(&buffer, "casual", ink, gray)
+            && chip_has_style(&buffer, "casual", plain, ink)
             && chip_has_style(&buffer, "formal", ink, white)
             && matching_cells(&app, "aimed for")
                 .iter()
                 .all(|(fg, bg, _)| *fg == quiet && *bg == background)
             && !buffer[requested].modifier.contains(Modifier::BOLD)
-            && chip_has_style(&buffer, "b2", ink, gray)
-            && chip_has_style(&buffer, "statement", ink, gray),
+            && chip_has_style(&buffer, "b2", plain, ink)
+            && chip_has_style(&buffer, "statement", plain, ink),
         "the compact tags hid the actual value, target, or restrained best-effort styling: {rendered}"
     );
 }
@@ -2391,5 +2416,35 @@ fn c_expands_every_card_when_none_is_expanded() {
             && expanded.card_expanded_at(1)
             && expanded.sentence_editor().is_none(),
         "the collapse toggle failed to expand every card from the fully collapsed view"
+    );
+}
+
+#[test]
+fn the_taught_word_is_the_only_lit_span_of_its_translation() {
+    let app = transit(
+        seeded(vec![draft("whilst", ready_artifacts())]),
+        AppEvent::KeyEnter,
+    )
+    .0;
+    let buffer = rendered_buffer(&app);
+    let (column, row) = position_of(&buffer, "source sentence with whilst");
+    let sentence = "source sentence with whilst";
+    let inks = (0..sentence.chars().count())
+        .map(|offset| {
+            buffer[(
+                column + u16::try_from(offset).expect("offset must fit"),
+                row,
+            )]
+                .fg
+        })
+        .collect::<Vec<_>>();
+    let lit = sentence
+        .char_indices()
+        .filter(|(index, _)| inks[*index] == Color::Rgb(0xe6, 0xe3, 0xda))
+        .map(|(_, ch)| ch)
+        .collect::<String>();
+    assert_eq!(
+        lit, "whilst",
+        "the taught word must be the one lit run inside its own sentence"
     );
 }

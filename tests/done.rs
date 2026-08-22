@@ -9,6 +9,8 @@ use kamishibai::session::{
 use kamishibai::tui::{App, AppEvent, Screen, Side, draw, transit};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
+use ratatui::style::{Color, Modifier};
 
 fn flat(app: &App) -> String {
     let backend = TestBackend::new(100, 20);
@@ -23,6 +25,28 @@ fn flat(app: &App) -> String {
         rendered.push('\n');
     }
     rendered
+}
+
+fn buffer_of(app: &App) -> Buffer {
+    let backend = TestBackend::new(100, 20);
+    let mut terminal = Terminal::new(backend).expect("backend");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    terminal.backend().buffer().clone()
+}
+
+fn style_of(app: &App, token: &str) -> (Color, Color, Modifier) {
+    let buffer = buffer_of(app);
+    for row in 0..buffer.area.height {
+        let line = (0..buffer.area.width)
+            .map(|column| buffer[(column, row)].symbol())
+            .collect::<String>();
+        if let Some(byte) = line.find(token) {
+            let column = u16::try_from(line[..byte].chars().count()).expect("column must fit");
+            let cell = &buffer[(column, row)];
+            return (cell.fg, cell.bg, cell.modifier);
+        }
+    }
+    panic!("invariant: {token} must be rendered somewhere on the screen");
 }
 
 fn published() -> App {
@@ -239,5 +263,38 @@ fn ctrl_g_from_done_restarts_failed_cards_on_your_cards() {
         (next.screen(), side),
         (Screen::YourCards, Side::RegenerateFailed),
         "Ctrl+G on Done must return to YourCards and restart failed artifacts"
+    );
+}
+
+#[test]
+fn done_reports_the_batch_in_the_same_styles_as_the_cards_screen() {
+    let done = priced_published();
+    let cards = priced_published().with_screen(Screen::YourCards);
+    assert_eq!(
+        (
+            style_of(&done, "1/1"),
+            style_of(&done, " ready"),
+            style_of(&done, "step 3/3"),
+            style_of(&done, "$0."),
+        ),
+        (
+            style_of(&cards, "0/0"),
+            style_of(&cards, " ready"),
+            style_of(&cards, "step 3/3"),
+            style_of(&cards, "$0."),
+        ),
+        "one batch must not report itself in two different weights on its two final views"
+    );
+}
+
+#[test]
+fn a_built_done_row_lights_its_term_while_a_broken_one_stays_quiet() {
+    assert_eq!(
+        (
+            style_of(&priced_published(), "wreck").2,
+            style_of(&failed_published(), "wreck").0,
+        ),
+        (Modifier::BOLD, Color::Rgb(0x8b, 0x8a, 0x83)),
+        "the done list must mark a finished card the same way the cards screen does"
     );
 }
