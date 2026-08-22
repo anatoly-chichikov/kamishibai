@@ -21,7 +21,7 @@ All future work references this map instead of re-deriving transitions.
 | `YourCards`       | fullscreen                                                                        | `04-your-cards.png`             |
 | Retry stress      | synthetic `YourCards` gallery with active, inactive, recovered, and terminal attempts | `06b-your-cards-retry-stress.png` |
 | Esc lifecycle     | synthetic armed clear, unarmed prefilled review return, armed stop, draining stop, and partial-publish states | `23-esc-words-clear.png` through `27-generation-partial.png` |
-| Sentence labels   | three-tag summary anchors on the `voice` row and wraps onto `manga`; expanded question-led editor sits below the step rows | `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png` |
+| Sentence labels   | three-tag summary anchors on the `voice` row of a collapsed card and wraps onto `manga`; an open card shows the question-led tune rows below the step rows instead, unlit until the walk reaches them | `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png` |
 | `Done`            | fullscreen                                                                        | `08-done.png`                   |
 | `PickLanguages`   | two scrolling lists over `YourWords` / `WhatIUnderstood`, opened with `Ctrl+L` or either header half | `31-language-pair-modal.png` |
 | Busy              | one universal blocking overlay on any screen                                      | `01b-busy.png`                  |
@@ -234,15 +234,18 @@ filled backing behind the labels.
 If the complete atomic set cannot fit even that way, the card head remains the
 mouse entry into tuning. There is no grammar axis or grammar row.
 
-`Enter`, `→`, or `Space` opens the focused card and nothing more: step rows
-without their tags, meta preview, rejected attempts. `Enter`, `←`, or `Esc`
-closes it again. Tuning is a separate, deliberate move — `↓` from the open head
-enters the editor on `how should it sound?`, and a click on a collapsed card's
-tags opens it straight away. Inside the editor both arrows belong to
+`Enter`, `→`, or `Space` opens the focused card: step rows without their tags,
+the four tune rows, meta preview, rejected attempts. `Enter`, `←`, or `Esc`
+closes it again. The tune rows are there from the first keystroke but unlit —
+no question is white or bold, no chevron is bright, the note owns no cursor —
+so an open card says what can be changed without anything being changeable yet.
+Tuning is a separate, deliberate move — `↓` from the open head lights
+`how should it sound?`, and a click on any control (or on a collapsed card's
+tags) hands the block the keyboard straight away. Once lit, both arrows belong to
 the focused horizontal control. The head remains `term →
-target sentence` and the three step rows stay together above the editor;
+target sentence` and the three step rows stay together above the tune rows;
 exactly one blank row separates `manga`
-from the editor, which renders below the complete step block, before the
+from them, and they render below the complete step block, before the
 expanded metadata and never beside the rows. Its three carousel questions
 are `how should it sound?`, `what kind of phrase?`, and `what's the desired level?`.
 The following note row is labelled `one more thing` and uses the single-line
@@ -265,7 +268,7 @@ cell of a segment belongs to the same clickable target. The nearest marker uses
 axis with no selected value, `—` is flanked by one two-cell marker on each side
 inside the same shared track; both cells of either marker are clickable. Legacy
 metadata renders no collapsed inline summary but remains tunable through this
-same below-artifacts editor. The footer advertises `[Enter/→] toggle`, plus
+same below-artifacts rows. The footer advertises `[Enter/→] toggle`, plus
 `[↓] tune` while the focused card is open and tunable; `Space` remains an
 unadvertised alias of the disclosure key.
 
@@ -372,7 +375,7 @@ not a key the user presses.
 | `WhatIUnderstood` (walk)    | `↑↓`/`j`/`k` walk through heads and open sense lists without closing them; `↑`/`k` above the first word opens generation guidance · `Enter` on a head toggles its meanings, `Enter` inside a list closes it · `Space` toggles the focused sense (committed immediately) · `Space` on `+ add more` opens ChangeSomething · `D` drop row · `S` guidance alias · `C` toggle: open every multi-meaning sense list (single-sense and off-language rows stay closed), else collapse them all and close an open guidance editor · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` collapses the focused open list, else back · side arrows inert |
 | `WhatIUnderstood` generation guidance | `Ctrl+G` make cards · `←→` pick · `↑↓` row · `↓` from format returns to words · `Enter`/`Esc` close (printable review keys inert) |
 | `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
-| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` open the card, `Enter`/`←`/`Esc` close it, never touching its editor (`Space` is an unadvertised alias) · `↑↓` walk through cards and the open editor's rows, parking the editor on exit while its card stays open and reentering an open card's rows by itself (`↓` from its head → register, arriving from below → note; saturates inside the last editor) · `C` toggle: expand every card, else collapse them all (works from carousel rows; only the note row types `c`) · `Tab`/`Shift+Tab` park the editor and jump to the next/previous unfinished card (wraps) · double `Esc` stops active generation |
+| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` open the card with its tune rows unlit, `Enter`/`←`/`Esc` close it, neither ever handing them the keyboard (`Space` is an unadvertised alias) · `↑↓` walk through cards and the lit tune rows, unlighting them on exit while its card stays open and relighting them on return (`↓` from its head → register, arriving from below → note; saturates inside the last card's rows) · `C` toggle: expand every card, else collapse them all (works from carousel rows; only the note row types `c`) · `Tab`/`Shift+Tab` unlight the rows and jump to the next/previous unfinished card (wraps) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
 | `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row (walking past register or note exits onto a card head, parking the editor) · text editing under `one more thing` · `Enter` closes editor and card · `Esc` parks the editor, second `Esc` collapses the card |
 | `PickLanguages`             | `↑/↓` pick within a column · `←/→` focus the left / right column · wheel scrolls the column under the pointer · `Enter` confirm · `Esc` cancel |
