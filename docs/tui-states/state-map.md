@@ -60,7 +60,7 @@ contaminate the index.
 The retry stress gallery is index 21. Esc lifecycle states are indices 22–26,
 and the open generation guidance is index 27, appended so the established absolute
 indices remain stable. The stress gallery's six cards preserve valid pipeline
-order while showing the identical active-attempt copy (`ai is working…`),
+order while showing the identical bare active spinner,
 inactive retries as a `·` row with only its label and known cost, a recovered
 artifact as a plain ready row, and a bare terminal `✗` row together.
 Their card heads carry the complete retry summary as `↻1`, `↻2`, or `↻3`
@@ -201,16 +201,16 @@ underlined label that clicks open — `scene` the card's cache cell in the
 system file manager, `voice` the audio file, `manga` the rendered page; a
 label without a recorded target stays plain. A ready row states either its
 cost or, when the artifact came back free from the cache, `cached` — never
-both. The active row shows the
-spinner and `ai is working…`, a terminal failure a bare `✗` plus cost, a
+both. The active row shows its
+spinner and nothing beside it, a terminal failure a bare `✗` plus cost, a
 discarded artifact `⊘ discarded`, an inactive retry (or a ready scene whose
 picture is still owed) `·` plus any known cost. File names and sizes are gone
 everywhere. Costs are incremental per row: `scene`
 folds the metadata and composition spend, `voice` and `manga` carry only their
 own artifact, retries included; the head keeps the card total. No `sentence:`
 heading or separator glyph is drawn anywhere. The three labels start
-together in one fixed column, and the tags follow the value column two cells
-later on the `voice` row:
+together in one fixed column, and the tags follow the value column three cells
+later on the `voice` row, but only while the card is collapsed:
 
 ```text
 ✓ scene  $.0035
@@ -228,19 +228,20 @@ fulfilled as a best effort, its atomic group is the gray actual tag, muted
 ordinary-background space between them. At narrow widths whole groups may
 wrap from the `voice` row onto the `manga` row at that same column.
 Retry history appears once in the card head instead of beside the tags; when
-the complete sequence cannot fit even wrapped — including while the `voice`
-row is busy and its `ai is working…` reaches into the tag column — the whole
+the complete sequence cannot fit even wrapped, the whole
 summary is hidden while the step rows remain. There is no vertical rail, rule, or
 filled backing behind the labels.
 If the complete atomic set cannot fit even that way, the card head remains the
 mouse entry into tuning. There is no grammar axis or grammar row.
 
-`Enter`, `→`, `Space`, or a tag click immediately expands the focused card and
-opens the inline editor on `how should it sound?`; `←` on a card head that owns
-no carousel collapses it again, while inside the editor both arrows belong to
+`Enter`, `→`, or `Space` opens the focused card and nothing more: step rows
+without their tags, meta preview, rejected attempts. `Enter`, `←`, or `Esc`
+closes it again. Tuning is a separate, deliberate move — `↓` from the open head
+enters the editor on `how should it sound?`, and a click on a collapsed card's
+tags opens it straight away. Inside the editor both arrows belong to
 the focused horizontal control. The head remains `term →
-target sentence` and the three step rows stay together above the editor. The
-inline tag summary disappears; exactly one blank row separates `manga`
+target sentence` and the three step rows stay together above the editor;
+exactly one blank row separates `manga`
 from the editor, which renders below the complete step block, before the
 expanded metadata and never beside the rows. Its three carousel questions
 are `how should it sound?`, `what kind of phrase?`, and `what's the desired level?`.
@@ -264,8 +265,9 @@ cell of a segment belongs to the same clickable target. The nearest marker uses
 axis with no selected value, `—` is flanked by one two-cell marker on each side
 inside the same shared track; both cells of either marker are clickable. Legacy
 metadata renders no collapsed inline summary but remains tunable through this
-same below-artifacts editor. The collapsed footer advertises only `[Enter/→]
-tune`; `Space` remains an unadvertised keyboard alias.
+same below-artifacts editor. The footer advertises `[Enter/→] toggle`, plus
+`[↓] tune` while the focused card is open and tunable; `Space` remains an
+unadvertised alias of the disclosure key.
 
 The expanded metadata that follows the editor uses statement and noun labels
 rather than questions: `the phrase` for the target sentence, `in your language`
@@ -370,7 +372,7 @@ not a key the user presses.
 | `WhatIUnderstood` (walk)    | `↑↓`/`j`/`k` walk through heads and open sense lists without closing them; `↑`/`k` above the first word opens generation guidance · `Enter` on a head toggles its meanings, `Enter` inside a list closes it · `Space` toggles the focused sense (committed immediately) · `Space` on `+ add more` opens ChangeSomething · `D` drop row · `S` guidance alias · `C` toggle: open every multi-meaning sense list (single-sense and off-language rows stay closed), else collapse them all and close an open guidance editor · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` collapses the focused open list, else back · side arrows inert |
 | `WhatIUnderstood` generation guidance | `Ctrl+G` make cards · `←→` pick · `↑↓` row · `↓` from format returns to words · `Enter`/`Esc` close (printable review keys inert) |
 | `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
-| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter` tune (reopens a parked head; `Space` is an unadvertised alias; side arrows inert) · `↑↓` walk through cards and the open editor's rows, parking the editor on exit while its card stays expanded and reentering an expanded card's rows by itself (`↓` from its head → register, arriving from below → note; saturates inside the last editor) · `C` toggle: expand every card, else collapse them all (works from carousel rows; only the note row types `c`) · `Tab`/`Shift+Tab` park the editor and jump to the next/previous unfinished card (wraps) · double `Esc` stops active generation |
+| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` open the card, `Enter`/`←`/`Esc` close it, never touching its editor (`Space` is an unadvertised alias) · `↑↓` walk through cards and the open editor's rows, parking the editor on exit while its card stays open and reentering an open card's rows by itself (`↓` from its head → register, arriving from below → note; saturates inside the last editor) · `C` toggle: expand every card, else collapse them all (works from carousel rows; only the note row types `c`) · `Tab`/`Shift+Tab` park the editor and jump to the next/previous unfinished card (wraps) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
 | `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row (walking past register or note exits onto a card head, parking the editor) · text editing under `one more thing` · `Enter` closes editor and card · `Esc` parks the editor, second `Esc` collapses the card |
 | `PickLanguages`             | `↑/↓` pick within a column · `←/→` focus the left / right column · wheel scrolls the column under the pointer · `Enter` confirm · `Esc` cancel |
@@ -411,8 +413,8 @@ not forwarded to card generation.
 ## Recovery semantics (MVP)
 
 - Retry: each artifact (`meta`, `scene`, `picture`, `sound`) gets one plain try plus up
-  to 3 retries. Every active attempt uses the same spinner and `ai is working…`
-  text. An inactive retry row keeps only its dot, artifact label, and known cost;
+  to 3 retries. Every active attempt is the same spinner beside its label, with
+  no words. An inactive retry row keeps only its dot, artifact label, and known cost;
   the card head summarizes spent retries once as `↻N` after its total cost.
 - Rejected attempts: expanding the card (Enter) reveals, below the card body and
   behind a dashed rule, a `rejected attempts` block:
