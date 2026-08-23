@@ -4,7 +4,7 @@
 //! content, action row):
 //!
 //! 1. The text modal (`ChangeSomething`) — a single text-input field with an
-//!    `[Esc] cancel · [Enter] send` row for the missing-sense flow.
+//!    `[Enter] confirm · [Esc] cancel` row for the missing-sense flow.
 //! 2. The language pair picker (`PickLanguages`) — two side-by-side vertical
 //!    lists, one per half of the pair, each row naming a language by code and
 //!    by the name its own speakers use. A ruled heading carries the arrow that
@@ -14,8 +14,8 @@
 //!    same language lands on the same row. Each column keeps its pick inverted
 //!    so the pair reads whole; the focused column's heading and pick are
 //!    bright. A column longer than the window scrolls, showing a thumb against
-//!    the right edge. Action row is `[↑ ↓] pick · [← →] column · [Enter]
-//!    confirm · [Esc] cancel`. No text input, no cursor.
+//!    the right edge. Action row is `[Enter] confirm · [←→] column · [↑↓] nav ·
+//!    [Esc] cancel`. No text input, no cursor.
 //!
 //! All modals are rendered last in the frame so they sit on top of the
 //! fullscreen screen beneath them.
@@ -129,9 +129,9 @@ fn text_placeholder(kind: ModalKind) -> &'static str {
 
 fn text_panel(kind: ModalKind, app: &App, width: usize) -> Paragraph<'static> {
     let dashes = "─".repeat(width);
-    let mut action_spans = super::common::FooterHint::ghost("Esc", "cancel").spans();
+    let mut action_spans = super::common::FooterHint::primary("Enter", "confirm").spans();
     action_spans.push(Span::styled(String::from("    "), palette::base()));
-    action_spans.extend(super::common::FooterHint::primary("Enter", "send").spans());
+    action_spans.extend(super::common::FooterHint::ghost("Esc", "cancel").spans());
     let actions = Line::from(action_spans);
     let lines = vec![
         Line::from(""),
@@ -149,8 +149,8 @@ fn text_panel(kind: ModalKind, app: &App, width: usize) -> Paragraph<'static> {
 const PICKER_CHROME: usize = 8;
 /// Cells between the two columns, wide enough to centre the arrow.
 const COLUMN_GAP: usize = 5;
-/// Cells the action row needs: `[↑ ↓] pick  [← →] column  [Enter] confirm  [Esc] cancel`.
-const ACTION_ROW_WIDTH: usize = 63;
+/// Cells the action row needs: `[Enter] confirm  [←→] column  [↑↓] nav  [Esc] cancel`.
+const ACTION_ROW_WIDTH: usize = 52;
 /// Cells each column spends to the right of its text: one blank, then the
 /// scrollbar. The blank is what keeps a full-width row off the bar.
 const SCROLLBAR_GUTTER: usize = 2;
@@ -170,11 +170,11 @@ fn picker_panel(app: &App, visible: usize) -> Paragraph<'static> {
             scrolling_cell(section, cursor, row, visible)
         })));
     }
-    let mut actions = super::common::FooterHint::secondary("↑ ↓", "pick").spans();
+    let mut actions = super::common::FooterHint::primary("Enter", "confirm").spans();
     actions.push(Span::styled(String::from("  "), palette::base()));
-    actions.extend(super::common::FooterHint::secondary("← →", "column").spans());
+    actions.extend(super::common::FooterHint::secondary("←→", "column").spans());
     actions.push(Span::styled(String::from("  "), palette::base()));
-    actions.extend(super::common::FooterHint::primary("Enter", "confirm").spans());
+    actions.extend(super::common::FooterHint::ghost("↑↓", "nav").spans());
     actions.push(Span::styled(String::from("  "), palette::base()));
     actions.extend(super::common::FooterHint::ghost("Esc", "cancel").spans());
     lines.push(Line::from(""));

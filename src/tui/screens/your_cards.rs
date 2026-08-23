@@ -1789,7 +1789,7 @@ fn can_regenerate(app: &App) -> bool {
 /// read as a frozen application. It says what is true instead — you can look
 /// around, you cannot act.
 fn stopping_hints(app: &App) -> Vec<super::common::FooterHint> {
-    let mut hints = vec![DisclosureControls::new(app.card_expanded()).secondary_toggle()];
+    let mut hints = vec![DisclosureControls::new(app.card_expanded()).secondary_disclosure()];
     if app.any_card_expanded() {
         hints.push(super::common::sweep_hint(true));
     }
@@ -1820,8 +1820,8 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         if can_regenerate(app) {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
         }
-        hints.push(super::common::FooterHint::secondary("← →", "pick"));
-        hints.push(super::common::FooterHint::ghost("↑ ↓", "row"));
+        hints.push(super::common::FooterHint::secondary("←→", "pick"));
+        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         // Esc alone. Enter also leaves the editor but takes the card's whole
         // expansion with it, and one hint cannot honestly name both outcomes;
         // Esc is the key the rest of the app already teaches for peeling one
@@ -1836,7 +1836,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
         }
         if !app.cards().is_empty() {
-            hints.push(controls.secondary_toggle());
+            hints.push(controls.secondary_disclosure());
         }
         if app.card_expanded() && app.card_tunable() {
             hints.push(super::common::FooterHint::secondary("↓", "tune"));
@@ -1855,6 +1855,12 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         }
         if app.can_start_new_batch() {
             hints.push(super::common::new_batch_hint(app.new_batch_pending()));
+        } else if !app.cards().is_empty() && !app.card_expanded() {
+            // The same Escape that starts a fresh batch on a settled screen
+            // stops the run on a live one, and until now it went unnamed until
+            // the first press had already armed it — the only destructive key
+            // in the app the user met by surprise.
+            hints.push(super::common::stop_generation_hint());
         }
         hints.push(super::common::quit_hint(app.quit_pending()));
         hints

@@ -179,7 +179,7 @@ fn welcome_language_step_footer_is_clean() {
     let rendered = flat(&app);
     assert_eq!(
         (
-            rendered.contains("[↑ ↓ ← →] language"),
+            rendered.contains("[↑↓←→] language"),
             rendered.contains("Ctrl+L")
         ),
         (true, false),

@@ -269,7 +269,7 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
             && rendered.contains("expel")
             && rendered.contains("at the end")
             && rendered.contains("[↑↓]")
-            && rendered.contains("[Enter/→] toggle")
+            && rendered.contains("[Enter/→] open")
             && rendered.contains("[Ctrl+G]")
             && rendered.contains("generate")
             && rendered.contains("[Esc] back")

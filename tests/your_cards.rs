@@ -382,7 +382,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
         .find("[Ctrl+G] regenerate")
         .expect("card footer must show regeneration");
     let tune = rendered
-        .find("[Enter/→] toggle")
+        .find("[Enter/→] open")
         .expect("card footer must show its disclosure key");
     let target = rendered
         .find("whilst → Example with whilst.")
@@ -407,7 +407,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
             && !rendered.contains("picture")
             && rendered.contains("RU → EN")
             && rendered.contains("[Tab] next")
-            && rendered.contains("[Enter/→] toggle")
+            && rendered.contains("[Enter/→] open")
             && !rendered.contains("] tune")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
@@ -462,7 +462,7 @@ fn a_published_batch_with_nothing_owed_stops_offering_regeneration() {
         rendered.contains("your cards")
             && rendered.contains("all done")
             && rendered.contains("[↑↓] nav")
-            && rendered.contains("[Enter/→] toggle")
+            && rendered.contains("[Enter/→] open")
             && !rendered.contains("] tune")
             && !rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")

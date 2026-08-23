@@ -56,17 +56,23 @@ impl DisclosureControls {
         }
     }
 
-    /// Return the secondary footer hint for the open/close toggle.
-    pub(crate) fn secondary_toggle(self) -> FooterHint {
-        FooterHint::secondary(self.toggle_key(), "toggle")
+    /// Return the secondary footer hint for the disclosure, named by the
+    /// direction it will take rather than by the mechanism.
+    ///
+    /// `toggle` described how the key is wired, not what pressing it does,
+    /// and it said the same word for both directions while the key pair
+    /// beside it was already flipping. The label follows the state now, so
+    /// the arrow and the verb always agree.
+    pub(crate) fn secondary_disclosure(self) -> FooterHint {
+        if self.open {
+            FooterHint::secondary("Enter/←", "close")
+        } else {
+            FooterHint::secondary("Enter/→", "open")
+        }
     }
 
     /// Return the Space action hint when the open pane has an action.
     pub(crate) fn primary_action(self) -> Option<FooterHint> {
         self.action.map(|label| FooterHint::primary("Space", label))
-    }
-
-    fn toggle_key(self) -> &'static str {
-        if self.open { "Enter/←" } else { "Enter/→" }
     }
 }

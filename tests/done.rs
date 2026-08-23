@@ -154,7 +154,7 @@ fn armed_done_screen_asks_for_escape_again() {
     assert!(
         rendered.contains("[Esc] again")
             && !rendered.contains("new cards")
-            && !rendered.contains("[Ctrl+G] Regenerate"),
+            && !rendered.contains("[Ctrl+G] regenerate"),
         "armed Done must make the second Escape confirmation visible: {rendered}"
     );
 }
@@ -253,7 +253,7 @@ fn quit_from_done_requests_app_exit() {
 fn done_with_failed_cards_offers_regenerate() {
     let rendered = flat(&failed_published());
     assert!(
-        rendered.contains("[Ctrl+G] Regenerate"),
+        rendered.contains("[Ctrl+G] regenerate"),
         "Done with failed cards must expose Ctrl+G Regenerate: {rendered}"
     );
 }

@@ -431,7 +431,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
     match welcome.stage {
         WelcomeStage::PickLanguage => {
             hints.push(super::common::FooterHint::primary("Enter", "next"));
-            hints.push(super::common::FooterHint::secondary("↑ ↓ ← →", "language"));
+            hints.push(super::common::FooterHint::secondary("↑↓←→", "language"));
         }
         WelcomeStage::EnterKey => {
             // Enter activates whichever chip is lit, and the two chips do
@@ -444,7 +444,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
             };
             hints.push(super::common::FooterHint::primary("Enter", action));
             if welcome.env_available {
-                hints.push(super::common::FooterHint::secondary("← →", "move"));
+                hints.push(super::common::FooterHint::secondary("←→", "move"));
             }
             hints.push(super::common::FooterHint::secondary("Esc", "back"));
         }

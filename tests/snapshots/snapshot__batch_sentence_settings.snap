@@ -17,4 +17,4 @@ expression: "render_sized(&app, 96, 16)"
                                                                                                 
                                                       ai may be wrong, please verify results    
                                                                                                 
-    step 2/3  1 card             [Ctrl+G] generate  [← →] pick  [↑ ↓] row  [Enter/Esc] close
+    step 2/3  1 card               [Ctrl+G] generate  [←→] pick  [↑↓] nav  [Enter/Esc] close

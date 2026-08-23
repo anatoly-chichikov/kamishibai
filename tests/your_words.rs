@@ -213,7 +213,7 @@ fn armed_words_clear_makes_escape_the_only_primary_action() {
     assert!(
         rendered.contains("[Esc] again")
             && !rendered.contains("[Esc] clear")
-            && !rendered.contains("[Ctrl+G] continue"),
+            && !rendered.contains("[Ctrl+G] understand"),
         "armed words clear competed with another primary footer action: {rendered}"
     );
 }
@@ -550,7 +550,7 @@ fn an_oversized_word_list_replaces_the_continue_hint_with_the_limit() {
     let rendered = flatten(&app);
     assert!(
         rendered.contains(&format!("over the {MAX_INTAKE_WORDS}-word limit"))
-            && !rendered.contains("[Ctrl+G] continue"),
+            && !rendered.contains("[Ctrl+G] understand"),
         "an oversized word list still advertised the key that would not work: {rendered}"
     );
 }

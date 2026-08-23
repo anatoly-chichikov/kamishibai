@@ -483,6 +483,16 @@ pub fn new_batch_hint(pending: bool) -> FooterHint {
     }
 }
 
+/// The live-batch Escape action, named before it is armed.
+///
+/// Every destructive Escape in the app follows the same two beats: the first
+/// press names what it will break and arms it, the second confirms. Stopping a
+/// run was the one that skipped the first beat, so `[Esc] again` appeared with
+/// nothing before it to say what "again" would do.
+pub fn stop_generation_hint() -> FooterHint {
+    FooterHint::with("Esc", "stop", Tier::Ghost, Keep::Useful)
+}
+
 /// The high-priority second-Escape confirmation shared by destructive actions.
 pub fn escape_again_hint() -> FooterHint {
     FooterHint::with("Esc", "again", Tier::Primary, Keep::Confirm)

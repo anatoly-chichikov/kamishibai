@@ -780,8 +780,8 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         if can_generate(app) {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
-        hints.push(super::common::FooterHint::secondary("← →", "pick"));
-        hints.push(super::common::FooterHint::ghost("↑ ↓", "row"));
+        hints.push(super::common::FooterHint::secondary("←→", "pick"));
+        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         hints.push(super::common::FooterHint::ghost("Enter/Esc", "close"));
     } else if matches!(app.review_focus(), ReviewFocus::Sense { .. }) {
         let controls = if app.expanded_add_more_focused() {
@@ -795,7 +795,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         if can_generate(app) {
             hints.push(super::common::FooterHint::secondary("Ctrl+G", "generate"));
         }
-        hints.push(controls.secondary_toggle());
+        hints.push(controls.secondary_disclosure());
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         hints.push(super::common::sweep_hint(true));
     } else {
@@ -809,7 +809,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         // `C` leaves it exactly there — and then `→` is inert while `←` is
         // what closes, and Esc peels the list instead of leaving the screen.
         let open = app.focused_sense_list_open();
-        hints.push(DisclosureControls::new(open).secondary_toggle());
+        hints.push(DisclosureControls::new(open).secondary_disclosure());
         if !open {
             hints.push(super::common::back_hint());
         }

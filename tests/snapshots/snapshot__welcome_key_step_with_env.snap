@@ -17,4 +17,4 @@ expression: "render_sized(&app, 96, 16)"
                            submit     load from env                                             
                                                       ai may be wrong, please verify results    
                                                                                                 
-    step 2/2                    [Enter] load from env  [← →] move  [Esc] back  [Ctrl+C] quit
+    step 2/2                     [Enter] load from env  [←→] move  [Esc] back  [Ctrl+C] quit

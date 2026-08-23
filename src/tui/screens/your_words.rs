@@ -240,7 +240,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
     if over_limit {
         hints.push(super::common::clear_words_hint());
     } else if count > 0 {
-        hints.push(super::common::FooterHint::primary("Ctrl+G", "continue"));
+        hints.push(super::common::FooterHint::primary("Ctrl+G", "understand"));
     } else {
         hints.push(super::common::FooterHint::primary("Cmd+V", "paste"));
     }

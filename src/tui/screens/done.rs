@@ -182,7 +182,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if failed_count(app) > 0 {
-        hints.push(super::common::FooterHint::primary("Ctrl+G", "Regenerate"));
+        hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
     }
     if !app.cards().is_empty() {
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
