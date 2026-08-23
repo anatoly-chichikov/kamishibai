@@ -175,12 +175,14 @@ fn your_words_footer_shows_language_shortcut() {
 }
 
 #[test]
-fn your_words_footer_keeps_paste_shortcut() {
-    let app = App::new(LanguagePair::new("en", "ru"));
-    let flat = flatten(&app);
+fn an_empty_words_box_spends_no_brightness_on_a_key_the_app_does_not_own() {
+    let empty = flatten(&App::new(LanguagePair::new("en", "ru")));
+    let typed = flatten(&App::new(LanguagePair::new("en", "ru")).seeded_blob("whilst"));
     assert!(
-        flat.contains("[Cmd+V] paste"),
-        "your words footer must keep the paste shortcut: {flat}"
+        !empty.contains("Cmd+V")
+            && !empty.contains("[Ctrl+G]")
+            && typed.contains("[Ctrl+G] understand"),
+        "the empty box has no key to name, and the one that matters should arrive with the first word: {empty}"
     );
 }
 
@@ -199,7 +201,7 @@ fn raw_nonempty_words_without_a_card_still_advertise_escape_clear() {
     let app = App::new(LanguagePair::new("en", "ru")).seeded_blob("\n");
     let rendered = flatten(&app);
     assert!(
-        rendered.contains("[Cmd+V] paste") && rendered.contains("[Esc] clear"),
+        rendered.contains("[Esc] clear") && !rendered.contains("[Ctrl+G]"),
         "raw nonempty input armed by Escape did not advertise its clear action: {rendered}"
     );
 }

@@ -36,7 +36,7 @@ const TRAILING_GAP: u16 = 3;
 const FIELD_INDENT: u16 = 4 + 16 + 2;
 /// Fixed width of the underlined key input field, matching the mask cap.
 const KEY_FIELD_WIDTH: u16 = 39;
-const KEY_PLACEHOLDER: &str = "paste your key [Cmd+V]";
+const KEY_PLACEHOLDER: &str = "paste or type your key";
 
 /// `ScreenView` handle for the first-run Welcome screen. Skips the language
 /// chip — the language pair is not yet locked in at this point.

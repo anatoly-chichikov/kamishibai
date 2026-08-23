@@ -219,8 +219,12 @@ fn status(app: &App) -> Vec<Span<'static>> {
         ));
     }
     if count > MAX_INTAKE_WORDS {
+        // Naming the ceiling says what is wrong; naming the overshoot says what
+        // to do about it. The review already words its own limit that way.
+        let over = count - MAX_INTAKE_WORDS;
+        let noun = if over == 1 { "line" } else { "lines" };
         left.push(Span::styled(
-            format!(" · over the {MAX_INTAKE_WORDS}-word limit"),
+            format!(" · over the {MAX_INTAKE_WORDS}-word limit — remove {over} {noun}"),
             palette::Ink::Detail.on(false),
         ));
     }
@@ -237,12 +241,16 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
     let count = word_count(app.blob());
     let over_limit = count > MAX_INTAKE_WORDS;
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
+    // An empty box has no bright key, because the thing to do — type — has no
+    // key to name. The slot used to hold `[Cmd+V] paste`, which named a chord
+    // the app never dispatches on (the terminal replays a paste as ordinary
+    // characters) and named it in macOS spelling on every platform. Leaving it
+    // empty also lets `[Ctrl+G] understand` announce itself by arriving the
+    // moment there is something to understand.
     if over_limit {
         hints.push(super::common::clear_words_hint());
     } else if count > 0 {
         hints.push(super::common::FooterHint::primary("Ctrl+G", "understand"));
-    } else {
-        hints.push(super::common::FooterHint::primary("Cmd+V", "paste"));
     }
     if !over_limit && !app.blob().is_empty() {
         hints.push(super::common::clear_words_hint());

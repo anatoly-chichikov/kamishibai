@@ -208,7 +208,7 @@ fn narrow_welcome_key_step_keeps_the_chosen_language_and_every_form_control_visi
     let rendered = render_sized(&app, 80, 16);
     assert!(
         rendered.contains("EN    English")
-            && rendered.contains("paste your key [Cmd+V]")
+            && rendered.contains("paste or type your key")
             && rendered.contains(" submit "),
         "the narrow Welcome key step clipped either the chosen language or its form controls"
     );

@@ -468,9 +468,6 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
         (WelcomeStage::EnterKey, AppEvent::WelcomeFocusTo(focus)) => {
             (app.welcome_focus(focus), Side::None)
         }
-        (WelcomeStage::EnterKey, AppEvent::WelcomePasteKey(text)) => {
-            (app.welcome_paste_key(text.trim().to_string()), Side::None)
-        }
         (WelcomeStage::EnterKey, AppEvent::KeyChar(symbol)) => {
             let mut key = app.welcome().key.clone();
             key.push(symbol);
