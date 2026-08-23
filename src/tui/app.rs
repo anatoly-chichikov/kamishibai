@@ -585,6 +585,21 @@ impl App {
         self
     }
 
+    /// Return the app with the last character of the API key removed.
+    ///
+    /// Backspace used to wipe the whole field, which is the one place in the
+    /// app where a single ordinary keystroke destroyed a whole entry — and on
+    /// the setup screen, where a mistyped key is exactly what you are trying to
+    /// correct. It rubs out one character, like every other field.
+    pub fn welcome_rubbed_key(mut self) -> Self {
+        self.welcome.key.pop();
+        if self.welcome.key.is_empty() {
+            self.welcome.source = KeySource::Empty;
+        }
+        self.welcome.notice = None;
+        self
+    }
+
     /// Return the app with welcome focus moved to the next control in the cycle.
     pub fn welcome_focus_next(mut self) -> Self {
         self.welcome.focus = step_focus(self.welcome.focus, self.welcome.env_available, 1);

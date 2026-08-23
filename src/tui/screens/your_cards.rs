@@ -1845,7 +1845,9 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
             hints.push(super::common::sweep_hint(true));
         }
         if census.unfinished() {
-            hints.push(super::common::FooterHint::secondary("Tab", "next"));
+            // Shift+Tab walks the same ring backwards and was never named, so
+            // the jump looked like a one-way ratchet.
+            hints.push(super::common::FooterHint::secondary("Tab/⇧Tab", "next"));
         }
         if !app.cards().is_empty() {
             hints.push(super::common::FooterHint::ghost("↑↓", "nav"));

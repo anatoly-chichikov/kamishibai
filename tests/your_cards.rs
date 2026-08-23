@@ -406,7 +406,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
             && rendered.contains("✓ voice")
             && !rendered.contains("picture")
             && rendered.contains("RU → EN")
-            && rendered.contains("[Tab] next")
+            && rendered.contains("[Tab/⇧Tab] next")
             && rendered.contains("[Enter/→] open")
             && !rendered.contains("] tune")
             && rendered.contains("[Ctrl+G] regenerate")
@@ -416,6 +416,21 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
             && ctrl < tune
             && target < picture,
         "each generated card must keep its target in the head before its step rows: {rendered}"
+    );
+}
+
+#[test]
+fn the_vim_walk_reaches_the_cards_screen_too() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+    ]);
+    let down = transit(app.clone(), AppEvent::KeyChar('j')).0;
+    let back = transit(down.clone(), AppEvent::KeyChar('k')).0;
+    assert_eq!(
+        (down.card_selected(), back.card_selected()),
+        (1, 0),
+        "j and k walked the review but died on the cards, so one list screen answered them and the other did not"
     );
 }
 
@@ -441,7 +456,7 @@ fn a_finished_batch_drops_the_jump_hint_and_keeps_plain_navigation() {
     ]);
     let rendered = flat(&app);
     assert!(
-        !rendered.contains("[Tab] next") && rendered.contains("[↑↓] nav"),
+        !rendered.contains("[Tab/⇧Tab] next") && rendered.contains("[↑↓] nav"),
         "a batch with nothing left to build still advertised the unfinished jump: {rendered}"
     );
 }

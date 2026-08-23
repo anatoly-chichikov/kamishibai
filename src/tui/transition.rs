@@ -217,7 +217,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         }
         (Screen::WhatIUnderstood, None, AppEvent::CursorLeft) => (app, Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::CursorRight) => (app, Side::None),
-        (Screen::WhatIUnderstood, None, AppEvent::NavPrev | AppEvent::KeyChar('k' | 'K'))
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev)
             if app.review_focus() == ReviewFocus::Head(0) && !app.candidates().is_empty() =>
         {
             (
@@ -247,12 +247,10 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 (next, Side::None)
             }
         }
-        (Screen::WhatIUnderstood, None, AppEvent::NavPrev | AppEvent::KeyChar('k' | 'K')) => {
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev) => {
             (app.review_focus_previous(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::NavNext | AppEvent::KeyChar('j' | 'J')) => {
-            (app.review_focus_next(), Side::None)
-        }
+        (Screen::WhatIUnderstood, None, AppEvent::NavNext) => (app.review_focus_next(), Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::OpenPreferredLanguagePicker) => (
             open_language_picker(app, PickerSection::Learning),
             Side::None,
@@ -478,7 +476,7 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
             key.push(symbol);
             (app.welcome_paste_key(key), Side::None)
         }
-        (WelcomeStage::EnterKey, AppEvent::KeyBackspace) => (app.welcome_clear_key(), Side::None),
+        (WelcomeStage::EnterKey, AppEvent::KeyBackspace) => (app.welcome_rubbed_key(), Side::None),
         (WelcomeStage::EnterKey, AppEvent::WelcomeLoadEnvKey) => (app, Side::LoadEnvKey),
         (WelcomeStage::EnterKey, AppEvent::Submit)
         | (WelcomeStage::EnterKey, AppEvent::KeyEnter) => welcome_submit(app),
@@ -539,13 +537,26 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
             Screen::Welcome,
             AppEvent::OpenPreferredLanguagePicker | AppEvent::OpenLanguagePicker(_),
         ) if app.welcome().stage == WelcomeStage::PickLanguage => AppEvent::WelcomeNextLanguage,
-        (Screen::WhatIUnderstood, AppEvent::KeyChar(symbol)) => {
-            AppEvent::KeyChar(latin_key(*symbol))
-        }
+        (Screen::WhatIUnderstood, AppEvent::KeyChar(symbol)) => walk(latin_key(*symbol)),
         (Screen::YourCards, AppEvent::KeyChar(symbol)) if !sentence_note_focused(app) => {
-            AppEvent::KeyChar(latin_key(*symbol))
+            walk(latin_key(*symbol))
         }
         _ => event,
+    }
+}
+
+/// Fold the vim walk onto the arrow events.
+///
+/// `j` and `k` used to be spelled out in the review screen's own match arms,
+/// which meant they worked on exactly one of the two list screens and behaved
+/// slightly differently from the arrows even there. Folding them here makes
+/// them an alias in the plain sense: every arm downstream sees one event, so
+/// the two keys cannot drift apart from the arrows again.
+fn walk(key: char) -> AppEvent {
+    match key {
+        'j' => AppEvent::NavNext,
+        'k' => AppEvent::NavPrev,
+        other => AppEvent::KeyChar(other),
     }
 }
 
@@ -651,6 +662,17 @@ mod tests {
             "",
             env_available,
         )
+    }
+
+    #[test]
+    fn backspace_on_the_key_rubs_out_one_character() {
+        let typed = enter_key(false).welcome_paste_key("abcd");
+        let rubbed = transit(typed, AppEvent::KeyBackspace).0;
+        assert_eq!(
+            rubbed.welcome().key,
+            "abc",
+            "backspace wiped the whole key on the one screen where a typo is what you came to fix"
+        );
     }
 
     #[test]
