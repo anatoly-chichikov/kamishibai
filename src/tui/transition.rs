@@ -381,10 +381,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::KeyChar(' ')) if !app.cards().is_empty() => {
             (app.card_toggle_expanded(), Side::None)
         }
-        (Screen::YourCards, None, AppEvent::NextUnfinished) => (app.card_jumped(true), Side::None),
-        (Screen::YourCards, None, AppEvent::PreviousUnfinished) => {
-            (app.card_jumped(false), Side::None)
-        }
         (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_focus_previous(), Side::None),
         (Screen::YourCards, None, AppEvent::NavNext) => (app.card_focus_next(), Side::None),
         (Screen::YourCards, None, event)

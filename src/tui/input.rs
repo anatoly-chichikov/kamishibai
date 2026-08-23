@@ -29,11 +29,6 @@ pub fn to_app(key: KeyEvent) -> Option<AppEvent> {
         KeyCode::Down => Some(AppEvent::NavNext),
         KeyCode::Left => Some(AppEvent::CursorLeft),
         KeyCode::Right => Some(AppEvent::CursorRight),
-        KeyCode::BackTab => Some(AppEvent::PreviousUnfinished),
-        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            Some(AppEvent::PreviousUnfinished)
-        }
-        KeyCode::Tab => Some(AppEvent::NextUnfinished),
         KeyCode::Char(symbol) if key.modifiers.contains(KeyModifiers::SUPER) => {
             match latin_key(symbol) {
                 'l' => Some(AppEvent::OpenPreferredLanguagePicker),

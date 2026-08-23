@@ -1625,29 +1625,6 @@ impl App {
         self
     }
 
-    /// Return the app with the card cursor on the next card that is not finished,
-    /// wrapping past the end of the batch. Unfinished means any phase but
-    /// `CardPhase::Ready`, so a card carrying a staged rewrite is a stop on the
-    /// walk. Leaves the app untouched when every card is finished.
-    #[must_use]
-    pub fn card_jumped(mut self, forward: bool) -> Self {
-        let total = self.cards.drafts.len();
-        if total == 0 {
-            return self;
-        }
-        let step = if forward { 1 } else { total - 1 };
-        let Some(next) = (1..=total)
-            .map(|offset| (self.cards.selected + offset * step) % total)
-            .find(|index| self.cards.drafts[*index].phase() != CardPhase::Ready)
-        else {
-            return self;
-        };
-        self.cards.editor = None;
-        self.cards.following = false;
-        self.cards.selected = next;
-        self
-    }
-
     /// Toggle the focused card, opening its editor immediately when it can be tuned.
     pub fn card_toggle_expanded(mut self) -> Self {
         let selected = self.cards.selected;

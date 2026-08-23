@@ -1802,7 +1802,6 @@ fn stopping_hints(app: &App) -> Vec<super::common::FooterHint> {
 }
 
 fn hints(app: &App) -> Vec<super::common::FooterHint> {
-    let census = app.card_census();
     if app.generation_stopping() {
         stopping_hints(app)
     } else if app.generation_stop_pending() {
@@ -1843,11 +1842,6 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         }
         if app.any_card_expanded() {
             hints.push(super::common::sweep_hint(true));
-        }
-        if census.unfinished() {
-            // Shift+Tab walks the same ring backwards and was never named, so
-            // the jump looked like a one-way ratchet.
-            hints.push(super::common::FooterHint::secondary("Tab/⇧Tab", "next"));
         }
         if !app.cards().is_empty() {
             hints.push(super::common::FooterHint::ghost("↑↓", "nav"));

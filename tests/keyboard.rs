@@ -204,25 +204,14 @@ fn release_generate_from_keyboard_enhancement_does_not_submit_twice() {
 }
 
 #[test]
-fn tab_maps_to_the_next_unfinished_card_jump() {
-    assert_eq!(
-        to_app(press(KeyCode::Tab)),
-        Some(AppEvent::NextUnfinished),
-        "the tab key never reached the card list as a jump"
-    );
-}
-
-#[test]
-fn shift_tab_maps_to_the_previous_unfinished_card_jump() {
+fn tab_carries_no_meaning_of_its_own() {
     assert_eq!(
         (
+            to_app(press(KeyCode::Tab)),
             to_app(press(KeyCode::BackTab)),
             to_app(modified(KeyCode::Tab, KeyModifiers::SHIFT))
         ),
-        (
-            Some(AppEvent::PreviousUnfinished),
-            Some(AppEvent::PreviousUnfinished)
-        ),
-        "a backwards jump was lost in one of the two shapes crossterm reports it as"
+        (None, None, None),
+        "tab still claimed an action after the card jump was removed"
     );
 }

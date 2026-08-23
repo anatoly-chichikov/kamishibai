@@ -406,7 +406,6 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
             && rendered.contains("✓ voice")
             && !rendered.contains("picture")
             && rendered.contains("RU → EN")
-            && rendered.contains("[Tab/⇧Tab] next")
             && rendered.contains("[Enter/→] open")
             && !rendered.contains("] tune")
             && rendered.contains("[Ctrl+G] regenerate")
@@ -445,19 +444,6 @@ fn a_running_batch_stops_offering_the_restart_it_would_only_queue() {
     assert!(
         !rendered.contains("[Ctrl+G] regenerate"),
         "with a worker mid-flight Ctrl+G only queues a silent restart, so it must not hold the bright slot: {rendered}"
-    );
-}
-
-#[test]
-fn a_finished_batch_drops_the_jump_hint_and_keeps_plain_navigation() {
-    let app = seeded(vec![
-        draft("whilst", ready_artifacts()),
-        draft("at the end", ready_artifacts()),
-    ]);
-    let rendered = flat(&app);
-    assert!(
-        !rendered.contains("[Tab/⇧Tab] next") && rendered.contains("[↑↓] nav"),
-        "a batch with nothing left to build still advertised the unfinished jump: {rendered}"
     );
 }
 
@@ -2177,54 +2163,6 @@ fn the_footer_keeps_regenerate_when_the_census_crowds_a_narrow_bar() {
     assert!(
         footer.contains("[Ctrl+G] regenerate"),
         "a crowded status bar shed the screen's main action: {footer}"
-    );
-}
-
-#[test]
-fn tab_walks_only_the_unfinished_cards_and_wraps() {
-    let drafts = (0..20)
-        .map(|index| {
-            let artifacts = if index == 7 || index == 13 {
-                CardArtifacts::default()
-            } else {
-                ready_artifacts()
-            };
-            draft(&format!("word-{index:02}"), artifacts)
-        })
-        .collect();
-    let start = seeded(drafts);
-    let first = transit(start.clone(), AppEvent::NextUnfinished).0;
-    let second = transit(first.clone(), AppEvent::NextUnfinished).0;
-    let wrapped = transit(second.clone(), AppEvent::NextUnfinished).0;
-    let backwards = transit(second.clone(), AppEvent::PreviousUnfinished).0;
-    assert_eq!(
-        (
-            first.card_selected(),
-            second.card_selected(),
-            wrapped.card_selected(),
-            backwards.card_selected()
-        ),
-        (7, 13, 7, 7),
-        "the jump key walked finished cards instead of cycling the unfinished ones"
-    );
-}
-
-#[test]
-fn tab_parks_the_editor_and_jumps_to_the_next_unfinished_card() {
-    let start = seeded(vec![
-        labeled_draft("whilst", ready_artifacts()),
-        labeled_draft("wreck", CardArtifacts::default()),
-    ]);
-    let opened = tuning(start);
-    let jumped = transit(opened.clone(), AppEvent::NextUnfinished).0;
-    assert_eq!(
-        (
-            jumped.card_selected(),
-            jumped.sentence_editor().is_none(),
-            jumped.card_expanded_at(0),
-        ),
-        (1, true, true),
-        "the jump key failed to park the open editor and land on the unfinished card"
     );
 }
 

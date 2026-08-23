@@ -260,8 +260,6 @@ where
                             | AppEvent::KeyBackspace
                             | AppEvent::NavPrev
                             | AppEvent::NavNext
-                            | AppEvent::NextUnfinished
-                            | AppEvent::PreviousUnfinished
                             | AppEvent::CursorLeft
                             | AppEvent::CursorRight
                     );
