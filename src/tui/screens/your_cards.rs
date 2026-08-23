@@ -1769,10 +1769,42 @@ fn status(app: &App) -> Vec<Span<'static>> {
     left
 }
 
+/// Return whether `Ctrl+G` would actually re-roll anything right now.
+///
+/// The key is wired unconditionally, but what it reaches depends on the batch:
+/// with a worker already running it only queues a silent restart, and on a
+/// finished batch with nothing staged it falls through to a plain republish.
+/// Neither is a regeneration, so neither earns the bright slot — the hint
+/// appears exactly when there is a rewrite, a failure, or an unfinished
+/// artifact waiting for it.
+fn can_regenerate(app: &App) -> bool {
+    app.cards_running_target().is_none() && app.card_census().unfinished()
+}
+
+/// Return the hints for a run that is draining its last in-flight request.
+///
+/// There is nothing to start here, so nothing takes the bright slot. But
+/// `transit` has no gate on the stop state at all: the walk, the disclosure
+/// and the sweep all still answer, and a bar that named only the exit would
+/// read as a frozen application. It says what is true instead — you can look
+/// around, you cannot act.
+fn stopping_hints(app: &App) -> Vec<super::common::FooterHint> {
+    let mut hints = vec![DisclosureControls::new(app.card_expanded()).secondary_toggle()];
+    if app.any_card_expanded() {
+        hints.push(super::common::FooterHint::secondary("C", "collapse"));
+    }
+    hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+    if !app.any_card_expanded() && !app.cards().is_empty() {
+        hints.push(super::common::FooterHint::ghost("C", "expand"));
+    }
+    hints.push(super::common::quit_hint(app.quit_pending()));
+    hints
+}
+
 fn hints(app: &App) -> Vec<super::common::FooterHint> {
     let census = app.card_census();
     if app.generation_stopping() {
-        vec![super::common::quit_hint(app.quit_pending())]
+        stopping_hints(app)
     } else if app.generation_stop_pending() {
         vec![
             super::common::escape_again_hint(),
@@ -1784,17 +1816,24 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
             super::common::quit_hint(app.quit_pending()),
         ]
     } else if app.sentence_editor().is_some() {
-        vec![
-            super::common::FooterHint::primary("Ctrl+G", "regenerate"),
-            super::common::FooterHint::secondary("← →", "pick"),
-            super::common::FooterHint::ghost("↑ ↓", "row"),
-            super::common::FooterHint::ghost("Enter/Esc", "close"),
-        ]
+        let mut hints = Vec::new();
+        if can_regenerate(app) {
+            hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
+        }
+        hints.push(super::common::FooterHint::secondary("← →", "pick"));
+        hints.push(super::common::FooterHint::ghost("↑ ↓", "row"));
+        hints.push(super::common::FooterHint::ghost("Enter/Esc", "close"));
+        hints.push(super::common::quit_hint(app.quit_pending()));
+        hints
     } else {
         let controls = DisclosureControls::new(app.card_expanded());
         let mut hints = Vec::new();
-        hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
-        hints.push(controls.secondary_toggle());
+        if can_regenerate(app) {
+            hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
+        }
+        if !app.cards().is_empty() {
+            hints.push(controls.secondary_toggle());
+        }
         if app.card_expanded() && app.card_tunable() {
             hints.push(super::common::FooterHint::secondary("↓", "tune"));
         }
@@ -1804,7 +1843,9 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         if census.unfinished() {
             hints.push(super::common::FooterHint::secondary("Tab", "next"));
         }
-        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        if !app.cards().is_empty() {
+            hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        }
         if !app.any_card_expanded() && !app.cards().is_empty() {
             hints.push(super::common::FooterHint::ghost("C", "expand"));
         }

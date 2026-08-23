@@ -420,6 +420,20 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
 }
 
 #[test]
+fn a_running_batch_stops_offering_the_restart_it_would_only_queue() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", CardArtifacts::default()),
+    ])
+    .cards_running(Some((1, Artifact::Meta)));
+    let rendered = flat(&app);
+    assert!(
+        !rendered.contains("[Ctrl+G] regenerate"),
+        "with a worker mid-flight Ctrl+G only queues a silent restart, so it must not hold the bright slot: {rendered}"
+    );
+}
+
+#[test]
 fn a_finished_batch_drops_the_jump_hint_and_keeps_plain_navigation() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
@@ -433,7 +447,7 @@ fn a_finished_batch_drops_the_jump_hint_and_keeps_plain_navigation() {
 }
 
 #[test]
-fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
+fn a_published_batch_with_nothing_owed_stops_offering_regeneration() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("at the end", ready_artifacts()),
@@ -450,7 +464,7 @@ fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
             && rendered.contains("[↑↓] nav")
             && rendered.contains("[Enter/→] toggle")
             && !rendered.contains("] tune")
-            && rendered.contains("[Ctrl+G] regenerate")
+            && !rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
             && rendered.contains("[Esc] new cards")
             && new_cards < quit

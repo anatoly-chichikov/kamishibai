@@ -249,9 +249,6 @@ fn both_r_keys_are_inert_while_space_opens_the_card_and_a_tag_opens_the_live_edi
     )
     .0;
     let rendered = flat(&opened);
-    let ctrl = rendered
-        .find("[Ctrl+G] regenerate")
-        .expect("editor footer must show regeneration");
     let arrows = rendered
         .find("[← →] pick")
         .expect("editor footer must show chip navigation");
@@ -286,11 +283,26 @@ fn both_r_keys_are_inert_while_space_opens_the_card_and_a_tag_opens_the_live_edi
             && rendered.contains("say what should change")
             && rendered.contains("[← →] pick")
             && rendered.contains("[↑ ↓] row")
-            && rendered.contains("[Ctrl+G] regenerate")
+            && !rendered.contains("[Ctrl+G] regenerate")
             && rendered.contains("[Enter/Esc] close")
             && !rendered.contains("[R] change")
-            && ctrl < arrows,
+            && arrows < rendered.find("[↑ ↓] row").unwrap_or(usize::MAX),
         "r/R emitted an action, Space fell into the editor, or the tag hit and live editor footer drifted apart: {rendered}"
+    );
+}
+
+#[test]
+fn the_editor_offers_regeneration_only_once_a_rewrite_is_staged() {
+    let opened = transit(
+        seeded(card()),
+        AppEvent::SentenceLabelFocus(LabelEditorRow::Register),
+    )
+    .0;
+    let staged = transit(opened.clone(), AppEvent::CursorRight).0;
+    assert!(
+        !flat(&opened).contains("[Ctrl+G] regenerate")
+            && flat(&staged).contains("[Ctrl+G] regenerate"),
+        "an untouched editor has nothing to re-roll, so the bright key must arrive with the first staged change"
     );
 }
 

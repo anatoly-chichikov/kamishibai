@@ -13,4 +13,4 @@ expression: render(&app)
                                                                                 
                                       ai may be wrong, please verify results    
                                                                                 
-    step 3/3  0/0 ready  00:00            [Ctrl+G] regenerate  [Ctrl+C] quit
+    step 3/3  0/0 ready  00:00                                 [Ctrl+C] quit

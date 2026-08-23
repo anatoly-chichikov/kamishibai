@@ -198,6 +198,11 @@ where
                     let delta = match key.code {
                         KeyCode::PageUp => Some(-page),
                         KeyCode::PageDown => Some(page),
+                        // Done is the one screen whose body scrolls but holds
+                        // no cursor to walk, so the arrows have nothing else to
+                        // mean there and would otherwise do nothing at all.
+                        KeyCode::Up if shell.app().screen() == Screen::Done => Some(-1),
+                        KeyCode::Down if shell.app().screen() == Screen::Done => Some(1),
                         KeyCode::Char(symbol)
                             if latin_key(symbol) == 'n'
                                 && key.modifiers.contains(KeyModifiers::CONTROL)

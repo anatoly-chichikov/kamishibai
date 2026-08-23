@@ -184,6 +184,9 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
     if failed_count(app) > 0 {
         hints.push(super::common::FooterHint::primary("Ctrl+G", "Regenerate"));
     }
+    if !app.cards().is_empty() {
+        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+    }
     if app.can_start_new_batch() {
         hints.push(super::common::new_batch_hint(app.new_batch_pending()));
     }

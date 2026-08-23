@@ -15,7 +15,7 @@ use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
 use crate::session::RawInputBatch;
-use crate::session::{Sense, WordCandidate};
+use crate::session::{MAX_PLAN_CARDS, Sense, WordCandidate};
 use crate::tui::app::{App, ReviewFocus};
 use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
@@ -737,7 +737,7 @@ fn status(app: &App) -> Vec<Span<'static>> {
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 2/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
-    let count = review_card_count(app);
+    let count = app.review_cards();
     if count > 0 {
         left.push(Span::styled(
             count.to_string(),
@@ -764,11 +764,20 @@ fn status(app: &App) -> Vec<Span<'static>> {
     left
 }
 
+/// Return whether `Ctrl+G` would actually start generating right now.
+///
+/// `start_generation` refuses an empty selection outright and answers an
+/// oversized one with a notice instead of a batch, so both refusals have to be
+/// asked here too — a bright key that only scolds is worse than no key.
+fn can_generate(app: &App) -> bool {
+    let count = app.review_cards();
+    count > 0 && count <= MAX_PLAN_CARDS
+}
+
 fn hints(app: &App) -> Vec<super::common::FooterHint> {
-    let count = review_card_count(app);
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if app.sentence_settings_editor().is_some() {
-        if count > 0 {
+        if can_generate(app) {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
         hints.push(super::common::FooterHint::secondary("← →", "pick"));
@@ -783,14 +792,14 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         if let Some(hint) = controls.primary_action() {
             hints.push(hint);
         }
-        if count > 0 {
+        if can_generate(app) {
             hints.push(super::common::FooterHint::secondary("Ctrl+G", "generate"));
         }
         hints.push(controls.secondary_toggle());
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         hints.push(super::common::FooterHint::secondary("C", "collapse"));
     } else {
-        if count > 0 {
+        if can_generate(app) {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
         if !app.candidates().is_empty() && app.selected() == 0 {
@@ -815,14 +824,6 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         hints.push(super::common::quit_hint(app.quit_pending()));
     }
     hints
-}
-
-fn review_card_count(app: &App) -> usize {
-    app.candidates()
-        .iter()
-        .filter(|candidate| candidate.ok())
-        .map(WordCandidate::selected_count)
-        .sum()
 }
 
 #[cfg(test)]
