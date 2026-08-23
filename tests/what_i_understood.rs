@@ -719,7 +719,7 @@ fn off_language_rows_ignore_enter_and_change_but_can_be_dropped() {
 }
 
 #[test]
-fn dropping_the_last_candidate_returns_to_your_words_with_input_cleared() {
+fn dropping_the_last_candidate_returns_to_your_words_with_the_input_intact() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .seeded_blob("bittersweet")
@@ -728,8 +728,25 @@ fn dropping_the_last_candidate_returns_to_your_words_with_input_cleared() {
     let after = transit(app, AppEvent::KeyChar('d')).0;
     assert_eq!(
         (after.screen(), after.blob()),
-        (Screen::YourWords, ""),
-        "dropping the final candidate must return to the enter-words step with the input wiped"
+        (Screen::YourWords, "bittersweet"),
+        "an unconfirmed letter must not be the one path that throws the typed words away"
+    );
+}
+
+#[test]
+fn dropping_is_refused_from_inside_an_open_sense_list() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .seeded_blob("bank")
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(app, AppEvent::CursorRight).0;
+    let focused = transit(opened, AppEvent::NavNext).0;
+    let after = transit(focused, AppEvent::KeyChar('d')).0;
+    assert_eq!(
+        after.candidates().len(),
+        1,
+        "picking senses must not sit one unadvertised letter away from discarding the whole word"
     );
 }
 

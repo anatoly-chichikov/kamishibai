@@ -797,7 +797,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         }
         hints.push(controls.secondary_toggle());
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
-        hints.push(super::common::FooterHint::secondary("C", "collapse"));
+        hints.push(super::common::sweep_hint(true));
     } else {
         if can_generate(app) {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
@@ -810,13 +810,13 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         if app.any_sense_list_open() {
-            hints.push(super::common::FooterHint::secondary("C", "collapse"));
+            hints.push(super::common::sweep_hint(true));
         } else if app
             .candidates()
             .iter()
             .any(|candidate| candidate.ok() && candidate.has_multiple_senses())
         {
-            hints.push(super::common::FooterHint::ghost("C", "expand"));
+            hints.push(super::common::sweep_hint(false));
         }
         hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
     }

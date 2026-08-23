@@ -260,12 +260,34 @@ pub enum Tier {
     Ghost,
 }
 
+/// How long a hint survives while the bar narrows.
+///
+/// Rank is not brightness — a quiet hint can outlive a loud one — so the two
+/// axes are named separately and the whole ladder is written here once. Read
+/// bottom to top it says: the exit outlives every action of the screen and
+/// yields only to the one action that advances it, and to a confirmation the
+/// user has already armed.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Keep {
+    /// Conventional keys and discovery affordances — shed first.
+    Optional,
+    /// Something this screen offers to do.
+    Useful,
+    /// The universal way out. `Ctrl+C` holds this rank alone, which is what
+    /// keeps it from ever tying with a screen action and losing the tie-break.
+    Exit,
+    /// The main action of the current sub-state.
+    Main,
+    /// A destructive confirmation the user has already armed.
+    Confirm,
+}
+
 /// Blank gap between status-bar segments and footer hints — two spaces, no
 /// glyph. The bar carries no punctuation between items.
 const SEPARATOR: &str = "  ";
 
-/// One `[KEY] label` footer hint: its text, its color `tier`, and `keep` — how
-/// long it survives when the bar is too narrow (higher is dropped later).
+/// One `[KEY] label` footer hint: its text, its colour `tier`, and its `keep`
+/// rank — how long it survives when the bar is too narrow.
 ///
 /// Built through `primary` / `secondary` / `ghost`; the status-bar renderer in
 /// this module reads the fields directly to paint the hint and to pick the
@@ -274,27 +296,27 @@ pub struct FooterHint {
     key: String,
     label: String,
     tier: Tier,
-    keep: u8,
+    keep: Keep,
 }
 
 impl FooterHint {
     /// The screen's main action — bright label; kept the longest and shed only
     /// when even it cannot fit beside the status.
     pub fn primary(key: &str, label: &str) -> Self {
-        Self::with(key, label, Tier::Primary, 3)
+        Self::with(key, label, Tier::Primary, Keep::Main)
     }
 
     /// A secondary action — one step quieter, dropped before the quit hint.
     pub fn secondary(key: &str, label: &str) -> Self {
-        Self::with(key, label, Tier::Secondary, 1)
+        Self::with(key, label, Tier::Secondary, Keep::Useful)
     }
 
     /// A conventional or omnipresent key — quietest, the first to be dropped.
     pub fn ghost(key: &str, label: &str) -> Self {
-        Self::with(key, label, Tier::Ghost, 0)
+        Self::with(key, label, Tier::Ghost, Keep::Optional)
     }
 
-    fn with(key: &str, label: &str, tier: Tier, keep: u8) -> Self {
+    fn with(key: &str, label: &str, tier: Tier, keep: Keep) -> Self {
         Self {
             key: String::from(key),
             label: String::from(label),
@@ -425,30 +447,31 @@ pub fn status_sep() -> Span<'static> {
 ///
 /// A dim `Ghost`; once the first Ctrl+C has been seen it brightens and its
 /// label switches from `quit` to `again` to signal the next press will exit.
-/// It outlives the secondary actions on a narrow line but is dropped — never
-/// clipped — before the bar would overflow.
+/// It is the sole holder of `Keep::Exit`, so it outlives every action a screen
+/// offers and yields only to that screen's primary — but it is still dropped
+/// whole, never clipped, on a bar too narrow even for that.
 pub fn quit_hint(pending: bool) -> FooterHint {
     if pending {
-        FooterHint::with("Ctrl+C", "again", Tier::Secondary, 2)
+        FooterHint::with("Ctrl+C", "again", Tier::Secondary, Keep::Exit)
     } else {
-        FooterHint::with("Ctrl+C", "quit", Tier::Ghost, 2)
+        FooterHint::with("Ctrl+C", "quit", Tier::Ghost, Keep::Exit)
     }
 }
 
-/// The review-screen back action, retained alongside quit on a crowded footer.
+/// The review-screen back action.
 pub fn back_hint() -> FooterHint {
-    FooterHint::with("Esc", "back", Tier::Secondary, 2)
+    FooterHint::secondary("Esc", "back")
 }
 
-/// The review-screen generation-guidance action, retained on a crowded footer.
+/// The review-screen generation-guidance action.
 pub fn sentence_settings_hint() -> FooterHint {
-    FooterHint::with("↑", "guidance", Tier::Secondary, 2)
+    FooterHint::secondary("↑", "guidance")
 }
 
-/// The nonempty words action, painted quietly but retained ahead of language
-/// selection when the footer is crowded.
+/// The nonempty words action, painted quietly but ranked as the screen action
+/// it is, so it outlives the conventional keys beside it.
 pub fn clear_words_hint() -> FooterHint {
-    FooterHint::with("Esc", "clear", Tier::Ghost, 1)
+    FooterHint::with("Esc", "clear", Tier::Ghost, Keep::Useful)
 }
 
 /// The finished-screen Escape action and its armed confirmation state.
@@ -456,13 +479,27 @@ pub fn new_batch_hint(pending: bool) -> FooterHint {
     if pending {
         escape_again_hint()
     } else {
-        FooterHint::with("Esc", "new cards", Tier::Ghost, 2)
+        FooterHint::with("Esc", "new cards", Tier::Ghost, Keep::Useful)
     }
 }
 
 /// The high-priority second-Escape confirmation shared by destructive actions.
 pub fn escape_again_hint() -> FooterHint {
-    FooterHint::with("Esc", "again", Tier::Primary, 4)
+    FooterHint::with("Esc", "again", Tier::Primary, Keep::Confirm)
+}
+
+/// The whole-screen disclosure sweep, named by the direction it will take.
+///
+/// Quiet while everything is closed, because opening is an offer rather than
+/// an instruction — but ranked as a screen action either way. As a plain ghost
+/// it was shed before the bar reached any realistic width, which hid the one
+/// gesture that shows a review or a batch all at once.
+pub fn sweep_hint(open: bool) -> FooterHint {
+    if open {
+        FooterHint::secondary("C", "collapse")
+    } else {
+        FooterHint::with("C", "expand", Tier::Ghost, Keep::Useful)
+    }
 }
 
 /// One and only entry point for drawing a fullscreen screen.
@@ -712,6 +749,37 @@ mod tests {
     }
 
     #[test]
+    fn the_sweep_survives_the_conventional_keys_it_used_to_die_beside() {
+        let hints = vec![
+            FooterHint::primary("Ctrl+G", "generate"),
+            FooterHint::ghost("↑↓", "nav"),
+            sweep_hint(false),
+            FooterHint::ghost("Ctrl+L", "languages"),
+            quit_hint(false),
+        ];
+        let line = joined(&footer_spans(status(), hints, 74));
+        assert!(
+            line.contains("expand") && !line.contains("nav"),
+            "the one gesture that opens the whole screen must outlive the keys nobody needs told, got: {line}"
+        );
+    }
+
+    #[test]
+    fn the_exit_outlives_the_screen_actions_that_used_to_tie_with_it() {
+        let hints = vec![
+            FooterHint::primary("Ctrl+G", "generate"),
+            sentence_settings_hint(),
+            back_hint(),
+            quit_hint(false),
+        ];
+        let line = joined(&footer_spans(status(), hints, 62));
+        assert!(
+            line.contains("Ctrl+C") && !line.contains("guidance"),
+            "a niche affordance must never outlive the one key that leaves, got: {line}"
+        );
+    }
+
+    #[test]
     fn quit_hint_outlives_secondaries_on_a_narrow_footer() {
         let line = joined(&footer_spans(status(), crowded_hints(), 72));
         assert!(
@@ -799,7 +867,7 @@ mod tests {
         let plain_spans = plain.spans();
         assert!(
             clear.tier == Tier::Ghost
-                && clear.keep == 1
+                && clear.keep > plain.keep
                 && clear_spans[0].style == plain_spans[0].style
                 && clear_spans[1].style == plain_spans[1].style,
             "words clear must stay visually quiet while surviving before ordinary ghost hints"

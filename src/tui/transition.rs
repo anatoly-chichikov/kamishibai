@@ -226,14 +226,21 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 Side::None,
             )
         }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('d'))
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('D')) => {
+        // Dropping a word is offered on the head row, where the footer names
+        // it. Inside an open sense list the same letter would throw away the
+        // whole word the user is busy picking meanings for, and nothing on
+        // screen would have warned them.
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('d' | 'D'))
+            if matches!(app.review_focus(), ReviewFocus::Head(_)) =>
+        {
             let next = app.dropped_selected();
             if next.candidates().is_empty() {
+                // Emptying the list leaves nothing to review, so we fall back
+                // to the words — the same place Esc goes, and with the same
+                // words still in the box. One letter must not be the only way
+                // to lose everything that was typed.
                 (
-                    next.with_screen(Screen::YourWords)
-                        .clear_blob()
-                        .body_scroll_reset(),
+                    next.with_screen(Screen::YourWords).body_scroll_reset(),
                     Side::None,
                 )
             } else {

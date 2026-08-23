@@ -1791,11 +1791,11 @@ fn can_regenerate(app: &App) -> bool {
 fn stopping_hints(app: &App) -> Vec<super::common::FooterHint> {
     let mut hints = vec![DisclosureControls::new(app.card_expanded()).secondary_toggle()];
     if app.any_card_expanded() {
-        hints.push(super::common::FooterHint::secondary("C", "collapse"));
+        hints.push(super::common::sweep_hint(true));
     }
     hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     if !app.any_card_expanded() && !app.cards().is_empty() {
-        hints.push(super::common::FooterHint::ghost("C", "expand"));
+        hints.push(super::common::sweep_hint(false));
     }
     hints.push(super::common::quit_hint(app.quit_pending()));
     hints
@@ -1838,7 +1838,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
             hints.push(super::common::FooterHint::secondary("↓", "tune"));
         }
         if app.any_card_expanded() {
-            hints.push(super::common::FooterHint::secondary("C", "collapse"));
+            hints.push(super::common::sweep_hint(true));
         }
         if census.unfinished() {
             hints.push(super::common::FooterHint::secondary("Tab", "next"));
@@ -1847,7 +1847,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
             hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         }
         if !app.any_card_expanded() && !app.cards().is_empty() {
-            hints.push(super::common::FooterHint::ghost("C", "expand"));
+            hints.push(super::common::sweep_hint(false));
         }
         if app.can_start_new_batch() {
             hints.push(super::common::new_batch_hint(app.new_batch_pending()));
