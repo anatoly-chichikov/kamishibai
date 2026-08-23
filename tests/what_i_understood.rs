@@ -1158,6 +1158,33 @@ fn c_opens_only_multi_sense_lists_when_none_is_open() {
 }
 
 #[test]
+fn review_letter_hotkeys_answer_on_a_russian_layout() {
+    fn review() -> App {
+        App::new(LanguagePair::new("en", "ru"))
+            .with_screen(Screen::WhatIUnderstood)
+            .confirmed_learning("en")
+            .understood(vec![bank_candidate(), single_candidate()])
+    }
+    assert_eq!(
+        (
+            transit(review(), AppEvent::KeyChar('с'))
+                .0
+                .sense_list_open(0),
+            transit(review(), AppEvent::KeyChar('ы'))
+                .0
+                .sentence_settings_editor()
+                .is_some(),
+            transit(review(), AppEvent::KeyChar('в'))
+                .0
+                .candidates()
+                .len(),
+        ),
+        (true, true, 1),
+        "the review hotkeys must answer the keys they are printed on, whatever layout typed them"
+    );
+}
+
+#[test]
 fn focused_add_more_row_highlight_starts_where_sense_row_highlights_start() {
     fn first_highlighted_column(app: &App, needle: &str) -> Option<u16> {
         let backend = TestBackend::new(140, 24);

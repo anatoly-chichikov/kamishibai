@@ -124,6 +124,20 @@ fn ctrl_g_normalizes_ascii_russian_and_greek_layouts() {
 }
 
 #[test]
+fn ctrl_l_normalizes_ascii_russian_and_greek_layouts() {
+    let events = ['l', 'L', 'д', 'Д', 'λ', 'Λ']
+        .into_iter()
+        .map(|symbol| to_app(modified(KeyCode::Char(symbol), KeyModifiers::CONTROL)))
+        .collect::<Vec<_>>();
+    assert!(
+        events
+            .iter()
+            .all(|event| event == &Some(AppEvent::OpenPreferredLanguagePicker)),
+        "Ctrl+L must survive supported layout and case variants: {events:?}"
+    );
+}
+
+#[test]
 fn ctrl_e_maps_to_the_welcome_env_loader() {
     let event = to_app(modified(KeyCode::Char('e'), KeyModifiers::CONTROL));
     assert_eq!(

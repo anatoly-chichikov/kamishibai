@@ -2499,6 +2499,29 @@ fn c_is_swallowed_while_the_note_row_owns_typing() {
 }
 
 #[test]
+fn the_collapse_toggle_answers_on_a_russian_layout() {
+    let collapsed = seeded(vec![labeled_draft("whilst", ready_artifacts())]);
+    let expanded = transit(collapsed, AppEvent::KeyChar('С')).0;
+    assert!(
+        expanded.card_expanded_at(0),
+        "the collapse toggle ignored the key it is printed on because a Cyrillic layout typed it"
+    );
+}
+
+#[test]
+fn a_russian_note_keeps_the_letters_it_was_typed_with() {
+    let opened =
+        seeded(vec![labeled_draft("whilst", ready_artifacts())]).sentence_editor_opened_for_note();
+    let typed = transit(opened, AppEvent::KeyChar('с')).0;
+    assert!(
+        typed
+            .sentence_editor()
+            .is_some_and(|editor| editor.note().value() == "с"),
+        "the note row folded a typed letter to its Latin key instead of keeping it"
+    );
+}
+
+#[test]
 fn c_expands_every_card_when_none_is_expanded() {
     let collapsed = seeded(vec![
         labeled_draft("whilst", ready_artifacts()),

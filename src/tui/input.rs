@@ -1,10 +1,13 @@
 //! Crossterm key events translated into the high-level `AppEvent` enum.
 //!
-//! Ctrl-combinations are normalised across keyboard layouts — pressing
-//! Ctrl+C on a Russian (ЙЦУКЕН) layout produces the Cyrillic letter `с`,
-//! which we map back to the physical-key Latin equivalent before dispatch.
-//! Plain printable characters keep their original codepoint so the user can
-//! type Cyrillic into the blob editor unchanged.
+//! Hotkeys are named in English but pressed on whatever layout the user has
+//! active, so every combination this mapper dispatches on is folded back to
+//! the Latin letter printed on that physical key: Ctrl+C on a Russian
+//! (ЙЦУКЕН) layout arrives as the Cyrillic `с`, and `latin_key` answers `c`.
+//! Plain printable characters keep their original codepoint here so the user
+//! can type Cyrillic into the blob editor unchanged; the screens that own a
+//! plain-letter hotkey fold it themselves, in `transition::promote`, on the
+//! screens where nothing is being typed.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -32,13 +35,13 @@ pub fn to_app(key: KeyEvent) -> Option<AppEvent> {
         }
         KeyCode::Tab => Some(AppEvent::NextUnfinished),
         KeyCode::Char(symbol) if key.modifiers.contains(KeyModifiers::SUPER) => {
-            match latin_for_ctrl(symbol) {
+            match latin_key(symbol) {
                 'l' => Some(AppEvent::OpenPreferredLanguagePicker),
                 _ => None,
             }
         }
         KeyCode::Char(symbol) if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            match latin_for_ctrl(symbol) {
+            match latin_key(symbol) {
                 'c' => Some(AppEvent::Quit),
                 'e' => Some(AppEvent::WelcomeLoadEnvKey),
                 'g' => Some(AppEvent::Generate),
@@ -51,15 +54,17 @@ pub fn to_app(key: KeyEvent) -> Option<AppEvent> {
     }
 }
 
-/// Map a Ctrl-combination character to its physical-key Latin equivalent.
+/// Map one typed character to the Latin letter printed on that physical key.
 ///
-/// Pressing Ctrl while a non-Latin layout is active still produces a
-/// printable codepoint of that layout — `Ctrl + с` on ЙЦУКЕН, `Ctrl + ψ`
-/// on Greek, and so on. Hotkeys are matched against the QWERTY position
-/// underneath, so we fold the codepoint back here. Characters that are
-/// already Latin pass through lowercased.
+/// A non-Latin layout produces its own codepoint for every key — `с` on
+/// ЙЦУКЕН, `ψ` on Greek, `і` on Ukrainian — while every hotkey in the
+/// application is named by its QWERTY position, so we fold the codepoint back
+/// here and hotkeys stop depending on which layout is active. Characters that
+/// are already Latin pass through lowercased, and anything this table does not
+/// name is returned unchanged. Ukrainian `і` takes the ЙЦУКЕН `ы` position it
+/// replaces; the Belarusian `і` sitting a row below is not a hotkey either way.
 #[must_use]
-pub fn latin_for_ctrl(symbol: char) -> char {
+pub fn latin_key(symbol: char) -> char {
     let lowered = symbol.to_ascii_lowercase();
     if lowered.is_ascii_alphabetic() {
         return lowered;
@@ -91,6 +96,7 @@ pub fn latin_for_ctrl(symbol: char) -> char {
         'и' | 'И' => 'b',
         'т' | 'Т' => 'n',
         'ь' | 'Ь' => 'm',
+        'і' | 'І' => 's',
         'α' | 'Α' => 'a',
         'β' | 'Β' => 'b',
         'ψ' | 'Ψ' => 'c',

@@ -551,3 +551,16 @@ fn c_keeps_typing_into_the_blob_instead_of_collapsing() {
         "a plain c on the words screen was stolen from text entry"
     );
 }
+
+#[test]
+fn the_words_screen_keeps_every_letter_the_layout_produced() {
+    let app = App::new(LanguagePair::new("en", "ru"));
+    let typed = "сыр"
+        .chars()
+        .fold(app, |app, symbol| transit(app, AppEvent::KeyChar(symbol)).0);
+    assert_eq!(
+        typed.blob(),
+        "сыр",
+        "the words screen folded typed letters to their Latin keys instead of keeping them"
+    );
+}

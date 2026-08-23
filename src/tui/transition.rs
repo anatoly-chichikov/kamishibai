@@ -4,6 +4,7 @@ use crate::session::{MAX_INTAKE_WORDS, MAX_PLAN_CARDS, RawInputBatch};
 use super::app::{App, ReviewFocus};
 use super::disclosure::{DisclosureControls, DisclosureIntent};
 use super::event::AppEvent;
+use super::input::latin_key;
 use super::picker::{LanguageChoice, PickerCursor, PickerSection, learning_target};
 use super::screen::{ModalKind, Screen, WelcomeFocus, WelcomeStage};
 use super::sentence_editor::{BatchSettingsRow, LabelEditorRow};
@@ -492,6 +493,13 @@ fn welcome_submit(app: App) -> (App, Side) {
     (app, Side::ValidateKey(key))
 }
 
+/// Reinterpret one key by the context it arrives in, before the screen match.
+///
+/// The two screens that own plain-letter hotkeys take no text, so a letter
+/// they receive is folded to the Latin key it was typed on and `C`, `S`, `D`
+/// and the `j`/`k` walk answer on any layout. Every screen that does take text
+/// — the words editor, the Welcome key field, any modal, and the focused
+/// rewrite note — is left out and keeps the codepoint the user typed.
 fn promote(app: &App, event: AppEvent) -> AppEvent {
     if let Some(ModalKind::PickLanguages) = app.modal() {
         return promote_picker(app, event);
@@ -524,6 +532,12 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
             Screen::Welcome,
             AppEvent::OpenPreferredLanguagePicker | AppEvent::OpenLanguagePicker(_),
         ) if app.welcome().stage == WelcomeStage::PickLanguage => AppEvent::WelcomeNextLanguage,
+        (Screen::WhatIUnderstood, AppEvent::KeyChar(symbol)) => {
+            AppEvent::KeyChar(latin_key(*symbol))
+        }
+        (Screen::YourCards, AppEvent::KeyChar(symbol)) if !sentence_note_focused(app) => {
+            AppEvent::KeyChar(latin_key(*symbol))
+        }
         _ => event,
     }
 }
