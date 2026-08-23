@@ -18,7 +18,6 @@ use crate::tui::palette;
 
 const HEADLINE: &str = "your cards";
 const HINT_OK: &str = "all done";
-const HINT_FAIL: &str = "some cards didn't make it";
 
 /// `ScreenView` handle for the post-generation summary screen.
 pub struct Done;
@@ -28,9 +27,11 @@ impl ScreenView for Done {
         Cow::Borrowed(HEADLINE)
     }
 
+    /// Silent when cards were lost — the outcome strip states that once, in
+    /// the one place bright enough to be seen.
     fn hint(&self, app: &App) -> Cow<'static, str> {
-        let copy = if app.cards_failed() > 0 || app.done_artifacts().failed > 0 {
-            HINT_FAIL
+        let copy = if super::banner::losses(app) > 0 {
+            ""
         } else {
             HINT_OK
         };
@@ -55,7 +56,7 @@ impl ScreenView for Done {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(banner_rows), Constraint::Min(0)])
             .split(area);
-        frame.render_widget(super::banner::widget(app), split[0]);
+        frame.render_widget(super::banner::widget(app, area.width), split[0]);
         frame.render_widget(card_summary(app).scroll((app.body_scroll(), 0)), split[1]);
     }
 }
@@ -128,17 +129,6 @@ fn published(app: &App) -> bool {
     !done.deck.is_empty() && done.cards.saturating_add(done.failed) > 0
 }
 
-/// Return how many cards gave up, from whichever of the two sources this
-/// screen is reading. The status line and the regeneration hint must never
-/// disagree about it, so both ask here.
-fn failed_count(app: &App) -> usize {
-    if published(app) {
-        app.done_artifacts().failed
-    } else {
-        app.cards_failed()
-    }
-}
-
 fn status(app: &App) -> Vec<Span<'static>> {
     let done = app.done_artifacts();
     let published = published(app);
@@ -152,7 +142,6 @@ fn status(app: &App) -> Vec<Span<'static>> {
     } else {
         app.cards().len()
     };
-    let failed = failed_count(app);
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 3/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
@@ -164,13 +153,6 @@ fn status(app: &App) -> Vec<Span<'static>> {
         format!("/{total} ready"),
         palette::Ink::Detail.on(false),
     ));
-    if failed > 0 {
-        left.push(super::common::status_sep());
-        left.push(Span::styled(
-            format!("{failed} gave up"),
-            palette::Ink::Detail.on(false),
-        ));
-    }
     if let Some(cost) = super::your_cards::total_cost(app) {
         left.push(super::common::status_sep());
         left.push(Span::styled(
@@ -189,7 +171,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         ];
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
-    if failed_count(app) > 0 {
+    if super::banner::losses(app) > 0 {
         hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
     }
     if !app.cards().is_empty() {

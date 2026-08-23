@@ -4,7 +4,8 @@
 //! terminal, no Gemini calls, no background threads.
 
 use kamishibai::session::{
-    LanguagePair, Sense, SentenceBatchSettings, SentenceLevel, SentenceTypeMix, WordCandidate,
+    CardDraft, LanguagePair, Sense, SentenceBatchSettings, SentenceLevel, SentenceTypeMix,
+    WordCandidate,
 };
 use kamishibai::tui::{
     App, AppEvent, BusyKind, KeySource, ModalKind, PickerSection, Screen, draw, transit,
@@ -242,6 +243,55 @@ fn done_snapshot_locks_final_screen() {
             "~/Documents/Kamishibai",
         );
     insta::assert_snapshot!("done", render(&app));
+}
+
+#[test]
+fn partial_publish_snapshot_locks_the_outcome_strip() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::Done)
+        .cards_started(vec![
+            CardDraft::new("whilst", "understanding", LanguagePair::new("en", "ru")),
+            CardDraft::new("wreck", "understanding", LanguagePair::new("en", "ru")),
+        ])
+        .done_published_counted(
+            String::from("~/Documents/Kamishibai/RU_cards.apkg"),
+            String::from("~/Documents/Kamishibai/RU_cards.pdf"),
+            String::from("~/Documents/Kamishibai"),
+            1,
+            1,
+        );
+    insta::assert_snapshot!("partial_publish", render_sized(&app, 100, 14));
+}
+
+/// The outcome strip's rule is drawn the way the status rule is — blank cells
+/// carrying `CROSSED_OUT` — so it leaves no glyph for a text snapshot to hold.
+/// Only the styles prove it is there, and that it is phase-locked to the rule
+/// above the footer rather than drawn on the opposite columns.
+#[test]
+fn the_outcome_strip_closes_itself_with_the_same_rule_the_footer_uses() {
+    let width = 100;
+    let height = 14;
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("test backend must boot");
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::Done)
+        .done_published(
+            "~/Documents/Kamishibai/RU_cards.apkg",
+            "~/Documents/Kamishibai/RU_cards.pdf",
+            "~/Documents/Kamishibai",
+        );
+    terminal
+        .draw(|frame| draw(frame, &app))
+        .expect("draw must succeed");
+    let buffer = terminal.backend().buffer();
+    let strip = 6;
+    let footer = height - 2;
+    assert!(
+        buffer[(4, strip)].modifier.contains(Modifier::CROSSED_OUT)
+            && buffer[(6, strip)].modifier.contains(Modifier::CROSSED_OUT)
+            && buffer[(4, strip)].fg == buffer[(4, footer)].fg,
+        "the outcome strip must close on the same dashed rule, in the same colour and phase, that closes the body"
+    );
 }
 
 fn opened_picker() -> App {

@@ -1,0 +1,18 @@
+---
+source: tests/snapshot.rs
+expression: "render_sized(&app, 100, 14)"
+---
+                                                                                                    
+     your cards                                                                           RU → ?    
+                                                                                                    
+    │ ↓ FOLDER  ~/Documents/Kamishibai                                                1 gave up     
+    │ ↓ APKG    RU_cards.apkg                                                                       
+    │ ↓ PDF     RU_cards.pdf                                                                        
+                                                                                                    
+                                                                                                    
+     ✓ 01  whilst                                                                                   
+     ✓ 02  wreck                                                                                    
+                                                                                                    
+                                                          ai may be wrong, please verify results    
+                                                                                                    
+    step 3/3  1/2 ready            [Ctrl+G] regenerate  [↑↓] nav  [Esc] new cards  [Ctrl+C] quit

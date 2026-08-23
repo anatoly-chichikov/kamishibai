@@ -106,8 +106,12 @@ fn seeded_with(artifacts: CardArtifacts) -> App {
 fn your_cards_surfaces_failure_banner_when_any_card_fails_terminally() {
     let app = seeded();
     let rendered = flat(&app);
+    let manga = rendered
+        .lines()
+        .find(|line| line.contains("✗ manga"))
+        .expect("the failed artifact must own a row");
     assert!(
-        rendered.contains("✗ manga") && !rendered.contains("gave up"),
+        !manga.contains("gave up"),
         "your cards must mark the failed manga row with a bare ✗: {rendered}"
     );
 }

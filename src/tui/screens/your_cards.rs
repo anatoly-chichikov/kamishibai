@@ -31,7 +31,6 @@ const HEADLINE_DONE: &str = "your cards";
 const HINT_WORKING: &str = "drawing each card one by one";
 const HINT_STOPPING: &str = "stopping…";
 const HINT_DONE: &str = "all done";
-const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
 const STEP_LABEL_COL_CHARS: usize = 8;
 const STEP_COST_COL_CHARS: usize = 6;
@@ -118,13 +117,16 @@ impl ScreenView for YourCards {
         Cow::Borrowed(copy)
     }
 
+    /// A settled batch that lost cards says nothing here: the outcome strip
+    /// carries that in one bright tag, and repeating it in dim type beside the
+    /// title would only say the same thing twice, more quietly.
     fn hint(&self, app: &App) -> Cow<'static, str> {
         let copy = if app.generation_stopping() {
             HINT_STOPPING
         } else if !all_finished(app) {
             HINT_WORKING
-        } else if app.cards_failed() > 0 || app.done_artifacts().failed > 0 {
-            HINT_DONE_FAILED
+        } else if super::banner::losses(app) > 0 {
+            ""
         } else {
             HINT_DONE
         };
@@ -153,7 +155,7 @@ impl ScreenView for YourCards {
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(banner_rows), Constraint::Min(0)])
                 .split(area);
-            frame.render_widget(super::banner::widget(app), split[0]);
+            frame.render_widget(super::banner::widget(app, area.width), split[0]);
             split[1]
         };
         frame.render_widget(
@@ -1742,13 +1744,6 @@ fn status(app: &App) -> Vec<Span<'static>> {
         format!("/{total} ready"),
         palette::Ink::Detail.on(false),
     ));
-    if published && done.failed > 0 {
-        left.push(super::common::status_sep());
-        left.push(Span::styled(
-            format!("{} omitted", done.failed),
-            palette::Ink::Detail.on(false),
-        ));
-    }
     if census.adjusted > 0 {
         left.push(super::common::status_sep());
         left.push(Span::styled(

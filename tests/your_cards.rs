@@ -575,13 +575,38 @@ fn partial_publish_is_a_settled_view_with_outputs_and_durable_tally() {
     let rendered = flat(&app);
     assert!(
         rendered.contains("your cards")
-            && rendered.contains("some cards didn't make it")
+            && rendered.contains("1 gave up")
+            && !rendered.contains("some cards didn't make it")
             && rendered.contains("1/2 ready")
-            && rendered.contains("1 omitted")
+            && !rendered.contains("1 omitted")
             && rendered.contains("APKG")
             && rendered.contains("PDF")
             && !rendered.contains("building your cards"),
         "partial publish did not render as a settled output-bearing batch: {rendered}"
+    );
+}
+
+#[test]
+fn a_batch_that_lost_nothing_carries_no_loss_tag() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("wreck", ready_artifacts()),
+    ])
+    .done_published_counted("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp", 2, 0);
+    let rendered = flat(&app);
+    assert!(
+        !rendered.contains("gave up") && rendered.contains("all done"),
+        "a clean batch must not be told it lost anything: {rendered}"
+    );
+}
+
+#[test]
+fn a_batch_that_published_nothing_still_states_what_it_lost() {
+    let app = seeded(vec![draft("wreck", failed_artifacts())]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("1 gave up"),
+        "a run where every card failed publishes no deck, and that is the run whose outcome must not go unsaid: {rendered}"
     );
 }
 
@@ -602,7 +627,7 @@ fn partial_publish_reserves_and_links_the_same_banner_rows() {
             scroll_viewport(&building, terminal) - scroll_viewport(&partial, terminal),
             link_at(&partial, terminal, column, row),
         ),
-        (4, Some(String::from("/tmp/cards.apkg"))),
+        (5, Some(String::from("/tmp/cards.apkg"))),
         "partial banner rendering, scrolling, and hit geometry diverged"
     );
 }
@@ -833,7 +858,7 @@ fn failure_banner_appears_when_any_card_exhausts_its_retries() {
     let manga = row_containing(&rendered, "✗ manga");
     assert!(
         manga.contains("$.3210")
-            && !rendered.contains("gave up")
+            && !manga.contains("gave up")
             && row_containing(&rendered, "wreck →").contains("$.3210  ↻3")
             && rendered.contains("$0.32"),
         "your cards must mark the failed manga row with a bare ✗ and its own cost: {rendered}"

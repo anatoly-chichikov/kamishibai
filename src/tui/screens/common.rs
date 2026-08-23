@@ -606,7 +606,7 @@ pub fn scroll_body_width(terminal_area: Rect) -> u16 {
 }
 
 fn banner_visible(app: &App) -> bool {
-    if !super::banner::has_entries(app) {
+    if !super::banner::reports(app) {
         return false;
     }
     match app.screen() {
