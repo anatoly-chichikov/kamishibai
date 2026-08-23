@@ -284,7 +284,7 @@ fn both_r_keys_are_inert_while_space_opens_the_card_and_a_tag_opens_the_live_edi
             && rendered.contains("[← →] pick")
             && rendered.contains("[↑ ↓] row")
             && !rendered.contains("[Ctrl+G] regenerate")
-            && rendered.contains("[Enter/Esc] close")
+            && rendered.contains("[Esc] close")
             && !rendered.contains("[R] change")
             && arrows < rendered.find("[↑ ↓] row").unwrap_or(usize::MAX),
         "r/R emitted an action, Space fell into the editor, or the tag hit and live editor footer drifted apart: {rendered}"

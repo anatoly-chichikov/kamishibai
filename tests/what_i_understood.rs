@@ -734,6 +734,23 @@ fn dropping_the_last_candidate_returns_to_your_words_with_the_input_intact() {
 }
 
 #[test]
+fn a_head_over_an_open_list_points_at_the_arrow_that_works() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .seeded_blob("bank")
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let swept = transit(app, AppEvent::KeyChar('c')).0;
+    let rendered = flat(&swept);
+    assert!(
+        rendered.contains("[Enter/←]")
+            && !rendered.contains("[Enter/→]")
+            && !rendered.contains("[Esc] back"),
+        "over an open list `→` is inert and Esc peels the list, so neither may be advertised: {rendered}"
+    );
+}
+
+#[test]
 fn dropping_is_refused_from_inside_an_open_sense_list() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)

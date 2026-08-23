@@ -1822,7 +1822,11 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         }
         hints.push(super::common::FooterHint::secondary("← →", "pick"));
         hints.push(super::common::FooterHint::ghost("↑ ↓", "row"));
-        hints.push(super::common::FooterHint::ghost("Enter/Esc", "close"));
+        // Esc alone. Enter also leaves the editor but takes the card's whole
+        // expansion with it, and one hint cannot honestly name both outcomes;
+        // Esc is the key the rest of the app already teaches for peeling one
+        // layer, so it is the one the bar names here.
+        hints.push(super::common::FooterHint::ghost("Esc", "close"));
         hints.push(super::common::quit_hint(app.quit_pending()));
         hints
     } else {

@@ -434,7 +434,15 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
             hints.push(super::common::FooterHint::secondary("↑ ↓ ← →", "language"));
         }
         WelcomeStage::EnterKey => {
-            hints.push(super::common::FooterHint::primary("Enter", "submit"));
+            // Enter activates whichever chip is lit, and the two chips do
+            // different things: one sends the typed key, the other copies the
+            // one already in the environment. The hint follows the focus so it
+            // never names the button the cursor is not on.
+            let action = match welcome.focus {
+                WelcomeFocus::LoadEnv => LOAD_ENV_LABEL,
+                WelcomeFocus::Submit => SUBMIT_LABEL,
+            };
+            hints.push(super::common::FooterHint::primary("Enter", action));
             if welcome.env_available {
                 hints.push(super::common::FooterHint::secondary("← →", "move"));
             }

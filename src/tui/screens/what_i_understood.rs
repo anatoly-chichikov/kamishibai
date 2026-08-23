@@ -805,8 +805,14 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         if !app.candidates().is_empty() && app.selected() == 0 {
             hints.push(super::common::sentence_settings_hint());
         }
-        hints.push(DisclosureControls::new(false).secondary_toggle());
-        hints.push(super::common::back_hint());
+        // The head can be focused with its own list already open — pressing
+        // `C` leaves it exactly there — and then `→` is inert while `←` is
+        // what closes, and Esc peels the list instead of leaving the screen.
+        let open = app.focused_sense_list_open();
+        hints.push(DisclosureControls::new(open).secondary_toggle());
+        if !open {
+            hints.push(super::common::back_hint());
+        }
         hints.push(super::common::FooterHint::secondary("D", "drop"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         if app.any_sense_list_open() {

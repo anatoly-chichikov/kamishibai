@@ -280,7 +280,8 @@ fn recoverable_error_overlay_keeps_the_message_visible() {
     assert!(
         flat.contains("can't reach gemini")
             && flat.contains("INTERNAL: boom")
-            && flat.contains("press any key to dismiss"),
+            && flat.contains("[Ctrl+G] retry")
+            && flat.contains("[Esc] dismiss"),
         "recoverable Gemini errors must render as an in-app overlay"
     );
 }
@@ -294,7 +295,8 @@ fn recoverable_error_overlay_wraps_long_timeout_messages() {
     assert!(
         flat.contains("operation timed out")
             && flat.contains("large word list")
-            && flat.contains("press any key to dismiss"),
+            && flat.contains("[Ctrl+G] retry")
+            && flat.contains("[Esc] dismiss"),
         "long Gemini timeout messages must remain visible inside the overlay: {flat}"
     );
 }
