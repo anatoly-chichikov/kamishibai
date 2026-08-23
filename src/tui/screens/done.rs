@@ -81,6 +81,14 @@ fn card_summary(app: &App) -> Paragraph<'_> {
         )));
     } else {
         for (index, draft) in app.cards().iter().enumerate() {
+            // One question, asked once. This screen only exists for a batch
+            // that has already been published, so a card either made the deck
+            // or gave up — there is no third state to distinguish. Asking
+            // `all_ready()` for the ink was asking about artifacts the reopen
+            // path never loads: `DraftRecord` stores identity and spend, not
+            // slots, so `CardDraft::new` hands back a default set and every
+            // real row came out at the dimmest rank while its own `✓` said the
+            // card had shipped. Now the glyph and the ink answer together.
             let failed = draft.artifacts().has_failed();
             let glyph = if failed { "✗" } else { "✓" };
             let glyph_style = if failed {
@@ -88,10 +96,10 @@ fn card_summary(app: &App) -> Paragraph<'_> {
             } else {
                 palette::Ink::Aside.on(false)
             };
-            let term_style = if draft.artifacts().all_ready() {
-                palette::Ink::Subject.on(false)
-            } else {
+            let term_style = if failed {
                 palette::Ink::Aside.on(false)
+            } else {
+                palette::Ink::Subject.on(false)
             };
             let mut spans = vec![
                 Span::styled(format!(" {glyph} "), glyph_style),

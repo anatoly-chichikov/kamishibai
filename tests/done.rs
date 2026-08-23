@@ -300,6 +300,30 @@ fn done_reports_the_batch_in_the_same_styles_as_the_cards_screen() {
 }
 
 #[test]
+fn a_reopened_done_row_lights_its_term_without_any_artifacts_to_ask() {
+    let reopened = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::Done)
+        .confirmed_learning("en")
+        .cards_started(vec![CardDraft::new(
+            "wreck",
+            "understanding for wreck",
+            LanguagePair::new("en", "ru"),
+        )])
+        .done_published_counted(
+            String::from("en_2026-04-17_183029.apkg"),
+            String::from("en_2026-04-17_183029.pdf"),
+            String::from("kamishibai-out/"),
+            1,
+            0,
+        );
+    assert_eq!(
+        style_of(&reopened, "wreck").0,
+        Color::Rgb(0xe6, 0xe3, 0xda),
+        "a reopened session carries no artifact slots, so asking them left every shipped card reading as unbuilt"
+    );
+}
+
+#[test]
 fn a_built_done_row_lights_its_term_while_a_broken_one_stays_quiet() {
     let built = style_of(&priced_published(), "wreck");
     assert_eq!(
