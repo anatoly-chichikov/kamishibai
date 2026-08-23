@@ -58,6 +58,23 @@ fn modifiers(app: &App, needle: &str) -> Vec<Modifier> {
     Vec::new()
 }
 
+fn highlighted_modifiers(app: &App) -> Vec<Modifier> {
+    let backend = TestBackend::new(140, 24);
+    let mut terminal = Terminal::new(backend).expect("backend");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let mut covered = Vec::new();
+    for row in 0..buffer.area.height {
+        for column in 0..buffer.area.width {
+            let cell = &buffer[(column, row)];
+            if cell.bg == Color::Rgb(0x26, 0x26, 0x2a) {
+                covered.push(cell.modifier);
+            }
+        }
+    }
+    covered
+}
+
 fn style_of(app: &App, needle: &str) -> (Color, Color, Modifier) {
     let backend = TestBackend::new(140, 24);
     let mut terminal = Terminal::new(backend).expect("backend");
@@ -361,13 +378,13 @@ fn an_open_sense_list_reads_as_three_steps_below_a_heading() {
             (foreground, background, Modifier::empty()),
             (unchosen, background, Modifier::empty()),
             (chosen, background, Modifier::empty()),
-            (chosen, highlight, Modifier::empty()),
+            (chosen, highlight, Modifier::BOLD),
             (chosen, background, Modifier::empty()),
-            (unchosen, highlight, Modifier::empty()),
+            (unchosen, highlight, Modifier::BOLD),
             (unchosen, background, Modifier::empty()),
-            (chosen, highlight, Modifier::empty()),
+            (chosen, highlight, Modifier::BOLD),
         ),
-        "an open list must step down from the word to its chosen senses to the rest, moving only its background as the cursor walks"
+        "an open list must step down from the word to its chosen senses to the rest, moving only its cursor as it walks"
     );
 }
 
@@ -742,7 +759,7 @@ fn support_language_rerun_preserves_selected_sense_by_index() {
 }
 
 #[test]
-fn the_selected_review_row_differs_from_its_neighbours_by_background_alone() {
+fn the_selected_review_row_differs_from_its_neighbours_by_cursor_alone() {
     let app = App::new(LanguagePair::new("en", "ru"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("en")
@@ -762,9 +779,26 @@ fn the_selected_review_row_differs_from_its_neighbours_by_background_alone() {
         (
             Color::Rgb(0xe6, 0xe3, 0xda),
             Color::Rgb(0x26, 0x26, 0x2a),
-            Modifier::empty()
+            Modifier::BOLD
         ),
-        "the selected term must keep its ordinary ink and take only the cursor background"
+        "the selected term must keep its ordinary ink and take the cursor background with its weight"
+    );
+}
+
+#[test]
+fn the_cursor_never_covers_a_cell_without_weighting_it() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let opened = transit(transit(app, AppEvent::KeyEnter).0, AppEvent::NavNext).0;
+    let covered = highlighted_modifiers(&opened);
+    assert!(
+        !covered.is_empty()
+            && covered
+                .iter()
+                .all(|modifier| modifier.contains(Modifier::BOLD)),
+        "the cursor band left part of its row without the weight that marks it"
     );
 }
 
@@ -809,8 +843,8 @@ fn selected_off_language_row_keeps_one_contiguous_highlight() {
         ),
         (
             true,
-            (dim, highlight, Modifier::CROSSED_OUT),
-            (dim, highlight, Modifier::empty()),
+            (dim, highlight, Modifier::CROSSED_OUT | Modifier::BOLD),
+            (dim, highlight, Modifier::BOLD),
         ),
         "the selected off-language row must not punch ordinary-background gaps through its highlight"
     );

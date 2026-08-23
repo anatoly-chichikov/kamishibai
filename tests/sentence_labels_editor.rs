@@ -927,7 +927,7 @@ fn narrow_layout_wraps_the_tags_onto_the_manga_row_and_keeps_them_clickable() {
             mouse_pointer_at(&collapsed, terminal, kind.0, kind.1),
         ),
         (
-            (scene.1 + 1, scene.1 + 1, scene.1 + 2),
+            (scene.1 + 1, scene.1 + 2, scene.1 + 2),
             focus.clone(),
             MousePointer::Hand,
             focus.clone(),

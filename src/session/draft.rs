@@ -502,6 +502,12 @@ pub struct CardMeta {
     target_sentence: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     labels: Option<SentenceLabels>,
+    #[serde(default, skip_serializing_if = "generated_meta")]
+    rewritten: bool,
+}
+
+fn generated_meta(rewritten: &bool) -> bool {
+    !*rewritten
 }
 
 impl CardMeta {
@@ -530,6 +536,7 @@ impl CardMeta {
             source_context: source_context.into(),
             target_sentence: target_sentence.into(),
             labels: None,
+            rewritten: false,
         }
     }
 
@@ -588,6 +595,24 @@ impl CardMeta {
     #[must_use]
     pub fn with_sentence_labels(mut self, labels: SentenceLabels) -> Self {
         self.labels = Some(labels);
+        self
+    }
+
+    /// Return whether this sentence was minted for a learner's own rewrite of
+    /// one card, rather than by the batch that generated everything.
+    ///
+    /// This is what lets a screen show which single card was touched among its
+    /// untouched neighbours, so a batch-wide level or type — pinned once for
+    /// every card at generation — deliberately does not set it.
+    #[must_use]
+    pub fn rewritten(&self) -> bool {
+        self.rewritten
+    }
+
+    /// Return the metadata marked as the product of a per-card rewrite.
+    #[must_use]
+    pub fn marked_rewritten(mut self) -> Self {
+        self.rewritten = true;
         self
     }
 }

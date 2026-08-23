@@ -746,7 +746,7 @@ fn chevron<Row: Copy>(
 ) -> (Span<'static>, ChipRegion<Row>) {
     let text = if forward { " >" } else { "< " };
     let style = if focused {
-        palette::base()
+        palette::Ink::Subject.lit()
     } else {
         palette::Ink::Detail.on(false)
     };
@@ -835,7 +835,7 @@ fn row_prefix(
     question_width: usize,
 ) -> Vec<Span<'static>> {
     let style = if focused {
-        palette::Ink::Subject.on(false)
+        palette::Ink::Subject.lit()
     } else {
         palette::Ink::Aside.on(false)
     };

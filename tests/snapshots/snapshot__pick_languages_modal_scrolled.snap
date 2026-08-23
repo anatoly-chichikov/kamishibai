@@ -3,7 +3,7 @@ source: tests/snapshot.rs
 expression: "render_sized(&opened_picker(), 96, 20)"
 ---
              ┌─ languages ───────────────────────────────────────────────────────┐              
-     what i u│                                                                   │    RU → …    
+     what i u│                                                                   │    RU → ?    
              │  your language             →  what you're learning                │              
     understan│  ──────────────────────       ───────────────────────────         │              
              │                               auto  detect from the words         │              

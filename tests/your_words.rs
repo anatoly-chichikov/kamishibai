@@ -18,6 +18,7 @@ use kamishibai::tui::{
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier};
 use tempfile::tempdir;
 
 fn press(code: KeyCode) -> KeyEvent {
@@ -43,6 +44,44 @@ fn flatten(app: &App) -> String {
         flat.push('\n');
     }
     flat
+}
+
+fn highlighted_modifiers(app: &App) -> Vec<Modifier> {
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).expect("test backend must boot");
+    terminal
+        .draw(|frame| draw(frame, app))
+        .expect("draw must succeed");
+    let buffer = terminal.backend().buffer();
+    let mut covered = Vec::new();
+    for row in 0..buffer.area.height {
+        for column in 0..buffer.area.width {
+            let cell = &buffer[(column, row)];
+            if cell.bg == Color::Rgb(0x26, 0x26, 0x2a) {
+                covered.push(cell.modifier);
+            }
+        }
+    }
+    covered
+}
+
+fn weight_of(app: &App, needle: &str) -> Modifier {
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).expect("test backend must boot");
+    terminal
+        .draw(|frame| draw(frame, app))
+        .expect("draw must succeed");
+    let buffer = terminal.backend().buffer();
+    for row in 0..buffer.area.height {
+        let line = (0..buffer.area.width)
+            .map(|column| buffer[(column, row)].symbol())
+            .collect::<String>();
+        if let Some(byte) = line.find(needle) {
+            let column = u16::try_from(line[..byte].chars().count()).expect("column must fit");
+            return buffer[(column, row)].modifier;
+        }
+    }
+    panic!("invariant: {needle} must be rendered somewhere on the screen");
 }
 
 fn long_blob(count: usize) -> String {
@@ -76,6 +115,23 @@ fn long_pasted_your_words_scrolls_to_the_cursor_line() {
     assert!(
         flat.contains("word-60") && !flat.contains("word-01"),
         "long pasted word lists must render the cursor end of the scrollable editor: {flat}"
+    );
+}
+
+#[test]
+fn the_typed_line_under_the_cursor_carries_the_weight_of_its_highlight() {
+    let app = App::new(LanguagePair::new("en", "ru")).seeded_blob("alpha\nbravo");
+    let covered = highlighted_modifiers(&app);
+    assert_eq!(
+        (
+            covered.is_empty(),
+            covered
+                .iter()
+                .all(|modifier| modifier.contains(Modifier::BOLD)),
+            weight_of(&app, "alpha"),
+        ),
+        (false, true, Modifier::empty()),
+        "the line the cursor sits on must carry the weight of its highlight while its neighbours stay plain"
     );
 }
 

@@ -91,7 +91,9 @@ persists the key and moves to `YourWords`; `Esc` steps back to the language stag
 `GEMINI_API_KEY` may prefill the key step, but it must never skip the language choice.
 
 After setup, the language pair is rendered as a compact header chip on every
-steady-state fullscreen screen, reading `my → target` (e.g. `EN → FR`).
+steady-state fullscreen screen, reading `my → target` (e.g. `EN → FR`). The
+whole chip is bold bright, matching the inverted title block on the other end of
+the header, and a target the understanding pass has not named yet reads `?`.
 
 ## Language pair surface
 
@@ -199,16 +201,20 @@ gets the natural sentence required by its approved understanding and only then
 receives a descriptive level; that default initial generation does not target
 a band. An explicit batch-level choice is the initial-generation exception and
 constrains every draft. A later per-card level change becomes a rewrite constraint. Every
-card head keeps `term → target sentence`. The term is `DIM` for as long as the
-card is missing any of its four artifacts, and when the last one lands it turns
-`FG` **and bold**; the target sentence stays `DIM` throughout, because the word
-is the subject of the row and the sentence is what explains it. Glyph, number,
+card head keeps `term → target sentence`. The term reads `Ink::Aside` — the
+same rank as the number beside it — for as long as the card is missing any of
+its four artifacts, and when the last one lands it turns `FG`; the target
+sentence stays `DIM` unless the learner asked for that one card to be rewritten,
+and the sentence that comes back reads `Ink::Subject`, the same principle that
+whitens a changed label chip. A level or type pinned once for the whole batch
+travels the generation path and deliberately leaves every sentence quiet.
+Glyph, number,
 `→`, and trailing cost are `Ink::Aside`, which makes the head structurally the
 same row as a `WhatIUnderstood` candidate. A card that terminally gave up never
-holds all four and stays `DIM`, and a card carrying a staged rewrite stays muted
-beside its struck sentence. Nothing on the head goes bold for being selected —
-selection is the `HL` row background (`#26262a`) alone, and it changes neither
-ink nor weight anywhere in the application.
+holds all four and stays quiet, and a card carrying a staged rewrite keeps that
+quiet term beside its struck sentence. The head goes bold for being selected and for
+nothing else — selection is the `HL` row background (`#26262a`) plus the weight
+of every letter it covers, and it never repaints an ink.
 Every card state renders the same step block immediately after the last line
 of that head, including when the target sentence wraps: up to three
 old-style rows — `scene` (the written material, i.e. the meta slot), `voice`
@@ -258,7 +264,8 @@ closes it again. The tune rows are there from the first keystroke but unlit —
 no question is white or bold, no chevron is bright, the note owns no cursor —
 so an open card says what can be changed without anything being changeable yet.
 Tuning is a separate, deliberate move — `↓` from the open head lights
-`how should it sound?`, and a click on any control (or on a collapsed card's
+`how should it sound?` white and bold together with its two chevrons, and a
+click on any control (or on a collapsed card's
 tags) hands the block the keyboard straight away. Once lit, both arrows belong to
 the focused horizontal control. The head remains `term →
 target sentence` and the three step rows stay together above the tune rows;

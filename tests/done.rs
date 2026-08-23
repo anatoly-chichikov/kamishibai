@@ -34,6 +34,18 @@ fn buffer_of(app: &App) -> Buffer {
     terminal.backend().buffer().clone()
 }
 
+fn row_of(buffer: &Buffer, token: &str) -> u16 {
+    for row in 0..buffer.area.height {
+        let line = (0..buffer.area.width)
+            .map(|column| buffer[(column, row)].symbol())
+            .collect::<String>();
+        if line.contains(token) {
+            return row;
+        }
+    }
+    panic!("invariant: {token} must be rendered somewhere on the screen");
+}
+
 fn style_of(app: &App, token: &str) -> (Color, Color, Modifier) {
     let buffer = buffer_of(app);
     for row in 0..buffer.area.height {
@@ -289,12 +301,29 @@ fn done_reports_the_batch_in_the_same_styles_as_the_cards_screen() {
 
 #[test]
 fn a_built_done_row_lights_its_term_while_a_broken_one_stays_quiet() {
+    let built = style_of(&priced_published(), "wreck");
     assert_eq!(
+        (built.0, built.2, style_of(&failed_published(), "wreck").0),
         (
-            style_of(&priced_published(), "wreck").2,
-            style_of(&failed_published(), "wreck").0,
+            Color::Rgb(0xe6, 0xe3, 0xda),
+            Modifier::empty(),
+            Color::Rgb(0x5a, 0x59, 0x53)
         ),
-        (Modifier::BOLD, Color::Rgb(0x8b, 0x8a, 0x83)),
-        "the done list must mark a finished card the same way the cards screen does"
+        "the done list must mark a finished card by ink alone, the same way the cards screen does"
+    );
+}
+
+#[test]
+fn a_body_without_a_cursor_carries_no_weight_at_all() {
+    let buffer = buffer_of(&priced_published());
+    let header = row_of(&buffer, "your cards");
+    let weighted = (0..buffer.area.height)
+        .filter(|row| *row != header)
+        .flat_map(|row| (0..buffer.area.width).map(move |column| (column, row)))
+        .filter(|position| buffer[*position].modifier.contains(Modifier::BOLD))
+        .count();
+    assert_eq!(
+        weighted, 0,
+        "the done body has no cursor to carry, so nothing below its header may be weighted"
     );
 }

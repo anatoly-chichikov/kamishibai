@@ -392,30 +392,43 @@ whatever explains it — glosses, sentences, questions, labels; `Ink::Aside`
 (`DIM2`) is the bookkeeping beside it — indices, costs, timings, separators,
 inactive markers; `rule()` draws structure. **Background is focus and nothing
 else**: the row under the cursor takes `HL` (`#26262a`, raised so it carries the
-signal alone) and keeps the same inks as its neighbours. **Weight is one thing**:
-`Modifier::BOLD` marks a card that holds all four artifacts, and appears nowhere
-else in the application. One consequence follows: an **underline means
+signal alone) and keeps the same inks as its neighbours. **Weight is focus too**:
+`Modifier::BOLD` marks whatever the keyboard owns right now and nothing else, so
+every letter the cursor covers is bold and no letter outside it is. The two
+channels come out of one function (`Ink::on`), which is why a row cannot take the
+band without taking the weight; a row that owns the keyboard while drawing no
+band — the lit question of a card or guidance editor — asks for the weight alone
+through `Ink::lit`. One consequence follows: an **underline means
 clickable** and takes its brightness from its rank, so the same affordance reads
 at three depths without three link colours. The label chips are the deliberate
 exception to "ink is rank" — the three sentence-label values read as one
 attribution strip, so both states are blocks and only their brightness changes.
+The header is the deliberate exception to "weight is focus": its inverted title
+block and its bold bright language chip are chrome standing outside the row
+grammar, so weight means focus everywhere between them and never on them.
 
-A card head that holds all four artifacts turns its term `FG` **and bold**; its
-target sentence stays `DIM` whatever happens, because the word is the subject of
-the row and the sentence explains it. While any artifact is still owed —
-including a terminally failed card, which never holds all four — the term stays
-`DIM` too, and a card with a staged rewrite keeps that muted term beside its
-struck sentence. The glyph, the number, the `→` and the trailing cost are
+A card head that holds all four artifacts turns its term `FG`; its
+target sentence stays `DIM` until the learner asks for that card to be rewritten,
+and the sentence that comes back reads `Ink::Subject` — the same principle that
+whitens a changed label chip, so the one card you touched stands out from the
+ones you did not. A batch-wide level or type is pinned onto every card at
+generation and deliberately does not count: `CardMeta::rewritten` is set only on
+the per-card correction path (`CardCorrectionResponse::into_revision`), not on
+the generation path every batch travels. While any artifact is still owed —
+including a terminally failed card, which never holds all four — the term drops
+to `Ink::Aside`, the same rank as the number beside it, and a card with a staged
+rewrite keeps that quiet term beside its struck sentence. The glyph, the number, the `→` and the trailing cost are
 `Ink::Aside`, which makes the head the same row as a `WhatIUnderstood`
-candidate: index, term, separator, explanation. Weight and brightness therefore
-mean built, never focused: selection is the row's `HL` background alone, and
-nothing on the head goes bold for being selected. Every card state renders the same **step block**
+candidate: index, term, separator, explanation. Brightness therefore means
+built and weight means focused: a built card is bright wherever it sits, and
+the selected head — built or not — is the one that goes bold, along with every
+other letter its `HL` band covers. Every card state renders the same **step block**
 beginning immediately after the last line of the head's target sentence,
 including when that sentence wraps: up to three old-style rows — `scene`
 (the written material, i.e. the meta slot), `voice` (audio), `manga` (the whole
 visual phase) — each a state glyph, a five-letter label, and its own
 incremental cost (`StepRow` in `src/tui/screens/your_cards.rs`). Every state
-starts in one shared value column right after the seven-cell label column.
+starts in one shared value column right after the eight-cell label column.
 A row appears only once its work started.
 A ready row shows a quiet `Ink::Aside` `✓` and an `Ink::Detail` label,
 underlined when it clicks open: `scene` the card's cache cell (the parent of
@@ -468,8 +481,10 @@ plus the requested white tag and never invent an actual value.
 The editor's three carousel questions are `how should it sound?`, `what kind of
 phrase?`, and `what's the desired level?`. The note label is `one more thing`, and its
 placeholder is `say what should change`. The active carousel question is white
-(`Ink::Subject`) against `Ink::Aside` for the rest, and the selected chip has a
-white background. Every carousel is
+and bold (`Ink::lit`) against `Ink::Aside` for the rest, its two chevrons take
+the same weight, and the selected chip has a white background — the editor is
+the one place focus is drawn without the cursor band, so weight carries it
+there. Every carousel is
 permanently bracketed by the two-cell direction controls `< ` and ` >`; both
 cells are clickable, focus that control's own row, and move one adjacent choice
 without wrapping past either boundary. All three tracks use one render-time

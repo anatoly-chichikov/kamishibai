@@ -1383,7 +1383,8 @@ impl CardCorrectionResponse {
             self.source_context,
             self.target_sentence,
         )
-        .with_sentence_labels(labels);
+        .with_sentence_labels(labels)
+        .marked_rewritten();
         Ok(CardRevision::new(self.term, self.understanding, meta))
     }
 }

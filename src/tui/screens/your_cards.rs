@@ -33,7 +33,7 @@ const HINT_STOPPING: &str = "stopping…";
 const HINT_DONE: &str = "all done";
 const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
-const STEP_LABEL_COL_CHARS: usize = 7;
+const STEP_LABEL_COL_CHARS: usize = 8;
 const STEP_COST_COL_CHARS: usize = 6;
 const SENTENCE_TAG_GAP: usize = 3;
 const SENTENCE_TAG_START: usize = super::common::CARD_DETAIL_COLUMN
@@ -524,14 +524,15 @@ fn card_head<'a>(
     let aside_style = palette::Ink::Aside.on(focused);
     let built = draft.artifacts().all_ready() && !pending;
     let term_style = if built {
-        palette::Ink::Subject
-            .on(focused)
-            .add_modifier(Modifier::BOLD)
+        palette::Ink::Subject.on(focused)
     } else {
-        palette::Ink::Detail.on(focused)
+        aside_style
     };
+    let rewritten = draft.meta().is_some_and(CardMeta::rewritten);
     let sentence_style = if pending {
         row_style.add_modifier(Modifier::CROSSED_OUT)
+    } else if rewritten {
+        palette::Ink::Subject.on(focused)
     } else {
         row_style
     };
@@ -838,7 +839,7 @@ fn step_name(kind: Artifact) -> &'static str {
 fn label_gap(label: &str) -> usize {
     STEP_LABEL_COL_CHARS
         .saturating_sub(super::common::display_width(label))
-        .max(2)
+        .max(3)
 }
 
 /// The expanded card body together with the row its rejected block starts on.

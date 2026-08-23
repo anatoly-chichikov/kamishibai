@@ -9,7 +9,6 @@ use std::borrow::Cow;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -86,9 +85,9 @@ fn card_summary(app: &App) -> Paragraph<'_> {
                 palette::Ink::Aside.on(false)
             };
             let term_style = if draft.artifacts().all_ready() {
-                palette::Ink::Subject.on(false).add_modifier(Modifier::BOLD)
+                palette::Ink::Subject.on(false)
             } else {
-                palette::Ink::Detail.on(false)
+                palette::Ink::Aside.on(false)
             };
             let mut spans = vec![
                 Span::styled(format!(" {glyph} "), glyph_style),

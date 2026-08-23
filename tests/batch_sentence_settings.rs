@@ -194,7 +194,7 @@ fn expanded_guidance_hides_summary_chips_and_uses_card_editor_questions() {
             && rendered.contains("what kinds of phrases?")
             && rendered.matches("best fit").count() == 2
             && active.0 == Color::Rgb(0xe6, 0xe3, 0xda)
-            && !active.2.contains(Modifier::BOLD)
+            && active.2.contains(Modifier::BOLD)
             && inactive.0 == Color::Rgb(0x5a, 0x59, 0x53)
             && !inactive.2.contains(Modifier::BOLD),
         "expanded guidance must replace summary chips with two card-editor-style best-fit questions: {rendered}"

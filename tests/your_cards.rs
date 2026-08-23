@@ -122,6 +122,19 @@ fn term_is_bold(buffer: &Buffer, term: &str) -> bool {
     buffer[(column, row)].modifier.contains(Modifier::BOLD)
 }
 
+fn highlighted_modifiers(buffer: &Buffer) -> Vec<Modifier> {
+    let mut covered = Vec::new();
+    for row in 0..buffer.area.height {
+        for column in 0..buffer.area.width {
+            let cell = &buffer[(column, row)];
+            if cell.bg == Color::Rgb(0x26, 0x26, 0x2a) {
+                covered.push(cell.modifier);
+            }
+        }
+    }
+    covered
+}
+
 fn row_text(buffer: &Buffer, row: u16) -> String {
     (0..buffer.area.width)
         .map(|column| buffer[(column, row)].symbol())
@@ -584,7 +597,7 @@ fn a_free_row_names_the_cache_hit_instead_of_leaving_its_value_blank() {
     let app = seeded(vec![draft("whilst", cached_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("✓ scene  cached") && !rendered.contains('$'),
+        rendered.contains("✓ scene   cached") && !rendered.contains('$'),
         "a row that cost nothing because its artifact came back from the cache must say so: {rendered}"
     );
 }
@@ -1087,7 +1100,7 @@ fn moving_down_moves_the_lit_question_to_the_next_carousel() {
             Color::Rgb(0x5a, 0x59, 0x53),
             false,
             Color::Rgb(0xe6, 0xe3, 0xda),
-            false,
+            true,
         ),
         "moving down left the lit question on the previous carousel"
     );
@@ -1115,7 +1128,7 @@ fn the_tag_summary_sits_on_the_voice_row_at_the_fixed_column() {
         ),
         (
             (head_row + 2, head_row + 2, head_row + 2),
-            (27, 36, 48),
+            (28, 37, 49),
             false,
             true,
             true,
@@ -1165,7 +1178,7 @@ fn audio_progress_keeps_collapsed_tags_in_one_column() {
             rendered.matches("↻2").count(),
             rendered.matches("$.0021").count(),
         ),
-        (vec![27, 27, 27, 27], true, "✓", "·", "✓", 2, 3),
+        (vec![28, 28, 28, 28], true, "✓", "·", "✓", 2, 3),
         "audio progress must keep one tag column on every voice row, busy or idle:\n{rendered}"
     );
 }
@@ -1201,7 +1214,7 @@ fn collapsed_cached_artifacts_keep_tags_beside_their_cache_note() {
             (register_column, register_row),
             buffer[(10, head_row + 1)].symbol(),
         ),
-        (3, false, (27, head_row + 2), "s"),
+        (3, false, (28, head_row + 2), "s"),
         "cached artifacts must collapse to ready rows that name the cache hit and keep the tag column"
     );
 }
@@ -1511,7 +1524,7 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
                 }),
             !term.is_empty()
                 && term.iter().all(|(fg, _, modifier)| {
-                    *fg == Color::Rgb(0x8b, 0x8a, 0x83) && !modifier.contains(Modifier::CROSSED_OUT)
+                    *fg == Color::Rgb(0x5a, 0x59, 0x53) && !modifier.contains(Modifier::CROSSED_OUT)
                 }),
             !source.is_empty()
                 && source.iter().all(|(fg, _, modifier)| {
@@ -1557,7 +1570,7 @@ fn a_broken_artifact_is_the_only_bright_span_in_its_step_block() {
 }
 
 #[test]
-fn a_built_card_turns_its_term_bold_and_leaves_its_sentence_quiet() {
+fn a_built_card_lights_its_term_and_leaves_its_sentence_quiet() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("terroir", ready_artifacts()),
@@ -1567,6 +1580,7 @@ fn a_built_card_turns_its_term_bold_and_leaves_its_sentence_quiet() {
     let buffer = rendered_buffer(&app);
     let white = Color::Rgb(0xe6, 0xe3, 0xda);
     let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let quiet = Color::Rgb(0x5a, 0x59, 0x53);
     assert_eq!(
         (
             (
@@ -1584,8 +1598,88 @@ fn a_built_card_turns_its_term_bold_and_leaves_its_sentence_quiet() {
                 term_ink(&buffer, "Example with wreck."),
             ),
         ),
-        ((white, gray, gray), (true, false, false), (gray, gray)),
-        "weight and brightness must read as built on the term alone, never on the sentence"
+        ((white, quiet, quiet), (false, false, false), (gray, gray)),
+        "brightness must read as built on the term alone, never on the sentence, and never as weight"
+    );
+}
+
+#[test]
+fn an_unbuilt_term_reads_at_the_rank_of_its_own_number() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("terroir", ready_artifacts()),
+        draft("wreck", partial_priced_artifacts()),
+        draft("bof", failed_artifacts()),
+    ]);
+    let buffer = rendered_buffer(&app);
+    let (number_column, number_row) = position_of(&buffer, "03");
+    assert_eq!(
+        (
+            term_ink(&buffer, "terroir"),
+            term_ink(&buffer, "wreck"),
+            term_ink(&buffer, "bof"),
+            buffer[(number_column, number_row)].fg,
+        ),
+        (
+            Color::Rgb(0xe6, 0xe3, 0xda),
+            Color::Rgb(0x5a, 0x59, 0x53),
+            Color::Rgb(0x5a, 0x59, 0x53),
+            Color::Rgb(0x5a, 0x59, 0x53),
+        ),
+        "a term still owed anything must read no louder than the number beside it"
+    );
+}
+
+#[test]
+fn a_rewritten_sentence_reads_white_beside_an_untouched_one() {
+    let rewritten = CardDraft::new(
+        "whilst",
+        "understanding for whilst",
+        LanguagePair::new("en", "ru"),
+    )
+    .with_meta(meta_for("whilst").marked_rewritten(), None)
+    .with_artifacts(ready_artifacts());
+    let app = seeded(vec![rewritten, draft("terroir", ready_artifacts())]);
+    let buffer = rendered_buffer(&app);
+    assert_eq!(
+        (
+            term_ink(&buffer, "Example with whilst."),
+            term_ink(&buffer, "Example with terroir."),
+        ),
+        (Color::Rgb(0xe6, 0xe3, 0xda), Color::Rgb(0x8b, 0x8a, 0x83),),
+        "the one sentence the learner asked to be rewritten must stand out from its untouched neighbours"
+    );
+}
+
+#[test]
+fn a_selected_head_carries_the_weight_a_built_card_no_longer_does() {
+    let buffer = rendered_buffer(&seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("terroir", ready_artifacts()),
+    ]));
+    assert_eq!(
+        (
+            term_is_bold(&buffer, "whilst"),
+            term_is_bold(&buffer, "terroir"),
+            term_ink(&buffer, "terroir"),
+        ),
+        (true, false, Color::Rgb(0xe6, 0xe3, 0xda)),
+        "weight must ride the cursor onto the selected head instead of marking a built card"
+    );
+}
+
+#[test]
+fn the_cursor_never_covers_a_cell_without_weighting_it() {
+    let covered = highlighted_modifiers(&rendered_buffer(&tuning(seeded(vec![labeled_draft(
+        "whilst",
+        ready_artifacts(),
+    )]))));
+    assert!(
+        !covered.is_empty()
+            && covered
+                .iter()
+                .all(|modifier| modifier.contains(Modifier::BOLD)),
+        "the cursor band left part of its row without the weight that marks it"
     );
 }
 
@@ -2362,7 +2456,7 @@ fn walking_into_an_open_card_lights_its_first_question_alone() {
         ),
         (
             Color::Rgb(0xe6, 0xe3, 0xda),
-            false,
+            true,
             Color::Rgb(0x5a, 0x59, 0x53),
             false,
         ),

@@ -15,7 +15,6 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use super::ScreenView;
 use crate::tui::app::App;
 use crate::tui::palette;
-use crate::tui::screen::Screen;
 
 /// Horizontal breathing room applied to every screen's content column.
 pub const GUTTER: u16 = 4;
@@ -225,29 +224,25 @@ fn take_chars(text: &str, limit: usize) -> String {
 /// Build the language chip — `support → target` in the header's right corner.
 ///
 /// Reading order is `support → target` so the user reads "from your language
-/// into the language i'm learning". The chip is standing chrome, not the
-/// subject of any screen, so both codes read as `Ink::Detail` and the arrow
-/// between them as `Ink::Aside`. The codes carry the link underline only on
-/// the two screens where clicking them still reopens the pair; on `YourCards`
-/// and `Done` the batch pair is frozen and an underline would promise an
-/// action that does nothing.
+/// into the language i'm learning", and an unconfirmed target reads `?` until
+/// the understanding pass names it. The whole chip — both codes and the arrow
+/// between them — is bold bright `palette::base()`, matching the inverted title
+/// block on the opposite side of the header: the header is chrome standing
+/// outside the row grammar, which is why weight is free to mark it. It carries
+/// no underline, because the hand pointer and the click both come from the
+/// chip's geometry in `links::language_chip_at`, not from the modifier.
 pub fn language_chip(app: &App) -> Vec<Span<'static>> {
     let known = app.pair().known().to_uppercase();
     let learning_text = if app.learning_pending() {
-        String::from("…")
+        String::from("?")
     } else {
         app.pair().learning().to_uppercase()
     };
-    let live = matches!(app.screen(), Screen::YourWords | Screen::WhatIUnderstood);
-    let code = if live {
-        palette::Ink::Detail.link(false)
-    } else {
-        palette::Ink::Detail.on(false)
-    };
+    let style = palette::base().add_modifier(Modifier::BOLD);
     vec![
-        Span::styled(known, code),
-        Span::styled(" → ", palette::Ink::Aside.on(false)),
-        Span::styled(learning_text, code),
+        Span::styled(known, style),
+        Span::styled(" → ", style),
+        Span::styled(learning_text, style),
     ]
 }
 

@@ -664,6 +664,74 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
     Ok(())
 }
 
+/// Only a per-card correction marks its sentence as the learner's own rewrite.
+///
+/// A batch that pins a level for every card travels the generation path, so
+/// this is what keeps a whole batch from reading as hand-tuned.
+#[test]
+fn only_a_per_card_correction_marks_its_metadata_as_rewritten() -> Result<()> {
+    let generated = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(body(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": "{\"pronunciation\":\"ˈbɒrəʊ\",\"transcription\":\"kən aɪ ˈbɒrəʊ jɔː ˈpɛn\",\"meaning\":\"одолжить\",\"importance\":8,\"source_sentence\":\"Можно одолжить твою ручку?\",\"source_highlight\":\"одолжить\",\"source_hint\":\"Когда ручка не твоя, а надо записать — вежливо просишь на время.\",\"source_context\":\"Нейтрально-вежливый глагол.\",\"target_sentence\":\"Can I borrow your pen?\",\"labels\":{\"register\":\"formal\",\"level\":\"b1\",\"type\":\"question\",\"approx\":[]}}"
+                    }]
+                }
+            }]
+        }))?)]),
+    )
+    .generate_card_meta(
+        "borrow",
+        "verb sense — to take something temporarily",
+        &LanguagePair::new("en", "ru"),
+        None,
+    )?;
+    let corrected = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(body(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": "{\"term\":\"borrow\",\"understanding\":\"verb sense — to take something temporarily\",\"pronunciation\":\"ˈbɒrəʊ\",\"transcription\":\"maɪ aɪ ˈbɒrəʊ jɔː ˈpɛn\",\"meaning\":\"одолжить\",\"importance\":8,\"source_sentence\":\"Могу я одолжить твою ручку?\",\"source_highlight\":\"одолжить\",\"source_hint\":\"Когда ручка не твоя, а надо записать — вежливо просишь на время.\",\"source_context\":\"Нейтрально-вежливый глагол.\",\"target_sentence\":\"May I borrow your pen?\",\"labels\":{\"register\":\"formal\",\"level\":\"b1\",\"type\":\"question\",\"approx\":[]}}"
+                    }]
+                }
+            }]
+        }))?)]),
+    )
+    .correct_card(
+        &CardDraft::new(
+            "borrow",
+            "verb sense — to take something temporarily",
+            LanguagePair::new("en", "ru"),
+        )
+        .with_meta(
+            CardMeta::new(
+                "/borrow/",
+                "/borrow seed/",
+                "одолжить",
+                8,
+                "src",
+                "borrow",
+                "hint",
+                "context",
+                "Can I borrow your pen?",
+            ),
+            None,
+        ),
+        "make it more polite",
+        &LanguagePair::new("en", "ru"),
+    )?;
+    let (_, _, corrected) = corrected.into_parts();
+    assert_eq!(
+        (generated.rewritten(), corrected.rewritten()),
+        (false, true),
+        "only the sentence a learner asked to be rewritten may carry the rewrite mark"
+    );
+    Ok(())
+}
+
 /// Missing API keys surface the configured startup error wording.
 #[test]
 fn missing_api_keys_surface_a_setup_hint() {

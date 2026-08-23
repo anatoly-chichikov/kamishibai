@@ -4,9 +4,10 @@
 //! every distinction the screens draw, and each channel carries exactly one
 //! meaning: [`Ink`] ranks a span inside the row it belongs to, the `HL`
 //! background marks the row under the cursor and nothing else, and
-//! `Modifier::BOLD` marks a finished card and nothing else. Underlining a span
-//! says it opens something when clicked; its brightness still comes from its
-//! rank.
+//! `Modifier::BOLD` marks whatever the keyboard owns right now — the row under
+//! that cursor, and the lit row of an editor that draws no cursor band.
+//! Underlining a span says it opens something when clicked; its brightness
+//! still comes from its rank.
 
 use ratatui::style::{Color, Modifier, Style};
 
@@ -26,7 +27,7 @@ pub const HL: Color = Color::Rgb(0x26, 0x26, 0x2a);
 /// Rank a span holds inside the row it belongs to.
 ///
 /// The rank answers "how much of this row is this span", never "what state is
-/// this row in": focus moves the background, completion moves the weight, and
+/// this row in": focus moves the background and the weight together, and
 /// neither of them repaints the ink.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Ink {
@@ -40,11 +41,29 @@ pub enum Ink {
 
 impl Ink {
     /// Return the style this rank takes on a row that is or is not focused.
+    ///
+    /// Focus paints two channels at once, so a row cannot take the cursor band
+    /// without taking the weight of its letters along with it.
     #[must_use]
     pub fn on(self, focused: bool) -> Style {
+        if focused {
+            self.lit().bg(HL)
+        } else {
+            Style::default().bg(BG).fg(self.color())
+        }
+    }
+
+    /// Return the style of a span the keyboard owns on a row that draws no
+    /// cursor band.
+    ///
+    /// The card and guidance editors light their active row by ink alone, and
+    /// weight follows the keyboard there exactly as it does under the cursor.
+    #[must_use]
+    pub fn lit(self) -> Style {
         Style::default()
-            .bg(if focused { HL } else { BG })
+            .bg(BG)
             .fg(self.color())
+            .add_modifier(Modifier::BOLD)
     }
 
     /// Return the style of a span at this rank that opens something when clicked.
