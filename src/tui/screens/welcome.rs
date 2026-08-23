@@ -55,8 +55,12 @@ impl ScreenView for Welcome {
         None
     }
 
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, width)
+    fn status(&self, app: &App) -> Vec<Span<'static>> {
+        status(app)
+    }
+
+    fn hints(&self, app: &App) -> Vec<super::common::FooterHint> {
+        hints(app)
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -410,16 +414,19 @@ fn place_key_cursor(frame: &mut Frame, app: &App, row: Rect) {
     frame.set_cursor_position((cursor_x, row.y));
 }
 
-fn footer(app: &App, width: u16) -> Paragraph<'static> {
-    let welcome = app.welcome();
-    let counter = match welcome.stage {
+fn status(app: &App) -> Vec<Span<'static>> {
+    let counter = match app.welcome().stage {
         WelcomeStage::PickLanguage => "step 1/2",
         WelcomeStage::EnterKey => "step 2/2",
     };
-    let left: Vec<Span<'static>> = vec![Span::styled(
+    vec![Span::styled(
         String::from(counter),
         palette::Ink::Aside.on(false),
-    )];
+    )]
+}
+
+fn hints(app: &App) -> Vec<super::common::FooterHint> {
+    let welcome = app.welcome();
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     match welcome.stage {
         WelcomeStage::PickLanguage => {
@@ -435,5 +442,5 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         }
     }
     hints.push(super::common::quit_hint(app.quit_pending()));
-    super::common::footer_bar(left, hints, width)
+    hints
 }

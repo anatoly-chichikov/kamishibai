@@ -131,8 +131,12 @@ impl ScreenView for YourCards {
         Cow::Borrowed(copy)
     }
 
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, width)
+    fn status(&self, app: &App) -> Vec<Span<'static>> {
+        status(app)
+    }
+
+    fn hints(&self, app: &App) -> Vec<super::common::FooterHint> {
+        hints(app)
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -1717,7 +1721,7 @@ pub(crate) fn total_cost(app: &App) -> Option<GenerationCost> {
     Some(cost)
 }
 
-fn footer(app: &App, width: u16) -> Paragraph<'static> {
+fn status(app: &App) -> Vec<Span<'static>> {
     let done = app.done_artifacts();
     let published = !done.deck.is_empty();
     let census = app.card_census();
@@ -1762,7 +1766,12 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     }
     left.push(super::common::status_sep());
     left.push(Span::styled(elapsed(app), palette::Ink::Aside.on(false)));
-    let hints = if app.generation_stopping() {
+    left
+}
+
+fn hints(app: &App) -> Vec<super::common::FooterHint> {
+    let census = app.card_census();
+    if app.generation_stopping() {
         vec![super::common::quit_hint(app.quit_pending())]
     } else if app.generation_stop_pending() {
         vec![
@@ -1804,8 +1813,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         }
         hints.push(super::common::quit_hint(app.quit_pending()));
         hints
-    };
-    super::common::footer_bar(left, hints, width)
+    }
 }
 
 fn elapsed(app: &App) -> String {

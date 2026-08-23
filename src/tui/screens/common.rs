@@ -490,7 +490,33 @@ pub fn render_screen(frame: &mut Frame, area: Rect, app: &App, view: &dyn Screen
     view.body(frame, rects.body, app);
     frame.render_widget(ai_disclaimer(), rects.disclaimer);
     paint_rules(frame, &rects);
-    frame.render_widget(view.footer(app, rects.status.width), rects.status);
+    frame.render_widget(
+        footer_bar(
+            view.status(app),
+            screen_hints(app, view),
+            rects.status.width,
+        ),
+        rects.status,
+    );
+}
+
+/// Return the hints the status bar may advertise for the frame being drawn.
+///
+/// A screen answers for its own keyboard, but an overlay drawn on top of it
+/// takes the keyboard away: `transit` swallows every event under a busy
+/// spinner, and the language picker swallows everything its own action row
+/// does not name. Advertising the screen's keys underneath either one is a
+/// bar that contradicts the panel above it, so the overlay states answer here
+/// instead — once, for every screen, where the chrome is already owned.
+///
+/// Quit is the exception the overlays cannot take: `Ctrl+C` is consumed in
+/// the terminal loop before `transit` ever sees it, so it keeps working and
+/// keeps being named.
+fn screen_hints(app: &App, view: &dyn ScreenView) -> Vec<FooterHint> {
+    if app.busy().is_some() || app.modal().is_some() {
+        return vec![quit_hint(app.quit_pending())];
+    }
+    view.hints(app)
 }
 
 /// Clear a rectangle with the terminal-dark background so no stray paper bleeds through.

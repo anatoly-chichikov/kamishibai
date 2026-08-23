@@ -37,8 +37,12 @@ impl ScreenView for Done {
         Cow::Borrowed(copy)
     }
 
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, width)
+    fn status(&self, app: &App) -> Vec<Span<'static>> {
+        status(app)
+    }
+
+    fn hints(&self, app: &App) -> Vec<super::common::FooterHint> {
+        hints(app)
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -109,9 +113,27 @@ fn card_summary(app: &App) -> Paragraph<'_> {
     Paragraph::new(lines).style(palette::base())
 }
 
-fn footer(app: &App, width: u16) -> Paragraph<'static> {
+/// Return whether this screen is reading a published record rather than the
+/// live batch it was reopened from.
+fn published(app: &App) -> bool {
     let done = app.done_artifacts();
-    let published = !done.deck.is_empty() && done.cards.saturating_add(done.failed) > 0;
+    !done.deck.is_empty() && done.cards.saturating_add(done.failed) > 0
+}
+
+/// Return how many cards gave up, from whichever of the two sources this
+/// screen is reading. The status line and the regeneration hint must never
+/// disagree about it, so both ask here.
+fn failed_count(app: &App) -> usize {
+    if published(app) {
+        app.done_artifacts().failed
+    } else {
+        app.cards_failed()
+    }
+}
+
+fn status(app: &App) -> Vec<Span<'static>> {
+    let done = app.done_artifacts();
+    let published = published(app);
     let ready = if published {
         done.cards
     } else {
@@ -122,11 +144,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     } else {
         app.cards().len()
     };
-    let failed = if published {
-        done.failed
-    } else {
-        app.cards_failed()
-    };
+    let failed = failed_count(app);
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 3/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
@@ -152,23 +170,23 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             palette::Ink::Subject.on(false),
         ));
     }
+    left
+}
+
+fn hints(app: &App) -> Vec<super::common::FooterHint> {
     if app.new_batch_pending() {
-        return super::common::footer_bar(
-            left,
-            vec![
-                super::common::new_batch_hint(true),
-                super::common::quit_hint(app.quit_pending()),
-            ],
-            width,
-        );
+        return vec![
+            super::common::new_batch_hint(true),
+            super::common::quit_hint(app.quit_pending()),
+        ];
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
-    if failed > 0 {
+    if failed_count(app) > 0 {
         hints.push(super::common::FooterHint::primary("Ctrl+G", "Regenerate"));
     }
     if app.can_start_new_batch() {
         hints.push(super::common::new_batch_hint(app.new_batch_pending()));
     }
     hints.push(super::common::quit_hint(app.quit_pending()));
-    super::common::footer_bar(left, hints, width)
+    hints
 }

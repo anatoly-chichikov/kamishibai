@@ -35,8 +35,12 @@ impl ScreenView for YourWords {
         Cow::Borrowed(HINT)
     }
 
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, width)
+    fn status(&self, app: &App) -> Vec<Span<'static>> {
+        status(app)
+    }
+
+    fn hints(&self, app: &App) -> Vec<super::common::FooterHint> {
+        hints(app)
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -196,7 +200,7 @@ fn placeholder_lines() -> Vec<Line<'static>> {
     ]
 }
 
-fn footer(app: &App, width: u16) -> Paragraph<'static> {
+fn status(app: &App) -> Vec<Span<'static>> {
     let count = word_count(app.blob());
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 1/3", palette::Ink::Aside.on(false)));
@@ -214,23 +218,24 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             palette::Ink::Detail.on(false),
         ));
     }
-    let over_limit = count > MAX_INTAKE_WORDS;
-    if over_limit {
+    if count > MAX_INTAKE_WORDS {
         left.push(Span::styled(
             format!(" · over the {MAX_INTAKE_WORDS}-word limit"),
             palette::Ink::Detail.on(false),
         ));
     }
+    left
+}
+
+fn hints(app: &App) -> Vec<super::common::FooterHint> {
     if app.word_clear_pending() {
-        return super::common::footer_bar(
-            left,
-            vec![
-                super::common::escape_again_hint(),
-                super::common::quit_hint(app.quit_pending()),
-            ],
-            width,
-        );
+        return vec![
+            super::common::escape_again_hint(),
+            super::common::quit_hint(app.quit_pending()),
+        ];
     }
+    let count = word_count(app.blob());
+    let over_limit = count > MAX_INTAKE_WORDS;
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if over_limit {
         hints.push(super::common::clear_words_hint());
@@ -244,7 +249,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     }
     hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
     hints.push(super::common::quit_hint(app.quit_pending()));
-    super::common::footer_bar(left, hints, width)
+    hints
 }
 
 fn word_count(blob: &str) -> usize {

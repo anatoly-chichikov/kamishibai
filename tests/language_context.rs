@@ -358,6 +358,19 @@ fn your_words_shows_detecting_marker_before_target_is_confirmed() {
 }
 
 #[test]
+fn the_open_pair_modal_leaves_no_contradicting_hints_on_the_bar_below_it() {
+    let app = base()
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en");
+    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker(PickerSection::Known));
+    let rendered = flat(&opened);
+    assert!(
+        !rendered.contains("[Esc] back") && !rendered.contains("[D] drop"),
+        "the modal owns Esc and swallows D, so the bar beneath it must not name either: {rendered}"
+    );
+}
+
+#[test]
 fn picking_my_language_on_what_i_understood_persists_the_new_code() {
     let app = base()
         .with_screen(Screen::WhatIUnderstood)

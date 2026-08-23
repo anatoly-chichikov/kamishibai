@@ -231,6 +231,18 @@ fn busy_loader_covers_the_current_screen_with_request_status() {
 }
 
 #[test]
+fn busy_loader_takes_the_screen_hints_down_with_the_keyboard() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob("deed\nhonor")
+        .busy_started(BusyKind::Understanding);
+    let flat = flatten(&app);
+    assert!(
+        !flat.contains("[Ctrl+G]") && !flat.contains("[Esc]") && flat.contains("[Ctrl+C] quit"),
+        "a busy overlay swallows every key but quit, so the bar must stop advertising the rest: {flat}"
+    );
+}
+
+#[test]
 fn busy_loader_owns_keyboard_input_until_request_finishes() {
     let app = App::new(LanguagePair::new("en", "ru")).busy_started(BusyKind::Understanding);
     let event = to_app(press(KeyCode::Char('x'))).expect("char must map");

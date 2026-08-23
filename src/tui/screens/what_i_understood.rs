@@ -47,8 +47,12 @@ impl ScreenView for WhatIUnderstood {
         Cow::Borrowed(HINT)
     }
 
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, width)
+    fn status(&self, app: &App) -> Vec<Span<'static>> {
+        status(app)
+    }
+
+    fn hints(&self, app: &App) -> Vec<super::common::FooterHint> {
+        hints(app)
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -729,7 +733,7 @@ fn candidate_label_len(candidate: &WordCandidate) -> usize {
     super::common::display_width(candidate.term()) + indicator
 }
 
-fn footer(app: &App, width: u16) -> Paragraph<'static> {
+fn status(app: &App) -> Vec<Span<'static>> {
     let mut left: Vec<Span<'static>> = Vec::new();
     left.push(Span::styled("step 2/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
@@ -757,6 +761,11 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             palette::Ink::Detail.on(false),
         ));
     }
+    left
+}
+
+fn hints(app: &App) -> Vec<super::common::FooterHint> {
+    let count = review_card_count(app);
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if app.sentence_settings_editor().is_some() {
         if count > 0 {
@@ -805,7 +814,7 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     if app.sentence_settings_editor().is_none() {
         hints.push(super::common::quit_hint(app.quit_pending()));
     }
-    super::common::footer_bar(left, hints, width)
+    hints
 }
 
 fn review_card_count(app: &App) -> usize {

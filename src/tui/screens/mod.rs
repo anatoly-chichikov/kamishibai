@@ -7,7 +7,6 @@ use std::borrow::Cow;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
-use ratatui::widgets::Paragraph;
 
 use crate::tui::app::App;
 
@@ -46,8 +45,16 @@ pub trait ScreenView {
     fn lang_chip(&self, app: &App) -> Option<Vec<Span<'static>>> {
         Some(common::language_chip(app))
     }
-    /// Status bar pinned to the bottom row of the frame.
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static>;
+    /// Left segment of the status bar — where this screen stands, what it
+    /// costs, how long it has run. Always drawn, whatever is layered on top.
+    fn status(&self, app: &App) -> Vec<Span<'static>>;
+    /// Right cluster of key hints for the screen's current sub-state, in
+    /// reading order with the primary first.
+    ///
+    /// A screen answers for its own keyboard only. When an overlay owns the
+    /// keyboard instead, `common::render_screen` replaces this answer rather
+    /// than asking the screen to remember the overlay exists.
+    fn hints(&self, app: &App) -> Vec<common::FooterHint>;
     /// Draw the body content into the inner body rectangle. The dispatcher
     /// already painted the background and header, and will paint the AI
     /// disclaimer, divider, and footer afterwards — body code must stay inside
