@@ -70,6 +70,38 @@ fn every_test_target_named_by_ci_exists() {
     );
 }
 
+/// Guard the workflow syntax: a plain YAML scalar cannot carry `": "`, so a
+/// one-line `run:` that does makes GitHub reject the whole file and fail the
+/// run before a single job starts — which is what a cargo filter written as
+/// `-- config:: paths::` did the moment it went in unquoted.
+#[test]
+fn every_single_line_ci_command_survives_its_yaml_scalar() {
+    let workflows = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.github/workflows"));
+    let mut broken: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(workflows).expect("the workflow directory must be readable") {
+        let path = entry.expect("directory entry must be readable").path();
+        let text = std::fs::read_to_string(&path).expect("each workflow must be readable");
+        for line in text.lines() {
+            let trimmed = line.trim_start();
+            let Some(command) = trimmed
+                .strip_prefix("- run:")
+                .or_else(|| trimmed.strip_prefix("run:"))
+            else {
+                continue;
+            };
+            let command = command.trim();
+            if command.starts_with(['|', '>', '"', '\'']) || !command.contains(": ") {
+                continue;
+            }
+            broken.push(format!("{}: {command}", path.display()));
+        }
+    }
+    assert!(
+        broken.is_empty(),
+        "a one-line CI command carries a YAML mapping separator and must be quoted: {broken:?}"
+    );
+}
+
 /// Guard the harness roster: with `autotests = false` a test file missing
 /// from the module list above would silently stop running.
 #[test]
