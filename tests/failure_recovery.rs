@@ -111,7 +111,7 @@ fn your_cards_surfaces_failure_banner_when_any_card_fails_terminally() {
         .find(|line| line.contains("✗ manga"))
         .expect("the failed artifact must own a row");
     assert!(
-        !manga.contains("gave up"),
+        !manga.contains("unfinished"),
         "your cards must mark the failed manga row with a bare ✗: {rendered}"
     );
 }

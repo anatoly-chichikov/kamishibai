@@ -5,7 +5,8 @@
 //! meaning: [`Ink`] ranks a span inside the row it belongs to, the `HL`
 //! background marks the row under the cursor and nothing else, and
 //! `Modifier::BOLD` marks whatever the keyboard owns right now — the row under
-//! that cursor, and the lit row of an editor that draws no cursor band.
+//! that cursor, the lit row of an editor that draws no cursor band, and the
+//! armed half of a two-beat confirmation in the footer.
 //! Underlining a span says it opens something when clicked; its brightness
 //! still comes from its rank.
 

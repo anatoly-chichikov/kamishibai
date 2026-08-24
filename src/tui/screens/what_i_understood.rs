@@ -795,9 +795,9 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         if can_generate(app) {
             hints.push(super::common::FooterHint::secondary("Ctrl+G", "generate"));
         }
-        hints.push(controls.secondary_disclosure());
-        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        hints.push(controls.disclosure_hint());
         hints.push(super::common::sweep_hint(true));
+        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     } else {
         if can_generate(app) {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
@@ -809,12 +809,8 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         // `C` leaves it exactly there — and then `→` is inert while `←` is
         // what closes, and Esc peels the list instead of leaving the screen.
         let open = app.focused_sense_list_open();
-        hints.push(DisclosureControls::new(open).secondary_disclosure());
-        if !open {
-            hints.push(super::common::back_hint());
-        }
+        hints.push(DisclosureControls::new(open).disclosure_hint());
         hints.push(super::common::FooterHint::secondary("D", "drop"));
-        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         if app.any_sense_list_open() {
             hints.push(super::common::sweep_hint(true));
         } else if app
@@ -824,7 +820,11 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         {
             hints.push(super::common::sweep_hint(false));
         }
+        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
+        if !open {
+            hints.push(super::common::back_hint());
+        }
     }
     if app.sentence_settings_editor().is_none() {
         hints.push(super::common::quit_hint(app.quit_pending()));

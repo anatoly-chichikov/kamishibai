@@ -1014,7 +1014,7 @@ mod tests {
                     "retry 1/3",
                     "retry 2/3",
                     "retry 3/3",
-                    "gave up",
+                    "unfinished",
                     "1 ✗",
                     "2 ✗",
                     "3 ✗",

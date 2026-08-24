@@ -575,7 +575,7 @@ fn partial_publish_is_a_settled_view_with_outputs_and_durable_tally() {
     let rendered = flat(&app);
     assert!(
         rendered.contains("your cards")
-            && rendered.contains("1 gave up")
+            && rendered.contains("1 unfinished")
             && !rendered.contains("some cards didn't make it")
             && rendered.contains("1/2 ready")
             && !rendered.contains("1 omitted")
@@ -595,7 +595,7 @@ fn a_batch_that_lost_nothing_carries_no_loss_tag() {
     .done_published_counted("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp", 2, 0);
     let rendered = flat(&app);
     assert!(
-        !rendered.contains("gave up") && rendered.contains("all done"),
+        !rendered.contains("unfinished") && rendered.contains("all done"),
         "a clean batch must not be told it lost anything: {rendered}"
     );
 }
@@ -605,8 +605,31 @@ fn a_batch_that_published_nothing_still_states_what_it_lost() {
     let app = seeded(vec![draft("wreck", failed_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("1 gave up"),
+        rendered.contains("1 unfinished"),
         "a run where every card failed publishes no deck, and that is the run whose outcome must not go unsaid: {rendered}"
+    );
+}
+
+#[test]
+fn the_outcome_block_spends_no_blank_row_on_either_side_of_its_rule() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("wreck", partial_priced_artifacts()),
+    ])
+    .done_published_counted("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp", 1, 1);
+    let buffer = rendered_buffer_at(&app, 100, 20);
+    let (_, pdf) = position_of(&buffer, "PDF");
+    let ruled = |row: u16| {
+        buffer[(0, row)].modifier.contains(Modifier::CROSSED_OUT)
+            && row_text(&buffer, row).trim().is_empty()
+    };
+    assert!(
+        ruled(pdf + 1) && !row_text(&buffer, pdf + 2).trim().is_empty(),
+        "the outcome block must close on the row under its last line and let the cards start right under that:\n{}",
+        (pdf..pdf + 3)
+            .map(|row| row_text(&buffer, row))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -627,7 +650,7 @@ fn partial_publish_reserves_and_links_the_same_banner_rows() {
             scroll_viewport(&building, terminal) - scroll_viewport(&partial, terminal),
             link_at(&partial, terminal, column, row),
         ),
-        (5, Some(String::from("/tmp/cards.apkg"))),
+        (4, Some(String::from("/tmp/cards.apkg"))),
         "partial banner rendering, scrolling, and hit geometry diverged"
     );
 }
@@ -842,7 +865,7 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
             && active.contains("manga")
             && !active.contains("retry")
             && !active.contains("$.1738")
-            && !failed.contains("gave up")
+            && !failed.contains("unfinished")
             && failed.contains("$.1738")
             && !rendered.contains("paused")
             && !rendered.contains("1 ✗")
@@ -858,7 +881,7 @@ fn failure_banner_appears_when_any_card_exhausts_its_retries() {
     let manga = row_containing(&rendered, "✗ manga");
     assert!(
         manga.contains("$.3210")
-            && !manga.contains("gave up")
+            && !manga.contains("unfinished")
             && row_containing(&rendered, "wreck →").contains("$.3210  ↻3")
             && rendered.contains("$0.32"),
         "your cards must mark the failed manga row with a bare ✗ and its own cost: {rendered}"
@@ -871,7 +894,7 @@ fn failure_footer_omits_the_duplicate_terminal_count() {
     let rendered = flat(&app);
     let footer = row_containing(&rendered, "step 3/3");
     assert!(
-        !footer.contains('✗') && !footer.contains("gave up"),
+        !footer.contains('✗') && !footer.contains("unfinished"),
         "failure footer repeated a terminal count already visible on its artifact row: {footer}"
     );
 }
@@ -2555,5 +2578,32 @@ fn the_taught_word_is_the_only_lit_span_of_its_translation() {
     assert_eq!(
         lit, "whilst",
         "the taught word must be the one lit run inside its own sentence"
+    );
+}
+
+#[test]
+fn following_holds_the_scroll_the_running_card_will_grow_into() {
+    let batch = |built: usize| -> Vec<CardDraft> {
+        (0..12)
+            .map(|index| {
+                let artifacts = if index < built {
+                    ready_artifacts()
+                } else {
+                    CardArtifacts::default()
+                };
+                draft(&format!("term{index:02}"), artifacts)
+            })
+            .collect()
+    };
+    let started = seeded(batch(11))
+        .cards_running(Some((11, Artifact::Sound)))
+        .body_scroll_to_selection(14, 100);
+    let filled = seeded(batch(12))
+        .cards_running(Some((11, Artifact::Picture)))
+        .body_scroll_to_selection(14, 100);
+    assert_eq!(
+        started.body_scroll(),
+        filled.body_scroll(),
+        "the viewport moved under the running card as it grew instead of reserving the room it would need"
     );
 }

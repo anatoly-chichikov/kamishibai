@@ -252,7 +252,10 @@ pub fn language_chip(app: &App) -> Vec<Span<'static>> {
 /// `FooterHint::keep`, not by tier.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
-    /// The one action that advances the screen — `Ink::Subject`.
+    /// An action that takes the work forward — `Ink::Subject`. The screen's
+    /// spine (`Ctrl+G`) always wears it, and so does the door into whatever
+    /// the cursor is standing on, because walking in is how the user acts on
+    /// a row at all.
     Primary,
     /// A useful but non-advancing action — `Ink::Detail`.
     Secondary,
@@ -297,6 +300,7 @@ pub struct FooterHint {
     label: String,
     tier: Tier,
     keep: Keep,
+    armed: bool,
 }
 
 impl FooterHint {
@@ -316,12 +320,36 @@ impl FooterHint {
         Self::with(key, label, Tier::Ghost, Keep::Optional)
     }
 
+    /// The door into the focused row — a disclosure that opens, or the walk
+    /// into an inline editor. Painted as bright as the screen's spine, since
+    /// stepping inside is the action the focused row offers, but ranked as
+    /// one of the screen's own offers: it is shed before the way out.
+    pub fn door(key: &str, label: &str) -> Self {
+        Self::with(key, label, Tier::Primary, Keep::Useful)
+    }
+
     fn with(key: &str, label: &str, tier: Tier, keep: Keep) -> Self {
         Self {
             key: String::from(key),
             label: String::from(label),
             tier,
             keep,
+            armed: false,
+        }
+    }
+
+    /// A destructive gesture whose first beat has already been taken, so the
+    /// next press of that key goes through.
+    ///
+    /// It is the one hint drawn with weight. Everywhere else bold marks what
+    /// the keyboard owns, and for the length of the confirmation window that
+    /// is exactly what this key is: nothing else can answer until it fires or
+    /// times out, and the bar has to say so loudly enough to stop a hand
+    /// already moving.
+    fn armed(key: &str, label: &str, keep: Keep) -> Self {
+        Self {
+            armed: true,
+            ..Self::with(key, label, Tier::Primary, keep)
         }
     }
 
@@ -336,6 +364,11 @@ impl FooterHint {
             Tier::Primary => palette::Ink::Subject.on(false),
             Tier::Secondary => palette::Ink::Detail.on(false),
             Tier::Ghost => palette::Ink::Aside.on(false),
+        };
+        let style = if self.armed {
+            style.add_modifier(Modifier::BOLD)
+        } else {
+            style
         };
         vec![
             Span::styled(format!("[{}]", self.key), style),
@@ -445,27 +478,36 @@ pub fn status_sep() -> Span<'static> {
 
 /// The global Ctrl+C quit hint — normally the rightmost item in a footer.
 ///
-/// A dim `Ghost`; once the first Ctrl+C has been seen it brightens and its
-/// label switches from `quit` to `again` to signal the next press will exit.
+/// A dim `Ghost`; once the first Ctrl+C has been seen it goes bright and bold
+/// and its label switches from `quit` to `again`, the same two beats every
+/// destructive Escape takes, so an armed key looks the same whichever one it
+/// is.
 /// It is the sole holder of `Keep::Exit`, so it outlives every action a screen
 /// offers and yields only to that screen's primary — but it is still dropped
 /// whole, never clipped, on a bar too narrow even for that.
 pub fn quit_hint(pending: bool) -> FooterHint {
     if pending {
-        FooterHint::with("Ctrl+C", "again", Tier::Secondary, Keep::Exit)
+        FooterHint::armed("Ctrl+C", "again", Keep::Exit)
     } else {
         FooterHint::with("Ctrl+C", "quit", Tier::Ghost, Keep::Exit)
     }
 }
 
-/// The review-screen back action.
+/// The review-screen back action — the one Escape in the app that breaks
+/// nothing, so it is also the cheapest hint on the bar.
+///
+/// Every other Escape names a consequence (`clear`, `stop`, `new cards`) and
+/// is ranked to survive the conventional keys beside it. This one only walks
+/// back to words that are still there, so it is drawn quiet, sits immediately
+/// before the way out, and is the first thing a narrowing bar sheds.
 pub fn back_hint() -> FooterHint {
-    FooterHint::secondary("Esc", "back")
+    FooterHint::with("Esc", "back", Tier::Ghost, Keep::Optional)
 }
 
-/// The review-screen generation-guidance action.
+/// The review-screen generation-guidance action — the door out of the top of
+/// the list, advertised only while the walk actually stands there.
 pub fn sentence_settings_hint() -> FooterHint {
-    FooterHint::secondary("↑", "guidance")
+    FooterHint::door("↑", "guidance")
 }
 
 /// The nonempty words action, painted quietly but ranked as the screen action
@@ -495,20 +537,21 @@ pub fn stop_generation_hint() -> FooterHint {
 
 /// The high-priority second-Escape confirmation shared by destructive actions.
 pub fn escape_again_hint() -> FooterHint {
-    FooterHint::with("Esc", "again", Tier::Primary, Keep::Confirm)
+    FooterHint::armed("Esc", "again", Keep::Confirm)
 }
 
 /// The whole-screen disclosure sweep, named by the direction it will take.
 ///
-/// Quiet while everything is closed, because opening is an offer rather than
-/// an instruction — but ranked as a screen action either way. As a plain ghost
-/// it was shed before the bar reached any realistic width, which hid the one
-/// gesture that shows a review or a batch all at once.
+/// One gesture, one rank: it reads the same whichever way it points, because
+/// opening the whole screen and closing it again are the same offer seen from
+/// its two ends. Drawn a step below the doors it operates and kept above the
+/// conventional keys, so it stands between them on the bar and on a narrowing
+/// one it outlives them.
 pub fn sweep_hint(open: bool) -> FooterHint {
     if open {
         FooterHint::secondary("C", "collapse")
     } else {
-        FooterHint::with("C", "expand", Tier::Ghost, Keep::Useful)
+        FooterHint::secondary("C", "expand")
     }
 }
 
@@ -535,6 +578,7 @@ pub fn render_screen(frame: &mut Frame, area: Rect, app: &App, view: &dyn Screen
         rects.header,
     );
     view.body(frame, rects.body, app);
+    paint_body_rule(frame, area, &rects, view.body_rule(app));
     frame.render_widget(ai_disclaimer(), rects.disclaimer);
     paint_rules(frame, &rects);
     frame.render_widget(
@@ -544,6 +588,31 @@ pub fn render_screen(frame: &mut Frame, area: Rect, app: &App, view: &dyn Screen
             rects.status.width,
         ),
         rects.status,
+    );
+}
+
+/// Draw a screen's own block border across the full terminal width.
+///
+/// The row is body-relative because only the screen knows where its block
+/// ends; the width is the whole terminal because a border is chrome, and the
+/// one already drawn above the footer reaches both edges. Painted after the
+/// body so it overwrites the blank row the block left for it, and skipped
+/// when a short terminal has already pushed that row past the body.
+fn paint_body_rule(frame: &mut Frame, area: Rect, rects: &ScreenFrame, row: Option<u16>) {
+    let Some(row) = row else {
+        return;
+    };
+    if row >= rects.body.height {
+        return;
+    }
+    frame.render_widget(
+        dashed_rule(area.width),
+        Rect {
+            x: area.x,
+            y: rects.body.y.saturating_add(row),
+            width: area.width,
+            height: 1,
+        },
     );
 }
 
@@ -771,6 +840,66 @@ mod tests {
         assert!(
             line.contains("expand") && !line.contains("nav"),
             "the one gesture that opens the whole screen must outlive the keys nobody needs told, got: {line}"
+        );
+    }
+
+    #[test]
+    fn an_armed_confirmation_is_the_one_hint_the_bar_draws_with_weight() {
+        let armed = [escape_again_hint(), quit_hint(true)].map(|hint| {
+            let spans = hint.spans();
+            (
+                spans[0].style.fg,
+                spans[0].style.add_modifier | spans[1].style.add_modifier,
+            )
+        });
+        assert_eq!(
+            armed,
+            [
+                (Some(palette::FG), Modifier::BOLD),
+                (Some(palette::FG), Modifier::BOLD),
+            ],
+            "a gesture whose next press goes through must be bright and bold whichever key holds it"
+        );
+    }
+
+    #[test]
+    fn a_door_is_painted_like_the_spine_it_stands_beside() {
+        let door = FooterHint::door("Enter/→", "open").spans();
+        let spine = FooterHint::primary("Ctrl+G", "generate").spans();
+        assert_eq!(
+            (door[0].style, door[1].style),
+            (spine[0].style, spine[1].style),
+            "walking into the focused row must read as brightly as the key that builds the batch"
+        );
+    }
+
+    #[test]
+    fn a_door_is_still_shed_before_the_way_out() {
+        let hints = vec![
+            FooterHint::primary("Ctrl+G", "generate"),
+            FooterHint::door("Enter/→", "open"),
+            quit_hint(false),
+        ];
+        let line = joined(&footer_spans(status(), hints, 60));
+        assert!(
+            line.contains("Ctrl+C") && !line.contains("open"),
+            "a bright door must not outrank the one key that leaves, got: {line}"
+        );
+    }
+
+    #[test]
+    fn the_way_back_is_the_first_hint_a_narrowing_bar_sheds() {
+        let hints = vec![
+            FooterHint::primary("Ctrl+G", "generate"),
+            sweep_hint(false),
+            FooterHint::ghost("↑↓", "nav"),
+            back_hint(),
+            quit_hint(false),
+        ];
+        let line = joined(&footer_spans(status(), hints, 86));
+        assert!(
+            !line.contains("back") && line.contains("nav"),
+            "the Escape that breaks nothing must go before the keys that move, got: {line}"
         );
     }
 

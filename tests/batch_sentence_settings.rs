@@ -153,13 +153,14 @@ fn choices(app: &App, area: Rect, row: BatchSettingsRow) -> BTreeSet<usize> {
 }
 
 #[test]
-fn a_wide_review_sheds_the_conventional_keys_before_the_exit() {
+fn a_wide_review_sheds_the_way_back_before_the_walk_or_the_exit() {
     let rendered = flat_at(&review(2), 120, 24);
     assert!(
         rendered.contains("[Ctrl+C] quit")
-            && !rendered.contains("[↑↓] nav")
+            && rendered.contains("[↑↓] nav")
+            && !rendered.contains("[Esc] back")
             && !rendered.contains("[Ctrl+L]"),
-        "at a normal width the review must shed the keys nobody needs told before anything else: {rendered}"
+        "at a normal width the review must shed the Escape that breaks nothing before the keys that move: {rendered}"
     );
 }
 

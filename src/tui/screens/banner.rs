@@ -7,12 +7,16 @@
 //! and what you lost, read in one glance.
 //!
 //! A dashed rule closes the block off from the card list below, the same rule
-//! that closes the body off from the footer.
+//! that closes the body off from the footer — drawn by `common::render_screen`
+//! across the full terminal width, because the body rectangle this widget
+//! lives in stops a gutter short of both edges and a border that stops short
+//! of the screen reads as a shorter border, not as the same one.
 //!
 //! The hit tester in `tui::links` mirrors the column maths laid out here.
 
 use std::path::Path;
 
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -39,19 +43,31 @@ pub const PATH_GAP: usize = 2;
 /// Visible characters bracketing the loss tag, one space either side.
 const TAG_PAD: usize = 2;
 
-/// Number of rows the strip occupies inside the body rect: its content rows,
-/// the dashed rule closing them off, and one blank before the cards. Returns
-/// zero when there is nothing to report.
+/// Number of rows the strip occupies inside the body rect: its content rows
+/// plus the dashed rule closing them off. Returns zero when there is nothing
+/// to report.
 ///
-/// The rule hugs the last content row the way the status rule hugs the
-/// disclaimer above it — no blank between a block and its own bottom edge.
+/// No blank on either side of the rule. A block and its own bottom edge need
+/// nothing between them, and the cards start on the row right under it — the
+/// same way the status rule sits between the disclaimer above it and the
+/// footer below it without a spare row for either.
 pub fn height(app: &App) -> u16 {
     let count = content_rows(app);
     if count == 0 {
         0
     } else {
-        u16::try_from(count + 2).unwrap_or(u16::MAX)
+        u16::try_from(count + 1).unwrap_or(u16::MAX)
     }
+}
+
+/// Row inside the body carrying the strip's closing rule, or `None` when the
+/// strip has nothing to report.
+///
+/// It is the last of the rows `height` reserves, and it is derived from that
+/// count so the two cannot drift: `render_screen` paints the rule from this
+/// answer while `widget` fills only the rows above it.
+pub fn rule_row(app: &App) -> Option<u16> {
+    height(app).checked_sub(1).filter(|_| reports(app))
 }
 
 /// Return whether the strip has anything to say — files, losses, or both.
@@ -91,12 +107,16 @@ pub fn losses(app: &App) -> usize {
 }
 
 /// Return the loss tag, or `None` when nothing was lost.
+///
+/// One word beside the count. The screen is already called `your cards`, so
+/// naming them again inside the tag only pushed the number away from the word
+/// that qualifies it.
 fn tag(app: &App) -> Option<String> {
     let lost = losses(app);
     if lost == 0 {
         return None;
     }
-    Some(format!(" {lost} gave up "))
+    Some(format!(" {lost} unfinished "))
 }
 
 /// Return the (label, path) pairs that should be rendered, in order.
@@ -137,15 +157,17 @@ pub fn display(label: &str, path: &str) -> String {
     basename(path)
 }
 
-/// Render the strip. Caller is responsible for rendering it into a
-/// `height(app)`-row sub-rect at the top of the body area, `width` cells wide.
+/// Render the strip's content rows. Caller is responsible for rendering them
+/// into a `height(app)`-row sub-rect at the top of the body area, `width`
+/// cells wide; the one row this widget leaves empty at the bottom is the
+/// full-width rule `render_screen` paints at `rule_row`.
 /// The deck and report rows show only the file name; the folder row shows the
 /// full directory path so the file rows above don't need to repeat it.
 pub fn widget(app: &App, width: u16) -> Paragraph<'static> {
     let entries = entries(app);
     let width = usize::from(width);
     let tag = tag(app);
-    let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries.len() + 3);
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries.len().max(1));
     for (index, (label, path)) in entries.iter().enumerate() {
         let padding = LABEL_PAD.saturating_sub(super::common::display_width(label)) + PATH_GAP;
         let display = display(label, path);
@@ -172,11 +194,6 @@ pub fn widget(app: &App, width: u16) -> Paragraph<'static> {
         push_tag(&mut spans, tag, width);
         lines.push(Line::from(spans));
     }
-    if lines.is_empty() {
-        return Paragraph::new(Vec::<Line<'static>>::new()).style(palette::base());
-    }
-    lines.push(super::common::dashed_line(0, width));
-    lines.push(Line::from(""));
     Paragraph::new(lines).style(palette::base())
 }
 
@@ -185,6 +202,10 @@ pub fn widget(app: &App, width: u16) -> Paragraph<'static> {
 /// The tag keeps its full width and the gap absorbs the difference, so on a
 /// terminal too narrow for both it is the path that runs off the edge — paths
 /// already do, and the count is the part that cannot afford to.
+///
+/// Its letters are the one bold span outside the keyboard's own row: weight
+/// means focus everywhere else, and this block is the single sentence a
+/// settled screen must not let the eye slide past.
 fn push_tag(spans: &mut Vec<Span<'static>>, tag: &str, width: usize) {
     let used: usize = spans
         .iter()
@@ -196,6 +217,6 @@ fn push_tag(spans: &mut Vec<Span<'static>>, tag: &str, width: usize) {
     spans.push(Span::styled(" ".repeat(gap), palette::base()));
     spans.push(Span::styled(
         String::from(tag),
-        super::sentence_labels::tag_style(true),
+        super::sentence_labels::tag_style(true).add_modifier(Modifier::BOLD),
     ));
 }

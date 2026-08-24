@@ -46,6 +46,10 @@ impl ScreenView for Done {
         hints(app)
     }
 
+    fn body_rule(&self, app: &App) -> Option<u16> {
+        super::banner::rule_row(app)
+    }
+
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
         let banner_rows = super::banner::height(app);
         if banner_rows == 0 {

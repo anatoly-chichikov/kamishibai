@@ -265,8 +265,10 @@ fn partial_publish_snapshot_locks_the_outcome_strip() {
 
 /// The outcome strip's rule is drawn the way the status rule is — blank cells
 /// carrying `CROSSED_OUT` — so it leaves no glyph for a text snapshot to hold.
-/// Only the styles prove it is there, and that it is phase-locked to the rule
-/// above the footer rather than drawn on the opposite columns.
+/// Only the styles prove it is there, that it reaches both screen edges past
+/// the body gutter, that it spends no blank row on either side of itself, and
+/// that it is phase-locked to the rule above the footer rather than drawn on
+/// the opposite columns.
 #[test]
 fn the_outcome_strip_closes_itself_with_the_same_rule_the_footer_uses() {
     let width = 100;
@@ -286,11 +288,18 @@ fn the_outcome_strip_closes_itself_with_the_same_rule_the_footer_uses() {
     let buffer = terminal.backend().buffer();
     let strip = 6;
     let footer = height - 2;
+    let dashed = |column: u16, row: u16| {
+        buffer[(column, row)]
+            .modifier
+            .contains(Modifier::CROSSED_OUT)
+    };
     assert!(
-        buffer[(4, strip)].modifier.contains(Modifier::CROSSED_OUT)
-            && buffer[(6, strip)].modifier.contains(Modifier::CROSSED_OUT)
-            && buffer[(4, strip)].fg == buffer[(4, footer)].fg,
-        "the outcome strip must close on the same dashed rule, in the same colour and phase, that closes the body"
+        dashed(0, strip)
+            && dashed(width - 2, strip)
+            && !dashed(0, strip - 1)
+            && !dashed(0, strip + 1)
+            && buffer[(0, strip)].fg == buffer[(0, footer)].fg,
+        "the outcome strip must close on one full-width dashed row, in the same colour and phase that closes the body, with no blank spent on either side of it"
     );
 }
 

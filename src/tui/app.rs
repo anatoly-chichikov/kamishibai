@@ -735,10 +735,16 @@ impl App {
         let Some((top, height)) = self.focused_body_range(body_width) else {
             return self;
         };
+        let bottom = top.saturating_add(height);
+        // The focused range may reach past what is drawn today — a card the
+        // engine is building reserves the rows it still owes — and the clamp
+        // has to allow that much scroll or the reservation is undone the
+        // moment it is made. Everywhere else the range ends inside the
+        // content and this reads as the plain content height it always was.
         let max = self
             .body_content_height(body_width)
+            .max(bottom)
             .saturating_sub(viewport);
-        let bottom = top.saturating_add(height);
         let mut next = self.body_scroll;
         let anchor_editor =
             self.screen == Screen::YourCards && self.cards.editor.is_some() && height <= viewport;

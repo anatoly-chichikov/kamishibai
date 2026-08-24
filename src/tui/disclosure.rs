@@ -56,18 +56,22 @@ impl DisclosureControls {
         }
     }
 
-    /// Return the secondary footer hint for the disclosure, named by the
-    /// direction it will take rather than by the mechanism.
+    /// Return the footer hint for the disclosure, named by the direction it
+    /// will take rather than by the mechanism.
     ///
     /// `toggle` described how the key is wired, not what pressing it does,
     /// and it said the same word for both directions while the key pair
     /// beside it was already flipping. The label follows the state now, so
     /// the arrow and the verb always agree.
-    pub(crate) fn secondary_disclosure(self) -> FooterHint {
+    ///
+    /// The two directions are not the same offer: opening is how the user
+    /// acts on the row under the cursor, so it is painted as a door, while
+    /// closing only undoes it and stays a step quieter.
+    pub(crate) fn disclosure_hint(self) -> FooterHint {
         if self.open {
             FooterHint::secondary("Enter/←", "close")
         } else {
-            FooterHint::secondary("Enter/→", "open")
+            FooterHint::door("Enter/→", "open")
         }
     }
 

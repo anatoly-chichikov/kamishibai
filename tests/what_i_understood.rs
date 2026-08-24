@@ -272,7 +272,6 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
             && rendered.contains("[Enter/→] open")
             && rendered.contains("[Ctrl+G]")
             && rendered.contains("generate")
-            && rendered.contains("[Esc] back")
             && !rendered.contains("[R] change"),
         "sense check must render the new mono header, gloss list, and key hints: {rendered}"
     );
@@ -730,6 +729,44 @@ fn dropping_the_last_candidate_returns_to_your_words_with_the_input_intact() {
         (after.screen(), after.blob()),
         (Screen::YourWords, "bittersweet"),
         "an unconfirmed letter must not be the one path that throws the typed words away"
+    );
+}
+
+fn footer_at(app: &App, width: u16) -> String {
+    let backend = TestBackend::new(width, 24);
+    let mut terminal = Terminal::new(backend).expect("backend");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let mut bar = String::new();
+    for column in 0..buffer.area.width {
+        bar.push_str(buffer[(column, buffer.area.height - 1)].symbol());
+    }
+    bar
+}
+
+#[test]
+fn the_review_bar_reads_from_what_it_builds_down_to_the_way_out() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .seeded_blob("bank")
+        .confirmed_learning("en")
+        .understood(vec![bank_candidate()]);
+    let bar = footer_at(&app, 200);
+    let ladder = [
+        "[Ctrl+G] generate",
+        "[↑] guidance",
+        "[Enter/→] open",
+        "[D] drop",
+        "[C] expand",
+        "[↑↓] nav",
+        "[Ctrl+L] languages",
+        "[Esc] back",
+        "[Ctrl+C] quit",
+    ]
+    .map(|hint| bar.find(hint));
+    assert!(
+        ladder.iter().all(Option::is_some) && ladder.windows(2).all(|pair| pair[0] < pair[1]),
+        "the bar must read from the key that builds, through the doors and the screen sweep, down to the walk and the way out: {bar}"
     );
 }
 

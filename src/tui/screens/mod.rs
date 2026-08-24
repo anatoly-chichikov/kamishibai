@@ -60,4 +60,15 @@ pub trait ScreenView {
     /// disclaimer, divider, and footer afterwards — body code must stay inside
     /// `area`.
     fn body(&self, frame: &mut Frame, area: Rect, app: &App);
+    /// Row inside the body, counted from its first line, that a block closes
+    /// itself off on — drawn as a dashed rule across the full terminal width,
+    /// in the same colour and column phase as the rule that closes the body
+    /// off from the footer. `None` on a screen with no such block.
+    ///
+    /// The rule is chrome, so the dispatcher paints it: `body` is handed a
+    /// rectangle a gutter short of both screen edges, and a border stopping a
+    /// gutter short reads as a different border, not as the same one.
+    fn body_rule(&self, _: &App) -> Option<u16> {
+        None
+    }
 }

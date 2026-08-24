@@ -141,6 +141,14 @@ impl ScreenView for YourCards {
         hints(app)
     }
 
+    fn body_rule(&self, app: &App) -> Option<u16> {
+        if all_finished(app) {
+            super::banner::rule_row(app)
+        } else {
+            None
+        }
+    }
+
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
         let finished = all_finished(app);
         let banner_rows = if finished {
@@ -1472,6 +1480,16 @@ pub(crate) fn focused_card_range(app: &App, width: usize) -> Option<(u16, u16)> 
                     })
                     .unwrap_or(base)
                     .max(1)
+            } else if app.following_card() == Some(idx) {
+                // Following aims at the finished card, not at the stub drawn
+                // so far: a card the engine is inside still owes up to three
+                // artifact rows, and a viewport that only kept its current
+                // rows visible would park it on the bottom line and let every
+                // row it grows fall off the screen before the next pass could
+                // scroll. Reserving the whole block plus its trailing blank
+                // means the card lands once and stays put while it fills in.
+                rows.max(head_rows(draft, width).saturating_add(STEP_ROWS.len()))
+                    .saturating_add(1)
             } else {
                 rows
             };
@@ -1784,14 +1802,13 @@ fn can_regenerate(app: &App) -> bool {
 /// read as a frozen application. It says what is true instead — you can look
 /// around, you cannot act.
 fn stopping_hints(app: &App) -> Vec<super::common::FooterHint> {
-    let mut hints = vec![DisclosureControls::new(app.card_expanded()).secondary_disclosure()];
+    let mut hints = vec![DisclosureControls::new(app.card_expanded()).disclosure_hint()];
     if app.any_card_expanded() {
         hints.push(super::common::sweep_hint(true));
-    }
-    hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
-    if !app.any_card_expanded() && !app.cards().is_empty() {
+    } else if !app.cards().is_empty() {
         hints.push(super::common::sweep_hint(false));
     }
+    hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     hints.push(super::common::quit_hint(app.quit_pending()));
     hints
 }
@@ -1830,19 +1847,18 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
         }
         if !app.cards().is_empty() {
-            hints.push(controls.secondary_disclosure());
+            hints.push(controls.disclosure_hint());
         }
         if app.card_expanded() && app.card_tunable() {
-            hints.push(super::common::FooterHint::secondary("↓", "tune"));
+            hints.push(super::common::FooterHint::door("↓", "tune"));
         }
         if app.any_card_expanded() {
             hints.push(super::common::sweep_hint(true));
+        } else if !app.cards().is_empty() {
+            hints.push(super::common::sweep_hint(false));
         }
         if !app.cards().is_empty() {
             hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
-        }
-        if !app.any_card_expanded() && !app.cards().is_empty() {
-            hints.push(super::common::sweep_hint(false));
         }
         if app.can_start_new_batch() {
             hints.push(super::common::new_batch_hint(app.new_batch_pending()));
