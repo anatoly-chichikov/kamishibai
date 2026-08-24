@@ -18,7 +18,6 @@ use crate::tui::palette;
 
 const HEADLINE: &str = "your cards";
 const HINT_OK: &str = "all done";
-const HINT_FAIL: &str = "some cards didn't make it";
 
 /// `ScreenView` handle for the post-generation summary screen.
 pub struct Done;
@@ -28,17 +27,27 @@ impl ScreenView for Done {
         Cow::Borrowed(HEADLINE)
     }
 
+    /// Silent when cards were lost — the outcome strip states that once, in
+    /// the one place bright enough to be seen.
     fn hint(&self, app: &App) -> Cow<'static, str> {
-        let copy = if app.cards_failed() > 0 || app.done_artifacts().failed > 0 {
-            HINT_FAIL
+        let copy = if super::banner::losses(app) > 0 {
+            ""
         } else {
             HINT_OK
         };
         Cow::Borrowed(copy)
     }
 
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, width)
+    fn status(&self, app: &App) -> Vec<Span<'static>> {
+        status(app)
+    }
+
+    fn hints(&self, app: &App) -> Vec<super::common::FooterHint> {
+        hints(app)
+    }
+
+    fn body_rule(&self, app: &App) -> Option<u16> {
+        super::banner::rule_row(app)
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -51,7 +60,7 @@ impl ScreenView for Done {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(banner_rows), Constraint::Min(0)])
             .split(area);
-        frame.render_widget(super::banner::widget(app), split[0]);
+        frame.render_widget(super::banner::widget(app, area.width), split[0]);
         frame.render_widget(card_summary(app).scroll((app.body_scroll(), 0)), split[1]);
     }
 }
@@ -73,24 +82,42 @@ fn card_summary(app: &App) -> Paragraph<'_> {
     if app.cards().is_empty() {
         lines.push(Line::from(Span::styled(
             "no cards in this batch",
-            palette::dim(),
+            palette::Ink::Detail.on(false),
         )));
     } else {
         for (index, draft) in app.cards().iter().enumerate() {
-            let glyph = if draft.artifacts().has_failed() {
-                "✗"
+            // One question, asked once. This screen only exists for a batch
+            // that has already been published, so a card either made the deck
+            // or gave up — there is no third state to distinguish. Asking
+            // `all_ready()` for the ink was asking about artifacts the reopen
+            // path never loads: `DraftRecord` stores identity and spend, not
+            // slots, so `CardDraft::new` hands back a default set and every
+            // real row came out at the dimmest rank while its own `✓` said the
+            // card had shipped. Now the glyph and the ink answer together.
+            let failed = draft.artifacts().has_failed();
+            let glyph = if failed { "✗" } else { "✓" };
+            let glyph_style = if failed {
+                palette::Ink::Subject.on(false)
             } else {
-                "✓"
+                palette::Ink::Aside.on(false)
+            };
+            let term_style = if failed {
+                palette::Ink::Aside.on(false)
+            } else {
+                palette::Ink::Subject.on(false)
             };
             let mut spans = vec![
-                Span::styled(format!(" {glyph} "), palette::base()),
-                Span::styled(format!("{:0>2}  ", index + 1), palette::dim2()),
-                Span::styled(String::from(draft.term()), palette::base()),
+                Span::styled(format!(" {glyph} "), glyph_style),
+                Span::styled(
+                    format!("{:0>2}  ", index + 1),
+                    palette::Ink::Aside.on(false),
+                ),
+                Span::styled(String::from(draft.term()), term_style),
             ];
             if let Some(cost) = super::your_cards::card_cost(draft) {
                 spans.push(Span::styled(
                     format!("  {}", cost.dollars()),
-                    palette::dim2(),
+                    palette::Ink::Aside.on(false),
                 ));
             }
             lines.push(Line::from(spans));
@@ -99,9 +126,16 @@ fn card_summary(app: &App) -> Paragraph<'_> {
     Paragraph::new(lines).style(palette::base())
 }
 
-fn footer(app: &App, width: u16) -> Paragraph<'static> {
+/// Return whether this screen is reading a published record rather than the
+/// live batch it was reopened from.
+fn published(app: &App) -> bool {
     let done = app.done_artifacts();
-    let published = !done.deck.is_empty() && done.cards.saturating_add(done.failed) > 0;
+    !done.deck.is_empty() && done.cards.saturating_add(done.failed) > 0
+}
+
+fn status(app: &App) -> Vec<Span<'static>> {
+    let done = app.done_artifacts();
+    let published = published(app);
     let ready = if published {
         done.cards
     } else {
@@ -112,43 +146,44 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
     } else {
         app.cards().len()
     };
-    let failed = if published {
-        done.failed
-    } else {
-        app.cards_failed()
-    };
     let mut left: Vec<Span<'static>> = Vec::new();
-    left.push(Span::styled("step 3/3", palette::dim2()));
+    left.push(Span::styled("step 3/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
     left.push(Span::styled(
-        format!("{ready}/{total} ready"),
-        palette::dim(),
+        ready.to_string(),
+        palette::Ink::Subject.on(false),
     ));
-    if failed > 0 {
-        left.push(super::common::status_sep());
-        left.push(Span::styled(format!("{failed} gave up"), palette::dim()));
-    }
+    left.push(Span::styled(
+        format!("/{total} ready"),
+        palette::Ink::Detail.on(false),
+    ));
     if let Some(cost) = super::your_cards::total_cost(app) {
         left.push(super::common::status_sep());
-        left.push(Span::styled(cost.dollars_cents(), palette::dim()));
+        left.push(Span::styled(
+            cost.dollars_cents(),
+            palette::Ink::Subject.on(false),
+        ));
     }
+    left
+}
+
+fn hints(app: &App) -> Vec<super::common::FooterHint> {
     if app.new_batch_pending() {
-        return super::common::footer_bar(
-            left,
-            vec![
-                super::common::new_batch_hint(true),
-                super::common::quit_hint(app.quit_pending()),
-            ],
-            width,
-        );
+        return vec![
+            super::common::new_batch_hint(true),
+            super::common::quit_hint(app.quit_pending()),
+        ];
     }
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
-    if failed > 0 {
-        hints.push(super::common::FooterHint::primary("Ctrl+G", "Regenerate"));
+    if super::banner::losses(app) > 0 {
+        hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
+    }
+    if !app.cards().is_empty() {
+        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     }
     if app.can_start_new_batch() {
         hints.push(super::common::new_batch_hint(app.new_batch_pending()));
     }
     hints.push(super::common::quit_hint(app.quit_pending()));
-    super::common::footer_bar(left, hints, width)
+    hints
 }

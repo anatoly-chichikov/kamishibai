@@ -11,10 +11,10 @@ expression: "render_sized(&app, 96, 16)"
                                                                                                 
     01  your language     EN    English                                                         
                                                                                                 
-    02  gemini api key  › paste your key [Cmd+V]                                                
+    02  gemini api key  › paste or type your key                                                
                           ───────────────────────────────────────                               
                                                                                                 
                            submit     load from env                                             
                                                       ai may be wrong, please verify results    
                                                                                                 
-    step 2/2                           [Enter] submit  [← →] move  [Esc] back  [Ctrl+C] quit
+    step 2/2                     [Enter] load from env  [←→] move  [Esc] back  [Ctrl+C] quit

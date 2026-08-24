@@ -222,6 +222,27 @@ impl GenerationConfig {
         }
     }
 
+    /// Return a plain text configuration bounded by an output ceiling.
+    ///
+    /// Nothing else about the request changes, so the reply keeps the free-form
+    /// shape the caller already parses; the ceiling only turns an unbounded
+    /// generation into one that reports `MAX_TOKENS` instead of running to the
+    /// transport timeout.
+    pub(super) fn bounded_text(max_output_tokens: u32) -> Self {
+        Self {
+            response_modalities: None,
+            image_config: None,
+            speech_config: None,
+            response_format: None,
+            response_mime_type: None,
+            response_schema: None,
+            max_output_tokens: Some(max_output_tokens),
+            thinking_config: None,
+            temperature: None,
+            media_resolution: None,
+        }
+    }
+
     /// Return the bounded Gemini 3.5 structured vision-judge configuration.
     pub(super) fn vision_judge(schema: Value) -> Result<Self> {
         validate_response_schema(&schema)?;

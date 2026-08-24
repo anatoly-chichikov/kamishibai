@@ -106,9 +106,13 @@ fn seeded_with(artifacts: CardArtifacts) -> App {
 fn your_cards_surfaces_failure_banner_when_any_card_fails_terminally() {
     let app = seeded();
     let rendered = flat(&app);
+    let manga = rendered
+        .lines()
+        .find(|line| line.contains("✗ manga"))
+        .expect("the failed artifact must own a row");
     assert!(
-        rendered.contains("gave up") && rendered.contains("✗") && rendered.contains("picture"),
-        "your cards must show `gave up` summary and ✗ on the failed step: {rendered}"
+        !manga.contains("unfinished"),
+        "your cards must mark the failed manga row with a bare ✗: {rendered}"
     );
 }
 
@@ -252,12 +256,18 @@ fn enter_on_failure_banner_toggles_expansion_without_leaving_your_cards() {
 }
 
 #[test]
-fn escape_closes_an_expanded_failure_before_resetting_the_batch() {
+fn escape_closes_an_expanded_failure_before_reaching_the_batch_lifecycle() {
     let opened = transit(seeded(), AppEvent::KeyEnter).0;
-    let (closed, side) = transit(opened, AppEvent::Cancel);
+    let (closed, side) = transit(opened.clone(), AppEvent::Cancel);
     assert_eq!(
-        (closed.screen(), closed.card_expanded(), side),
-        (Screen::YourCards, false, Side::None),
-        "Escape on an expanded failure bypassed the disclosure and reached the batch lifecycle"
+        (
+            closed.screen(),
+            opened.card_expanded(),
+            opened.sentence_editor().is_none(),
+            closed.card_expanded(),
+            side,
+        ),
+        (Screen::YourCards, true, true, false, Side::None),
+        "Escape on an expanded failure bypassed the card's own disclosure and reached the batch lifecycle"
     );
 }

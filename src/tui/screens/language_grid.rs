@@ -119,7 +119,7 @@ impl LanguageGrid {
             let style = if index == picked {
                 palette::invert()
             } else {
-                palette::dim()
+                palette::Ink::Detail.on(false)
             };
             spans.push(Span::styled(
                 pad_right(self.shape.text(index).as_str(), self.shape.width()),

@@ -14,8 +14,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
-use crate::session::{Sense, WordCandidate};
-use crate::tui::app::App;
+use crate::session::RawInputBatch;
+use crate::session::{MAX_PLAN_CARDS, Sense, WordCandidate};
+use crate::tui::app::{App, ReviewFocus};
 use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
 
@@ -46,8 +47,12 @@ impl ScreenView for WhatIUnderstood {
         Cow::Borrowed(HINT)
     }
 
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, width)
+    fn status(&self, app: &App) -> Vec<Span<'static>> {
+        status(app)
+    }
+
+    fn hints(&self, app: &App) -> Vec<super::common::FooterHint> {
+        hints(app)
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -56,6 +61,15 @@ impl ScreenView for WhatIUnderstood {
 }
 
 fn body(app: &App, width: u16) -> Paragraph<'_> {
+    Paragraph::new(body_lines(app, width)).style(palette::base())
+}
+
+/// Build every body line of the review screen in render order.
+///
+/// `content_height` counts the same rows without building them, and the two
+/// must agree or the scroll clamp walks past content that is really there —
+/// `screen_lines_match_the_counted_height` pins that.
+fn body_lines(app: &App, width: u16) -> Vec<Line<'_>> {
     if app.candidates().is_empty() {
         let typed: Vec<&str> = app
             .blob()
@@ -75,15 +89,17 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 .enumerate()
                 .map(|(index, line)| pending_line(index, line, term_width, width))
                 .collect::<Vec<_>>();
-            return Paragraph::new(lines).style(palette::base());
+            return lines;
         }
         let copy = if app.learning_pending() {
             "understanding your words…"
         } else {
             "nothing left to review"
         };
-        return Paragraph::new(Line::from(Span::styled(copy, palette::dim())))
-            .style(palette::base());
+        return vec![Line::from(Span::styled(
+            copy,
+            palette::Ink::Detail.on(false),
+        ))];
     }
     let term_width = candidate_label_width(app.candidates(), 12);
     let mut lines = vec![settings_summary_line(app)];
@@ -99,20 +115,26 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
     let selected = if app.sentence_settings_editor().is_some() {
         usize::MAX
     } else {
-        app.selected()
+        match app.review_focus() {
+            ReviewFocus::Head(row) => row,
+            ReviewFocus::Sense { .. } => usize::MAX,
+        }
     };
     for (index, candidate) in app.candidates().iter().enumerate() {
-        let expanded = app.expanded_sense();
-        if expanded.as_ref().map(|item| item.row) == Some(index) {
-            let expanded = expanded
-                .as_ref()
-                .expect("invariant: row is the expanded one");
+        if app.sense_list_open(index) && candidate.ok() {
+            let cursor = match app.review_focus() {
+                ReviewFocus::Sense {
+                    row,
+                    index: position,
+                } if row == index => position,
+                _ => usize::MAX,
+            };
             lines.extend(candidate_line(
                 index,
                 candidate,
                 selected,
-                Some(expanded.selected.len()),
-                Gloss::Sentence(sense_text(candidate.sense())),
+                Some(candidate.selected_count()),
+                head_gloss(candidate, true),
                 term_width,
                 width,
             ));
@@ -120,14 +142,14 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 lines.extend(sense_line(
                     sense_index,
                     sense,
-                    expanded.cursor,
-                    &expanded.selected,
+                    cursor,
+                    candidate.selected_senses(),
                     term_width,
                     width,
                 ));
             }
             lines.push(add_more_line(
-                expanded.cursor == candidate.senses().len(),
+                cursor == candidate.senses().len(),
                 term_width,
                 width,
             ));
@@ -141,13 +163,13 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
                 candidate,
                 selected,
                 None,
-                Gloss::Sentence(sense_text(candidate.sense())),
+                head_gloss(candidate, false),
                 term_width,
                 width,
             ));
         }
     }
-    Paragraph::new(lines).style(palette::base())
+    lines
 }
 
 /// Total number of lines `body` will render for the current state of `app`.
@@ -155,24 +177,21 @@ fn body(app: &App, width: u16) -> Paragraph<'_> {
 /// zero when neither set is populated. Used by the scroll clamp in `tui::app`.
 pub(crate) fn content_height(app: &App, width: usize) -> u16 {
     if !app.candidates().is_empty() {
-        let expanded_row = app.expanded_sense().map(|item| item.row);
         let term_width = candidate_label_width(app.candidates(), 12);
-        let total = candidate_content_height(app, width, expanded_row, term_width)
+        let total = candidate_content_height(app, width, term_width)
             .saturating_add(review_prefix_height(app, width));
         return u16::try_from(total).unwrap_or(u16::MAX);
     }
-    let typed = app
-        .blob()
-        .split('\n')
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .count();
+    let typed = RawInputBatch::new(app.blob()).word_count();
     u16::try_from(typed).unwrap_or(u16::MAX)
 }
 
 fn settings_summary_line(app: &App) -> Line<'static> {
     let settings = app.sentence_settings();
-    let mut spans = vec![Span::styled(format!("{SETTINGS_LABEL}  "), palette::dim())];
+    let mut spans = vec![Span::styled(
+        format!("{SETTINGS_LABEL}  "),
+        palette::Ink::Detail.on(false),
+    )];
     if app.sentence_settings_editor().is_some() {
         return Line::from(spans);
     }
@@ -211,14 +230,17 @@ fn alternates_line(app: &App) -> Option<Line<'static>> {
     if codes.is_empty() {
         return None;
     }
-    let mut spans = vec![Span::styled(ALTERNATES_LABEL, palette::dim2())];
+    let mut spans = vec![Span::styled(
+        ALTERNATES_LABEL,
+        palette::Ink::Aside.on(false),
+    )];
     for (index, code) in codes.iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(ALTERNATES_SEPARATOR, palette::rule()));
         }
         spans.push(Span::styled(
             code.to_uppercase(),
-            palette::dim().add_modifier(Modifier::UNDERLINED),
+            palette::Ink::Detail.link(false),
         ));
     }
     Some(Line::from(spans))
@@ -261,17 +283,17 @@ fn review_prefix_height(app: &App, width: usize) -> usize {
         .saturating_add(usize::from(!app.alternates().is_empty()))
 }
 
-fn candidate_content_height(
-    app: &App,
-    width: usize,
-    expanded_row: Option<usize>,
-    term_width: usize,
-) -> usize {
+fn candidate_content_height(app: &App, width: usize, term_width: usize) -> usize {
     app.candidates()
         .iter()
         .enumerate()
         .map(|(index, candidate)| {
-            candidate_rows(candidate, expanded_row == Some(index), term_width, width)
+            candidate_rows(
+                candidate,
+                app.sense_list_open(index) && candidate.ok(),
+                term_width,
+                width,
+            )
         })
         .sum()
 }
@@ -288,8 +310,7 @@ pub(crate) fn sentence_settings_control_at(
     }
     if row == 0 {
         let summary_width = settings_summary_line(app).width();
-        return (app.expanded_sense().is_none() && column < summary_width)
-            .then_some(SentenceSettingsControl::Open);
+        return (column < summary_width).then_some(SentenceSettingsControl::Open);
     }
     let focused = app.sentence_settings_editor()?;
     let editor_row = row.checked_sub(1)?;
@@ -310,9 +331,9 @@ fn pending_line<'a>(index: usize, raw: &'a str, term_width: usize, width: u16) -
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled(
         format!("{:0>2}  ", index + 1),
-        palette::dim2(),
+        palette::Ink::Aside.on(false),
     ));
-    spans.push(Span::styled(term, palette::dim()));
+    spans.push(Span::styled(term, palette::Ink::Detail.on(false)));
     if pad > 0 {
         spans.push(Span::styled(" ".repeat(pad), palette::base()));
     }
@@ -320,19 +341,55 @@ fn pending_line<'a>(index: usize, raw: &'a str, term_width: usize, width: u16) -
 }
 
 /// What fills the gloss column of a candidate row: an active-sense `Sentence`
-/// introduced by an em-dash, or a plain `Heading` label (the multi-meaning
-/// header) with no dash — a label is not a sentence, so it carries no dash.
+/// introduced by an em-dash, a plain `Heading` label (the multi-meaning header)
+/// with no dash — a label is not a sentence, so it carries no dash — or
+/// `Silent`, the column deliberately left empty because everything it could say
+/// is already listed underneath.
 enum Gloss {
     Sentence(String),
     Heading(String),
+    Silent,
 }
 
-fn on_selected_row(style: Style, selected: bool) -> Style {
-    if selected {
-        style.bg(palette::HL)
-    } else {
-        style
+impl Gloss {
+    /// Width of the separator this gloss is introduced by.
+    fn separator(&self) -> &'static str {
+        match self {
+            Self::Sentence(_) => "  —  ",
+            Self::Heading(_) => "  ",
+            Self::Silent => "",
+        }
     }
+
+    /// The text this gloss puts in the column, empty when it says nothing.
+    fn text(&self) -> &str {
+        match self {
+            Self::Sentence(text) | Self::Heading(text) => text.as_str(),
+            Self::Silent => "",
+        }
+    }
+}
+
+/// Return what the head row of one candidate says in its gloss column.
+///
+/// An open list already enumerates every sense underneath the head, so the head
+/// stops repeating one of them: it carries the meanings heading when there is
+/// more than one sense to choose between — the same heading a collapsed word
+/// with several chosen meanings shows — and says nothing at all when the list
+/// below holds a single row. The heading therefore appears exactly when the
+/// `X/Y` counter does.
+fn head_gloss(candidate: &WordCandidate, open: bool) -> Gloss {
+    if open {
+        return if candidate.has_multiple_senses() {
+            Gloss::Heading(String::from(MEANINGS_LABEL))
+        } else {
+            Gloss::Silent
+        };
+    }
+    if candidate.ok() && candidate.selected_count() > 1 {
+        return Gloss::Heading(String::from(MEANINGS_LABEL));
+    }
+    Gloss::Sentence(sense_text(candidate.sense()))
 }
 
 fn candidate_line<'a>(
@@ -344,46 +401,18 @@ fn candidate_line<'a>(
     term_width: usize,
     width: u16,
 ) -> Vec<Line<'a>> {
-    let expanded = expanded_count.is_some();
-    let is_selected = index == selected && !expanded;
-    let is_expanded_parent = index == selected && expanded;
-    let row_style = if is_selected {
-        palette::highlight()
+    let is_selected = index == selected;
+    let row_style = palette::Ink::Detail.on(is_selected);
+    let num_style = palette::Ink::Aside.on(is_selected);
+    let term_style = if candidate.ok() {
+        palette::Ink::Subject.on(is_selected)
     } else {
-        palette::base()
+        palette::Ink::Detail
+            .on(is_selected)
+            .add_modifier(Modifier::CROSSED_OUT)
     };
-    let num_style = if is_selected {
-        palette::highlight().add_modifier(Modifier::BOLD)
-    } else {
-        palette::dim2()
-    };
-    let term_style = if !candidate.ok() {
-        on_selected_row(palette::dim(), is_selected).add_modifier(Modifier::CROSSED_OUT)
-    } else if is_expanded_parent {
-        palette::base()
-    } else if is_selected {
-        palette::highlight().add_modifier(Modifier::BOLD)
-    } else {
-        palette::base()
-    };
-    let dash_style = if !candidate.ok() {
-        on_selected_row(palette::dim2(), is_selected)
-    } else if is_expanded_parent {
-        palette::dim()
-    } else if is_selected {
-        palette::highlight_dim()
-    } else {
-        palette::dim2()
-    };
-    let gloss_style = if !candidate.ok() {
-        on_selected_row(palette::dim(), is_selected)
-    } else if is_expanded_parent {
-        palette::dim()
-    } else if is_selected {
-        palette::highlight_dim().add_modifier(Modifier::BOLD)
-    } else {
-        palette::dim()
-    };
+    let dash_style = palette::Ink::Aside.on(is_selected);
+    let gloss_style = palette::Ink::Detail.on(is_selected);
     let label_width = candidate_label_len(candidate);
     let indicator = inline_indicator(candidate, expanded_count);
     let pad_after_label = term_width.saturating_sub(label_width);
@@ -396,10 +425,8 @@ fn candidate_line<'a>(
     if pad_after_label > 0 {
         spans.push(Span::styled(" ".repeat(pad_after_label), row_style));
     }
-    let (separator, gloss) = match gloss {
-        Gloss::Sentence(text) => ("  —  ", text),
-        Gloss::Heading(text) => ("  ", text),
-    };
+    let separator = gloss.separator();
+    let gloss = String::from(gloss.text());
     let gloss_start = 4 + term_width + super::common::display_width(separator);
     let available = (width as usize).saturating_sub(gloss_start).max(1);
     let chunks = super::common::wrap_words(gloss.as_str(), available, available);
@@ -438,21 +465,14 @@ fn sense_line<'a>(
     let focused = index == cursor;
     let checked = selected.contains(&index);
     let marker = if checked { "  ✓ " } else { "    " };
-    let style = if focused {
-        palette::highlight().add_modifier(Modifier::BOLD)
-    } else if checked {
-        palette::base()
+    let style = if checked {
+        palette::Ink::Detail.on(focused)
     } else {
-        palette::dim()
+        palette::Ink::Aside.on(focused)
     };
     let text = sense_text(sense);
     let indent = 4 + term_width + 5;
-    let pad_style = if focused {
-        palette::highlight()
-    } else {
-        palette::base()
-    };
-    marked_lines(marker, text.as_str(), indent, style, pad_style, width)
+    marked_lines(marker, text.as_str(), indent, style, style, width)
 }
 
 fn sense_text(sense: &Sense) -> String {
@@ -476,65 +496,44 @@ pub(crate) fn candidate_rows(
     term_width: usize,
     width: usize,
 ) -> usize {
+    let head = candidate_line_rows(
+        candidate,
+        &head_gloss(candidate, expanded),
+        term_width,
+        width,
+    );
     if expanded {
-        let parent = candidate_line_rows(
-            candidate,
-            GlossKind::Sentence,
-            sense_text(candidate.sense()).as_str(),
-            term_width,
-            width,
-        );
         let senses = candidate
             .senses()
             .iter()
             .map(|sense| sense_rows(sense, term_width, width))
             .sum::<usize>();
-        parent.saturating_add(senses).saturating_add(1)
-    } else if candidate.ok() && candidate.selected_count() > 1 {
-        let header = candidate_line_rows(
-            candidate,
-            GlossKind::Heading,
-            MEANINGS_LABEL,
-            term_width,
-            width,
-        );
+        return head.saturating_add(senses).saturating_add(1);
+    }
+    if candidate.ok() && candidate.selected_count() > 1 {
         let selected = candidate
             .selected_senses()
             .iter()
             .map(|index| selected_meaning_rows(&candidate.senses()[*index], term_width, width))
             .sum::<usize>();
-        header.saturating_add(selected)
-    } else {
-        candidate_line_rows(
-            candidate,
-            GlossKind::Sentence,
-            sense_text(candidate.sense()).as_str(),
-            term_width,
-            width,
-        )
+        return head.saturating_add(selected);
     }
-}
-
-enum GlossKind {
-    Sentence,
-    Heading,
+    head
 }
 
 fn candidate_line_rows(
     candidate: &WordCandidate,
-    kind: GlossKind,
-    gloss: &str,
+    gloss: &Gloss,
     term_width: usize,
     width: usize,
 ) -> usize {
-    let separator_width = match kind {
-        GlossKind::Sentence => 5,
-        GlossKind::Heading => 2,
-    };
+    let separator_width = super::common::display_width(gloss.separator());
     let label_width = candidate_label_len(candidate);
     let gloss_start = 4 + term_width.max(label_width) + separator_width;
     let available = width.saturating_sub(gloss_start).max(1);
-    super::common::wrap_words(gloss, available, available).len()
+    super::common::wrap_words(gloss.text(), available, available)
+        .len()
+        .max(1)
 }
 
 fn sense_rows(sense: &Sense, term_width: usize, width: usize) -> usize {
@@ -556,7 +555,6 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
     if app.candidates().is_empty() {
         return None;
     }
-    let expanded_row = app.expanded_sense().map(|item| item.row);
     let term_width = candidate_label_width(app.candidates(), 12);
     if let Some(focused) = app.sentence_settings_editor() {
         let (start, height) = super::sentence_labels::batch_editor_focus_range(
@@ -569,42 +567,40 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
             u16::try_from(height).unwrap_or(u16::MAX),
         ));
     }
-    let selected = app.selected().min(app.candidates().len() - 1);
+    let focus = app.review_focus();
+    let target = focus.row().min(app.candidates().len() - 1);
     let mut offset = review_prefix_height(app, width);
     for (index, candidate) in app.candidates().iter().enumerate() {
-        if index != selected {
-            offset = offset.saturating_add(candidate_rows(
-                candidate,
-                expanded_row == Some(index),
-                term_width,
-                width,
-            ));
+        let open = app.sense_list_open(index) && candidate.ok();
+        if index != target {
+            offset = offset.saturating_add(candidate_rows(candidate, open, term_width, width));
             continue;
         }
-        if let Some(expanded) = app.expanded_sense()
-            && expanded.row == selected
-        {
+        if open && let ReviewFocus::Sense { index: cursor, .. } = focus {
             offset = offset.saturating_add(candidate_line_rows(
                 candidate,
-                GlossKind::Sentence,
-                sense_text(candidate.sense()).as_str(),
+                &head_gloss(candidate, true),
                 term_width,
                 width,
             ));
-            for sense in candidate.senses().iter().take(expanded.cursor) {
+            for sense in candidate.senses().iter().take(cursor) {
                 offset = offset.saturating_add(sense_rows(sense, term_width, width));
             }
-            let height = if expanded.cursor == candidate.senses().len() {
+            let height = if cursor >= candidate.senses().len() {
                 1
             } else {
-                sense_rows(&candidate.senses()[expanded.cursor], term_width, width)
+                sense_rows(&candidate.senses()[cursor], term_width, width)
             };
             return Some((
                 u16::try_from(offset).unwrap_or(u16::MAX),
                 u16::try_from(height).unwrap_or(u16::MAX),
             ));
         }
-        let height = candidate_rows(candidate, false, term_width, width);
+        let height = if open {
+            candidate_line_rows(candidate, &head_gloss(candidate, true), term_width, width)
+        } else {
+            candidate_rows(candidate, false, term_width, width)
+        };
         return Some((
             u16::try_from(offset).unwrap_or(u16::MAX),
             u16::try_from(height).unwrap_or(u16::MAX),
@@ -614,8 +610,9 @@ pub(crate) fn focused_range(app: &App, width: usize) -> Option<(u16, u16)> {
 }
 
 /// Render a collapsed word that has several selected meanings: a header row
-/// (`NN  term  X/Y  —  multiple meanings:`) followed by one dimmed, read-only
-/// line per selected meaning. Navigation never lands on the meaning rows.
+/// (`NN  term  X/Y  multiple meanings:`, a label and so introduced by no dash)
+/// followed by one dimmed, read-only line per selected meaning. Navigation
+/// never lands on the meaning rows.
 fn candidate_block<'a>(
     index: usize,
     candidate: &'a WordCandidate,
@@ -629,7 +626,7 @@ fn candidate_block<'a>(
         candidate,
         selected,
         None,
-        Gloss::Heading(String::from(MEANINGS_LABEL)),
+        head_gloss(candidate, false),
         term_width,
         width,
     ));
@@ -654,7 +651,7 @@ fn selected_meaning_line<'a>(sense: &'a Sense, term_width: usize, width: u16) ->
         marker,
         text.as_str(),
         indent,
-        palette::dim(),
+        palette::Ink::Detail.on(false),
         palette::base(),
         width,
     )
@@ -696,24 +693,15 @@ fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
     let marker = "    ";
     let text = "+ add more";
     let used = indent + super::common::display_width(marker) + super::common::display_width(text);
-    let style = if focused {
-        palette::highlight().add_modifier(Modifier::BOLD)
-    } else {
-        palette::dim()
-    };
-    let pad_style = if focused {
-        palette::highlight()
-    } else {
-        palette::base()
-    };
+    let style = palette::Ink::Detail.on(focused);
     let mut spans = vec![
-        Span::styled(" ".repeat(indent), palette::base()),
+        Span::styled(" ".repeat(indent), style),
         Span::styled(marker, style),
         Span::styled(text, style),
     ];
     let pad = (width as usize).saturating_sub(used);
     if pad > 0 {
-        spans.push(Span::styled(" ".repeat(pad), pad_style));
+        spans.push(Span::styled(" ".repeat(pad), style));
     }
     Line::from(spans)
 }
@@ -745,34 +733,57 @@ fn candidate_label_len(candidate: &WordCandidate) -> usize {
     super::common::display_width(candidate.term()) + indicator
 }
 
-fn footer(app: &App, width: u16) -> Paragraph<'static> {
+fn status(app: &App) -> Vec<Span<'static>> {
     let mut left: Vec<Span<'static>> = Vec::new();
-    left.push(Span::styled("step 2/3", palette::dim2()));
+    left.push(Span::styled("step 2/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
-    let count = review_card_count(app);
+    let count = app.review_cards();
     if count > 0 {
         left.push(Span::styled(
             count.to_string(),
-            palette::base().add_modifier(Modifier::BOLD),
+            palette::Ink::Subject.on(false),
         ));
         let noun = if count == 1 { "card" } else { "cards" };
-        left.push(Span::styled(format!(" {noun}"), palette::dim()));
+        left.push(Span::styled(
+            format!(" {noun}"),
+            palette::Ink::Detail.on(false),
+        ));
     } else {
-        left.push(Span::styled("nothing to make", palette::dim2()));
+        left.push(Span::styled(
+            "nothing to make",
+            palette::Ink::Aside.on(false),
+        ));
     }
     if let Some(message) = app.review_notice() {
         left.push(super::common::status_sep());
-        left.push(Span::styled(message.to_string(), palette::dim()));
+        left.push(Span::styled(
+            message.to_string(),
+            palette::Ink::Detail.on(false),
+        ));
     }
+    left
+}
+
+/// Return whether `Ctrl+G` would actually start generating right now.
+///
+/// `start_generation` refuses an empty selection outright and answers an
+/// oversized one with a notice instead of a batch, so both refusals have to be
+/// asked here too — a bright key that only scolds is worse than no key.
+fn can_generate(app: &App) -> bool {
+    let count = app.review_cards();
+    count > 0 && count <= MAX_PLAN_CARDS
+}
+
+fn hints(app: &App) -> Vec<super::common::FooterHint> {
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     if app.sentence_settings_editor().is_some() {
-        if count > 0 {
+        if can_generate(app) {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
-        hints.push(super::common::FooterHint::secondary("← →", "pick"));
-        hints.push(super::common::FooterHint::ghost("↑ ↓", "row"));
+        hints.push(super::common::FooterHint::secondary("←→", "pick"));
+        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         hints.push(super::common::FooterHint::ghost("Enter/Esc", "close"));
-    } else if app.expanded_sense().is_some() {
+    } else if matches!(app.review_focus(), ReviewFocus::Sense { .. }) {
         let controls = if app.expanded_add_more_focused() {
             DisclosureControls::new(true).with_action("add")
         } else {
@@ -781,44 +792,95 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
         if let Some(hint) = controls.primary_action() {
             hints.push(hint);
         }
-        if count > 0 {
+        if can_generate(app) {
             hints.push(super::common::FooterHint::secondary("Ctrl+G", "generate"));
         }
-        hints.push(controls.secondary_toggle());
+        hints.push(controls.disclosure_hint());
+        hints.push(super::common::sweep_hint(true));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
     } else {
-        if count > 0 {
+        if can_generate(app) {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "generate"));
         }
         if !app.candidates().is_empty() && app.selected() == 0 {
             hints.push(super::common::sentence_settings_hint());
         }
-        hints.push(DisclosureControls::new(false).secondary_toggle());
-        hints.push(super::common::back_hint());
+        // The head can be focused with its own list already open — pressing
+        // `C` leaves it exactly there — and then `→` is inert while `←` is
+        // what closes, and Esc peels the list instead of leaving the screen.
+        let open = app.focused_sense_list_open();
+        hints.push(DisclosureControls::new(open).disclosure_hint());
         hints.push(super::common::FooterHint::secondary("D", "drop"));
+        if app.any_sense_list_open() {
+            hints.push(super::common::sweep_hint(true));
+        } else if app
+            .candidates()
+            .iter()
+            .any(|candidate| candidate.ok() && candidate.has_multiple_senses())
+        {
+            hints.push(super::common::sweep_hint(false));
+        }
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
         hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
+        if !open {
+            hints.push(super::common::back_hint());
+        }
     }
     if app.sentence_settings_editor().is_none() {
         hints.push(super::common::quit_hint(app.quit_pending()));
     }
-    super::common::footer_bar(left, hints, width)
+    hints
 }
 
-fn review_card_count(app: &App) -> usize {
-    let expanded = app.expanded_sense();
-    app.candidates()
-        .iter()
-        .enumerate()
-        .filter(|(_, candidate)| candidate.ok())
-        .map(|(row, candidate)| {
-            expanded
-                .as_ref()
-                .filter(|selection| selection.row == row)
-                .map_or_else(
-                    || candidate.selected_count(),
-                    |selection| selection.selected.len(),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::LanguagePair;
+    use crate::tui::Screen;
+
+    fn wordy() -> WordCandidate {
+        WordCandidate::with_senses(
+            "bank",
+            vec![
+                Sense::plain(
+                    "A financial institution that takes deposits from the public, lends them out at interest, keeps its customers' current accounts, and stores their valuables in a guarded vault downstairs.",
+                ),
+                Sense::plain("The sloping side of a river."),
+                Sense::tagged("To tilt an aircraft into a turn.", "aviation"),
+            ],
+            0,
+            true,
+        )
+    }
+
+    fn review(candidates: Vec<WordCandidate>) -> App {
+        App::new(LanguagePair::new("en", "ru"))
+            .with_screen(Screen::WhatIUnderstood)
+            .confirmed_learning("en")
+            .understood(candidates)
+    }
+
+    #[test]
+    fn screen_lines_match_the_counted_height() {
+        let single = WordCandidate::new("bittersweet", "Both glad and sad at once.", true);
+        let shapes = [
+            review(vec![wordy()]),
+            review(vec![wordy()]).sense_list_toggled(),
+            review(vec![single.clone()]),
+            review(vec![single]).sense_list_toggled(),
+        ];
+        let counted = shapes
+            .iter()
+            .map(|app| {
+                (
+                    body_lines(app, 90).len(),
+                    usize::from(content_height(app, 90)),
                 )
-        })
-        .sum()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            counted.iter().all(|(drawn, counted)| drawn == counted),
+            "the renderer and the scroll clamp disagreed on a review shape, got {counted:?}"
+        );
+    }
 }

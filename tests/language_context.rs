@@ -12,7 +12,26 @@ use kamishibai::tui::{
 };
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::style::{Color, Modifier};
 use tempfile::tempdir;
+
+fn style_of(app: &App, needle: &str) -> (Color, Color, Modifier) {
+    let backend = TestBackend::new(120, 24);
+    let mut terminal = Terminal::new(backend).expect("backend");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    for row in 0..buffer.area.height {
+        let line = (0..buffer.area.width)
+            .map(|column| buffer[(column, row)].symbol())
+            .collect::<String>();
+        if let Some(byte) = line.find(needle) {
+            let column = u16::try_from(line[..byte].chars().count()).expect("column must fit");
+            let cell = &buffer[(column, row)];
+            return (cell.fg, cell.bg, cell.modifier);
+        }
+    }
+    panic!("invariant: {needle} must be rendered somewhere on the screen");
+}
 
 fn flat(app: &App) -> String {
     let backend = TestBackend::new(120, 24);
@@ -160,7 +179,7 @@ fn welcome_language_step_footer_is_clean() {
     let rendered = flat(&app);
     assert_eq!(
         (
-            rendered.contains("[↑ ↓ ← →] language"),
+            rendered.contains("[↑↓←→] language"),
             rendered.contains("Ctrl+L")
         ),
         (true, false),
@@ -316,13 +335,16 @@ fn language_badge_is_consistent_across_every_fullscreen_screen() {
         .with_screen(Screen::Done)
         .confirmed_learning("en")
         .done_published("deck.apkg", "report.pdf", "out/");
-    for app in [your_words, what_i_understood, your_cards, done] {
-        let rendered = flat(&app);
-        assert!(
-            rendered.contains("→ EN"),
-            "every fullscreen screen must render the compact language chip"
-        );
-    }
+    let chips = [your_words, what_i_understood, your_cards, done]
+        .iter()
+        .map(|app| (flat(app).contains("→ EN"), style_of(app, "RU → EN")))
+        .collect::<Vec<_>>();
+    assert!(
+        chips.iter().all(|(shown, style)| *shown
+            && style.0 == Color::Rgb(0xe6, 0xe3, 0xda)
+            && style.2 == Modifier::BOLD),
+        "every fullscreen screen must render the language chip bold and bright: {chips:?}"
+    );
 }
 
 #[test]
@@ -330,8 +352,21 @@ fn your_words_shows_detecting_marker_before_target_is_confirmed() {
     let app = base();
     let rendered = flat(&app);
     assert!(
-        rendered.contains("…"),
-        "while target is pending the language chip must show a `…` placeholder"
+        rendered.contains("→ ?"),
+        "while target is pending the language chip must show a `?` placeholder"
+    );
+}
+
+#[test]
+fn the_open_pair_modal_leaves_no_contradicting_hints_on_the_bar_below_it() {
+    let app = base()
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en");
+    let (opened, _) = transit(app, AppEvent::OpenLanguagePicker(PickerSection::Known));
+    let rendered = flat(&opened);
+    assert!(
+        !rendered.contains("[Esc] back") && !rendered.contains("[D] drop"),
+        "the modal owns Esc and swallows D, so the bar beneath it must not name either: {rendered}"
     );
 }
 

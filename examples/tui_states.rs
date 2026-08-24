@@ -23,12 +23,12 @@ use crossterm::terminal::{
 use kamishibai::session::{
     Artifact, ArtifactCosts, ArtifactFile, ArtifactSlot, AttemptFault, AttemptPenalties,
     AttemptScorecard, AxisSet, CardArtifacts, CardDraft, CardMeta, GenerationCost, LanguagePair,
-    Register, SentenceAxis, SentenceBatchSettings, SentenceKind, SentenceLabelSelection,
+    Register, Sense, SentenceAxis, SentenceBatchSettings, SentenceKind, SentenceLabelSelection,
     SentenceLabels, SentenceLevel, SentenceTypeMix, WordCandidate,
 };
 use kamishibai::tui::{
-    App, AppEvent, BusyKind, KeySource, ModalKind, MousePointer, PickerSection, Screen, draw,
-    mouse_pointer_at, reset_mouse_pointer, transit, write_mouse_pointer,
+    App, AppEvent, BusyKind, KeySource, LabelEditorRow, ModalKind, MousePointer, PickerSection,
+    Screen, draw, mouse_pointer_at, reset_mouse_pointer, transit, write_mouse_pointer,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -603,6 +603,32 @@ fn build_states() -> Vec<(String, App)> {
         .clone()
         .with_alternates(vec![String::from("EN"), String::from("NL")]);
 
+    let polysemous = App::new(pair())
+        .seeded_blob("canard\nchouette")
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("fr")
+        .understood(vec![
+            WordCandidate::with_senses(
+                "canard",
+                vec![
+                    Sense::tagged("noun; a duck on a pond or a plate", "animal"),
+                    Sense::tagged("noun; a planted newspaper hoax", "press"),
+                    Sense::tagged("noun; a wrong note held far too long", "music"),
+                ],
+                0,
+                true,
+            ),
+            WordCandidate::new(
+                "chouette",
+                "noun an owl; colloquially an adjective meaning neat or lovely",
+                true,
+            ),
+        ])
+        .sense_list_toggled()
+        .review_focus_next()
+        .review_focus_next()
+        .sense_toggled();
+
     let language_pair_modal = transit(
         review.clone(),
         AppEvent::OpenLanguagePicker(PickerSection::Learning),
@@ -635,9 +661,7 @@ fn build_states() -> Vec<(String, App)> {
     let register_pinned = label_editor.clone().sentence_editor_axis_advanced(true);
     let editor_on_note = register_pinned
         .clone()
-        .sentence_editor_row_next()
-        .sentence_editor_row_next()
-        .sentence_editor_row_next();
+        .sentence_editor_focused(LabelEditorRow::Note);
     let note_typed = "make it simpler and warmer"
         .chars()
         .fold(editor_on_note, |app, symbol| {
@@ -714,8 +738,16 @@ fn build_states() -> Vec<(String, App)> {
     let mouse_selected = cards_seed
         .clone()
         .sentence_editor_opened_for_register()
-        .sentence_editor_row_next()
+        .sentence_editor_focused(LabelEditorRow::Type)
         .sentence_editor_axis_chosen(2);
+    let parked_multi = cards_seed
+        .clone()
+        .sentence_editor_opened_for_register()
+        .sentence_editor_parked()
+        .card_revealed(1)
+        .sentence_editor_parked()
+        .card_revealed(2)
+        .card_toggle_expanded();
     let legacy = cards_with_first(legacy_card(
         "dépaysement",
         "Ce dépaysement l'a réveillée d'un coup.",
@@ -928,6 +960,14 @@ fn build_states() -> Vec<(String, App)> {
             String::from("00c · Welcome · language grid"),
             welcome_language,
         ),
+        (
+            String::from("20 · Your cards · parked multi-expanded"),
+            parked_multi,
+        ),
+        (
+            String::from("02f · What I understood · open sense list"),
+            polysemous,
+        ),
     ]
 }
 
@@ -959,8 +999,8 @@ mod tests {
             .join("\n");
         assert!(
             [
-                "ai is working…",
-                "gave up",
+                "◐ ",
+                "✗ manga",
                 "↻1",
                 "↻2",
                 "↻3",
@@ -974,7 +1014,7 @@ mod tests {
                     "retry 1/3",
                     "retry 2/3",
                     "retry 3/3",
-                    "gave up after",
+                    "unfinished",
                     "1 ✗",
                     "2 ✗",
                     "3 ✗",

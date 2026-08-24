@@ -6,8 +6,8 @@ use kamishibai::session::{
     LanguagePair, Sense, SentenceBatchSettings, SentenceLevel, SentenceTypeMix, WordCandidate,
 };
 use kamishibai::tui::{
-    App, AppEvent, BatchSettingsRow, ModalKind, MousePointer, Screen, Side, draw, mouse_pointer_at,
-    review_event_at, scroll_body_width, scroll_viewport, transit,
+    App, AppEvent, BatchSettingsRow, ModalKind, MousePointer, ReviewFocus, Screen, Side, draw,
+    mouse_pointer_at, review_event_at, scroll_body_width, scroll_viewport, transit,
 };
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -153,6 +153,18 @@ fn choices(app: &App, area: Rect, row: BatchSettingsRow) -> BTreeSet<usize> {
 }
 
 #[test]
+fn a_wide_review_sheds_the_way_back_before_the_walk_or_the_exit() {
+    let rendered = flat_at(&review(2), 120, 24);
+    assert!(
+        rendered.contains("[Ctrl+C] quit")
+            && rendered.contains("[↑↓] nav")
+            && !rendered.contains("[Esc] back")
+            && !rendered.contains("[Ctrl+L]"),
+        "at a normal width the review must shed the Escape that breaks nothing before the keys that move: {rendered}"
+    );
+}
+
+#[test]
 fn review_places_quiet_generation_guidance_one_blank_row_above_words() {
     let rendered = flat_at(&review(2), 120, 24);
     let lines = rendered.lines().collect::<Vec<_>>();
@@ -286,7 +298,7 @@ fn upward_list_navigation_opens_settings_and_downward_navigation_returns_to_word
 
 #[test]
 fn upward_navigation_reaches_the_first_word_before_opening_settings() {
-    let second = review(2).selected_next();
+    let second = review(2).review_focus_next();
     let first = transit(second, AppEvent::NavPrev).0;
     let opened = transit(first.clone(), AppEvent::NavPrev).0;
     let opened_with_k = transit(first.clone(), AppEvent::KeyChar('k')).0;
@@ -308,7 +320,7 @@ fn upward_navigation_reaches_the_first_word_before_opening_settings() {
 }
 
 #[test]
-fn expanded_senses_keep_ownership_of_upward_navigation_and_the_settings_alias() {
+fn walking_up_from_inside_an_open_sense_list_reaches_its_head_before_guidance() {
     let app = App::new(LanguagePair::new("en", "fr"))
         .with_screen(Screen::WhatIUnderstood)
         .confirmed_learning("fr")
@@ -322,15 +334,25 @@ fn expanded_senses_keep_ownership_of_upward_navigation_and_the_settings_alias() 
             true,
         )]);
     let opened = transit(app, AppEvent::KeyEnter).0;
-    let up = transit(opened, AppEvent::NavPrev).0;
-    let alias = transit(up, AppEvent::KeyChar('S')).0;
+    let inside = transit(opened, AppEvent::NavNext).0;
+    let head = transit(inside, AppEvent::NavPrev).0;
+    let guidance = transit(head.clone(), AppEvent::NavPrev).0;
     assert_eq!(
         (
-            alias.expanded_sense().map(|sense| sense.cursor),
-            alias.sentence_settings_editor(),
+            head.review_focus(),
+            head.sentence_settings_editor(),
+            head.sense_list_open(0),
+            guidance.sentence_settings_editor(),
+            guidance.sense_list_open(0),
         ),
-        (Some(0), None),
-        "the sense picker must not leak its top-boundary navigation into batch settings"
+        (
+            ReviewFocus::Head(0),
+            None,
+            true,
+            Some(BatchSettingsRow::Types),
+            true,
+        ),
+        "the walk skipped the open list head or guidance collapsed the list it walked out of"
     );
 }
 
@@ -388,12 +410,12 @@ fn enter_closes_the_open_editor_while_printable_keys_stay_owned() {
             enter.sentence_settings_editor(),
             enter.sentence_settings(),
             enter.candidates().len(),
-            enter.expanded_sense(),
+            enter.any_sense_list_open(),
             drop.candidates().len(),
             move_key.selected(),
-            space.expanded_sense(),
+            space.any_sense_list_open(),
         ),
-        (None, settings, 2, None, 2, 0, None),
+        (None, settings, 2, false, 2, 0, false),
         "Enter did not collapse generation guidance or another owned key leaked into review controls"
     );
 }

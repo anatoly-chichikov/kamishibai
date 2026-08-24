@@ -269,6 +269,16 @@ where
         self.app.body_scroll() != before
     }
 
+    /// Move scroll onto the card the engine is building, while the view still
+    /// rides the engine. Does nothing once the user has scrolled or navigated
+    /// away, and stays quiet while a card is open.
+    pub(super) fn follow_running_card(&mut self, viewport: u16, body_width: u16) -> bool {
+        if self.app.following_card().is_none() {
+            return false;
+        }
+        self.snap_scroll_to_selection(viewport, body_width)
+    }
+
     /// Move scroll so keyboard focus remains visible.
     pub(super) fn snap_scroll_to_selection(&mut self, viewport: u16, body_width: u16) -> bool {
         let before = self.app.body_scroll();
@@ -1028,6 +1038,7 @@ where
             .clone()
             .busy_finished()
             .cards_running(None)
+            .cards_following()
             .publication_cleared()
             .error_cleared();
         if staged {
@@ -2860,6 +2871,36 @@ mod tests {
                 2,
             ),
             "bulk correction must leave the modal under the loader and close it only after success"
+        );
+    }
+
+    #[test]
+    fn restarting_a_staged_batch_rearms_the_viewport_follow() {
+        let mut shell = shell(review().understood(vec![candidate("alpha"), candidate("beta")]));
+        shell
+            .handle(AppEvent::Generate)
+            .expect("initial generation must start");
+        settle_shell(&mut shell, 300);
+        let original = shell.app.cards().to_vec();
+        let drafts = vec![
+            original[0].clone(),
+            original[1]
+                .clone()
+                .staging_rewrite(SentenceLabelSelection::empty(), "rewrite beta"),
+        ];
+        shell.app = shell
+            .app
+            .clone()
+            .cards_replaced(drafts)
+            .body_scrolled(4, 10, 100);
+        shell
+            .handle(AppEvent::Generate)
+            .expect("batch rewrite must start");
+        shell.app = shell.app.clone().cards_running(Some((1, Artifact::Meta)));
+        assert_eq!(
+            shell.app.following_card(),
+            Some(1),
+            "restarting a batch left the viewport stranded where the reader had scrolled"
         );
     }
 

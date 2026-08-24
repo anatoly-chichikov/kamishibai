@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Duration;
 
@@ -6,13 +7,13 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::application::LearningTarget;
 use crate::session::{
-    Artifact, CardArtifacts, CardDraft, LanguagePair, Sense, SentenceBatchSettings,
-    SentenceLabelSelection, WordCandidate,
+    Artifact, CardArtifacts, CardDraft, CardPhase, LanguagePair, Sense, SentenceBatchSettings,
+    WordCandidate,
 };
 
 use super::picker::{LanguageChoice, PickerCursor, PickerSection};
 use super::screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
-use super::sentence_editor::{BatchSettingsRow, LabelEditorRow, NoteDraft, SentenceLabelsEditor};
+use super::sentence_editor::{BatchSettingsRow, LabelEditorRow, SentenceLabelsEditor};
 
 /// The immutable shell state carried between transitions.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -148,11 +149,45 @@ impl BusyView {
 pub struct CardsView {
     pub drafts: Vec<CardDraft>,
     pub selected: usize,
-    pub expanded: bool,
+    pub expanded: ExpandedCards,
     pub elapsed: Duration,
     pub running: Option<(usize, Artifact)>,
     editor: Option<SentenceLabelsEditor>,
     stop: GenerationStopState,
+    following: bool,
+}
+
+/// The cards whose blocks stay expanded while focus walks elsewhere.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ExpandedCards(BTreeSet<usize>);
+
+impl ExpandedCards {
+    /// Return whether one card's block is expanded.
+    #[must_use]
+    pub fn contains(&self, card: usize) -> bool {
+        self.0.contains(&card)
+    }
+
+    /// Return whether no card is expanded.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn with(mut self, card: usize) -> Self {
+        self.0.insert(card);
+        self
+    }
+
+    fn without(mut self, card: usize) -> Self {
+        self.0.remove(&card);
+        self
+    }
+
+    fn retained(mut self, len: usize) -> Self {
+        self.0.retain(|card| *card < len);
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -162,6 +197,41 @@ enum GenerationStopState {
     Pending,
     Stopping,
     Cancelling,
+}
+
+/// How many cards of the batch stand in each phase.
+///
+/// `ready`, `failed` and `adjusted` keep the counts the status line has always
+/// shown and may overlap: a card whose artifacts are all present still counts
+/// as ready while it carries a staged rewrite. `working` is the exclusive
+/// remainder and stays internal: the status line derives progress from `ready`
+/// against the batch size, so the count only answers whether any card is left
+/// unfinished.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CardCensus {
+    pub ready: usize,
+    working: usize,
+    pub failed: usize,
+    pub adjusted: usize,
+}
+
+impl CardCensus {
+    /// Return whether any card still owes work — building, failed, or adjusted.
+    #[must_use]
+    pub fn unfinished(&self) -> bool {
+        self.working > 0 || self.failed > 0 || self.adjusted > 0
+    }
+
+    /// Return the census with one more card folded in.
+    #[must_use]
+    fn counting(mut self, draft: &CardDraft) -> Self {
+        let artifacts = draft.artifacts();
+        self.ready += usize::from(artifacts.all_ready());
+        self.failed += usize::from(artifacts.has_failed());
+        self.adjusted += usize::from(draft.staged_rewrite().is_some());
+        self.working += usize::from(draft.phase() == CardPhase::Working);
+        self
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -184,14 +254,84 @@ pub struct AppInput {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Review {
     pub candidates: Vec<WordCandidate>,
-    pub selected: usize,
-    pub expanded: Option<ExpandedSense>,
+    pub focus: ReviewFocus,
+    pub open: OpenSenseLists,
     pub notice: Option<String>,
     /// Supported codes the understanding pass judged equally plausible for
     /// this batch, excluding the one it chose. Empty when the batch is
     /// unambiguous, and empty for cache entries written before the pass
     /// started reporting them.
     pub alternates: Vec<String>,
+}
+
+/// One position on the continuous review walk: a candidate head, or one row
+/// inside that candidate's open sense list, where `index == senses.len()` is
+/// the list's add-more row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReviewFocus {
+    Head(usize),
+    Sense { row: usize, index: usize },
+}
+
+impl ReviewFocus {
+    /// Return the candidate row this focus position belongs to.
+    #[must_use]
+    pub fn row(self) -> usize {
+        match self {
+            Self::Head(row) | Self::Sense { row, .. } => row,
+        }
+    }
+}
+
+impl Default for ReviewFocus {
+    fn default() -> Self {
+        Self::Head(0)
+    }
+}
+
+/// The candidate rows whose sense lists stay open inline on the review walk.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct OpenSenseLists(BTreeSet<usize>);
+
+impl OpenSenseLists {
+    /// Return whether one candidate row's sense list is open.
+    #[must_use]
+    pub fn contains(&self, row: usize) -> bool {
+        self.0.contains(&row)
+    }
+
+    /// Return whether no sense list is open.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn toggled(mut self, row: usize) -> Self {
+        if !self.0.remove(&row) {
+            self.0.insert(row);
+        }
+        self
+    }
+
+    fn with(mut self, row: usize) -> Self {
+        self.0.insert(row);
+        self
+    }
+
+    fn without(mut self, row: usize) -> Self {
+        self.0.remove(&row);
+        self
+    }
+
+    fn dropped_row(self, row: usize) -> Self {
+        Self(
+            self.0
+                .into_iter()
+                .filter(|open| *open != row)
+                .map(|open| if open > row { open - 1 } else { open })
+                .collect(),
+        )
+    }
 }
 
 /// Build one language pair, preserving the case each code arrived in.
@@ -204,14 +344,6 @@ pub struct Review {
 /// case-insensitive instead.
 fn paired(learning: &str, known: &str) -> LanguagePair {
     LanguagePair::new(learning.to_string(), known.to_string())
-}
-
-/// Expanded sense picker state for one review row.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ExpandedSense {
-    pub row: usize,
-    pub cursor: usize,
-    pub selected: Vec<usize>,
 }
 
 impl App {
@@ -333,7 +465,7 @@ impl App {
             && self.busy.is_none()
             && self.error.is_none()
             && self.cards.editor.is_none()
-            && !self.cards.expanded
+            && !self.cards.expanded.contains(self.cards.selected)
     }
 
     /// Return whether generation has reached a terminal or published view.
@@ -453,6 +585,21 @@ impl App {
         self
     }
 
+    /// Return the app with the last character of the API key removed.
+    ///
+    /// Backspace used to wipe the whole field, which is the one place in the
+    /// app where a single ordinary keystroke destroyed a whole entry — and on
+    /// the setup screen, where a mistyped key is exactly what you are trying to
+    /// correct. It rubs out one character, like every other field.
+    pub fn welcome_rubbed_key(mut self) -> Self {
+        self.welcome.key.pop();
+        if self.welcome.key.is_empty() {
+            self.welcome.source = KeySource::Empty;
+        }
+        self.welcome.notice = None;
+        self
+    }
+
     /// Return the app with welcome focus moved to the next control in the cycle.
     pub fn welcome_focus_next(mut self) -> Self {
         self.welcome.focus = step_focus(self.welcome.focus, self.welcome.env_available, 1);
@@ -546,6 +693,7 @@ impl App {
     /// head row, so the clamp must agree with the renderer about that width.
     /// A zero `viewport` clamps to zero.
     pub fn body_scrolled(mut self, delta: i32, viewport: u16, body_width: u16) -> Self {
+        self.cards.following = false;
         let max = self
             .body_content_height(body_width)
             .saturating_sub(viewport);
@@ -587,10 +735,16 @@ impl App {
         let Some((top, height)) = self.focused_body_range(body_width) else {
             return self;
         };
+        let bottom = top.saturating_add(height);
+        // The focused range may reach past what is drawn today — a card the
+        // engine is building reserves the rows it still owes — and the clamp
+        // has to allow that much scroll or the reservation is undone the
+        // moment it is made. Everywhere else the range ends inside the
+        // content and this reads as the plain content height it always was.
         let max = self
             .body_content_height(body_width)
+            .max(bottom)
             .saturating_sub(viewport);
-        let bottom = top.saturating_add(height);
         let mut next = self.body_scroll;
         let anchor_editor =
             self.screen == Screen::YourCards && self.cards.editor.is_some() && height <= viewport;
@@ -782,19 +936,56 @@ impl App {
         self.review.candidates.as_slice()
     }
 
-    /// Return the currently highlighted candidate index.
+    /// Return the candidate row the review walk currently stands on.
     pub fn selected(&self) -> usize {
-        self.review.selected
+        self.review.focus.row()
     }
 
-    /// Return the expanded sense picker state, if any.
-    pub fn expanded_sense(&self) -> Option<ExpandedSense> {
-        self.review.expanded.clone()
+    /// Return the current position of the continuous review walk.
+    #[must_use]
+    pub fn review_focus(&self) -> ReviewFocus {
+        self.review.focus
+    }
+
+    /// Return whether one candidate row's sense list is open inline.
+    #[must_use]
+    pub fn sense_list_open(&self, row: usize) -> bool {
+        self.review.open.contains(row)
+    }
+
+    /// Return whether any candidate row holds an open sense list.
+    #[must_use]
+    pub fn any_sense_list_open(&self) -> bool {
+        !self.review.open.is_empty()
+    }
+
+    /// Return whether the walk stands on or inside an open sense list.
+    #[must_use]
+    pub fn focused_sense_list_open(&self) -> bool {
+        self.review.open.contains(self.review.focus.row())
     }
 
     /// Return the short review notice, if any.
     pub fn review_notice(&self) -> Option<&str> {
         self.review.notice.as_deref()
+    }
+
+    /// Return the app carrying one short review notice.
+    #[must_use]
+    pub fn review_noticed(mut self, message: impl Into<String>) -> Self {
+        self.review.notice = Some(message.into());
+        self
+    }
+
+    /// Return how many cards the confirmed sense selection would commit.
+    #[must_use]
+    pub fn review_cards(&self) -> usize {
+        self.review
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.ok())
+            .map(WordCandidate::selected_count)
+            .sum()
     }
 
     /// Return the durable sentence preferences chosen for this reviewed batch.
@@ -820,7 +1011,6 @@ impl App {
     #[must_use]
     pub fn sentence_settings_opened(mut self) -> Self {
         self.sentence_settings_row = Some(BatchSettingsRow::Level);
-        self.review.expanded = None;
         self.review.notice = None;
         self
     }
@@ -881,8 +1071,8 @@ impl App {
     pub fn understood(mut self, candidates: Vec<WordCandidate>) -> Self {
         self.review = Review {
             candidates,
-            selected: 0,
-            expanded: None,
+            focus: ReviewFocus::Head(0),
+            open: OpenSenseLists::default(),
             notice: None,
             alternates: Vec::new(),
         };
@@ -917,185 +1107,207 @@ impl App {
                 *candidate = candidate.clone().selecting_senses(selected);
             }
         }
-        let selected = self.review.selected.min(candidates.len().saturating_sub(1));
+        let row = self
+            .review
+            .focus
+            .row()
+            .min(candidates.len().saturating_sub(1));
         let alternates = std::mem::take(&mut self.review.alternates);
         self.review = Review {
             candidates,
-            selected,
-            expanded: None,
+            focus: ReviewFocus::Head(row),
+            open: OpenSenseLists::default(),
             notice: None,
             alternates,
         };
         self
     }
 
-    /// Return whether the selected row can open a sense picker.
+    /// Return whether the focused row can open a sense picker.
     pub fn selected_can_expand_senses(&self) -> bool {
         self.review
             .candidates
-            .get(self.review.selected)
+            .get(self.review.focus.row())
             .map(WordCandidate::ok)
             .unwrap_or(false)
     }
 
-    /// Return the app with the selected row's sense picker opened.
-    pub fn senses_expanded(mut self) -> Self {
-        let Some(candidate) = self.review.candidates.get(self.review.selected) else {
-            return self;
-        };
-        if !candidate.ok() {
+    /// Return the app with the focused head's sense list opened or closed.
+    #[must_use]
+    pub fn sense_list_toggled(mut self) -> Self {
+        let row = self.review.focus.row();
+        if !self.selected_can_expand_senses() {
             return self;
         }
-        let selected = candidate.selected_senses().to_vec();
-        let cursor = candidate.selected();
-        self.review.expanded = Some(ExpandedSense {
-            row: self.review.selected,
-            cursor,
-            selected,
-        });
+        self.review.open = self.review.open.toggled(row);
+        self.review.focus = ReviewFocus::Head(row);
         self.review.notice = None;
         self
     }
 
-    /// Return the app with the expanded sense cursor moved down.
-    pub fn sense_next(mut self) -> Self {
-        let Some(expanded) = self.review.expanded else {
-            return self;
-        };
-        let Some(candidate) = self.review.candidates.get(expanded.row) else {
-            self.review.expanded = None;
-            return self;
-        };
-        let last = candidate.senses().len();
-        let cursor = expanded.cursor.min(last).saturating_add(1).min(last);
-        self.review.expanded = Some(ExpandedSense { cursor, ..expanded });
+    /// Return the app with the focused row's sense list closed.
+    #[must_use]
+    pub fn sense_list_closed(mut self) -> Self {
+        let row = self.review.focus.row();
+        self.review.open = self.review.open.without(row);
+        self.review.focus = ReviewFocus::Head(row);
         self.review.notice = None;
         self
     }
 
-    /// Return the app with the expanded sense cursor moved up.
-    pub fn sense_previous(mut self) -> Self {
-        let Some(expanded) = self.review.expanded else {
-            return self;
-        };
-        let Some(_candidate) = self.review.candidates.get(expanded.row) else {
-            self.review.expanded = None;
-            return self;
-        };
-        let cursor = expanded.cursor.saturating_sub(1);
-        self.review.expanded = Some(ExpandedSense { cursor, ..expanded });
-        self.review.notice = None;
+    /// Return the app with every open sense list collapsed.
+    #[must_use]
+    pub fn sense_lists_collapsed(mut self) -> Self {
+        self.review.open = OpenSenseLists::default();
+        self.review.focus = ReviewFocus::Head(self.review.focus.row());
         self
     }
 
-    /// Return the app with the focused sense toggled in the expanded multi-select.
+    /// Return the app with every multi-meaning row's sense list opened;
+    /// single-sense and off-language rows stay closed.
+    #[must_use]
+    pub fn sense_lists_expanded_all(mut self) -> Self {
+        self.review.open = OpenSenseLists(
+            self.review
+                .candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| candidate.ok() && candidate.has_multiple_senses())
+                .map(|(row, _)| row)
+                .collect(),
+        );
+        self.review.focus = ReviewFocus::Head(self.review.focus.row());
+        self
+    }
+
+    /// Return the app with the review walk moved one position down, entering
+    /// and leaving open sense lists without closing them.
+    #[must_use]
+    pub fn review_focus_next(mut self) -> Self {
+        let total = self.review.candidates.len();
+        if total == 0 {
+            return self;
+        }
+        self.review.notice = None;
+        self.review.focus = match self.review.focus {
+            ReviewFocus::Head(row) if self.review.open.contains(row) => {
+                ReviewFocus::Sense { row, index: 0 }
+            }
+            ReviewFocus::Head(row) if row + 1 < total => ReviewFocus::Head(row + 1),
+            ReviewFocus::Head(row) => ReviewFocus::Head(row),
+            ReviewFocus::Sense { row, index } => {
+                let last = self
+                    .review
+                    .candidates
+                    .get(row)
+                    .map(|candidate| candidate.senses().len())
+                    .unwrap_or(0);
+                if index < last {
+                    ReviewFocus::Sense {
+                        row,
+                        index: index + 1,
+                    }
+                } else if row + 1 < total {
+                    ReviewFocus::Head(row + 1)
+                } else {
+                    ReviewFocus::Sense { row, index }
+                }
+            }
+        };
+        self
+    }
+
+    /// Return the app with the review walk moved one position up, entering the
+    /// previous row's open sense list at its add-more row.
+    #[must_use]
+    pub fn review_focus_previous(mut self) -> Self {
+        self.review.notice = None;
+        self.review.focus = match self.review.focus {
+            ReviewFocus::Head(row) if row > 0 => {
+                let previous = row - 1;
+                if self.review.open.contains(previous) {
+                    let last = self
+                        .review
+                        .candidates
+                        .get(previous)
+                        .map(|candidate| candidate.senses().len())
+                        .unwrap_or(0);
+                    ReviewFocus::Sense {
+                        row: previous,
+                        index: last,
+                    }
+                } else {
+                    ReviewFocus::Head(previous)
+                }
+            }
+            ReviewFocus::Head(row) => ReviewFocus::Head(row),
+            ReviewFocus::Sense { row, index: 0 } => ReviewFocus::Head(row),
+            ReviewFocus::Sense { row, index } => ReviewFocus::Sense {
+                row,
+                index: index - 1,
+            },
+        };
+        self
+    }
+
+    /// Return the app with the focused sense toggled, committed immediately
+    /// into the candidate; the last selected sense cannot be deselected.
     pub fn sense_toggled(mut self) -> Self {
-        let Some(mut expanded) = self.review.expanded else {
+        let ReviewFocus::Sense { row, index } = self.review.focus else {
             return self;
         };
-        let Some(candidate) = self.review.candidates.get(expanded.row) else {
-            self.review.expanded = None;
+        let Some(candidate) = self.review.candidates.get(row).cloned() else {
             return self;
         };
-        if expanded.cursor >= candidate.senses().len() {
-            self.review.expanded = Some(expanded);
+        if index >= candidate.senses().len() {
             return self;
         }
-        if let Some(position) = expanded
-            .selected
-            .iter()
-            .position(|index| *index == expanded.cursor)
-        {
-            if expanded.selected.len() > 1 {
-                expanded.selected.remove(position);
+        let mut selected = candidate.selected_senses().to_vec();
+        if let Some(position) = selected.iter().position(|chosen| *chosen == index) {
+            if selected.len() > 1 {
+                selected.remove(position);
             }
         } else {
-            expanded.selected.push(expanded.cursor);
-            expanded.selected.sort_unstable();
+            selected.push(index);
+            selected.sort_unstable();
         }
-        self.review.expanded = Some(expanded);
+        self.review.candidates[row] = candidate.selecting_senses(selected);
         self.review.notice = None;
         self
     }
 
-    /// Return whether the expanded picker cursor is on its add-more row.
+    /// Return whether the review walk stands on an open list's add-more row.
     pub fn expanded_add_more_focused(&self) -> bool {
-        let Some(expanded) = &self.review.expanded else {
+        let ReviewFocus::Sense { row, index } = self.review.focus else {
             return false;
         };
         self.review
             .candidates
-            .get(expanded.row)
-            .map(|candidate| expanded.cursor >= candidate.senses().len())
+            .get(row)
+            .map(|candidate| index >= candidate.senses().len())
             .unwrap_or(false)
     }
 
-    /// Return the app with the expanded sense picker confirmed and closed.
-    pub fn senses_confirmed(mut self) -> Self {
-        if let Some(expanded) = self.review.expanded
-            && let Some(candidate) = self.review.candidates.get(expanded.row).cloned()
-        {
-            self.review.candidates[expanded.row] = candidate.selecting_senses(expanded.selected);
-        }
-        self.review.expanded = None;
-        self.review.notice = None;
-        self
-    }
-
-    /// Return the app with the expanded sense picker cancelled and closed.
-    pub fn senses_cancelled(mut self) -> Self {
-        self.review.expanded = None;
-        self.review.notice = None;
-        self
-    }
-
-    /// Return the app with new senses appended to the selected row.
+    /// Return the app with new senses appended to the focused row.
     pub fn senses_appended_to_selected(
         mut self,
         senses: Vec<Sense>,
         message: Option<String>,
     ) -> Self {
-        let selected = self.review.selected;
-        let Some(candidate) = self.review.candidates.get(selected).cloned() else {
+        let row = self.review.focus.row();
+        let Some(candidate) = self.review.candidates.get(row).cloned() else {
             return self;
         };
         let (candidate, first) = candidate.with_added_senses(senses);
-        self.review.candidates[selected] = candidate;
+        self.review.candidates[row] = candidate;
         self.review.notice = if first.is_none() && message.is_none() {
             Some(String::from("nothing to add"))
         } else {
             message
         };
-        if let Some(cursor) = first {
-            let expanded_selected = self.review.candidates[selected].selected_senses().to_vec();
-            self.review.expanded = Some(ExpandedSense {
-                row: selected,
-                cursor,
-                selected: expanded_selected,
-            });
-        }
-        self
-    }
-
-    /// Return the app with the cursor moved one row down (saturates at last).
-    pub fn selected_next(mut self) -> Self {
-        self.review.expanded = None;
-        self.review.notice = None;
-        if !self.review.candidates.is_empty() {
-            let last = self.review.candidates.len() - 1;
-            if self.review.selected < last {
-                self.review.selected += 1;
-            }
-        }
-        self
-    }
-
-    /// Return the app with the cursor moved one row up (saturates at zero).
-    pub fn selected_previous(mut self) -> Self {
-        self.review.expanded = None;
-        self.review.notice = None;
-        if self.review.selected > 0 {
-            self.review.selected -= 1;
+        if let Some(index) = first {
+            self.review.open = self.review.open.with(row);
+            self.review.focus = ReviewFocus::Sense { row, index };
         }
         self
     }
@@ -1105,14 +1317,19 @@ impl App {
         self.cards.drafts.as_slice()
     }
 
-    /// Return how many cards carry a live pending rewrite.
+    /// Return how many cards stand in each phase, in one pass over the batch.
     #[must_use]
-    pub fn cards_pending(&self) -> usize {
+    pub fn card_census(&self) -> CardCensus {
         self.cards
             .drafts
             .iter()
-            .filter(|draft| draft.staged_rewrite().is_some())
-            .count()
+            .fold(CardCensus::default(), CardCensus::counting)
+    }
+
+    /// Return how many cards carry a live pending rewrite.
+    #[must_use]
+    pub fn cards_pending(&self) -> usize {
+        self.card_census().adjusted
     }
 
     /// Return whether the focused card can open its sentence-label editor.
@@ -1124,10 +1341,7 @@ impl App {
     /// Return whether one card can open its sentence-label editor.
     #[must_use]
     pub fn card_tunable_at(&self, card: usize) -> bool {
-        self.cards.drafts.get(card).is_some_and(|draft| {
-            draft.meta().is_some()
-                && (draft.rewrite().is_none() || draft.staged_rewrite().is_some())
-        })
+        self.cards.drafts.get(card).is_some_and(CardDraft::tunable)
     }
 
     /// Return the currently focused card index.
@@ -1137,7 +1351,92 @@ impl App {
 
     /// Return whether the focused card is expanded.
     pub fn card_expanded(&self) -> bool {
-        self.cards.expanded
+        self.cards.expanded.contains(self.cards.selected)
+    }
+
+    /// Return whether one card's block is expanded, focused or parked.
+    #[must_use]
+    pub fn card_expanded_at(&self, card: usize) -> bool {
+        self.cards.expanded.contains(card)
+    }
+
+    /// Return whether any card holds an expanded block.
+    #[must_use]
+    pub fn any_card_expanded(&self) -> bool {
+        !self.cards.expanded.is_empty()
+    }
+
+    /// Return the app with every expanded card collapsed.
+    #[must_use]
+    pub fn cards_collapsed(mut self) -> Self {
+        self.cards.editor = None;
+        self.cards.expanded = ExpandedCards::default();
+        self
+    }
+
+    /// Return the app with every card's block expanded, editors closed.
+    #[must_use]
+    pub fn cards_expanded_all(mut self) -> Self {
+        self.cards.editor = None;
+        self.cards.expanded = ExpandedCards((0..self.cards.drafts.len()).collect());
+        self
+    }
+
+    /// Return the app with the editor parked: closed while its card stays
+    /// expanded, every staged edit already living in the draft.
+    #[must_use]
+    pub fn sentence_editor_parked(mut self) -> Self {
+        self.cards.editor = None;
+        self
+    }
+
+    /// Return the app with the card walk moved one position down: from an
+    /// expanded head into its own editor, through the editor's rows, then out
+    /// onto the next card head, parking the editor without collapsing its
+    /// card. The walk saturates inside the last card's editor.
+    #[must_use]
+    pub fn card_focus_next(mut self) -> Self {
+        let last = self.cards.drafts.len().saturating_sub(1);
+        if let Some(editor) = self.cards.editor.take() {
+            if editor.row() != LabelEditorRow::Note {
+                self.cards.editor = Some(editor.row_next());
+                return self;
+            }
+            if self.cards.selected >= last {
+                self.cards.editor = Some(editor);
+                return self;
+            }
+        } else if self.card_expanded() && self.card_tunable() {
+            return self.sentence_editor_opened_for_register();
+        }
+        self.cards.following = false;
+        if !self.cards.drafts.is_empty() && self.cards.selected < last {
+            self.cards.selected += 1;
+        }
+        self
+    }
+
+    /// Return the app with the card walk moved one position up: through the
+    /// open editor's rows onto this card's own head, and from a head into the
+    /// previous card — entering a parked card's editor at its note row.
+    #[must_use]
+    pub fn card_focus_previous(mut self) -> Self {
+        if let Some(editor) = self.cards.editor.take() {
+            if editor.row() != LabelEditorRow::Register {
+                self.cards.editor = Some(editor.row_previous());
+                return self;
+            }
+            self.cards.following = false;
+            return self;
+        }
+        self.cards.following = false;
+        if self.cards.selected > 0 {
+            self.cards.selected -= 1;
+            if self.card_expanded() && self.card_tunable() {
+                return self.sentence_editor_opened_for_note();
+            }
+        }
+        self
     }
 
     /// Return the open sentence-label editor for the focused card.
@@ -1149,20 +1448,20 @@ impl App {
     /// Return the app with the focused card expanded and its note row editing.
     #[must_use]
     pub fn sentence_editor_opened_for_note(self) -> Self {
-        self.sentence_editor_opened(LabelEditorRow::Note)
+        self.sentence_editor_opened_for(LabelEditorRow::Note)
     }
 
     /// Return the app with the focused card expanded and its register row editing.
     #[must_use]
     pub fn sentence_editor_opened_for_register(self) -> Self {
-        self.sentence_editor_opened(LabelEditorRow::Register)
+        self.sentence_editor_opened_for(LabelEditorRow::Register)
     }
 
     /// Return the app with the sentence-label editor and focused card collapsed.
     #[must_use]
     pub fn sentence_editor_closed(mut self) -> Self {
         self.cards.editor = None;
-        self.cards.expanded = false;
+        self.cards.expanded = std::mem::take(&mut self.cards.expanded).without(self.cards.selected);
         self
     }
 
@@ -1171,24 +1470,6 @@ impl App {
     pub fn sentence_editor_focused(mut self, row: LabelEditorRow) -> Self {
         if let Some(editor) = self.cards.editor.take() {
             self.cards.editor = Some(editor.focused(row));
-        }
-        self
-    }
-
-    /// Return the app with the sentence-label editor moved to its previous row.
-    #[must_use]
-    pub fn sentence_editor_row_previous(mut self) -> Self {
-        if let Some(editor) = self.cards.editor.take() {
-            self.cards.editor = Some(editor.row_previous());
-        }
-        self
-    }
-
-    /// Return the app with the sentence-label editor moved to its next row.
-    #[must_use]
-    pub fn sentence_editor_row_next(mut self) -> Self {
-        if let Some(editor) = self.cards.editor.take() {
-            self.cards.editor = Some(editor.row_next());
         }
         self
     }
@@ -1251,16 +1532,20 @@ impl App {
         self
     }
 
-    fn sentence_editor_opened(mut self, row: LabelEditorRow) -> Self {
+    /// Return the app with the focused card expanded and its editor live on one
+    /// row. Expansion alone only displays those rows — this is what hands them
+    /// the keyboard, and the walk (`↓` from the head, `↑` from below) and a
+    /// click on one of the controls are what go through it.
+    #[must_use]
+    pub fn sentence_editor_opened_for(mut self, row: LabelEditorRow) -> Self {
         if !self.card_tunable() {
             return self;
         }
         let Some(draft) = self.cards.drafts.get(self.cards.selected) else {
             return self;
         };
-        let (baseline, selection, note) = sentence_editor_seed(draft);
-        self.cards.editor = Some(SentenceLabelsEditor::new(baseline, selection, row, note));
-        self.cards.expanded = true;
+        self.cards.editor = Some(SentenceLabelsEditor::seeded(draft, row));
+        self.cards.expanded = std::mem::take(&mut self.cards.expanded).with(self.cards.selected);
         self
     }
 
@@ -1282,20 +1567,50 @@ impl App {
         self.cards = CardsView {
             drafts,
             selected: 0,
-            expanded: false,
+            expanded: ExpandedCards::default(),
             elapsed: Duration::ZERO,
             running: None,
             editor: None,
             stop: GenerationStopState::Inactive,
+            following: true,
         };
         self
     }
 
     /// Return the app with the currently-running artifact recorded so the UI can
-    /// render an inline spinner instead of "queued".
+    /// render an inline spinner instead of "queued". While the view still
+    /// follows the engine and no card is open, the selection rides along, which
+    /// is what lets the viewport stay on the card being built.
     pub fn cards_running(mut self, target: Option<(usize, Artifact)>) -> Self {
         self.cards.running = target;
+        if let Some((card, _)) = target
+            && self.cards.following
+            && !self.cards.expanded.contains(self.cards.selected)
+            && card < self.cards.drafts.len()
+        {
+            self.cards.selected = card;
+        }
         self
+    }
+
+    /// Return the app with the viewport riding the engine again.
+    #[must_use]
+    pub fn cards_following(mut self) -> Self {
+        self.cards.following = true;
+        self
+    }
+
+    /// Return the card the viewport should ride while the batch builds.
+    ///
+    /// Following is suppressed rather than cleared while a card is open, so
+    /// closing that card resumes the ride. An open sentence editor implies an
+    /// expanded card, so this one check covers both.
+    #[must_use]
+    pub fn following_card(&self) -> Option<usize> {
+        if !self.cards.following || self.card_expanded() {
+            return None;
+        }
+        self.cards.running.map(|(card, _)| card)
     }
 
     /// Return which (card, artifact) pair is being worked on right now, if any.
@@ -1311,46 +1626,20 @@ impl App {
         }
         self.cards.drafts = drafts;
         self.cards.selected = selected;
-        if self.cards.drafts.is_empty() {
-            self.cards.expanded = false;
-        }
-        self
-    }
-
-    /// Return the app with card cursor moved down (saturates).
-    pub fn card_selected_next(mut self) -> Self {
-        self.cards.editor = None;
-        if !self.cards.drafts.is_empty() {
-            let last = self.cards.drafts.len() - 1;
-            if self.cards.selected < last {
-                self.cards.selected += 1;
-                self.cards.expanded = false;
-            }
-        }
-        self
-    }
-
-    /// Return the app with card cursor moved up (saturates).
-    pub fn card_selected_previous(mut self) -> Self {
-        self.cards.editor = None;
-        if self.cards.selected > 0 {
-            self.cards.selected -= 1;
-            self.cards.expanded = false;
-        }
+        self.cards.expanded =
+            std::mem::take(&mut self.cards.expanded).retained(self.cards.drafts.len());
         self
     }
 
     /// Toggle the focused card, opening its editor immediately when it can be tuned.
     pub fn card_toggle_expanded(mut self) -> Self {
-        if self.cards.expanded {
+        let selected = self.cards.selected;
+        if self.cards.expanded.contains(selected) {
             self.cards.editor = None;
-            self.cards.expanded = false;
+            self.cards.expanded = std::mem::take(&mut self.cards.expanded).without(selected);
             return self;
         }
-        if self.card_tunable() {
-            return self.sentence_editor_opened_for_register();
-        }
-        self.cards.expanded = true;
+        self.cards.expanded = std::mem::take(&mut self.cards.expanded).with(selected);
         self
     }
 
@@ -1359,11 +1648,7 @@ impl App {
         if card < self.cards.drafts.len() {
             self.cards.editor = None;
             self.cards.selected = card;
-            self.cards.expanded = false;
-            if self.card_tunable() {
-                return self.sentence_editor_opened_for_register();
-            }
-            self.cards.expanded = true;
+            self.cards.expanded = std::mem::take(&mut self.cards.expanded).with(card);
         }
         self
     }
@@ -1481,20 +1766,12 @@ impl App {
 
     /// Return the count of ready cards for the status line.
     pub fn cards_ready(&self) -> usize {
-        self.cards
-            .drafts
-            .iter()
-            .filter(|draft| draft.artifacts().all_ready())
-            .count()
+        self.card_census().ready
     }
 
     /// Return the count of failed cards for the status line.
     pub fn cards_failed(&self) -> usize {
-        self.cards
-            .drafts
-            .iter()
-            .filter(|draft| draft.artifacts().has_failed())
-            .count()
+        self.card_census().failed
     }
 
     /// Return the artifact-specific display hint for the focused card.
@@ -1505,22 +1782,21 @@ impl App {
         artifact_hint(draft.artifacts(), kind)
     }
 
-    /// Return the app with the selected candidate removed.
+    /// Return the app with the focused candidate removed.
     pub fn dropped_selected(mut self) -> Self {
         if self.review.candidates.is_empty() {
             return self;
         }
-        self.review.expanded = None;
         self.review.notice = None;
-        let index = self.review.selected.min(self.review.candidates.len() - 1);
+        let index = self
+            .review
+            .focus
+            .row()
+            .min(self.review.candidates.len() - 1);
         self.review.candidates.remove(index);
-        if self.review.selected >= self.review.candidates.len()
-            && !self.review.candidates.is_empty()
-        {
-            self.review.selected = self.review.candidates.len() - 1;
-        } else if self.review.candidates.is_empty() {
-            self.review.selected = 0;
-        }
+        self.review.open = std::mem::take(&mut self.review.open).dropped_row(index);
+        let row = index.min(self.review.candidates.len().saturating_sub(1));
+        self.review.focus = ReviewFocus::Head(row);
         self
     }
 
@@ -1592,24 +1868,6 @@ impl App {
         self.blob_cursor = 0;
         self
     }
-}
-
-fn sentence_editor_seed(
-    draft: &CardDraft,
-) -> (SentenceLabelSelection, SentenceLabelSelection, NoteDraft) {
-    let baseline = draft
-        .meta()
-        .and_then(|meta| meta.sentence_labels())
-        .map(SentenceLabelSelection::from_labels)
-        .unwrap_or_else(SentenceLabelSelection::empty);
-    if let Some(rewrite) = draft.staged_rewrite() {
-        return (
-            baseline,
-            rewrite.selection().clone(),
-            NoteDraft::new(rewrite.note()),
-        );
-    }
-    (baseline.clone(), baseline, NoteDraft::default())
 }
 
 fn boundary_at_or_before(text: &str, cursor: usize) -> usize {
@@ -1828,17 +2086,17 @@ mod tests {
     }
 
     #[test]
-    fn opening_batch_settings_focuses_level_and_closes_the_sense_picker() {
+    fn opening_batch_settings_focuses_level_and_keeps_open_sense_lists() {
         let next = App::new(LanguagePair::new("fr", "en"))
             .understood(vec![crate::session::WordCandidate::new(
                 "canard", "a duck", true,
             )])
-            .senses_expanded()
+            .sense_list_toggled()
             .sentence_settings_opened();
         assert_eq!(
-            (next.sentence_settings_editor(), next.expanded_sense()),
-            (Some(BatchSettingsRow::Level), None),
-            "opening sentence settings left another review layer open"
+            (next.sentence_settings_editor(), next.sense_list_open(0)),
+            (Some(BatchSettingsRow::Level), true),
+            "opening sentence settings collapsed an open sense list instead of leaving it inline"
         );
     }
 
@@ -1895,18 +2153,17 @@ mod tests {
     }
 
     #[test]
-    fn card_navigation_closes_the_editor() {
-        let navigated = cards()
-            .sentence_editor_opened_for_note()
-            .card_selected_next();
+    fn card_navigation_parks_the_editor_without_collapsing_its_card() {
+        let navigated = cards().sentence_editor_opened_for_note().card_focus_next();
         assert_eq!(
             (
                 navigated.card_selected(),
                 navigated.card_expanded(),
+                navigated.card_expanded_at(0),
                 navigated.sentence_editor(),
             ),
-            (1, false, None),
-            "card navigation kept an editor attached to the previous selection"
+            (1, false, true, None),
+            "walking off an open editor collapsed its card instead of parking it"
         );
     }
 

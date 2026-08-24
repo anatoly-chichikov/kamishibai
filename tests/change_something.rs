@@ -66,7 +66,7 @@ fn modal_renders_placeholder_dashes_and_send_cancel_footer() {
             && !rendered.contains("write the missing meaning however you want")
             && rendered.contains("#2 - verb")
             && rendered.contains("[Esc] cancel")
-            && rendered.contains("[Enter] send"),
+            && rendered.contains("[Enter] confirm"),
         "add more modal must render typed input and send/cancel footer without helper prose"
     );
 }

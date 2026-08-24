@@ -1,6 +1,6 @@
 //! Sentence-label tags and in-card editor rendering.
 
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::session::{SentenceAxis, SentenceBatchSettings, SentenceLabelSelection, SentenceLabels};
@@ -78,17 +78,6 @@ impl HeadTagsLayout {
         self.tags
             .iter()
             .map(|tag| tag.end.saturating_sub(tag.start))
-            .max()
-            .unwrap_or(0)
-    }
-
-    /// Return the exclusive column occupied by one rendered tag row.
-    #[must_use]
-    pub(crate) fn row_width(&self, row: usize) -> usize {
-        self.tags
-            .iter()
-            .filter(|tag| tag.row == row)
-            .map(|tag| tag.end)
             .max()
             .unwrap_or(0)
     }
@@ -228,14 +217,18 @@ pub(crate) fn head_tags_layout(
     Some(HeadTagsLayout { tags })
 }
 
+/// Render the four tune rows of one card. `focused` is what separates the live
+/// editor from the same rows merely on display under an open card: unfocused,
+/// no question is lit, no chevron is bright, and the note owns no cursor.
 pub(crate) fn editor_lines(
     editor: &SentenceLabelsEditor,
     current: Option<&SentenceLabels>,
+    focused: bool,
     width: usize,
     first_start: usize,
     fallback_start: usize,
 ) -> Vec<Line<'static>> {
-    editor_layout(editor, current, width, first_start, fallback_start).lines
+    editor_layout(editor, current, focused, width, first_start, fallback_start).lines
 }
 
 /// Return the exclusive editor row needed to keep the focused control visible.
@@ -247,7 +240,7 @@ pub(crate) fn editor_focus_end(
     first_start: usize,
     fallback_start: usize,
 ) -> usize {
-    let layout = editor_layout(editor, current, width, first_start, fallback_start);
+    let layout = editor_layout(editor, current, true, width, first_start, fallback_start);
     if editor.row() == LabelEditorRow::Note {
         return layout.note_row + 1;
     }
@@ -265,7 +258,7 @@ pub(crate) fn editor_cursor(
     first_start: usize,
     fallback_start: usize,
 ) -> Option<(usize, usize)> {
-    editor_layout(editor, current, width, first_start, fallback_start).cursor
+    editor_layout(editor, current, true, width, first_start, fallback_start).cursor
 }
 
 pub(crate) fn editor_control_at(
@@ -277,7 +270,7 @@ pub(crate) fn editor_control_at(
     first_start: usize,
     fallback_start: usize,
 ) -> Option<EditorControl> {
-    let layout = editor_layout(editor, current, width, first_start, fallback_start);
+    let layout = editor_layout(editor, current, true, width, first_start, fallback_start);
     if row == layout.note_row && column >= layout.note_start && column < width {
         return Some(EditorControl::Note);
     }
@@ -335,6 +328,11 @@ pub(crate) fn batch_editor_control_at(
 }
 
 /// Return the shared compact-label style used before and after generation.
+///
+/// Both states are blocks, because the three values read as one attribution
+/// strip rather than as three loose words: what the model chose sits on the
+/// muted `DIM` block, and what the user pinned or the model fulfilled exactly
+/// sits on the bright inverted one.
 pub(crate) fn tag_style(pinned: bool) -> Style {
     if pinned {
         palette::invert()
@@ -349,11 +347,11 @@ fn tag_spans(source: &TagSource<'_>, axis: SentenceAxis) -> (Vec<Span<'static>>,
     let spans = match (actual, requested) {
         (Some(actual), Some(requested)) if actual != requested => vec![
             label_tag(actual, false),
-            Span::styled(" · aimed for ", palette::dim2()),
+            Span::styled(" · aimed for ", palette::Ink::Aside.on(false)),
             label_tag(requested, true),
         ],
         (None, Some(requested)) => vec![
-            Span::styled("aimed for ", palette::dim2()),
+            Span::styled("aimed for ", palette::Ink::Aside.on(false)),
             label_tag(requested, true),
         ],
         (Some(actual), _) => vec![label_tag(actual, source.pinned(axis))],
@@ -373,6 +371,7 @@ fn label_tag(token: &str, pinned: bool) -> Span<'static> {
 fn editor_layout(
     editor: &SentenceLabelsEditor,
     current: Option<&SentenceLabels>,
+    focused: bool,
     width: usize,
     first_start: usize,
     fallback_start: usize,
@@ -393,7 +392,7 @@ fn editor_layout(
         LabelEditorRow::Level,
     ] {
         let (mut rendered, mut regions) =
-            axis_lines(editor, current, row, width, lines.len(), indent);
+            axis_lines(editor, current, focused, row, width, lines.len(), indent);
         lines.append(&mut rendered);
         chips.append(&mut regions);
         row_ends.push((row, lines.len()));
@@ -402,13 +401,13 @@ fn editor_layout(
     let note_start = indent + question_column();
     let mut note = row_prefix(
         row_label(LabelEditorRow::Note),
-        editor.row() == LabelEditorRow::Note,
+        focused && editor.row() == LabelEditorRow::Note,
         indent,
         question_column(),
     );
     note.extend(TextField::new(editor.note().value(), NOTE_PLACEHOLDER).spans());
     lines.push(Line::from(note));
-    let cursor = if editor.row() == LabelEditorRow::Note {
+    let cursor = if focused && editor.row() == LabelEditorRow::Note {
         Some((
             note_start + super::common::display_width(editor.note().before_cursor()),
             note_row,
@@ -453,9 +452,11 @@ fn selector_width(editor: &SentenceLabelsEditor) -> usize {
     .expect("invariant: sentence-label editor must expose at least one axis")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn axis_lines(
     editor: &SentenceLabelsEditor,
     current: Option<&SentenceLabels>,
+    focused: bool,
     row: LabelEditorRow,
     width: usize,
     first_row: usize,
@@ -472,7 +473,7 @@ fn axis_lines(
         CarouselAxis {
             row,
             label: row_label(row),
-            focused: editor.row() == row,
+            focused: focused && editor.row() == row,
             selected,
         },
         count,
@@ -514,7 +515,8 @@ fn append_current(
             .expect("invariant: every sentence-label axis must render a carousel line");
         line.spans
             .push(Span::styled(same_line_gap, palette::base()));
-        line.spans.push(Span::styled(label, palette::dim2()));
+        line.spans
+            .push(Span::styled(label, palette::Ink::Aside.on(false)));
         line.spans.push(Span::styled(actual, palette::base()));
         return;
     }
@@ -525,7 +527,7 @@ fn append_current(
     };
     lines.push(Line::from(vec![
         Span::styled(" ".repeat(start), palette::base()),
-        Span::styled(label, palette::dim2()),
+        Span::styled(label, palette::Ink::Aside.on(false)),
         Span::styled(actual, palette::base()),
     ]));
 }
@@ -591,10 +593,7 @@ fn carousel_lines<Row: Copy>(
             .expect("invariant: selected sentence-label choice must have a token");
         let chip = format!(" {token} ");
         let start = used;
-        spans.push(Span::styled(
-            chip,
-            palette::invert().add_modifier(Modifier::BOLD),
-        ));
+        spans.push(Span::styled(chip, palette::invert()));
         used += super::common::display_width(token) + 2;
         regions.push(ChipRegion {
             row: screen_row,
@@ -628,7 +627,7 @@ fn carousel_lines<Row: Copy>(
         spans.push(span);
         regions.push(region);
         used += MARKER_WIDTH;
-        spans.push(Span::styled(" — ", palette::dim2()));
+        spans.push(Span::styled(" — ", palette::Ink::Aside.on(false)));
         used += 3;
         let (span, region) = marker(row, screen_row, 0, 1, used, MARKER_WIDTH);
         spans.push(span);
@@ -747,9 +746,9 @@ fn chevron<Row: Copy>(
 ) -> (Span<'static>, ChipRegion<Row>) {
     let text = if forward { " >" } else { "< " };
     let style = if focused {
-        palette::base()
+        palette::Ink::Subject.lit()
     } else {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     };
     (
         Span::styled(text, style),
@@ -791,11 +790,17 @@ fn empty_marker(width: usize) -> Span<'static> {
     Span::styled(" ".repeat(width), marker_style(usize::MAX))
 }
 
+/// Paint one rail segment by how far its choice sits from the selected chip.
+///
+/// The rail fades out rather than stopping: the nearest hidden choice is the
+/// brightest segment, the next one is a rule line, and everything beyond it is
+/// the page itself. The far segment is deliberately the background and not the
+/// cursor highlight — the rail must not brighten when the row highlight does.
 fn marker_style(distance: usize) -> Style {
     let background = match distance {
         1 => palette::DIM2,
         2 => palette::RULE,
-        _ => palette::HL,
+        _ => palette::BG,
     };
     Style::default().bg(background).fg(palette::BG)
 }
@@ -830,9 +835,9 @@ fn row_prefix(
     question_width: usize,
 ) -> Vec<Span<'static>> {
     let style = if focused {
-        palette::base().add_modifier(Modifier::BOLD)
+        palette::Ink::Subject.lit()
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     vec![
         Span::styled(" ".repeat(indent), palette::base()),

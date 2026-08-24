@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.9.0
+Release: 1.10.0
 
 Overview
 
@@ -21,7 +21,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.9.0/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.10.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -215,6 +215,20 @@ metadata policy, so a card carrying metadata from an older policy refreshes it
 once even under defaults. Explicit settings are accepted with both word intake
 and `--build`; an imported card whose cached metadata does not satisfy them is
 refreshed only when generation starts.
+
+One batch is capped at 60 words and 80 cards. Both ceilings are usage errors
+(exit 2) refused before credential lookup, Gemini, cache writes, and session
+creation. The two are separate because one word yields one card per selected
+sense: a legal 60-word list can still exceed the card ceiling under
+`--senses all`, and that refusal lands after understanding, since sense counts
+are only known then — the understanding cache is kept, so the corrected rerun
+costs nothing. `--build` imports cards directly and is checked against the card
+ceiling alone. Committing a plan larger than the card ceiling is refused by
+`generate`; a plan committed before this release still generates.
+
+The understanding pass itself is asked in bounded chunks and each chunk is
+cached as soon as it decodes, so a batch that fails part-way keeps every word
+the earlier chunks produced and a rerun asks only for the rest.
 
 `--generate` immediately commits and starts the session. Add `--wait` to run
 that generation in the same foreground process; `--wait` without `--generate`
@@ -677,6 +691,7 @@ Rules:
 - text fields must be non-empty
 - language codes must be non-empty
 - language codes accept any case and are normalized to uppercase in the session
+- at most 80 entries
 
 Example:
 

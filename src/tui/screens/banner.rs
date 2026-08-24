@@ -1,12 +1,22 @@
-//! Sticky outputs panel shared by `your cards` and `done`.
+//! Sticky outcome strip shared by `your cards` and `done`.
 //!
-//! The panel lists the produced artifacts — APKG (deck), PDF (report) and
-//! FOLDER (output directory) — one per row. Each row shows an underlined
-//! placeholder label followed by the path in dim grey. The hit tester in
-//! `tui::links` mirrors the column maths laid out here.
+//! One block, two halves: on the left the produced artifacts — APKG (deck),
+//! PDF (report) and FOLDER (output directory), one per row, each an underlined
+//! label followed by its path in dim grey; on the right, level with the first
+//! row, a bright tag counting the cards that never made the deck. What you got
+//! and what you lost, read in one glance.
+//!
+//! A dashed rule closes the block off from the card list below, the same rule
+//! that closes the body off from the footer — drawn by `common::render_screen`
+//! across the full terminal width, because the body rectangle this widget
+//! lives in stops a gutter short of both edges and a border that stops short
+//! of the screen reads as a shorter border, not as the same one.
+//!
+//! The hit tester in `tui::links` mirrors the column maths laid out here.
 
 use std::path::Path;
 
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -30,11 +40,19 @@ pub const LABEL_PAD: usize = 6;
 /// Visible characters separating the padded label from the path.
 pub const PATH_GAP: usize = 2;
 
-/// Number of rows the panel occupies inside the body rect (the artifact
-/// rows plus one trailing blank line for breathing). Returns zero when no
-/// artifact is ready yet.
+/// Visible characters bracketing the loss tag, one space either side.
+const TAG_PAD: usize = 2;
+
+/// Number of rows the strip occupies inside the body rect: its content rows
+/// plus the dashed rule closing them off. Returns zero when there is nothing
+/// to report.
+///
+/// No blank on either side of the rule. A block and its own bottom edge need
+/// nothing between them, and the cards start on the row right under it — the
+/// same way the status rule sits between the disclaimer above it and the
+/// footer below it without a spare row for either.
 pub fn height(app: &App) -> u16 {
-    let count = entries(app).len();
+    let count = content_rows(app);
     if count == 0 {
         0
     } else {
@@ -42,9 +60,63 @@ pub fn height(app: &App) -> u16 {
     }
 }
 
+/// Row inside the body carrying the strip's closing rule, or `None` when the
+/// strip has nothing to report.
+///
+/// It is the last of the rows `height` reserves, and it is derived from that
+/// count so the two cannot drift: `render_screen` paints the rule from this
+/// answer while `widget` fills only the rows above it.
+pub fn rule_row(app: &App) -> Option<u16> {
+    height(app).checked_sub(1).filter(|_| reports(app))
+}
+
+/// Return whether the strip has anything to say — files, losses, or both.
+///
+/// Losses count on their own because a batch where every card gave up
+/// publishes no deck at all, and that is exactly the run whose outcome the
+/// learner most needs stated.
+pub fn reports(app: &App) -> bool {
+    content_rows(app) > 0
+}
+
+fn content_rows(app: &App) -> usize {
+    let count = entries(app).len();
+    if count > 0 {
+        count
+    } else {
+        usize::from(losses(app) > 0)
+    }
+}
+
 /// Return `true` if at least one of the three artifact paths is available.
 pub fn has_entries(app: &App) -> bool {
     !entries(app).is_empty()
+}
+
+/// Return how many cards never made the deck.
+///
+/// A published record carries the durable tally and a live batch carries the
+/// census. They answer the same question, but only the published one survives
+/// a reopen, so it wins wherever it exists.
+pub fn losses(app: &App) -> usize {
+    let done = app.done_artifacts();
+    if !done.deck.is_empty() && done.cards.saturating_add(done.failed) > 0 {
+        return done.failed;
+    }
+    app.cards_failed()
+}
+
+/// Return the loss tag, or `None` when nothing was lost.
+///
+/// One word beside the count. The screen is already called `your cards`, so
+/// naming them again inside the tag only pushed the number away from the word
+/// that qualifies it.
+fn tag(app: &App) -> Option<String> {
+    let lost = losses(app);
+    if lost == 0 {
+        return None;
+    }
+    Some(format!(" {lost} unfinished "))
 }
 
 /// Return the (label, path) pairs that should be rendered, in order.
@@ -85,25 +157,66 @@ pub fn display(label: &str, path: &str) -> String {
     basename(path)
 }
 
-/// Render the panel widget. Caller is responsible for rendering it into a
-/// `height(app)`-row sub-rect at the top of the body area. The deck and
-/// report rows show only the file name; the folder row shows the full
-/// directory path so the file rows above don't need to repeat it.
-pub fn widget(app: &App) -> Paragraph<'static> {
+/// Render the strip's content rows. Caller is responsible for rendering them
+/// into a `height(app)`-row sub-rect at the top of the body area, `width`
+/// cells wide; the one row this widget leaves empty at the bottom is the
+/// full-width rule `render_screen` paints at `rule_row`.
+/// The deck and report rows show only the file name; the folder row shows the
+/// full directory path so the file rows above don't need to repeat it.
+pub fn widget(app: &App, width: u16) -> Paragraph<'static> {
     let entries = entries(app);
-    let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries.len() + 1);
-    for (label, path) in &entries {
+    let width = usize::from(width);
+    let tag = tag(app);
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries.len().max(1));
+    for (index, (label, path)) in entries.iter().enumerate() {
         let padding = LABEL_PAD.saturating_sub(super::common::display_width(label)) + PATH_GAP;
         let display = display(label, path);
-        let spans: Vec<Span<'static>> = vec![
+        let mut spans: Vec<Span<'static>> = vec![
             Span::styled("│ ", palette::base()),
-            Span::styled(GLYPH, palette::dim()),
-            Span::styled(String::from(*label), palette::link()),
+            Span::styled(GLYPH, palette::Ink::Detail.on(false)),
+            Span::styled(String::from(*label), palette::Ink::Subject.link(false)),
             Span::styled(" ".repeat(padding), palette::base()),
-            Span::styled(display, palette::dim()),
+            Span::styled(display, palette::Ink::Detail.on(false)),
         ];
+        if index == 0
+            && let Some(tag) = tag.as_deref()
+        {
+            push_tag(&mut spans, tag, width);
+        }
         lines.push(Line::from(spans));
     }
-    lines.push(Line::from(""));
+    if entries.is_empty()
+        && let Some(tag) = tag.as_deref()
+    {
+        // No gutter bar here: it exists to bind the file rows into one block,
+        // and with no files beside it a lone tick would be marking nothing.
+        let mut spans = Vec::new();
+        push_tag(&mut spans, tag, width);
+        lines.push(Line::from(spans));
+    }
     Paragraph::new(lines).style(palette::base())
+}
+
+/// Push the right-aligned loss tag onto one already-built row.
+///
+/// The tag keeps its full width and the gap absorbs the difference, so on a
+/// terminal too narrow for both it is the path that runs off the edge — paths
+/// already do, and the count is the part that cannot afford to.
+///
+/// Its letters are the one bold span outside the keyboard's own row: weight
+/// means focus everywhere else, and this block is the single sentence a
+/// settled screen must not let the eye slide past.
+fn push_tag(spans: &mut Vec<Span<'static>>, tag: &str, width: usize) {
+    let used: usize = spans
+        .iter()
+        .map(|span| super::common::display_width(span.content.as_ref()))
+        .sum();
+    let gap = width
+        .saturating_sub(used + super::common::display_width(tag))
+        .max(TAG_PAD);
+    spans.push(Span::styled(" ".repeat(gap), palette::base()));
+    spans.push(Span::styled(
+        String::from(tag),
+        super::sentence_labels::tag_style(true).add_modifier(Modifier::BOLD),
+    ));
 }

@@ -141,7 +141,7 @@ fn visual_revision_locks_serialize_competing_processes() -> Result<()> {
     let directory = TempDir::new()?;
     let signal = directory.path().join("lease-ready");
     let mut child = Command::new(std::env::current_exe()?)
-        .arg("visual_lock_child_holds_one_cross_process_lease")
+        .arg("cache::visual_lock_child_holds_one_cross_process_lease")
         .arg("--exact")
         .arg("--nocapture")
         .env("KAMISHIBAI_VISUAL_LOCK_TEST_ROOT", directory.path())

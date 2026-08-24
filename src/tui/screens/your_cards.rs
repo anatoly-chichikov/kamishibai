@@ -24,61 +24,72 @@ use crate::session::{
 use crate::tui::app::App;
 use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
-use crate::tui::sentence_editor::SentenceLabelsEditor;
+use crate::tui::sentence_editor::{LabelEditorRow, SentenceLabelsEditor};
 
 const HEADLINE_WORKING: &str = "building your cards";
 const HEADLINE_DONE: &str = "your cards";
 const HINT_WORKING: &str = "drawing each card one by one";
 const HINT_STOPPING: &str = "stopping…";
 const HINT_DONE: &str = "all done";
-const HINT_DONE_FAILED: &str = "some cards didn't make it";
 const SPINNER_FRAME_MILLIS: u128 = 250;
-const STEP_LABEL_COL_CHARS: usize = 14;
-const STEP_DETAIL_COL_CHARS: usize = 9;
-const STEP_AUX_COL_CHARS: usize = 8;
+const STEP_LABEL_COL_CHARS: usize = 8;
+const STEP_COST_COL_CHARS: usize = 6;
 const SENTENCE_TAG_GAP: usize = 3;
 const SENTENCE_TAG_START: usize = super::common::CARD_DETAIL_COLUMN
     + STEP_LABEL_COL_CHARS
-    + STEP_DETAIL_COL_CHARS
-    + STEP_AUX_COL_CHARS
+    + STEP_COST_COL_CHARS
     + SENTENCE_TAG_GAP;
 const SECTION_GAP_ROWS: usize = 1;
 const FACT_LABEL_COLUMN: usize = 29;
-const STEPS: [(&str, Artifact); 4] = [
-    ("meta", Artifact::Meta),
-    ("audio", Artifact::Sound),
-    ("scene", Artifact::Scene),
-    ("picture", Artifact::Picture),
-];
+const STEP_ROWS: [StepRow; 3] = [StepRow::Scene, StepRow::Voice, StepRow::Manga];
 const SPINNER_FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
+const CACHED_NOTE: &str = "cached";
 
-struct CollapsedLabels {
+/// One rendered artifact row of a card block, named after what the card gets
+/// out of it: `scene` is the written material — the `Artifact::Meta` slot,
+/// whose click target is the card's whole cache cell; `voice` is the audio;
+/// and `manga` folds `Artifact::Scene` and `Artifact::Picture` into the one
+/// visual phase that ends at the rendered page.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum StepRow {
+    Scene,
+    Voice,
+    Manga,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RowState {
+    Hidden,
+    Ready,
+    Active,
+    Failed,
+    Discarded,
+    Paused,
+}
+
+struct SummaryLabels {
     tags: super::sentence_labels::HeadTagsLayout,
     start: usize,
 }
 
 struct ArtifactLine<'a> {
-    core: Vec<Span<'a>>,
-    tail: Vec<Span<'a>>,
+    spans: Vec<Span<'a>>,
 }
 
 impl<'a> ArtifactLine<'a> {
-    fn core_width(&self) -> usize {
-        spans_width(self.core.as_slice())
+    fn width(&self) -> usize {
+        spans_width(self.spans.as_slice())
     }
 
-    fn tail_width(&self) -> usize {
-        spans_width(self.tail.as_slice())
+    fn into_line(self) -> Line<'a> {
+        Line::from(self.spans)
     }
 
-    fn into_line(mut self) -> Line<'a> {
-        self.core.append(&mut self.tail);
-        Line::from(self.core)
-    }
-
+    /// Drop the whole row one rank, so a staged rewrite reads as parked work
+    /// without ever making a span brighter than it was.
     fn muted(mut self) -> Self {
-        for span in self.core.iter_mut().chain(self.tail.iter_mut()) {
-            span.style = span.style.fg(palette::DIM);
+        for span in &mut self.spans {
+            span.style = span.style.fg(palette::DIM2);
         }
         self
     }
@@ -106,21 +117,36 @@ impl ScreenView for YourCards {
         Cow::Borrowed(copy)
     }
 
+    /// A settled batch that lost cards says nothing here: the outcome strip
+    /// carries that in one bright tag, and repeating it in dim type beside the
+    /// title would only say the same thing twice, more quietly.
     fn hint(&self, app: &App) -> Cow<'static, str> {
         let copy = if app.generation_stopping() {
             HINT_STOPPING
         } else if !all_finished(app) {
             HINT_WORKING
-        } else if app.cards_failed() > 0 || app.done_artifacts().failed > 0 {
-            HINT_DONE_FAILED
+        } else if super::banner::losses(app) > 0 {
+            ""
         } else {
             HINT_DONE
         };
         Cow::Borrowed(copy)
     }
 
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, width)
+    fn status(&self, app: &App) -> Vec<Span<'static>> {
+        status(app)
+    }
+
+    fn hints(&self, app: &App) -> Vec<super::common::FooterHint> {
+        hints(app)
+    }
+
+    fn body_rule(&self, app: &App) -> Option<u16> {
+        if all_finished(app) {
+            super::banner::rule_row(app)
+        } else {
+            None
+        }
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -137,7 +163,7 @@ impl ScreenView for YourCards {
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(banner_rows), Constraint::Min(0)])
                 .split(area);
-            frame.render_widget(super::banner::widget(app), split[0]);
+            frame.render_widget(super::banner::widget(app, area.width), split[0]);
             split[1]
         };
         frame.render_widget(
@@ -152,7 +178,10 @@ fn cards_paragraph(app: &App, width: usize) -> Paragraph<'_> {
     let mut lines: Vec<Line<'_>> = Vec::new();
     if app.cards().is_empty() {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("preparing cards…", palette::dim())));
+        lines.push(Line::from(Span::styled(
+            "preparing cards…",
+            palette::Ink::Detail.on(false),
+        )));
         return Paragraph::new(lines).style(palette::base());
     }
     let spinner_frame =
@@ -160,7 +189,7 @@ fn cards_paragraph(app: &App, width: usize) -> Paragraph<'_> {
     let running_target = app.cards_running_target();
     for (index, draft) in app.cards().iter().enumerate() {
         let focused = index == app.card_selected();
-        let expanded = focused && app.card_expanded();
+        let expanded = app.card_expanded_at(index);
         let running_for_card =
             running_target.and_then(|(card, kind)| if card == index { Some(kind) } else { None });
         lines.extend(card_block(
@@ -188,7 +217,6 @@ fn card_block<'a>(
     running: Option<Artifact>,
     spinner_frame: usize,
 ) -> Vec<Line<'a>> {
-    let artifacts = draft.artifacts();
     let steps = step_rows_for(draft, running);
     let progressed = !steps.is_empty();
     let pending = draft.staged_rewrite().is_some();
@@ -198,32 +226,24 @@ fn card_block<'a>(
     ));
     let step_lines = steps
         .iter()
-        .map(|kind| {
-            let slot = slot_for(artifacts, *kind);
-            let line = artifact_line(
-                *kind,
-                slot,
-                running,
-                spinner_frame,
-                *kind == Artifact::Meta && draft.meta().is_some(),
-            );
-            (*kind, if pending { line.muted() } else { line })
+        .map(|row| {
+            let line = step_line(draft, *row, running, spinner_frame);
+            (*row, if pending { line.muted() } else { line })
         })
         .collect::<Vec<_>>();
-    if expanded {
+    if let Some(tune) = tune_rows(draft, expanded, editor) {
         lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
-        if let Some(editor) = editor {
-            lines.push(Line::from(""));
-            lines.extend(super::sentence_labels::editor_lines(
-                editor,
-                draft.meta().and_then(CardMeta::sentence_labels),
-                width,
-                super::common::CARD_DETAIL_COLUMN,
-                super::common::CARD_DETAIL_COLUMN,
-            ));
-        }
-    } else if let Some(labels) = collapsed_labels(draft, running, width) {
-        lines.extend(collapsed_step_lines(step_lines, labels));
+        lines.push(Line::from(""));
+        lines.extend(super::sentence_labels::editor_lines(
+            &tune.editor,
+            draft.meta().and_then(CardMeta::sentence_labels),
+            tune.focused,
+            width,
+            super::common::CARD_DETAIL_COLUMN,
+            super::common::CARD_DETAIL_COLUMN,
+        ));
+    } else if let Some(labels) = summary_labels(draft, running, expanded, width) {
+        lines.extend(summary_step_lines(step_lines, labels));
     } else {
         lines.extend(step_lines.into_iter().map(|(_, line)| line.into_line()));
     }
@@ -236,81 +256,88 @@ fn card_block<'a>(
     lines
 }
 
-fn collapsed_labels(
+/// The tune rows one card renders, and whether they own the keyboard.
+///
+/// An open tunable card always shows them, so opening a card immediately says
+/// what can be changed about it; only the walk into the block makes them live.
+struct TuneRows {
+    editor: SentenceLabelsEditor,
+    focused: bool,
+}
+
+fn tune_rows(
     draft: &CardDraft,
-    running: Option<Artifact>,
-    width: usize,
-) -> Option<CollapsedLabels> {
-    let steps = step_rows_for(draft, running);
-    if !steps.contains(&Artifact::Sound) {
+    expanded: bool,
+    editor: Option<&SentenceLabelsEditor>,
+) -> Option<TuneRows> {
+    if !expanded {
         return None;
     }
-    let sound = artifact_line(
-        Artifact::Sound,
-        draft.artifacts().sound(),
-        running,
-        0,
-        false,
-    );
-    let start = SENTENCE_TAG_START;
-    if sound.core_width() > start {
-        return None;
-    }
-    let unwrapped = summary_tags_layout(draft, usize::MAX)?;
-    if sound.tail_width() > 0 {
-        if start
-            .saturating_add(unwrapped.row_width(0))
-            .saturating_add(sound.tail_width())
-            > width
-        {
-            return None;
-        }
-        return Some(CollapsedLabels {
-            tags: unwrapped,
-            start,
+    if let Some(editor) = editor {
+        return Some(TuneRows {
+            editor: editor.clone(),
+            focused: true,
         });
     }
+    draft.tunable().then(|| TuneRows {
+        editor: SentenceLabelsEditor::seeded(draft, LabelEditorRow::Register),
+        focused: false,
+    })
+}
+
+/// The tag summary belongs to the collapsed card alone: an open block already
+/// shows the card's own metadata, and repeating the tags there only invites the
+/// reader to reach for controls that live one row further down.
+fn summary_labels(
+    draft: &CardDraft,
+    running: Option<Artifact>,
+    expanded: bool,
+    width: usize,
+) -> Option<SummaryLabels> {
+    if expanded {
+        return None;
+    }
+    let steps = step_rows_for(draft, running);
+    if !steps.contains(&StepRow::Voice) {
+        return None;
+    }
+    let start = SENTENCE_TAG_START;
+    if step_line(draft, StepRow::Voice, running, 0).width() > start {
+        return None;
+    }
     let content_width = width.saturating_sub(start);
-    if unwrapped.minimum_width() > content_width {
+    if summary_tags_layout(draft, usize::MAX)?.minimum_width() > content_width {
         return None;
     }
     let tags = summary_tags_layout(draft, content_width)?;
-    if [Artifact::Sound, Artifact::Scene, Artifact::Picture]
+    if tags.occupies(2) {
+        return None;
+    }
+    if [StepRow::Voice, StepRow::Manga]
         .into_iter()
         .enumerate()
-        .any(|(row, artifact)| {
+        .any(|(row, step)| {
             tags.occupies(row)
-                && (!steps.contains(&artifact)
-                    || artifact_line_width(draft, running, artifact) > start)
+                && (!steps.contains(&step) || step_line_width(draft, running, step) > start)
         })
     {
         return None;
     }
-    Some(CollapsedLabels { tags, start })
+    Some(SummaryLabels { tags, start })
 }
 
-fn collapsed_step_lines<'a>(
-    steps: Vec<(Artifact, ArtifactLine<'a>)>,
-    labels: CollapsedLabels,
+fn summary_step_lines<'a>(
+    steps: Vec<(StepRow, ArtifactLine<'a>)>,
+    labels: SummaryLabels,
 ) -> Vec<Line<'a>> {
     steps
         .into_iter()
-        .map(|(artifact, line)| {
-            let Some(row) = sentence_tag_row(artifact) else {
+        .map(|(step, line)| {
+            let Some(row) = sentence_tag_row(step) else {
                 return line.into_line();
             };
             if !labels.tags.occupies(row) {
                 return line.into_line();
-            }
-            if artifact == Artifact::Sound {
-                let mut spans = line.core;
-                spans.push(Span::styled(
-                    " ".repeat(labels.start.saturating_sub(spans_width(spans.as_slice()))),
-                    palette::base(),
-                ));
-                spans.extend(labels.tags.spans_from(row, 0, palette::base()));
-                spans.extend(line.tail);
-                return Line::from(spans);
             }
             let mut full = line.into_line();
             full.spans.push(Span::styled(
@@ -322,6 +349,142 @@ fn collapsed_step_lines<'a>(
             full
         })
         .collect()
+}
+
+fn row_state(draft: &CardDraft, row: StepRow, running: Option<Artifact>) -> RowState {
+    let artifacts = draft.artifacts();
+    match row {
+        StepRow::Scene => slot_row_state(
+            artifacts.meta(),
+            draft.meta().is_some(),
+            running == Some(Artifact::Meta),
+        ),
+        StepRow::Voice => {
+            slot_row_state(artifacts.sound(), false, running == Some(Artifact::Sound))
+        }
+        StepRow::Manga => manga_row_state(artifacts.scene(), artifacts.picture(), running),
+    }
+}
+
+fn slot_row_state(slot: &ArtifactSlot, stored: bool, active: bool) -> RowState {
+    if slot.ready() || stored {
+        return RowState::Ready;
+    }
+    if slot.discarded() {
+        return RowState::Discarded;
+    }
+    if slot.failed_terminally() {
+        return RowState::Failed;
+    }
+    if active {
+        return RowState::Active;
+    }
+    if slot.tally().retry().is_some() {
+        return RowState::Paused;
+    }
+    RowState::Hidden
+}
+
+fn manga_row_state(
+    scene: &ArtifactSlot,
+    picture: &ArtifactSlot,
+    running: Option<Artifact>,
+) -> RowState {
+    if picture.ready() {
+        return RowState::Ready;
+    }
+    if picture.discarded() || scene.discarded() {
+        return RowState::Discarded;
+    }
+    if scene.failed_terminally() || picture.failed_terminally() {
+        return RowState::Failed;
+    }
+    if matches!(running, Some(Artifact::Scene | Artifact::Picture)) {
+        return RowState::Active;
+    }
+    if scene.tally().retry().is_some() || picture.tally().retry().is_some() || scene.ready() {
+        return RowState::Paused;
+    }
+    RowState::Hidden
+}
+
+fn row_visible(draft: &CardDraft, row: StepRow, running: Option<Artifact>) -> bool {
+    let artifacts = draft.artifacts();
+    match row {
+        StepRow::Scene => {
+            draft.meta().is_some() || slot_visible(artifacts.meta(), Artifact::Meta, running)
+        }
+        StepRow::Voice => slot_visible(artifacts.sound(), Artifact::Sound, running),
+        StepRow::Manga => {
+            slot_visible(artifacts.scene(), Artifact::Scene, running)
+                || slot_visible(artifacts.picture(), Artifact::Picture, running)
+        }
+    }
+}
+
+fn row_name(row: StepRow) -> &'static str {
+    match row {
+        StepRow::Scene => "scene",
+        StepRow::Voice => "voice",
+        StepRow::Manga => "manga",
+    }
+}
+
+fn row_cost(artifacts: &CardArtifacts, row: StepRow) -> Option<GenerationCost> {
+    match row {
+        StepRow::Scene => {
+            let cost = [artifacts.meta().cost(), artifacts.scene().cost()]
+                .into_iter()
+                .flatten()
+                .sum::<GenerationCost>();
+            (cost.nanos() != 0).then_some(cost)
+        }
+        StepRow::Voice => artifacts.sound().cost(),
+        StepRow::Manga => artifacts.picture().cost(),
+    }
+}
+
+fn row_cached(artifacts: &CardArtifacts, row: StepRow) -> bool {
+    let slot = match row {
+        StepRow::Scene => artifacts.meta(),
+        StepRow::Voice => artifacts.sound(),
+        StepRow::Manga => artifacts.picture(),
+    };
+    slot.file().is_some_and(ArtifactFile::cached)
+}
+
+fn row_target(draft: &CardDraft, row: StepRow) -> Option<PathBuf> {
+    let artifacts = draft.artifacts();
+    match row {
+        StepRow::Scene => artifacts
+            .meta()
+            .file()
+            .and_then(|file| file.path().parent().map(Path::to_path_buf)),
+        StepRow::Voice => artifacts
+            .sound()
+            .file()
+            .map(|file| file.path().to_path_buf()),
+        StepRow::Manga => artifacts
+            .picture()
+            .file()
+            .map(|file| file.path().to_path_buf()),
+    }
+}
+
+/// Click target of one step row as body-relative label columns: `scene`
+/// opens the card's cache cell (the parent of the meta file), `voice` opens
+/// the audio file, and `manga` opens the rendered page. `None` while the
+/// row's target file is not recorded yet.
+#[must_use]
+pub(crate) fn step_link_region(draft: &CardDraft, row: StepRow) -> Option<(u16, u16, PathBuf)> {
+    let target = row_target(draft, row)?;
+    let start = super::common::CARD_DETAIL_COLUMN;
+    let end = start + super::common::display_width(row_name(row));
+    Some((
+        u16::try_from(start).unwrap_or(u16::MAX),
+        u16::try_from(end).unwrap_or(u16::MAX),
+        target,
+    ))
 }
 
 fn paint_sentence_editor_cursor(frame: &mut Frame, area: Rect, app: &App) {
@@ -362,11 +525,7 @@ fn card_head<'a>(
     pending: bool,
     width: usize,
 ) -> Vec<Line<'a>> {
-    let row_style = if focused {
-        palette::highlight()
-    } else {
-        palette::base()
-    };
+    let row_style = palette::Ink::Detail.on(focused);
     let glyph = if expanded {
         "▾"
     } else if card_finished(draft) {
@@ -376,55 +535,28 @@ fn card_head<'a>(
     } else {
         " "
     };
-    let glyph_style = if focused && !pending {
-        palette::highlight().add_modifier(Modifier::BOLD)
-    } else if focused {
-        palette::highlight_dim()
+    let aside_style = palette::Ink::Aside.on(focused);
+    let built = draft.artifacts().all_ready() && !pending;
+    let term_style = if built {
+        palette::Ink::Subject.on(focused)
     } else {
-        palette::dim2()
+        aside_style
     };
-    let num_style = if focused && !pending {
-        palette::highlight()
-    } else if focused {
-        palette::highlight_dim()
-    } else {
-        palette::dim2()
-    };
-    let term_style = if pending {
-        if focused {
-            palette::highlight_dim()
-        } else {
-            palette::dim()
-        }
-    } else {
-        match (progressed, focused) {
-            (true, true) => palette::highlight().add_modifier(Modifier::BOLD),
-            (true, false) => palette::base(),
-            (false, true) => palette::highlight_dim(),
-            (false, false) => palette::dim2(),
-        }
-    };
-    let sentence_base = if focused {
-        palette::highlight_dim()
-    } else {
-        palette::dim()
-    };
+    let rewritten = draft.meta().is_some_and(CardMeta::rewritten);
     let sentence_style = if pending {
-        sentence_base.add_modifier(Modifier::CROSSED_OUT)
+        row_style.add_modifier(Modifier::CROSSED_OUT)
+    } else if rewritten {
+        palette::Ink::Subject.on(focused)
     } else {
-        sentence_base
+        row_style
     };
     let term_width = super::common::display_width(draft.term());
     let head_used = HEAD_PREFIX_CHARS + term_width;
     let mut head_spans: Vec<Span<'a>> = Vec::new();
-    head_spans.push(Span::styled(format!(" {glyph} "), glyph_style));
-    head_spans.push(Span::styled(format!("{:0>2}  ", idx + 1), num_style));
+    head_spans.push(Span::styled(format!(" {glyph} "), aside_style));
+    head_spans.push(Span::styled(format!("{:0>2}  ", idx + 1), aside_style));
     head_spans.push(Span::styled(String::from(draft.term()), term_style));
-    let suffix_style = if focused {
-        palette::highlight_dim()
-    } else {
-        palette::dim2()
-    };
+    let suffix_style = aside_style;
     let Some(meta) = draft.meta() else {
         let suffix = visible_card_head_suffix(draft, head_used, width);
         let suffix_width = suffix
@@ -450,7 +582,7 @@ fn card_head<'a>(
     let mut chunks = chunks.into_iter();
     let first = chunks.next().unwrap_or_default();
     let first_width = super::common::display_width(first.as_str());
-    head_spans.push(Span::styled(HEAD_ARROW, sentence_base));
+    head_spans.push(Span::styled(HEAD_ARROW, aside_style));
     head_spans.push(Span::styled(first, sentence_style));
     let mut first_used = sentence_start + first_width;
     if let Some(label) = suffix.as_ref() {
@@ -488,26 +620,16 @@ fn summary_tags_layout(
     super::sentence_labels::head_tags_layout(labels, staged, None, width)
 }
 
-fn sentence_tag_row(artifact: Artifact) -> Option<usize> {
-    match artifact {
-        Artifact::Meta => None,
-        Artifact::Sound => Some(0),
-        Artifact::Scene => Some(1),
-        Artifact::Picture => Some(2),
+fn sentence_tag_row(step: StepRow) -> Option<usize> {
+    match step {
+        StepRow::Scene => None,
+        StepRow::Voice => Some(0),
+        StepRow::Manga => Some(1),
     }
 }
 
-fn artifact_line_width(draft: &CardDraft, running: Option<Artifact>, kind: Artifact) -> usize {
-    let artifacts = draft.artifacts();
-    artifact_line(
-        kind,
-        slot_for(artifacts, kind),
-        running,
-        0,
-        kind == Artifact::Meta && draft.meta().is_some(),
-    )
-    .into_line()
-    .width()
+fn step_line_width(draft: &CardDraft, running: Option<Artifact>, step: StepRow) -> usize {
+    step_line(draft, step, running, 0).width()
 }
 
 fn spans_width(spans: &[Span<'_>]) -> usize {
@@ -595,34 +717,35 @@ fn slot_visible(slot: &ArtifactSlot, kind: Artifact, running: Option<Artifact>) 
         || running == Some(kind)
 }
 
-fn artifact_line<'a>(
-    kind: Artifact,
-    slot: &'a ArtifactSlot,
+fn step_line<'a>(
+    draft: &CardDraft,
+    row: StepRow,
     running: Option<Artifact>,
     spinner_frame: usize,
-    stored: bool,
 ) -> ArtifactLine<'a> {
-    let active = running == Some(kind);
-    let label = step_label(kind, slot);
-    let state = step_state(slot, active, spinner_frame, stored);
-    let mut core: Vec<Span<'a>> = Vec::new();
-    core.push(Span::styled(
+    let state = step_state(draft, row, running, spinner_frame);
+    let label = row_name(row);
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    spans.push(Span::styled(
         " ".repeat(super::common::CARD_DETAIL_COLUMN.saturating_sub(2)),
         palette::base(),
     ));
-    core.push(Span::styled(
+    spans.push(Span::styled(
         format!("{} ", state.glyph),
         state.status_style,
     ));
-    core.push(Span::styled(label.clone(), state.label_style));
-    core.push(Span::styled(" ".repeat(label_gap(&label)), palette::dim()));
-    core.extend(state.line.core);
-    ArtifactLine {
-        core,
-        tail: state.line.tail,
-    }
+    spans.push(Span::styled(String::from(label), state.label_style));
+    spans.push(Span::styled(
+        " ".repeat(label_gap(label)),
+        palette::Ink::Detail.on(false),
+    ));
+    spans.extend(state.line.spans);
+    ArtifactLine { spans }
 }
 
+/// Drop one expanded-preview line a rank while its rewrite is staged. The
+/// preview reads at subject rank, so a rank quieter is `DIM`; the step rows
+/// already sit a rank below it and park at `DIM2` through `ArtifactLine`.
 fn muted_line(mut line: Line<'_>) -> Line<'_> {
     for span in &mut line.spans {
         span.style = span.style.fg(palette::DIM);
@@ -630,117 +753,92 @@ fn muted_line(mut line: Line<'_>) -> Line<'_> {
     line
 }
 
-fn step_label(kind: Artifact, slot: &ArtifactSlot) -> String {
-    match slot.file() {
-        Some(file) => artifact_file_label(kind, file),
-        None => String::from(step_name(kind)),
-    }
-}
-
+/// Paint one step row by what it needs from the reader.
+///
+/// A card that is building or built asks for nothing, so its whole block sits
+/// at detail and aside rank; the one artifact that terminally gave up is the
+/// only subject-rank span the block ever draws, which makes a broken card the
+/// only bright thing on an otherwise quiet screen.
 fn step_state<'a>(
-    slot: &'a ArtifactSlot,
-    active: bool,
+    draft: &CardDraft,
+    row: StepRow,
+    running: Option<Artifact>,
     spinner_frame: usize,
-    stored: bool,
 ) -> StepState<'a> {
-    let row_dim = palette::dim();
-    let row_dim2 = palette::dim2();
-    let row_fg = palette::base();
-    if slot.ready() || stored {
-        let mut core: Vec<Span<'a>> = Vec::new();
-        let mut tail: Vec<Span<'a>> = Vec::new();
-        if let Some(file) = slot.file() {
-            core.push(Span::styled(
-                pad_left(file.size(), STEP_DETAIL_COL_CHARS),
-                palette::dim(),
-            ));
-        }
-        push_slot_cost(&mut core, slot);
-        if let Some(file) = slot.file()
-            && file.cached()
-        {
-            if slot.cost().is_some() {
-                push_cached(&mut tail);
-            } else {
-                push_cached(&mut core);
-            }
-        }
-        return StepState {
+    let cost = row_cost(draft.artifacts(), row);
+    let detail = palette::Ink::Detail.on(false);
+    let aside = palette::Ink::Aside.on(false);
+    match row_state(draft, row, running) {
+        RowState::Ready => StepState {
             glyph: String::from("✓"),
-            status_style: row_fg,
-            label_style: palette::link(),
-            line: ArtifactLine { core, tail },
-        };
-    }
-    if slot.discarded() {
-        return StepState {
+            status_style: aside,
+            label_style: if row_target(draft, row).is_some() {
+                palette::Ink::Detail.link(false)
+            } else {
+                detail
+            },
+            line: ArtifactLine {
+                spans: ready_value(cost, row_cached(draft.artifacts(), row)),
+            },
+        },
+        RowState::Discarded => StepState {
             glyph: String::from("⊘"),
-            status_style: row_dim,
-            label_style: row_dim,
+            status_style: aside,
+            label_style: detail,
             line: ArtifactLine {
-                core: vec![Span::styled(String::from("discarded"), palette::dim())],
-                tail: Vec::new(),
+                spans: vec![Span::styled(String::from("discarded"), aside)],
             },
-        };
-    }
-    if slot.failed_terminally() {
-        let mut core = vec![Span::styled(String::from("gave up"), palette::dim())];
-        push_slot_cost(&mut core, slot);
-        return StepState {
+        },
+        RowState::Failed => StepState {
             glyph: String::from("✗"),
-            status_style: row_fg,
-            label_style: row_fg,
+            status_style: palette::Ink::Subject.on(false),
+            label_style: palette::Ink::Subject.on(false),
             line: ArtifactLine {
-                core,
-                tail: Vec::new(),
+                spans: row_cost_spans(cost),
             },
-        };
-    }
-    if active {
-        return StepState {
+        },
+        RowState::Active => StepState {
             glyph: String::from(SPINNER_FRAMES[spinner_frame]),
-            status_style: row_fg,
-            label_style: row_fg,
-            line: ArtifactLine {
-                core: vec![Span::styled(String::from("ai is working…"), palette::dim())],
-                tail: Vec::new(),
-            },
-        };
-    }
-    if slot.tally().retry().is_some() {
-        let mut core = Vec::new();
-        push_slot_cost(&mut core, slot);
-        return StepState {
+            status_style: detail,
+            label_style: detail,
+            line: ArtifactLine { spans: Vec::new() },
+        },
+        RowState::Paused => StepState {
             glyph: String::from("·"),
-            status_style: row_fg,
-            label_style: row_fg,
+            status_style: aside,
+            label_style: detail,
             line: ArtifactLine {
-                core,
-                tail: Vec::new(),
+                spans: row_cost_spans(cost),
             },
-        };
-    }
-    StepState {
-        glyph: String::from("○"),
-        status_style: row_dim2,
-        label_style: row_dim2,
-        line: ArtifactLine {
-            core: vec![Span::styled(String::from("queued"), palette::dim())],
-            tail: Vec::new(),
+        },
+        RowState::Hidden => StepState {
+            glyph: String::from("○"),
+            status_style: aside,
+            label_style: aside,
+            line: ArtifactLine {
+                spans: vec![Span::styled(String::from("queued"), aside)],
+            },
         },
     }
 }
 
-fn push_cached(note: &mut Vec<Span<'_>>) {
-    note.push(Span::styled("  ", palette::dim()));
-    note.push(Span::styled("cached", palette::dim2()));
+/// A finished row states either what it cost or that it cost nothing because
+/// the artifact came back from the cache — never both, and never nothing when
+/// the file is a cache hit.
+fn ready_value<'a>(cost: Option<GenerationCost>, cached: bool) -> Vec<Span<'a>> {
+    match (cost, cached) {
+        (Some(cost), _) => vec![Span::styled(cost.dollars(), palette::Ink::Aside.on(false))],
+        (None, true) => vec![Span::styled(
+            String::from(CACHED_NOTE),
+            palette::Ink::Aside.on(false),
+        )],
+        (None, false) => Vec::new(),
+    }
 }
 
-fn push_slot_cost<'a>(note: &mut Vec<Span<'a>>, slot: &ArtifactSlot) {
-    if let Some(cost) = slot.cost() {
-        note.push(Span::styled("  ", palette::dim()));
-        note.push(Span::styled(cost.dollars(), palette::dim2()));
-    }
+fn row_cost_spans<'a>(cost: Option<GenerationCost>) -> Vec<Span<'a>> {
+    cost.map(|cost| vec![Span::styled(cost.dollars(), palette::Ink::Aside.on(false))])
+        .unwrap_or_default()
 }
 
 fn step_name(kind: Artifact) -> &'static str {
@@ -752,32 +850,10 @@ fn step_name(kind: Artifact) -> &'static str {
     }
 }
 
-pub(crate) fn artifact_file_label(kind: Artifact, file: &ArtifactFile) -> String {
-    match file_extension(file.name()) {
-        Some(extension) => format!("{}.{}", step_name(kind), extension),
-        None => String::from(step_name(kind)),
-    }
-}
-
-fn file_extension(filename: &str) -> Option<&str> {
-    filename
-        .rsplit_once('.')
-        .map(|(_, extension)| extension)
-        .filter(|extension| !extension.is_empty())
-}
-
 fn label_gap(label: &str) -> usize {
     STEP_LABEL_COL_CHARS
         .saturating_sub(super::common::display_width(label))
-        .max(2)
-}
-
-fn pad_left(text: &str, width: usize) -> String {
-    let len = super::common::display_width(text);
-    if len >= width {
-        return String::from(text);
-    }
-    format!("{}{}", " ".repeat(width - len), text)
+        .max(3)
 }
 
 /// The expanded card body together with the row its rejected block starts on.
@@ -794,10 +870,15 @@ fn detail_pane(draft: &CardDraft, width: usize, pending: bool) -> DetailPane<'_>
     lines.push(Line::from(""));
     if let Some(meta) = draft.meta() {
         lines.extend(meta_preview(meta, indent, width, pending));
+    } else if let Some(previous) = draft
+        .rewrite()
+        .and_then(crate::session::CardRewrite::previous)
+    {
+        lines.extend(meta_preview(previous, indent, width, true));
     } else {
         lines.push(Line::from(vec![
             Span::styled(indent, palette::base()),
-            Span::styled("meta not generated yet", palette::dim2()),
+            Span::styled("meta not generated yet", palette::Ink::Aside.on(false)),
         ]));
     }
     let attempts = rejected_attempts(draft);
@@ -811,7 +892,7 @@ fn detail_pane(draft: &CardDraft, width: usize, pending: bool) -> DetailPane<'_>
         ));
         lines.push(Line::from(vec![
             Span::styled(indent, palette::base()),
-            Span::styled("rejected attempts", palette::dim2()),
+            Span::styled("rejected attempts", palette::Ink::Aside.on(false)),
         ]));
         let start = lines.len();
         lines.extend(
@@ -859,16 +940,21 @@ impl<'a> RejectedAttempt<'a> {
 
 /// Return every rejected attempt of one card, in artifact and attempt order.
 pub(crate) fn rejected_attempts(draft: &CardDraft) -> Vec<RejectedAttempt<'_>> {
-    STEPS
-        .iter()
-        .flat_map(|&(_, kind)| {
-            slot_for(draft.artifacts(), kind)
-                .faults()
-                .iter()
-                .enumerate()
-                .map(move |(position, fault)| RejectedAttempt::new(kind, position + 1, fault))
-        })
-        .collect()
+    [
+        Artifact::Meta,
+        Artifact::Sound,
+        Artifact::Scene,
+        Artifact::Picture,
+    ]
+    .into_iter()
+    .flat_map(|kind| {
+        slot_for(draft.artifacts(), kind)
+            .faults()
+            .iter()
+            .enumerate()
+            .map(move |(position, fault)| RejectedAttempt::new(kind, position + 1, fault))
+    })
+    .collect()
 }
 
 /// One rendered rejected attempt: its header row carrying the click targets,
@@ -900,10 +986,10 @@ pub(crate) fn rejected_row<'a>(attempt: RejectedAttempt<'_>, width: usize) -> Re
     let step = format!("{} {}", step_name(attempt.artifact), attempt.index);
     let mut spans = vec![
         Span::styled(REJECTED_INDENT, palette::base()),
-        Span::styled("✗ ", palette::dim()),
+        Span::styled("✗ ", palette::Ink::Detail.on(false)),
         Span::styled(
             pad_right(step.as_str(), REJECTED_STEP_COL_CHARS),
-            palette::dim(),
+            palette::Ink::Detail.on(false),
         ),
     ];
     let mut links: Vec<(u16, u16, PathBuf)> = Vec::new();
@@ -922,15 +1008,18 @@ pub(crate) fn rejected_row<'a>(attempt: RejectedAttempt<'_>, width: usize) -> Re
             );
             spans.push(Span::styled(
                 column_gap(column, files_start + REJECTED_FILE_COL_CHARS),
-                palette::dim(),
+                palette::Ink::Detail.on(false),
             ));
         }
         None => spans.push(Span::styled(
             " ".repeat(REJECTED_FILE_COL_CHARS),
-            palette::dim(),
+            palette::Ink::Detail.on(false),
         )),
     }
-    spans.push(Span::styled(verdict_word(attempt.fault), palette::dim()));
+    spans.push(Span::styled(
+        verdict_word(attempt.fault),
+        palette::Ink::Detail.on(false),
+    ));
     let mut lines = vec![Line::from(spans)];
     let bullet = format!("{REJECTED_INDENT}  · ");
     let room = width
@@ -938,8 +1027,8 @@ pub(crate) fn rejected_row<'a>(attempt: RejectedAttempt<'_>, width: usize) -> Re
         .max(12);
     for finding in findings(attempt.fault) {
         lines.push(Line::from(vec![
-            Span::styled(bullet.clone(), palette::dim()),
-            Span::styled(clip(finding.as_str(), room), palette::dim()),
+            Span::styled(bullet.clone(), palette::Ink::Detail.on(false)),
+            Span::styled(clip(finding.as_str(), room), palette::Ink::Detail.on(false)),
         ]));
     }
     RejectedRow { lines, links }
@@ -1002,10 +1091,7 @@ fn push_link<'a>(
     target: Option<&Path>,
 ) -> usize {
     let width = super::common::display_width(label.as_str());
-    spans.push(Span::styled(
-        label,
-        palette::dim2().add_modifier(Modifier::UNDERLINED),
-    ));
+    spans.push(Span::styled(label, palette::Ink::Aside.link(false)));
     if let Some(target) = target {
         links.push((
             u16::try_from(column).unwrap_or(u16::MAX),
@@ -1048,7 +1134,7 @@ fn meta_preview<'a>(
     let label = |text: &'static str| {
         Line::from(vec![
             Span::styled(indent, palette::base()),
-            Span::styled(text, palette::dim2()),
+            Span::styled(text, palette::Ink::Aside.on(false)),
         ])
     };
     lines.push(label("the phrase"));
@@ -1130,7 +1216,7 @@ fn fact_lines(
     if !inline {
         let mut lines = vec![Line::from(vec![
             Span::styled(indent, palette::base()),
-            Span::styled(label, palette::dim2()),
+            Span::styled(label, palette::Ink::Aside.on(false)),
         ])];
         lines.extend(values.into_iter().map(|value| {
             Line::from(vec![
@@ -1151,7 +1237,7 @@ fn fact_lines(
             };
             Line::from(vec![
                 Span::styled(indent, palette::base()),
-                Span::styled(label, palette::dim2()),
+                Span::styled(label, palette::Ink::Aside.on(false)),
                 Span::styled(value, palette::base()),
             ])
         })
@@ -1283,16 +1369,20 @@ fn split_token(text: &str, width: usize) -> Vec<String> {
     parts
 }
 
-/// Repaint one markdown-rendered line with the preview palette and prepend the
-/// shared indent span. The markdown layer emits neutral spans carrying only
-/// BOLD / ITALIC modifiers — we keep those and force the foreground colour to
-/// `palette::base()` so context blends with the surrounding preview rows.
+/// Repaint one wrapped preview line and prepend the shared indent span.
+///
+/// The markdown layer emits neutral spans carrying only BOLD / ITALIC
+/// modifiers and no ink of their own, so they inherit the preview base; a span
+/// that already named its rank — the taught word inside its own sentence —
+/// keeps it.
 fn restyle_with_indent(line: Line<'static>, indent: &'static str) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len() + 1);
     spans.push(Span::styled(indent, palette::base()));
     for span in line.spans {
-        let style = palette::base().add_modifier(span.style.add_modifier);
-        spans.push(Span::styled(span.content, style));
+        spans.push(Span::styled(
+            span.content,
+            palette::base().patch(span.style),
+        ));
     }
     Line::from(spans)
 }
@@ -1303,17 +1393,15 @@ fn highlight_lines<'a>(meta: &'a CardMeta, indent: &'static str, width: usize) -
     if highlight.is_empty() {
         return value_lines(sentence, indent, width, palette::base());
     }
+    let around = palette::Ink::Detail.on(false);
     let line = if let Some(pos) = sentence.find(highlight) {
         let head = &sentence[..pos];
         let middle = &sentence[pos..pos + highlight.len()];
         let tail = &sentence[pos + highlight.len()..];
         Line::from(vec![
-            Span::styled(head.to_string(), palette::base()),
-            Span::styled(
-                middle.to_string(),
-                palette::base().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(tail.to_string(), palette::base()),
+            Span::styled(head.to_string(), around),
+            Span::styled(middle.to_string(), palette::Ink::Subject.on(false)),
+            Span::styled(tail.to_string(), around),
         ])
     } else {
         Line::from(vec![Span::styled(sentence.to_string(), palette::base())])
@@ -1338,7 +1426,7 @@ pub(crate) fn card_range_at(app: &App, width: usize, row: usize) -> Option<(usiz
     for (index, draft) in app.cards().iter().enumerate() {
         let running =
             running_target.and_then(|(card, artifact)| (card == index).then_some(artifact));
-        let expanded = index == app.card_selected() && app.card_expanded();
+        let expanded = app.card_expanded_at(index);
         let editor = if index == app.card_selected() {
             app.sentence_editor()
         } else {
@@ -1367,7 +1455,7 @@ pub(crate) fn focused_card_range(app: &App, width: usize) -> Option<(u16, u16)> 
     for (idx, draft) in app.cards().iter().enumerate() {
         let running_for_card =
             running_target.and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
-        let expanded = idx == app.card_selected() && app.card_expanded();
+        let expanded = app.card_expanded_at(idx);
         let editor = if idx == app.card_selected() {
             app.sentence_editor()
         } else {
@@ -1392,6 +1480,16 @@ pub(crate) fn focused_card_range(app: &App, width: usize) -> Option<(u16, u16)> 
                     })
                     .unwrap_or(base)
                     .max(1)
+            } else if app.following_card() == Some(idx) {
+                // Following aims at the finished card, not at the stub drawn
+                // so far: a card the engine is inside still owes up to three
+                // artifact rows, and a viewport that only kept its current
+                // rows visible would park it on the bottom line and let every
+                // row it grows fall off the screen before the next pass could
+                // scroll. Reserving the whole block plus its trailing blank
+                // means the card lands once and stays put while it fills in.
+                rows.max(head_rows(draft, width).saturating_add(STEP_ROWS.len()))
+                    .saturating_add(1)
             } else {
                 rows
             };
@@ -1420,7 +1518,7 @@ pub(crate) fn content_height(app: &App, width: usize) -> u16 {
     for (idx, draft) in app.cards().iter().enumerate() {
         let running_for_card =
             running_target.and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
-        let expanded = idx == app.card_selected() && app.card_expanded();
+        let expanded = app.card_expanded_at(idx);
         let editor = if idx == app.card_selected() {
             app.sentence_editor()
         } else {
@@ -1439,26 +1537,25 @@ pub(crate) fn head_rows_for(draft: &CardDraft, width: usize) -> usize {
     head_rows(draft, width)
 }
 
-/// Return whether one cell relative to the meta row belongs to a summary tag.
+/// Return whether one cell relative to the first step row belongs to a
+/// summary tag.
 #[must_use]
 pub(crate) fn sentence_tag_hit_at(
     draft: &CardDraft,
     running: Option<Artifact>,
+    expanded: bool,
     width: usize,
     row: usize,
     column: usize,
 ) -> bool {
-    let Some(meta) = meta_step_index(draft, running) else {
-        return false;
-    };
-    let Some(labels) = collapsed_labels(draft, running, width) else {
+    let Some(labels) = summary_labels(draft, running, expanded, width) else {
         return false;
     };
     let steps = step_rows_for(draft, running);
-    let Some(artifact) = steps.get(meta.saturating_add(row)).copied() else {
+    let Some(step) = steps.get(row).copied() else {
         return false;
     };
-    let Some(row) = sentence_tag_row(artifact) else {
+    let Some(row) = sentence_tag_row(step) else {
         return false;
     };
     let Some(column) = column.checked_sub(labels.start) else {
@@ -1472,31 +1569,30 @@ pub(crate) fn sentence_tag_hit_at(
 pub(crate) fn sentence_tags_visible(
     draft: &CardDraft,
     running: Option<Artifact>,
+    expanded: bool,
     width: usize,
 ) -> bool {
-    collapsed_labels(draft, running, width).is_some()
+    summary_labels(draft, running, expanded, width).is_some()
 }
 
-/// Return the expanded sentence-editor control at one cell relative to the
-/// card's meta row.
+/// Return the tune-row control at one cell relative to the card's first step
+/// row. The rows are clickable whether or not they are live: a click is how the
+/// mouse says both "tune this card" and "pin this value" in one gesture.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn sentence_editor_control_at(
     draft: &CardDraft,
     running: Option<Artifact>,
-    editor: &SentenceLabelsEditor,
+    editor: Option<&SentenceLabelsEditor>,
+    expanded: bool,
     width: usize,
     row: usize,
     column: usize,
 ) -> Option<super::sentence_labels::EditorControl> {
-    let meta = meta_step_index(draft, running)?;
+    let tune = tune_rows(draft, expanded, editor)?;
     let steps = step_rows_for(draft, running);
-    let row = row.checked_sub(
-        steps
-            .len()
-            .saturating_sub(meta)
-            .saturating_add(SECTION_GAP_ROWS),
-    )?;
+    let row = row.checked_sub(steps.len().saturating_add(SECTION_GAP_ROWS))?;
     super::sentence_labels::editor_control_at(
-        editor,
+        &tune.editor,
         draft.meta().and_then(CardMeta::sentence_labels),
         width,
         column,
@@ -1506,24 +1602,20 @@ pub(crate) fn sentence_editor_control_at(
     )
 }
 
-/// Return the artifact step rows visible for one card.
-pub(crate) fn step_rows_for(draft: &CardDraft, running: Option<Artifact>) -> Vec<Artifact> {
-    let artifacts = draft.artifacts();
-    STEPS
+/// Return the step rows visible for one card.
+pub(crate) fn step_rows_for(draft: &CardDraft, running: Option<Artifact>) -> Vec<StepRow> {
+    STEP_ROWS
         .iter()
-        .filter_map(|&(_, kind)| {
-            if kind == Artifact::Meta && draft.meta().is_some()
-                || slot_visible(slot_for(artifacts, kind), kind, running)
-            {
-                Some(kind)
-            } else {
-                None
-            }
-        })
+        .copied()
+        .filter(|row| row_visible(draft, *row, running))
         .collect()
 }
 
-fn card_layout(
+/// Row count and trailing-gap count of one rendered card block. The single
+/// source of card height for the renderer, the scroll clamp, and the click
+/// hit-tester in `tui::links`, so the three cannot drift apart.
+#[must_use]
+pub(crate) fn card_layout(
     draft: &CardDraft,
     running: Option<Artifact>,
     expanded: bool,
@@ -1531,6 +1623,7 @@ fn card_layout(
     width: usize,
 ) -> (usize, usize) {
     let steps = step_rows_for(draft, running);
+    let progressed = !steps.is_empty();
     let labels = sentence_label_extra_rows(draft, running, editor, expanded, width);
     let mut rows = head_rows(draft, width)
         .saturating_add(steps.len())
@@ -1538,7 +1631,7 @@ fn card_layout(
     if expanded {
         rows = rows.saturating_add(detail_pane_height(draft, width));
     }
-    let trailing = usize::from(!steps.is_empty() || labels > 0 || expanded);
+    let trailing = usize::from(progressed || expanded);
     (rows, trailing)
 }
 
@@ -1550,15 +1643,13 @@ pub(crate) fn sentence_label_extra_rows(
     expanded: bool,
     width: usize,
 ) -> usize {
-    if !expanded {
-        return 0;
-    }
-    editor
-        .map(|editor| {
+    tune_rows(draft, expanded, editor)
+        .map(|tune| {
             SECTION_GAP_ROWS.saturating_add(
                 super::sentence_labels::editor_lines(
-                    editor,
+                    &tune.editor,
                     draft.meta().and_then(CardMeta::sentence_labels),
+                    tune.focused,
                     width,
                     super::common::CARD_DETAIL_COLUMN,
                     super::common::CARD_DETAIL_COLUMN,
@@ -1567,12 +1658,6 @@ pub(crate) fn sentence_label_extra_rows(
             )
         })
         .unwrap_or(0)
-}
-
-fn meta_step_index(draft: &CardDraft, running: Option<Artifact>) -> Option<usize> {
-    step_rows_for(draft, running)
-        .iter()
-        .position(|artifact| *artifact == Artifact::Meta)
 }
 
 /// Locate the sentence editor cursor inside the complete scrolling card
@@ -1603,7 +1688,8 @@ pub(crate) fn sentence_editor_cursor_for(app: &App, width: usize) -> Option<(usi
                     .saturating_add(row),
             ));
         }
-        let (rows, trailing) = card_layout(draft, running, false, None, width);
+        let (rows, trailing) =
+            card_layout(draft, running, app.card_expanded_at(index), None, width);
         offset = offset.saturating_add(rows).saturating_add(trailing);
     }
     None
@@ -1655,53 +1741,81 @@ pub(crate) fn total_cost(app: &App) -> Option<GenerationCost> {
     Some(cost)
 }
 
-fn footer(app: &App, width: u16) -> Paragraph<'static> {
+fn status(app: &App) -> Vec<Span<'static>> {
     let done = app.done_artifacts();
     let published = !done.deck.is_empty();
-    let ready = if published {
-        done.cards
-    } else {
-        app.cards_ready()
-    };
+    let census = app.card_census();
+    let ready = if published { done.cards } else { census.ready };
     let total = if published {
         done.cards.saturating_add(done.failed)
     } else {
         app.cards().len()
     };
     let mut left: Vec<Span<'static>> = Vec::new();
-    left.push(Span::styled("step 3/3", palette::dim2()));
+    left.push(Span::styled("step 3/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
     left.push(Span::styled(
         ready.to_string(),
-        palette::base().add_modifier(Modifier::BOLD),
+        palette::Ink::Subject.on(false),
     ));
-    left.push(Span::styled(format!("/{total} ready"), palette::dim()));
-    if published && done.failed > 0 {
+    left.push(Span::styled(
+        format!("/{total} ready"),
+        palette::Ink::Detail.on(false),
+    ));
+    if census.adjusted > 0 {
         left.push(super::common::status_sep());
         left.push(Span::styled(
-            format!("{} omitted", done.failed),
-            palette::dim(),
+            census.adjusted.to_string(),
+            palette::Ink::Subject.on(false),
         ));
-    }
-    if app.cards_pending() > 0 {
-        left.push(super::common::status_sep());
-        left.push(Span::styled(
-            app.cards_pending().to_string(),
-            palette::base().add_modifier(Modifier::BOLD),
-        ));
-        left.push(Span::styled(" pending", palette::dim()));
+        left.push(Span::styled(" pending", palette::Ink::Detail.on(false)));
     }
     if let Some(cost) = total_cost(app) {
         left.push(super::common::status_sep());
         left.push(Span::styled(
             cost.dollars_cents(),
-            palette::base().add_modifier(Modifier::BOLD),
+            palette::Ink::Subject.on(false),
         ));
     }
     left.push(super::common::status_sep());
-    left.push(Span::styled(elapsed(app), palette::dim2()));
-    let hints = if app.generation_stopping() {
-        vec![super::common::quit_hint(app.quit_pending())]
+    left.push(Span::styled(elapsed(app), palette::Ink::Aside.on(false)));
+    left
+}
+
+/// Return whether `Ctrl+G` would actually re-roll anything right now.
+///
+/// The key is wired unconditionally, but what it reaches depends on the batch:
+/// with a worker already running it only queues a silent restart, and on a
+/// finished batch with nothing staged it falls through to a plain republish.
+/// Neither is a regeneration, so neither earns the bright slot — the hint
+/// appears exactly when there is a rewrite, a failure, or an unfinished
+/// artifact waiting for it.
+fn can_regenerate(app: &App) -> bool {
+    app.cards_running_target().is_none() && app.card_census().unfinished()
+}
+
+/// Return the hints for a run that is draining its last in-flight request.
+///
+/// There is nothing to start here, so nothing takes the bright slot. But
+/// `transit` has no gate on the stop state at all: the walk, the disclosure
+/// and the sweep all still answer, and a bar that named only the exit would
+/// read as a frozen application. It says what is true instead — you can look
+/// around, you cannot act.
+fn stopping_hints(app: &App) -> Vec<super::common::FooterHint> {
+    let mut hints = vec![DisclosureControls::new(app.card_expanded()).disclosure_hint()];
+    if app.any_card_expanded() {
+        hints.push(super::common::sweep_hint(true));
+    } else if !app.cards().is_empty() {
+        hints.push(super::common::sweep_hint(false));
+    }
+    hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+    hints.push(super::common::quit_hint(app.quit_pending()));
+    hints
+}
+
+fn hints(app: &App) -> Vec<super::common::FooterHint> {
+    if app.generation_stopping() {
+        stopping_hints(app)
     } else if app.generation_stop_pending() {
         vec![
             super::common::escape_again_hint(),
@@ -1713,29 +1827,51 @@ fn footer(app: &App, width: u16) -> Paragraph<'static> {
             super::common::quit_hint(app.quit_pending()),
         ]
     } else if app.sentence_editor().is_some() {
-        vec![
-            super::common::FooterHint::primary("Ctrl+G", "regenerate"),
-            super::common::FooterHint::secondary("← →", "pick"),
-            super::common::FooterHint::ghost("↑ ↓", "row"),
-            super::common::FooterHint::ghost("Enter/Esc", "close"),
-        ]
+        let mut hints = Vec::new();
+        if can_regenerate(app) {
+            hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
+        }
+        hints.push(super::common::FooterHint::secondary("←→", "pick"));
+        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        // Esc alone. Enter also leaves the editor but takes the card's whole
+        // expansion with it, and one hint cannot honestly name both outcomes;
+        // Esc is the key the rest of the app already teaches for peeling one
+        // layer, so it is the one the bar names here.
+        hints.push(super::common::FooterHint::ghost("Esc", "close"));
+        hints.push(super::common::quit_hint(app.quit_pending()));
+        hints
     } else {
         let controls = DisclosureControls::new(app.card_expanded());
         let mut hints = Vec::new();
-        hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
-        if app.card_tunable() {
-            hints.push(super::common::FooterHint::secondary("Enter/→", "tune"));
-        } else {
-            hints.push(controls.secondary_toggle());
+        if can_regenerate(app) {
+            hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
         }
-        hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        if !app.cards().is_empty() {
+            hints.push(controls.disclosure_hint());
+        }
+        if app.card_expanded() && app.card_tunable() {
+            hints.push(super::common::FooterHint::door("↓", "tune"));
+        }
+        if app.any_card_expanded() {
+            hints.push(super::common::sweep_hint(true));
+        } else if !app.cards().is_empty() {
+            hints.push(super::common::sweep_hint(false));
+        }
+        if !app.cards().is_empty() {
+            hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
+        }
         if app.can_start_new_batch() {
             hints.push(super::common::new_batch_hint(app.new_batch_pending()));
+        } else if !app.cards().is_empty() && !app.card_expanded() {
+            // The same Escape that starts a fresh batch on a settled screen
+            // stops the run on a live one, and until now it went unnamed until
+            // the first press had already armed it — the only destructive key
+            // in the app the user met by surprise.
+            hints.push(super::common::stop_generation_hint());
         }
         hints.push(super::common::quit_hint(app.quit_pending()));
         hints
-    };
-    super::common::footer_bar(left, hints, width)
+    }
 }
 
 fn elapsed(app: &App) -> String {

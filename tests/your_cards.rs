@@ -46,7 +46,7 @@ fn selected_label_highlighted(app: &App, needle: &str) -> bool {
         if let Some(start) = rendered.find(needle) {
             let column = rendered[..start].chars().count() as u16;
             return (0..needle.chars().count()).all(|offset| {
-                buffer[(column + offset as u16, row)].bg == Color::Rgb(0x1c, 0x1c, 0x1f)
+                buffer[(column + offset as u16, row)].bg == Color::Rgb(0x26, 0x26, 0x2a)
             });
         }
     }
@@ -112,6 +112,29 @@ fn position_of(buffer: &Buffer, needle: &str) -> (u16, u16) {
     panic!("the rendered screen never showed '{needle}':\n{rendered}");
 }
 
+fn term_ink(buffer: &Buffer, term: &str) -> Color {
+    let (column, row) = position_of(buffer, term);
+    buffer[(column, row)].fg
+}
+
+fn term_is_bold(buffer: &Buffer, term: &str) -> bool {
+    let (column, row) = position_of(buffer, term);
+    buffer[(column, row)].modifier.contains(Modifier::BOLD)
+}
+
+fn highlighted_modifiers(buffer: &Buffer) -> Vec<Modifier> {
+    let mut covered = Vec::new();
+    for row in 0..buffer.area.height {
+        for column in 0..buffer.area.width {
+            let cell = &buffer[(column, row)];
+            if cell.bg == Color::Rgb(0x26, 0x26, 0x2a) {
+                covered.push(cell.modifier);
+            }
+        }
+    }
+    covered
+}
+
 fn row_text(buffer: &Buffer, row: u16) -> String {
     (0..buffer.area.width)
         .map(|column| buffer[(column, row)].symbol())
@@ -147,6 +170,10 @@ fn priced_file(name: &str, nanos: u64) -> ArtifactFile {
 
 fn cached_file(name: &str) -> ArtifactFile {
     ArtifactFile::new(name, PathBuf::from(format!("/tmp/{name}")), "1 B", true)
+}
+
+fn cached_priced_file(name: &str, nanos: u64) -> ArtifactFile {
+    cached_file(name).with_cost(GenerationCost::from_nanos(nanos))
 }
 
 fn priced_artifacts() -> CardArtifacts {
@@ -318,16 +345,16 @@ fn seeded(drafts: Vec<CardDraft>) -> App {
         .cards_started(drafts)
 }
 
+fn tuning(app: App) -> App {
+    let expanded = transit(app, AppEvent::KeyEnter).0;
+    transit(expanded, AppEvent::NavNext).0
+}
+
 fn row_containing<'a>(rendered: &'a str, needle: &str) -> &'a str {
     rendered
         .lines()
         .find(|line| line.contains(needle))
         .expect("rendered card row must exist")
-}
-
-fn column_of(row: &str, needle: &str) -> usize {
-    let offset = row.find(needle).expect("rendered card cell must exist");
-    row[..offset].chars().count()
 }
 
 fn columns_of(buffer: &Buffer, needle: &str) -> Vec<u16> {
@@ -343,7 +370,7 @@ fn columns_of(buffer: &Buffer, needle: &str) -> Vec<u16> {
 }
 
 #[test]
-fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_marks() {
+fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("at the end", ready_artifacts()),
@@ -355,14 +382,14 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
         .find("[Ctrl+G] regenerate")
         .expect("card footer must show regeneration");
     let tune = rendered
-        .find("[Enter/→] tune")
-        .expect("card footer must show tuning");
+        .find("[Enter/→] open")
+        .expect("card footer must show its disclosure key");
     let target = rendered
         .find("whilst → Example with whilst.")
         .expect("first card head must be visible");
     let picture = rendered
-        .find("✓ picture")
-        .expect("first card picture step must be visible");
+        .find("✓ manga")
+        .expect("first card manga row must be visible");
     assert!(
         rendered.contains("building your cards")
             && rendered.contains("2/4 ready")
@@ -376,25 +403,52 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_artifact_check_mar
             && rendered.contains("Example with wreck.")
             && rendered.contains("whilst → Example with whilst.")
             && rendered.contains("✓ scene")
-            && rendered.contains("✓ picture")
+            && rendered.contains("✓ voice")
+            && !rendered.contains("picture")
             && rendered.contains("RU → EN")
-            && rendered.contains("[↑↓] nav")
-            && rendered.contains("[Enter/→] tune")
-            && !rendered.contains("[Enter/→] toggle")
-            && !rendered.contains("[Space] tune")
+            && rendered.contains("[Enter/→] open")
+            && !rendered.contains("] tune")
             && rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
             && !rendered.contains("[D] drop")
-            && !rendered.contains("ai is working…")
             && !rendered.contains("queued")
             && ctrl < tune
             && target < picture,
-        "each generated card must keep its target in the head before artifact steps: {rendered}"
+        "each generated card must keep its target in the head before its step rows: {rendered}"
     );
 }
 
 #[test]
-fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
+fn the_vim_walk_reaches_the_cards_screen_too() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+    ]);
+    let down = transit(app.clone(), AppEvent::KeyChar('j')).0;
+    let back = transit(down.clone(), AppEvent::KeyChar('k')).0;
+    assert_eq!(
+        (down.card_selected(), back.card_selected()),
+        (1, 0),
+        "j and k walked the review but died on the cards, so one list screen answered them and the other did not"
+    );
+}
+
+#[test]
+fn a_running_batch_stops_offering_the_restart_it_would_only_queue() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", CardArtifacts::default()),
+    ])
+    .cards_running(Some((1, Artifact::Meta)));
+    let rendered = flat(&app);
+    assert!(
+        !rendered.contains("[Ctrl+G] regenerate"),
+        "with a worker mid-flight Ctrl+G only queues a silent restart, so it must not hold the bright slot: {rendered}"
+    );
+}
+
+#[test]
+fn a_published_batch_with_nothing_owed_stops_offering_regeneration() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("at the end", ready_artifacts()),
@@ -409,32 +463,53 @@ fn your_cards_done_footer_carries_one_tune_and_regenerate_hint() {
         rendered.contains("your cards")
             && rendered.contains("all done")
             && rendered.contains("[↑↓] nav")
-            && rendered.contains("[Enter/→] tune")
-            && !rendered.contains("[Enter/→] toggle")
-            && !rendered.contains("[Space] tune")
-            && rendered.contains("[Ctrl+G] regenerate")
+            && rendered.contains("[Enter/→] open")
+            && !rendered.contains("] tune")
+            && !rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("[R] change")
             && rendered.contains("[Esc] new cards")
             && new_cards < quit
             && !rendered.contains("[D] drop")
-            && !rendered.contains("ai is working…"),
+            && !rendered.contains('◐'),
         "published footer must offer new cards before quit and omit stale toggle, Space, or drop hooks: {rendered}"
     );
 }
 
 #[test]
-fn your_cards_shows_card_asset_and_total_costs_when_finished() {
+fn step_rows_carry_their_own_incremental_costs() {
     let app = seeded(vec![draft("whilst", priced_artifacts())]);
     let rendered = flat(&app);
+    let scene = row_containing(&rendered, "scene");
+    let voice = row_containing(&rendered, "voice");
+    let manga = row_containing(&rendered, "manga");
     assert!(
         rendered.contains("whilst → Example with whilst.  $.0808")
-            && rendered.contains("meta.json           1 B  $.0015")
-            && rendered.contains("audio.wav           1 B  $.0100")
-            && rendered.contains("scene.json          1 B  $.0020")
-            && rendered.contains("picture.jpg         1 B  $.0673")
+            && scene.contains("$.0035")
+            && voice.contains("$.0100")
+            && manga.contains("$.0673")
             && rendered.contains("$0.08")
+            && !rendered.contains("meta.json")
+            && !rendered.contains("1 B")
             && !rendered.contains("total cost"),
-        "finished cards must show detailed costs and a simplified total in dollars: {rendered}"
+        "the scene row must fold the metadata and composition spend while voice and manga keep their own: {rendered}"
+    );
+}
+
+#[test]
+fn an_expanded_card_keeps_the_same_three_step_rows() {
+    let app = transit(
+        seeded(vec![draft("whilst", priced_artifacts())]),
+        AppEvent::KeyEnter,
+    )
+    .0;
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("✓ scene")
+            && rendered.contains("✓ voice")
+            && rendered.contains("✓ manga")
+            && !rendered.contains("meta.json")
+            && !rendered.contains("1 B"),
+        "the expanded card must keep the same three step rows without file names or sizes: {rendered}"
     );
 }
 
@@ -472,7 +547,7 @@ fn armed_generation_stop_makes_escape_the_only_primary_action() {
     assert!(
         rendered.contains("[Esc] again")
             && !rendered.contains("[Ctrl+G] regenerate")
-            && !rendered.contains("[Enter/→] tune"),
+            && !rendered.contains("] tune"),
         "armed generation stop competed with generation actions: {rendered}"
     );
 }
@@ -484,7 +559,7 @@ fn draining_generation_says_stopping_without_offering_more_work() {
     assert!(
         rendered.contains("stopping…")
             && !rendered.contains("[Ctrl+G] regenerate")
-            && !rendered.contains("[Enter/→] tune")
+            && !rendered.contains("] tune")
             && !rendered.contains("[Esc] again"),
         "draining generation looked active or offered another action: {rendered}"
     );
@@ -500,13 +575,61 @@ fn partial_publish_is_a_settled_view_with_outputs_and_durable_tally() {
     let rendered = flat(&app);
     assert!(
         rendered.contains("your cards")
-            && rendered.contains("some cards didn't make it")
+            && rendered.contains("1 unfinished")
+            && !rendered.contains("some cards didn't make it")
             && rendered.contains("1/2 ready")
-            && rendered.contains("1 omitted")
+            && !rendered.contains("1 omitted")
             && rendered.contains("APKG")
             && rendered.contains("PDF")
             && !rendered.contains("building your cards"),
         "partial publish did not render as a settled output-bearing batch: {rendered}"
+    );
+}
+
+#[test]
+fn a_batch_that_lost_nothing_carries_no_loss_tag() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("wreck", ready_artifacts()),
+    ])
+    .done_published_counted("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp", 2, 0);
+    let rendered = flat(&app);
+    assert!(
+        !rendered.contains("unfinished") && rendered.contains("all done"),
+        "a clean batch must not be told it lost anything: {rendered}"
+    );
+}
+
+#[test]
+fn a_batch_that_published_nothing_still_states_what_it_lost() {
+    let app = seeded(vec![draft("wreck", failed_artifacts())]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("1 unfinished"),
+        "a run where every card failed publishes no deck, and that is the run whose outcome must not go unsaid: {rendered}"
+    );
+}
+
+#[test]
+fn the_outcome_block_spends_no_blank_row_on_either_side_of_its_rule() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("wreck", partial_priced_artifacts()),
+    ])
+    .done_published_counted("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp", 1, 1);
+    let buffer = rendered_buffer_at(&app, 100, 20);
+    let (_, pdf) = position_of(&buffer, "PDF");
+    let ruled = |row: u16| {
+        buffer[(0, row)].modifier.contains(Modifier::CROSSED_OUT)
+            && row_text(&buffer, row).trim().is_empty()
+    };
+    assert!(
+        ruled(pdf + 1) && !row_text(&buffer, pdf + 2).trim().is_empty(),
+        "the outcome block must close on the row under its last line and let the cards start right under that:\n{}",
+        (pdf..pdf + 3)
+            .map(|row| row_text(&buffer, row))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -533,12 +656,29 @@ fn partial_publish_reserves_and_links_the_same_banner_rows() {
 }
 
 #[test]
-fn your_cards_marks_cached_artifacts_next_to_the_file_metadata() {
+fn a_free_row_names_the_cache_hit_instead_of_leaving_its_value_blank() {
     let app = seeded(vec![draft("whilst", cached_artifacts())]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("meta.json           1 B  cached"),
-        "cached artifact rows must say cached in the same dim metadata slot as prices: {rendered}"
+        rendered.contains("✓ scene   cached") && !rendered.contains('$'),
+        "a row that cost nothing because its artifact came back from the cache must say so: {rendered}"
+    );
+}
+
+#[test]
+fn a_priced_row_keeps_only_the_money_even_when_its_file_was_a_cache_hit() {
+    let artifacts = CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta)
+            .succeeded_with(cached_priced_file("meta.json", 1_500_000)),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded_with(cached_file("scene.json")),
+        ArtifactSlot::fresh(Artifact::Picture).succeeded_with(cached_file("picture.jpg")),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded_with(cached_file("audio.wav")),
+    );
+    let rendered = flat(&seeded(vec![draft("whilst", artifacts)]));
+    let scene = row_containing(&rendered, "scene");
+    assert!(
+        scene.contains("$.0015") && !scene.contains("cached"),
+        "a row that recorded a price must state the money alone, never the cache note beside it: {rendered}"
     );
 }
 
@@ -575,7 +715,7 @@ fn untouched_card_shows_only_a_dim_term_with_no_step_rows() {
         rendered.contains("ancient")
             && !rendered.contains("meta")
             && !rendered.contains("audio")
-            && !rendered.contains("scene")
+            && !rendered.contains("manga")
             && !rendered.contains("picture")
             && !rendered.contains("queued"),
         "untouched card must collapse to its term row alone, no artifact lines: {rendered}"
@@ -586,16 +726,19 @@ fn untouched_card_shows_only_a_dim_term_with_no_step_rows() {
 fn retry_state_moves_its_spent_attempt_count_to_the_card_head() {
     let app = seeded(vec![draft("in the end", retrying_artifacts())]);
     let rendered = flat(&app);
+    let buffer = rendered_buffer(&app);
+    let (_, manga_row) = position_of(&buffer, "manga");
     let head = row_containing(&rendered, "in the end →");
-    let picture = row_containing(&rendered, "picture");
-    assert!(
-        head.contains("$.1234  ↻1")
-            && picture.contains("$.1234")
-            && !picture.contains("retry")
-            && !picture.contains("paused")
-            && !picture.contains('✗')
-            && rendered.contains("$0.12"),
-        "retrying state duplicated its attempt count outside the card head: {rendered}"
+    assert_eq!(
+        (
+            head.contains("$.1234  ↻1"),
+            buffer[(8, manga_row)].symbol(),
+            row_text(&buffer, manga_row).contains("$.1234"),
+            rendered.contains("retry"),
+            rendered.contains("$0.12"),
+        ),
+        (true, "·", true, false, true),
+        "retrying state must keep the spent count on the head and a dot on its manga row: {rendered}"
     );
 }
 
@@ -648,7 +791,7 @@ fn meta_less_retry_badge_uses_the_last_available_head_cells() {
 }
 
 #[test]
-fn narrow_retry_suffix_wraps_with_the_head_without_shifting_artifact_links() {
+fn narrow_retry_suffix_wraps_with_the_head_without_shifting_the_step_rows() {
     let app = seeded(vec![labeled_draft(
         "interdependently",
         recovered_priced_artifacts(2),
@@ -656,16 +799,16 @@ fn narrow_retry_suffix_wraps_with_the_head_without_shifting_artifact_links() {
     let terminal = Rect::new(0, 0, 60, 30);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
     let (_, head_row) = position_of(&buffer, "interdependently →");
-    let (meta_column, meta_row) = position_of(&buffer, "meta.json");
+    let (scene_column, scene_row) = position_of(&buffer, "scene");
     let head = row_text(&buffer, head_row);
     assert_eq!(
         (
             head.contains("$.0808  ↻2"),
-            meta_row.saturating_sub(head_row),
-            link_at(&app, terminal, meta_column, meta_row),
+            scene_row.saturating_sub(head_row),
+            link_at(&app, terminal, scene_column, scene_row),
         ),
-        (true, 2, Some(String::from("/tmp/meta.json"))),
-        "the combined cost and retry suffix drifted from wrapped-head layout or its artifact hit map"
+        (true, 2, Some(String::from("/tmp"))),
+        "the combined cost and retry suffix drifted from wrapped-head layout or the scene row hit map"
     );
 }
 
@@ -710,9 +853,8 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
     let failed = draft("move on", rejected_picture_artifacts_with(4)).with_costs(costs);
     let app = seeded(vec![recovered, retrying, failed]).cards_running(Some((1, Artifact::Picture)));
     let rendered = flat(&app);
-    let ready = row_containing(&rendered, "picture.jpg");
-    let active = row_containing(&rendered, "ai is working…");
-    let failed = row_containing(&rendered, "gave up");
+    let active = row_containing(&rendered, "◐ manga");
+    let failed = row_containing(&rendered, "✗ manga");
     let recovered_head = row_containing(&rendered, "whilst →");
     let active_head = row_containing(&rendered, "commodity →");
     let failed_head = row_containing(&rendered, "move on →");
@@ -720,17 +862,15 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
         recovered_head.contains("$.0673  ↻1")
             && active_head.contains("$.2148  ↻3")
             && failed_head.contains("$.2148  ↻3")
-            && ready.contains("$.0673")
-            && active.contains("picture")
+            && active.contains("manga")
             && !active.contains("retry")
             && !active.contains("$.1738")
+            && !failed.contains("unfinished")
             && failed.contains("$.1738")
-            && !failed.contains("after")
             && !rendered.contains("paused")
             && !rendered.contains("1 ✗")
-            && !rendered.contains("3 ✗")
-            && !rendered.contains("4 ✗"),
-        "artifact rows retained retry history instead of leaving it on their card heads: {rendered}"
+            && !rendered.contains("3 ✗"),
+        "manga rows retained retry history instead of leaving it on their card heads: {rendered}"
     );
 }
 
@@ -738,14 +878,13 @@ fn retry_rows_keep_only_current_work_while_card_heads_keep_the_history() {
 fn failure_banner_appears_when_any_card_exhausts_its_retries() {
     let app = seeded(vec![draft("wreck", failed_artifacts())]);
     let rendered = flat(&app);
+    let manga = row_containing(&rendered, "✗ manga");
     assert!(
-        rendered.contains("gave up")
-            && !rendered.contains("gave up after")
-            && rendered.contains("✗")
-            && rendered.contains("picture")
-            && rendered.contains("$.3210")
+        manga.contains("$.3210")
+            && !manga.contains("unfinished")
+            && row_containing(&rendered, "wreck →").contains("$.3210  ↻3")
             && rendered.contains("$0.32"),
-        "your cards must mark the card as `gave up` and show the ✗ on the failed step: {rendered}"
+        "your cards must mark the failed manga row with a bare ✗ and its own cost: {rendered}"
     );
 }
 
@@ -755,50 +894,72 @@ fn failure_footer_omits_the_duplicate_terminal_count() {
     let rendered = flat(&app);
     let footer = row_containing(&rendered, "step 3/3");
     assert!(
-        !footer.contains('✗') && !footer.contains("gave up"),
+        !footer.contains('✗') && !footer.contains("unfinished"),
         "failure footer repeated a terminal count already visible on its artifact row: {footer}"
     );
 }
 
 #[test]
-fn right_and_enter_open_the_editor_while_enter_and_escape_close_it() {
+fn enter_opens_the_card_while_the_walk_opens_its_editor_and_escape_peels_layers() {
     let start = seeded(vec![
         labeled_draft("whilst", ready_artifacts()),
         labeled_draft("at the end", ready_artifacts()),
     ]);
     let after_down = transit(start.clone(), AppEvent::NavNext).0;
-    let opened_right = transit(after_down.clone(), AppEvent::CursorRight).0;
-    let moved_inside = transit(opened_right.clone(), AppEvent::CursorLeft).0;
-    let (entered_inside, enter_side) = transit(opened_right.clone(), AppEvent::KeyEnter);
-    let closed = transit(opened_right.clone(), AppEvent::Cancel).0;
-    let opened_enter = transit(after_down.clone(), AppEvent::KeyEnter).0;
+    let expanded = transit(after_down.clone(), AppEvent::KeyEnter).0;
+    let tuned = transit(expanded.clone(), AppEvent::NavNext).0;
+    let moved_inside = transit(tuned.clone(), AppEvent::CursorLeft).0;
+    let (entered_inside, enter_side) = transit(tuned.clone(), AppEvent::KeyEnter);
+    let parked = transit(tuned.clone(), AppEvent::Cancel).0;
+    let collapsed = transit(parked.clone(), AppEvent::Cancel).0;
     assert_eq!(
         (
             (
                 start.card_selected(),
                 after_down.card_selected(),
                 start.card_expanded(),
-                opened_right.card_expanded(),
+                expanded.card_expanded(),
                 moved_inside.card_expanded(),
                 entered_inside.card_expanded(),
-                closed.card_expanded(),
-                opened_enter.card_expanded(),
+                parked.card_expanded(),
+                collapsed.card_expanded(),
             ),
             (
                 start.sentence_editor().is_none(),
-                opened_right.sentence_editor().is_some(),
+                expanded.sentence_editor().is_none(),
+                tuned.sentence_editor().is_some(),
                 moved_inside.sentence_editor().is_some(),
                 entered_inside.sentence_editor().is_some(),
-                closed.sentence_editor().is_none(),
-                opened_enter.sentence_editor().is_some(),
+                parked.sentence_editor().is_none(),
                 enter_side,
             ),
         ),
         (
-            (0, 1, false, true, true, false, false, true),
-            (true, true, true, false, true, true, Side::None),
+            (0, 1, false, true, true, false, true, false),
+            (true, true, true, true, false, true, Side::None),
         ),
-        "tune controls failed to open on Enter/Right or collapse on Enter/Escape"
+        "Enter must open the card without its editor, the walk must open the editor, and Escape must peel editor then expansion"
+    );
+}
+
+#[test]
+fn the_side_arrows_open_and_close_the_focused_card_without_entering_its_editor() {
+    let start = seeded(vec![labeled_draft("whilst", ready_artifacts())]);
+    let opened = transit(start, AppEvent::CursorRight).0;
+    let again = transit(opened.clone(), AppEvent::CursorRight).0;
+    let collapsed = transit(opened.clone(), AppEvent::CursorLeft).0;
+    assert_eq!(
+        (
+            (opened.card_expanded(), opened.sentence_editor().is_some()),
+            (again.card_expanded(), again.sentence_editor().is_some()),
+            (
+                collapsed.card_expanded(),
+                collapsed.sentence_editor().is_some()
+            ),
+            opened.cards_pending(),
+        ),
+        ((true, false), (true, false), (false, false), 0),
+        "the side arrows must open and close the card without ever falling into its editor"
     );
 }
 
@@ -818,9 +979,7 @@ fn opening_an_editor_anchors_the_card_head_when_focused_content_fits() {
             .0
             .body_scroll_to_selection(viewport, body_width)
     });
-    let opened = transit(selected, AppEvent::KeyEnter)
-        .0
-        .body_scroll_to_selection(viewport, body_width);
+    let opened = tuning(selected).body_scroll_to_selection(viewport, body_width);
     let buffer = rendered_buffer_at(&opened, terminal.width, terminal.height);
     let (_, card_row) = position_of(&buffer, "five");
     assert_eq!(
@@ -848,9 +1007,7 @@ fn expanding_a_card_keeps_the_focused_editor_row_visible_when_it_cannot_fit() {
             .body_scroll_to_selection(6, 120)
     });
     let before = selected.body_scroll();
-    let expanded = transit(selected, AppEvent::KeyEnter)
-        .0
-        .body_scroll_to_selection(6, 120);
+    let expanded = tuning(selected).body_scroll_to_selection(6, 120);
     assert_eq!(
         (
             expanded.body_scroll(),
@@ -865,9 +1022,9 @@ fn expanding_a_card_keeps_the_focused_editor_row_visible_when_it_cannot_fit() {
 #[test]
 fn expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane() {
     let start = seeded(vec![draft("whilst", ready_artifacts())]);
-    let expanded = transit(start, AppEvent::KeyEnter).0;
+    let expanded = tuning(start);
     let rendered = flat(&expanded);
-    let artifact_lines = rendered.matches("scene").count();
+    let artifact_lines = rendered.matches("manga").count();
     assert!(
         expanded.card_expanded()
             && expanded.sentence_editor().is_some()
@@ -896,11 +1053,7 @@ fn expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane() {
 
 #[test]
 fn expanded_editor_replaces_the_chip_grid_with_focused_question_carousels() {
-    let app = transit(
-        seeded(vec![labeled_draft("whilst", ready_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+    let app = tuning(seeded(vec![labeled_draft("whilst", ready_artifacts())]));
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let sound = position_of(&buffer, "how should it sound?");
@@ -914,7 +1067,6 @@ fn expanded_editor_replaces_the_chip_grid_with_focused_question_carousels() {
     let bg = Color::Rgb(0x0e, 0x0e, 0x10);
     let dim2 = Color::Rgb(0x5a, 0x59, 0x53);
     let rule = Color::Rgb(0x2a, 0x2a, 0x2d);
-    let highlight = Color::Rgb(0x1c, 0x1c, 0x1f);
     let casual_end = casual.0 + u16::try_from("casual".chars().count()).expect("casual width");
     let b1_end = b1.0 + u16::try_from("b1".chars().count()).expect("b1 width");
     let statement_end =
@@ -981,7 +1133,7 @@ fn expanded_editor_replaces_the_chip_grid_with_focused_question_carousels() {
             (bg, fg, dim2, dim2, dim2, dim2, dim2, rule, rule, rule,),
             (
                 (dim2, dim2, dim2, dim2, dim2, dim2, dim2, rule, rule, rule,),
-                (dim2, dim2, dim2, rule, rule, rule, highlight, highlight),
+                (dim2, dim2, dim2, rule, rule, rule, bg, bg),
             ),
             (
                 false, false, false, false, false, false, false, false, false, false
@@ -992,12 +1144,8 @@ fn expanded_editor_replaces_the_chip_grid_with_focused_question_carousels() {
 }
 
 #[test]
-fn moving_down_moves_the_white_question_focus_to_the_next_carousel() {
-    let opened = transit(
-        seeded(vec![labeled_draft("whilst", ready_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+fn moving_down_moves_the_lit_question_to_the_next_carousel() {
+    let opened = tuning(seeded(vec![labeled_draft("whilst", ready_artifacts())]));
     let app = transit(opened, AppEvent::NavNext).0;
     let buffer = rendered_buffer(&app);
     let sound = position_of(&buffer, "how should it sound?");
@@ -1017,73 +1165,39 @@ fn moving_down_moves_the_white_question_focus_to_the_next_carousel() {
             Color::Rgb(0xe6, 0xe3, 0xda),
             true,
         ),
-        "moving down left the white question focus on the previous carousel"
+        "moving down left the lit question on the previous carousel"
     );
 }
 
 #[test]
-fn collapsed_priced_artifacts_put_all_tags_on_audio_after_three_plain_gaps() {
-    let terminal = Rect::new(0, 0, 120, 50);
+fn the_tag_summary_sits_on_the_voice_row_at_the_fixed_column() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst →");
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (cost_column, _) = position_of(&buffer, "$.0015");
     let (register_column, register_row) = position_of(&buffer, "casual");
     let (kind_column, kind_row) = position_of(&buffer, "statement");
     let (level_column, level_row) = position_of(&buffer, "b1");
-    let (_, audio_row) = position_of(&buffer, "audio.wav");
-    let (_, scene_row) = position_of(&buffer, "scene.json");
-    let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
-    let dim2 = Color::Rgb(0x5a, 0x59, 0x53);
     let ink = Color::Rgb(0x0e, 0x0e, 0x10);
     let tag = Color::Rgb(0x8b, 0x8a, 0x83);
     assert_eq!(
         (
-            (
-                rendered.contains("sentence:"),
-                (meta_row..=picture_row).any(|row| row_text(&buffer, row).contains('│')),
-                buffer[(cost_column, meta_row)].fg,
-                head_row + 1 == meta_row,
-            ),
-            (
-                register_column
-                    == cost_column
-                        + u16::try_from("$.0015".chars().count()).expect("cost width must fit")
-                        + 4,
-                buffer[(register_column - 2, audio_row)].symbol(),
-                buffer[(register_column - 2, audio_row)].bg != tag,
-            ),
-            (
-                (audio_row, scene_row, picture_row),
-                (register_row, kind_row, level_row),
-                (register_column, kind_column, level_column),
-            ),
-            (
-                chip_has_style(&buffer, "casual", ink, tag),
-                chip_has_style(&buffer, "statement", ink, tag),
-                chip_has_style(&buffer, "b1", ink, tag),
-                link_at(&app, terminal, picture_column, picture_row),
-            ),
+            (register_row, kind_row, level_row),
+            (register_column, kind_column, level_column),
+            rendered.contains("sentence:"),
+            chip_has_style(&buffer, "casual", ink, tag),
+            chip_has_style(&buffer, "statement", ink, tag),
+            chip_has_style(&buffer, "b1", ink, tag),
         ),
         (
-            (false, false, dim2, true),
-            (true, " ", true),
-            (
-                (meta_row + 1, meta_row + 2, meta_row + 3),
-                (audio_row, audio_row, audio_row),
-                (
-                    cost_column
-                        + u16::try_from("$.0015".chars().count()).expect("cost width must fit")
-                        + 4,
-                    register_column + 9,
-                    register_column + 21,
-                ),
-            ),
-            (true, true, true, Some(String::from("/tmp/picture.jpg"))),
+            (head_row + 2, head_row + 2, head_row + 2),
+            (28, 37, 49),
+            false,
+            true,
+            true,
+            true,
         ),
-        "collapsed priced artifacts retained chrome or detached the three tags from audio after three plain gaps"
+        "the collapsed tag summary must sit on the voice row at the fixed tag column"
     );
 }
 
@@ -1113,208 +1227,58 @@ fn audio_progress_keeps_collapsed_tags_in_one_column() {
         seeded(vec![ready, active, retry, recovered]).cards_running(Some((1, Artifact::Sound)));
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
-    let active_row = row_containing(&rendered, "ai is working…");
-    let retry_row = rendered
-        .lines()
-        .find(|line| line.contains("· audio") && line.contains("$.0021"))
-        .expect("inactive audio retry row must remain visible");
-    let recovered_row = rendered
-        .lines()
-        .find(|line| line.contains("audio.wav") && line.contains("$.0021"))
-        .expect("recovered audio row must remain visible");
+    let active_row = row_containing(&rendered, "◐ voice");
+    let (_, ready_head) = position_of(&buffer, "ready →");
+    let (_, retry_head) = position_of(&buffer, "retry →");
+    let (_, recovered_head) = position_of(&buffer, "recovered →");
     assert_eq!(
         (
             columns_of(&buffer, "casual"),
-            column_of(active_row, "ai is working…") < column_of(active_row, "casual"),
-            column_of(retry_row, "$.0021") < column_of(retry_row, "casual"),
-            column_of(recovered_row, "$.0021") < column_of(recovered_row, "casual"),
+            active_row.contains("casual"),
+            buffer[(8, ready_head + 2)].symbol(),
+            buffer[(8, retry_head + 2)].symbol(),
+            buffer[(8, recovered_head + 2)].symbol(),
             rendered.matches("↻2").count(),
-            rendered.contains("retry 2/3"),
-            rendered.contains("paused"),
+            rendered.matches("$.0021").count(),
+        ),
+        (vec![28, 28, 28, 28], true, "✓", "·", "✓", 2, 3),
+        "audio progress must keep one tag column on every voice row, busy or idle:\n{rendered}"
+    );
+}
+
+#[test]
+fn a_recovered_picture_keeps_a_plain_check_and_its_history_on_the_head() {
+    let app = seeded(vec![labeled_draft("whilst", recovered_priced_artifacts(2))]);
+    let rendered = flat(&app);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst →");
+    assert_eq!(
+        (
+            buffer[(8, head_row + 3)].symbol(),
+            row_containing(&rendered, "whilst →").contains("↻2"),
             rendered.contains("2 ✗"),
         ),
-        (
-            vec![45, 45, 45, 45],
-            true,
-            true,
-            true,
-            2,
-            false,
-            false,
-            false
-        ),
-        "audio progress moved its collapsed labels or left volatile status before them:\n{rendered}"
+        ("✓", true, false),
+        "a recovered picture must render a plain ready manga row while the head keeps the history"
     );
 }
 
 #[test]
-fn narrow_audio_retry_keeps_cost_and_hides_the_whole_tag_summary() {
-    let draft = labeled_draft("retry", audio_progress_artifacts(audio_retry_slot(2))).with_costs(
-        ArtifactCosts::default().charged(Artifact::Sound, GenerationCost::from_nanos(2_100_000)),
-    );
-    let app = seeded(vec![draft]);
-    let buffer = rendered_buffer_at(&app, 70, 30);
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let audio_row = (meta_row..buffer.area.height)
-        .find(|row| row_text(&buffer, *row).contains("· audio"))
-        .expect("inactive audio retry row must remain visible");
-    let artifacts = (meta_row..=audio_row)
-        .map(|row| row_text(&buffer, row))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_eq!(
-        (
-            artifacts.contains("$.0021"),
-            artifacts.contains("retry 2/3"),
-            artifacts.contains("paused"),
-            artifacts.contains("2 ✗"),
-            artifacts.contains("casual"),
-            artifacts.contains("statement"),
-            artifacts.contains("b1"),
-        ),
-        (true, false, false, false, false, false, false),
-        "narrow audio retry clipped its cost or sliced the compact tag summary:\n{artifacts}"
-    );
-}
-
-#[test]
-fn recovered_picture_keeps_collapsed_tags_at_the_audio_anchor() {
-    let app = seeded(vec![labeled_draft("whilst", recovered_priced_artifacts(2))]);
-    let buffer = rendered_buffer(&app);
-    let (audio_cost_column, audio_row) = position_of(&buffer, "$.0100");
-    let (register_column, register_row) = position_of(&buffer, "casual");
-    let (_, picture_row) = position_of(&buffer, "picture.jpg");
-    let picture = row_text(&buffer, picture_row);
-    assert_eq!(
-        (
-            register_column,
-            register_row,
-            picture_row,
-            picture.contains("2 ✗"),
-        ),
-        (
-            audio_cost_column
-                + u16::try_from("$.0100".chars().count()).expect("cost width must fit")
-                + 4,
-            audio_row,
-            audio_row + 2,
-            false,
-        ),
-        "a recovered picture moved collapsed sentence tags or retained a local attempt tally"
-    );
-}
-
-#[test]
-fn narrow_recovered_picture_uses_all_three_tag_rows_without_a_local_tally() {
-    let buffer = rendered_buffer_at(
-        &seeded(vec![labeled_draft("whilst", recovered_priced_artifacts(2))]),
-        60,
-        30,
-    );
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (_, audio_row) = position_of(&buffer, "audio.wav");
-    let (_, scene_row) = position_of(&buffer, "scene.json");
-    let (_, picture_row) = position_of(&buffer, "picture.jpg");
-    let (_, register_row) = position_of(&buffer, "casual");
-    let (_, kind_row) = position_of(&buffer, "statement");
-    let (_, level_row) = position_of(&buffer, "b1");
-    let artifact_rows = (meta_row..=picture_row)
-        .map(|row| row_text(&buffer, row))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_eq!(
-        (
-            (register_row, kind_row, level_row),
-            (audio_row, scene_row, picture_row),
-            artifact_rows.contains("2 ✗"),
-        ),
-        (
-            (audio_row, scene_row, picture_row),
-            (meta_row + 1, meta_row + 2, meta_row + 3),
-            false,
-        ),
-        "narrow sentence tags failed to reclaim the rows freed by the local tally"
-    );
-}
-
-#[test]
-fn collapsed_cached_artifacts_put_all_tags_after_the_common_status_gap() {
+fn collapsed_cached_artifacts_keep_tags_beside_their_cache_note() {
     let app = seeded(vec![labeled_draft("whilst", cached_artifacts())]);
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (cached_column, _) = position_of(&buffer, "cached");
-    let (_, audio_row) = position_of(&buffer, "audio");
-    let (_, scene_row) = position_of(&buffer, "scene");
-    let (_, picture_row) = position_of(&buffer, "picture");
+    let (_, head_row) = position_of(&buffer, "whilst →");
     let (register_column, register_row) = position_of(&buffer, "casual");
-    let (_, kind_row) = position_of(&buffer, "statement");
-    let (_, level_row) = position_of(&buffer, "b1");
-    let dim2 = Color::Rgb(0x5a, 0x59, 0x53);
     assert_eq!(
         (
-            (
-                rendered.contains("sentence:"),
-                (meta_row..=picture_row).any(|row| row_text(&buffer, row).contains('│')),
-                buffer[(cached_column, meta_row)].fg,
-            ),
-            (
-                register_column
-                    == cached_column
-                        + u16::try_from("cached".chars().count()).expect("cached width must fit")
-                        + 4,
-                buffer[(register_column - 2, audio_row)].symbol(),
-            ),
-            (
-                (audio_row, scene_row, picture_row),
-                (register_row, kind_row, level_row),
-            ),
+            rendered.matches("cached").count(),
+            rendered.contains("meta.json"),
+            (register_column, register_row),
+            buffer[(10, head_row + 1)].symbol(),
         ),
-        (
-            (false, false, dim2),
-            (true, " "),
-            (
-                (meta_row + 1, meta_row + 2, meta_row + 3),
-                (audio_row, audio_row, audio_row),
-            ),
-        ),
-        "cached artifacts retained chrome or failed to align all collapsed tags after audio status"
-    );
-}
-
-#[test]
-fn narrow_collapsed_tags_wrap_only_across_the_three_plain_artifact_rows() {
-    let terminal = Rect::new(0, 0, 60, 30);
-    let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let rendered = flat(&app);
-    let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (_, audio_row) = position_of(&buffer, "audio.wav");
-    let (_, scene_row) = position_of(&buffer, "scene.json");
-    let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
-    let (_, register_row) = position_of(&buffer, "casual");
-    let (_, kind_row) = position_of(&buffer, "statement");
-    let (_, level_row) = position_of(&buffer, "b1");
-    let artifact_rows = (meta_row..=picture_row)
-        .map(|row| row_text(&buffer, row))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_eq!(
-        (
-            (
-                rendered.contains("sentence:"),
-                artifact_rows.contains('│'),
-                (audio_row, scene_row, picture_row),
-            ),
-            (register_row, kind_row, level_row),
-            link_at(&app, terminal, picture_column, picture_row),
-        ),
-        (
-            (false, false, (meta_row + 1, meta_row + 2, meta_row + 3)),
-            (audio_row, scene_row, picture_row),
-            Some(String::from("/tmp/picture.jpg")),
-        ),
-        "narrow collapsed tags escaped the audio-to-picture rows or retained sentence chrome"
+        (3, false, (28, head_row + 2), "s"),
+        "cached artifacts must collapse to ready rows that name the cache hit and keep the tag column"
     );
 }
 
@@ -1322,49 +1286,152 @@ fn narrow_collapsed_tags_wrap_only_across_the_three_plain_artifact_rows() {
 fn too_narrow_collapsed_card_hides_the_atomic_tag_summary() {
     let buffer = rendered_buffer_at(
         &seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        50,
+        38,
         30,
     );
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (_, picture_row) = position_of(&buffer, "picture.jpg");
-    let artifact_rows = (meta_row..=picture_row)
+    let (_, scene_row) = position_of(&buffer, "scene");
+    let rows = (scene_row..scene_row + 3)
         .map(|row| row_text(&buffer, row))
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(
         (
-            artifact_rows.contains('│'),
-            artifact_rows.contains("casual"),
-            artifact_rows.contains("b1"),
-            artifact_rows.contains("statement"),
+            rows.contains("scene"),
+            rows.contains("voice"),
+            rows.contains("manga"),
+            rows.contains("casual"),
+            rows.contains("statement"),
+            rows.contains("b1"),
         ),
-        (false, false, false, false),
-        "too-narrow collapsed layout sliced an atomic tag beside the artifact status"
+        (true, true, true, false, false, false),
+        "too-narrow collapsed layout must keep the step rows and hide the whole tag summary"
+    );
+}
+
+#[test]
+fn ready_step_labels_render_as_underlined_links() {
+    let app = seeded(vec![draft("whilst", priced_artifacts())]);
+    let scene = matching_cells(&app, "scene");
+    assert!(
+        !scene.is_empty()
+            && scene
+                .iter()
+                .all(|(_, _, modifier)| modifier.contains(Modifier::UNDERLINED)),
+        "a ready row label with a known target must render as an underlined link"
+    );
+}
+
+#[test]
+fn only_started_rows_render_and_queued_rows_stay_hidden() {
+    let app = seeded(vec![draft("whilst", partial_priced_artifacts())]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("✓ scene")
+            && !rendered.contains("voice")
+            && !rendered.contains("manga")
+            && !rendered.contains("queued"),
+        "rows that never started must stay hidden while the scene row appears first: {rendered}"
+    );
+}
+
+#[test]
+fn scene_and_picture_work_share_one_spinner_on_the_manga_row() {
+    let artifacts = CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene),
+        ArtifactSlot::fresh(Artifact::Picture),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    );
+    let app = seeded(vec![draft("whilst", artifacts)]).cards_running(Some((0, Artifact::Scene)));
+    let rendered = flat(&app);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst →");
+    let manga = row_text(&buffer, head_row + 3);
+    assert_eq!(
+        (
+            buffer[(8, head_row + 3)].symbol(),
+            manga.trim_end().ends_with("manga"),
+            rendered.contains("picture"),
+        ),
+        ("◐", true, false),
+        "scene and picture work must spin on the single manga row with nothing but the glyph beside it"
+    );
+}
+
+#[test]
+fn a_ready_scene_with_a_queued_picture_keeps_a_dim_dot_trace() {
+    let artifacts = CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        ArtifactSlot::fresh(Artifact::Picture),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    );
+    let app = seeded(vec![draft("whilst", artifacts)]);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst →");
+    assert_eq!(
+        buffer[(8, head_row + 3)].symbol(),
+        "·",
+        "a paid ready scene with its picture still owed must leave a dim dot on the manga row"
+    );
+}
+
+#[test]
+fn a_discarded_artifact_renders_a_dim_slash_on_its_manga_row() {
+    let artifacts = CardArtifacts::from_parts(
+        ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+        ArtifactSlot::fresh(Artifact::Picture).discard(),
+        ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+    );
+    let app = seeded(vec![draft("whilst", artifacts)]);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst →");
+    assert_eq!(
+        buffer[(8, head_row + 3)].symbol(),
+        "⊘",
+        "a discarded artifact must keep its dim slash on the manga row"
+    );
+}
+
+#[test]
+fn a_staged_rewrite_mutes_the_step_rows_and_keeps_the_staged_tags_visible() {
+    let staged = seeded(vec![labeled_draft("whilst", ready_artifacts())])
+        .sentence_editor_opened_for_register()
+        .sentence_editor_axis_chosen(2);
+    let parked = transit(staged, AppEvent::Cancel).0;
+    let app = transit(parked, AppEvent::Cancel).0;
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "whilst");
+    let parked = Color::Rgb(0x5a, 0x59, 0x53);
+    let scene_label = &buffer[(10, head_row + 1)];
+    assert_eq!(
+        (
+            scene_label.symbol(),
+            scene_label.fg,
+            row_text(&buffer, head_row + 2).contains("formal"),
+        ),
+        ("s", parked, true),
+        "a staged rewrite must mute the step rows while the staged tags stay visible"
     );
 }
 
 #[test]
 fn expanded_sentence_editor_starts_below_the_complete_artifact_block() {
     let terminal = Rect::new(0, 0, 120, 50);
-    let app = transit(
-        seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+    let app = tuning(seeded(vec![labeled_draft("whilst", priced_artifacts())]));
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let (_, head_row) = position_of(&buffer, "whilst →");
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (meta_column, _) = position_of(&buffer, "meta.json");
-    let (_, audio_row) = position_of(&buffer, "audio.wav");
-    let (_, scene_row) = position_of(&buffer, "scene.json");
-    let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
+    let (scene_column, scene_row) = position_of(&buffer, "scene");
+    let (_, voice_row) = position_of(&buffer, "voice");
+    let (manga_column, manga_row) = position_of(&buffer, "manga");
     let (sound_column, sound_row) = position_of(&buffer, "how should it sound?");
     let (kind_column, kind_row) = position_of(&buffer, "what kind of phrase?");
     let (level_column, level_row) = position_of(&buffer, "what's the desired level?");
     let (note_column, note_row) = position_of(&buffer, "one more thing");
     let section_has_no_pipe =
-        (meta_row..=note_row).all(|row| !row_text(&buffer, row).contains('│'));
+        (scene_row..=note_row).all(|row| !row_text(&buffer, row).contains('│'));
     assert_eq!(
         (
             (
@@ -1372,62 +1439,38 @@ fn expanded_sentence_editor_starts_below_the_complete_artifact_block() {
                 app.sentence_editor().is_some(),
                 rendered.contains("sentence:"),
                 section_has_no_pipe,
-                head_row + 1 == meta_row,
-                sound_row == picture_row + 2
-                    && row_text(&buffer, picture_row + 1).trim().is_empty(),
+                head_row + 1 == scene_row,
+                sound_row == manga_row + 2 && row_text(&buffer, manga_row + 1).trim().is_empty(),
             ),
             (
-                (audio_row, scene_row, picture_row),
+                (voice_row, manga_row),
                 (sound_row, kind_row, level_row, note_row),
             ),
-            (
-                meta_column,
-                sound_column,
-                kind_column,
-                level_column,
-                note_column,
-            ),
-            link_at(&app, terminal, picture_column, picture_row),
+            (sound_column, kind_column, level_column, note_column),
+            link_at(&app, terminal, manga_column, manga_row),
         ),
         (
             (true, true, false, true, true, true),
             (
-                (meta_row + 1, meta_row + 2, meta_row + 3),
-                (
-                    picture_row + 2,
-                    picture_row + 3,
-                    picture_row + 4,
-                    picture_row + 5,
-                ),
+                (scene_row + 1, scene_row + 2),
+                (manga_row + 2, manga_row + 3, manga_row + 4, manga_row + 5),
             ),
-            (
-                meta_column,
-                meta_column,
-                meta_column,
-                meta_column,
-                meta_column,
-            ),
+            (scene_column, scene_column, scene_column, scene_column),
             Some(String::from("/tmp/picture.jpg")),
         ),
-        "expanded editor remained beside the artifacts or retained the old sentence pane"
+        "expanded editor remained beside the step rows or retained the old sentence pane"
     );
 }
 
 #[test]
 fn narrow_expanded_sentence_editor_starts_below_the_artifact_block() {
     let terminal = Rect::new(0, 0, 50, 50);
-    let app = transit(
-        seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+    let app = tuning(seeded(vec![labeled_draft("whilst", priced_artifacts())]));
     let rendered = flat(&app);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (meta_column, _) = position_of(&buffer, "meta.json");
-    let (_, audio_row) = position_of(&buffer, "audio.wav");
-    let (_, scene_row) = position_of(&buffer, "scene.json");
-    let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
+    let (scene_column, scene_row) = position_of(&buffer, "scene");
+    let (_, voice_row) = position_of(&buffer, "voice");
+    let (manga_column, manga_row) = position_of(&buffer, "manga");
     let (sound_column, sound_row) = position_of(&buffer, "how should it sound?");
     let (kind_column, kind_row) = position_of(&buffer, "what kind of phrase?");
     let (level_column, level_row) = position_of(&buffer, "what's the desired level?");
@@ -1435,16 +1478,15 @@ fn narrow_expanded_sentence_editor_starts_below_the_artifact_block() {
     let (_, b1_row) = position_of(&buffer, "b1");
     let (note_column, note_row) = position_of(&buffer, "one more thing");
     let section_has_no_pipe =
-        (meta_row..=note_row).all(|row| !row_text(&buffer, row).contains('│'));
+        (scene_row..=note_row).all(|row| !row_text(&buffer, row).contains('│'));
     assert_eq!(
         (
             (
                 rendered.contains("sentence:"),
                 section_has_no_pipe,
-                !row_text(&buffer, meta_row - 1).trim().is_empty(),
-                sound_row == picture_row + 2
-                    && row_text(&buffer, picture_row + 1).trim().is_empty(),
-                (audio_row, scene_row, picture_row),
+                !row_text(&buffer, scene_row - 1).trim().is_empty(),
+                sound_row == manga_row + 2 && row_text(&buffer, manga_row + 1).trim().is_empty(),
+                (voice_row, manga_row),
             ),
             (
                 (sound_column, kind_column, level_column, note_column),
@@ -1457,30 +1499,24 @@ fn narrow_expanded_sentence_editor_starts_below_the_artifact_block() {
                     note_row,
                 ),
             ),
-            link_at(&app, terminal, picture_column, picture_row),
+            link_at(&app, terminal, manga_column, manga_row),
         ),
         (
+            (false, true, true, true, (scene_row + 1, scene_row + 2)),
             (
-                false,
-                true,
-                true,
-                true,
-                (meta_row + 1, meta_row + 2, meta_row + 3),
-            ),
-            (
-                (meta_column, meta_column, meta_column, meta_column),
+                (scene_column, scene_column, scene_column, scene_column,),
                 (
-                    picture_row + 2,
-                    picture_row + 4,
-                    picture_row + 5,
-                    picture_row + 6,
-                    picture_row + 7,
-                    picture_row + 8,
+                    manga_row + 2,
+                    manga_row + 4,
+                    manga_row + 5,
+                    manga_row + 6,
+                    manga_row + 7,
+                    manga_row + 8,
                 ),
             ),
             Some(String::from("/tmp/picture.jpg")),
         ),
-        "narrow expanded editor did not begin below the artifacts without the old sentence pane"
+        "narrow expanded editor did not begin below the step rows without the old sentence pane"
     );
 }
 
@@ -1489,7 +1525,8 @@ fn closed_pending_card_shows_the_staged_tags_and_bulk_regeneration_footer() {
     let staged = seeded(vec![labeled_draft("whilst", ready_artifacts())])
         .sentence_editor_opened_for_register()
         .sentence_editor_axis_chosen(2);
-    let app = transit(staged, AppEvent::Cancel).0;
+    let parked = transit(staged, AppEvent::Cancel).0;
+    let app = transit(parked, AppEvent::Cancel).0;
     let rendered = flat(&app);
     let buffer = rendered_buffer(&app);
     let formal = position_of(&buffer, "formal");
@@ -1528,7 +1565,7 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
     let buffer = rendered_buffer(&app);
     let target = matching_cells(&app, "Example with whilst.");
     let source = matching_cells(&app, "source sentence with whilst");
-    let step = matching_cells(&app, "✓ meta");
+    let step = matching_cells(&app, "✓ scene");
     let (term_column, term_row) = position_of(&buffer, "whilst");
     let term = (0.."whilst".chars().count())
         .map(|offset| {
@@ -1550,7 +1587,7 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
                 }),
             !term.is_empty()
                 && term.iter().all(|(fg, _, modifier)| {
-                    *fg == Color::Rgb(0x8b, 0x8a, 0x83) && !modifier.contains(Modifier::CROSSED_OUT)
+                    *fg == Color::Rgb(0x5a, 0x59, 0x53) && !modifier.contains(Modifier::CROSSED_OUT)
                 }),
             !source.is_empty()
                 && source.iter().all(|(fg, _, modifier)| {
@@ -1558,7 +1595,7 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
                 }),
             !step.is_empty()
                 && step.iter().all(|(fg, _, modifier)| {
-                    *fg == Color::Rgb(0x8b, 0x8a, 0x83) && !modifier.contains(Modifier::CROSSED_OUT)
+                    *fg == Color::Rgb(0x5a, 0x59, 0x53) && !modifier.contains(Modifier::CROSSED_OUT)
                 }),
             chip_has_style(&buffer, "formal", ink, chip),
             chip_has_style(&buffer, "b1", ink, chip),
@@ -1567,6 +1604,145 @@ fn pending_card_strikes_only_the_target_sentence_and_mutes_the_rest() {
         ),
         (true, true, true, true, true, true, true, true),
         "pending editor struck non-sentence content, exposed summary tags, or dimmed selected choices"
+    );
+}
+
+#[test]
+fn a_broken_artifact_is_the_only_bright_span_in_its_step_block() {
+    let app = seeded(vec![draft("bof", failed_artifacts())]);
+    let buffer = rendered_buffer(&app);
+    let (_, head_row) = position_of(&buffer, "bof");
+    let white = Color::Rgb(0xe6, 0xe3, 0xda);
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let quiet = Color::Rgb(0x5a, 0x59, 0x53);
+    let cross = &buffer[(8, head_row + 2)];
+    let tick = &buffer[(8, head_row + 1)];
+    assert_eq!(
+        (
+            (cross.symbol(), cross.fg),
+            (
+                buffer[(10, head_row + 2)].symbol(),
+                buffer[(10, head_row + 2)].fg
+            ),
+            (tick.symbol(), tick.fg),
+            buffer[(10, head_row + 1)].fg,
+        ),
+        (("✗", white), ("m", white), ("✓", quiet), gray),
+        "a broken artifact must be the one bright thing while every finished neighbour stays quiet"
+    );
+}
+
+#[test]
+fn a_built_card_lights_its_term_and_leaves_its_sentence_quiet() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("terroir", ready_artifacts()),
+        draft("wreck", partial_priced_artifacts()),
+        draft("bof", failed_artifacts()),
+    ]);
+    let buffer = rendered_buffer(&app);
+    let white = Color::Rgb(0xe6, 0xe3, 0xda);
+    let gray = Color::Rgb(0x8b, 0x8a, 0x83);
+    let quiet = Color::Rgb(0x5a, 0x59, 0x53);
+    assert_eq!(
+        (
+            (
+                term_ink(&buffer, "terroir"),
+                term_ink(&buffer, "wreck"),
+                term_ink(&buffer, "bof"),
+            ),
+            (
+                term_is_bold(&buffer, "terroir"),
+                term_is_bold(&buffer, "wreck"),
+                term_is_bold(&buffer, "bof"),
+            ),
+            (
+                term_ink(&buffer, "Example with terroir."),
+                term_ink(&buffer, "Example with wreck."),
+            ),
+        ),
+        ((white, quiet, quiet), (false, false, false), (gray, gray)),
+        "brightness must read as built on the term alone, never on the sentence, and never as weight"
+    );
+}
+
+#[test]
+fn an_unbuilt_term_reads_at_the_rank_of_its_own_number() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("terroir", ready_artifacts()),
+        draft("wreck", partial_priced_artifacts()),
+        draft("bof", failed_artifacts()),
+    ]);
+    let buffer = rendered_buffer(&app);
+    let (number_column, number_row) = position_of(&buffer, "03");
+    assert_eq!(
+        (
+            term_ink(&buffer, "terroir"),
+            term_ink(&buffer, "wreck"),
+            term_ink(&buffer, "bof"),
+            buffer[(number_column, number_row)].fg,
+        ),
+        (
+            Color::Rgb(0xe6, 0xe3, 0xda),
+            Color::Rgb(0x5a, 0x59, 0x53),
+            Color::Rgb(0x5a, 0x59, 0x53),
+            Color::Rgb(0x5a, 0x59, 0x53),
+        ),
+        "a term still owed anything must read no louder than the number beside it"
+    );
+}
+
+#[test]
+fn a_rewritten_sentence_reads_white_beside_an_untouched_one() {
+    let rewritten = CardDraft::new(
+        "whilst",
+        "understanding for whilst",
+        LanguagePair::new("en", "ru"),
+    )
+    .with_meta(meta_for("whilst").marked_rewritten(), None)
+    .with_artifacts(ready_artifacts());
+    let app = seeded(vec![rewritten, draft("terroir", ready_artifacts())]);
+    let buffer = rendered_buffer(&app);
+    assert_eq!(
+        (
+            term_ink(&buffer, "Example with whilst."),
+            term_ink(&buffer, "Example with terroir."),
+        ),
+        (Color::Rgb(0xe6, 0xe3, 0xda), Color::Rgb(0x8b, 0x8a, 0x83),),
+        "the one sentence the learner asked to be rewritten must stand out from its untouched neighbours"
+    );
+}
+
+#[test]
+fn a_selected_head_carries_the_weight_a_built_card_no_longer_does() {
+    let buffer = rendered_buffer(&seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("terroir", ready_artifacts()),
+    ]));
+    assert_eq!(
+        (
+            term_is_bold(&buffer, "whilst"),
+            term_is_bold(&buffer, "terroir"),
+            term_ink(&buffer, "terroir"),
+        ),
+        (true, false, Color::Rgb(0xe6, 0xe3, 0xda)),
+        "weight must ride the cursor onto the selected head instead of marking a built card"
+    );
+}
+
+#[test]
+fn the_cursor_never_covers_a_cell_without_weighting_it() {
+    let covered = highlighted_modifiers(&rendered_buffer(&tuning(seeded(vec![labeled_draft(
+        "whilst",
+        ready_artifacts(),
+    )]))));
+    assert!(
+        !covered.is_empty()
+            && covered
+                .iter()
+                .all(|modifier| modifier.contains(Modifier::BOLD)),
+        "the cursor band left part of its row without the weight that marks it"
     );
 }
 
@@ -1592,15 +1768,14 @@ fn active_rewrite_shows_normal_generation_without_pending_tags_or_count() {
             && app.cards()[0]
                 .rewrite()
                 .is_some_and(kamishibai::session::CardRewrite::started)
-            && rendered.contains("ai is working…")
+            && rendered.contains('◐')
             && !rendered.contains("pending")
             && !rendered.contains("formal")
             && !rendered.contains("casual")
             && !rendered.contains("b1")
             && !rendered.contains("statement")
             && !rendered.contains("Example with whilst.")
-            && !rendered.contains("[Enter/→] tune")
-            && !rendered.contains("[Space] tune"),
+            && !rendered.contains("] tune"),
         "active rewrite retained staged styling or exposed stale generated metadata: {rendered}"
     );
 }
@@ -1774,35 +1949,54 @@ fn cell_of(app: &App, needle: &str) -> (u16, u16) {
 }
 
 #[test]
-fn collapsed_tags_keep_the_meta_artifact_link_on_its_rendered_row() {
+fn clicking_the_scene_label_row_targets_the_cards_cache_folder() {
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
-    let (artifact_column, artifact_row) = cell_of(&app, "meta.json");
-    let (_, audio_row) = cell_of(&app, "audio.wav");
-    let (_, tags_row) = cell_of(&app, "casual");
+    let (scene_column, scene_row) = cell_of(&app, "scene");
     assert_eq!(
-        (
-            tags_row,
-            link_at(
-                &app,
-                Rect::new(0, 0, 120, 50),
-                artifact_column,
-                artifact_row,
-            ),
-        ),
-        (audio_row, Some(String::from("/tmp/meta.json"))),
-        "the collapsed audio-row tags shifted or swallowed the meta artifact link"
+        link_at(&app, Rect::new(0, 0, 120, 50), scene_column, scene_row),
+        Some(String::from("/tmp")),
+        "the scene row must target the folder holding the card's assets"
     );
 }
 
 #[test]
-fn expanded_editor_below_artifacts_keeps_the_meta_link_on_its_rendered_row() {
-    let app = transit(
-        seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
-    let (artifact_column, artifact_row) = cell_of(&app, "meta.json");
-    let (_, picture_row) = cell_of(&app, "picture.jpg");
+fn clicking_the_voice_label_opens_the_audio_file() {
+    let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
+    let (voice_column, voice_row) = cell_of(&app, "voice");
+    assert_eq!(
+        link_at(&app, Rect::new(0, 0, 120, 50), voice_column, voice_row),
+        Some(String::from("/tmp/audio.wav")),
+        "the voice row must target the generated audio file"
+    );
+}
+
+#[test]
+fn clicking_the_manga_label_opens_the_rendered_page() {
+    let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
+    let (manga_column, manga_row) = cell_of(&app, "manga");
+    assert_eq!(
+        link_at(&app, Rect::new(0, 0, 120, 50), manga_column, manga_row),
+        Some(String::from("/tmp/picture.jpg")),
+        "the manga row must target the rendered picture"
+    );
+}
+
+#[test]
+fn the_cell_after_a_row_label_is_not_a_link() {
+    let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
+    let (_, scene_row) = cell_of(&app, "scene");
+    assert_eq!(
+        link_at(&app, Rect::new(0, 0, 120, 50), 15, scene_row),
+        None,
+        "the gap after a row label must stay inert"
+    );
+}
+
+#[test]
+fn expanded_editor_below_step_rows_keeps_the_scene_link_on_its_rendered_row() {
+    let app = tuning(seeded(vec![labeled_draft("whilst", priced_artifacts())]));
+    let (scene_column, scene_row) = cell_of(&app, "scene");
+    let (_, manga_row) = cell_of(&app, "manga");
     let (editor_column, editor_row) = cell_of(&app, "how should it sound?");
     assert_eq!(
         (
@@ -1810,71 +2004,57 @@ fn expanded_editor_below_artifacts_keeps_the_meta_link_on_its_rendered_row() {
             app.sentence_editor().is_some(),
             editor_column,
             editor_row,
-            link_at(
-                &app,
-                Rect::new(0, 0, 120, 50),
-                artifact_column,
-                artifact_row,
-            ),
+            link_at(&app, Rect::new(0, 0, 120, 50), scene_column, scene_row),
         ),
         (
             true,
             true,
-            artifact_column,
-            picture_row + 2,
-            Some(String::from("/tmp/meta.json")),
+            scene_column,
+            manga_row + 2,
+            Some(String::from("/tmp")),
         ),
-        "the editor below the artifacts shifted or swallowed the meta artifact link"
+        "the editor below the step rows shifted or swallowed the scene link"
     );
 }
 
 #[test]
-fn narrow_sentence_tags_keep_the_downstream_picture_link_aligned() {
-    let terminal = Rect::new(0, 0, 50, 30);
+fn a_narrow_card_keeps_the_manga_label_clickable() {
+    let terminal = Rect::new(0, 0, 45, 30);
     let app = seeded(vec![labeled_draft("whilst", priced_artifacts())]);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
+    let (manga_column, manga_row) = position_of(&buffer, "manga");
     assert_eq!(
-        (
-            picture_row,
-            link_at(&app, terminal, picture_column, picture_row),
-        ),
-        (meta_row + 3, Some(String::from("/tmp/picture.jpg"))),
-        "wrapped sentence tags detached the downstream picture link from its rendered row"
+        link_at(&app, terminal, manga_column, manga_row),
+        Some(String::from("/tmp/picture.jpg")),
+        "the narrow card lost the manga label click target"
     );
 }
 
 #[test]
 fn expanded_sentence_editor_keeps_the_downstream_picture_link_aligned() {
     let terminal = Rect::new(0, 0, 120, 50);
-    let app = transit(
-        seeded(vec![labeled_draft("whilst", priced_artifacts())]),
-        AppEvent::KeyEnter,
-    )
-    .0;
+    let app = tuning(seeded(vec![labeled_draft("whilst", priced_artifacts())]));
     let buffer = rendered_buffer(&app);
-    let (_, meta_row) = position_of(&buffer, "meta.json");
-    let (picture_column, picture_row) = position_of(&buffer, "picture.jpg");
+    let (_, scene_row) = position_of(&buffer, "scene");
+    let (manga_column, manga_row) = position_of(&buffer, "manga");
     assert_eq!(
-        (
-            picture_row,
-            link_at(&app, terminal, picture_column, picture_row),
-        ),
-        (meta_row + 3, Some(String::from("/tmp/picture.jpg"))),
-        "expanded sentence editor detached the downstream picture link from its rendered row"
+        (manga_row, link_at(&app, terminal, manga_column, manga_row),),
+        (scene_row + 2, Some(String::from("/tmp/picture.jpg"))),
+        "expanded sentence editor detached the downstream manga link from its rendered row"
     );
 }
 
 #[test]
-fn scrolled_sentence_sections_keep_the_selected_artifact_link_aligned() {
-    let terminal = Rect::new(0, 0, 120, 16);
-    let selected = (0..3).fold(
+fn scrolled_cards_keep_the_selected_scene_link_aligned() {
+    let terminal = Rect::new(0, 0, 120, 10);
+    let selected = (0..5).fold(
         seeded(vec![
             labeled_draft("one", linked_artifacts("one")),
             labeled_draft("two", linked_artifacts("two")),
             labeled_draft("three", linked_artifacts("three")),
             labeled_draft("four", linked_artifacts("four")),
+            labeled_draft("five", linked_artifacts("five")),
+            labeled_draft("six", linked_artifacts("six")),
         ]),
         |app, _| transit(app, AppEvent::NavNext).0,
     );
@@ -1882,16 +2062,16 @@ fn scrolled_sentence_sections_keep_the_selected_artifact_link_aligned() {
     let body_width = scroll_body_width(terminal);
     let app = selected.body_scroll_to_selection(viewport, body_width);
     let buffer = rendered_buffer_at(&app, terminal.width, terminal.height);
-    let (_, term_row) = position_of(&buffer, "four");
-    let artifact_row = term_row + 1;
+    let (_, term_row) = position_of(&buffer, "six →");
+    let scene_row = term_row + 1;
     assert_eq!(
         (
             app.body_scroll() > 0,
-            row_text(&buffer, artifact_row).contains("meta.json"),
-            link_at(&app, terminal, 10, artifact_row),
+            row_text(&buffer, scene_row).contains("scene"),
+            link_at(&app, terminal, 11, scene_row),
         ),
-        (true, true, Some(String::from("/tmp/four.json"))),
-        "scrolling a card with collapsed tags detached its artifact click target from the file row"
+        (true, true, Some(String::from("/tmp"))),
+        "scrolling a collapsed card detached its scene click target from its row"
     );
 }
 
@@ -1986,15 +2166,444 @@ fn a_finished_artifact_keeps_attempt_history_only_in_the_card_head_and_details()
     let collapsed = seeded(vec![draft("whilst", recovered_picture_artifacts())]);
     let rendered = flat(&collapsed);
     let head = row_containing(&rendered, "whilst →");
-    let picture = row_containing(&rendered, "picture.jpg");
+    let manga = row_containing(&rendered, "manga");
     let expanded = flat(&transit(collapsed, AppEvent::KeyEnter).0);
     assert!(
         head.contains("$.0673  ↻1")
-            && picture.contains("✓ picture.jpg")
-            && !picture.contains("1 ✗")
-            && !picture.contains("1 rejected")
+            && manga.contains("$.0673")
+            && !rendered.contains("picture.jpg")
+            && !rendered.contains("1 ✗")
+            && !rendered.contains("1 rejected")
             && expanded.contains("rejected attempts")
             && expanded.contains("picture 1"),
         "a finished artifact duplicated or hid its attempt history: {rendered}"
+    );
+}
+
+#[test]
+fn the_footer_states_the_progress_of_a_live_batch_only_as_the_ready_count() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+        draft("in the end", retrying_artifacts()),
+        draft("wreck", CardArtifacts::default()),
+    ]);
+    let rendered = flat(&app);
+    let footer = row_containing(&rendered, "step 3/3");
+    assert!(
+        footer.contains("2/4 ready") && !footer.contains("building"),
+        "the status bar repeated the ready count as a second progress number: {footer}"
+    );
+}
+
+#[test]
+fn the_footer_keeps_regenerate_when_the_census_crowds_a_narrow_bar() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("in the end", retrying_artifacts()),
+        draft("wreck", CardArtifacts::default()),
+    ]);
+    let buffer = rendered_buffer_at(&app, 72, 40);
+    let footer = (0..buffer.area.height)
+        .map(|row| row_text(&buffer, row))
+        .find(|row| row.contains("step 3/3"))
+        .expect("narrow status bar must exist");
+    assert!(
+        footer.contains("[Ctrl+G] regenerate"),
+        "a crowded status bar shed the screen's main action: {footer}"
+    );
+}
+
+#[test]
+fn following_moves_the_selection_onto_the_card_the_engine_started() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+        draft("in the end", CardArtifacts::default()),
+        draft("wreck", CardArtifacts::default()),
+    ])
+    .cards_running(Some((3, Artifact::Meta)));
+    assert_eq!(
+        (app.card_selected(), app.following_card()),
+        (3, Some(3)),
+        "the view stayed behind while the engine moved on to another card"
+    );
+}
+
+#[test]
+fn scrolling_away_stops_the_viewport_following_the_engine() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+        draft("in the end", CardArtifacts::default()),
+        draft("wreck", CardArtifacts::default()),
+    ])
+    .body_scrolled(3, 10, 100)
+    .cards_running(Some((3, Artifact::Meta)));
+    assert_eq!(
+        (app.card_selected(), app.following_card()),
+        (0, None),
+        "the viewport chased the engine after the reader had scrolled away"
+    );
+}
+
+#[test]
+fn an_open_card_stops_the_viewport_following_the_engine() {
+    let opened = transit(
+        seeded(vec![
+            draft("whilst", ready_artifacts()),
+            draft("wreck", CardArtifacts::default()),
+        ]),
+        AppEvent::KeyEnter,
+    )
+    .0
+    .cards_running(Some((1, Artifact::Meta)));
+    assert_eq!(
+        opened.following_card(),
+        None,
+        "the viewport moved out from under a card the reader had opened"
+    );
+}
+
+#[test]
+fn down_from_the_note_row_parks_the_editor_on_the_next_card_head() {
+    let opened = seeded(vec![
+        labeled_draft("whilst", ready_artifacts()),
+        labeled_draft("at the end", ready_artifacts()),
+    ])
+    .sentence_editor_opened_for_note();
+    let walked = transit(opened, AppEvent::NavNext).0;
+    assert_eq!(
+        (
+            walked.card_selected(),
+            walked.sentence_editor().is_none(),
+            walked.card_expanded_at(0),
+        ),
+        (1, true, true),
+        "walking below the note row failed to park the editor on the next card head"
+    );
+}
+
+#[test]
+fn up_from_the_register_row_parks_the_editor_on_this_card_head() {
+    let opened = seeded(vec![
+        labeled_draft("whilst", ready_artifacts()),
+        labeled_draft("at the end", ready_artifacts()),
+    ])
+    .sentence_editor_opened_for_register();
+    let walked = transit(opened, AppEvent::NavPrev).0;
+    assert_eq!(
+        (
+            walked.card_selected(),
+            walked.sentence_editor().is_none(),
+            walked.card_expanded_at(0),
+        ),
+        (0, true, true),
+        "walking above the register row failed to park the editor on its own card head"
+    );
+}
+
+#[test]
+fn walking_back_onto_a_parked_card_reenters_its_editor_at_the_note_row() {
+    let parked = seeded(vec![
+        labeled_draft("whilst", ready_artifacts()),
+        labeled_draft("at the end", ready_artifacts()),
+    ])
+    .sentence_editor_opened_for_note();
+    let below = transit(parked, AppEvent::NavNext).0;
+    let back = transit(below, AppEvent::NavPrev).0;
+    assert_eq!(
+        (
+            back.card_selected(),
+            back.sentence_editor()
+                .map(kamishibai::tui::SentenceLabelsEditor::row),
+            back.card_expanded_at(0),
+        ),
+        (0, Some(LabelEditorRow::Note), true),
+        "walking back onto a parked card stopped at the head instead of reentering its tune rows"
+    );
+}
+
+#[test]
+fn down_from_a_parked_expanded_head_enters_its_editor_on_register() {
+    let parked = transit(
+        seeded(vec![
+            labeled_draft("whilst", ready_artifacts()),
+            labeled_draft("at the end", ready_artifacts()),
+        ])
+        .sentence_editor_opened_for_register(),
+        AppEvent::Cancel,
+    )
+    .0;
+    let entered = transit(parked, AppEvent::NavNext).0;
+    assert_eq!(
+        (
+            entered.card_selected(),
+            entered
+                .sentence_editor()
+                .map(kamishibai::tui::SentenceLabelsEditor::row),
+        ),
+        (0, Some(LabelEditorRow::Register)),
+        "walking down from an expanded head skipped its own tune rows"
+    );
+}
+
+#[test]
+fn down_at_the_last_note_row_stays_inside_the_editor() {
+    let opened =
+        seeded(vec![labeled_draft("whilst", ready_artifacts())]).sentence_editor_opened_for_note();
+    let pressed = transit(opened, AppEvent::NavNext).0;
+    assert!(
+        pressed
+            .sentence_editor()
+            .is_some_and(|editor| editor.row() == LabelEditorRow::Note),
+        "the walk fell off the bottom of the last card and cycled its editor"
+    );
+}
+
+#[test]
+fn an_expanded_card_with_an_active_rewrite_keeps_its_previous_meta_visible() {
+    let rewriting = labeled_draft("whilst", ready_artifacts())
+        .staging_rewrite(
+            kamishibai::session::SentenceLabelSelection::empty()
+                .choosing(SentenceAxis::Register, 2),
+            "make it formal",
+        )
+        .starting_rewrite();
+    let app = seeded(vec![rewriting]).cards_running(Some((0, Artifact::Meta)));
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let rendered = flat(&opened);
+    assert!(
+        rendered.contains("the phrase")
+            && rendered.contains("Example with whilst.")
+            && !rendered.contains("meta not generated yet"),
+        "expanding a card mid-rewrite hid its previous meta instead of showing it struck: {rendered}"
+    );
+}
+
+#[test]
+fn c_collapses_all_from_a_carousel_row_of_the_open_editor() {
+    let opened = seeded(vec![labeled_draft("whilst", ready_artifacts())])
+        .sentence_editor_opened_for_register();
+    let collapsed = transit(opened, AppEvent::KeyChar('c')).0;
+    assert!(
+        !collapsed.any_card_expanded() && collapsed.sentence_editor().is_none(),
+        "collapse all was swallowed by a carousel row that owns no typing"
+    );
+}
+
+#[test]
+fn an_open_tunable_card_advertises_the_walk_into_its_editor() {
+    let collapsed = seeded(vec![labeled_draft("whilst", ready_artifacts())]);
+    let expanded = transit(collapsed.clone(), AppEvent::KeyEnter).0;
+    assert!(
+        !flat(&collapsed).contains("[↓] tune") && flat(&expanded).contains("[↓] tune"),
+        "the footer never names the gesture that opens the tune rows"
+    );
+}
+
+#[test]
+fn enter_on_a_parked_tunable_head_collapses_the_card() {
+    let parked = transit(
+        seeded(vec![labeled_draft("whilst", ready_artifacts())])
+            .sentence_editor_opened_for_register(),
+        AppEvent::Cancel,
+    )
+    .0;
+    let closed = transit(parked, AppEvent::KeyEnter).0;
+    assert!(
+        !closed.card_expanded() && closed.sentence_editor().is_none(),
+        "Enter on a parked tunable head fell back into tuning instead of closing the card"
+    );
+}
+
+#[test]
+fn an_open_card_shows_its_tune_rows_inactive_above_the_meta_preview() {
+    let parked = transit(
+        seeded(vec![labeled_draft("whilst", ready_artifacts())])
+            .sentence_editor_opened_for_register(),
+        AppEvent::Cancel,
+    )
+    .0;
+    let rendered = flat(&parked);
+    let buffer = rendered_buffer(&parked);
+    let question = position_of(&buffer, "how should it sound?");
+    assert_eq!(
+        (
+            (parked.card_expanded(), parked.sentence_editor().is_some()),
+            (
+                row_containing(&rendered, "✓ voice").contains("casual"),
+                rendered.contains("what kind of phrase?"),
+                rendered.contains("one more thing"),
+                rendered.contains("the phrase"),
+            ),
+            (
+                buffer[question].fg,
+                buffer[question].modifier.contains(Modifier::BOLD),
+            ),
+        ),
+        (
+            (true, false),
+            (false, true, true, true),
+            (Color::Rgb(0x5a, 0x59, 0x53), false),
+        ),
+        "an open card must show its tune rows inactive above the meta preview, with no tag summary left on the step rows"
+    );
+}
+
+#[test]
+fn walking_into_an_open_card_lights_its_first_question_alone() {
+    let open = transit(
+        seeded(vec![labeled_draft("whilst", ready_artifacts())]),
+        AppEvent::KeyEnter,
+    )
+    .0;
+    let tuned = transit(open, AppEvent::NavNext).0;
+    let buffer = rendered_buffer(&tuned);
+    let sound = position_of(&buffer, "how should it sound?");
+    let kind = position_of(&buffer, "what kind of phrase?");
+    assert_eq!(
+        (
+            buffer[sound].fg,
+            buffer[sound].modifier.contains(Modifier::BOLD),
+            buffer[kind].fg,
+            buffer[kind].modifier.contains(Modifier::BOLD),
+        ),
+        (
+            Color::Rgb(0xe6, 0xe3, 0xda),
+            true,
+            Color::Rgb(0x5a, 0x59, 0x53),
+            false,
+        ),
+        "walking into an open card failed to light its first question alone"
+    );
+}
+
+#[test]
+fn c_collapses_every_parked_card_on_your_cards() {
+    let first_parked = transit(
+        seeded(vec![
+            labeled_draft("whilst", ready_artifacts()),
+            labeled_draft("at the end", ready_artifacts()),
+        ])
+        .sentence_editor_opened_for_note(),
+        AppEvent::NavNext,
+    )
+    .0;
+    let second_open = transit(first_parked, AppEvent::KeyEnter).0;
+    let second_parked = transit(second_open, AppEvent::Cancel).0;
+    let collapsed = transit(second_parked, AppEvent::KeyChar('c')).0;
+    assert!(
+        !collapsed.any_card_expanded(),
+        "collapse all left a parked card expanded"
+    );
+}
+
+#[test]
+fn c_is_swallowed_while_the_note_row_owns_typing() {
+    let opened =
+        seeded(vec![labeled_draft("whilst", ready_artifacts())]).sentence_editor_opened_for_note();
+    let typed = transit(opened, AppEvent::KeyChar('c')).0;
+    assert!(
+        typed
+            .sentence_editor()
+            .is_some_and(|editor| editor.note().value().contains('c'))
+            && typed.card_expanded(),
+        "a printable key leaked through the note row into collapse all"
+    );
+}
+
+#[test]
+fn the_collapse_toggle_answers_on_a_russian_layout() {
+    let collapsed = seeded(vec![labeled_draft("whilst", ready_artifacts())]);
+    let expanded = transit(collapsed, AppEvent::KeyChar('С')).0;
+    assert!(
+        expanded.card_expanded_at(0),
+        "the collapse toggle ignored the key it is printed on because a Cyrillic layout typed it"
+    );
+}
+
+#[test]
+fn a_russian_note_keeps_the_letters_it_was_typed_with() {
+    let opened =
+        seeded(vec![labeled_draft("whilst", ready_artifacts())]).sentence_editor_opened_for_note();
+    let typed = transit(opened, AppEvent::KeyChar('с')).0;
+    assert!(
+        typed
+            .sentence_editor()
+            .is_some_and(|editor| editor.note().value() == "с"),
+        "the note row folded a typed letter to its Latin key instead of keeping it"
+    );
+}
+
+#[test]
+fn c_expands_every_card_when_none_is_expanded() {
+    let collapsed = seeded(vec![
+        labeled_draft("whilst", ready_artifacts()),
+        draft("wreck", CardArtifacts::default()),
+    ]);
+    let expanded = transit(collapsed, AppEvent::KeyChar('c')).0;
+    assert!(
+        expanded.card_expanded_at(0)
+            && expanded.card_expanded_at(1)
+            && expanded.sentence_editor().is_none(),
+        "the collapse toggle failed to expand every card from the fully collapsed view"
+    );
+}
+
+#[test]
+fn the_taught_word_is_the_only_lit_span_of_its_translation() {
+    let app = transit(
+        seeded(vec![draft("whilst", ready_artifacts())]),
+        AppEvent::KeyEnter,
+    )
+    .0;
+    let buffer = rendered_buffer(&app);
+    let (column, row) = position_of(&buffer, "source sentence with whilst");
+    let sentence = "source sentence with whilst";
+    let inks = (0..sentence.chars().count())
+        .map(|offset| {
+            buffer[(
+                column + u16::try_from(offset).expect("offset must fit"),
+                row,
+            )]
+                .fg
+        })
+        .collect::<Vec<_>>();
+    let lit = sentence
+        .char_indices()
+        .filter(|(index, _)| inks[*index] == Color::Rgb(0xe6, 0xe3, 0xda))
+        .map(|(_, ch)| ch)
+        .collect::<String>();
+    assert_eq!(
+        lit, "whilst",
+        "the taught word must be the one lit run inside its own sentence"
+    );
+}
+
+#[test]
+fn following_holds_the_scroll_the_running_card_will_grow_into() {
+    let batch = |built: usize| -> Vec<CardDraft> {
+        (0..12)
+            .map(|index| {
+                let artifacts = if index < built {
+                    ready_artifacts()
+                } else {
+                    CardArtifacts::default()
+                };
+                draft(&format!("term{index:02}"), artifacts)
+            })
+            .collect()
+    };
+    let started = seeded(batch(11))
+        .cards_running(Some((11, Artifact::Sound)))
+        .body_scroll_to_selection(14, 100);
+    let filled = seeded(batch(12))
+        .cards_running(Some((11, Artifact::Picture)))
+        .body_scroll_to_selection(14, 100);
+    assert_eq!(
+        started.body_scroll(),
+        filled.body_scroll(),
+        "the viewport moved under the running card as it grew instead of reserving the room it would need"
     );
 }

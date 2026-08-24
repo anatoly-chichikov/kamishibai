@@ -14,8 +14,8 @@ use crate::cli::error::{usage, usage_hint};
 use crate::config::{PreferenceStore, default_store};
 use crate::runtime::locations::{LocationArgs, Locations, OutputUnavailable, SystemContext};
 use crate::session::{
-    CandidateRecord, LanguagePair, RawInputBatch, SentenceBatchSettings, SentenceLevel,
-    SentenceTypeMix, WordCandidate, drafts_from_document,
+    CandidateRecord, LanguagePair, MAX_INTAKE_WORDS, MAX_PLAN_CARDS, RawInputBatch,
+    SentenceBatchSettings, SentenceLevel, SentenceTypeMix, WordCandidate, drafts_from_document,
 };
 use crate::vocabulary::VocabularyDocument;
 
@@ -27,6 +27,10 @@ use super::{Render, json, preflight_key, resolve_language, validate_language, vi
 /// Understand the requested words (or import a cards JSON) and create a session.
 pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
     let target = learning_target(args.learning.as_deref())?;
+    let words = match args.build {
+        Some(_) => Vec::new(),
+        None => intake_words(args)?,
+    };
     let out = output_dir(args.out.as_deref())?;
     let store = SessionStore::system()?;
     let workflow = console::workflow(out.clone())?;
@@ -36,7 +40,7 @@ pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
             let prefs_store = default_store(&SystemContext)?;
             let known = resolve_known(args.known.as_deref(), &prefs_store)?;
             preflight_key()?;
-            word_session(&workflow, args, known.as_str(), &target)?
+            word_session(&workflow, args, known.as_str(), &target, words)?
         }
     };
     if session.candidates.is_empty() {
@@ -92,21 +96,36 @@ fn word_session(
     args: &NewArgs,
     known: &str,
     target: &LearningTarget,
+    words: Vec<String>,
 ) -> Result<Prepared> {
-    let words = words_lines(args)?;
     let raw = RawInputBatch::new(words.join("\n"));
-    if !raw.has_content() {
-        return Err(usage("no words to learn: input was empty"));
-    }
     let understood = workflow.understand(&raw, known, target)?;
     let learning = understood.guess().code().to_uppercase();
     let pair = LanguagePair::new(learning.as_str(), known.to_uppercase());
-    let candidates = understood
+    let selected = understood
         .candidates()
         .iter()
-        .map(|candidate| {
-            CandidateRecord::from_candidate(&initial_selection(candidate, args.senses))
-        })
+        .map(|candidate| initial_selection(candidate, args.senses))
+        .collect::<Vec<_>>();
+    let cards: usize = selected
+        .iter()
+        .filter(|candidate| candidate.ok())
+        .map(WordCandidate::selected_count)
+        .sum();
+    if cards > MAX_PLAN_CARDS {
+        return Err(usage_hint(
+            format!(
+                "too many cards: {} words with the chosen senses make {cards} cards, at most {MAX_PLAN_CARDS} per batch",
+                words.len()
+            ),
+            format!(
+                "Use --senses primary, or pass fewer words, so the plan is {MAX_PLAN_CARDS} cards or fewer"
+            ),
+        ));
+    }
+    let candidates = selected
+        .iter()
+        .map(CandidateRecord::from_candidate)
         .collect();
     Ok(Prepared {
         pair,
@@ -137,6 +156,17 @@ fn initial_selection(candidate: &WordCandidate, senses: SensePolicy) -> WordCand
 fn build_session(workflow: &impl CardProduction, path: &Path) -> Result<Prepared> {
     let document = read_document(path.to_string_lossy().as_ref())?;
     let (pair, drafts) = drafts_from_document(&document)?;
+    if drafts.len() > MAX_PLAN_CARDS {
+        return Err(usage_hint(
+            format!(
+                "too many cards: {} entries, at most {MAX_PLAN_CARDS} per batch",
+                drafts.len()
+            ),
+            format!(
+                "Split the cards JSON into files of {MAX_PLAN_CARDS} entries or fewer and run new --build once per file"
+            ),
+        ));
+    }
     let mut candidates = Vec::with_capacity(drafts.len());
     let mut words = Vec::with_capacity(drafts.len());
     for draft in &drafts {
@@ -157,6 +187,28 @@ fn build_session(workflow: &impl CardProduction, path: &Path) -> Result<Prepared
         candidates,
         source: "cards",
     })
+}
+
+/// Read the requested vocabulary lines and refuse a batch that is too large
+/// for one understanding pass.
+///
+/// Runs before the preference store, the credential preflight, and any Gemini
+/// or cache work, so an oversized list costs nothing.
+fn intake_words(args: &NewArgs) -> Result<Vec<String>> {
+    let raw = RawInputBatch::new(words_lines(args)?.join("\n"));
+    if !raw.has_content() {
+        return Err(usage("no words to learn: input was empty"));
+    }
+    let count = raw.word_count();
+    if count > MAX_INTAKE_WORDS {
+        return Err(usage_hint(
+            format!("too many words: {count} lines, at most {MAX_INTAKE_WORDS} per batch"),
+            format!(
+                "Split the list into batches of {MAX_INTAKE_WORDS} or fewer and run new once per batch"
+            ),
+        ));
+    }
+    Ok(raw.lines().map(String::from).collect())
 }
 
 fn words_lines(args: &NewArgs) -> Result<Vec<String>> {

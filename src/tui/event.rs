@@ -92,8 +92,6 @@ pub enum AppEvent {
     /// the rendered grid is — the same reason the picker's wheel resolves a row
     /// before it becomes an event.
     WelcomeLanguageAt(usize),
-    /// Welcome: a clipboard paste landed on the API key input.
-    WelcomePasteKey(String),
     /// Welcome: user asked to load `GEMINI_API_KEY` from the environment.
     WelcomeLoadEnvKey,
     /// Welcome key step: move focus to a specific control (mouse click).

@@ -10,7 +10,7 @@ use std::time::Duration;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::languages::catalog;
-use kamishibai::session::{LanguagePair, LearningDetection, ScriptDetection};
+use kamishibai::session::{LanguagePair, LearningDetection, MAX_INTAKE_WORDS, ScriptDetection};
 use kamishibai::tui::{
     App, AppEvent, BusyKind, Screen, Side, draw, scroll_body_width, scroll_viewport, to_app,
     transit,
@@ -18,6 +18,7 @@ use kamishibai::tui::{
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier};
 use tempfile::tempdir;
 
 fn press(code: KeyCode) -> KeyEvent {
@@ -43,6 +44,44 @@ fn flatten(app: &App) -> String {
         flat.push('\n');
     }
     flat
+}
+
+fn highlighted_modifiers(app: &App) -> Vec<Modifier> {
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).expect("test backend must boot");
+    terminal
+        .draw(|frame| draw(frame, app))
+        .expect("draw must succeed");
+    let buffer = terminal.backend().buffer();
+    let mut covered = Vec::new();
+    for row in 0..buffer.area.height {
+        for column in 0..buffer.area.width {
+            let cell = &buffer[(column, row)];
+            if cell.bg == Color::Rgb(0x26, 0x26, 0x2a) {
+                covered.push(cell.modifier);
+            }
+        }
+    }
+    covered
+}
+
+fn weight_of(app: &App, needle: &str) -> Modifier {
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).expect("test backend must boot");
+    terminal
+        .draw(|frame| draw(frame, app))
+        .expect("draw must succeed");
+    let buffer = terminal.backend().buffer();
+    for row in 0..buffer.area.height {
+        let line = (0..buffer.area.width)
+            .map(|column| buffer[(column, row)].symbol())
+            .collect::<String>();
+        if let Some(byte) = line.find(needle) {
+            let column = u16::try_from(line[..byte].chars().count()).expect("column must fit");
+            return buffer[(column, row)].modifier;
+        }
+    }
+    panic!("invariant: {needle} must be rendered somewhere on the screen");
 }
 
 fn long_blob(count: usize) -> String {
@@ -76,6 +115,23 @@ fn long_pasted_your_words_scrolls_to_the_cursor_line() {
     assert!(
         flat.contains("word-60") && !flat.contains("word-01"),
         "long pasted word lists must render the cursor end of the scrollable editor: {flat}"
+    );
+}
+
+#[test]
+fn the_typed_line_under_the_cursor_carries_the_weight_of_its_highlight() {
+    let app = App::new(LanguagePair::new("en", "ru")).seeded_blob("alpha\nbravo");
+    let covered = highlighted_modifiers(&app);
+    assert_eq!(
+        (
+            covered.is_empty(),
+            covered
+                .iter()
+                .all(|modifier| modifier.contains(Modifier::BOLD)),
+            weight_of(&app, "alpha"),
+        ),
+        (false, true, Modifier::empty()),
+        "the line the cursor sits on must carry the weight of its highlight while its neighbours stay plain"
     );
 }
 
@@ -119,12 +175,14 @@ fn your_words_footer_shows_language_shortcut() {
 }
 
 #[test]
-fn your_words_footer_keeps_paste_shortcut() {
-    let app = App::new(LanguagePair::new("en", "ru"));
-    let flat = flatten(&app);
+fn an_empty_words_box_spends_no_brightness_on_a_key_the_app_does_not_own() {
+    let empty = flatten(&App::new(LanguagePair::new("en", "ru")));
+    let typed = flatten(&App::new(LanguagePair::new("en", "ru")).seeded_blob("whilst"));
     assert!(
-        flat.contains("[Cmd+V] paste"),
-        "your words footer must keep the paste shortcut: {flat}"
+        !empty.contains("Cmd+V")
+            && !empty.contains("[Ctrl+G]")
+            && typed.contains("[Ctrl+G] understand"),
+        "the empty box has no key to name, and the one that matters should arrive with the first word: {empty}"
     );
 }
 
@@ -143,7 +201,7 @@ fn raw_nonempty_words_without_a_card_still_advertise_escape_clear() {
     let app = App::new(LanguagePair::new("en", "ru")).seeded_blob("\n");
     let rendered = flatten(&app);
     assert!(
-        rendered.contains("[Cmd+V] paste") && rendered.contains("[Esc] clear"),
+        rendered.contains("[Esc] clear") && !rendered.contains("[Ctrl+G]"),
         "raw nonempty input armed by Escape did not advertise its clear action: {rendered}"
     );
 }
@@ -157,7 +215,7 @@ fn armed_words_clear_makes_escape_the_only_primary_action() {
     assert!(
         rendered.contains("[Esc] again")
             && !rendered.contains("[Esc] clear")
-            && !rendered.contains("[Ctrl+G] continue"),
+            && !rendered.contains("[Ctrl+G] understand"),
         "armed words clear competed with another primary footer action: {rendered}"
     );
 }
@@ -171,6 +229,18 @@ fn busy_loader_covers_the_current_screen_with_request_status() {
     assert!(
         flat.contains("ai is working") && flat.contains("understanding your words"),
         "busy loader must cover the current screen with a visible request status"
+    );
+}
+
+#[test]
+fn busy_loader_takes_the_screen_hints_down_with_the_keyboard() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob("deed\nhonor")
+        .busy_started(BusyKind::Understanding);
+    let flat = flatten(&app);
+    assert!(
+        !flat.contains("[Ctrl+G]") && !flat.contains("[Esc]") && flat.contains("[Ctrl+C] quit"),
+        "a busy overlay swallows every key but quit, so the bar must stop advertising the rest: {flat}"
     );
 }
 
@@ -212,7 +282,8 @@ fn recoverable_error_overlay_keeps_the_message_visible() {
     assert!(
         flat.contains("can't reach gemini")
             && flat.contains("INTERNAL: boom")
-            && flat.contains("press any key to dismiss"),
+            && flat.contains("[Ctrl+G] retry")
+            && flat.contains("[Esc] dismiss"),
         "recoverable Gemini errors must render as an in-app overlay"
     );
 }
@@ -226,7 +297,8 @@ fn recoverable_error_overlay_wraps_long_timeout_messages() {
     assert!(
         flat.contains("operation timed out")
             && flat.contains("large word list")
-            && flat.contains("press any key to dismiss"),
+            && flat.contains("[Ctrl+G] retry")
+            && flat.contains("[Esc] dismiss"),
         "long Gemini timeout messages must remain visible inside the overlay: {flat}"
     );
 }
@@ -444,5 +516,67 @@ fn preference_store_feeds_my_language_into_the_initial_pair() {
         app.pair().known(),
         "es",
         "persisted my language must feed into the initial pair at app start"
+    );
+}
+
+#[test]
+fn an_oversized_word_list_never_starts_the_understanding_pass() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob(long_blob(MAX_INTAKE_WORDS + 1))
+        .confirmed_learning("en");
+    let (after, side) = transit(app, AppEvent::Generate);
+    assert_eq!(
+        (side, after.screen(), after.error().is_none()),
+        (Side::None, Screen::YourWords, true),
+        "an oversized word list was sent to the provider instead of being refused quietly"
+    );
+}
+
+#[test]
+fn a_word_list_exactly_at_the_ceiling_still_starts_the_pass() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob(long_blob(MAX_INTAKE_WORDS))
+        .confirmed_learning("en");
+    assert_eq!(
+        transit(app, AppEvent::Generate).1,
+        Side::RunUnderstanding,
+        "a batch sitting exactly on the ceiling was refused"
+    );
+}
+
+#[test]
+fn an_oversized_word_list_replaces_the_continue_hint_with_the_limit() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .seeded_blob(long_blob(MAX_INTAKE_WORDS + 5))
+        .confirmed_learning("en");
+    let rendered = flatten(&app);
+    assert!(
+        rendered.contains(&format!("over the {MAX_INTAKE_WORDS}-word limit"))
+            && !rendered.contains("[Ctrl+G] understand"),
+        "an oversized word list still advertised the key that would not work: {rendered}"
+    );
+}
+
+#[test]
+fn c_keeps_typing_into_the_blob_instead_of_collapsing() {
+    let app = App::new(LanguagePair::new("en", "ru"));
+    let typed = transit(app, AppEvent::KeyChar('c')).0;
+    assert_eq!(
+        typed.blob(),
+        "c",
+        "a plain c on the words screen was stolen from text entry"
+    );
+}
+
+#[test]
+fn the_words_screen_keeps_every_letter_the_layout_produced() {
+    let app = App::new(LanguagePair::new("en", "ru"));
+    let typed = "сыр"
+        .chars()
+        .fold(app, |app, symbol| transit(app, AppEvent::KeyChar(symbol)).0);
+    assert_eq!(
+        typed.blob(),
+        "сыр",
+        "the words screen folded typed letters to their Latin keys instead of keeping them"
     );
 }

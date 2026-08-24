@@ -12,11 +12,19 @@ use crate::languages::catalog;
 
 use super::vault::{CardCell, digest};
 use super::{
-    CardMeta, LanguagePair, LearningDetection, LearningGuess, RawInputBatch, ScriptDetection,
-    Sense, SentenceLabels, Understood, WordCandidate,
+    CardMeta, IntakeTooLarge, LanguagePair, LearningDetection, LearningGuess, MAX_INTAKE_WORDS,
+    RawInputBatch, ScriptDetection, Sense, SentenceLabels, Understood, WordCandidate,
 };
 
 const UNDERSTANDING_VERSION: &str = "v6";
+
+/// How many vocabulary lines one intake request carries.
+///
+/// Twenty words of the worst-case polysemous shape stay well under the intake
+/// output ceiling and take roughly a quarter of the transport timeout, and each
+/// chunk is written to the cache as soon as it decodes — so a batch that fails
+/// part-way keeps everything the earlier chunks produced.
+const INTAKE_CHUNK_WORDS: usize = 20;
 const META_POLICY: &str = "v3-initial-sentence-preferences";
 
 /// Caching decorator for the first-pass understanding contract.
@@ -64,6 +72,10 @@ where
         known: &str,
         target: &LearningTarget,
     ) -> Result<Understood> {
+        let words = raw.word_count();
+        if words > MAX_INTAKE_WORDS {
+            return Err(IntakeTooLarge::new(words).into());
+        }
         let detected = match target {
             LearningTarget::Detect => ScriptDetection.detect(raw.text(), &catalog())?,
             LearningTarget::Explicit(code) => LearningGuess::new(code.to_string(), true),
@@ -94,8 +106,7 @@ where
             }
         }
         if !misses.is_empty() {
-            let (returned, candidates) =
-                self.missing(&cache, scope, raw, entries.as_slice(), misses)?;
+            let (returned, candidates) = self.missing(&cache, scope, misses)?;
             guess = Some(returned);
             for (index, candidate) in candidates {
                 merged[index] = Some(candidate);
@@ -128,61 +139,85 @@ impl<T> CachedUnderstanding<T> {
         &self,
         cache: &Cache,
         scope: UnderstandingScope<'_>,
-        raw: &RawInputBatch,
-        entries: &[String],
         misses: Vec<EntryMiss>,
     ) -> Result<(LearningGuess, Vec<(usize, WordCandidate)>)>
     where
         T: Understanding,
     {
-        let missing_raw = RawInputBatch::new(
-            misses
+        let unique = deduplicated(&misses);
+        let mut guess: Option<LearningGuess> = None;
+        let mut resolved: Vec<(usize, WordCandidate)> = Vec::new();
+        for chunk in unique.chunks(INTAKE_CHUNK_WORDS) {
+            let understood = self.chunk_understood(scope, chunk)?;
+            guess = guess.or_else(|| Some(understood.guess().clone()));
+            for ((entry, rows), candidate) in chunk.iter().zip(understood.candidates()) {
+                let filename = self.entry_filename(entry, scope.known, scope.identity);
+                write_json(
+                    cache,
+                    filename.as_str(),
+                    &EntryRecord::from_candidate(understood.guess(), candidate),
+                )?;
+                for row in rows {
+                    resolved.push((*row, candidate.clone()));
+                }
+            }
+        }
+        let guess = guess
+            .ok_or_else(|| anyhow!("understanding pass returned no language for the batch"))?;
+        Ok((guess, resolved))
+    }
+
+    /// Ask one bounded chunk, retrying that chunk alone when the reply carries
+    /// the wrong number of rows. A short reply is the signature of a truncated
+    /// response, so the retry stays chunk-scoped and never grows the request.
+    fn chunk_understood(
+        &self,
+        scope: UnderstandingScope<'_>,
+        chunk: &[(String, Vec<usize>)],
+    ) -> Result<Understood>
+    where
+        T: Understanding,
+    {
+        let raw = RawInputBatch::new(
+            chunk
                 .iter()
-                .map(EntryMiss::entry)
+                .map(|(entry, _)| entry.as_str())
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
-        let understood = self
-            .inner
-            .understand(&missing_raw, scope.known, scope.target)?;
+        let understood = self.inner.understand(&raw, scope.known, scope.target)?;
         enforce_target(&understood, scope.target)?;
-        if understood.candidates().len() != misses.len() {
-            let full = self.inner.understand(raw, scope.known, scope.target)?;
-            enforce_target(&full, scope.target)?;
-            self.store_entries(cache, scope, entries, &full)?;
-            return Ok(indexed(full));
+        if understood.candidates().len() == chunk.len() {
+            return Ok(understood);
         }
-        for (miss, candidate) in misses.iter().zip(understood.candidates()) {
-            let filename = self.entry_filename(miss.entry(), scope.known, scope.identity);
-            write_json(
-                cache,
-                filename.as_str(),
-                &EntryRecord::from_candidate(understood.guess(), candidate),
-            )?;
+        let retried = self.inner.understand(&raw, scope.known, scope.target)?;
+        enforce_target(&retried, scope.target)?;
+        if retried.candidates().len() != chunk.len() {
+            return Err(anyhow!(
+                "understanding pass returned {} rows for {} words",
+                retried.candidates().len(),
+                chunk.len()
+            ));
         }
-        Ok(indexed_missing(understood, misses))
+        Ok(retried)
     }
+}
 
-    fn store_entries(
-        &self,
-        cache: &Cache,
-        scope: UnderstandingScope<'_>,
-        entries: &[String],
-        understood: &Understood,
-    ) -> Result<()> {
-        if entries.len() != understood.candidates().len() {
-            return Ok(());
+/// Group repeated vocabulary lines so one line is asked about exactly once.
+///
+/// Entries stay 1:1 with the input rows everywhere else, so the returned rows
+/// carry every position that shares a line and the single answer fans back out
+/// to all of them.
+fn deduplicated(misses: &[EntryMiss]) -> Vec<(String, Vec<usize>)> {
+    let mut unique: Vec<(String, Vec<usize>)> = Vec::new();
+    for miss in misses {
+        if let Some(slot) = unique.iter_mut().find(|(entry, _)| entry == miss.entry()) {
+            slot.1.push(miss.index());
+        } else {
+            unique.push((miss.entry().to_string(), vec![miss.index()]));
         }
-        for (entry, candidate) in entries.iter().zip(understood.candidates()) {
-            let filename = self.entry_filename(entry, scope.known, scope.identity);
-            write_json(
-                cache,
-                filename.as_str(),
-                &EntryRecord::from_candidate(understood.guess(), candidate),
-            )?;
-        }
-        Ok(())
     }
+    unique
 }
 
 fn enforce_target(understood: &Understood, target: &LearningTarget) -> Result<()> {
@@ -307,6 +342,10 @@ impl EntryMiss {
 
     fn entry(&self) -> &str {
         self.entry.as_str()
+    }
+
+    fn index(&self) -> usize {
+        self.index
     }
 }
 
@@ -550,36 +589,7 @@ fn commit_replacement(cache: &Cache, staged: &std::path::Path, filename: &str) -
 }
 
 fn normalized_entries(raw: &RawInputBatch) -> Vec<String> {
-    raw.text()
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(String::from)
-        .collect()
-}
-
-fn indexed(understood: Understood) -> (LearningGuess, Vec<(usize, WordCandidate)>) {
-    let guess = understood.guess().clone();
-    let candidates = understood
-        .candidates()
-        .iter()
-        .cloned()
-        .enumerate()
-        .collect();
-    (guess, candidates)
-}
-
-fn indexed_missing(
-    understood: Understood,
-    misses: Vec<EntryMiss>,
-) -> (LearningGuess, Vec<(usize, WordCandidate)>) {
-    let guess = understood.guess().clone();
-    let candidates = misses
-        .into_iter()
-        .zip(understood.candidates().iter().cloned())
-        .map(|(miss, candidate)| (miss.index, candidate))
-        .collect();
-    (guess, candidates)
+    raw.lines().map(String::from).collect()
 }
 
 #[cfg(test)]
@@ -664,6 +674,189 @@ mod tests {
             "A common concrete noun",
             sentence,
         )
+    }
+
+    /// A pass that records every batch it is handed and can fail on demand.
+    struct RecordingUnderstanding {
+        seen: Rc<RefCell<Vec<Vec<String>>>>,
+        fail_from: usize,
+    }
+
+    impl RecordingUnderstanding {
+        fn new(seen: Rc<RefCell<Vec<Vec<String>>>>, fail_from: usize) -> Self {
+            Self { seen, fail_from }
+        }
+    }
+
+    impl Understanding for RecordingUnderstanding {
+        fn understand(
+            &self,
+            raw: &RawInputBatch,
+            _known: &str,
+            _target: &LearningTarget,
+        ) -> Result<Understood> {
+            let entries = normalized_entries(raw);
+            self.seen.borrow_mut().push(entries.clone());
+            if self.seen.borrow().len() > self.fail_from {
+                return Err(anyhow!("understanding pass refused this chunk"));
+            }
+            let candidates = entries
+                .into_iter()
+                .map(|entry| WordCandidate::new(entry, "a meaning", true))
+                .collect();
+            Ok(Understood::new(LearningGuess::new("EN", true), candidates))
+        }
+    }
+
+    /// A pass whose first reply is one row short, then answers in full.
+    struct ShortOnceUnderstanding {
+        seen: Rc<RefCell<Vec<Vec<String>>>>,
+    }
+
+    impl ShortOnceUnderstanding {
+        fn new(seen: Rc<RefCell<Vec<Vec<String>>>>) -> Self {
+            Self { seen }
+        }
+    }
+
+    impl Understanding for ShortOnceUnderstanding {
+        fn understand(
+            &self,
+            raw: &RawInputBatch,
+            _known: &str,
+            _target: &LearningTarget,
+        ) -> Result<Understood> {
+            let entries = normalized_entries(raw);
+            self.seen.borrow_mut().push(entries.clone());
+            let first = self.seen.borrow().len() == 1;
+            let kept = if first {
+                entries.len().saturating_sub(1)
+            } else {
+                entries.len()
+            };
+            let candidates = entries
+                .into_iter()
+                .take(kept)
+                .map(|entry| WordCandidate::new(entry, "a meaning", true))
+                .collect();
+            Ok(Understood::new(LearningGuess::new("EN", true), candidates))
+        }
+    }
+
+    fn blob(count: usize) -> String {
+        (0..count)
+            .map(|index| format!("word-{index:03}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn an_oversized_batch_is_refused_before_the_understanding_pass_runs() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            RecordingUnderstanding::new(seen.clone(), usize::MAX),
+            directory.path(),
+        );
+        let refused = cache.understand(
+            &RawInputBatch::new(blob(MAX_INTAKE_WORDS + 1)),
+            "ru",
+            &LearningTarget::Detect,
+        );
+        let files = std::fs::read_dir(directory.path())
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(
+            (refused.is_err(), seen.borrow().len(), files),
+            (true, 0, 0),
+            "an oversized batch still reached the provider or touched the cache"
+        );
+    }
+
+    #[test]
+    fn a_batch_larger_than_one_chunk_is_asked_in_bounded_requests() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            RecordingUnderstanding::new(seen.clone(), usize::MAX),
+            directory.path(),
+        );
+        cache
+            .understand(&RawInputBatch::new(blob(45)), "ru", &LearningTarget::Detect)
+            .expect("a full batch must be understood");
+        let requests = seen.borrow();
+        assert_eq!(
+            (
+                requests.len(),
+                requests.iter().map(Vec::len).max(),
+                requests.iter().map(Vec::len).sum::<usize>()
+            ),
+            (3, Some(INTAKE_CHUNK_WORDS), 45),
+            "the batch was not split into bounded intake requests"
+        );
+    }
+
+    #[test]
+    fn a_failing_chunk_keeps_the_entries_earlier_chunks_produced() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            RecordingUnderstanding::new(seen.clone(), 1),
+            directory.path(),
+        );
+        let refused =
+            cache.understand(&RawInputBatch::new(blob(40)), "ru", &LearningTarget::Detect);
+        let stored = std::fs::read_dir(directory.path().join("understanding/RU-EN"))
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(
+            (refused.is_err(), stored),
+            (true, INTAKE_CHUNK_WORDS),
+            "a batch that failed part-way threw away the words it had already understood"
+        );
+    }
+
+    #[test]
+    fn duplicate_lines_are_asked_once_and_fan_out_to_every_row() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            RecordingUnderstanding::new(seen.clone(), usize::MAX),
+            directory.path(),
+        );
+        let understood = cache
+            .understand(
+                &RawInputBatch::new("alpha\nbeta\nalpha"),
+                "ru",
+                &LearningTarget::Detect,
+            )
+            .expect("a batch with a repeated line must be understood");
+        assert_eq!(
+            (
+                seen.borrow().len(),
+                seen.borrow().first().map(Vec::len),
+                understood.candidates().len()
+            ),
+            (1, Some(2), 3),
+            "a repeated line was asked about twice or lost its answer"
+        );
+    }
+
+    #[test]
+    fn a_short_chunk_reply_re_asks_only_that_chunk() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache =
+            CachedUnderstanding::new(ShortOnceUnderstanding::new(seen.clone()), directory.path());
+        cache
+            .understand(&RawInputBatch::new(blob(25)), "ru", &LearningTarget::Detect)
+            .expect("a short first reply must be retried and then succeed");
+        let requests = seen.borrow();
+        assert_eq!(
+            (requests.len(), requests.iter().map(Vec::len).max()),
+            (3, Some(INTAKE_CHUNK_WORDS)),
+            "a short reply re-asked more than the chunk that came back short"
+        );
     }
 
     #[test]

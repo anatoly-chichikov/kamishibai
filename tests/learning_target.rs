@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use kamishibai::session::MAX_INTAKE_WORDS;
+
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -279,5 +281,46 @@ fn omitted_learning_keeps_autodetection() {
         ),
         (true, 1, Some("EN"), true),
         "omitting --learning no longer uses the existing autodetection contract"
+    );
+}
+
+/// An oversized word list fails before credentials, network, cache, or sessions.
+#[test]
+fn an_oversized_word_list_fails_before_any_external_or_persistent_work() {
+    let data = TempDir::new().expect("data tempdir must be created");
+    let cache = TempDir::new().expect("cache tempdir must be created");
+    let out = TempDir::new().expect("output tempdir must be created");
+    let (gemini, calls, _) = gemini("FR");
+    let mut command = cli(data.path(), cache.path(), gemini.as_str());
+    command.env_remove("GEMINI_API_KEY").arg("new");
+    for index in 0..=MAX_INTAKE_WORDS {
+        command.args(["--word", &format!("word-{index:03}")]);
+    }
+    let output = command
+        .args([
+            "--known",
+            "RU",
+            "--out",
+            out.path().to_str().expect("output path must be UTF-8"),
+            "--json",
+        ])
+        .output()
+        .expect("oversized new command must run");
+    let document: Value =
+        serde_json::from_slice(output.stdout.as_slice()).expect("stdout must be JSON");
+    assert_eq!(
+        (
+            output.status.code(),
+            document["error"]["code"].as_str(),
+            document["error"]["exit"].as_u64(),
+            document["error"]["hint"]
+                .as_str()
+                .is_some_and(|hint| hint.contains(&MAX_INTAKE_WORDS.to_string())),
+            calls.load(Ordering::SeqCst),
+            empty(data.path()),
+            empty(cache.path()),
+        ),
+        (Some(2), Some("usage"), Some(2), true, 0, true, true),
+        "an oversized word list reached credentials, Gemini, the cache, or session creation"
     );
 }

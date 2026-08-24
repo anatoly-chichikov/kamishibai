@@ -29,9 +29,10 @@ use crate::runtime::locations::SystemContext;
 use crate::session::{CardDraft, LanguagePair};
 use crate::tui::{
     App, AppEvent, KeySource, ModalKind, MousePointer, Screen, Side, WelcomeFocus, WelcomeStage,
-    draw, language_chip_at, link_at, mouse_pointer_at, picker_geometry, reset_mouse_pointer,
-    review_event_at, scroll_body_width, scroll_viewport, sentence_label_event_at, to_app,
-    welcome_control_at, welcome_language_at, welcome_language_step, write_mouse_pointer,
+    draw, language_chip_at, latin_key, link_at, mouse_pointer_at, picker_geometry,
+    reset_mouse_pointer, review_event_at, scroll_body_width, scroll_viewport,
+    sentence_label_event_at, to_app, welcome_control_at, welcome_language_at,
+    welcome_language_step, write_mouse_pointer,
 };
 
 const POINTER_REFRESH: Duration = Duration::from_millis(50);
@@ -174,6 +175,7 @@ where
         let rect = terminal_rect(terminal)?;
         let (viewport, body_width) = scroll_frame(shell.app(), rect);
         dirty |= shell.reclamp_scroll(viewport, body_width);
+        dirty |= shell.follow_running_card(viewport, body_width);
         if dirty {
             terminal.draw(|frame| draw(frame, shell.app()))?;
             write_pointer_at(terminal, shell.app(), rect, mouse_position);
@@ -196,14 +198,21 @@ where
                     let delta = match key.code {
                         KeyCode::PageUp => Some(-page),
                         KeyCode::PageDown => Some(page),
-                        KeyCode::Char('n' | 'N')
-                            if key.modifiers.contains(KeyModifiers::CONTROL)
+                        // Done is the one screen whose body scrolls but holds
+                        // no cursor to walk, so the arrows have nothing else to
+                        // mean there and would otherwise do nothing at all.
+                        KeyCode::Up if shell.app().screen() == Screen::Done => Some(-1),
+                        KeyCode::Down if shell.app().screen() == Screen::Done => Some(1),
+                        KeyCode::Char(symbol)
+                            if latin_key(symbol) == 'n'
+                                && key.modifiers.contains(KeyModifiers::CONTROL)
                                 && scroll_hotkey_screen(shell.app().screen()) =>
                         {
                             Some(1)
                         }
-                        KeyCode::Char('p' | 'P')
-                            if key.modifiers.contains(KeyModifiers::CONTROL)
+                        KeyCode::Char(symbol)
+                            if latin_key(symbol) == 'p'
+                                && key.modifiers.contains(KeyModifiers::CONTROL)
                                 && scroll_hotkey_screen(shell.app().screen()) =>
                         {
                             Some(-1)

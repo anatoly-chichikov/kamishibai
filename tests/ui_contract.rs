@@ -169,12 +169,17 @@ fn check_your_words_input_contract(contract: &Contract, errs: &mut Vec<String>) 
             "yw.placeholder does not lock line-delimited input",
         ));
     }
-    let Some(paste) = element_by_id(contract, "yw.footer_paste") else {
-        errs.push(String::from("yw.footer_paste is missing"));
-        return;
-    };
-    if !text_contains(paste, "Cmd+V") || !text_contains(paste, "paste") {
-        errs.push(String::from("yw.footer_paste does not reveal Cmd+V paste"));
+    // No footer hint may name Cmd+V: the app never dispatches on it, a paste
+    // arrives as ordinary characters from the terminal, and the spelling is
+    // macOS-only.
+    let mut pasters = Vec::new();
+    visit_elements(contract, |element| {
+        if text_contains(element, "Cmd+V") {
+            pasters.push(element.id.clone());
+        }
+    });
+    for id in pasters {
+        errs.push(format!("{id:?} advertises a Cmd+V the app never receives"));
     }
     let Some(continue_hint) = element_by_id(contract, "yw.footer_continue") else {
         errs.push(String::from("yw.footer_continue is missing"));
@@ -254,7 +259,7 @@ fn check_batch_sentence_settings_contract(contract: &Contract, errs: &mut Vec<St
         ));
         return;
     };
-    for text in ["Ctrl+G", "pick", "row", "Enter", "Esc", "close"] {
+    for text in ["Ctrl+G", "pick", "nav", "Enter", "Esc", "close"] {
         if !text_contains(editor, text) {
             errs.push(format!(
                 "wu.footer_sentence_settings_editor does not lock {text:?}"

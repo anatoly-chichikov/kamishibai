@@ -70,7 +70,7 @@ pub fn paint_rules(frame: &mut Frame, rects: &ScreenFrame) {
 fn ai_disclaimer() -> Paragraph<'static> {
     Paragraph::new(AI_DISCLAIMER)
         .alignment(Alignment::Right)
-        .style(palette::dim2())
+        .style(palette::Ink::Aside.on(false))
 }
 
 fn disclaimer_rect(area: Rect) -> Rect {
@@ -181,13 +181,10 @@ pub fn header(
     }
     let gap = width.saturating_sub(used);
     let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::styled(
-        title_block,
-        palette::invert().add_modifier(Modifier::BOLD),
-    ));
+    spans.push(Span::styled(title_block, palette::invert()));
     if !hint.is_empty() {
         spans.push(Span::styled(" ".repeat(hint_lead), palette::base()));
-        spans.push(Span::styled(hint, palette::dim()));
+        spans.push(Span::styled(hint, palette::Ink::Detail.on(false)));
     }
     spans.push(Span::styled(" ".repeat(gap), palette::base()));
     if !chip.is_empty() {
@@ -224,16 +221,20 @@ fn take_chars(text: &str, limit: usize) -> String {
     split_display_prefix(text, limit).0.to_string()
 }
 
-/// Build the language chip — bold bright `support → target`.
+/// Build the language chip — `support → target` in the header's right corner.
 ///
 /// Reading order is `support → target` so the user reads "from your language
-/// into the language i'm learning". The whole chip — both languages and the
-/// arrow between them — is rendered in bold bright `palette::base()`,
-/// matching the title block on the opposite side of the header.
+/// into the language i'm learning", and an unconfirmed target reads `?` until
+/// the understanding pass names it. The whole chip — both codes and the arrow
+/// between them — is bold bright `palette::base()`, matching the inverted title
+/// block on the opposite side of the header: the header is chrome standing
+/// outside the row grammar, which is why weight is free to mark it. It carries
+/// no underline, because the hand pointer and the click both come from the
+/// chip's geometry in `links::language_chip_at`, not from the modifier.
 pub fn language_chip(app: &App) -> Vec<Span<'static>> {
     let known = app.pair().known().to_uppercase();
     let learning_text = if app.learning_pending() {
-        String::from("…")
+        String::from("?")
     } else {
         app.pair().learning().to_uppercase()
     };
@@ -245,24 +246,51 @@ pub fn language_chip(app: &App) -> Vec<Span<'static>> {
     ]
 }
 
-/// Color weight of a footer key hint. This only paints the hint; how soon a
-/// hint is shed on a narrow bar is decided by `FooterHint::keep`, not by tier.
+/// Rank of a footer key hint — key and label share one ink, so the three tiers
+/// read as three steps of brightness rather than as three weights. This only
+/// paints the hint; how soon a hint is shed on a narrow bar is decided by
+/// `FooterHint::keep`, not by tier.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
-    /// The one action that advances the screen — brightest.
+    /// An action that takes the work forward — `Ink::Subject`. The screen's
+    /// spine (`Ctrl+G`) always wears it, and so does the door into whatever
+    /// the cursor is standing on, because walking in is how the user acts on
+    /// a row at all.
     Primary,
-    /// A useful but non-advancing action — bold key, dim label.
+    /// A useful but non-advancing action — `Ink::Detail`.
     Secondary,
-    /// Conventional or omnipresent keys (navigation, quit) — fully dim.
+    /// Conventional or omnipresent keys (navigation, quit) — `Ink::Aside`.
     Ghost,
+}
+
+/// How long a hint survives while the bar narrows.
+///
+/// Rank is not brightness — a quiet hint can outlive a loud one — so the two
+/// axes are named separately and the whole ladder is written here once. Read
+/// bottom to top it says: the exit outlives every action of the screen and
+/// yields only to the one action that advances it, and to a confirmation the
+/// user has already armed.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Keep {
+    /// Conventional keys and discovery affordances — shed first.
+    Optional,
+    /// Something this screen offers to do.
+    Useful,
+    /// The universal way out. `Ctrl+C` holds this rank alone, which is what
+    /// keeps it from ever tying with a screen action and losing the tie-break.
+    Exit,
+    /// The main action of the current sub-state.
+    Main,
+    /// A destructive confirmation the user has already armed.
+    Confirm,
 }
 
 /// Blank gap between status-bar segments and footer hints — two spaces, no
 /// glyph. The bar carries no punctuation between items.
 const SEPARATOR: &str = "  ";
 
-/// One `[KEY] label` footer hint: its text, its color `tier`, and `keep` — how
-/// long it survives when the bar is too narrow (higher is dropped later).
+/// One `[KEY] label` footer hint: its text, its colour `tier`, and its `keep`
+/// rank — how long it survives when the bar is too narrow.
 ///
 /// Built through `primary` / `secondary` / `ghost`; the status-bar renderer in
 /// this module reads the fields directly to paint the hint and to pick the
@@ -271,32 +299,57 @@ pub struct FooterHint {
     key: String,
     label: String,
     tier: Tier,
-    keep: u8,
+    keep: Keep,
+    armed: bool,
 }
 
 impl FooterHint {
     /// The screen's main action — bright label; kept the longest and shed only
     /// when even it cannot fit beside the status.
     pub fn primary(key: &str, label: &str) -> Self {
-        Self::with(key, label, Tier::Primary, 3)
+        Self::with(key, label, Tier::Primary, Keep::Main)
     }
 
-    /// A secondary action — bold key, dim label, dropped before the quit hint.
+    /// A secondary action — one step quieter, dropped before the quit hint.
     pub fn secondary(key: &str, label: &str) -> Self {
-        Self::with(key, label, Tier::Secondary, 1)
+        Self::with(key, label, Tier::Secondary, Keep::Useful)
     }
 
-    /// A conventional or omnipresent key — fully dim, the first to be dropped.
+    /// A conventional or omnipresent key — quietest, the first to be dropped.
     pub fn ghost(key: &str, label: &str) -> Self {
-        Self::with(key, label, Tier::Ghost, 0)
+        Self::with(key, label, Tier::Ghost, Keep::Optional)
     }
 
-    fn with(key: &str, label: &str, tier: Tier, keep: u8) -> Self {
+    /// The door into the focused row — a disclosure that opens, or the walk
+    /// into an inline editor. Painted as bright as the screen's spine, since
+    /// stepping inside is the action the focused row offers, but ranked as
+    /// one of the screen's own offers: it is shed before the way out.
+    pub fn door(key: &str, label: &str) -> Self {
+        Self::with(key, label, Tier::Primary, Keep::Useful)
+    }
+
+    fn with(key: &str, label: &str, tier: Tier, keep: Keep) -> Self {
         Self {
             key: String::from(key),
             label: String::from(label),
             tier,
             keep,
+            armed: false,
+        }
+    }
+
+    /// A destructive gesture whose first beat has already been taken, so the
+    /// next press of that key goes through.
+    ///
+    /// It is the one hint drawn with weight. Everywhere else bold marks what
+    /// the keyboard owns, and for the length of the confirmation window that
+    /// is exactly what this key is: nothing else can answer until it fires or
+    /// times out, and the bar has to say so loudly enough to stop a hand
+    /// already moving.
+    fn armed(key: &str, label: &str, keep: Keep) -> Self {
+        Self {
+            armed: true,
+            ..Self::with(key, label, Tier::Primary, keep)
         }
     }
 
@@ -307,17 +360,19 @@ impl FooterHint {
     /// Paint the hint as `[KEY] label` spans, colored by its tier. Used by the
     /// status bar and by modal action rows so every hint stays in lock-step.
     pub fn spans(&self) -> Vec<Span<'static>> {
-        let (key_style, label_style) = match self.tier {
-            Tier::Primary => (
-                palette::base().add_modifier(Modifier::BOLD),
-                palette::base(),
-            ),
-            Tier::Secondary => (palette::base().add_modifier(Modifier::BOLD), palette::dim()),
-            Tier::Ghost => (palette::dim2(), palette::dim2()),
+        let style = match self.tier {
+            Tier::Primary => palette::Ink::Subject.on(false),
+            Tier::Secondary => palette::Ink::Detail.on(false),
+            Tier::Ghost => palette::Ink::Aside.on(false),
+        };
+        let style = if self.armed {
+            style.add_modifier(Modifier::BOLD)
+        } else {
+            style
         };
         vec![
-            Span::styled(format!("[{}]", self.key), key_style),
-            Span::styled(format!(" {}", self.label), label_style),
+            Span::styled(format!("[{}]", self.key), style),
+            Span::styled(format!(" {}", self.label), style),
         ]
     }
 }
@@ -423,32 +478,42 @@ pub fn status_sep() -> Span<'static> {
 
 /// The global Ctrl+C quit hint — normally the rightmost item in a footer.
 ///
-/// A dim `Ghost`; once the first Ctrl+C has been seen it brightens and its
-/// label switches from `quit` to `again` to signal the next press will exit.
-/// It outlives the secondary actions on a narrow line but is dropped — never
-/// clipped — before the bar would overflow.
+/// A dim `Ghost`; once the first Ctrl+C has been seen it goes bright and bold
+/// and its label switches from `quit` to `again`, the same two beats every
+/// destructive Escape takes, so an armed key looks the same whichever one it
+/// is.
+/// It is the sole holder of `Keep::Exit`, so it outlives every action a screen
+/// offers and yields only to that screen's primary — but it is still dropped
+/// whole, never clipped, on a bar too narrow even for that.
 pub fn quit_hint(pending: bool) -> FooterHint {
     if pending {
-        FooterHint::with("Ctrl+C", "again", Tier::Secondary, 2)
+        FooterHint::armed("Ctrl+C", "again", Keep::Exit)
     } else {
-        FooterHint::with("Ctrl+C", "quit", Tier::Ghost, 2)
+        FooterHint::with("Ctrl+C", "quit", Tier::Ghost, Keep::Exit)
     }
 }
 
-/// The review-screen back action, retained alongside quit on a crowded footer.
+/// The review-screen back action — the one Escape in the app that breaks
+/// nothing, so it is also the cheapest hint on the bar.
+///
+/// Every other Escape names a consequence (`clear`, `stop`, `new cards`) and
+/// is ranked to survive the conventional keys beside it. This one only walks
+/// back to words that are still there, so it is drawn quiet, sits immediately
+/// before the way out, and is the first thing a narrowing bar sheds.
 pub fn back_hint() -> FooterHint {
-    FooterHint::with("Esc", "back", Tier::Secondary, 2)
+    FooterHint::with("Esc", "back", Tier::Ghost, Keep::Optional)
 }
 
-/// The review-screen generation-guidance action, retained on a crowded footer.
+/// The review-screen generation-guidance action — the door out of the top of
+/// the list, advertised only while the walk actually stands there.
 pub fn sentence_settings_hint() -> FooterHint {
-    FooterHint::with("↑", "guidance", Tier::Secondary, 2)
+    FooterHint::door("↑", "guidance")
 }
 
-/// The nonempty words action, painted quietly but retained ahead of language
-/// selection when the footer is crowded.
+/// The nonempty words action, painted quietly but ranked as the screen action
+/// it is, so it outlives the conventional keys beside it.
 pub fn clear_words_hint() -> FooterHint {
-    FooterHint::with("Esc", "clear", Tier::Ghost, 1)
+    FooterHint::with("Esc", "clear", Tier::Ghost, Keep::Useful)
 }
 
 /// The finished-screen Escape action and its armed confirmation state.
@@ -456,13 +521,38 @@ pub fn new_batch_hint(pending: bool) -> FooterHint {
     if pending {
         escape_again_hint()
     } else {
-        FooterHint::with("Esc", "new cards", Tier::Ghost, 2)
+        FooterHint::with("Esc", "new cards", Tier::Ghost, Keep::Useful)
     }
+}
+
+/// The live-batch Escape action, named before it is armed.
+///
+/// Every destructive Escape in the app follows the same two beats: the first
+/// press names what it will break and arms it, the second confirms. Stopping a
+/// run was the one that skipped the first beat, so `[Esc] again` appeared with
+/// nothing before it to say what "again" would do.
+pub fn stop_generation_hint() -> FooterHint {
+    FooterHint::with("Esc", "stop", Tier::Ghost, Keep::Useful)
 }
 
 /// The high-priority second-Escape confirmation shared by destructive actions.
 pub fn escape_again_hint() -> FooterHint {
-    FooterHint::with("Esc", "again", Tier::Primary, 4)
+    FooterHint::armed("Esc", "again", Keep::Confirm)
+}
+
+/// The whole-screen disclosure sweep, named by the direction it will take.
+///
+/// One gesture, one rank: it reads the same whichever way it points, because
+/// opening the whole screen and closing it again are the same offer seen from
+/// its two ends. Drawn a step below the doors it operates and kept above the
+/// conventional keys, so it stands between them on the bar and on a narrowing
+/// one it outlives them.
+pub fn sweep_hint(open: bool) -> FooterHint {
+    if open {
+        FooterHint::secondary("C", "collapse")
+    } else {
+        FooterHint::secondary("C", "expand")
+    }
 }
 
 /// One and only entry point for drawing a fullscreen screen.
@@ -488,9 +578,61 @@ pub fn render_screen(frame: &mut Frame, area: Rect, app: &App, view: &dyn Screen
         rects.header,
     );
     view.body(frame, rects.body, app);
+    paint_body_rule(frame, area, &rects, view.body_rule(app));
     frame.render_widget(ai_disclaimer(), rects.disclaimer);
     paint_rules(frame, &rects);
-    frame.render_widget(view.footer(app, rects.status.width), rects.status);
+    frame.render_widget(
+        footer_bar(
+            view.status(app),
+            screen_hints(app, view),
+            rects.status.width,
+        ),
+        rects.status,
+    );
+}
+
+/// Draw a screen's own block border across the full terminal width.
+///
+/// The row is body-relative because only the screen knows where its block
+/// ends; the width is the whole terminal because a border is chrome, and the
+/// one already drawn above the footer reaches both edges. Painted after the
+/// body so it overwrites the blank row the block left for it, and skipped
+/// when a short terminal has already pushed that row past the body.
+fn paint_body_rule(frame: &mut Frame, area: Rect, rects: &ScreenFrame, row: Option<u16>) {
+    let Some(row) = row else {
+        return;
+    };
+    if row >= rects.body.height {
+        return;
+    }
+    frame.render_widget(
+        dashed_rule(area.width),
+        Rect {
+            x: area.x,
+            y: rects.body.y.saturating_add(row),
+            width: area.width,
+            height: 1,
+        },
+    );
+}
+
+/// Return the hints the status bar may advertise for the frame being drawn.
+///
+/// A screen answers for its own keyboard, but an overlay drawn on top of it
+/// takes the keyboard away: `transit` swallows every event under a busy
+/// spinner, and the language picker swallows everything its own action row
+/// does not name. Advertising the screen's keys underneath either one is a
+/// bar that contradicts the panel above it, so the overlay states answer here
+/// instead — once, for every screen, where the chrome is already owned.
+///
+/// Quit is the exception the overlays cannot take: `Ctrl+C` is consumed in
+/// the terminal loop before `transit` ever sees it, so it keeps working and
+/// keeps being named.
+fn screen_hints(app: &App, view: &dyn ScreenView) -> Vec<FooterHint> {
+    if app.busy().is_some() || app.modal().is_some() {
+        return vec![quit_hint(app.quit_pending())];
+    }
+    view.hints(app)
 }
 
 /// Clear a rectangle with the terminal-dark background so no stray paper bleeds through.
@@ -533,7 +675,7 @@ pub fn scroll_body_width(terminal_area: Rect) -> u16 {
 }
 
 fn banner_visible(app: &App) -> bool {
-    if !super::banner::has_entries(app) {
+    if !super::banner::reports(app) {
         return false;
     }
     match app.screen() {
@@ -642,18 +784,21 @@ mod tests {
     fn status() -> Vec<Span<'static>> {
         vec![Span::styled(
             String::from("step 2/3  nothing to make"),
-            palette::dim2(),
+            palette::Ink::Aside.on(false),
         )]
     }
 
     fn short_status() -> Vec<Span<'static>> {
-        vec![Span::styled(String::from("step 2/3"), palette::dim2())]
+        vec![Span::styled(
+            String::from("step 2/3"),
+            palette::Ink::Aside.on(false),
+        )]
     }
 
     fn crowded_hints() -> Vec<FooterHint> {
         vec![
             FooterHint::primary("Ctrl+G", "generate"),
-            FooterHint::secondary("Enter/→", "toggle"),
+            FooterHint::secondary("Enter", "toggle"),
             FooterHint::secondary("D", "drop"),
             FooterHint::ghost("↑↓", "nav"),
             quit_hint(false),
@@ -679,6 +824,97 @@ mod tests {
         assert!(
             !line.contains("↑↓"),
             "ghost nav must be shed before a secondary when the footer is too narrow, got: {line}"
+        );
+    }
+
+    #[test]
+    fn the_sweep_survives_the_conventional_keys_it_used_to_die_beside() {
+        let hints = vec![
+            FooterHint::primary("Ctrl+G", "generate"),
+            FooterHint::ghost("↑↓", "nav"),
+            sweep_hint(false),
+            FooterHint::ghost("Ctrl+L", "languages"),
+            quit_hint(false),
+        ];
+        let line = joined(&footer_spans(status(), hints, 74));
+        assert!(
+            line.contains("expand") && !line.contains("nav"),
+            "the one gesture that opens the whole screen must outlive the keys nobody needs told, got: {line}"
+        );
+    }
+
+    #[test]
+    fn an_armed_confirmation_is_the_one_hint_the_bar_draws_with_weight() {
+        let armed = [escape_again_hint(), quit_hint(true)].map(|hint| {
+            let spans = hint.spans();
+            (
+                spans[0].style.fg,
+                spans[0].style.add_modifier | spans[1].style.add_modifier,
+            )
+        });
+        assert_eq!(
+            armed,
+            [
+                (Some(palette::FG), Modifier::BOLD),
+                (Some(palette::FG), Modifier::BOLD),
+            ],
+            "a gesture whose next press goes through must be bright and bold whichever key holds it"
+        );
+    }
+
+    #[test]
+    fn a_door_is_painted_like_the_spine_it_stands_beside() {
+        let door = FooterHint::door("Enter/→", "open").spans();
+        let spine = FooterHint::primary("Ctrl+G", "generate").spans();
+        assert_eq!(
+            (door[0].style, door[1].style),
+            (spine[0].style, spine[1].style),
+            "walking into the focused row must read as brightly as the key that builds the batch"
+        );
+    }
+
+    #[test]
+    fn a_door_is_still_shed_before_the_way_out() {
+        let hints = vec![
+            FooterHint::primary("Ctrl+G", "generate"),
+            FooterHint::door("Enter/→", "open"),
+            quit_hint(false),
+        ];
+        let line = joined(&footer_spans(status(), hints, 60));
+        assert!(
+            line.contains("Ctrl+C") && !line.contains("open"),
+            "a bright door must not outrank the one key that leaves, got: {line}"
+        );
+    }
+
+    #[test]
+    fn the_way_back_is_the_first_hint_a_narrowing_bar_sheds() {
+        let hints = vec![
+            FooterHint::primary("Ctrl+G", "generate"),
+            sweep_hint(false),
+            FooterHint::ghost("↑↓", "nav"),
+            back_hint(),
+            quit_hint(false),
+        ];
+        let line = joined(&footer_spans(status(), hints, 86));
+        assert!(
+            !line.contains("back") && line.contains("nav"),
+            "the Escape that breaks nothing must go before the keys that move, got: {line}"
+        );
+    }
+
+    #[test]
+    fn the_exit_outlives_the_screen_actions_that_used_to_tie_with_it() {
+        let hints = vec![
+            FooterHint::primary("Ctrl+G", "generate"),
+            sentence_settings_hint(),
+            back_hint(),
+            quit_hint(false),
+        ];
+        let line = joined(&footer_spans(status(), hints, 62));
+        assert!(
+            line.contains("Ctrl+C") && !line.contains("guidance"),
+            "a niche affordance must never outlive the one key that leaves, got: {line}"
         );
     }
 
@@ -714,7 +950,7 @@ mod tests {
         let hints = vec![
             new_batch_hint(true),
             FooterHint::primary("Ctrl+G", "regenerate"),
-            FooterHint::secondary("Enter/→", "tune"),
+            FooterHint::secondary("Enter", "tune"),
             FooterHint::ghost("↑↓", "nav"),
             quit_hint(false),
         ];
@@ -722,6 +958,32 @@ mod tests {
         assert!(
             line.contains("[Esc] again") && !line.contains("Ctrl+G"),
             "a cramped footer hid the armed Escape confirmation behind a regular action: {line}"
+        );
+    }
+
+    #[test]
+    fn the_three_footer_tiers_separate_by_ink_and_never_by_weight() {
+        let inks = [
+            FooterHint::primary("Ctrl+G", "generate"),
+            FooterHint::secondary("Enter", "tune"),
+            FooterHint::ghost("↑↓", "nav"),
+        ]
+        .map(|hint| {
+            let spans = hint.spans();
+            (
+                spans[0].style.fg,
+                spans[1].style.fg,
+                spans[0].style.add_modifier | spans[1].style.add_modifier,
+            )
+        });
+        assert_eq!(
+            inks,
+            [
+                (Some(palette::FG), Some(palette::FG), Modifier::empty()),
+                (Some(palette::DIM), Some(palette::DIM), Modifier::empty()),
+                (Some(palette::DIM2), Some(palette::DIM2), Modifier::empty()),
+            ],
+            "footer tiers must read as three steps of brightness, not as three weights"
         );
     }
 
@@ -744,7 +1006,7 @@ mod tests {
         let plain_spans = plain.spans();
         assert!(
             clear.tier == Tier::Ghost
-                && clear.keep == 1
+                && clear.keep > plain.keep
                 && clear_spans[0].style == plain_spans[0].style
                 && clear_spans[1].style == plain_spans[1].style,
             "words clear must stay visually quiet while surviving before ordinary ghost hints"

@@ -238,7 +238,7 @@ fn choice_regions(
 }
 
 #[test]
-fn both_r_keys_are_inert_while_sentence_tags_and_space_open_the_live_editor() {
+fn both_r_keys_are_inert_while_space_opens_the_card_and_a_tag_opens_the_live_editor() {
     let collapsed = seeded(card());
     let (lowercase, lowercase_side) = transit(collapsed.clone(), AppEvent::KeyChar('r'));
     let (uppercase, uppercase_side) = transit(collapsed.clone(), AppEvent::KeyChar('R'));
@@ -249,11 +249,8 @@ fn both_r_keys_are_inert_while_sentence_tags_and_space_open_the_live_editor() {
     )
     .0;
     let rendered = flat(&opened);
-    let ctrl = rendered
-        .find("[Ctrl+G] regenerate")
-        .expect("editor footer must show regeneration");
     let arrows = rendered
-        .find("[← →] pick")
+        .find("[←→] pick")
         .expect("editor footer must show chip navigation");
     assert!(
         lowercase.sentence_editor().is_none()
@@ -261,9 +258,7 @@ fn both_r_keys_are_inert_while_sentence_tags_and_space_open_the_live_editor() {
             && lowercase_side == Side::None
             && uppercase_side == Side::None
             && spaced.card_expanded()
-            && spaced
-                .sentence_editor()
-                .is_some_and(|editor| editor.row() == LabelEditorRow::Register)
+            && spaced.sentence_editor().is_none()
             && opened.card_expanded()
             && opened
                 .sentence_editor()
@@ -286,13 +281,28 @@ fn both_r_keys_are_inert_while_sentence_tags_and_space_open_the_live_editor() {
             && !rendered.contains("question")
             && !rendered.contains("dialogue")
             && rendered.contains("say what should change")
-            && rendered.contains("[← →] pick")
-            && rendered.contains("[↑ ↓] row")
-            && rendered.contains("[Ctrl+G] regenerate")
-            && rendered.contains("[Enter/Esc] close")
+            && rendered.contains("[←→] pick")
+            && rendered.contains("[↑↓] nav")
+            && !rendered.contains("[Ctrl+G] regenerate")
+            && rendered.contains("[Esc] close")
             && !rendered.contains("[R] change")
-            && ctrl < arrows,
-        "r/R emitted an action, opened the editor, or sentence tags, Space, and the live editor footer drifted apart: {rendered}"
+            && arrows < rendered.find("[↑↓] nav").unwrap_or(usize::MAX),
+        "r/R emitted an action, Space fell into the editor, or the tag hit and live editor footer drifted apart: {rendered}"
+    );
+}
+
+#[test]
+fn the_editor_offers_regeneration_only_once_a_rewrite_is_staged() {
+    let opened = transit(
+        seeded(card()),
+        AppEvent::SentenceLabelFocus(LabelEditorRow::Register),
+    )
+    .0;
+    let staged = transit(opened.clone(), AppEvent::CursorRight).0;
+    assert!(
+        !flat(&opened).contains("[Ctrl+G] regenerate")
+            && flat(&staged).contains("[Ctrl+G] regenerate"),
+        "an untouched editor has nothing to re-roll, so the bright key must arrive with the first staged change"
     );
 }
 
@@ -610,7 +620,7 @@ fn both_cells_of_each_direction_chevron_move_its_own_carousel() {
 }
 
 #[test]
-fn chip_and_note_edits_stage_immediately_and_escape_collapses_without_rollback() {
+fn chip_and_note_edits_stage_immediately_and_escape_peels_layers_without_rollback() {
     let opened = transit(
         seeded(card()),
         AppEvent::SentenceLabelFocus(LabelEditorRow::Register),
@@ -628,7 +638,8 @@ fn chip_and_note_edits_stage_immediately_and_escape_collapses_without_rollback()
         AppEvent::KeyChar('x'),
     )
     .0;
-    let closed = transit(note.clone(), AppEvent::Cancel).0;
+    let parked = transit(note.clone(), AppEvent::Cancel).0;
+    let closed = transit(parked.clone(), AppEvent::Cancel).0;
     let changed_rewrite = changed.cards()[0]
         .rewrite()
         .expect("chip edit must stage immediately");
@@ -648,6 +659,8 @@ fn chip_and_note_edits_stage_immediately_and_escape_collapses_without_rollback()
             note.cards()[0]
                 .rewrite()
                 .map(kamishibai::session::CardRewrite::note),
+            parked.sentence_editor(),
+            parked.card_expanded(),
             closed.sentence_editor(),
             closed.card_expanded(),
             closed_rewrite.note(),
@@ -661,12 +674,14 @@ fn chip_and_note_edits_stage_immediately_and_escape_collapses_without_rollback()
             vec![SentenceAxis::Register],
             Some("x"),
             None,
+            true,
+            None,
             false,
             "x",
             true,
             true
         ),
-        "live staging lost an edit, invalidated artifacts early, or failed to collapse without rollback"
+        "live staging lost an edit, invalidated artifacts early, or Esc failed to peel the editor then the expansion without rollback"
     );
 }
 
@@ -754,7 +769,11 @@ fn enter_closes_the_editor_and_ctrl_g_requests_all_pending_cards() {
 
 #[test]
 fn repeating_the_active_legacy_chip_restores_the_empty_baseline() {
-    let opened = transit(seeded(legacy_card()), AppEvent::KeyChar(' ')).0;
+    let opened = transit(
+        seeded(legacy_card()),
+        AppEvent::SentenceLabelFocus(LabelEditorRow::Register),
+    )
+    .0;
     let selected = transit(
         opened,
         AppEvent::SentenceLabelChoose(LabelEditorRow::Register, 0),
@@ -782,12 +801,11 @@ fn repeating_the_active_legacy_chip_restores_the_empty_baseline() {
 }
 
 #[test]
-fn collapsed_audio_row_tags_hit_only_their_boxes_not_the_plain_gap_or_artifacts() {
+fn voice_row_tags_hit_only_their_boxes_not_the_labels_or_gaps() {
     let terminal = Rect::new(0, 0, 120, 50);
     let collapsed = seeded(priced_card_for("whilst"));
     let term = cell_of(&collapsed, "whilst", 120, 50);
-    let meta = cell_of(&collapsed, "meta.json", 120, 50);
-    let audio = cell_of(&collapsed, "audio.wav", 120, 50);
+    let scene = cell_of(&collapsed, "scene", 120, 50);
     let register = cell_of(&collapsed, "casual", 120, 50);
     let kind = cell_of(&collapsed, "statement", 120, 50);
     let level = cell_of(&collapsed, "b1", 120, 50);
@@ -795,6 +813,7 @@ fn collapsed_audio_row_tags_hit_only_their_boxes_not_the_plain_gap_or_artifacts(
     let first_gap = (kind.0 - 2, kind.1);
     let second_gap = (level.0 - 2, level.1);
     let status_gap = (register.0 - 2, register.1);
+    let chip_gap = (scene.0 + 7, scene.1);
     let arrow = (
         term.0 + u16::try_from("whilst".chars().count()).expect("term width must fit") + 1,
         term.1,
@@ -825,12 +844,12 @@ fn collapsed_audio_row_tags_hit_only_their_boxes_not_the_plain_gap_or_artifacts(
                 mouse_pointer_at(&collapsed, terminal, status_gap.0, status_gap.1),
             ),
             (
-                sentence_label_event_at(&collapsed, terminal, meta.0, meta.1),
-                mouse_pointer_at(&collapsed, terminal, meta.0, meta.1),
-                sentence_label_event_at(&collapsed, terminal, audio.0, audio.1),
-                mouse_pointer_at(&collapsed, terminal, audio.0, audio.1),
+                sentence_label_event_at(&collapsed, terminal, scene.0, scene.1),
+                mouse_pointer_at(&collapsed, terminal, scene.0, scene.1),
+                sentence_label_event_at(&collapsed, terminal, chip_gap.0, chip_gap.1),
+                mouse_pointer_at(&collapsed, terminal, chip_gap.0, chip_gap.1),
             ),
-            (meta.1, audio.1, register.1, level.1, kind.1),
+            (scene.1, register.1, kind.1, level.1),
         ),
         (
             (
@@ -850,16 +869,16 @@ fn collapsed_audio_row_tags_hit_only_their_boxes_not_the_plain_gap_or_artifacts(
                 MousePointer::Arrow,
             ),
             (None, MousePointer::Arrow, None, MousePointer::Arrow),
-            (None, MousePointer::Hand, None, MousePointer::Hand),
-            (meta.1, meta.1 + 1, audio.1, audio.1, audio.1),
+            (None, MousePointer::Hand, None, MousePointer::Arrow),
+            (term.1 + 1, scene.1 + 1, scene.1 + 1, scene.1 + 1),
         ),
-        "collapsed audio-row tags leaked hits into the status gap, artifact cells, inter-chip gaps, or head"
+        "voice-row tags leaked hits into the status gap, row labels, inter-tag gaps, or head"
     );
 }
 
 #[test]
 fn too_narrow_atomic_tags_keep_the_card_head_as_the_editor_entry() {
-    let terminal = Rect::new(0, 0, 50, 30);
+    let terminal = Rect::new(0, 0, 38, 30);
     let collapsed = seeded(priced_card_for("whilst"));
     let term = cell_of(&collapsed, "whilst", terminal.width, terminal.height);
     assert_eq!(
@@ -877,7 +896,7 @@ fn too_narrow_atomic_tags_keep_the_card_head_as_the_editor_entry() {
 
 #[test]
 fn partial_narrow_card_hides_atomic_tags_and_keeps_the_card_head_entry() {
-    let terminal = Rect::new(0, 0, 60, 30);
+    let terminal = Rect::new(0, 0, 46, 30);
     let collapsed = seeded(partial_card_for("whilst")).cards_running(Some((0, Artifact::Sound)));
     let term = cell_of(&collapsed, "whilst", terminal.width, terminal.height);
     let rendered = flat_at(&collapsed, terminal.width, terminal.height);
@@ -901,15 +920,13 @@ fn partial_narrow_card_hides_atomic_tags_and_keeps_the_card_head_entry() {
 }
 
 #[test]
-fn narrow_layout_keeps_wrapped_sentence_tags_clickable_on_the_three_artifact_rows() {
-    let terminal = Rect::new(0, 0, 60, 30);
+fn narrow_layout_wraps_the_tags_onto_the_manga_row_and_keeps_them_clickable() {
+    let terminal = Rect::new(0, 0, 50, 30);
     let collapsed = seeded(priced_card_for("whilst"));
-    let audio = cell_of(&collapsed, "audio", 60, 30);
-    let scene = cell_of(&collapsed, "scene", 60, 30);
-    let picture = cell_of(&collapsed, "picture", 60, 30);
-    let register = cell_of(&collapsed, "casual", 60, 30);
-    let kind = cell_of(&collapsed, "statement", 60, 30);
-    let level = cell_of(&collapsed, "b1", 60, 30);
+    let scene = cell_of(&collapsed, "scene", 50, 30);
+    let register = cell_of(&collapsed, "casual", 50, 30);
+    let kind = cell_of(&collapsed, "statement", 50, 30);
+    let level = cell_of(&collapsed, "b1", 50, 30);
     let focus = Some(AppEvent::SentenceLabelOpen(0, LabelEditorRow::Register));
     assert_eq!(
         (
@@ -922,7 +939,7 @@ fn narrow_layout_keeps_wrapped_sentence_tags_clickable_on_the_three_artifact_row
             mouse_pointer_at(&collapsed, terminal, kind.0, kind.1),
         ),
         (
-            (audio.1, scene.1, picture.1),
+            (scene.1 + 1, scene.1 + 2, scene.1 + 2),
             focus.clone(),
             MousePointer::Hand,
             focus.clone(),
@@ -930,7 +947,7 @@ fn narrow_layout_keeps_wrapped_sentence_tags_clickable_on_the_three_artifact_row
             focus,
             MousePointer::Hand,
         ),
-        "narrow layout detached wrapped sentence tags from the three plain artifact rows or their hit regions"
+        "narrow layout detached the wrapped tags from the voice and manga rows or their hit regions"
     );
 }
 
@@ -959,23 +976,44 @@ fn clicking_an_unfocused_cards_tags_selects_it_and_opens_its_editor() {
 }
 
 #[test]
-fn expanded_editor_removes_the_collapsed_summary_tag_open_hit() {
+fn an_open_card_removes_the_collapsed_summary_tag_open_hit() {
     let terminal = Rect::new(0, 0, 120, 50);
     let collapsed = seeded(priced_card_for("whilst"));
     let tag = cell_of(&collapsed, "casual", 120, 50);
     let opened = transit(collapsed, AppEvent::KeyEnter).0;
+    let rendered = flat(&opened);
     let event = sentence_label_event_at(&opened, terminal, tag.0, tag.1);
     assert_eq!(
         (
             opened.card_expanded(),
-            opened.sentence_editor().is_some(),
+            rendered
+                .lines()
+                .find(|line| line.contains("voice"))
+                .is_some_and(|line| line.contains("casual")),
             matches!(
                 event,
                 Some(AppEvent::SentenceLabelOpen(_, LabelEditorRow::Register))
             ),
         ),
-        (true, true, false),
-        "expanded editor left a phantom collapsed-summary open hit"
+        (true, false, false),
+        "an open card kept its collapsed summary or a phantom hit where the tags used to be"
+    );
+}
+
+#[test]
+fn clicking_a_chevron_on_an_open_card_opens_its_editor_and_stages_the_move() {
+    let terminal = Rect::new(0, 0, 120, 50);
+    let opened = transit(seeded(card()), AppEvent::KeyEnter).0;
+    let chevron = cell_of(&opened, ">", 120, 50);
+    let event = sentence_label_event_at(&opened, terminal, chevron.0, chevron.1)
+        .expect("the tune rows of an open card must stay clickable");
+    let advanced = transit(opened, event).0;
+    assert!(
+        advanced
+            .sentence_editor()
+            .is_some_and(|editor| editor.row() == LabelEditorRow::Register)
+            && advanced.cards_pending() == 1,
+        "clicking a chevron on an open card failed to hand it the keyboard and stage the move"
     );
 }
 
@@ -1014,7 +1052,11 @@ fn clicking_the_legacy_card_head_opens_its_unattributed_editor() {
 
 #[test]
 fn legacy_editor_keeps_its_questions_visible_around_empty_axes() {
-    let opened = transit(seeded(legacy_card()), AppEvent::KeyChar(' ')).0;
+    let opened = transit(
+        seeded(legacy_card()),
+        AppEvent::SentenceLabelFocus(LabelEditorRow::Register),
+    )
+    .0;
     let rendered = flat(&opened);
     let question = cell_of(&opened, "how should it sound?", 120, 50);
     let backend = TestBackend::new(120, 50);
@@ -1157,7 +1199,8 @@ fn ctrl_g_keeps_multiple_independent_pending_cards_in_one_bulk_request() {
         AppEvent::SentenceLabelChoose(LabelEditorRow::Register, 2),
     )
     .0;
-    let collapsed = transit(first, AppEvent::Cancel).0;
+    let parked = transit(first, AppEvent::Cancel).0;
+    let collapsed = transit(parked, AppEvent::Cancel).0;
     let selected = transit(collapsed, AppEvent::NavNext).0;
     let second = transit(selected, AppEvent::SentenceLabelFocus(LabelEditorRow::Note)).0;
     let second = transit(second, AppEvent::KeyChar('x')).0;
@@ -1208,7 +1251,7 @@ fn an_active_rewrite_cannot_reopen_or_read_as_pending_during_meta_generation() {
                 .rewrite()
                 .map(kamishibai::session::CardRewrite::started),
         ),
-        (Side::None, Side::None, None, false, 0, None, Some(true)),
+        (Side::None, Side::None, None, true, 0, None, Some(true)),
         "active metadata generation reopened the editor or masqueraded as a staged rewrite"
     );
 }

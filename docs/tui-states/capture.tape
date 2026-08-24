@@ -108,7 +108,7 @@ Screenshot "live/09a-level-raised.png"
 
 Wait+Screen /1 pending/
 Ctrl+G
-Wait+Screen@30s /ai is working/
+Wait+Screen@30s /drawing each card/
 Sleep 800ms
 Screenshot "live/09b-card-regenerating.png"
 

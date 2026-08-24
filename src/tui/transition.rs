@@ -1,8 +1,10 @@
 use crate::languages::catalog;
+use crate::session::{MAX_INTAKE_WORDS, MAX_PLAN_CARDS, RawInputBatch};
 
-use super::app::App;
+use super::app::{App, ReviewFocus};
 use super::disclosure::{DisclosureControls, DisclosureIntent};
 use super::event::AppEvent;
+use super::input::latin_key;
 use super::picker::{LanguageChoice, PickerCursor, PickerSection, learning_target};
 use super::screen::{ModalKind, Screen, WelcomeFocus, WelcomeStage};
 use super::sentence_editor::{BatchSettingsRow, LabelEditorRow};
@@ -61,11 +63,8 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
     match (app.screen(), app.modal(), event) {
         (Screen::Welcome, _, e) => welcome(app, e),
         (Screen::YourWords, None, AppEvent::Generate) => {
-            if app
-                .blob()
-                .chars()
-                .any(|character| !character.is_whitespace())
-            {
+            let batch = RawInputBatch::new(app.blob());
+            if batch.has_content() && batch.word_count() <= MAX_INTAKE_WORDS {
                 (app, Side::RunUnderstanding)
             } else {
                 (app, Side::None)
@@ -94,7 +93,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (app.sentence_settings_closed(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsOpen)
-            if app.expanded_sense().is_none() && !app.candidates().is_empty() =>
+            if !app.candidates().is_empty() =>
         {
             (app.sentence_settings_opened(), Side::None)
         }
@@ -156,18 +155,31 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         {
             (app, Side::None)
         }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('c' | 'C'))
+            if !app.candidates().is_empty() =>
+        {
+            if app.any_sense_list_open() || app.sentence_settings_editor().is_some() {
+                (
+                    app.sentence_settings_closed().sense_lists_collapsed(),
+                    Side::None,
+                )
+            } else {
+                (app.sense_lists_expanded_all(), Side::None)
+            }
+        }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar(_))
             if app.sentence_settings_editor().is_some() =>
         {
             (app, Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::KeyChar('s' | 'S'))
-            if app.expanded_sense().is_none() && !app.candidates().is_empty() =>
+            if matches!(app.review_focus(), ReviewFocus::Head(_))
+                && !app.candidates().is_empty() =>
         {
             (app.sentence_settings_opened(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::Cancel) if app.expanded_sense().is_some() => {
-            (app.senses_cancelled(), Side::None)
+        (Screen::WhatIUnderstood, None, AppEvent::Cancel) if app.focused_sense_list_open() => {
+            (app.sense_list_closed(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::Cancel) => {
             let choice = LanguageChoice::new(app.pair().known().to_string(), learning_target(None));
@@ -177,42 +189,36 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 Side::None,
             )
         }
-        (Screen::WhatIUnderstood, None, event)
-            if matches!(sense_controls(&app).intent(&event), DisclosureIntent::Close) =>
+        (Screen::WhatIUnderstood, None, AppEvent::KeyEnter)
+            if matches!(app.review_focus(), ReviewFocus::Sense { .. }) =>
         {
-            (app.senses_confirmed(), Side::None)
+            (app.sense_list_closed(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, event)
-            if sense_controls(&app).intent(&event) == DisclosureIntent::Action =>
-        {
-            if app.expanded_add_more_focused() {
-                (app.with_modal(ModalKind::ChangeSomething), Side::None)
-            } else {
-                (app.sense_toggled(), Side::None)
-            }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyEnter) => {
+            (app.sense_list_toggled(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, event)
-            if sense_controls(&app).intent(&event) == DisclosureIntent::Open =>
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar(' '))
+            if app.expanded_add_more_focused() =>
         {
-            if app.selected_can_expand_senses() {
-                (app.senses_expanded(), Side::None)
-            } else {
-                (app, Side::None)
-            }
+            (app.with_modal(ModalKind::ChangeSomething), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar(' '))
+            if matches!(app.review_focus(), ReviewFocus::Sense { .. }) =>
+        {
+            (app.sense_toggled(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorRight)
+            if !app.focused_sense_list_open() =>
+        {
+            (app.sense_list_toggled(), Side::None)
+        }
+        (Screen::WhatIUnderstood, None, AppEvent::CursorLeft) if app.focused_sense_list_open() => {
+            (app.sense_list_closed(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::CursorLeft) => (app, Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::CursorRight) => (app, Side::None),
-        (Screen::WhatIUnderstood, None, AppEvent::NavPrev) if app.expanded_sense().is_some() => {
-            (app.sense_previous(), Side::None)
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::NavNext) if app.expanded_sense().is_some() => {
-            (app.sense_next(), Side::None)
-        }
         (Screen::WhatIUnderstood, None, AppEvent::NavPrev)
-            if app.expanded_sense().is_none()
-                && app.sentence_settings_editor().is_none()
-                && app.selected() == 0
-                && !app.candidates().is_empty() =>
+            if app.review_focus() == ReviewFocus::Head(0) && !app.candidates().is_empty() =>
         {
             (
                 app.sentence_settings_opened()
@@ -220,50 +226,31 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
                 Side::None,
             )
         }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K'))
-            if app.expanded_sense().is_some() =>
+        // Dropping a word is offered on the head row, where the footer names
+        // it. Inside an open sense list the same letter would throw away the
+        // whole word the user is busy picking meanings for, and nothing on
+        // screen would have warned them.
+        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('d' | 'D'))
+            if matches!(app.review_focus(), ReviewFocus::Head(_)) =>
         {
-            (app.sense_previous(), Side::None)
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('j'))
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('J'))
-            if app.expanded_sense().is_some() =>
-        {
-            (app.sense_next(), Side::None)
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('d'))
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('D')) => {
             let next = app.dropped_selected();
             if next.candidates().is_empty() {
+                // Emptying the list leaves nothing to review, so we fall back
+                // to the words — the same place Esc goes, and with the same
+                // words still in the box. One letter must not be the only way
+                // to lose everything that was typed.
                 (
-                    next.with_screen(Screen::YourWords)
-                        .clear_blob()
-                        .body_scroll_reset(),
+                    next.with_screen(Screen::YourWords).body_scroll_reset(),
                     Side::None,
                 )
             } else {
                 (next, Side::None)
             }
         }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('k'))
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('K')) => {
-            if app.selected() == 0 && !app.candidates().is_empty() {
-                (
-                    app.sentence_settings_opened()
-                        .sentence_settings_focused(BatchSettingsRow::Types),
-                    Side::None,
-                )
-            } else {
-                (app.selected_previous(), Side::None)
-            }
+        (Screen::WhatIUnderstood, None, AppEvent::NavPrev) => {
+            (app.review_focus_previous(), Side::None)
         }
-        (Screen::WhatIUnderstood, None, AppEvent::KeyChar('j'))
-        | (Screen::WhatIUnderstood, None, AppEvent::KeyChar('J')) => {
-            (app.selected_next(), Side::None)
-        }
-        (Screen::WhatIUnderstood, None, AppEvent::NavPrev) => (app.selected_previous(), Side::None),
-        (Screen::WhatIUnderstood, None, AppEvent::NavNext) => (app.selected_next(), Side::None),
+        (Screen::WhatIUnderstood, None, AppEvent::NavNext) => (app.review_focus_next(), Side::None),
         (Screen::WhatIUnderstood, None, AppEvent::OpenPreferredLanguagePicker) => (
             open_language_picker(app, PickerSection::Learning),
             Side::None,
@@ -317,7 +304,7 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             adopt_languages(app, choice)
         }
         (Screen::YourCards, None, AppEvent::Cancel) if app.sentence_editor().is_some() => {
-            (app.sentence_editor_closed(), Side::None)
+            (app.sentence_editor_parked(), Side::None)
         }
         (Screen::YourCards, None, AppEvent::Cancel) if app.card_expanded() => {
             (app.card_toggle_expanded(), Side::None)
@@ -331,42 +318,28 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             if app.card_tunable_at(card) =>
         {
             (
-                app.card_revealed(card).sentence_editor_focused(row),
+                app.card_revealed(card).sentence_editor_opened_for(row),
                 Side::None,
             )
         }
         (Screen::YourCards, None, AppEvent::SentenceLabelFocus(row)) if app.card_tunable() => {
-            let next = if app.sentence_editor().is_some() {
-                app.sentence_editor_focused(row)
-            } else {
-                app.sentence_editor_opened_for_register()
-                    .sentence_editor_focused(row)
-            };
-            (next, Side::None)
+            (live_sentence_editor(app, row), Side::None)
         }
         (Screen::YourCards, None, AppEvent::SentenceLabelChoose(row, index))
-            if app.sentence_editor().is_some() =>
+            if app.card_tunable() =>
         {
             (
-                app.sentence_editor_focused(row)
-                    .sentence_editor_axis_chosen(index),
+                live_sentence_editor(app, row).sentence_editor_axis_chosen(index),
                 Side::None,
             )
         }
         (Screen::YourCards, None, AppEvent::SentenceLabelAdvance(row, forward))
-            if app.sentence_editor().is_some() =>
+            if app.card_tunable() =>
         {
             (
-                app.sentence_editor_focused(row)
-                    .sentence_editor_axis_advanced(forward),
+                live_sentence_editor(app, row).sentence_editor_axis_advanced(forward),
                 Side::None,
             )
-        }
-        (Screen::YourCards, None, AppEvent::NavPrev) if app.sentence_editor().is_some() => {
-            (app.sentence_editor_row_previous(), Side::None)
-        }
-        (Screen::YourCards, None, AppEvent::NavNext) if app.sentence_editor().is_some() => {
-            (app.sentence_editor_row_next(), Side::None)
         }
         (Screen::YourCards, None, AppEvent::CursorLeft) if app.sentence_editor().is_some() => {
             let next = if sentence_note_focused(&app) {
@@ -384,6 +357,15 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             };
             (next, Side::None)
         }
+        (Screen::YourCards, None, AppEvent::KeyChar('c' | 'C'))
+            if !sentence_note_focused(&app) && !app.cards().is_empty() =>
+        {
+            if app.any_card_expanded() {
+                (app.cards_collapsed(), Side::None)
+            } else {
+                (app.cards_expanded_all(), Side::None)
+            }
+        }
         (Screen::YourCards, None, AppEvent::KeyChar(symbol)) if app.sentence_editor().is_some() => {
             (app.sentence_editor_typed(symbol), Side::None)
         }
@@ -396,11 +378,11 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::YourCards, None, AppEvent::Generate) if app.sentence_editor().is_some() => {
             (app.sentence_editor_closed(), Side::RegenerateCards)
         }
-        (Screen::YourCards, None, AppEvent::KeyChar(' ')) if app.card_tunable() => {
-            (app.sentence_editor_opened_for_register(), Side::None)
+        (Screen::YourCards, None, AppEvent::KeyChar(' ')) if !app.cards().is_empty() => {
+            (app.card_toggle_expanded(), Side::None)
         }
-        (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_selected_previous(), Side::None),
-        (Screen::YourCards, None, AppEvent::NavNext) => (app.card_selected_next(), Side::None),
+        (Screen::YourCards, None, AppEvent::NavPrev) => (app.card_focus_previous(), Side::None),
+        (Screen::YourCards, None, AppEvent::NavNext) => (app.card_focus_next(), Side::None),
         (Screen::YourCards, None, event)
             if matches!(
                 DisclosureControls::new(app.card_expanded()).intent(&event),
@@ -423,13 +405,15 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
     }
 }
 
-fn sense_controls(app: &App) -> DisclosureControls {
-    let controls = DisclosureControls::new(app.expanded_sense().is_some());
-    if app.expanded_sense().is_some() {
-        controls.with_action("select")
-    } else {
-        controls
+/// Return the app with the focused card's editor live on one row, opening it
+/// when the card was merely displaying those rows. A click on a tune control
+/// says "tune this" and "pick this" at once, so it must not need the block to
+/// already own the keyboard.
+fn live_sentence_editor(app: App, row: LabelEditorRow) -> App {
+    if app.sentence_editor().is_some() {
+        return app.sentence_editor_focused(row);
     }
+    app.sentence_editor_opened_for(row)
 }
 
 fn sentence_note_focused(app: &App) -> bool {
@@ -438,9 +422,16 @@ fn sentence_note_focused(app: &App) -> bool {
 }
 
 fn start_generation(app: App) -> (App, Side) {
-    let app = app.senses_confirmed();
     if !app.candidates().iter().any(|candidate| candidate.ok()) {
         return (app, Side::None);
+    }
+    if app.review_cards() > MAX_PLAN_CARDS {
+        return (
+            app.review_noticed(format!(
+                "over the {MAX_PLAN_CARDS}-card limit — deselect senses"
+            )),
+            Side::None,
+        );
     }
     (app.with_screen(Screen::YourCards), Side::StartGeneration)
 }
@@ -473,15 +464,12 @@ fn welcome(app: App, event: AppEvent) -> (App, Side) {
         (WelcomeStage::EnterKey, AppEvent::WelcomeFocusTo(focus)) => {
             (app.welcome_focus(focus), Side::None)
         }
-        (WelcomeStage::EnterKey, AppEvent::WelcomePasteKey(text)) => {
-            (app.welcome_paste_key(text.trim().to_string()), Side::None)
-        }
         (WelcomeStage::EnterKey, AppEvent::KeyChar(symbol)) => {
             let mut key = app.welcome().key.clone();
             key.push(symbol);
             (app.welcome_paste_key(key), Side::None)
         }
-        (WelcomeStage::EnterKey, AppEvent::KeyBackspace) => (app.welcome_clear_key(), Side::None),
+        (WelcomeStage::EnterKey, AppEvent::KeyBackspace) => (app.welcome_rubbed_key(), Side::None),
         (WelcomeStage::EnterKey, AppEvent::WelcomeLoadEnvKey) => (app, Side::LoadEnvKey),
         (WelcomeStage::EnterKey, AppEvent::Submit)
         | (WelcomeStage::EnterKey, AppEvent::KeyEnter) => welcome_submit(app),
@@ -503,6 +491,13 @@ fn welcome_submit(app: App) -> (App, Side) {
     (app, Side::ValidateKey(key))
 }
 
+/// Reinterpret one key by the context it arrives in, before the screen match.
+///
+/// The two screens that own plain-letter hotkeys take no text, so a letter
+/// they receive is folded to the Latin key it was typed on and `C`, `S`, `D`
+/// and the `j`/`k` walk answer on any layout. Every screen that does take text
+/// — the words editor, the Welcome key field, any modal, and the focused
+/// rewrite note — is left out and keeps the codepoint the user typed.
 fn promote(app: &App, event: AppEvent) -> AppEvent {
     if let Some(ModalKind::PickLanguages) = app.modal() {
         return promote_picker(app, event);
@@ -535,7 +530,26 @@ fn promote(app: &App, event: AppEvent) -> AppEvent {
             Screen::Welcome,
             AppEvent::OpenPreferredLanguagePicker | AppEvent::OpenLanguagePicker(_),
         ) if app.welcome().stage == WelcomeStage::PickLanguage => AppEvent::WelcomeNextLanguage,
+        (Screen::WhatIUnderstood, AppEvent::KeyChar(symbol)) => walk(latin_key(*symbol)),
+        (Screen::YourCards, AppEvent::KeyChar(symbol)) if !sentence_note_focused(app) => {
+            walk(latin_key(*symbol))
+        }
         _ => event,
+    }
+}
+
+/// Fold the vim walk onto the arrow events.
+///
+/// `j` and `k` used to be spelled out in the review screen's own match arms,
+/// which meant they worked on exactly one of the two list screens and behaved
+/// slightly differently from the arrows even there. Folding them here makes
+/// them an alias in the plain sense: every arm downstream sees one event, so
+/// the two keys cannot drift apart from the arrows again.
+fn walk(key: char) -> AppEvent {
+    match key {
+        'j' => AppEvent::NavNext,
+        'k' => AppEvent::NavPrev,
+        other => AppEvent::KeyChar(other),
     }
 }
 
@@ -572,6 +586,12 @@ fn adopt_languages(app: App, choice: LanguageChoice) -> (App, Side) {
         return (app, Side::None);
     }
     let rereads = rereads(&app, &choice);
+    if rereads && RawInputBatch::new(app.blob()).word_count() > MAX_INTAKE_WORDS {
+        return (
+            app.review_noticed("too many words to re-read — start a new batch"),
+            Side::None,
+        );
+    }
     let next = app.languages_adopted(&choice);
     if rereads {
         return (next, Side::AdoptLanguagesAndRunUnderstanding(choice));
@@ -635,6 +655,17 @@ mod tests {
             "",
             env_available,
         )
+    }
+
+    #[test]
+    fn backspace_on_the_key_rubs_out_one_character() {
+        let typed = enter_key(false).welcome_paste_key("abcd");
+        let rubbed = transit(typed, AppEvent::KeyBackspace).0;
+        assert_eq!(
+            rubbed.welcome().key,
+            "abc",
+            "backspace wiped the whole key on the one screen where a typo is what you came to fix"
+        );
     }
 
     #[test]

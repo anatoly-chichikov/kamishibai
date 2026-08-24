@@ -21,7 +21,7 @@ All future work references this map instead of re-deriving transitions.
 | `YourCards`       | fullscreen                                                                        | `04-your-cards.png`             |
 | Retry stress      | synthetic `YourCards` gallery with active, inactive, recovered, and terminal attempts | `06b-your-cards-retry-stress.png` |
 | Esc lifecycle     | synthetic armed clear, unarmed prefilled review return, armed stop, draining stop, and partial-publish states | `23-esc-words-clear.png` through `27-generation-partial.png` |
-| Sentence labels   | collapsed three-tag summary starts inline on `audio` and wraps onto `scene` / `picture`; expanded question-led editor sits below every artifact | `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png` |
+| Sentence labels   | three-tag summary anchors on the `voice` row of a collapsed card and wraps onto `manga`; an open card shows the question-led tune rows below the step rows instead, unlit until the walk reaches them | `11-s1-label-tags.png` through `22-s12-label-legacy-meta.png` |
 | `Done`            | fullscreen                                                                        | `08-done.png`                   |
 | `PickLanguages`   | two scrolling lists over `YourWords` / `WhatIUnderstood`, opened with `Ctrl+L` or either header half | `31-language-pair-modal.png` |
 | Busy              | one universal blocking overlay on any screen                                      | `01b-busy.png`                  |
@@ -60,10 +60,11 @@ contaminate the index.
 The retry stress gallery is index 21. Esc lifecycle states are indices 22–26,
 and the open generation guidance is index 27, appended so the established absolute
 indices remain stable. The stress gallery's six cards preserve valid pipeline
-order while showing the identical active-attempt copy (`ai is working…`),
-inactive retry rows with only their dot, artifact, and known cost, a recovered
-artifact, and a terminal `gave up` row together. Their card heads carry the
-complete retry summary as `↻1`, `↻2`, or `↻3` after the total cost.
+order while showing the identical bare active spinner,
+inactive retries as a `·` row with only its label and known cost, a recovered
+artifact as a plain ready row, and a bare terminal `✗` row together.
+Their card heads carry the complete retry summary as `↻1`, `↻2`, or `↻3`
+after the total cost.
 
 Every blocking text phase uses one universal overlay on top of the current
 screen: first understanding, bulk correction, the Welcome key check, and the two
@@ -90,7 +91,9 @@ persists the key and moves to `YourWords`; `Esc` steps back to the language stag
 `GEMINI_API_KEY` may prefill the key step, but it must never skip the language choice.
 
 After setup, the language pair is rendered as a compact header chip on every
-steady-state fullscreen screen, reading `my → target` (e.g. `EN → FR`).
+steady-state fullscreen screen, reading `my → target` (e.g. `EN → FR`). The
+whole chip is bold bright, matching the inverted title block on the other end of
+the header, and a target the understanding pass has not named yet reads `?`.
 
 ## Language pair surface
 
@@ -130,7 +133,21 @@ those sentences instead of maintaining a parallel taxonomy.
 
 `WhatIUnderstood` renders one row per candidate: included selected senses
 proceed to card generation as separate cards, while `ok=false` rows stay visible
-with a struck-through term so the user can see what was rejected and why.
+with a struck-through term so the user can see what was rejected and why. The
+row is the reference implementation of the shared grammar — index `Ink::Aside`,
+term `Ink::Subject`, dash `Ink::Aside`, gloss `Ink::Detail` — and the cursor
+changes none of it, only the `HL` background beneath the whole line. An open
+sense list continues that ladder rather than breaking it: a chosen sense is
+marked by its `✓` and reads at `Ink::Detail`, exactly like the same gloss on a
+collapsed row, while an unchosen one sits a rank below at `Ink::Aside`. The
+`+ add more` row is an action rather than a meaning and stays at `Ink::Detail`.
+The head of an open word stops repeating one of the senses listed beneath it:
+it carries the `multiple meanings:` heading whenever there is more than one
+sense to choose between — the same heading a collapsed word with several chosen
+meanings shows, so the heading appears exactly when the `X/Y` counter does — and
+carries nothing at all when the list below holds a single row. One `head_gloss`
+answers the renderer, the height counter, and both scroll-snap sites, and
+`screen_lines_match_the_counted_height` fails if they ever disagree.
 
 ## Batch generation guidance
 
@@ -149,9 +166,10 @@ are `what's the desired level?` with `best fit`, `a1`, `a2`, `b1`, `b2`, `c1`,
 `c2`, and `what kinds of phrases?` with `best fit`, `statements`, `questions`,
 `dialogue`, `mixed`. They use
 the same fixed-track marker and two-cell `< ` / ` >` hit geometry as the
-per-card editor. The focused label is white and bold, the selected chip is
-inverted, and the entire block follows the ordinary body scroll so a short
-viewport brings the focused row into view.
+per-card editor. The focused label is white (`Ink::Subject`) against
+`Ink::Aside` for the others, the selected chip is inverted, and the entire block
+follows the ordinary body scroll so a short viewport brings the focused row into
+view.
 
 These are batch preferences, not a new screen or modal. Ordinary upward
 navigation reaches the first word before one more `↑` or `k` opens the nearest
@@ -183,50 +201,83 @@ gets the natural sentence required by its approved understanding and only then
 receives a descriptive level; that default initial generation does not target
 a band. An explicit batch-level choice is the initial-generation exception and
 constrains every draft. A later per-card level change becomes a rewrite constraint. Every
-card head keeps `term → target sentence`.
-The artifacts begin immediately after the last line of that head, including
-when the target sentence wraps, and remain an uninterrupted left column in
-`meta`, `audio`, `scene`, `picture` order, including their size and final `$…`
-or `cached` indicators. A collapsed card leaves the `meta` row unadorned and
-draws no `sentence:` heading or separator glyph anywhere. The three labels
-start together in one fixed column after the stable `audio` core:
+card head keeps `term → target sentence`. The term reads `Ink::Aside` — the
+same rank as the number beside it — for as long as the card is missing any of
+its four artifacts, and when the last one lands it turns `FG`; the target
+sentence stays `DIM` unless the learner asked for that one card to be rewritten,
+and the sentence that comes back reads `Ink::Subject`, the same principle that
+whitens a changed label chip. A level or type pinned once for the whole batch
+travels the generation path and deliberately leaves every sentence quiet.
+Glyph, number,
+`→`, and trailing cost are `Ink::Aside`, which makes the head structurally the
+same row as a `WhatIUnderstood` candidate. A card that terminally gave up never
+holds all four and stays quiet, and a card carrying a staged rewrite keeps that
+quiet term beside its struck sentence. The head goes bold for being selected and for
+nothing else — selection is the `HL` row background (`#26262a`) plus the weight
+of every letter it covers, and it never repaints an ink.
+Every card state renders the same step block immediately after the last line
+of that head, including when the target sentence wraps: up to three
+old-style rows — `scene` (the written material, i.e. the meta slot), `voice`
+(audio), `manga` (the whole visual phase) — each a state glyph, a five-letter
+label, and its own incremental cost in one shared value column. A
+row appears only once its work started. A ready row shows a quiet `Ink::Aside`
+`✓` and an `Ink::Detail`, underlined label that clicks open — `scene` the card's
+cache cell in the
+system file manager, `voice` the audio file, `manga` the rendered page; a
+label without a recorded target stays plain. A ready row states either its
+cost or, when the artifact came back free from the cache, `cached` — never
+both. The active row shows its
+spinner and nothing beside it, a terminal failure a bare `✗` plus cost, a
+discarded artifact `⊘ discarded`, an inactive retry (or a ready scene whose
+picture is still owed) `·` plus any known cost. File names and sizes are gone
+everywhere. Costs are incremental per row: `scene`
+folds the metadata and composition spend, `voice` and `manga` carry only their
+own artifact, retries included; the head keeps the card total. No `sentence:`
+heading or separator glyph is drawn anywhere. The three labels start
+together in one fixed column, and the tags follow the value column three cells
+later on the `voice` row, but only while the card is collapsed:
 
 ```text
-meta     … cached
-audio    … cached   formal statement b1
-audio    $.0021     formal statement b1
-scene    … cached
-picture  … cached
+✓ scene  $.0035
+✓ voice  $.0100   formal   statement   b1
+✓ manga  $.0673
 ```
 
 The actual register, sentence-type, and CEFR values replace the three
 example values. Each value remains a separate tag with dark `BG` letters.
-Unchanged actual tags use the gray `DIM` background — the same color used for
-the compact target sentence's foreground — while explicitly changed or exactly
-fulfilled pinned tags use a white background without bold. If a target is only
-fulfilled as a best effort, its atomic group is the gray actual tag, muted
-`· aimed for`, and the requested white tag. Adjacent axis groups have one
-ordinary-background space between them. At narrow widths wrapping occurs only
-between whole axis groups and may use the same tag-column on the `scene` and
-`picture` rows. `ai is working…`, ready, cached, inactive retry, and recovered
-audio all keep the same tag column. Retry history appears once in the card head
-instead of beside the tags; when the complete row or a wrapped group would
-collide, the complete inline summary is hidden. There is no vertical rail,
-rule, or filled backing behind the labels.
+Unchanged actual tags use the gray `DIM` background while explicitly changed or
+exactly fulfilled pinned tags use a white background without bold. If a target
+is only fulfilled as a best effort, its atomic group is the gray actual tag,
+muted `· aimed for`, and the requested white tag. Adjacent axis groups have one
+ordinary-background space between them. At narrow widths whole groups may
+wrap from the `voice` row onto the `manga` row at that same column.
+Retry history appears once in the card head instead of beside the tags; when
+the complete sequence cannot fit even wrapped, the whole
+summary is hidden while the step rows remain. There is no vertical rail, rule, or
+filled backing behind the labels.
 If the complete atomic set cannot fit even that way, the card head remains the
 mouse entry into tuning. There is no grammar axis or grammar row.
 
-`Enter`, `→`, `Space`, or a tag click immediately expands the focused card and
-opens the inline editor on `how should it sound?`. The head remains `term →
-target sentence` and all four artifact rows stay together above it. The
-collapsed inline summary disappears; exactly one blank row separates `picture`
-from the editor, which renders below the complete artifact block, before the
-expanded metadata and never beside the artifacts. Its three carousel questions
+`Enter`, `→`, or `Space` opens the focused card: step rows without their tags,
+the four tune rows, meta preview, rejected attempts. `Enter`, `←`, or `Esc`
+closes it again. The tune rows are there from the first keystroke but unlit —
+no question is white or bold, no chevron is bright, the note owns no cursor —
+so an open card says what can be changed without anything being changeable yet.
+Tuning is a separate, deliberate move — `↓` from the open head lights
+`how should it sound?` white and bold together with its two chevrons, and a
+click on any control (or on a collapsed card's
+tags) hands the block the keyboard straight away. Once lit, both arrows belong to
+the focused horizontal control. The head remains `term →
+target sentence` and the three step rows stay together above the tune rows;
+exactly one blank row separates `manga`
+from them, and they render below the complete step block, before the
+expanded metadata and never beside the rows. Its three carousel questions
 are `how should it sound?`, `what kind of phrase?`, and `what's the desired level?`.
 The following note row is labelled `one more thing` and uses the single-line
 `TextField` with the placeholder `say what should change`.
 
-The active question is white and bold. The selected chip has a white background.
+The active question is white (`Ink::Subject`) while the others are
+`Ink::Aside`. The selected chip has a white background.
 Every carousel is permanently bracketed by the two-cell direction controls
 `< ` and ` >`; both cells are clickable, focus that control's own row, and move
 one adjacent choice without wrapping past either boundary. All three tracks use
@@ -238,13 +289,14 @@ into one marker segment per hidden choice; every adjacent step transfers exactly
 segment from the trailing side to the leading side. Segment widths differ by at
 most one cell, spare cells sit nearest the selected chip on each side, and every
 cell of a segment belongs to the same clickable target. The nearest marker uses
-`DIM2`, the next farther marker uses `RULE`, and every marker farther away uses
-`HL`, saturating at `HL`. On a legacy
+`DIM2`, the next farther marker uses `RULE`, and every marker farther away is the
+page background, so the rail fades out without borrowing the cursor highlight. On a legacy
 axis with no selected value, `—` is flanked by one two-cell marker on each side
 inside the same shared track; both cells of either marker are clickable. Legacy
 metadata renders no collapsed inline summary but remains tunable through this
-same below-artifacts editor. The collapsed footer advertises only `[Enter/→]
-tune`; `Space` remains an unadvertised keyboard alias.
+same below-artifacts rows. The footer advertises `[Enter/→] toggle`, plus
+`[↓] tune` while the focused card is open and tunable; `Space` remains an
+unadvertised alias of the disclosure key.
 
 The expanded metadata that follows the editor uses statement and noun labels
 rather than questions: `the phrase` for the target sentence, `in your language`
@@ -254,9 +306,9 @@ pronunciation` for transcription, `worth learning` for importance, and `the
 right context` for non-empty context.
 
 Every chip or note edit is pending immediately: the old target sentence is
-struck through and its current metadata and artifact rows are muted. While the
+struck through and its current metadata and step rows are muted. While the
 editor is open, its white selected chips show the staged choices below the
-artifacts; after it closes, the staged choices return inline on the `audio` row as
+rows; after it closes, the staged choices return on the `voice` row as
 summary tags, gray for unchanged values and white without bold for changed or
 pinned values. The editor carousel remains on the requested target; when it
 differs from the generated attribution, muted `current` plus the actual value
@@ -280,19 +332,20 @@ together. There is no per-card modal and `R` has no `YourCards` action.
 | S7 · pending batch regenerating | `17-s7-label-regenerating.png` |
 | S8 · regenerated pinned value stays audio-anchored beside a recovered picture whose head shows `↻2` | `18-s8-label-regenerated.png` |
 | S9 · collapsed actual value beside its requested best-effort target | `19-s9-label-approx.png` |
-| S10 · whole-tag wrapping onto `scene` / `picture`, with impossible summaries hidden atomically | `20-s10-label-tags-narrow.png` |
+| S10 · whole-tag wrapping onto the `manga` row, with impossible summaries hidden atomically | `20-s10-label-tags-narrow.png` |
 | S11 · post-click `request` selection between both direction chevrons | `21-s11-label-mouse-selection.png` |
 | S12 · legacy below-artifacts editor with a marker on each side of `—` | `22-s12-label-legacy-meta.png` |
 
 ## Transitions
 
 ```
-    YourWords ──[Ctrl+G, blob not blank]──► (Understanding busy) ──► WhatIUnderstood
+    YourWords ──[Ctrl+G, blob not blank and ≤ 60 lines]──► (Understanding busy) ──► WhatIUnderstood
+        ├─ [Ctrl+G, > 60 lines] ──► inert; footer reads `over the 60-word limit` and drops `[Ctrl+G] continue`
         └─ [Esc] arm clear ──► [Esc again within 1 s] ──► empty YourWords
 
     WhatIUnderstood
-        ├─ [Enter]/[→] on a row ──► sense picker opens
-        │       ├─ [Space] toggle sense · [↑↓]/[j][k] move · [Enter]/[←] done (collapse)
+        ├─ [Enter] on a head ──► its sense list opens inline (several may stay open; [C] collapses all)
+        │       ├─ [Space] toggle sense (commits immediately) · [↑↓]/[j][k] walk in, through, and out without closing · [Enter]/[Esc] close this list
         │       └─ [Space] on the "+ add more" row ──► ChangeSomething (bulk modal)
         │                                                  ├─ [Enter] send ──► (BulkCorrection busy) ──► WhatIUnderstood
         │                                                  └─ [Esc] cancel ──► WhatIUnderstood
@@ -304,14 +357,15 @@ together. There is no per-card modal and `R` has no `YourCards` action.
         ├─ [Esc, no inner layer] ──► YourWords (blob and selected senses preserved; clear unarmed)
         │       └─ [Esc] arm clear ──► [Esc again within 1 s] ──► empty YourWords
         ├─ [Ctrl+L] ──► PickLanguages modal ──► adopt pair; re-read only when required
+        ├─ [Ctrl+G, > 80 cards selected] ──► inert; notice reads `over the 80-card limit — deselect senses`
         └─ [Ctrl+G, ≥1 ok row] ──► (StartGeneration) ──► YourCards
 
     YourCards
         ├─ [↑↓] nav
-        ├─ [Enter]/[→]/[Space]/[click tag] ──► expand + live editor on `how should it sound?`
-        │       ├─ [←→] pick · [↑↓] row · type under `one more thing`
+        ├─ [Enter]/[Space]/[click tag] ──► expand + live editor on `how should it sound?`
+        │       ├─ [←→] pick · [↑↓] row, exiting past register/note onto a card head (editor parks, card stays expanded; [C] collapses all)
         │       ├─ every edit ──► pending now; defaults + blank note ──► no pending
-        │       └─ [Enter]/[Esc] ──► close + collapse while retaining pending
+        │       └─ [Enter] close + collapse · [Esc] park, [Esc] again collapse — pending retained either way
         ├─ [Ctrl+G, pending > 0] ──► regenerate all pending cards in one batch
         ├─ [Ctrl+G, pending = 0] ──► existing retry/rebuild fallback
         ├─ [Esc] arm stop ──► [Esc again within 1 s] ──► drain current artifact, start no next request
@@ -326,9 +380,13 @@ together. There is no per-card modal and `R` has no `YourCards` action.
         └─ [Ctrl+C] twice within 1 s ──► exit
 ```
 
-`Esc` always closes one layer from inside out: error, modal/editor/expanded
-disclosure, then the current screen action. `R` has no action on `WhatIUnderstood`
-or `YourCards` (the bulk modal is reached only through the `+ add more` row).
+`Esc` always closes one layer from inside out: error, modal, then on
+`YourCards` the editor first (parking it, the card stays expanded) and the
+card's expansion second, on `WhatIUnderstood` the focused open sense list,
+then the current screen action. Open blocks the focus is not on never
+intercept `Esc`; `C` collapses them all at once. `R` has no action on
+`WhatIUnderstood` or `YourCards` (the bulk modal is reached only through the
+`+ add more` row).
 Once a batch is published, double `Esc` starts a clean batch without restarting the app.
 Publishing the deck/PDF is automatic once the generation queue drains — it is
 not a key the user presses.
@@ -339,14 +397,13 @@ not a key the user presses.
 | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `Welcome` · pick language   | `←/→` step `my language` · `↑/↓` move one grid line · click picks · `Enter` next · `Ctrl+C` quit             |
 | `Welcome` · enter key       | type/`Cmd+V` paste key · `←/→` move focus (submit ↔ load-from-env, env only) · `Enter` submit · `Esc` back   |
-| `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue · `[Esc] clear` then `[Esc] again` · `Ctrl+L` language |
-| `WhatIUnderstood` (list)    | `↑↓`/`j`/`k` nav; `↑`/`k` above the first word opens generation guidance · `Enter`/`→` pick meanings · `D` drop row · `S` guidance alias · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` back |
-| `WhatIUnderstood` (picker)  | `Space` toggle sense · `↑↓`/`j`/`k` move · `Enter`/`←` done · `Space` on `+ add more` opens ChangeSomething  |
+| `YourWords`                 | type/paste one item per line · `Enter` newline · `←/→/↑/↓` move cursor · `Ctrl+G` continue (inert over the 60-word limit) · `[Esc] clear` then `[Esc] again` · `Ctrl+L` language |
+| `WhatIUnderstood` (walk)    | `↑↓`/`j`/`k` walk through heads and open sense lists without closing them; `↑`/`k` above the first word opens generation guidance · `Enter` on a head toggles its meanings, `Enter` inside a list closes it · `Space` toggles the focused sense (committed immediately) · `Space` on `+ add more` opens ChangeSomething · `D` drop row · `S` guidance alias · `C` toggle: open every multi-meaning sense list (single-sense and off-language rows stay closed), else collapse them all and close an open guidance editor · `Ctrl+G` make cards · `Ctrl+L` language · `Esc` collapses the focused open list, else back · side arrows inert |
 | `WhatIUnderstood` generation guidance | `Ctrl+G` make cards · `←→` pick · `↑↓` row · `↓` from format returns to words · `Enter`/`Esc` close (printable review keys inert) |
 | `ChangeSomething`           | text input · `Enter` send · `Esc` cancel                                                                    |
-| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` tune · `↑↓` nav (`Space` is an unadvertised alias) · double `Esc` stops active generation |
+| `YourCards`                 | `Ctrl+G` regenerate pending batch/fallback · `Enter`/`→` open the card with its tune rows unlit, `Enter`/`←`/`Esc` close it, neither ever handing them the keyboard (`Space` is an unadvertised alias) · `↑↓` walk through cards and the lit tune rows, unlighting them on exit while its card stays open and relighting them on return (`↓` from its head → register, arriving from below → note; saturates inside the last card's rows) · `C` toggle: expand every card, else collapse them all (works from carousel rows; only the note row types `c`) · double `Esc` stops active generation |
 | `YourCards` finished final  | `[Esc] new cards` · twice within 1 s starts a clean batch · first shows `[Esc] again` · other action/timeout disarms |
-| `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row · text editing under `one more thing` · `Enter`/`Esc` close |
+| `YourCards` label editor    | `Ctrl+G` regenerate pending batch · `←→` pick · `↑↓` row (walking past register or note exits onto a card head, parking the editor) · text editing under `one more thing` · `Enter` closes editor and card · `Esc` parks the editor, second `Esc` collapses the card |
 | `PickLanguages`             | `↑/↓` pick within a column · `←/→` focus the left / right column · wheel scrolls the column under the pointer · `Enter` confirm · `Esc` cancel |
 | `Done`                      | `Ctrl+G` regenerate failed (only when failures) · `[Esc] new cards` · twice within 1 s starts a clean batch · `Ctrl+C` quit |
 
@@ -385,17 +442,17 @@ not forwarded to card generation.
 ## Recovery semantics (MVP)
 
 - Retry: each artifact (`meta`, `scene`, `picture`, `sound`) gets one plain try plus up
-  to 3 retries. Every active attempt uses the same spinner and `ai is working…`
-  text. An inactive retry row keeps only its dot, artifact label, and known cost;
+  to 3 retries. Every active attempt is the same spinner beside its label, with
+  no words. An inactive retry row keeps only its dot, artifact label, and known cost;
   the card head summarizes spent retries once as `↻N` after its total cost.
-- Rejected attempts: expanding the card (Enter/→) reveals, below the card body and
+- Rejected attempts: expanding the card (Enter) reveals, below the card body and
   behind a dashed rule, a `rejected attempts` block:
   one row per failure, naming the gate (`border`, `topology`, `recall_text`, …) and its
   reason. A row links to whatever its own try left behind — the archived frame for a
   picture, the rejected model reply for a scene — and it opens with the system
   handler. A try that never reached the model leaves that column blank.
 - Terminal failure: after the plain try and all 3 retries, the card stays in the queue;
-  its artifact row keeps a leading `✗`, says `gave up`, and shows any known cost.
+  its artifact row keeps a leading `✗` and shows any known cost, with no status word.
   The head contributes at most `↻3` for that artifact, and the footer does not
   duplicate the terminal count.
 - Recovery via `Ctrl+G`: on `YourCards`, `RegenerateCards` activates every
@@ -418,8 +475,10 @@ not forwarded to card generation.
 - `body` renders the active screen. Modals are rendered last by drawing into a
   centered rectangle over `body` using `Clear + Block::bordered()`.
 - `footer` renders the active screen's keyboard hints as a tiered, width-aware
-  status bar: the primary action leads in bright ink, secondary actions follow,
-  and conventional keys (navigation, quit) are dimmed. When the row is too narrow
+  status bar: three steps of one ink each — the primary action in `Ink::Subject`,
+  secondary actions in `Ink::Detail`, and conventional keys (navigation, quit) in
+  `Ink::Aside`; key and label always share their tier's ink, and no footer hint is
+  ever bold. When the row is too narrow
   the dim hints are shed first — the primary action and quit never clip. The
   finished final permanently shows `[Esc] new cards` in the same muted treatment
   as quit and directly before it. The first `Esc` changes that action to `[Esc]

@@ -11,7 +11,7 @@ expression: "render_sized(&app, 96, 16)"
                                                                                                 
     01  your language     EN    English                                                         
                                                                                                 
-    02  gemini api key  › paste your key [Cmd+V]                                                
+    02  gemini api key  › paste or type your key                                                
                           ───────────────────────────────────────                               
                                                                                                 
                            submit                                                               

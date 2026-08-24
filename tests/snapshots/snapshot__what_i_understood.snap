@@ -3,7 +3,7 @@ source: tests/snapshot.rs
 expression: render(&app)
 ---
                                                                                 
-     what i understood   quick check before i build the cards         RU → …    
+     what i understood   quick check before i build the cards         RU → ?    
                                                                                 
     understanding your words…                                                   
                                                                                 
@@ -13,4 +13,4 @@ expression: render(&app)
                                                                                 
                                       ai may be wrong, please verify results    
                                                                                 
-    step 2/3  nothing to make    [Enter/→] toggle  [Esc] back  [Ctrl+C] quit
+    step 2/3  nothing to make        [Enter/→] open  [D] drop  [Ctrl+C] quit

@@ -13,4 +13,4 @@ expression: render(&app)
                                                                                 
                                       ai may be wrong, please verify results    
                                                                                 
-    step 2/3  2 cards            [Ctrl+G] generate  [↑] guidance  [Esc] back
+    step 2/3  2 cards         [Ctrl+G] generate  [↑] guidance  [Ctrl+C] quit

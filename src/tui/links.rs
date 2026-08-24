@@ -13,18 +13,16 @@ use super::event::AppEvent;
 use super::picker::{LanguageChoice, PickerSection, learning_target};
 use super::screen::{Screen, WelcomeFocus, WelcomeStage};
 use super::screens::banner;
-use super::screens::common::{
-    CARD_DETAIL_COLUMN, GUTTER, TOP_MARGIN, display_width, frame_rects, language_chip,
-};
+use super::screens::common::{GUTTER, TOP_MARGIN, display_width, frame_rects, language_chip};
 use super::screens::sentence_labels::EditorControl;
 use super::screens::welcome;
 use super::screens::what_i_understood::{
     SentenceSettingsControl, alternate_at, sentence_settings_control_at,
 };
 use super::screens::your_cards::{
-    artifact_file_label, card_range_at, detail_pane_height, head_rows_for, rejected_attempts,
-    rejected_link_columns, rejected_rows_offset, sentence_editor_control_at,
-    sentence_label_extra_rows, sentence_tag_hit_at, sentence_tags_visible, step_rows_for,
+    StepRow, card_layout, card_range_at, head_rows_for, rejected_attempts, rejected_link_columns,
+    rejected_rows_offset, sentence_editor_control_at, sentence_label_extra_rows,
+    sentence_tag_hit_at, sentence_tags_visible, step_link_region, step_rows_for,
 };
 use super::sentence_editor::LabelEditorRow;
 
@@ -179,50 +177,57 @@ pub fn sentence_label_event_at(
         .and_then(crate::session::CardMeta::sentence_labels);
     let staged = draft.staged_rewrite().map(|rewrite| rewrite.selection());
     let selected = card == app.card_selected();
+    let expanded = app.card_expanded_at(card);
     let editor = if selected {
         app.sentence_editor()
     } else {
         None
     };
     let head_start = card_start;
-    let expanded = selected && app.card_expanded();
     let head_height = head_rows_for(draft, width);
     let head_end = head_start.saturating_add(head_height);
     let running = app
         .cards_running_target()
         .and_then(|(running_card, artifact)| (running_card == card).then_some(artifact));
     let steps = step_rows_for(draft, running);
-    let meta_row = head_end.saturating_add(
-        steps
-            .iter()
-            .position(|artifact| *artifact == crate::session::Artifact::Meta)?,
-    );
     let attributed = labels.is_some()
         || staged.is_some_and(crate::session::SentenceLabelSelection::attributed)
         || editor.is_some_and(|editor| editor.selection().attributed());
     if !expanded
         && (!attributed
-            || !steps.contains(&crate::session::Artifact::Sound)
-            || !sentence_tags_visible(draft, running, width))
+            || !steps.contains(&StepRow::Voice)
+            || !sentence_tags_visible(draft, running, expanded, width))
         && app.card_tunable_at(card)
         && content_row >= head_start
         && content_row < head_end
     {
         return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
     }
+    let block_row = content_row.checked_sub(head_end)?;
     if !expanded {
-        let tag_row = content_row.checked_sub(meta_row)?;
-        if sentence_tag_hit_at(draft, running, width, tag_row, column) {
+        if sentence_tag_hit_at(draft, running, expanded, width, block_row, column) {
             return Some(AppEvent::SentenceLabelOpen(card, LabelEditorRow::Register));
         }
         return None;
     }
-    let editor = editor?;
-    let editor_row = content_row.checked_sub(meta_row)?;
-    match sentence_editor_control_at(draft, running, editor, width, editor_row, column)? {
+    let control =
+        sentence_editor_control_at(draft, running, editor, expanded, width, block_row, column)?;
+    if !selected {
+        return Some(AppEvent::SentenceLabelOpen(card, control_row(&control)));
+    }
+    match control {
         EditorControl::Chip(row, index) => Some(AppEvent::SentenceLabelChoose(row, index)),
         EditorControl::Advance(row, forward) => Some(AppEvent::SentenceLabelAdvance(row, forward)),
         EditorControl::Note => Some(AppEvent::SentenceLabelFocus(LabelEditorRow::Note)),
+    }
+}
+
+/// The row a tune control belongs to, used to carry a click on an unfocused
+/// card into that card's own editor before anything is changed.
+fn control_row(control: &EditorControl) -> LabelEditorRow {
+    match control {
+        EditorControl::Chip(row, _) | EditorControl::Advance(row, _) => *row,
+        EditorControl::Note => LabelEditorRow::Note,
     }
 }
 
@@ -297,7 +302,7 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
         let running = app
             .cards_running_target()
             .and_then(|(card, kind)| if card == idx { Some(kind) } else { None });
-        let expanded = idx == app.card_selected() && app.card_expanded();
+        let expanded = app.card_expanded_at(idx);
         let editor = if idx == app.card_selected() {
             app.sentence_editor()
         } else {
@@ -305,15 +310,10 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
         };
         let head_height = head_rows_for(draft, width);
         let steps = step_rows_for(draft, running);
-        let detail = if expanded {
-            detail_pane_height(draft, width)
-        } else {
-            0
-        };
         let labels = sentence_label_extra_rows(draft, running, editor, expanded, width);
-        let trailing = usize::from(!steps.is_empty() || detail > 0 || labels > 0);
-        let card_total = head_height + steps.len() + labels + detail + trailing;
-        for (step_idx, artifact) in steps.iter().enumerate() {
+        let (rows, trailing) = card_layout(draft, running, expanded, editor, width);
+        let card_total = rows + trailing;
+        for (step_idx, step) in steps.iter().enumerate() {
             let absolute = content_row + head_height + step_idx;
             let Some(screen_row) = visible_content_row(
                 body_y + banner_rows,
@@ -323,29 +323,17 @@ fn link_regions(app: &App, terminal: Rect) -> Vec<LinkRegion> {
             ) else {
                 continue;
             };
-            let slot = match artifact {
-                crate::session::Artifact::Meta => draft.artifacts().meta(),
-                crate::session::Artifact::Sound => draft.artifacts().sound(),
-                crate::session::Artifact::Scene => draft.artifacts().scene(),
-                crate::session::Artifact::Picture => draft.artifacts().picture(),
-            };
-            let Some(file) = slot.file() else {
+            let Some((start, end, target)) = step_link_region(draft, *step) else {
                 continue;
             };
-            let label = artifact_file_label(*artifact, file);
-            let label_start = body_x
-                + u16::try_from(CARD_DETAIL_COLUMN)
-                    .expect("invariant: card detail column must fit in u16");
-            let label_end = label_start
-                .saturating_add(u16::try_from(display_width(label.as_str())).unwrap_or(u16::MAX));
             links.push(LinkRegion {
                 row: screen_row,
-                hit_start: label_start,
-                hit_end: label_end,
-                target: file.path().to_string_lossy().into_owned(),
+                hit_start: body_x.saturating_add(start),
+                hit_end: body_x.saturating_add(end),
+                target: target.to_string_lossy().into_owned(),
             });
         }
-        if detail > 0 {
+        if expanded {
             links.extend(rejected_regions(
                 draft,
                 body_x,

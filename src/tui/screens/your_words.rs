@@ -10,11 +10,11 @@ use std::borrow::Cow;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
+use crate::session::{MAX_INTAKE_WORDS, RawInputBatch};
 use crate::tui::app::App;
 use crate::tui::palette;
 
@@ -35,8 +35,12 @@ impl ScreenView for YourWords {
         Cow::Borrowed(HINT)
     }
 
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, width)
+    fn status(&self, app: &App) -> Vec<Span<'static>> {
+        status(app)
+    }
+
+    fn hints(&self, app: &App) -> Vec<super::common::FooterHint> {
+        hints(app)
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -111,7 +115,10 @@ fn highlight_strip(body: Rect, row: usize) -> Option<Rect> {
 fn paint_strip(frame: &mut Frame, area: Rect) {
     let filler = " ".repeat(area.width as usize);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(filler, palette::highlight()))),
+        Paragraph::new(Line::from(Span::styled(
+            filler,
+            palette::Ink::Subject.on(true),
+        ))),
         area,
     );
 }
@@ -130,9 +137,9 @@ fn gutter(app: &App) -> Paragraph<'static> {
         let style = if index >= actual {
             palette::base().fg(palette::RULE)
         } else if index == active && !app.blob().is_empty() {
-            palette::highlight().add_modifier(Modifier::BOLD)
+            palette::Ink::Aside.on(true)
         } else {
-            palette::dim2()
+            palette::Ink::Aside.on(false)
         };
         lines.push(Line::from(Span::styled(label, style)));
     }
@@ -163,7 +170,7 @@ fn body_lines(app: &App, width: u16) -> Vec<Line<'static>> {
 
 fn line_for_row(index: usize, raw: &str, active: usize, width: u16) -> Line<'static> {
     let style = if index == active {
-        palette::highlight()
+        palette::Ink::Subject.on(true)
     } else {
         palette::base()
     };
@@ -173,7 +180,10 @@ fn line_for_row(index: usize, raw: &str, active: usize, width: u16) -> Line<'sta
         let used = super::common::display_width(raw);
         let pad = (width as usize).saturating_sub(used);
         if pad > 0 {
-            spans.push(Span::styled(" ".repeat(pad), palette::highlight()));
+            spans.push(Span::styled(
+                " ".repeat(pad),
+                palette::Ink::Subject.on(true),
+            ));
         }
     }
     Line::from(spans)
@@ -183,52 +193,73 @@ fn placeholder_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(""),
         Line::from(""),
-        Line::from(Span::styled(PLACEHOLDER_HINT, palette::dim2())),
+        Line::from(Span::styled(
+            PLACEHOLDER_HINT,
+            palette::Ink::Aside.on(false),
+        )),
     ]
 }
 
-fn footer(app: &App, width: u16) -> Paragraph<'static> {
+fn status(app: &App) -> Vec<Span<'static>> {
     let count = word_count(app.blob());
     let mut left: Vec<Span<'static>> = Vec::new();
-    left.push(Span::styled("step 1/3", palette::dim2()));
+    left.push(Span::styled("step 1/3", palette::Ink::Aside.on(false)));
     left.push(super::common::status_sep());
     if count == 0 {
-        left.push(Span::styled("empty", palette::dim2()));
+        left.push(Span::styled("empty", palette::Ink::Aside.on(false)));
     } else {
         let noun = if count == 1 { "card" } else { "cards" };
         left.push(Span::styled(
             count.to_string(),
-            palette::base().add_modifier(Modifier::BOLD),
+            palette::Ink::Subject.on(false),
         ));
-        left.push(Span::styled(format!(" {noun}"), palette::dim()));
+        left.push(Span::styled(
+            format!(" {noun}"),
+            palette::Ink::Detail.on(false),
+        ));
     }
+    if count > MAX_INTAKE_WORDS {
+        // Naming the ceiling says what is wrong; naming the overshoot says what
+        // to do about it. The review already words its own limit that way.
+        let over = count - MAX_INTAKE_WORDS;
+        let noun = if over == 1 { "line" } else { "lines" };
+        left.push(Span::styled(
+            format!(" · over the {MAX_INTAKE_WORDS}-word limit — remove {over} {noun}"),
+            palette::Ink::Detail.on(false),
+        ));
+    }
+    left
+}
+
+fn hints(app: &App) -> Vec<super::common::FooterHint> {
     if app.word_clear_pending() {
-        return super::common::footer_bar(
-            left,
-            vec![
-                super::common::escape_again_hint(),
-                super::common::quit_hint(app.quit_pending()),
-            ],
-            width,
-        );
+        return vec![
+            super::common::escape_again_hint(),
+            super::common::quit_hint(app.quit_pending()),
+        ];
     }
+    let count = word_count(app.blob());
+    let over_limit = count > MAX_INTAKE_WORDS;
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
-    if count > 0 {
-        hints.push(super::common::FooterHint::primary("Ctrl+G", "continue"));
-    } else {
-        hints.push(super::common::FooterHint::primary("Cmd+V", "paste"));
+    // An empty box has no bright key, because the thing to do — type — has no
+    // key to name. The slot used to hold `[Cmd+V] paste`, which named a chord
+    // the app never dispatches on (the terminal replays a paste as ordinary
+    // characters) and named it in macOS spelling on every platform. Leaving it
+    // empty also lets `[Ctrl+G] understand` announce itself by arriving the
+    // moment there is something to understand.
+    if over_limit {
+        hints.push(super::common::clear_words_hint());
+    } else if count > 0 {
+        hints.push(super::common::FooterHint::primary("Ctrl+G", "understand"));
     }
-    if !app.blob().is_empty() {
+    if !over_limit && !app.blob().is_empty() {
         hints.push(super::common::clear_words_hint());
     }
     hints.push(super::common::FooterHint::ghost("Ctrl+L", "languages"));
     hints.push(super::common::quit_hint(app.quit_pending()));
-    super::common::footer_bar(left, hints, width)
+    hints
 }
 
 fn word_count(blob: &str) -> usize {
-    blob.split('\n')
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .count()
+    RawInputBatch::new(blob).word_count()
 }

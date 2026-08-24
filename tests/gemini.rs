@@ -664,6 +664,74 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
     Ok(())
 }
 
+/// Only a per-card correction marks its sentence as the learner's own rewrite.
+///
+/// A batch that pins a level for every card travels the generation path, so
+/// this is what keeps a whole batch from reading as hand-tuned.
+#[test]
+fn only_a_per_card_correction_marks_its_metadata_as_rewritten() -> Result<()> {
+    let generated = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(body(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": "{\"pronunciation\":\"ˈbɒrəʊ\",\"transcription\":\"kən aɪ ˈbɒrəʊ jɔː ˈpɛn\",\"meaning\":\"одолжить\",\"importance\":8,\"source_sentence\":\"Можно одолжить твою ручку?\",\"source_highlight\":\"одолжить\",\"source_hint\":\"Когда ручка не твоя, а надо записать — вежливо просишь на время.\",\"source_context\":\"Нейтрально-вежливый глагол.\",\"target_sentence\":\"Can I borrow your pen?\",\"labels\":{\"register\":\"formal\",\"level\":\"b1\",\"type\":\"question\",\"approx\":[]}}"
+                    }]
+                }
+            }]
+        }))?)]),
+    )
+    .generate_card_meta(
+        "borrow",
+        "verb sense — to take something temporarily",
+        &LanguagePair::new("en", "ru"),
+        None,
+    )?;
+    let corrected = GeminiClient::new(
+        "key",
+        FakeTransport::new(vec![Ok(body(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": "{\"term\":\"borrow\",\"understanding\":\"verb sense — to take something temporarily\",\"pronunciation\":\"ˈbɒrəʊ\",\"transcription\":\"maɪ aɪ ˈbɒrəʊ jɔː ˈpɛn\",\"meaning\":\"одолжить\",\"importance\":8,\"source_sentence\":\"Могу я одолжить твою ручку?\",\"source_highlight\":\"одолжить\",\"source_hint\":\"Когда ручка не твоя, а надо записать — вежливо просишь на время.\",\"source_context\":\"Нейтрально-вежливый глагол.\",\"target_sentence\":\"May I borrow your pen?\",\"labels\":{\"register\":\"formal\",\"level\":\"b1\",\"type\":\"question\",\"approx\":[]}}"
+                    }]
+                }
+            }]
+        }))?)]),
+    )
+    .correct_card(
+        &CardDraft::new(
+            "borrow",
+            "verb sense — to take something temporarily",
+            LanguagePair::new("en", "ru"),
+        )
+        .with_meta(
+            CardMeta::new(
+                "/borrow/",
+                "/borrow seed/",
+                "одолжить",
+                8,
+                "src",
+                "borrow",
+                "hint",
+                "context",
+                "Can I borrow your pen?",
+            ),
+            None,
+        ),
+        "make it more polite",
+        &LanguagePair::new("en", "ru"),
+    )?;
+    let (_, _, corrected) = corrected.into_parts();
+    assert_eq!(
+        (generated.rewritten(), corrected.rewritten()),
+        (false, true),
+        "only the sentence a learner asked to be rewritten may carry the rewrite mark"
+    );
+    Ok(())
+}
+
 /// Missing API keys surface the configured startup error wording.
 #[test]
 fn missing_api_keys_surface_a_setup_hint() {
@@ -1477,4 +1545,50 @@ fn tts_generation_does_not_hide_non_quota_failures() {
         "INTERNAL: boom",
         "tts generation no longer surfaces non-quota failures immediately"
     );
+}
+
+/// The batch-wide intake call bounds its own output so a truncation is named.
+#[test]
+fn understanding_bounds_its_output_tokens() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "text": "{\"target_lang\":\"FR\",\"items\":[{\"term\":\"chat\",\"senses\":[{\"understanding\":\"a cat\",\"tag\":null}],\"selected\":0,\"ok\":true}]}"
+                }]
+            }
+        }]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    client.understand(&RawInputBatch::new("chat"), "RU", &LearningTarget::Detect)?;
+    let sent = requests.borrow()[0].1.clone();
+    assert!(
+        sent.contains(r#""maxOutputTokens":16384"#),
+        "the batch-wide intake request went out with no output ceiling: {sent}"
+    );
+    Ok(())
+}
+
+/// A truncated intake reply names the ceiling instead of leaking a parse error.
+#[test]
+fn truncated_understanding_names_the_output_ceiling() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{
+            "finishReason": "MAX_TOKENS",
+            "content": {
+                "parts": [{"text": "{\"target_lang\":\"FR\",\"items\":[{\"term\":\"cha"}]
+            }
+        }]
+    }))?)]);
+    let client = GeminiClient::new("key", transport);
+    let refused = client.understand(&RawInputBatch::new("chat"), "RU", &LearningTarget::Detect);
+    let message = refused
+        .expect_err("a truncated intake reply must be refused")
+        .to_string();
+    assert!(
+        message.contains("16384-token output ceiling"),
+        "a truncated intake reply surfaced as something other than the ceiling: {message}"
+    );
+    Ok(())
 }

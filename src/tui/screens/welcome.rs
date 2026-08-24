@@ -13,7 +13,6 @@ use std::rc::Rc;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -37,7 +36,7 @@ const TRAILING_GAP: u16 = 3;
 const FIELD_INDENT: u16 = 4 + 16 + 2;
 /// Fixed width of the underlined key input field, matching the mask cap.
 const KEY_FIELD_WIDTH: u16 = 39;
-const KEY_PLACEHOLDER: &str = "paste your key [Cmd+V]";
+const KEY_PLACEHOLDER: &str = "paste or type your key";
 
 /// `ScreenView` handle for the first-run Welcome screen. Skips the language
 /// chip — the language pair is not yet locked in at this point.
@@ -56,8 +55,12 @@ impl ScreenView for Welcome {
         None
     }
 
-    fn footer(&self, app: &App, width: u16) -> Paragraph<'static> {
-        footer(app, width)
+    fn status(&self, app: &App) -> Vec<Span<'static>> {
+        status(app)
+    }
+
+    fn hints(&self, app: &App) -> Vec<super::common::FooterHint> {
+        hints(app)
     }
 
     fn body(&self, frame: &mut Frame, area: Rect, app: &App) {
@@ -167,14 +170,20 @@ fn intro(width: u16) -> Paragraph<'static> {
             format!("{current} {word}")
         };
         if candidate.chars().count() > max_chars && !current.is_empty() {
-            lines.push(Line::from(Span::styled(current.clone(), palette::dim())));
+            lines.push(Line::from(Span::styled(
+                current.clone(),
+                palette::Ink::Detail.on(false),
+            )));
             current = String::from(word);
         } else {
             current = candidate;
         }
     }
     if !current.is_empty() {
-        lines.push(Line::from(Span::styled(current, palette::dim())));
+        lines.push(Line::from(Span::styled(
+            current,
+            palette::Ink::Detail.on(false),
+        )));
     }
     Paragraph::new(lines).style(palette::base())
 }
@@ -208,7 +217,7 @@ fn language_lines(app: &App, area: Rect) -> Vec<Line<'static>> {
         let mut spans = step_label(false);
         spans.push(Span::styled(
             PickerSection::Known.row_text(picked),
-            palette::dim(),
+            palette::Ink::Detail.on(false),
         ));
         return vec![Line::from(spans)];
     }
@@ -234,12 +243,12 @@ fn step_label(active: bool) -> Vec<Span<'static>> {
     let num_style = if active {
         palette::base()
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     let label_style = if active {
         palette::base()
     } else {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     };
     vec![
         Span::styled("01  ", num_style),
@@ -256,13 +265,13 @@ fn input_row(app: &App) -> (Vec<Span<'static>>, u16) {
     let num_style = if active {
         palette::base()
     } else {
-        palette::dim2()
+        palette::Ink::Aside.on(false)
     };
     spans.push(Span::styled("02  ", num_style));
     let label_style = if active || !welcome.key.is_empty() {
         palette::base()
     } else {
-        palette::dim()
+        palette::Ink::Detail.on(false)
     };
     spans.push(Span::styled(
         super::common::pad_right("gemini api key", 16),
@@ -271,7 +280,10 @@ fn input_row(app: &App) -> (Vec<Span<'static>>, u16) {
     spans.push(chevron(active));
     if !active {
         if !welcome.key.is_empty() {
-            spans.push(Span::styled(masked(welcome.key.as_str()), palette::dim()));
+            spans.push(Span::styled(
+                masked(welcome.key.as_str()),
+                palette::Ink::Detail.on(false),
+            ));
         }
         return (spans, 0);
     }
@@ -298,7 +310,7 @@ fn input_lines(app: &App, width: u16) -> (Paragraph<'static>, Paragraph<'static>
         );
     };
     let notice_width = u16::try_from(notice.chars().count()).unwrap_or(u16::MAX);
-    let notice_span = Span::styled(notice, palette::base().add_modifier(Modifier::BOLD));
+    let notice_span = Span::styled(notice, palette::Ink::Subject.on(false));
     if FIELD_INDENT + KEY_FIELD_WIDTH + TRAILING_GAP + notice_width <= width {
         let pad = usize::from(KEY_FIELD_WIDTH.saturating_sub(value_width) + TRAILING_GAP);
         spans.push(Span::raw(" ".repeat(pad)));
@@ -344,9 +356,9 @@ fn button_spans(app: &App) -> Vec<Span<'static>> {
 fn chip(label: &str, focused: bool) -> Span<'static> {
     let text = format!(" {label} ");
     if focused {
-        Span::styled(text, palette::invert().add_modifier(Modifier::BOLD))
+        Span::styled(text, palette::invert())
     } else {
-        Span::styled(text, palette::dim())
+        Span::styled(text, palette::Ink::Detail.on(false))
     }
 }
 
@@ -358,7 +370,7 @@ fn chip_width(label: &str) -> u16 {
 /// active row, blank on the inactive one, so both rows stay aligned.
 fn chevron(active: bool) -> Span<'static> {
     if active {
-        Span::styled("› ", palette::base().add_modifier(Modifier::BOLD))
+        Span::styled("› ", palette::Ink::Subject.on(false))
     } else {
         Span::styled("  ", palette::base())
     }
@@ -373,7 +385,10 @@ fn key_underline_row(app: &App) -> Paragraph<'static> {
     let indent = " ".repeat(usize::from(FIELD_INDENT));
     Paragraph::new(Line::from(vec![
         Span::raw(indent),
-        Span::styled("─".repeat(usize::from(KEY_FIELD_WIDTH)), palette::dim()),
+        Span::styled(
+            "─".repeat(usize::from(KEY_FIELD_WIDTH)),
+            palette::Ink::Detail.on(false),
+        ),
     ]))
     .style(palette::base())
 }
@@ -399,27 +414,41 @@ fn place_key_cursor(frame: &mut Frame, app: &App, row: Rect) {
     frame.set_cursor_position((cursor_x, row.y));
 }
 
-fn footer(app: &App, width: u16) -> Paragraph<'static> {
-    let welcome = app.welcome();
-    let counter = match welcome.stage {
+fn status(app: &App) -> Vec<Span<'static>> {
+    let counter = match app.welcome().stage {
         WelcomeStage::PickLanguage => "step 1/2",
         WelcomeStage::EnterKey => "step 2/2",
     };
-    let left: Vec<Span<'static>> = vec![Span::styled(String::from(counter), palette::dim2())];
+    vec![Span::styled(
+        String::from(counter),
+        palette::Ink::Aside.on(false),
+    )]
+}
+
+fn hints(app: &App) -> Vec<super::common::FooterHint> {
+    let welcome = app.welcome();
     let mut hints: Vec<super::common::FooterHint> = Vec::new();
     match welcome.stage {
         WelcomeStage::PickLanguage => {
             hints.push(super::common::FooterHint::primary("Enter", "next"));
-            hints.push(super::common::FooterHint::secondary("↑ ↓ ← →", "language"));
+            hints.push(super::common::FooterHint::secondary("↑↓←→", "language"));
         }
         WelcomeStage::EnterKey => {
-            hints.push(super::common::FooterHint::primary("Enter", "submit"));
+            // Enter activates whichever chip is lit, and the two chips do
+            // different things: one sends the typed key, the other copies the
+            // one already in the environment. The hint follows the focus so it
+            // never names the button the cursor is not on.
+            let action = match welcome.focus {
+                WelcomeFocus::LoadEnv => LOAD_ENV_LABEL,
+                WelcomeFocus::Submit => SUBMIT_LABEL,
+            };
+            hints.push(super::common::FooterHint::primary("Enter", action));
             if welcome.env_available {
-                hints.push(super::common::FooterHint::secondary("← →", "move"));
+                hints.push(super::common::FooterHint::secondary("←→", "move"));
             }
             hints.push(super::common::FooterHint::secondary("Esc", "back"));
         }
     }
     hints.push(super::common::quit_hint(app.quit_pending()));
-    super::common::footer_bar(left, hints, width)
+    hints
 }
