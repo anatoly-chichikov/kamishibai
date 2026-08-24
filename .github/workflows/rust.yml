@@ -109,4 +109,4 @@ jobs:
           save-if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
       - run: cargo check --all-targets --all-features --locked
       - name: Test Windows preferences and paths
-        run: cargo test --locked --test config --test config_cli --test paths
+        run: cargo test --locked --test all -- config:: config_cli:: paths::

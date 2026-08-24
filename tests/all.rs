@@ -44,6 +44,32 @@ mod what_i_understood;
 mod your_cards;
 mod your_words;
 
+/// Guard the CI roster: with `autotests = false` a test target exists only
+/// where `Cargo.toml` declares one, and a workflow step naming any other name
+/// aborts the whole job with `no test target named ...` before a single test
+/// runs. That is how the Windows step kept asking for `--test config` after
+/// those files became modules of this harness.
+#[test]
+fn every_test_target_named_by_ci_exists() {
+    let manifest = include_str!("../Cargo.toml");
+    let workflows = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.github/workflows"));
+    let mut missing: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(workflows).expect("the workflow directory must be readable") {
+        let path = entry.expect("directory entry must be readable").path();
+        let text = std::fs::read_to_string(&path).expect("each workflow must be readable");
+        for named in text.split("--test ").skip(1) {
+            let target = named.split_whitespace().next().unwrap_or_default();
+            if !manifest.contains(&format!("name = \"{target}\"")) {
+                missing.push(format!("{}: {target}", path.display()));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "CI asks cargo for test targets no manifest declares: {missing:?}"
+    );
+}
+
 /// Guard the harness roster: with `autotests = false` a test file missing
 /// from the module list above would silently stop running.
 #[test]
