@@ -230,7 +230,8 @@ From the repo root:
    Writes `live/01-your-words.png`, `live/01b-busy.png`, `live/02-what-i-understood.png`,
    `live/02a-nav.png`, `live/03-senses.png`, `live/03b-senses-toggled.png`,
    `live/04-your-cards.png`, `live/08-done.png`, `live/09-card-adjusting.png`,
-   `live/09a-level-raised.png`, `live/09b-card-regenerating.png`,
+   `live/09a-level-raised.png`, `live/09d-card-staged.png`,
+   `live/09b-card-regenerating.png`,
    `live/09c-card-regenerated.png`, `live/09-card-open.png`,
    `live/10-card-scroll-end.png`, and the full raw `live/capture.gif`.
 
@@ -356,9 +357,10 @@ header reads **`EN → FR`**. The tape types seven French words on `YourWords`: 
 verb, and colloquialisms (`canard` doubles as "duck" and "newspaper hoax"); all yield strong
 manga panels and interesting English glosses. The synthetic `examples/tui_states.rs` walker
 mirrors this EN→FR flow with the first four of those words. After the first complete build,
-the tape opens the simple `chouette` card, moves its level exactly one step from `a2` to `b1`,
-waits until the footer proves there is exactly `1 pending`, and presses `Ctrl+G`; this keeps
-the regeneration story scoped to one card. The README gif ends on the rewritten collapsed
+the tape walks up from the last built card to the simple `chouette` card, moves its level
+exactly one step, waits until the footer proves there is exactly `1 pending`, closes the card
+so the staged rewrite reads as one collapsed row (`09d-card-staged.png`), and presses
+`Ctrl+G`; this keeps the regeneration story scoped to one card. The README gif ends on the rewritten collapsed
 card. The tape may continue afterward to capture the separate open-card screenshots.
 
 ### Synthetic and edge-case shots
