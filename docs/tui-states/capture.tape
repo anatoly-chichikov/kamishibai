@@ -58,17 +58,22 @@ Down
 Sleep 900ms
 Screenshot "live/02a-nav.png"
 
-# open canard senses, walk them, toggle the journalism "hoax" sense on
+# open canard senses, walk to the last one, toggle it on (the model picks the
+# senses, so which figurative meaning lands there varies between runs)
 Enter
-Sleep 1s
+Sleep 1500ms
 Screenshot "live/03-senses.png"
 Down
-Sleep 800ms
+Sleep 700ms
+Down
+Sleep 700ms
+Down
+Sleep 700ms
 Space
-Sleep 900ms
+Sleep 2s
 Screenshot "live/03b-senses-toggled.png"
 Enter
-Sleep 900ms
+Sleep 1500ms
 
 # one more nav tick so the motion reads as deliberate
 Down
@@ -84,18 +89,18 @@ Wait+Screen@15m /(all done|make it)/
 Sleep 1500ms
 Screenshot "live/08-done.png"
 
-# final beat: raise the simple chouette card by exactly one CEFR step, regenerate,
+# final beat: walk up from the last built card to chouette, raise it by exactly one CEFR step,
 # capture the collapsed result for the gif, then reopen it for separate detail screenshots
-Down
+Up
 Sleep 650ms
-Down
+Up
 Sleep 650ms
-Down
-Sleep 650ms
-Down
+Up
 Sleep 750ms
 Enter
-Sleep 800ms
+Sleep 1400ms
+Down
+Sleep 650ms
 Down
 Sleep 650ms
 Down
@@ -103,10 +108,14 @@ Sleep 900ms
 Screenshot "live/09-card-adjusting.png"
 
 Right
-Sleep 1200ms
+Sleep 1500ms
 Screenshot "live/09a-level-raised.png"
 
 Wait+Screen /1 pending/
+Enter
+Sleep 1600ms
+Screenshot "live/09d-card-staged.png"
+
 Ctrl+G
 Wait+Screen@30s /drawing each card/
 Sleep 800ms
@@ -116,10 +125,6 @@ Wait+Screen@15m /all done/
 Sleep 1500ms
 Screenshot "live/09c-card-regenerated.png"
 Enter
-Sleep 800ms
-Down
-Sleep 500ms
-Down
 Sleep 900ms
 Screenshot "live/09-card-open.png"
 
