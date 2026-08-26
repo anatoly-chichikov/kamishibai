@@ -611,7 +611,7 @@ fn a_batch_that_published_nothing_still_states_what_it_lost() {
 }
 
 #[test]
-fn the_outcome_block_spends_no_blank_row_on_either_side_of_its_rule() {
+fn the_outcome_block_breathes_one_blank_row_above_its_rule() {
     let app = seeded(vec![
         draft("whilst", ready_artifacts()),
         draft("wreck", partial_priced_artifacts()),
@@ -624,9 +624,12 @@ fn the_outcome_block_spends_no_blank_row_on_either_side_of_its_rule() {
             && row_text(&buffer, row).trim().is_empty()
     };
     assert!(
-        ruled(pdf + 1) && !row_text(&buffer, pdf + 2).trim().is_empty(),
-        "the outcome block must close on the row under its last line and let the cards start right under that:\n{}",
-        (pdf..pdf + 3)
+        !ruled(pdf + 1)
+            && row_text(&buffer, pdf + 1).trim().is_empty()
+            && ruled(pdf + 2)
+            && !row_text(&buffer, pdf + 3).trim().is_empty(),
+        "the outcome block must take a blank row before its closing rule and let the cards start right under that rule:\n{}",
+        (pdf..pdf + 4)
             .map(|row| row_text(&buffer, row))
             .collect::<Vec<_>>()
             .join("\n")
@@ -650,7 +653,7 @@ fn partial_publish_reserves_and_links_the_same_banner_rows() {
             scroll_viewport(&building, terminal) - scroll_viewport(&partial, terminal),
             link_at(&partial, terminal, column, row),
         ),
-        (4, Some(String::from("/tmp/cards.apkg"))),
+        (5, Some(String::from("/tmp/cards.apkg"))),
         "partial banner rendering, scrolling, and hit geometry diverged"
     );
 }
@@ -2578,6 +2581,59 @@ fn the_taught_word_is_the_only_lit_span_of_its_translation() {
     assert_eq!(
         lit, "whilst",
         "the taught word must be the one lit run inside its own sentence"
+    );
+}
+
+#[test]
+fn following_holds_the_running_card_a_third_of_the_way_down() {
+    let terminal = Rect::new(0, 0, 100, 30);
+    let batch = (0..40)
+        .map(|index| {
+            let artifacts = if index < 20 {
+                ready_artifacts()
+            } else {
+                CardArtifacts::default()
+            };
+            draft(&format!("term{index:02}"), artifacts)
+        })
+        .collect::<Vec<_>>();
+    let started = seeded(batch).cards_running(Some((20, Artifact::Sound)));
+    let viewport = scroll_viewport(&started, terminal);
+    let riding = started.body_scroll_to_selection(viewport, scroll_body_width(terminal));
+    let buffer = rendered_buffer_at(&riding, terminal.width, terminal.height);
+    assert_eq!(
+        position_of(&buffer, "term20").1,
+        3 + viewport * 30 / 100,
+        "the card the engine is building must ride a third of the way down the body instead of being parked on the bottom row, or the words still queued behind it are off the screen"
+    );
+}
+
+#[test]
+fn a_settled_batch_keeps_its_last_card_out_from_under_the_outcome_strip() {
+    let terminal = Rect::new(0, 0, 100, 30);
+    let batch = (0..12)
+        .map(|index| draft(&format!("term{index:02}"), ready_artifacts()))
+        .collect::<Vec<_>>();
+    let building = seeded(batch).cards_running(Some((11, Artifact::Picture)));
+    let width = scroll_body_width(terminal);
+    let riding = building
+        .clone()
+        .body_scroll_to_selection(scroll_viewport(&building, terminal), width);
+    let settled =
+        riding
+            .cards_running(None)
+            .done_published("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp");
+    let rested = settled
+        .clone()
+        .body_scroll_clamped(scroll_viewport(&settled, terminal), width);
+    let buffer = rendered_buffer_at(&rested, terminal.width, terminal.height);
+    assert!(
+        (0..terminal.height).any(|row| row_text(&buffer, row).contains("term11")),
+        "the outcome strip took its rows out of the card area and pushed the card the run just finished out of sight:\n{}",
+        (0..terminal.height)
+            .map(|row| row_text(&buffer, row))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 

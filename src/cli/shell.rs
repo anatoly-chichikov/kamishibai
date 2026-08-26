@@ -21,9 +21,11 @@ use crate::tui::{App, AppEvent, BusyKind, KeySource, Screen, Side, WelcomeStage,
 const ANIMATION_FRAME_MILLIS: u64 = 250;
 const IDLE_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
 const BACKGROUND_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
-const FAST_JOB_POLL: Duration = Duration::from_millis(25);
+const FAST_JOB_POLL_MILLIS: u64 = 25;
+const FAST_JOB_POLL: Duration = Duration::from_millis(FAST_JOB_POLL_MILLIS);
 const FAST_JOB_WINDOW: Duration = Duration::from_millis(50);
 const CONFIRMATION_WINDOW: Duration = Duration::from_millis(1000);
+const STEP_DWELL: Duration = Duration::from_millis(3 * FAST_JOB_POLL_MILLIS);
 const KEY_REJECTED_MESSAGE: &str = "Gemini rejected this API key; saved key was cleared";
 
 struct PendingJob<T> {
@@ -106,6 +108,7 @@ pub(super) struct Shell<P, K> {
     quit_armed_at: Option<Instant>,
     new_batch_armed_at: Option<Instant>,
     destructive_escape_armed_at: Option<(DestructiveEscape, Instant)>,
+    dwell: Duration,
     workflow: P,
     keys: K,
     store: PreferenceStore,
@@ -141,6 +144,7 @@ impl Shell<GeminiCardWorkflow, GeminiKeyValidation> {
             quit_armed_at: None,
             new_batch_armed_at: None,
             destructive_escape_armed_at: None,
+            dwell: STEP_DWELL,
             workflow,
             keys,
             store: default_store(&SystemContext)?,
@@ -611,10 +615,25 @@ where
         Ok(())
     }
 
+    /// Settle the finished artifact job, once it has been on screen long
+    /// enough to be read.
+    ///
+    /// A step that came back from the cache answers in a millisecond, and
+    /// settling it here lets `advance_engine` raise the next one inside the
+    /// same tick, so a whole card walked meta → sound → scene → picture
+    /// between two frames and the batch flashed past unreadably. Holding the
+    /// job for `dwell` gives every step a beat of its own on its row. The
+    /// dwell is re-checked once per `FAST_JOB_POLL`, so it can only ever
+    /// expire on that grid and is sized in whole polls rather than rounded up
+    /// to one behind the reader's back. The floor is unconditional because a
+    /// real provider call outlasts it many times over and never feels it.
     fn poll_artifact(&mut self) -> Result<bool> {
         let Some(job) = self.artifact_job.as_ref() else {
             return Ok(false);
         };
+        if job.job.started.elapsed() < self.dwell {
+            return Ok(false);
+        }
         match job.job.receiver.try_recv() {
             Ok(outcome) => {
                 let job = self
@@ -1698,6 +1717,7 @@ mod tests {
             quit_armed_at: None,
             new_batch_armed_at: None,
             destructive_escape_armed_at: None,
+            dwell: Duration::ZERO,
             workflow: workflow.clone(),
             keys: workflow,
             store,
@@ -1749,6 +1769,7 @@ mod tests {
             quit_armed_at: None,
             new_batch_armed_at: None,
             destructive_escape_armed_at: None,
+            dwell: Duration::ZERO,
             workflow: TestWorkflow::local(),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -3329,6 +3350,7 @@ mod tests {
             quit_armed_at: None,
             new_batch_armed_at: None,
             destructive_escape_armed_at: None,
+            dwell: Duration::ZERO,
             workflow: TestWorkflow::local(),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -3482,6 +3504,7 @@ mod tests {
             quit_armed_at: None,
             new_batch_armed_at: None,
             destructive_escape_armed_at: None,
+            dwell: Duration::ZERO,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -3603,6 +3626,7 @@ mod tests {
             quit_armed_at: None,
             new_batch_armed_at: None,
             destructive_escape_armed_at: None,
+            dwell: Duration::ZERO,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -3751,6 +3775,7 @@ mod tests {
             quit_armed_at: None,
             new_batch_armed_at: None,
             destructive_escape_armed_at: None,
+            dwell: Duration::ZERO,
             workflow: TestWorkflow::counting(calls.clone()),
             keys: TestWorkflow::local(),
             store: PreferenceStore::at(home.path().join("preferences.json")),
@@ -4010,6 +4035,36 @@ mod tests {
             (fresh.poll_timeout(), stale.poll_timeout()),
             (FAST_JOB_POLL, BACKGROUND_POLL),
             "background work must leave the fast cadence after the cache-hit window"
+        );
+    }
+
+    #[test]
+    fn a_step_holds_its_row_for_its_own_beat_before_it_settles() {
+        let language_pair = pair();
+        let draft = CardDraft::new("alpha", "first understanding", language_pair.clone());
+        let app = App::new(language_pair)
+            .with_screen(Screen::YourCards)
+            .cards_started(vec![draft.clone()]);
+        let mut shell = shell(app);
+        shell.dwell = STEP_DWELL;
+        shell.engine = Some(SessionEngine::start(vec![draft]));
+        shell.tick().expect("the first tick must raise a step");
+        thread::sleep(Duration::from_millis(20));
+        shell.tick().expect("the dwelling tick must succeed");
+        let dwelling = shell.artifact_job.as_ref().map(|job| job.artifact);
+        let job = shell
+            .artifact_job
+            .as_mut()
+            .expect("invariant: the step must still be in flight");
+        job.job.started = Instant::now() - STEP_DWELL;
+        shell.tick().expect("the settling tick must succeed");
+        assert_eq!(
+            (
+                dwelling,
+                shell.artifact_job.as_ref().map(|job| job.artifact)
+            ),
+            (Some(Artifact::Meta), Some(Artifact::Sound)),
+            "a step that answered from cache walked on before its row could be read, which is how a whole batch flashes past"
         );
     }
 
