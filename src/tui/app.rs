@@ -346,6 +346,16 @@ fn paired(learning: &str, known: &str) -> LanguagePair {
     LanguagePair::new(learning.to_string(), known.to_string())
 }
 
+/// How far down the viewport the ride holds the card the engine is building,
+/// as a percentage of the viewport height.
+///
+/// Parking that card against the bottom row left nothing under it, and what
+/// sits under it is the grey tail of words the batch has not reached yet —
+/// the only place a running build says what is coming next. Holding the card
+/// near the top keeps that queue on screen without throwing the cards already
+/// built off in one jump.
+const FOLLOW_ANCHOR_PERCENT: u16 = 30;
+
 impl App {
     /// Create a fresh app sitting on `YourWords` with an initial language pair.
     pub fn new(pair: LanguagePair) -> Self {
@@ -708,14 +718,42 @@ impl App {
     /// the user collapses an expanded card or removes candidates) snaps the
     /// view back so no blank tail is left below the content. `body_width` is
     /// the body rect width in chars, used by the head-row wrap calc.
+    ///
+    /// This is also where the ride comes to rest. The outcome strip appears in
+    /// the same moment the batch settles and takes its rows out of the card
+    /// area from above, so a view left exactly where the ride parked it slides
+    /// its last card under the strip and out of sight — the card the run just
+    /// finished, hidden behind the block announcing it. Parking at the end
+    /// once and disarming the ride there means the correction cannot fight a
+    /// later click or an opened card.
     pub fn body_scroll_clamped(mut self, viewport: u16, body_width: u16) -> Self {
         let max = self
             .body_content_height(body_width)
             .saturating_sub(viewport);
+        if self.ride_settled() {
+            self.cards.following = false;
+            self.body_scroll = max;
+            return self;
+        }
         if self.body_scroll > max {
             self.body_scroll = max;
         }
         self
+    }
+
+    /// Whether the ride reached the end of the batch it was carrying.
+    ///
+    /// A run ends with `cards_running(None)` while `following` is still armed,
+    /// which is exactly the state nobody scrolled or walked out of, and the
+    /// strip is up only once there is an outcome to report. An expanded card
+    /// is the learner reading one card on purpose, so the ride leaves it be.
+    fn ride_settled(&self) -> bool {
+        self.screen == Screen::YourCards
+            && self.cards.following
+            && self.cards.running.is_none()
+            && !self.card_expanded()
+            && crate::tui::screens::banner::reports(self)
+            && self.batch_settled()
     }
 
     /// Return the app with the body scroll reset to the top.
@@ -748,7 +786,13 @@ impl App {
         let mut next = self.body_scroll;
         let anchor_editor =
             self.screen == Screen::YourCards && self.cards.editor.is_some() && height <= viewport;
-        if anchor_editor || top < next {
+        if let Some(anchor) = self.follow_anchor(top, viewport) {
+            // The ride holds its card near the top and yields to the old
+            // bottom park only when the card's own block is taller than the
+            // room left under the anchor, which is the one case where holding
+            // it there would push its later rows off the screen.
+            next = anchor.max(bottom.saturating_sub(viewport));
+        } else if anchor_editor || top < next {
             next = top;
         } else if bottom > next.saturating_add(viewport) {
             next = bottom.saturating_sub(viewport);
@@ -758,6 +802,15 @@ impl App {
         }
         self.body_scroll = next;
         self
+    }
+
+    /// Scroll offset that holds the followed card `FOLLOW_ANCHOR_PERCENT` of
+    /// the way down the viewport, or `None` when the view is not riding the
+    /// engine. `following_card` already answers `None` for a broken ride and
+    /// for an expanded card, so the anchor needs no further guard.
+    fn follow_anchor(&self, top: u16, viewport: u16) -> Option<u16> {
+        (self.screen == Screen::YourCards && self.following_card() == Some(self.cards.selected))
+            .then(|| top.saturating_sub(viewport.saturating_mul(FOLLOW_ANCHOR_PERCENT) / 100))
     }
 
     fn focused_body_range(&self, body_width: u16) -> Option<(u16, u16)> {

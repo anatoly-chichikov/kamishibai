@@ -9,8 +9,8 @@ expression: render(&app)
     │ ↓ APKG    RU_cards.apkg                                                   
     │ ↓ PDF     RU_cards.pdf                                                    
                                                                                 
-    no cards in this batch                                                      
                                                                                 
+    no cards in this batch                                                      
                                       ai may be wrong, please verify results    
                                                                                 
     step 3/3  0/0 ready                       [Esc] new cards  [Ctrl+C] quit

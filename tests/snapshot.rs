@@ -266,9 +266,9 @@ fn partial_publish_snapshot_locks_the_outcome_strip() {
 /// The outcome strip's rule is drawn the way the status rule is — blank cells
 /// carrying `CROSSED_OUT` — so it leaves no glyph for a text snapshot to hold.
 /// Only the styles prove it is there, that it reaches both screen edges past
-/// the body gutter, that it spends no blank row on either side of itself, and
-/// that it is phase-locked to the rule above the footer rather than drawn on
-/// the opposite columns.
+/// the body gutter, that the blank row above it stays blank while the cards
+/// start right under it, and that it is phase-locked to the rule above the
+/// footer rather than drawn on the opposite columns.
 #[test]
 fn the_outcome_strip_closes_itself_with_the_same_rule_the_footer_uses() {
     let width = 100;
@@ -286,7 +286,7 @@ fn the_outcome_strip_closes_itself_with_the_same_rule_the_footer_uses() {
         .draw(|frame| draw(frame, &app))
         .expect("draw must succeed");
     let buffer = terminal.backend().buffer();
-    let strip = 6;
+    let strip = 7;
     let footer = height - 2;
     let dashed = |column: u16, row: u16| {
         buffer[(column, row)]
@@ -299,7 +299,7 @@ fn the_outcome_strip_closes_itself_with_the_same_rule_the_footer_uses() {
             && !dashed(0, strip - 1)
             && !dashed(0, strip + 1)
             && buffer[(0, strip)].fg == buffer[(0, footer)].fg,
-        "the outcome strip must close on one full-width dashed row, in the same colour and phase that closes the body, with no blank spent on either side of it"
+        "the outcome strip must close on one full-width dashed row, in the same colour and phase that closes the body, with its one blank row above it and the cards directly below"
     );
 }
 

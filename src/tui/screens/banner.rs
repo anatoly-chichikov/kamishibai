@@ -10,7 +10,9 @@
 //! that closes the body off from the footer — drawn by `common::render_screen`
 //! across the full terminal width, because the body rectangle this widget
 //! lives in stops a gutter short of both edges and a border that stops short
-//! of the screen reads as a shorter border, not as the same one.
+//! of the screen reads as a shorter border, not as the same one. One blank row
+//! stands between the last path and that rule, so the paths are not read as
+//! sitting on top of their own edge.
 //!
 //! The hit tester in `tui::links` mirrors the column maths laid out here.
 
@@ -43,20 +45,19 @@ pub const PATH_GAP: usize = 2;
 /// Visible characters bracketing the loss tag, one space either side.
 const TAG_PAD: usize = 2;
 
-/// Number of rows the strip occupies inside the body rect: its content rows
-/// plus the dashed rule closing them off. Returns zero when there is nothing
-/// to report.
+/// Number of rows the strip occupies inside the body rect: its content rows,
+/// one blank row, and the dashed rule closing them off. Returns zero when
+/// there is nothing to report.
 ///
-/// No blank on either side of the rule. A block and its own bottom edge need
-/// nothing between them, and the cards start on the row right under it — the
-/// same way the status rule sits between the disclaimer above it and the
-/// footer below it without a spare row for either.
+/// One blank above the rule, none below it. The block needs a breath before
+/// its own bottom edge, while the cards start on the row right under that
+/// edge — the same way the status rule sits directly above the footer.
 pub fn height(app: &App) -> u16 {
     let count = content_rows(app);
     if count == 0 {
         0
     } else {
-        u16::try_from(count + 1).unwrap_or(u16::MAX)
+        u16::try_from(count + 2).unwrap_or(u16::MAX)
     }
 }
 
@@ -159,8 +160,9 @@ pub fn display(label: &str, path: &str) -> String {
 
 /// Render the strip's content rows. Caller is responsible for rendering them
 /// into a `height(app)`-row sub-rect at the top of the body area, `width`
-/// cells wide; the one row this widget leaves empty at the bottom is the
-/// full-width rule `render_screen` paints at `rule_row`.
+/// cells wide; of the two rows this widget leaves empty at the bottom the
+/// first stays blank and the second carries the full-width rule
+/// `render_screen` paints at `rule_row`.
 /// The deck and report rows show only the file name; the folder row shows the
 /// full directory path so the file rows above don't need to repeat it.
 pub fn widget(app: &App, width: u16) -> Paragraph<'static> {
