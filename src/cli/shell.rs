@@ -15,7 +15,9 @@ use crate::application::{CardUseCases, KeyValidation, PublishPhase, PublishProgr
 use crate::config::{PreferenceStore, Preferences, default_store};
 use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
-use crate::session::{Artifact, ArtifactAttempt, CardDraft, RawInputBatch, SessionEngine};
+use crate::session::{
+    Artifact, ArtifactAttempt, CardDraft, RawInputBatch, SentenceBatchSettings, SessionEngine,
+};
 use crate::tui::{App, AppEvent, BusyKind, KeySource, Screen, Side, WelcomeStage, transit};
 
 const ANIMATION_FRAME_MILLIS: u64 = 250;
@@ -745,13 +747,33 @@ where
         match outcome {
             TextOutcome::Understanding(result) => match result {
                 Ok(understood) => {
-                    self.app = self
+                    let learning = understood.guess().code();
+                    let current = self.app.sentence_settings();
+                    let same = self.app.pair().learning().eq_ignore_ascii_case(learning);
+                    let fallback = if same {
+                        current
+                    } else {
+                        SentenceBatchSettings::default()
+                    };
+                    let (settings, preference_error) = match self.store.read() {
+                        Ok(preferences) => (
+                            preferences.saved_guidance(learning).unwrap_or(fallback),
+                            None,
+                        ),
+                        Err(error) => (fallback, Some(error.to_string())),
+                    };
+                    let app = self
                         .app
                         .clone()
                         .with_screen(Screen::WhatIUnderstood)
-                        .confirmed_learning(understood.guess().code())
+                        .confirmed_learning(learning)
+                        .with_sentence_settings(settings)
                         .understood_preserving_senses(understood.candidates().to_vec())
                         .with_alternates(understood.guess().alternates().to_vec());
+                    self.app = match preference_error {
+                        Some(error) => app.error_shown(error),
+                        None => app,
+                    };
                 }
                 Err(error) => {
                     if rejects_key(&error) {
@@ -858,6 +880,9 @@ where
             }
             Side::AdoptLanguages(choice) => {
                 self.persist_preferences(|prefs| prefs.adopt(choice.known()))?;
+            }
+            Side::RememberSentenceSettings { learning, settings } => {
+                self.persist_preferences(|prefs| prefs.remember(learning.as_str(), settings))?;
             }
             Side::ValidateKey(key) => {
                 let keys = self.keys.clone();
@@ -1359,9 +1384,9 @@ mod tests {
     use crate::session::{
         ARTIFACT_ATTEMPT_CEILING, ArtifactCosts, ArtifactFile, ArtifactSlot, CandidateRecord,
         CardArtifacts, CardMeta, CardRevision, GenerationCost, LanguagePair, LearningDetection,
-        RawInputBatch, ScriptDetection, Sense, SenseCorrection, SentenceBatchSettings,
-        SentenceLabelSelection, SentenceLevel, SentenceTypeMix, Understood, WordCandidate,
-        catalog_for_detection,
+        LearningGuess, RawInputBatch, ScriptDetection, Sense, SenseCorrection,
+        SentenceBatchSettings, SentenceLabelSelection, SentenceLevel, SentenceTypeMix, Understood,
+        WordCandidate, catalog_for_detection,
     };
     use crate::tui::{LabelEditorRow, ModalKind};
     use anyhow::Result;
@@ -1853,6 +1878,126 @@ mod tests {
             requests,
             vec![None],
             "natural unlevelled batches must preserve the existing unconstrained metadata request"
+        );
+    }
+
+    #[test]
+    fn guidance_changes_persist_for_the_current_learning_language_until_reset() {
+        let mut shell = shell(review().sentence_settings_opened());
+        shell
+            .handle(AppEvent::CursorRight)
+            .expect("level choice must persist");
+        shell
+            .handle(AppEvent::NavNext)
+            .expect("types row must receive focus");
+        shell
+            .handle(AppEvent::CursorRight)
+            .expect("type choice must persist");
+        let explicit = shell
+            .store
+            .read()
+            .expect("saved guidance must remain readable")
+            .guidance("EN");
+        shell
+            .handle(AppEvent::CursorLeft)
+            .expect("type default must persist");
+        shell
+            .handle(AppEvent::NavPrev)
+            .expect("level row must receive focus");
+        shell
+            .handle(AppEvent::CursorLeft)
+            .expect("level default must persist");
+        let restored = shell
+            .store
+            .read()
+            .expect("restored defaults must remain readable");
+        assert_eq!(
+            (explicit, restored.guidance("en"), restored.guidance("fr"),),
+            (
+                SentenceBatchSettings::new(Some(SentenceLevel::A1), SentenceTypeMix::Statements,),
+                SentenceBatchSettings::default(),
+                SentenceBatchSettings::default(),
+            ),
+            "guidance was not saved by learning language or survived an explicit best-fit reset"
+        );
+    }
+
+    #[test]
+    fn understanding_restores_guidance_for_the_detected_learning_language() {
+        let settings =
+            SentenceBatchSettings::new(Some(SentenceLevel::B2), SentenceTypeMix::Dialogue);
+        let mut shell = shell(App::new(pair()).seeded_blob("γεια"));
+        shell
+            .store
+            .write(&Preferences::new("ru").remember("EL", settings))
+            .expect("Greek guidance must be seeded");
+        shell
+            .handle(AppEvent::Generate)
+            .expect("understanding must start");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.pair().learning(),
+                shell.app.sentence_settings(),
+            ),
+            (Screen::WhatIUnderstood, "el", settings),
+            "fresh review did not restore guidance for its detected learning language"
+        );
+    }
+
+    #[test]
+    fn understanding_keeps_legacy_session_guidance_only_for_the_same_target() {
+        let settings =
+            SentenceBatchSettings::new(Some(SentenceLevel::C1), SentenceTypeMix::Questions);
+        let app = review().with_sentence_settings(settings);
+        let mut same = shell(app.clone());
+        same.finish_text(TextOutcome::Understanding(Ok(Understood::new(
+            LearningGuess::new("EN", true),
+            vec![candidate("whilst")],
+        ))));
+        let mut changed = shell(app);
+        changed.finish_text(TextOutcome::Understanding(Ok(Understood::new(
+            LearningGuess::new("EL", true),
+            vec![candidate("γεια")],
+        ))));
+        assert_eq!(
+            (
+                same.app.sentence_settings(),
+                changed.app.sentence_settings(),
+            ),
+            (settings, SentenceBatchSettings::default()),
+            "fresh target guidance leaked across languages or legacy same-target settings were erased"
+        );
+    }
+
+    #[test]
+    fn successful_understanding_survives_a_concurrent_preferences_failure() {
+        let choice = crate::tui::LanguageChoice::new("ru", crate::tui::learning_target(Some("el")));
+        let app = review().languages_adopted(&choice);
+        let mut shell = shell(app);
+        std::fs::write(shell.store.path(), "{broken")
+            .expect("preferences corruption must be reproducible");
+        shell.finish_text(TextOutcome::Understanding(Ok(Understood::new(
+            LearningGuess::new("EL", true),
+            vec![candidate("γεια")],
+        ))));
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.pair().learning(),
+                shell.app.candidates()[0].term(),
+                shell.app.sentence_settings(),
+                shell.app.error().is_some(),
+            ),
+            (
+                Screen::WhatIUnderstood,
+                "EL",
+                "γεια",
+                SentenceBatchSettings::default(),
+                true,
+            ),
+            "a preferences read failure discarded successful understanding into a mismatched review"
         );
     }
 

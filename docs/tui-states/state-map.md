@@ -178,9 +178,13 @@ format row; `S` and mouse opening retain `level` as their initial focus.
 two rows, and `Enter`, `Esc`, or `↓` from format closes only this editor while
 retaining both choices and returning to the previously selected word. While it
 is open, its input ownership prevents `D`, `J`, `Space`, or other printable
-keys from leaking into candidate or sense controls. The choices survive sense
-re-review, screen changes, and session resume; only a new batch resets them to
-no target level plus `best fit`, restoring the one-tag summary.
+keys from leaking into candidate or sense controls. Every actual choice is
+saved immediately under the confirmed learning-language code. Fresh batches
+and later launches restore that language's choices after understanding resolves
+the target, while a resumed session keeps the settings recorded in its own
+`session.json`. Returning both rows to `best fit` removes that language's saved
+override; a target without one restores the muted one-tag default. Choices also
+survive sense re-review and ordinary screen changes.
 
 `Ctrl+G` is valid with the editor open. At that boundary the settings expand
 once, after excluded candidates and selected senses have produced the final

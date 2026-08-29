@@ -907,6 +907,7 @@ impl App {
     /// not a guess, so the header stops showing the pending ellipsis. Handing
     /// the half back to detection reopens that ellipsis until the pass answers.
     pub fn languages_adopted(mut self, choice: &LanguageChoice) -> Self {
+        let previous_learning = self.pair.learning().to_string();
         self.learning_target = choice.learning().clone();
         match choice.pinned() {
             Some(code) => {
@@ -917,6 +918,13 @@ impl App {
                 self.pair = paired(self.pair.learning(), choice.known());
                 self.input.learning_pending = true;
             }
+        }
+        if !self
+            .pair
+            .learning()
+            .eq_ignore_ascii_case(previous_learning.as_str())
+        {
+            self.sentence_settings = SentenceBatchSettings::default();
         }
         self.picker_cursor = PickerCursor::opening(
             self.pair.known(),

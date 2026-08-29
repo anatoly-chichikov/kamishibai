@@ -1,5 +1,5 @@
 use crate::languages::catalog;
-use crate::session::{MAX_INTAKE_WORDS, MAX_PLAN_CARDS, RawInputBatch};
+use crate::session::{MAX_INTAKE_WORDS, MAX_PLAN_CARDS, RawInputBatch, SentenceBatchSettings};
 
 use super::app::{App, ReviewFocus};
 use super::disclosure::{DisclosureControls, DisclosureIntent};
@@ -29,6 +29,12 @@ pub enum Side {
     /// Adopt one language pair before any words were read. Only the known half
     /// is persisted; the learning half stays a session-local pin.
     AdoptLanguages(LanguageChoice),
+    /// Persist one changed generation-guidance policy under its learning
+    /// language without waiting for the editor to close or generation to start.
+    RememberSentenceSettings {
+        learning: String,
+        settings: SentenceBatchSettings,
+    },
     /// Welcome key step: probe Gemini with the entered key. The shell runs the
     /// check off-thread, persists language + key only on success, then moves to
     /// `Your Words`; a rejected key stays on Welcome with an inline notice.
@@ -105,20 +111,18 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsChoose(row, index))
             if app.sentence_settings_editor().is_some() =>
         {
-            (
+            change_sentence_settings(app, |app| {
                 app.sentence_settings_focused(row)
-                    .sentence_settings_chosen(index),
-                Side::None,
-            )
+                    .sentence_settings_chosen(index)
+            })
         }
         (Screen::WhatIUnderstood, None, AppEvent::SentenceSettingsAdvance(row, forward))
             if app.sentence_settings_editor().is_some() =>
         {
-            (
+            change_sentence_settings(app, |app| {
                 app.sentence_settings_focused(row)
-                    .sentence_settings_advanced(forward),
-                Side::None,
-            )
+                    .sentence_settings_advanced(forward)
+            })
         }
         (Screen::WhatIUnderstood, None, AppEvent::NavPrev)
             if app.sentence_settings_editor().is_some() =>
@@ -138,12 +142,12 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, None, AppEvent::CursorLeft)
             if app.sentence_settings_editor().is_some() =>
         {
-            (app.sentence_settings_advanced(false), Side::None)
+            change_sentence_settings(app, |app| app.sentence_settings_advanced(false))
         }
         (Screen::WhatIUnderstood, None, AppEvent::CursorRight)
             if app.sentence_settings_editor().is_some() =>
         {
-            (app.sentence_settings_advanced(true), Side::None)
+            change_sentence_settings(app, |app| app.sentence_settings_advanced(true))
         }
         (Screen::WhatIUnderstood, None, AppEvent::KeyEnter)
             if app.sentence_settings_editor().is_some() =>
@@ -403,6 +407,19 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (_, _, AppEvent::Redraw) => (app, Side::None),
         (_, _, _) => (app, Side::None),
     }
+}
+
+fn change_sentence_settings(app: App, change: impl FnOnce(App) -> App) -> (App, Side) {
+    let previous = app.sentence_settings();
+    let learning = app.pair().learning().to_string();
+    let next = change(app);
+    let settings = next.sentence_settings();
+    let side = if settings == previous {
+        Side::None
+    } else {
+        Side::RememberSentenceSettings { learning, settings }
+    };
+    (next, side)
 }
 
 /// Return the app with the focused card's editor live on one row, opening it

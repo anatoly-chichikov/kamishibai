@@ -374,6 +374,32 @@ fn keyboard_changes_both_rows_and_escape_closes_without_losing_choices() {
 }
 
 #[test]
+fn changing_guidance_requests_persistence_for_the_learning_language() {
+    let app = review(2).sentence_settings_opened();
+    let (changed, side) = transit(
+        app,
+        AppEvent::SentenceSettingsChoose(BatchSettingsRow::Level, 3),
+    );
+    let (_, repeated) = transit(
+        changed.clone(),
+        AppEvent::SentenceSettingsChoose(BatchSettingsRow::Level, 3),
+    );
+    let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::BestFit);
+    assert_eq!(
+        (changed.sentence_settings(), side, repeated),
+        (
+            settings,
+            Side::RememberSentenceSettings {
+                learning: String::from("fr"),
+                settings,
+            },
+            Side::None,
+        ),
+        "a changed guidance choice did not request one target-language preference update"
+    );
+}
+
+#[test]
 fn re_understanding_and_screen_changes_keep_only_the_durable_choices() {
     let settings = SentenceBatchSettings::new(Some(SentenceLevel::C1), SentenceTypeMix::Mixed);
     let app = review(2)
