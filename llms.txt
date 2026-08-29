@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.10.1
+Release: 1.10.2
 
 Overview
 
@@ -21,7 +21,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.10.1/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.10.2/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -31,8 +31,10 @@ known = my = source
 learning = target
 ```
 
-Only `known` is saved globally. `learning` belongs to a session: pass it
-explicitly or let word intake autodetect it. Do not create or edit
+Only `known` is saved as a global language choice. `learning` belongs to a
+session: pass it explicitly or let word intake autodetect it. The interactive
+TUI separately remembers explicit generation guidance by `learning` code; it
+does not persist the learning-language choice itself. Do not create or edit
 `preferences.json` by hand; `config` owns that file.
 
 For CI, shared, remote, or ephemeral agents, keep the key in the environment
@@ -731,7 +733,8 @@ Default cache locations:
 - Windows: the platform-native user cache directory plus `kamishibai`
 - override: `KAMISHIBAI_CACHE`, interpreted as the exact cache root
 
-Saved language and key live in `preferences.json`:
+Saved known language, key, and per-learning-language TUI guidance live in
+`preferences.json`:
 
 - macOS: `~/Library/Application Support/kamishibai/preferences.json`
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/kamishibai/preferences.json`

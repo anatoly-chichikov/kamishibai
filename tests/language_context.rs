@@ -4,7 +4,8 @@
 
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::session::{
-    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair, WordCandidate,
+    Artifact, ArtifactSlot, CardArtifacts, CardDraft, CardMeta, LanguagePair,
+    SentenceBatchSettings, SentenceLevel, SentenceTypeMix, WordCandidate,
 };
 use kamishibai::tui::{
     App, AppEvent, KeySource, LanguageChoice, PickerSection, Screen, Side, WelcomeStage, draw,
@@ -619,6 +620,25 @@ fn pinning_the_learning_language_rereads_the_reviewed_words() {
             Side::AdoptLanguagesAndRunUnderstanding(pinned_choice("ru", "de")),
         ),
         "pinning a different learning language must reread the batch under it"
+    );
+}
+
+#[test]
+fn changing_the_target_clears_live_guidance_without_affecting_known_only_changes() {
+    let settings = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Questions);
+    let app = reviewed()
+        .confirmed_learning("en")
+        .with_sentence_settings(settings);
+    let changed = transit(
+        app.clone(),
+        AppEvent::SetLanguages(pinned_choice("ru", "de")),
+    )
+    .0;
+    let known_only = transit(app, AppEvent::SetLanguages(known_choice("es"))).0;
+    assert_eq!(
+        (changed.sentence_settings(), known_only.sentence_settings(),),
+        (SentenceBatchSettings::default(), settings),
+        "live generation guidance crossed into another target or vanished on a known-language change"
     );
 }
 

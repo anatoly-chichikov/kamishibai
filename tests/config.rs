@@ -6,6 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use kamishibai::config::{PreferenceStore, Preferences};
+use kamishibai::session::{SentenceBatchSettings, SentenceLevel, SentenceTypeMix};
 use tempfile::tempdir;
 
 #[cfg(unix)]
@@ -25,6 +26,80 @@ fn preference_store_persists_my_language_across_reads() {
         restored,
         Preferences::new("ru"),
         "persisted my_language must survive a round trip"
+    );
+}
+
+#[test]
+fn preference_store_persists_sentence_guidance_by_learning_language() {
+    let home = tempdir().expect("must create temp home");
+    let store = PreferenceStore::at(home.path().join("kamishibai").join("preferences.json"));
+    let french = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Questions);
+    let greek = SentenceBatchSettings::new(Some(SentenceLevel::A2), SentenceTypeMix::Dialogue);
+    store
+        .write(
+            &Preferences::new("ru")
+                .remember("fr", french)
+                .remember("EL", greek),
+        )
+        .expect("sentence guidance must persist");
+    let restored = store.read().expect("sentence guidance must restore");
+    let document: serde_json::Value = serde_json::from_slice(
+        fs::read(store.path())
+            .expect("preferences must remain readable")
+            .as_slice(),
+    )
+    .expect("preferences must remain JSON");
+    assert_eq!(
+        (
+            restored.guidance("FR"),
+            restored.guidance("el"),
+            restored.guidance("EN"),
+            document["sentences"].get("FR").is_some(),
+            document["sentences"].get("fr").is_none(),
+        ),
+        (french, greek, SentenceBatchSettings::default(), true, true,),
+        "saved sentence guidance leaked across learning languages or ignored code case"
+    );
+}
+
+#[test]
+fn restoring_best_fit_removes_the_learning_language_override() {
+    let home = tempdir().expect("must create temp home");
+    let store = PreferenceStore::at(home.path().join("kamishibai").join("preferences.json"));
+    let explicit = SentenceBatchSettings::new(Some(SentenceLevel::C1), SentenceTypeMix::Mixed);
+    let french = SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Questions);
+    store
+        .write(
+            &Preferences::new("en")
+                .with_api_key("saved-secret")
+                .remember("FR", french)
+                .remember("el", explicit)
+                .remember("EL", SentenceBatchSettings::default()),
+        )
+        .expect("restored defaults must persist");
+    let restored = store.read().expect("restored defaults must read");
+    let document: serde_json::Value = serde_json::from_slice(
+        fs::read(store.path())
+            .expect("preferences must remain readable")
+            .as_slice(),
+    )
+    .expect("preferences must remain JSON");
+    assert_eq!(
+        (
+            restored.my_language.as_str(),
+            restored.api_key.as_deref(),
+            restored.guidance("el"),
+            restored.guidance("fr"),
+            document["sentences"].get("EL").is_none(),
+        ),
+        (
+            "en",
+            Some("saved-secret"),
+            SentenceBatchSettings::default(),
+            french,
+            true,
+        ),
+        "best fit left a stale target-language override in preferences"
     );
 }
 
@@ -51,17 +126,20 @@ fn stored_api_key_does_not_confirm_the_default_language() {
 
 #[test]
 fn clearing_api_key_preserves_the_confirmed_language() {
+    let settings = SentenceBatchSettings::new(Some(SentenceLevel::A2), SentenceTypeMix::Statements);
     let preferences = Preferences::new("ru")
+        .remember("fr", settings)
         .with_api_key("123456789012345678901234567890")
         .without_api_key();
     assert_eq!(
         (
-            preferences.my_language,
+            preferences.my_language.as_str(),
             preferences.my_language_confirmed,
-            preferences.api_key,
+            preferences.api_key.as_deref(),
+            preferences.guidance("FR"),
         ),
-        (String::from("ru"), true, None),
-        "clearing a rejected API key must not reset the confirmed language"
+        ("ru", true, None, settings),
+        "clearing a rejected API key must not reset the confirmed language or guidance"
     );
 }
 
@@ -81,8 +159,9 @@ fn legacy_preference_without_confirmation_cannot_silently_pick_german() {
         (
             restored.requires_language_choice(),
             restored.startup_language().to_string(),
+            restored.guidance("de"),
         ),
-        (true, String::from("en")),
+        (true, String::from("en"), SentenceBatchSettings::default(),),
         "legacy preferences without confirmation must not silently select German"
     );
 }
@@ -134,7 +213,7 @@ fn a_known_language_update_preserves_the_saved_key() {
 fn concurrent_updates_preserve_independent_fields() {
     let home = tempdir().expect("must create temp home");
     let store = PreferenceStore::at(home.path().join("kamishibai").join("preferences.json"));
-    let barrier = Arc::new(Barrier::new(3));
+    let barrier = Arc::new(Barrier::new(4));
     let language_store = store.clone();
     let language_barrier = Arc::clone(&barrier);
     let language = thread::spawn(move || {
@@ -150,6 +229,17 @@ fn concurrent_updates_preserve_independent_fields() {
         key_barrier.wait();
         key_store.update(|preferences| preferences.with_api_key("concurrent-secret"))
     });
+    let guidance_store = store.clone();
+    let guidance_barrier = Arc::clone(&barrier);
+    let guidance = thread::spawn(move || {
+        guidance_barrier.wait();
+        guidance_store.update(|preferences| {
+            preferences.remember(
+                "el",
+                SentenceBatchSettings::new(Some(SentenceLevel::B2), SentenceTypeMix::Dialogue),
+            )
+        })
+    });
     barrier.wait();
     language
         .join()
@@ -158,10 +248,22 @@ fn concurrent_updates_preserve_independent_fields() {
     key.join()
         .expect("key thread must finish")
         .expect("key update must succeed");
+    guidance
+        .join()
+        .expect("guidance thread must finish")
+        .expect("guidance update must succeed");
     let restored = store.read().expect("read must succeed");
     assert_eq!(
-        (restored.my_language.as_str(), restored.api_key.as_deref()),
-        ("ru", Some("concurrent-secret")),
+        (
+            restored.my_language.as_str(),
+            restored.api_key.as_deref(),
+            restored.guidance("EL"),
+        ),
+        (
+            "ru",
+            Some("concurrent-secret"),
+            SentenceBatchSettings::new(Some(SentenceLevel::B2), SentenceTypeMix::Dialogue,),
+        ),
         "serialized updates lost one independently changed field"
     );
 }
