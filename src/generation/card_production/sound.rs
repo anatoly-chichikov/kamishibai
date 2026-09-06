@@ -93,12 +93,7 @@ impl SoundProduction {
     }
 
     fn cell(&self, draft: &CardDraft) -> CardCell {
-        CardCell::new(
-            self.cache.clone(),
-            draft.pair(),
-            draft.term(),
-            draft.understanding(),
-        )
+        CardCell::for_draft(self.cache.clone(), draft)
     }
 
     fn audio(&self, draft: &CardDraft, costs: CostRecorder) -> Result<Audio<MeteredGemini>> {

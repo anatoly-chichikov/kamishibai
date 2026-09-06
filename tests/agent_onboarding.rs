@@ -96,7 +96,7 @@ fn intake_gemini() -> (String, Arc<AtomicUsize>, Arc<Mutex<String>>) {
     (format!("http://127.0.0.1:{port}"), calls, request)
 }
 
-/// Start a local intake/meta/TTS endpoint for one configured waited generation.
+/// Start a local intake/meta/IPA/TTS endpoint for one configured waited generation.
 fn configured_generation_gemini(
     cache: &Path,
     understanding: &str,
@@ -126,10 +126,18 @@ fn configured_generation_gemini(
             let body = match call {
                 0 => intake_body(understanding.as_str()),
                 1 => meta_body(kind.as_str()),
-                _ => {
+                2 => serde_json::json!({
+                    "candidates": [{"content": {"parts": [{"text": serde_json::json!({
+                        "pronunciation": "ʃa",
+                        "transcription": "lə ʃa dɔʁ"
+                    }).to_string()}]}}]
+                })
+                .to_string(),
+                3 => {
                     seed_visual(cache.as_path(), understanding.as_str());
                     tts_body()
                 }
+                _ => panic!("configured generation sent an unexpected extra request"),
             };
             write_response(&mut stream, body.as_str());
         }
@@ -270,7 +278,7 @@ fn credential_gemini() -> String {
         let (mut stream, _) = listener.accept().expect("credential request must arrive");
         let mut scratch = [0u8; 65536];
         let _ = stream.read(&mut scratch);
-        let body = r#"{"models":[{"name":"models/gemini-3.7-flash","supportedGenerationMethods":["generateContent"]}]}"#;
+        let body = r#"{"models":[{"name":"models/gemini-3.8-flash","supportedGenerationMethods":["generateContent"]}]}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()
@@ -489,9 +497,18 @@ fn configured_new_can_generate_and_wait_in_one_offline_call() {
             result_code,
             result["sentences"].clone(),
             calls.load(Ordering::SeqCst),
-            requests
-                .get(1)
-                .is_some_and(|request| request.contains("Initial sentence preset")),
+            [
+                requests
+                    .get(1)
+                    .is_some_and(|request| request.contains("Initial sentence preset")),
+                requests
+                    .get(2)
+                    .is_some_and(|request| request.contains("Verify only the two IPA fields")
+                        && request.contains("gemini-3.8-flash:generateContent")),
+                requests.get(3).is_some_and(
+                    |request| request.contains("gemini-3.1-flash-tts-preview:generateContent")
+                ),
+            ],
         ),
         (
             Some(0),
@@ -503,8 +520,8 @@ fn configured_new_can_generate_and_wait_in_one_offline_call() {
             true,
             Some(0),
             serde_json::json!({"level": "b1", "types": "mixed"}),
-            3,
-            true,
+            4,
+            [true; 3],
         ),
         "configured new --generate --wait did not preserve settings through offline publication"
     );

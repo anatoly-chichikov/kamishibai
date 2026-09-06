@@ -18,8 +18,8 @@ use crate::session::{
 use super::args::{GenerateArgs, RegenerateArgs};
 use super::store::{DraftRecord, Phase, SessionRecord, SessionStore};
 use super::{
-    Render, drop_artifacts, drop_incomplete_artifacts, json, preflight_key, refuse_if_live,
-    reset_to_understood, resolve, view, worker,
+    Render, drop_draft_artifacts, drop_incomplete_draft_artifacts, json, preflight_key,
+    refuse_if_live, reset_to_understood, resolve, view, worker,
 };
 
 /// Commit the curated plan and start the managed worker that generates+publishes.
@@ -116,10 +116,10 @@ fn run_wait(store: &SessionStore, id: &str, render: Render, intro: Option<String
             }
             Ok(())
         }
-        Err(_) => {
+        Err(error) => {
             let reshaped = operational_hint(
-                "couldn't build any card — nothing published",
-                format!("Check your connection and key, then: kamishibai generate {id}"),
+                format!("{error:#}"),
+                format!("Resolve the error above, then: kamishibai generate {id}"),
             );
             if matches!(render, Render::Json) {
                 stdout.emit(json_line(&reshaped).as_str())?;
@@ -311,13 +311,7 @@ fn drop_imported_card(
         refuse_if_starting(fresh)?;
         refuse_staged_rewrites(fresh)?;
         cancel_imported_rewrite(fresh, slot, current.term.as_str())?;
-        drop_artifacts(
-            root.as_path(),
-            &pair,
-            current.term.as_str(),
-            current.understanding.as_str(),
-            true,
-        )?;
+        drop_draft_artifacts(root.as_path(), &pair, current, true)?;
         reset_to_understood(fresh);
         Ok(())
     })
@@ -398,11 +392,8 @@ fn queue_rewrite(
         .find(|(_slot, draft)| draft.term.as_str() == card)
         .ok_or_else(|| usage(format!("no card '{card}' in session '{}'", record.id)))?;
     let current = current.clone();
-    let previous = CardMetaCache::new(root).load(
-        current.term.as_str(),
-        current.understanding.as_str(),
-        &pair,
-    )?;
+    let cell = super::cell_for_draft(root.as_path(), &pair, &current);
+    let previous = CardMetaCache::new(root).load_at(&cell)?;
     let selection = previous
         .as_ref()
         .and_then(|meta| meta.sentence_labels())
@@ -451,12 +442,7 @@ fn drop_targets(
             return Err(usage("no matching cards to regenerate"));
         }
         for draft in &targets {
-            drop_incomplete_artifacts(
-                root.as_path(),
-                &pair,
-                draft.term.as_str(),
-                draft.understanding.as_str(),
-            )?;
+            drop_incomplete_draft_artifacts(root.as_path(), &pair, draft)?;
         }
         terms = targets.iter().map(|draft| draft.term.clone()).collect();
         reset_to_understood(fresh);
@@ -466,13 +452,7 @@ fn drop_targets(
 }
 
 fn record_of(draft: &CardDraft) -> DraftRecord {
-    DraftRecord {
-        term: String::from(draft.term()),
-        understanding: String::from(draft.understanding()),
-        costs: crate::session::ArtifactCosts::from_artifacts(draft.artifacts()),
-        rewrite: draft.rewrite().cloned(),
-        meta_request: draft.meta_request().cloned(),
-    }
+    DraftRecord::from_draft(draft)
 }
 
 fn reporter(render: Render) -> Box<dyn Reporter> {
@@ -577,6 +557,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            reviewed_senses: Vec::new(),
             costs: ArtifactCosts::default(),
             rewrite: Some(CardRewrite::new(
                 None,

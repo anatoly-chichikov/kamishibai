@@ -24,6 +24,7 @@ pub use attempt::{AttemptFault, AttemptLog, AttemptPenalties, AttemptScorecard, 
 pub use bridge::{drafts_from_document, from_entry, to_document, to_entry};
 pub(crate) use cache::CandidateRecord;
 pub use cache::{CachedUnderstanding, CardMetaCache};
+pub(crate) use candidate::MAX_CARD_MEANINGS;
 pub use candidate::{IntakeTooLarge, MAX_INTAKE_WORDS, RawInputBatch, Sense, WordCandidate};
 pub use cost::{CostRecord, GenerationCost};
 pub use detection::{LearningDetection, LearningGuess, ScriptDetection};

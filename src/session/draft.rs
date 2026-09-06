@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::GenerationCost;
 use super::attempt::{ARTIFACT_ATTEMPT_CEILING, AttemptFault, AttemptLog, AttemptTally};
+use super::candidate::{Sense, WordCandidate};
 use super::labels::{SentenceLabelSelection, SentenceLabels};
 use super::pair::LanguagePair;
 use super::pass::CardRevision;
@@ -580,6 +581,25 @@ impl CardMeta {
         self.source_context.as_str()
     }
 
+    /// Return the metadata with a locally normalized usage explanation installed.
+    #[must_use]
+    pub fn with_source_context(mut self, source_context: impl Into<String>) -> Self {
+        self.source_context = source_context.into();
+        self
+    }
+
+    /// Return the metadata with only the reviewed term and sentence IPA replaced.
+    #[must_use]
+    pub(crate) fn with_phonetics(
+        mut self,
+        pronunciation: impl Into<String>,
+        transcription: impl Into<String>,
+    ) -> Self {
+        self.pronunciation = pronunciation.into();
+        self.transcription = transcription.into();
+        self
+    }
+
     /// Return the natural example sentence in target language.
     pub fn target_sentence(&self) -> &str {
         self.target_sentence.as_str()
@@ -710,7 +730,8 @@ pub enum CardPhase {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CardDraft {
     term: String,
-    understanding: String,
+    reviewed_senses: Vec<Sense>,
+    sense_priorities: Vec<usize>,
     pair: LanguagePair,
     meta: Option<CardMeta>,
     meta_request: Option<SentenceLabelSelection>,
@@ -727,13 +748,72 @@ impl CardDraft {
     ) -> Self {
         Self {
             term: term.into(),
-            understanding: understanding.into(),
+            reviewed_senses: vec![Sense::plain(understanding)],
+            sense_priorities: Vec::new(),
             pair,
             meta: None,
             meta_request: None,
             rewrite: None,
             artifacts: CardArtifacts::default(),
         }
+    }
+
+    /// Create one draft from a reviewed candidate and the sense chosen for this card.
+    ///
+    /// The chosen sense is placed first. Every other reviewed sense follows in
+    /// the candidate's original display order, with its optional tag intact.
+    #[must_use]
+    pub fn from_candidate(candidate: &WordCandidate, selected: usize, pair: LanguagePair) -> Self {
+        let chosen = candidate
+            .senses()
+            .get(selected)
+            .unwrap_or_else(|| panic!("invariant: selected sense index {selected} must exist"));
+        let reviewed_senses = std::iter::once(chosen.clone())
+            .chain(
+                candidate
+                    .senses()
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| *index != selected)
+                    .map(|(_, sense)| sense.clone()),
+            )
+            .collect();
+        Self::new(candidate.term(), chosen.understanding(), pair)
+            .with_reviewed_senses(reviewed_senses)
+            .with_sense_priorities(
+                std::iter::once(selected)
+                    .chain((0..candidate.senses().len()).filter(|index| *index != selected))
+                    .collect(),
+            )
+    }
+
+    /// Return the draft carrying a non-empty, selected-first reviewed sense list.
+    #[must_use]
+    pub(crate) fn with_reviewed_senses(mut self, reviewed_senses: Vec<Sense>) -> Self {
+        assert!(
+            !reviewed_senses.is_empty(),
+            "invariant: a card draft must keep at least one reviewed sense"
+        );
+        self.reviewed_senses = reviewed_senses;
+        self.sense_priorities.clear();
+        self
+    }
+
+    /// Restore the original relative priority without changing selected-first cache identity.
+    #[must_use]
+    pub(crate) fn with_sense_priorities(mut self, priorities: Vec<usize>) -> Self {
+        self.sense_priorities = normalized_priorities(priorities, self.reviewed_senses.len());
+        self
+    }
+
+    /// Return the stable zero-based priority of one currently displayed reviewed sense.
+    #[must_use]
+    pub(crate) fn sense_priority(&self, index: usize) -> usize {
+        assert!(
+            index < self.reviewed_senses.len(),
+            "invariant: a prioritized sense must exist"
+        );
+        self.sense_priorities.get(index).copied().unwrap_or(index)
     }
 
     /// Return the primary term.
@@ -743,7 +823,13 @@ impl CardDraft {
 
     /// Return the understanding sentence carried over from the intake pass.
     pub fn understanding(&self) -> &str {
-        self.understanding.as_str()
+        self.reviewed_senses[0].understanding()
+    }
+
+    /// Return every reviewed sense with the one chosen for this card first.
+    #[must_use]
+    pub fn reviewed_senses(&self) -> &[Sense] {
+        self.reviewed_senses.as_slice()
     }
 
     /// Return the language pair locked into the card.
@@ -824,7 +910,8 @@ impl CardDraft {
         );
         Self {
             term: self.term,
-            understanding: self.understanding,
+            reviewed_senses: self.reviewed_senses,
+            sense_priorities: self.sense_priorities,
             pair: self.pair,
             meta: Some(meta),
             meta_request: None,
@@ -834,9 +921,20 @@ impl CardDraft {
     }
 
     /// Return the draft with a metadata revision installed after a rewrite attempt.
+    /// A changed term retains only its newly confirmed, untagged understanding.
     #[must_use]
     pub fn with_revision(self, revision: CardRevision, file: Option<ArtifactFile>) -> Self {
         let (term, understanding, meta) = revision.into_parts();
+        let priorities = (0..self.reviewed_senses.len())
+            .map(|index| self.sense_priority(index))
+            .collect();
+        let (reviewed_senses, sense_priorities) = synchronized_senses(
+            self.reviewed_senses,
+            priorities,
+            self.term.as_str(),
+            term.as_str(),
+            understanding.as_str(),
+        );
         let meta_slot = match file {
             Some(file) => self.artifacts.meta().clone().succeeded_with(file),
             None => self.artifacts.meta().clone().succeeded(),
@@ -849,7 +947,8 @@ impl CardDraft {
         );
         Self {
             term,
-            understanding,
+            reviewed_senses,
+            sense_priorities,
             pair: self.pair,
             meta: Some(meta),
             meta_request: None,
@@ -881,7 +980,8 @@ impl CardDraft {
             .then(|| CardRewrite::new(previous, selection, note).staging());
         Self {
             term: self.term,
-            understanding: self.understanding,
+            reviewed_senses: self.reviewed_senses,
+            sense_priorities: self.sense_priorities,
             pair: self.pair,
             meta: self.meta,
             meta_request: None,
@@ -903,7 +1003,8 @@ impl CardDraft {
         let fresh = CardArtifacts::default();
         Self {
             term: self.term,
-            understanding: self.understanding,
+            reviewed_senses: self.reviewed_senses,
+            sense_priorities: self.sense_priorities,
             pair: self.pair,
             meta: None,
             meta_request: None,
@@ -950,6 +1051,7 @@ impl CardDraft {
     /// scene/picture/sound depend on the meta. When the caller has already
     /// persisted the new meta to disk, the resulting `ArtifactFile` lands on
     /// the meta slot so the meta row keeps its clickable file label.
+    /// A changed term retains only its newly confirmed, untagged understanding.
     pub fn recomposed(
         self,
         term: impl Into<String>,
@@ -957,6 +1059,18 @@ impl CardDraft {
         meta: CardMeta,
         file: Option<ArtifactFile>,
     ) -> Self {
+        let term = term.into();
+        let understanding = understanding.into();
+        let priorities = (0..self.reviewed_senses.len())
+            .map(|index| self.sense_priority(index))
+            .collect();
+        let (reviewed_senses, sense_priorities) = synchronized_senses(
+            self.reviewed_senses,
+            priorities,
+            self.term.as_str(),
+            term.as_str(),
+            understanding.as_str(),
+        );
         let meta_slot = match file {
             Some(file) => ArtifactSlot::fresh(Artifact::Meta).succeeded_with(file),
             None => ArtifactSlot::fresh(Artifact::Meta).succeeded(),
@@ -968,8 +1082,9 @@ impl CardDraft {
             ArtifactSlot::fresh(Artifact::Sound),
         );
         Self {
-            term: term.into(),
-            understanding: understanding.into(),
+            term,
+            reviewed_senses,
+            sense_priorities,
             pair: self.pair,
             meta: Some(meta),
             meta_request: None,
@@ -982,7 +1097,8 @@ impl CardDraft {
     pub fn with_artifacts(self, artifacts: CardArtifacts) -> Self {
         Self {
             term: self.term,
-            understanding: self.understanding,
+            reviewed_senses: self.reviewed_senses,
+            sense_priorities: self.sense_priorities,
             pair: self.pair,
             meta: self.meta,
             meta_request: self.meta_request,
@@ -997,7 +1113,8 @@ impl CardDraft {
         let artifacts = costs.hydrate(self.artifacts);
         Self {
             term: self.term,
-            understanding: self.understanding,
+            reviewed_senses: self.reviewed_senses,
+            sense_priorities: self.sense_priorities,
             pair: self.pair,
             meta: self.meta,
             meta_request: self.meta_request,
@@ -1007,9 +1124,63 @@ impl CardDraft {
     }
 }
 
+fn synchronized_senses(
+    mut senses: Vec<Sense>,
+    priorities: Vec<usize>,
+    previous: &str,
+    term: &str,
+    understanding: &str,
+) -> (Vec<Sense>, Vec<usize>) {
+    if previous != term {
+        return (vec![Sense::plain(understanding)], Vec::new());
+    }
+    let selected = senses
+        .iter()
+        .position(|sense| sense.matches(understanding))
+        .unwrap_or_else(|| {
+            senses[0] = Sense::plain(understanding);
+            0
+        });
+    let mut ranked = priorities.into_iter().zip(senses).collect::<Vec<_>>();
+    let chosen = ranked.remove(selected);
+    ranked.sort_by_key(|(priority, _)| *priority);
+    ranked.insert(0, chosen);
+    let (priorities, senses): (Vec<_>, Vec<_>) = ranked.into_iter().unzip();
+    let priorities = normalized_priorities(priorities, senses.len());
+    (senses, priorities)
+}
+
+fn normalized_priorities(priorities: Vec<usize>, count: usize) -> Vec<usize> {
+    let mut sorted = priorities.clone();
+    sorted.sort_unstable();
+    assert!(
+        sorted.iter().copied().eq(0..count),
+        "invariant: sense priorities must form one complete ordered inventory"
+    );
+    if priorities.iter().copied().eq(0..count) {
+        Vec::new()
+    } else {
+        priorities
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn meta() -> CardMeta {
+        CardMeta::new(
+            "ka.naʁ",
+            "lə ka.naʁ vɔl",
+            "duck",
+            6,
+            "The duck flies.",
+            "duck",
+            "Think of the bird.",
+            "A common animal noun.",
+            "Le canard vole.",
+        )
+    }
 
     fn finished_artifacts() -> CardArtifacts {
         CardArtifacts::from_parts(
@@ -1044,6 +1215,215 @@ mod tests {
             built.phase(),
             CardPhase::Ready,
             "a fully built card was still counted as owing work"
+        );
+    }
+
+    #[test]
+    fn the_legacy_constructor_keeps_one_reviewed_sense() {
+        let draft = CardDraft::new("canard", "a duck", LanguagePair::new("en", "fr"));
+        assert_eq!(
+            draft.reviewed_senses(),
+            &[Sense::plain("a duck")],
+            "the singleton constructor stopped retaining its understanding as a reviewed sense"
+        );
+    }
+
+    #[test]
+    fn repeated_revisions_cannot_rank_a_previous_rare_choice_above_common_alternatives() {
+        let senses = (1..=6)
+            .map(|rank| Sense::tagged(format!("meaning {rank}"), format!("tag {rank}")))
+            .collect::<Vec<_>>();
+        let candidate = WordCandidate::with_senses("bank", senses.clone(), 5, true);
+        let mut draft = CardDraft::from_candidate(&candidate, 5, LanguagePair::new("en", "ru"));
+        let mut actual = vec![draft.reviewed_senses().to_vec()];
+        for selected in [4, 0] {
+            draft = draft.with_revision(
+                CardRevision::new("bank", senses[selected].understanding(), meta()),
+                None,
+            );
+            actual.push(draft.reviewed_senses().to_vec());
+        }
+        let expected = [5, 4, 0]
+            .map(|selected| {
+                std::iter::once(senses[selected].clone())
+                    .chain(
+                        senses
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, _)| *index != selected)
+                            .map(|(_, sense)| sense.clone()),
+                    )
+                    .collect::<Vec<_>>()
+            })
+            .to_vec();
+        assert_eq!(
+            actual, expected,
+            "a previously chosen rare meaning displaced a higher-priority alternative"
+        );
+    }
+
+    #[test]
+    fn a_novel_recomposition_cannot_reorder_the_other_reviewed_meanings() {
+        let candidate = WordCandidate::with_senses(
+            "bank",
+            vec![
+                Sense::tagged("common", "central"),
+                Sense::plain("less common"),
+                Sense::tagged("rare", "specialized"),
+            ],
+            2,
+            true,
+        );
+        let revised = CardDraft::from_candidate(&candidate, 2, LanguagePair::new("en", "ru"))
+            .recomposed("bank", "new interpretation", meta(), None)
+            .recomposed("bank", "common", meta(), None);
+        assert_eq!(
+            revised.reviewed_senses(),
+            &[
+                Sense::tagged("common", "central"),
+                Sense::plain("less common"),
+                Sense::plain("new interpretation")
+            ],
+            "a replacement sense inherited an obsolete tag or reordered surviving alternatives"
+        );
+    }
+
+    #[test]
+    fn a_revision_promotes_a_normalized_alternative_without_losing_its_tag() {
+        let candidate = WordCandidate::with_selected_senses(
+            "canard",
+            vec![
+                Sense::plain("a duck"),
+                Sense::tagged("a false report", "journalism"),
+                Sense::plain("a newspaper hoax"),
+            ],
+            vec![0],
+            true,
+        );
+        let revised = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("en", "fr"))
+            .with_revision(
+                CardRevision::new("canard", "  A   FALSE REPORT  ", meta()),
+                None,
+            );
+        assert_eq!(
+            revised.reviewed_senses(),
+            &[
+                Sense::tagged("a false report", "journalism"),
+                Sense::plain("a duck"),
+                Sense::plain("a newspaper hoax"),
+            ],
+            "a normalized revision duplicated its reviewed alternative or discarded the alternative tag"
+        );
+    }
+
+    #[test]
+    fn a_revision_matching_the_selected_sense_keeps_canonical_text_and_tag() {
+        let candidate = WordCandidate::with_selected_senses(
+            "crever",
+            vec![
+                Sense::tagged("to die", "slang"),
+                Sense::plain("to puncture"),
+            ],
+            vec![0],
+            true,
+        );
+        let revised = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("en", "fr"))
+            .with_revision(CardRevision::new("crever", "  TO   DIE ", meta()), None);
+        assert_eq!(
+            revised.reviewed_senses(),
+            &[
+                Sense::tagged("to die", "slang"),
+                Sense::plain("to puncture"),
+            ],
+            "a normalized revision rewrote the canonical selected sense or lost its tag"
+        );
+    }
+
+    #[test]
+    fn a_novel_recomposition_cannot_inherit_the_previous_sense_tag() {
+        let candidate = WordCandidate::with_selected_senses(
+            "crever",
+            vec![
+                Sense::tagged("to die", "slang"),
+                Sense::plain("to puncture"),
+            ],
+            vec![0],
+            true,
+        );
+        let revised = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("en", "fr"))
+            .recomposed("crever", "to stop operating", meta(), None);
+        assert_eq!(
+            revised.reviewed_senses(),
+            &[
+                Sense::plain("to stop operating"),
+                Sense::plain("to puncture"),
+            ],
+            "a genuinely new correction inherited the tag of the replaced sense"
+        );
+    }
+
+    #[test]
+    fn a_revision_changing_the_term_cannot_inherit_a_matching_sense_tag() {
+        let candidate = WordCandidate::with_selected_senses(
+            "crever",
+            vec![
+                Sense::tagged("to die", "slang"),
+                Sense::plain("to puncture"),
+            ],
+            vec![0],
+            true,
+        );
+        let revised = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("fr", "en"))
+            .with_revision(CardRevision::new("mourir", "to die", meta()), None);
+        assert_eq!(
+            revised.reviewed_senses(),
+            &[Sense::plain("to die")],
+            "a different term inherited the previous word's tag or alternative meanings"
+        );
+    }
+
+    #[test]
+    fn a_recomposition_changing_the_term_cannot_keep_the_previous_words_alternatives() {
+        let candidate = WordCandidate::with_selected_senses(
+            "saw",
+            vec![
+                Sense::plain("past tense of see"),
+                Sense::tagged("a cutting tool", "woodwork"),
+            ],
+            vec![0],
+            true,
+        );
+        let revised = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("en", "ru"))
+            .recomposed("see", "to perceive with eyes", meta(), None);
+        assert_eq!(
+            revised.reviewed_senses(),
+            &[Sense::plain("to perceive with eyes")],
+            "a corrected word still carried an alternative belonging to its previous form"
+        );
+    }
+
+    #[test]
+    fn a_same_term_recomposition_keeps_the_promoted_alternatives_tag() {
+        let candidate = WordCandidate::with_selected_senses(
+            "canard",
+            vec![
+                Sense::plain("a duck"),
+                Sense::tagged("a false report", "journalism"),
+                Sense::plain("a newspaper hoax"),
+            ],
+            vec![0],
+            true,
+        );
+        let revised = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("fr", "en"))
+            .recomposed("canard", "  A   FALSE REPORT ", meta(), None);
+        assert_eq!(
+            revised.reviewed_senses(),
+            &[
+                Sense::tagged("a false report", "journalism"),
+                Sense::plain("a duck"),
+                Sense::plain("a newspaper hoax"),
+            ],
+            "a same-word correction lost the reviewed alternatives or the promoted sense tag"
         );
     }
 }

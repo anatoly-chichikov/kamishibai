@@ -62,6 +62,8 @@ kamishibai writes:
 
 The front asks: the illustration, the sentence in your language, a hint. The back answers: the same sentence in the learning language, read by a native voice, with the gloss, IPA, and a usage note.
 
+The printable sheet uses four fixed-size fold-cards per A4 page. Explanations show at most five reviewed meanings: the selected meaning first and bold, then the highest-priority alternatives. The complete meaning list stays available for choosing cards. Concise guidance on usage, unsuitable situations, and one useful nuance follows the glossary. Denser cards use tighter spacing within the same card size.
+
 Import the deck into Anki, and the cards look roughly like this on your phone:
 
 <p align="center">

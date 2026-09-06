@@ -483,6 +483,77 @@ fn card_sheets_fit_four_duplex_cards_onto_each_printable_a4_page() -> Result<()>
     Ok(())
 }
 
+/// Card sheets save a realistic dense multi-sense card after its complete
+/// back-face layout has passed the lower-level content-preservation check.
+#[test]
+fn card_sheets_save_a_dense_multi_sense_context() -> Result<()> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("cards-six-senses.pdf");
+    let mut item = entry("bank", "en", "ru");
+    item.target.sentence =
+        text("The pilot banked the aircraft smoothly while approaching the distant runway marker");
+    item.meaning =
+        text("to tilt an aircraft sideways during a turn by lifting one wing above the other");
+    item.source.context = text(
+        "**Meaning.**\n- **a financial institution that safeguards deposits and lends money to people and companies [finance]**\n- the sloping ground immediately beside a river, lake, canal, or similar body of water [landform]\n- a stored reserve of blood, data, food, or other resources for future use [reserve]\n- a long row or tier of matching objects arranged closely beside one another [row]\n- to rely confidently on a person, promise, event, or expected future result [rely]\n- to tilt an aircraft sideways while turning by raising one wing above another [aviation]\nThe noun senses grew from ideas of an edge or accumulated mass; the verbs developed separately.\n\n**Where you'll hear it.** Common in finance, geography, computing, medicine, aviation, and dependent plans.\n\n**Where it's out of place.** Do not use the finance sense for a wallet, safe, or ordinary container.\n\n**Subtlety.** Bank on takes a person or outcome; bank the aircraft names deliberate sideways tilt - final context anchor.",
+    );
+    let mut sheet = CardSheet::new();
+    sheet.append(&item, None);
+    sheet.save(&path, &Thumbnail::new(256))?;
+    assert_eq!(
+        (path.exists(), pages(&path)),
+        (true, 1),
+        "the completely planned dense multi-sense card did not save as one printable page"
+    );
+    Ok(())
+}
+
+/// Fixed-size card sheets refuse unbounded imported prose without producing
+/// oversized cards or a successful PDF with a clipped tail.
+#[test]
+fn card_sheets_refuse_unbounded_explanations_without_changing_card_size() -> Result<()> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("cards-overflow.pdf");
+    let mut item = entry("bank", "en", "ru");
+    let context = format!(
+        "**Meaning.**\n- {}\n\n**Subtlety.** final-overflow-anchor",
+        "unbounded context ".repeat(1600)
+    );
+    item.source.context = text(context.as_str());
+    let mut sheet = CardSheet::new();
+    sheet.append(&item, None);
+    let result = sheet.save(&path, &Thumbnail::new(256));
+    assert_eq!(
+        (result.is_err(), path.exists()),
+        (true, false),
+        "unbounded prose produced oversized cards or a clipped PDF instead of refusing"
+    );
+    Ok(())
+}
+
+/// Several dense cards retain the original four-card sheet geometry.
+#[test]
+fn card_sheets_pack_several_dense_cards_at_the_original_size() -> Result<()> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("cards-dense.pdf");
+    let mut item = entry("good for you", "ru", "en");
+    item.source.context = text(&format!(
+        "**Meaning.** A useful expression.\n\n**Subtlety.** {}",
+        "Precise usage guidance belongs to this meaning. ".repeat(18)
+    ));
+    let mut sheet = CardSheet::new();
+    for _ in 0..3 {
+        sheet.append(&item, None);
+    }
+    sheet.save(&path, &Thumbnail::new(256))?;
+    assert_eq!(
+        pages(&path),
+        1,
+        "three dense foldcards no longer share one original-size sheet"
+    );
+    Ok(())
+}
+
 /// Card sheets render mixed-script content without panicking.
 #[test]
 fn card_sheets_render_mixed_script_content_without_panicking() -> Result<()> {
@@ -497,6 +568,106 @@ fn card_sheets_render_mixed_script_content_without_panicking() -> Result<()> {
         "card sheets no longer render mixed-script content without panicking"
     );
     Ok(())
+}
+
+/// Both PDF surfaces must expose CFF outlines through their actual character ids.
+#[cfg(target_os = "macos")]
+#[test]
+fn cjk_bold_fonts_cannot_be_published_as_truetype_outlines() -> Result<()> {
+    let directory = TempDir::new()?;
+    let paths = [
+        directory.path().join("cjk-card.pdf"),
+        directory.path().join("cjk-report.pdf"),
+    ];
+    let mut item = entry("cast", "ja", "en");
+    item.source.context = text(
+        "**意味**\n- **出演する俳優たち**\n- 投げること\n\n**使う場面**\n映画の話。\n\n**不適切な場面**\n制限はない。\n\n**注意点**\n文脈で区別する。",
+    );
+    let mut sheet = CardSheet::new();
+    sheet.append(&item, None);
+    sheet.save(&paths[0], &Thumbnail::new(150))?;
+    let mut report = Report::new(StaticLayout {
+        rows: vec![(String::from("意味 出演する俳優たち"), 10.0)],
+    });
+    report.append(&item, None);
+    report.save(&paths[1], &Thumbnail::new(150))?;
+    let compatible = paths
+        .iter()
+        .map(|path| cff_fonts_are_compatible(path))
+        .collect::<Result<Vec<_>>>()?;
+    assert!(
+        compatible.into_iter().all(|valid| valid),
+        "a bold CJK font has incorrect outline declarations, glyph addressing or widths"
+    );
+    Ok(())
+}
+
+/// Inspect saved font streams rather than trusting parser coverage or nonempty PDF bytes.
+#[cfg(target_os = "macos")]
+fn cff_fonts_are_compatible(path: &Path) -> Result<bool> {
+    let document = Document::load(path)?;
+    let mut inspected = 0;
+    for object in document.objects.values() {
+        let Ok(font) = object.as_dict() else {
+            continue;
+        };
+        if !font
+            .get(b"Subtype")
+            .and_then(lopdf::Object::as_name)
+            .is_ok_and(|name| name == b"Type0")
+        {
+            continue;
+        }
+        for child in font.get(b"DescendantFonts")?.as_array()? {
+            let descendant = document.dereference(child)?.1.as_dict()?;
+            let descriptor = descendant
+                .get_deref(b"FontDescriptor", &document)?
+                .as_dict()?;
+            let stream = descriptor
+                .get_deref(b"FontFile3", &document)
+                .or_else(|_| descriptor.get_deref(b"FontFile2", &document))?
+                .as_stream()?;
+            let bytes = stream.get_plain_content()?;
+            if bytes.starts_with(b"OTTO") {
+                return Ok(false);
+            }
+            let Some(cff) = rustybuzz::ttf_parser::cff::Table::parse(&bytes) else {
+                continue;
+            };
+            inspected += 1;
+            if descendant.get(b"Subtype")?.as_name()? != b"CIDFontType0"
+                || !descriptor.has(b"FontFile3")
+                || !stream
+                    .dict
+                    .get(b"Subtype")
+                    .and_then(lopdf::Object::as_name)
+                    .is_ok_and(|name| name == b"CIDFontType0C")
+            {
+                return Ok(false);
+            }
+            let encoding = font.get_deref(b"Encoding", &document)?.as_stream()?;
+            let mapping = String::from_utf8(encoding.get_plain_content()?)?;
+            let collection = descendant.get(b"CIDSystemInfo")?.as_dict()?;
+            if encoding.dict.get(b"CIDSystemInfo")?.as_dict()? != collection {
+                return Ok(false);
+            }
+            let widths = descendant.get(b"W")?.as_array()?;
+            for glyph in 0..cff.number_of_glyphs() {
+                let cid = cff
+                    .glyph_cid(rustybuzz::ttf_parser::GlyphId(glyph))
+                    .expect("CFF glyph must have a CID");
+                if !mapping.contains(&format!("<{glyph:04X}> {cid}\n"))
+                    || glyph != 0
+                        && !widths
+                            .chunks_exact(2)
+                            .any(|pair| pair[0].as_i64().is_ok_and(|value| value == i64::from(cid)))
+                {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(inspected > 0)
 }
 
 /// The production card-sheet boundary generates one parseable PDF containing

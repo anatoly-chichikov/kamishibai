@@ -26,7 +26,9 @@ pub fn to_entry(draft: &CardDraft) -> Result<VocabularyEntry> {
             lang: LanguageCode::new(draft.pair().known())?,
             highlight: NonEmptyText::new(meta.source_highlight())?,
             hint: NonEmptyText::new(meta.source_hint())?,
-            context: NonEmptyText::new(meta.source_context())?,
+            context: NonEmptyText::new(crate::markdown::compact_card_context(
+                meta.source_context(),
+            ))?,
         },
         target: VocabularyTarget {
             sentence: NonEmptyText::new(meta.target_sentence())?,

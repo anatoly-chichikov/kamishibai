@@ -38,6 +38,106 @@ pub enum Block {
     },
 }
 
+/// Limit a recognized card context to five meaning groups and remove its glossary recap.
+#[must_use]
+pub fn compact_card_context(input: &str) -> String {
+    let lines = input.lines().collect::<Vec<_>>();
+    let headers = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| card_header(line.trim()).map(|_| index))
+        .collect::<Vec<_>>();
+    if headers.len() != 4
+        || lines[..headers[0]]
+            .iter()
+            .any(|line| !line.trim().is_empty())
+        || !card_header(lines[headers[0]].trim()).is_some_and(crate::languages::is_meaning_header)
+    {
+        return input.to_string();
+    }
+    let mut indentation = None;
+    let mut meanings = 0;
+    let mut overflow = None;
+    let mut separated = false;
+    let mut recap = None;
+    for (index, line) in lines
+        .iter()
+        .enumerate()
+        .take(headers[1])
+        .skip(headers[0] + 1)
+    {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            separated = indentation.is_some();
+            continue;
+        }
+        if let Some(indent) = meaning_bullet(line) {
+            if recap.is_some() {
+                return input.to_string();
+            }
+            let base = *indentation.get_or_insert(indent);
+            if indent < base {
+                return input.to_string();
+            }
+            if indent == base {
+                meanings += 1;
+                if meanings > crate::session::MAX_CARD_MEANINGS {
+                    overflow.get_or_insert(index);
+                }
+            }
+            separated = false;
+        } else if indentation.is_none() {
+            return input.to_string();
+        } else if recap.is_none() && (separated || !line.starts_with(char::is_whitespace)) {
+            if !trimmed
+                .split_once([':', '：'])
+                .is_some_and(|(label, text)| !label.trim().is_empty() && !text.trim().is_empty())
+            {
+                return input.to_string();
+            }
+            recap.get_or_insert(index);
+        }
+    }
+    let Some(start) = overflow.or(recap) else {
+        return input.to_string();
+    };
+    let first = lines[..start].join("\n");
+    format!(
+        "{}\n\n{}{}",
+        first.trim_end(),
+        lines[headers[1]..].join("\n"),
+        if input.ends_with('\n') { "\n" } else { "" }
+    )
+}
+
+/// Recognize the standalone bold headings used by the card explanation contract.
+fn card_header(line: &str) -> Option<&str> {
+    line.strip_prefix("**")
+        .and_then(|inner| inner.strip_suffix("**"))
+        .filter(|inner| {
+            !inner.trim().is_empty() && !inner.contains("**") && meaning_bullet(line).is_none()
+        })
+}
+
+/// Identify the indentation of a canonical or legacy fully emphasized meaning bullet.
+fn meaning_bullet(line: &str) -> Option<usize> {
+    let trimmed = line.trim();
+    let body = trimmed
+        .strip_prefix("**")
+        .and_then(|inner| inner.strip_suffix("**"))
+        .filter(|inner| !inner.contains("**"))
+        .unwrap_or(trimmed);
+    body.strip_prefix("- ")
+        .or_else(|| body.strip_prefix("* "))
+        .map(|_| line.chars().take_while(|ch| ch.is_whitespace()).count())
+}
+
+/// Parse a card explanation after limiting its glossary and removing its recap.
+#[must_use]
+pub fn parse_card_context(input: &str) -> Vec<Block> {
+    parse_markdown(&compact_card_context(input))
+}
+
 /// Parse one markdown blob into blocks for downstream renderers. Lines
 /// starting with `- ` or `* ` (after 0..4 leading spaces) become bullets at
 /// indent `leading_spaces / 2`, capped at 2. Other non-empty lines group into
@@ -178,12 +278,17 @@ fn parse_inline(text: &str) -> Vec<TextChunk> {
     let mut buffer = String::new();
     let mut i = 0;
     while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && matches!(chars[i + 1], '\\' | '*') {
+            buffer.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
         if chars[i] == '*' {
             if i + 1 < chars.len() && chars[i + 1] == '*' {
                 if let Some(end) = find_marker(&chars, i + 2, &['*', '*']) {
                     flush(&mut chunks, &mut buffer);
                     chunks.push(TextChunk {
-                        text: chars[i + 2..end].iter().collect(),
+                        text: unescaped(&chars[i + 2..end]),
                         bold: true,
                         italic: false,
                     });
@@ -195,7 +300,7 @@ fn parse_inline(text: &str) -> Vec<TextChunk> {
             {
                 flush(&mut chunks, &mut buffer);
                 chunks.push(TextChunk {
-                    text: chars[i + 1..end].iter().collect(),
+                    text: unescaped(&chars[i + 1..end]),
                     bold: false,
                     italic: true,
                 });
@@ -230,12 +335,38 @@ fn find_marker(chars: &[char], from: usize, marker: &[char]) -> Option<usize> {
     }
     let mut i = from;
     while i + marker.len() <= chars.len() {
-        if chars[i..i + marker.len()] == *marker {
+        if !escaped(chars, i) && chars[i..i + marker.len()] == *marker {
             return Some(i);
         }
         i += 1;
     }
     None
+}
+
+fn escaped(chars: &[char], index: usize) -> bool {
+    chars[..index]
+        .iter()
+        .rev()
+        .take_while(|character| **character == '\\')
+        .count()
+        % 2
+        == 1
+}
+
+fn unescaped(chars: &[char]) -> String {
+    let mut text = String::new();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '\\' && index + 1 < chars.len() && matches!(chars[index + 1], '\\' | '*')
+        {
+            text.push(chars[index + 1]);
+            index += 2;
+        } else {
+            text.push(chars[index]);
+            index += 1;
+        }
+    }
+    text
 }
 
 /// Render one paragraph block into a ratatui `Line` of styled spans.
@@ -296,8 +427,177 @@ fn push_html_escape(out: &mut String, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Block, TextChunk, parse_markdown, to_html, to_plain, to_ratatui};
+    use super::{
+        Block, TextChunk, compact_card_context, parse_markdown, to_html, to_plain, to_ratatui,
+    };
     use ratatui::style::Modifier;
+
+    #[test]
+    fn card_context_cannot_repeat_the_meaning_list_before_usage() {
+        let context = "**Meaning.**\n- **approval**\n- a health benefit\ndifference: one expresses approval and the other describes health.\n\n**Usage.**\nSay it to congratulate a friend.\n\n**Limits.**\nA dry reply can sound dismissive.\n\n**Nuance.**\nTone matters: \"Good for you!\" can sound sincere or sarcastic.";
+        assert_eq!(
+            compact_card_context(context),
+            "**Meaning.**\n- **approval**\n- a health benefit\n\n**Usage.**\nSay it to congratulate a friend.\n\n**Limits.**\nA dry reply can sound dismissive.\n\n**Nuance.**\nTone matters: \"Good for you!\" can sound sincere or sarcastic.",
+            "the obsolete recap survived or useful card content changed"
+        );
+    }
+
+    #[test]
+    fn compact_context_cannot_rewrite_a_list_only_card() {
+        let context = "**Meaning.**\n- **approval**\n- benefit\n\n**Usage.**\nCongratulating a friend.\n\n**Limits.**\nA dry tone can sound dismissive.\n\n**Nuance.**\nKeep the explanation and its quoted example.";
+        assert_eq!(
+            compact_card_context(context),
+            context,
+            "a compact card was changed"
+        );
+    }
+
+    #[test]
+    fn compact_context_cannot_remove_indented_meaning_continuations() {
+        let context = "**Meaning.**\n- **approval**\n- a benefit\n  for health or well-being\nrecap: the first is approval and the second is a benefit.\n\n**Usage.**\nCommon.\n\n**Limits.**\nNone.\n\n**Nuance.**\nNo additional peculiarity.";
+        let compact = compact_card_context(context);
+        assert!(
+            compact.contains("- a benefit\n  for health or well-being\n\n**Usage.**"),
+            "a wrapped reviewed meaning was removed"
+        );
+    }
+
+    #[test]
+    fn compact_context_cannot_guess_at_an_unstructured_description() {
+        let context = "**Meaning.**\n- a benefit\nAn explanation supplied by the user.\n\n**Notes.**\nKeep all of it.";
+        assert_eq!(
+            compact_card_context(context),
+            context,
+            "an unrecognized description was silently shortened"
+        );
+    }
+
+    #[test]
+    fn compact_context_cannot_shorten_an_unrelated_four_section_document() {
+        let context = "**Ingredients**\n- sesame\nWarning: contains a severe allergen.\n\n**Preparation**\nMix.\n\n**Storage**\nKeep chilled.\n\n**Serving**\nServe cold.";
+        assert_eq!(
+            compact_card_context(context),
+            context,
+            "an unrelated four-section document lost its warning"
+        );
+    }
+
+    #[test]
+    fn compact_context_cannot_keep_a_blank_separated_indented_recap() {
+        let context = "**Meaning.**\n- **approval**\n- benefit\n\n  recap: one means approval and the other means benefit.\n\n**Usage.**\nCommon.\n\n**Limits.**\nNone.\n\n**Nuance.**\nNo additional peculiarity.";
+        assert_eq!(
+            compact_card_context(context),
+            "**Meaning.**\n- **approval**\n- benefit\n\n**Usage.**\nCommon.\n\n**Limits.**\nNone.\n\n**Nuance.**\nNo additional peculiarity.",
+            "an indented recap survived as a false meaning continuation"
+        );
+    }
+
+    #[test]
+    fn compact_context_cannot_remove_an_unlabelled_user_paragraph() {
+        let context = "**Meaning.**\n- benefit\nAn explanation supplied by the user.\n\n**Usage.**\nCommon.\n\n**Limits.**\nNone.\n\n**Nuance.**\nKeep this.";
+        assert_eq!(
+            compact_card_context(context),
+            context,
+            "an unrecognized paragraph was mistaken for a labelled recap"
+        );
+    }
+
+    #[test]
+    fn compact_context_cannot_remove_a_comparison_from_the_usage_sections() {
+        let context = "**Meaning.**\n- **approval**\n\n**Usage.**\nUse: say it to congratulate a friend.\n\n**Limits.**\nDifference: a dry reply can sound dismissive.\n\n**Nuance.**\nContrast: tone changes the impression.";
+        assert_eq!(
+            compact_card_context(context),
+            context,
+            "useful usage guidance was mistaken for a glossary recap"
+        );
+    }
+
+    /// Build a recognized four-section context for meaning-limit regressions.
+    fn meaning_context(meanings: &str) -> String {
+        format!(
+            "**Значение.**\n{meanings}\n\n**Где встречается.**\nПодходит в обычной беседе.\n\n**Где неуместно.**\nОсобых ограничений нет.\n\n**Нюанс.**\nПолезное пояснение с одним примером: «example»."
+        )
+    }
+
+    #[test]
+    fn a_card_context_cannot_display_more_than_five_reviewed_meanings() {
+        let input = meaning_context(
+            "- **[selected] первое значение**\n- [noun] второе\n- третье\n- четвёртое\n- пятое\n- шестое",
+        );
+        assert_eq!(
+            compact_card_context(&input),
+            meaning_context(
+                "- **[selected] первое значение**\n- [noun] второе\n- третье\n- четвёртое\n- пятое"
+            ),
+            "the sixth meaning survived or the selected meaning, tags, order, or usage sections changed"
+        );
+    }
+
+    #[test]
+    fn five_reviewed_meanings_cannot_change_during_projection() {
+        let input =
+            meaning_context("- **[selected] первое**\n- второе\n- третье\n- четвёртое\n- пятое");
+        assert_eq!(
+            compact_card_context(&input),
+            input,
+            "a card within the meaning limit changed"
+        );
+    }
+
+    #[test]
+    fn wrapped_meaning_lines_cannot_count_as_additional_meanings() {
+        let kept = "- **[selected] первое**\n  продолжение первого\n- второе\n  продолжение второго\n- третье\n- четвёртое\n- пятое\n  продолжение пятого";
+        let input = meaning_context(&format!("{kept}\n- шестое\n  продолжение шестого"));
+        assert_eq!(
+            compact_card_context(&input),
+            meaning_context(kept),
+            "wrapped definition text was counted separately or a removed meaning left its continuation behind"
+        );
+    }
+
+    #[test]
+    fn meaning_limit_and_recap_removal_cannot_leave_either_overflow() {
+        let kept = "- **первое**\n- второе\n- третье\n- четвёртое\n- пятое";
+        let input = meaning_context(&format!(
+            "{kept}\n- шестое\n  продолжение шестого\n\n  различие: бессмысленный пересказ значений."
+        ));
+        assert_eq!(
+            compact_card_context(&input),
+            meaning_context(kept),
+            "the sixth meaning or obsolete recap survived combined projection"
+        );
+    }
+
+    #[test]
+    fn a_legacy_bold_bullet_marker_cannot_disable_the_meaning_limit() {
+        let kept = "**- [selected] первое**\n- второе\n- третье\n- четвёртое\n- пятое";
+        assert_eq!(
+            compact_card_context(&meaning_context(&format!("{kept}\n- шестое"))),
+            meaning_context(kept),
+            "the emphasized bullet marker became a heading or bypassed the five-meaning limit"
+        );
+    }
+
+    #[test]
+    fn nested_definition_bullets_cannot_consume_the_meaning_limit() {
+        let kept = "- **первое**\n  - уточнение первого\n- второе\n- третье\n- четвёртое\n- пятое";
+        assert_eq!(
+            compact_card_context(&meaning_context(&format!("{kept}\n- шестое"))),
+            meaning_context(kept),
+            "a nested definition detail consumed a reviewed-meaning slot"
+        );
+    }
+
+    #[test]
+    fn an_unknown_document_cannot_lose_lines_under_the_meaning_limit() {
+        let input = meaning_context("- **first**\n- second\n- third\n- fourth\n- fifth\n- sixth")
+            .replace("**Значение.**", "**Ingredients**");
+        assert_eq!(
+            compact_card_context(&input),
+            input,
+            "an unrelated document lost content under the card meaning limit"
+        );
+    }
 
     fn plain(text: &str) -> TextChunk {
         TextChunk {
@@ -396,6 +696,37 @@ mod tests {
             parse_markdown("an *unclosed italic"),
             vec![Block::Paragraph(vec![plain("an *unclosed italic")])],
             "an unclosed italic marker did not stay literal"
+        );
+    }
+
+    #[test]
+    fn escaped_markers_and_backslashes_stay_literal_in_every_projection() {
+        let blocks = parse_markdown(r"- **literal \*\*stars\*\* and a\\b**");
+        let lines = to_ratatui(&blocks);
+        let text = lines[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert_eq!(
+            (
+                blocks,
+                to_plain(&parse_markdown(r"- **literal \*\*stars\*\* and a\\b**")),
+                to_html(&parse_markdown(r"- **literal \*\*stars\*\* and a\\b**")),
+                text,
+            ),
+            (
+                vec![Block::Bullet {
+                    indent: 0,
+                    chunks: vec![bold(r"literal **stars** and a\b")],
+                }],
+                String::from(r"- literal **stars** and a\b"),
+                String::from(
+                    r#"<ul style="margin: 0.4em 0; padding-left: 1.2em;"><li><strong>literal **stars** and a\b</strong></li></ul>"#,
+                ),
+                String::from(r"• literal **stars** and a\b"),
+            ),
+            "escaped markdown changed literal stars or backslashes in a shared projection"
         );
     }
 

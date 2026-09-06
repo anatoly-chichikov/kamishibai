@@ -110,11 +110,7 @@ fn current_meta(root: &Path, draft: &DraftRecord, pair: &LanguagePair) -> Result
     {
         return Ok(Some(meta));
     }
-    CardMetaCache::new(root.to_path_buf()).load(
-        draft.term.as_str(),
-        draft.understanding.as_str(),
-        pair,
-    )
+    CardMetaCache::new(root.to_path_buf()).load_at(&super::cell_for_draft(root, pair, draft))
 }
 
 fn staged(
@@ -263,6 +259,7 @@ mod tests {
         DraftRecord {
             term: String::from("bank"),
             understanding: String::from("a financial institution"),
+            reviewed_senses: Vec::new(),
             costs: ArtifactCosts::default(),
             rewrite,
             meta_request: None,
@@ -367,6 +364,7 @@ mod tests {
             DraftRecord {
                 term: String::from("bank"),
                 understanding: String::from("the side of a river"),
+                reviewed_senses: Vec::new(),
                 costs: ArtifactCosts::default(),
                 rewrite: None,
                 meta_request: None,

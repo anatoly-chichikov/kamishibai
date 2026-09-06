@@ -64,12 +64,13 @@ pub(super) fn result(args: &ResultArgs, render: Render) -> Result<()> {
     println!("dir: {}", paths.output);
     println!("cache: {}", cards_cache(&record, root.as_path()).display());
     let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
-    let cache = CardMetaCache::new(root);
+    let cache = CardMetaCache::new(root.clone());
     for draft in &record.drafts {
         if view::awaits_initial_meta(draft) {
             continue;
         }
-        if let Some(meta) = cache.load(draft.term.as_str(), draft.understanding.as_str(), &pair)? {
+        let cell = super::cell_for_draft(root.as_path(), &pair, draft);
+        if let Some(meta) = cache.load_at(&cell)? {
             print_card(draft, &record, &meta);
         }
     }

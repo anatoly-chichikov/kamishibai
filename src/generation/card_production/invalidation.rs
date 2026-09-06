@@ -12,9 +12,12 @@ use crate::generation::artifact_cache::{
     SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE, VisualGuard,
 };
 use crate::generation::visual_revision;
-use crate::session::{CardCell, LanguagePair};
+#[cfg(test)]
+use crate::session::LanguagePair;
+use crate::session::{CardCell, CardDraft};
 
 /// Remove one card's complete current artifact set under the destructive lock order.
+#[cfg(test)]
 pub(crate) fn invalidate_card(
     root: &Path,
     pair: &LanguagePair,
@@ -23,7 +26,29 @@ pub(crate) fn invalidate_card(
     keep_meta: bool,
     keep_meta_cost: bool,
 ) -> Result<()> {
-    let cache = CardCell::new(root.to_path_buf(), pair, term, understanding).cache();
+    invalidate_cell(
+        CardCell::new(root.to_path_buf(), pair, term, understanding),
+        keep_meta,
+        keep_meta_cost,
+    )
+}
+
+/// Remove one reviewed draft's complete current artifact set under the lock order.
+pub(crate) fn invalidate_draft(
+    root: &Path,
+    draft: &CardDraft,
+    keep_meta: bool,
+    keep_meta_cost: bool,
+) -> Result<()> {
+    invalidate_cell(
+        CardCell::for_draft(root.to_path_buf(), draft),
+        keep_meta,
+        keep_meta_cost,
+    )
+}
+
+fn invalidate_cell(cell: CardCell, keep_meta: bool, keep_meta_cost: bool) -> Result<()> {
+    let cache = cell.cache();
     let visual = cache.visual(visual_revision())?;
     let _guards = ArtifactGuards::hold(&cache, &visual)?;
     remove_cached_files(

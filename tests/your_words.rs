@@ -280,11 +280,11 @@ fn recoverable_error_overlay_keeps_the_message_visible() {
     let app = App::new(LanguagePair::new("en", "ru")).error_shown("INTERNAL: boom");
     let flat = flatten(&app);
     assert!(
-        flat.contains("can't reach gemini")
+        flat.contains("could not complete request")
             && flat.contains("INTERNAL: boom")
             && flat.contains("[Ctrl+G] retry")
             && flat.contains("[Esc] dismiss"),
-        "recoverable Gemini errors must render as an in-app overlay"
+        "recoverable errors must remain visible without inventing a Gemini connection failure"
     );
 }
 

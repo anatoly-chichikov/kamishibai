@@ -417,7 +417,7 @@ mod tests {
                 true,
                 Some(true),
                 Some(true),
-                "gemini-3.7-flash",
+                "gemini-3.8-flash",
                 3,
             ),
             "clean full recall did not run dedicated fidelity before exactly one zoom scan"
@@ -484,7 +484,7 @@ mod tests {
                 Some("BROKEN_SUBJECT_CONTINUITY"),
                 Some(true),
                 Some(true),
-                "gemini-3.7-flash",
+                "gemini-3.8-flash",
                 3,
             ),
             "a score-only fidelity finding stopped the inspection chain before zoom"

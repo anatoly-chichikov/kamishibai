@@ -93,7 +93,7 @@ where
                     .collect(),
             )
             .save(&PdfSaveOptions::default(), &mut Vec::new());
-        fs::write(output, pdf)?;
+        fs::write(output, super::font_embedding::normalized(pdf)?)?;
         Ok(())
     }
 

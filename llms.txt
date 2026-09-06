@@ -1,11 +1,16 @@
 kamishibai agent contract
-Release: 1.10.2
+Release: 1.11.0
 
 Overview
 
 kamishibai turns a list of words into an illustrated Anki deck using Google
 Gemini. Each card has a native example sentence, native-speaker audio, and a
 manga panel.
+
+All text generation and image-reading judgments use `gemini-3.8-flash`,
+including understanding, sense correction, card writing, feature extraction,
+and scene composition. Image output uses `gemini-3.1-flash-image`; speech
+synthesis uses `gemini-3.1-flash-tts-preview`.
 
 This file describes the headless console contract for agents and scripts.
 Running `kamishibai` with no arguments opens the interactive TUI, which is out
@@ -21,7 +26,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.10.2/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.11.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -209,8 +214,18 @@ The allocation is stable across retries and process restarts. The retired
 `natural` and `varied` values remain accepted as aliases for `best-fit` and
 `mixed`.
 
-These settings are initial metadata constraints, not a second rewrite pass:
-each card still makes at most the ordinary one metadata request per attempt.
+These settings constrain the initial authoring request. Each successful metadata
+attempt uses two text requests: card authoring with HIGH thinking, followed by
+a focused IPA verification with MEDIUM thinking. Both use Gemini 3.8 Flash and
+JSON mode. The second response can replace pronunciation and transcription only;
+it cannot rewrite the sentence, meaning, reviewed senses, labels, or description.
+It runs after initial validation and uses the corrected term and understanding
+when a correction changes the card. Invalid initial metadata stops before this
+second request. A failed IPA request fails that metadata attempt, retaining the
+previous cached metadata and every measured cost; there is no inner retry or
+silent fallback. The ordinary four-attempt ceiling can therefore spend up to
+eight text requests on metadata. This model check reduces observed errors but
+does not certify pronunciation as dictionary-verified.
 When neither a level nor a non-`best-fit` type policy is requested, the rendered metadata
 prompt and provider-call shape are unchanged. This release advances the
 metadata policy, so a card carrying metadata from an older policy refreshes it
@@ -268,6 +283,23 @@ an exact requested value would make the accepted use unnatural, the closest
 natural result keeps its actual attribution and records the requested target
 separately. That pinned axis is also named in `approx`; this is a best-effort
 outcome, not a failed card.
+
+Every committed card also keeps the complete sense list that was visible on
+`What I Understood`. Its selected sense is first; the remaining reviewed senses
+keep their original priority and tags. The displayed glossary contains at most
+five meanings: the selected one first in bold, followed by the four highest-priority
+alternatives. The original review order prioritizes current frequency and any
+explicit input hint; changing the selected meaning does not promote the formerly
+selected alternative above that original priority. The full inventory remains
+available for selecting and correcting cards, including meanings omitted from
+this glossary. Concise usage, suitability, and nuance guidance follows directly;
+there is no separate paragraph restating the differences between the meanings.
+Each guidance section explains one useful point briefly. When that point
+depends on a construction, it includes one quoted example and a faithful
+translation. A section may honestly state that there is no special restriction
+or additional nuance; it must not invent one or replace its explanation with
+a list of examples. This structured Markdown is shared by the TUI preview,
+Anki card, and PDF report.
 
 `status`
 
@@ -410,7 +442,8 @@ Presence rules:
   number
 - a card's state is derived from artifacts in order: `meta`, `sound`, `scene`,
   then `picture`
-- all four artifacts set to `true` means the card is in the deck
+- all four artifacts set to `true` means the card is ready to publish; a
+  `published` or `partial` phase with `result` confirms the package was saved
 - the first false artifact is where the card stands or failed
 - `cards.pending` is always present after commit and counts staged, not active,
   adjustments

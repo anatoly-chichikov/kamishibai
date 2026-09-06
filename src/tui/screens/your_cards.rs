@@ -16,7 +16,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
-use crate::markdown::{parse_markdown, to_ratatui};
+use crate::markdown::{parse_card_context, to_ratatui};
 use crate::session::{
     Artifact, ArtifactFile, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, CardMeta,
     GenerationCost,
@@ -31,6 +31,7 @@ const HEADLINE_DONE: &str = "your cards";
 const HINT_WORKING: &str = "drawing each card one by one";
 const HINT_STOPPING: &str = "stopping…";
 const HINT_DONE: &str = "all done";
+const HINT_UNSAVED: &str = "cards ready · not saved";
 const SPINNER_FRAME_MILLIS: u128 = 250;
 const STEP_LABEL_COL_CHARS: usize = 8;
 const STEP_COST_COL_CHARS: usize = 6;
@@ -127,6 +128,8 @@ impl ScreenView for YourCards {
             HINT_WORKING
         } else if super::banner::losses(app) > 0 {
             ""
+        } else if app.done_artifacts().deck.is_empty() || app.done_artifacts().report.is_empty() {
+            HINT_UNSAVED
         } else {
             HINT_DONE
         };
@@ -1189,7 +1192,7 @@ fn meta_preview<'a>(
         lines.push(label("the right context"));
         let indent_w = super::common::display_width(indent);
         let inner = width.saturating_sub(indent_w).max(20);
-        for line in to_ratatui(&parse_markdown(meta.source_context())) {
+        for line in to_ratatui(&parse_card_context(meta.source_context())) {
             for wrapped in softwrap_line(line, inner) {
                 lines.push(restyle_with_indent(wrapped, indent));
             }
@@ -1794,6 +1797,14 @@ fn can_regenerate(app: &App) -> bool {
     app.cards_running_target().is_none() && app.card_census().unfinished()
 }
 
+/// Offer saving when every artifact is ready but its study package is unpublished.
+fn can_publish(app: &App) -> bool {
+    app.cards_running_target().is_none()
+        && !app.cards().is_empty()
+        && !app.card_census().unfinished()
+        && (app.done_artifacts().deck.is_empty() || app.done_artifacts().report.is_empty())
+}
+
 /// Return the hints for a run that is draining its last in-flight request.
 ///
 /// There is nothing to start here, so nothing takes the bright slot. But
@@ -1830,6 +1841,8 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         let mut hints = Vec::new();
         if can_regenerate(app) {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
+        } else if can_publish(app) {
+            hints.push(super::common::FooterHint::primary("Ctrl+G", "save"));
         }
         hints.push(super::common::FooterHint::secondary("←→", "pick"));
         hints.push(super::common::FooterHint::ghost("↑↓", "nav"));
@@ -1845,6 +1858,8 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         let mut hints = Vec::new();
         if can_regenerate(app) {
             hints.push(super::common::FooterHint::primary("Ctrl+G", "regenerate"));
+        } else if can_publish(app) {
+            hints.push(super::common::FooterHint::primary("Ctrl+G", "save"));
         }
         if !app.cards().is_empty() {
             hints.push(controls.disclosure_hint());

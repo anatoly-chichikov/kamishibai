@@ -4,6 +4,10 @@ use crate::session::{CostRecord, GenerationCost};
 
 use super::protocol::UsageMetadata;
 
+const GEMINI_3_8_FLASH_INPUT_NANOS: u64 = 750;
+const GEMINI_3_8_FLASH_OUTPUT_NANOS: u64 = 3_750;
+const GEMINI_3_7_FLASH_INPUT_NANOS: u64 = 750;
+const GEMINI_3_7_FLASH_OUTPUT_NANOS: u64 = 3_750;
 const GEMINI_3_6_FLASH_INPUT_NANOS: u64 = 1_500;
 const GEMINI_3_6_FLASH_OUTPUT_NANOS: u64 = 7_500;
 const GEMINI_3_5_FLASH_INPUT_NANOS: u64 = 1_500;
@@ -74,7 +78,17 @@ fn output_tokens(usage: &UsageMetadata) -> u64 {
 
 fn rates(model: &str) -> Rates {
     match model {
-        "gemini-3.7-flash" | "gemini-3.6-flash" => Rates {
+        "gemini-3.8-flash" => Rates {
+            input_nanos: GEMINI_3_8_FLASH_INPUT_NANOS,
+            output_nanos: GEMINI_3_8_FLASH_OUTPUT_NANOS,
+            thinking_nanos: GEMINI_3_8_FLASH_OUTPUT_NANOS,
+        },
+        "gemini-3.7-flash" => Rates {
+            input_nanos: GEMINI_3_7_FLASH_INPUT_NANOS,
+            output_nanos: GEMINI_3_7_FLASH_OUTPUT_NANOS,
+            thinking_nanos: GEMINI_3_7_FLASH_OUTPUT_NANOS,
+        },
+        "gemini-3.6-flash" => Rates {
             input_nanos: GEMINI_3_6_FLASH_INPUT_NANOS,
             output_nanos: GEMINI_3_6_FLASH_OUTPUT_NANOS,
             thinking_nanos: GEMINI_3_6_FLASH_OUTPUT_NANOS,
@@ -115,6 +129,37 @@ fn rates(model: &str) -> Rates {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn three_eight_flash_cannot_drop_input_output_or_thinking_costs() {
+        let usage = UsageMetadata {
+            prompt_token_count: 137,
+            candidates_token_count: 29,
+            thoughts_token_count: 43,
+            total_token_count: 209,
+        };
+        let cost = priced("gemini-3.8-flash", Some(&usage));
+        assert_eq!(
+            (cost.model(), cost.requests(), cost.cost().nanos()),
+            ("gemini-3.8-flash", 1, 372_750),
+            "Gemini 3.8 Flash lost its model attribution or current Standard input, visible output, and thinking rates"
+        );
+    }
+
+    #[test]
+    fn three_seven_flash_uses_its_standard_text_rates() {
+        let usage = UsageMetadata {
+            prompt_token_count: 100,
+            candidates_token_count: 20,
+            thoughts_token_count: 30,
+            total_token_count: 150,
+        };
+        assert_eq!(
+            priced("gemini-3.7-flash", Some(&usage)).cost().nanos(),
+            262_500,
+            "Gemini 3.7 Flash pricing drifted from its current Standard rates"
+        );
+    }
 
     #[test]
     fn flash_text_usage_prices_input_output_and_thinking_tokens() {

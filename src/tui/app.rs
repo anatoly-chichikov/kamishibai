@@ -21,7 +21,7 @@ pub struct App {
     screen: Screen,
     modal: Option<ModalKind>,
     busy: Option<BusyView>,
-    error: Option<String>,
+    error: Option<AppError>,
     pair: LanguagePair,
     input: AppInput,
     blob_cursor: usize,
@@ -37,6 +37,28 @@ pub struct App {
     word_clear_pending: bool,
     picker_cursor: PickerCursor,
     learning_target: LearningTarget,
+}
+
+/// Keeps the failed operation attached to its diagnostic for honest recovery copy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum AppError {
+    Request(String),
+    Publication(String),
+}
+
+impl AppError {
+    fn message(&self) -> &str {
+        match self {
+            Self::Request(message) | Self::Publication(message) => message,
+        }
+    }
+
+    fn title(&self) -> &'static str {
+        match self {
+            Self::Request(_) => "could not complete request",
+            Self::Publication(_) => "could not save your cards",
+        }
+    }
 }
 
 /// First-run welcome state: stage, typed key, source of that key, focused
@@ -645,7 +667,13 @@ impl App {
 
     /// Return the last recoverable request error, if one is being shown.
     pub fn error(&self) -> Option<&str> {
-        self.error.as_deref()
+        self.error.as_ref().map(AppError::message)
+    }
+
+    /// Describe the failed operation without inferring its origin from diagnostic text.
+    #[must_use]
+    pub fn error_title(&self) -> Option<&'static str> {
+        self.error.as_ref().map(AppError::title)
     }
 
     /// Return the session language pair.
@@ -967,7 +995,14 @@ impl App {
 
     /// Return the app with a recoverable request error shown.
     pub fn error_shown(mut self, message: impl Into<String>) -> Self {
-        self.error = Some(message.into());
+        self.error = Some(AppError::Request(message.into()));
+        self
+    }
+
+    /// Keep completed cards intact while showing that saving their package failed.
+    #[must_use]
+    pub fn publication_failed(mut self, message: impl Into<String>) -> Self {
+        self.error = Some(AppError::Publication(message.into()));
         self
     }
 

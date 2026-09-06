@@ -45,7 +45,7 @@ fn gemini_answering(status: &'static str) -> String {
             let _ = stream.read(&mut scratch);
             let body = match status.split_once(' ').map(|(code, _)| code) {
                 Some("200") => {
-                    r#"{"models":[{"name":"models/gemini-3.7-flash","supportedGenerationMethods":["generateContent"]}]}"#
+                    r#"{"models":[{"name":"models/gemini-3.8-flash","supportedGenerationMethods":["generateContent"]}]}"#
                 }
                 Some("400") => r#"{"error":{"status":"INVALID_ARGUMENT"}}"#,
                 Some("401") => r#"{"error":{"status":"UNAUTHENTICATED"}}"#,

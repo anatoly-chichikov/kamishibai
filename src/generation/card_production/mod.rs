@@ -34,7 +34,9 @@ use visual::VisualProduction;
 #[cfg(test)]
 use visual::production_renderer;
 
+#[cfg(test)]
 pub(crate) use invalidation::invalidate_card;
+pub(crate) use invalidation::invalidate_draft;
 
 /// Produces card metadata and media through focused Gemini adapters.
 #[derive(Clone)]
@@ -131,13 +133,7 @@ impl CardProduction for GeminiCardProduction {
         let term = draft.term().to_string();
         let understanding = draft.understanding().to_string();
         self.metadata
-            .generate(
-                draft.term(),
-                draft.understanding(),
-                draft.pair(),
-                draft.meta_request(),
-                Some(slot),
-            )
+            .generate_draft(draft, draft.meta_request(), Some(slot))
             .map(|(meta, file)| (CardRevision::new(term, understanding, meta), file))
     }
 

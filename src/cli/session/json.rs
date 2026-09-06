@@ -15,8 +15,10 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::runtime::locations::{SystemContext, cache_root};
+#[cfg(test)]
+use crate::session::CardDraft;
 use crate::session::{
-    AxisSet, CardDraft, CardMetaCache, LanguagePair, SentenceAxis, SentenceBatchSettings,
+    AxisSet, CardMetaCache, LanguagePair, SentenceAxis, SentenceBatchSettings,
     SentenceLabelSelection, SentenceLabels,
 };
 use crate::vocabulary::VocabularyEntry;
@@ -363,7 +365,7 @@ fn current_labels(
         return previous.sentence_labels().map(LabelsDoc::current);
     }
     cache
-        .load(draft.term.as_str(), draft.understanding.as_str(), pair)
+        .load_for_draft(&draft.hydrate(pair.clone()))
         .ok()
         .flatten()
         .and_then(|meta| meta.sentence_labels().map(LabelsDoc::current))
@@ -411,15 +413,9 @@ impl ResultDoc {
             if view::awaits_initial_meta(draft) {
                 continue;
             }
-            if let Some(meta) =
-                cache.load(draft.term.as_str(), draft.understanding.as_str(), &pair)?
-            {
-                let card = CardDraft::new(
-                    draft.term.as_str(),
-                    draft.understanding.as_str(),
-                    pair.clone(),
-                )
-                .with_meta(meta, None);
+            let hydrated = draft.hydrate(pair.clone());
+            if let Some(meta) = cache.load_for_draft(&hydrated)? {
+                let card = hydrated.with_meta(meta, None);
                 items.push(crate::session::to_entry(&card)?);
             }
         }
@@ -656,6 +652,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            reviewed_senses: Vec::new(),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: None,
             meta_request: None,
@@ -740,6 +737,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            reviewed_senses: Vec::new(),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: None,
             meta_request: None,
@@ -827,6 +825,7 @@ mod tests {
             DraftRecord {
                 term: String::from("canard"),
                 understanding: String::from("a duck"),
+                reviewed_senses: Vec::new(),
                 costs: crate::session::ArtifactCosts::default(),
                 rewrite: None,
                 meta_request: Some(
@@ -836,6 +835,7 @@ mod tests {
             DraftRecord {
                 term: String::from("hibou"),
                 understanding: String::from("an owl"),
+                reviewed_senses: Vec::new(),
                 costs: crate::session::ArtifactCosts::default(),
                 rewrite: None,
                 meta_request: None,
@@ -896,6 +896,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            reviewed_senses: Vec::new(),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: staged.rewrite().cloned(),
             meta_request: None,
@@ -949,6 +950,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            reviewed_senses: Vec::new(),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: Some(CardRewrite::new(Some(previous), requested, " \n ")),
             meta_request: None,
@@ -1000,6 +1002,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            reviewed_senses: Vec::new(),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: Some(CardRewrite::new(
                 Some(unlabeled_meta()),

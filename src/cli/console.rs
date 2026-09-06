@@ -7,7 +7,7 @@
 //! differs: progress is reported through a [`Reporter`] port with human,
 //! quiet, and NDJSON-on-stderr implementations.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::application::{CardProduction, PublishPhase, PublishProgress, StudyPublishing};
@@ -195,7 +195,13 @@ where
         bail!("the session no longer names this worker");
     }
     reporter.publishing();
-    let (deck, report, output) = workflow.publish(&drafts, &Unwatched)?.into_paths();
+    let publication = workflow.publish(&drafts, &Unwatched);
+    let (deck, report, output) = if cards > 0 {
+        publication.context("could not save your cards")?
+    } else {
+        publication?
+    }
+    .into_paths();
     let outcome = Outcome {
         deck,
         report,
@@ -284,9 +290,10 @@ pub(super) fn drafts_for(candidates: &[WordCandidate], pair: &LanguagePair) -> V
         .flat_map(|candidate| {
             let indices: Vec<usize> = candidate.selected_senses().to_vec();
             indices.into_iter().filter_map(move |index| {
-                candidate.senses().get(index).map(|sense| {
-                    CardDraft::new(candidate.term(), sense.understanding(), pair.clone())
-                })
+                candidate
+                    .senses()
+                    .get(index)
+                    .map(|_| CardDraft::from_candidate(candidate, index, pair.clone()))
             })
         })
         .collect()
@@ -740,6 +747,34 @@ mod tests {
             drafts.len(),
             2,
             "every selected sense must become its own card"
+        );
+    }
+
+    #[test]
+    fn every_card_keeps_the_reviewed_senses_with_its_selected_sense_first() {
+        let candidate = WordCandidate::with_selected_senses(
+            "canard",
+            vec![
+                Sense::plain("a duck"),
+                Sense::tagged("a false report", "journalism"),
+                Sense::plain("a newspaper hoax"),
+            ],
+            vec![1],
+            true,
+        );
+        let drafts = drafts_for(&[candidate], &pair());
+        assert_eq!(
+            drafts[0]
+                .reviewed_senses()
+                .iter()
+                .map(|sense| (sense.understanding(), sense.tag()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("a false report", Some("journalism")),
+                ("a duck", None),
+                ("a newspaper hoax", None),
+            ],
+            "a generated card lost the reviewed alternatives or left its selected sense buried among them"
         );
     }
 

@@ -66,7 +66,11 @@ where
             9.0,
         ));
         lines.push((
-            format!("{}: {}", labels.context.as_str(), entry.source.context),
+            format!(
+                "{}: {}",
+                labels.context.as_str(),
+                crate::markdown::compact_card_context(entry.source.context.as_str())
+            ),
             8.0,
         ));
         lines.push((
