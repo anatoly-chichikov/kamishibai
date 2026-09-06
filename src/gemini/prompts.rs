@@ -12,6 +12,8 @@ const INTAKE_PROMPT: &str = include_str!("../../assets/gemini_intake_prompt.txt"
 const SENSE_PROMPT: &str = include_str!("../../assets/gemini_sense_prompt.txt");
 const CARD_META_PROMPT: &str = include_str!("../../assets/gemini_card_meta_prompt.txt");
 const CARD_PROMPT: &str = include_str!("../../assets/gemini_card_prompt.txt");
+const PHONETICS_PROMPT: &str = include_str!("../../assets/gemini_phonetics_prompt.txt");
+const LEARNER_EXPLANATIONS: &str = include_str!("../../assets/learner_explanations_prompt.txt");
 
 /// Render the human-in-the-loop intake prompt.
 pub(super) fn render_intake_prompt(
@@ -25,6 +27,10 @@ pub(super) fn render_intake_prompt(
     render(
         INTAKE_PROMPT,
         &[
+            (
+                "{learner_explanations}",
+                learner_explanations(examples.writing()?)?,
+            ),
             ("{supported_languages}", language_choices(catalog)?),
             ("{support_language}", language_label(catalog, support.code)?),
             ("{target_instruction}", target_instruction(target, catalog)?),
@@ -57,6 +63,10 @@ pub(super) fn render_bulk_prompt(
         SENSE_PROMPT,
         &[
             (
+                "{learner_explanations}",
+                learner_explanations(examples.writing()?)?,
+            ),
+            (
                 "{target_language}",
                 language_label(catalog, pair.learning())?,
             ),
@@ -74,19 +84,48 @@ pub(super) fn render_bulk_prompt(
     )
 }
 
+/// Render the focused IPA review from the validated card and its settled reviewed senses.
+pub(super) fn render_phonetics_prompt(
+    draft: &CardDraft,
+    meta: &CardMeta,
+    pair: &LanguagePair,
+) -> Result<String> {
+    let senses = draft
+        .reviewed_senses()
+        .iter()
+        .map(|sense| json!({"understanding": sense.understanding(), "tag": sense.tag()}))
+        .collect::<Vec<_>>();
+    let input = json!({
+        "target_language": pair.learning(),
+        "term": draft.term(),
+        "reviewed_senses": senses,
+        "selected": 0,
+        "target_sentence": meta.target_sentence(),
+        "pronunciation": meta.pronunciation(),
+        "transcription": meta.transcription(),
+    });
+    render(
+        PHONETICS_PROMPT,
+        &[("{input_json}", serde_json::to_string_pretty(&input)?)],
+    )
+}
+
 /// Render the card-meta generation prompt.
 pub(super) fn render_card_meta_prompt(
-    term: &str,
-    understanding: &str,
-    pair: &LanguagePair,
+    draft: &CardDraft,
     request: Option<&SentenceLabelSelection>,
     catalog: &LanguageCatalog,
 ) -> Result<String> {
+    let pair = draft.pair();
     let source = pair.known_profile(catalog)?;
     let examples = catalog.prompts(source.code)?;
     render(
         CARD_META_PROMPT,
         &[
+            (
+                "{learner_explanations}",
+                learner_explanations(examples.writing()?)?,
+            ),
             (
                 "{target_language}",
                 language_label(catalog, pair.learning())?,
@@ -95,8 +134,9 @@ pub(super) fn render_card_meta_prompt(
             ("{hint_length}", String::from(examples.hint_length())),
             ("{hint_examples}", examples.hint()?),
             ("{context_examples}", examples.context()?),
-            ("{term}", String::from(term)),
-            ("{understanding}", String::from(understanding)),
+            ("{term}", String::from(draft.term())),
+            ("{understanding}", String::from(draft.understanding())),
+            ("{reviewed_senses}", reviewed_senses(draft)?),
             (
                 "{initial_approx_schema}",
                 String::from(initial_approx_schema(request)),
@@ -111,6 +151,23 @@ pub(super) fn render_card_meta_prompt(
             ),
         ],
     )
+}
+
+fn reviewed_senses(draft: &CardDraft) -> Result<String> {
+    let senses = draft
+        .reviewed_senses()
+        .iter()
+        .enumerate()
+        .map(|(index, sense)| {
+            json!({
+                "chosen": index == 0,
+                "priority": draft.sense_priority(index),
+                "understanding": sense.understanding(),
+                "tag": sense.tag(),
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::to_string_pretty(&senses)?)
 }
 
 fn initial_approx_schema(request: Option<&SentenceLabelSelection>) -> &'static str {
@@ -195,6 +252,10 @@ pub(super) fn render_card_prompt(
         CARD_PROMPT,
         &[
             (
+                "{learner_explanations}",
+                learner_explanations(examples.writing()?)?,
+            ),
+            (
                 "{target_language}",
                 language_label(catalog, pair.learning())?,
             ),
@@ -204,6 +265,7 @@ pub(super) fn render_card_prompt(
             ("{context_examples}", examples.context()?),
             ("{term}", String::from(draft.term())),
             ("{understanding}", String::from(draft.understanding())),
+            ("{reviewed_senses}", reviewed_senses(draft)?),
             ("{current_meta}", meta_json),
             ("{requested_labels}", requested_labels(&selection)),
             ("{user_correction}", correction),
@@ -269,6 +331,10 @@ fn language_label(catalog: &LanguageCatalog, code: &str) -> Result<String> {
     Ok(format!("{} ({})", item.code, item.prompt))
 }
 
+fn learner_explanations(writing: String) -> Result<String> {
+    render(LEARNER_EXPLANATIONS, &[("{learner_examples}", writing)])
+}
+
 fn render(template: &str, values: &[(&str, String)]) -> Result<String> {
     PromptTemplate::new(template).render(values)
 }
@@ -276,15 +342,153 @@ fn render(template: &str, values: &[(&str, String)]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CARD_META_PROMPT, language_label, render, render_bulk_prompt, render_card_meta_prompt,
-        render_card_prompt, render_intake_prompt,
+        CARD_META_PROMPT, language_label, learner_explanations, render, render_bulk_prompt,
+        render_card_meta_prompt, render_card_prompt, render_intake_prompt, render_phonetics_prompt,
+        reviewed_senses,
     };
     use crate::application::LearningTarget;
     use crate::languages::catalog;
     use crate::session::{
-        AxisSet, CardDraft, CardMeta, LanguagePair, Register, SentenceAxis, SentenceKind,
+        AxisSet, CardDraft, CardMeta, LanguagePair, Register, Sense, SentenceAxis, SentenceKind,
         SentenceLabelSelection, SentenceLabels, SentenceLevel, WordCandidate,
     };
+
+    #[test]
+    fn learner_prompts_cannot_omit_their_local_writing_examples() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../../assets/prompt_examples.json"))
+                .expect("prompt examples must decode");
+        let catalog = catalog();
+        let candidate = WordCandidate::new("term", "one precise sense", true);
+        let complete = catalog.codes().into_iter().all(|known| {
+            let Some(examples) = document[known.to_ascii_lowercase()]["card"]["writing"]
+                .as_array()
+                .filter(|examples| examples.len() == 2)
+            else {
+                return false;
+            };
+            let pair = LanguagePair::new("en", known);
+            let draft = CardDraft::new("term", "one precise sense", pair.clone());
+            [
+                render_intake_prompt("term", known, &LearningTarget::Detect, &catalog),
+                render_bulk_prompt(&candidate, "add one sense", &pair, &catalog),
+                render_card_meta_prompt(&draft, None, &catalog),
+                render_card_prompt(&draft, "", &pair, &catalog),
+            ]
+            .into_iter()
+            .all(|prompt| {
+                prompt.is_ok_and(|prompt| {
+                    examples.iter().all(|example| {
+                        ["bad", "good"].into_iter().all(|key| {
+                            example[key]
+                                .as_str()
+                                .is_some_and(|text| prompt.matches(text).count() == 1)
+                        })
+                    }) && !prompt.contains("{learner_examples}")
+                })
+            })
+        });
+        assert!(
+            complete,
+            "a learner prompt omitted, duplicated or failed to interpolate localized writing examples"
+        );
+    }
+
+    #[test]
+    fn local_writing_examples_cannot_enter_the_phonetics_review() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../../assets/prompt_examples.json"))
+                .expect("prompt examples must decode");
+        let isolated = catalog().codes().into_iter().all(|known| {
+            let Some(examples) = document[known.to_ascii_lowercase()]["card"]["writing"]
+                .as_array()
+                .filter(|examples| examples.len() == 2)
+            else {
+                return false;
+            };
+            let pair = LanguagePair::new("en", known);
+            let draft = CardDraft::new("term", "one precise sense", pair.clone());
+            let meta = CardMeta::new("tɜːm", "tɜːm", "", 5, "", "", "", "", "term");
+            render_phonetics_prompt(&draft, &meta, &pair).is_ok_and(|prompt| {
+                examples.iter().all(|example| {
+                    ["bad", "good"].into_iter().all(|key| {
+                        example[key]
+                            .as_str()
+                            .is_some_and(|text| !prompt.contains(text))
+                    })
+                })
+            })
+        });
+        assert!(
+            isolated,
+            "localized writing examples leaked into the IPA-only review"
+        );
+    }
+
+    #[test]
+    fn nested_style_rendering_cannot_rescan_user_slots() {
+        let literal = "{learner_examples}";
+        let pair = LanguagePair::new("en", "ru");
+        let catalog = catalog();
+        let candidate = WordCandidate::new("term", literal, true);
+        let draft = CardDraft::new("term", literal, pair.clone());
+        let preserved = [
+            render_intake_prompt(literal, "ru", &LearningTarget::Detect, &catalog),
+            render_bulk_prompt(&candidate, literal, &pair, &catalog),
+            render_card_meta_prompt(&draft, None, &catalog),
+            render_card_prompt(&draft, literal, &pair, &catalog),
+        ]
+        .into_iter()
+        .all(|prompt| prompt.is_ok_and(|prompt| prompt.contains(literal)));
+        assert!(
+            preserved,
+            "nested style rendering interpreted literal user data as another template slot"
+        );
+    }
+
+    #[test]
+    fn learner_explanations_cannot_skip_plain_language_in_any_supported_language() {
+        let catalog = catalog();
+        let candidate = WordCandidate::new("term", "one precise sense", true);
+        let complete = catalog.codes().into_iter().all(|known| {
+            let pair = LanguagePair::new("en", known);
+            let draft = CardDraft::new("term", "one precise sense", pair.clone());
+            [
+                render_intake_prompt("term", known, &LearningTarget::Detect, &catalog),
+                render_bulk_prompt(&candidate, "add one sense", &pair, &catalog),
+                render_card_meta_prompt(&draft, None, &catalog),
+                render_card_prompt(&draft, "", &pair, &catalog),
+            ]
+            .into_iter()
+            .all(|prompt| {
+                prompt.is_ok_and(|prompt| {
+                    prompt
+                        .matches("Assume no knowledge of grammar terminology")
+                        .count()
+                        == 1
+                        && !prompt.contains("State the exact grammatical subclass")
+                        && !prompt.contains("Always abbreviate part-of-speech labels")
+                })
+            })
+        });
+        assert!(
+            complete,
+            "a learner-facing prompt omitted plain language or still demanded grammar terminology"
+        );
+    }
+
+    #[test]
+    fn learner_prose_rules_cannot_change_the_phonetics_review() {
+        let pair = LanguagePair::new("en", "ru");
+        let draft = CardDraft::new("term", "one precise sense", pair.clone());
+        let meta = CardMeta::new("tɜːm", "tɜːm", "слово", 5, "", "", "", "", "term");
+        let prompt =
+            render_phonetics_prompt(&draft, &meta, &pair).expect("phonetics review must render");
+        assert!(
+            !prompt.contains("Assume no knowledge of grammar terminology"),
+            "learner prose instructions leaked into the IPA-only review"
+        );
+    }
 
     #[test]
     fn english_intake_cannot_embed_russian_support_examples() {
@@ -319,14 +523,9 @@ mod tests {
 
     #[test]
     fn german_card_meta_uses_german_support_examples() {
-        let prompt = render_card_meta_prompt(
-            "canard",
-            "eine Zeitungsente",
-            &LanguagePair::new("fr", "de"),
-            None,
-            &catalog(),
-        )
-        .expect("german card meta prompt must render");
+        let draft = CardDraft::new("canard", "eine Zeitungsente", LanguagePair::new("fr", "de"));
+        let prompt = render_card_meta_prompt(&draft, None, &catalog())
+            .expect("german card meta prompt must render");
         assert!(
             prompt.contains("**Bedeutung.**")
                 && prompt.contains("selten")
@@ -336,15 +535,317 @@ mod tests {
     }
 
     #[test]
-    fn card_meta_prompt_attributes_cefr_only_after_writing_a_natural_sentence() {
-        let prompt = render_card_meta_prompt(
-            "canard",
-            "a duck",
-            &LanguagePair::new("fr", "en"),
-            None,
+    fn chosen_reviewed_tag_binds_generation_in_both_card_prompts() {
+        let candidate = WordCandidate::with_senses(
+            "crever",
+            vec![
+                Sense::plain("to puncture"),
+                Sense::tagged("to die", "slang"),
+                Sense::plain("to burst"),
+            ],
+            1,
+            true,
+        );
+        let pair = LanguagePair::new("fr", "en");
+        let draft = CardDraft::from_candidate(&candidate, 1, pair.clone());
+        let senses = reviewed_senses(&draft).expect("reviewed senses must render");
+        let decoded = serde_json::from_str::<serde_json::Value>(senses.as_str())
+            .expect("reviewed senses must stay valid JSON");
+        let generated = render_card_meta_prompt(&draft, None, &catalog())
+            .expect("multi-sense card meta prompt must render");
+        let corrected = render_card_prompt(&draft, "make it shorter", &pair, &catalog())
+            .expect("multi-sense correction prompt must render");
+        assert_eq!(
+            (
+                decoded,
+                generated.matches(senses.as_str()).count(),
+                corrected.matches(senses.as_str()).count(),
+                generated.contains(
+                    "Its `understanding` and any non-null `tag` are one binding constraint, not display metadata"
+                ),
+                generated.contains(
+                    "The chosen tag must govern the translation, target sentence, situation, and descriptive labels"
+                ),
+                generated.contains("understanding and the chosen reviewed tag"),
+                generated.contains("under the chosen understanding and tag"),
+                corrected.contains(
+                    "Unless the correction explicitly moves the card to another sense, the chosen tag must continue to govern"
+                ),
+                corrected.contains(
+                    "preserve the chosen tag's register, domain, region, and usage constraints throughout the card"
+                ),
+                corrected.contains("chosen sense, form, and tagged usage"),
+                generated.contains("Do not add historical derivation or relatedness claims"),
+                corrected.contains("Do not add historical derivation or relatedness claims"),
+            ),
+            (
+                serde_json::json!([
+                    {"chosen": true, "priority": 1, "understanding": "to die", "tag": "slang"},
+                    {"chosen": false, "priority": 0, "understanding": "to puncture", "tag": null},
+                    {"chosen": false, "priority": 2, "understanding": "to burst", "tag": null},
+                ]),
+                1,
+                1,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+            ),
+            "a reviewed tag stopped constraining one of the card-generation prompts"
+        );
+    }
+
+    #[test]
+    fn card_prompts_omit_unprovided_etymology_from_authored_explanations() {
+        let candidate = WordCandidate::with_senses(
+            "bank",
+            vec![
+                Sense::tagged("a financial institution", "finance"),
+                Sense::tagged("land beside a river", "landform"),
+            ],
+            0,
+            true,
+        );
+        let pair = LanguagePair::new("en", "fr");
+        let draft = CardDraft::from_candidate(&candidate, 0, pair.clone());
+        let generated = render_card_meta_prompt(&draft, None, &catalog())
+            .expect("multi-sense card meta prompt must render");
+        let corrected = render_card_prompt(&draft, "make it shorter", &pair, &catalog())
+            .expect("multi-sense correction prompt must render");
+        let safeguards = [
+            "No trusted etymological source is supplied",
+            "Do not add historical derivation or relatedness claims",
+            "Do not infer unrelated origins from uncertainty",
+        ];
+        assert!(
+            safeguards
+                .iter()
+                .all(|rule| generated.contains(rule) && corrected.contains(rule))
+                && ![generated, corrected].iter().any(|prompt| {
+                    prompt.contains("Give a brief historical")
+                        || prompt.contains("reliably known to be unrelated or homonymous")
+                }),
+            "a card prompt still authorized unsupported etymology from model confidence"
+        );
+    }
+
+    #[test]
+    fn a_changed_term_expires_the_old_reviewed_inventory_in_the_correction_prompt() {
+        let candidate = WordCandidate::with_senses(
+            "bound",
+            vec![Sense::plain("a limit"), Sense::plain("a jump")],
+            0,
+            true,
+        );
+        let pair = LanguagePair::new("en", "fr");
+        let draft = CardDraft::from_candidate(&candidate, 0, pair.clone());
+        let prompt = render_card_prompt(
+            &draft,
+            "Change the term to limit for a boundary",
+            &pair,
             &catalog(),
         )
-        .expect("three-axis card meta prompt must render");
+        .expect("term-changing correction prompt must render");
+        assert!(
+            prompt.contains("If returned `term` differs from current `term`")
+                && prompt.contains("the old `Reviewed meanings` are obsolete")
+                && prompt.contains("one bold bullet containing the returned `understanding` only")
+                && prompt.contains("Do not invent or transfer alternatives for the new term")
+                && !prompt.contains("In the first section copy all `Reviewed meanings`"),
+            "a term-changing correction still instructed the author to carry old sibling meanings"
+        );
+    }
+
+    #[test]
+    fn card_prompts_keep_the_glossary_list_only_and_each_usage_section_compact() {
+        let pair = LanguagePair::new("en", "fr");
+        let draft = CardDraft::new("anchor", "a heavy mooring device", pair.clone());
+        let prompts = [
+            render_card_meta_prompt(&draft, None, &catalog()).expect("metadata prompt must render"),
+            render_card_prompt(&draft, "use a shorter example", &pair, &catalog())
+                .expect("correction prompt must render"),
+        ];
+        assert!(
+            prompts.iter().all(|prompt| {
+                prompt.contains("Do not add a relationship or differences paragraph")
+                    && prompt
+                        .contains("one useful point each, using one or two short, direct sentences")
+                    && prompt.contains("roughly one short line of prose")
+                    && prompt.contains("Do not repeat the meaning list in prose")
+                    && !prompt.contains("Ground the relationship")
+                    && !prompt.contains("Keep every bullet and the relationship sentence")
+            }),
+            "a card prompt still demanded redundant glossary prose or open-ended usage paragraphs"
+        );
+    }
+
+    #[test]
+    fn card_descriptions_cannot_invent_rules_from_one_working_example() {
+        let pair = LanguagePair::new("en", "fr");
+        let draft = CardDraft::new("anchor", "a heavy mooring device", pair.clone());
+        let prompts = [
+            render_card_meta_prompt(&draft, None, &catalog()).expect("metadata prompt must render"),
+            render_card_prompt(&draft, "use a shorter example", &pair, &catalog())
+                .expect("correction prompt must render"),
+        ];
+        assert!(
+            prompts.iter().all(|prompt| {
+                prompt.contains("Do not infer an absolute rule from one example")
+                    && prompt.contains("Explain one useful usage nuance")
+                    && prompt.contains("A translated example alone is not a nuance")
+                    && prompt.contains("include one short target-language example in quotation marks")
+                    && prompt.contains("The example must show the exact combination being explained")
+                    && prompt.contains("Do not rescue a false claim merely by adding usually or often")
+                    && prompt.contains("Determine the exact scope silently; explain it with actual words and situations")
+                    && prompt.contains("If there is no special usage restriction")
+                    && prompt.contains("If there is no useful additional peculiarity")
+                    && prompt.contains("Tone, facial expression, and word order are cues")
+                    && prompt.contains("not necessary or sufficient conditions for a speaker's intent")
+                    && prompt.contains("no additional special point needs noting beyond the guidance above")
+                    && prompt.contains("Do not turn a more usual alternative into a ban on the chosen word")
+                    && prompt.contains("Keep lexical meaning separate from real-world consequences")
+                    && prompt.contains("does not by itself guarantee an outcome or impose an obligation")
+                    && prompt.contains("Examples mentioned in a definition are not exhaustive lists")
+                    && prompt.contains("do not intensify them with only, always")
+                    && prompt.contains("an attempt, plan, or purpose is not a completed result")
+                    && prompt.contains("against every written word of target_sentence")
+                    && prompt.contains("Ordinary source-language tokens already visible in source_sentence may recur naturally")
+                    && prompt.contains("do not name them as the answer")
+            }),
+            "a card prompt dropped useful guidance or still demanded unsupported restrictions"
+        );
+    }
+
+    #[test]
+    fn a_narrow_correction_cannot_preserve_a_broken_description_contract() {
+        let pair = LanguagePair::new("en", "fr");
+        let draft = CardDraft::new("anchor", "a heavy mooring device", pair.clone());
+        let prompt = render_card_prompt(&draft, "use a shorter example", &pair, &catalog())
+            .expect("correction prompt must render");
+        assert!(
+            prompt.contains("Always check the existing source_context against the four-section contract")
+                && prompt.contains("repair only the affected description sections")
+                && prompt.contains("wording requires grammar knowledge or is unnecessarily difficult")
+                && prompt.contains("This does not authorize unrelated changes to the term, sense, example situation, or preserved labels"),
+            "a narrow correction could retain obsolete headers or example-only teaching sections"
+        );
+    }
+
+    #[test]
+    fn card_usage_guidance_cannot_turn_shared_domains_into_exclusive_meanings() {
+        let pair = LanguagePair::new("en", "fr");
+        let draft = CardDraft::new("anchor", "a heavy mooring device", pair.clone());
+        let prompts = [
+            render_card_meta_prompt(&draft, None, &catalog()).expect("metadata prompt must render"),
+            render_card_prompt(&draft, "use a shorter example", &pair, &catalog())
+                .expect("correction prompt must render"),
+        ];
+        assert!(
+            prompts.iter().all(|prompt| {
+                prompt.contains("Scope usage observations to this chosen use or this example")
+                    && prompt.contains("check whether each other reviewed meaning also occurs there")
+                    && prompt.contains("do not manufacture separate domains")
+                    && !prompt.contains(
+                        "name a part of speech, construction, register, domain, or concrete situation that separates the reviewed senses",
+                    )
+            }),
+            "a card prompt still demanded an exclusive domain boundary for meanings that can overlap"
+        );
+    }
+
+    #[test]
+    fn card_prompts_do_not_force_a_false_prohibition_or_near_word_distinction() {
+        let pair = LanguagePair::new("en", "fr");
+        let draft = CardDraft::new("anchor", "a heavy mooring device", pair.clone());
+        let prompts = [
+            render_card_meta_prompt(&draft, None, &catalog()).expect("metadata prompt must render"),
+            render_card_prompt(&draft, "use a shorter example", &pair, &catalog())
+                .expect("correction prompt must render"),
+        ];
+        assert!(
+            prompts.iter().all(|prompt| {
+                prompt.contains("instead of inventing a forbidden setting or a substitute")
+                    && prompt.contains("An ordinary valid counterexample defeats an absolute rule")
+                    && prompt.contains("Scope the advice to that situation")
+                    && prompt.contains(
+                        "Default to a concrete scene cue without naming another target-language word",
+                    )
+                    && prompt.contains("Optional contrasts are not a required field or format")
+                    && prompt.contains("If the other word is also a valid answer in this context")
+                    && prompt.contains("Check every part of the hint")
+                    && prompt.contains(
+                        "Ordinary source-language tokens already visible in source_sentence may recur naturally",
+                    )
+            }),
+            "a card prompt still forced a broad rule, a near-word contrast, or translation avoidance"
+        );
+    }
+
+    #[test]
+    fn authored_explanations_cannot_add_qualifiers_beyond_their_evidence() {
+        let pair = LanguagePair::new("en", "fr");
+        let candidate = WordCandidate::new("anchor", "a heavy mooring device", true);
+        let draft = CardDraft::new("anchor", "a heavy mooring device", pair.clone());
+        let cards = [
+            render_card_meta_prompt(&draft, None, &catalog()).expect("metadata prompt must render"),
+            render_card_prompt(&draft, "use a shorter example", &pair, &catalog())
+                .expect("correction prompt must render"),
+        ];
+        let senses = [
+            render_intake_prompt("anchor", "fr", &LearningTarget::Detect, &catalog())
+                .expect("intake prompt must render"),
+            render_bulk_prompt(&candidate, "another common use", &pair, &catalog())
+                .expect("sense prompt must render"),
+        ];
+        assert!(
+            cards.iter().all(|prompt| {
+                prompt.contains("Do not add properties or causes absent from the definitions")
+                    && prompt.contains(
+                        "each example translation preserves exactly what its example says",
+                    )
+                    && prompt.contains("cannot replace the explanation")
+            }) && senses.iter().all(|prompt| {
+                prompt.contains("Use the shortest distinguishing definition")
+                    && prompt.contains(
+                        "Check each qualifier against ordinary valid examples of the same use",
+                    )
+                    && prompt.contains("Remove imagined details about how the action is performed")
+            }),
+            "an authoring prompt still turned an imagined example or collocation into an unsupported definition"
+        );
+    }
+
+    #[test]
+    fn sense_prompts_do_not_turn_typical_examples_into_lexical_restrictions() {
+        let pair = LanguagePair::new("en", "fr");
+        let candidate = WordCandidate::new("anchor", "a heavy mooring device", true);
+        let prompts = [
+            render_intake_prompt("anchor", "fr", &LearningTarget::Detect, &catalog())
+                .expect("intake prompt must render"),
+            render_bulk_prompt(&candidate, "another common use", &pair, &catalog())
+                .expect("sense prompt must render"),
+        ];
+        assert!(
+            prompts.iter().all(|prompt| {
+                prompt.contains("A typical example does not define a restriction")
+                    && prompt
+                        .contains("Prefer a broader accurate gloss to a narrower unsupported one")
+                    && prompt.contains("Do not add a tag merely to fill a category")
+            }),
+            "a sense prompt still encouraged incidental restrictions or invented usage labels"
+        );
+    }
+
+    #[test]
+    fn card_meta_prompt_attributes_cefr_only_after_writing_a_natural_sentence() {
+        let draft = CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en"));
+        let prompt = render_card_meta_prompt(&draft, None, &catalog())
+            .expect("three-axis card meta prompt must render");
         assert!(
             prompt.contains(
                 "\"labels\":{\"register\":\"<neutral|casual|formal|literary|archaic>\",\"type\":\"<statement|question|request|exclamation|dialogue>\",\"level\":\"<a1|a2|b1|b2|c1|c2>\",\"approx\":[]}"
@@ -405,6 +906,11 @@ mod tests {
             legacy_template.as_str(),
             &[
                 (
+                    "{learner_explanations}",
+                    learner_explanations(examples.writing().expect("writing examples must render"))
+                        .expect("learner style must render"),
+                ),
+                (
                     "{target_language}",
                     language_label(&catalog, pair.learning())
                         .expect("target language label must render"),
@@ -425,11 +931,17 @@ mod tests {
                 ),
                 ("{term}", String::from("canard")),
                 ("{understanding}", String::from("a duck")),
+                (
+                    "{reviewed_senses}",
+                    reviewed_senses(&CardDraft::new("canard", "a duck", pair.clone()))
+                        .expect("reviewed senses must render"),
+                ),
             ],
         )
         .expect("legacy card meta prompt must render");
+        let draft = CardDraft::new("canard", "a duck", pair);
         assert_eq!(
-            render_card_meta_prompt("canard", "a duck", &pair, None, &catalog)
+            render_card_meta_prompt(&draft, None, &catalog)
                 .expect("default card meta prompt must render"),
             legacy,
             "empty initial preferences changed the legacy card meta prompt bytes"
@@ -441,14 +953,9 @@ mod tests {
         let request = SentenceLabelSelection::empty()
             .choosing(SentenceAxis::Level, 2)
             .choosing(SentenceAxis::Type, 1);
-        let prompt = render_card_meta_prompt(
-            "canard",
-            "a duck",
-            &LanguagePair::new("fr", "en"),
-            Some(&request),
-            &catalog(),
-        )
-        .expect("requested card meta prompt must render");
+        let draft = CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en"));
+        let prompt = render_card_meta_prompt(&draft, Some(&request), &catalog())
+            .expect("requested card meta prompt must render");
         assert!(
             prompt.contains(
                 "Initial sentence preset: type=\"question\" (changed) · level=\"b1\" (changed)"
@@ -590,14 +1097,13 @@ mod tests {
 
     #[test]
     fn user_values_cannot_trigger_a_second_template_interpolation() {
-        let prompt = render_card_meta_prompt(
+        let draft = CardDraft::new(
             "{understanding}",
             "chosen sense",
-            &LanguagePair::new("fr", "en"),
-            None,
-            &catalog(),
-        )
-        .expect("card meta prompt with placeholder-shaped input must render");
+            LanguagePair::new("fr", "en"),
+        );
+        let prompt = render_card_meta_prompt(&draft, None, &catalog())
+            .expect("card meta prompt with placeholder-shaped input must render");
         assert_eq!(
             prompt.matches("{understanding}").count(),
             1,
@@ -609,14 +1115,9 @@ mod tests {
     fn cjk_prompts_use_lexical_length_rules_without_artificial_spaces() {
         let chinese = render_intake_prompt("批准", "zh", &LearningTarget::Detect, &catalog())
             .expect("chinese intake prompt must render");
-        let japanese = render_card_meta_prompt(
-            "承認",
-            "同意して認めること",
-            &LanguagePair::new("en", "ja"),
-            None,
-            &catalog(),
-        )
-        .expect("japanese card prompt must render");
+        let draft = CardDraft::new("承認", "同意して認めること", LanguagePair::new("en", "ja"));
+        let japanese = render_card_meta_prompt(&draft, None, &catalog())
+            .expect("japanese card prompt must render");
         let english = render_intake_prompt("râler", "en", &LearningTarget::Detect, &catalog())
             .expect("english intake prompt must render");
         assert!(
@@ -637,14 +1138,7 @@ mod tests {
                     let pair = LanguagePair::new(learning, known);
                     let draft = CardDraft::new("term", "one precise sense", pair.clone());
                     render_bulk_prompt(&candidate, "add one sense", &pair, &catalog).is_ok()
-                        && render_card_meta_prompt(
-                            "term",
-                            "one precise sense",
-                            &pair,
-                            None,
-                            &catalog,
-                        )
-                        .is_ok()
+                        && render_card_meta_prompt(&draft, None, &catalog).is_ok()
                         && render_card_prompt(&draft, "make it shorter", &pair, &catalog).is_ok()
                 })
         });

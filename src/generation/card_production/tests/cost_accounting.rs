@@ -23,6 +23,53 @@ fn correction_observer_persists_the_exact_billed_request() {
 }
 
 #[test]
+fn correction_observer_retains_both_author_and_phonetic_charges() {
+    let home = TempDir::new().expect("tempdir must be created");
+    let cache = Cache::new("cards/phonetic-cost", home.path());
+    let recorder = CostRecorder::new(cache.clone(), Artifact::Meta);
+    recorder
+        .push_correction(CostRecord::new(
+            "gemini-3.8-flash",
+            1,
+            100,
+            50,
+            150,
+            GenerationCost::from_nanos(262_500),
+        ))
+        .expect("author cost must persist");
+    recorder
+        .push_correction(CostRecord::new(
+            "gemini-3.8-flash",
+            1,
+            7,
+            14,
+            21,
+            GenerationCost::from_nanos(57_750),
+        ))
+        .expect("phonetic cost must persist");
+    assert_eq!(
+        (
+            recorder
+                .current(false)
+                .expect("operation cost must resolve"),
+            load_cost_record(&cache, Artifact::Meta).expect("stored cost must decode"),
+        ),
+        (
+            Some(GenerationCost::from_nanos(320_250)),
+            Some(CostRecord::new(
+                "gemini-3.8-flash",
+                2,
+                107,
+                64,
+                171,
+                GenerationCost::from_nanos(320_250)
+            )),
+        ),
+        "correction observer discarded a text pass or double-counted its operation aggregate"
+    );
+}
+
+#[test]
 fn provider_observer_journals_session_spend_before_lifetime_sidecar_failure() {
     let home = TempDir::new().expect("tempdir must be created");
     let ledger = RecordingLedger::default();

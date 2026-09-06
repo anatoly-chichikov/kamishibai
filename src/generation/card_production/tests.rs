@@ -763,6 +763,7 @@ impl Speaker for PersistingSpeaker {
 }
 
 mod cost_accounting;
+mod metadata_phonetics;
 mod picture_recovery;
 mod picture_requests;
 mod scene_attempt;

@@ -8,7 +8,8 @@ use kamishibai::gemini::{GeminiClient, Transport, TransportResponse, rejects_key
 use kamishibai::generation::manga::{HiddenRecall, RecallCard, ShownRecall};
 use kamishibai::languages::catalog;
 use kamishibai::session::{
-    CardDraft, CardMeta, LanguagePair, LearningTarget, RawInputBatch, WordCandidate,
+    CardDraft, CardMeta, LanguagePair, LearningTarget, RawInputBatch, Sense, SentenceAxis,
+    SentenceLabelSelection, WordCandidate,
 };
 use serde_json::{Value, json};
 
@@ -103,6 +104,22 @@ fn body(value: Value) -> Result<TransportResponse> {
     })
 }
 
+/// Return a strict second-pass IPA reply with distinct metered usage.
+fn ipa_body(pronunciation: &str, transcription: &str) -> Result<TransportResponse> {
+    body(json!({
+        "candidates": [{"content": {"parts": [{"text": json!({
+            "pronunciation": pronunciation,
+            "transcription": transcription
+        }).to_string()}]}}],
+        "usageMetadata": {
+            "promptTokenCount": 7,
+            "candidatesTokenCount": 3,
+            "thoughtsTokenCount": 11,
+            "totalTokenCount": 21
+        }
+    }))
+}
+
 /// Return the first text prompt recorded by fake transport.
 fn recorded_prompt(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Result<String> {
     let body = requests.borrow()[0].1.clone();
@@ -112,6 +129,23 @@ fn recorded_prompt(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Result<Stri
             .as_str()
             .expect("request text must exist"),
     ))
+}
+
+/// Decode the immutable card input carried by the final phonetic request.
+fn recorded_phonetic_input(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Result<Value> {
+    let captured = requests.borrow();
+    let response: Value =
+        serde_json::from_str(&captured.last().expect("IPA request must exist").1)?;
+    let prompt = response["contents"][0]["parts"][0]["text"]
+        .as_str()
+        .expect("IPA request must carry text");
+    let input = prompt
+        .find('{')
+        .expect("IPA prompt must carry a card input");
+    Ok(serde_json::Deserializer::from_str(&prompt[input..])
+        .into_iter::<Value>()
+        .next()
+        .expect("IPA card input must exist")?)
 }
 
 /// Return one production feature plan for a single motivated camera view.
@@ -302,7 +336,7 @@ fn free_form_completion_keeps_the_legacy_request_bytes() -> Result<()> {
     }))?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let response = client.complete("gemini-3.7-flash", String::from("compose"))?;
+    let response = client.complete("gemini-3.8-flash", String::from("compose"))?;
     assert_eq!(
         (response.as_str(), requests.borrow()[0].1.as_str()),
         ("ok", r#"{"contents":[{"parts":[{"text":"compose"}]}]}"#,),
@@ -320,7 +354,7 @@ fn structured_completion_uses_the_json_response_format() -> Result<()> {
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
     let response = client.complete_json(
-        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         String::from("compose"),
         &json!({"type":"object","additionalProperties":false,"required":["panels"]}),
     )?;
@@ -341,7 +375,7 @@ fn unsupported_response_schema_keywords_fail_before_transport() {
     let transport = FakeTransport::new(Vec::new());
     let requests = transport.requests.clone();
     let result = GeminiClient::new("key", transport).complete_json(
-        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         String::from("compose"),
         &json!({"type":"string","minLength":1}),
     );
@@ -359,17 +393,17 @@ fn malformed_response_subschemas_fail_before_transport() {
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
     let items = client.complete_json(
-        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         String::from("compose"),
         &json!({"type":"array","items":[]}),
     );
     let additional = client.complete_json(
-        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         String::from("compose"),
         &json!({"type":"object","additionalProperties":"false"}),
     );
     let nested = client.complete_json(
-        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         String::from("compose"),
         &json!({
             "type":"object",
@@ -380,12 +414,12 @@ fn malformed_response_subschemas_fail_before_transport() {
         }),
     );
     let nested_items = client.complete_json(
-        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         String::from("compose"),
         &json!({"type":"array","items":{"type":"string","minLength":1}}),
     );
     let prefix_items = client.complete_json(
-        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         String::from("compose"),
         &json!({"type":"array","prefixItems":[{"type":"string","minLength":1}]}),
     );
@@ -411,7 +445,7 @@ fn json_mode_uses_the_legacy_response_mime_type() -> Result<()> {
     }))?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let response = client.complete_json_mode("gemini-3.7-flash", String::from("compose"))?;
+    let response = client.complete_json_mode("gemini-3.8-flash", String::from("compose"))?;
     assert_eq!(
         (response.as_str(), requests.borrow()[0].1.as_str()),
         (
@@ -456,7 +490,7 @@ fn understanding_uses_flash_and_returns_sense_rows() -> Result<()> {
             understood.candidates()[1].ok(),
         ),
         (
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
             true,
             "en",
             "wrecked",
@@ -557,15 +591,18 @@ fn bulk_correction_uses_flash_and_returns_new_senses() -> Result<()> {
 /// Card-meta generation uses Flash and returns the full rich meta.
 #[test]
 fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
-    let transport = FakeTransport::new(vec![Ok(body(json!({
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": "{\"pronunciation\":\"ˈbɒrəʊ\",\"transcription\":\"kən aɪ ˈbɒrəʊ jɔː ˈpɛn\",\"meaning\":\"одолжить\",\"importance\":8,\"source_sentence\":\"Можно одолжить твою ручку?\",\"source_highlight\":\"одолжить\",\"source_hint\":\"Когда ручка не твоя, а надо записать — вежливо просишь на время.\",\"source_context\":\"Нейтрально-вежливый глагол.\",\"target_sentence\":\"Can I borrow your pen?\",\"labels\":{\"register\":\"formal\",\"level\":\"b1\",\"type\":\"question\",\"approx\":[]}}"
-                }]
-            }
-        }]
-    }))?)]);
+    let transport = FakeTransport::new(vec![
+        Ok(body(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": "{\"pronunciation\":\"ˈbɒrəʊ\",\"transcription\":\"kən aɪ ˈbɒrəʊ jɔː ˈpɛn\",\"meaning\":\"одолжить\",\"importance\":8,\"source_sentence\":\"Можно одолжить твою ручку?\",\"source_highlight\":\"одолжить\",\"source_hint\":\"Когда ручка не твоя, а надо записать — вежливо просишь на время.\",\"source_context\":\"Нейтрально-вежливый глагол.\",\"target_sentence\":\"Can I borrow your pen?\",\"labels\":{\"register\":\"formal\",\"level\":\"b1\",\"type\":\"question\",\"approx\":[]}}"
+                    }]
+                }
+            }]
+        }))?),
+        ipa_body("bɔroʊ", "kæn aɪ bɔroʊ jʊr pɛn"),
+    ]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
     let meta_out = client.generate_card_meta(
@@ -579,8 +616,12 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
         .expect("fresh metadata must carry sentence labels");
     assert_eq!(
         (
-            requests.borrow()[0].0.as_str(),
-            meta_out.pronunciation(),
+            requests
+                .borrow()
+                .iter()
+                .map(|request| request.0.clone())
+                .collect::<Vec<_>>(),
+            (meta_out.pronunciation(), meta_out.transcription()),
             meta_out.target_sentence(),
             meta_out.source_highlight(),
             meta_out.importance(),
@@ -590,8 +631,13 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
             labels.approx().is_empty(),
         ),
         (
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
-            "ˈbɒrəʊ",
+            vec![
+                String::from(
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
+                );
+                2
+            ],
+            ("bɔroʊ", "kæn aɪ bɔroʊ jʊr pɛn"),
             "Can I borrow your pen?",
             "одолжить",
             8,
@@ -605,18 +651,123 @@ fn card_meta_generation_uses_flash_and_returns_full_meta() -> Result<()> {
     Ok(())
 }
 
+/// Draft generation retains every reviewed sense through authoring and IPA refinement.
+#[test]
+fn draft_metadata_preserves_reviewed_senses_and_requested_labels() -> Result<()> {
+    let context = "**Meaning.**\n- paraphrase\n\n**Usage.**\nIn a newspaper.\n\n**Pattern.**\nAn example.\n\n**Nuance.**\nA useful pairing.";
+    let authored = json!({
+        "pronunciation":"ka.naʁ", "transcription":"sə ka.naʁ siʁ.kyl",
+        "meaning":"a false report", "importance":5,
+        "source_sentence":"This false report is circulating.", "source_highlight":"false report",
+        "source_hint":"A newspaper spreads an invented story.", "source_context":context,
+        "target_sentence":"Ce canard circule.",
+        "labels":{"register":"neutral","level":"a2","type":"statement","approx":[]}
+    });
+    let transport = FakeTransport::new(vec![
+        body(json!({"candidates":[{"content":{"parts":[{"text":authored.to_string()}]}}]})),
+        ipa_body("kanaʁ", "sə kanaʁ siʁkyl"),
+    ]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let candidate = WordCandidate::with_senses(
+        "canard",
+        vec![
+            Sense::tagged("a duck", "animal"),
+            Sense::tagged("a false report", "journalism"),
+        ],
+        1,
+        true,
+    );
+    let draft = CardDraft::from_candidate(&candidate, 1, LanguagePair::new("FR", "EN"));
+    let selection = SentenceLabelSelection::empty().choosing(SentenceAxis::Level, 1);
+    let meta = client.generate_draft_meta(&draft, Some(&selection))?;
+    let first = recorded_prompt(&requests)?;
+    let input = recorded_phonetic_input(&requests)?;
+    assert_eq!(
+        (
+            requests.borrow().len(),
+            first.contains("a duck")
+                && first.contains("a false report")
+                && first.contains("journalism"),
+            input["reviewed_senses"].clone(),
+            meta.source_context().starts_with(
+                "**Meaning.**\n- **[journalism] a false report**\n- [animal] a duck\n\n**Usage.**"
+            ),
+            meta.pronunciation(),
+            meta.sentence_labels()
+                .expect("labels must exist")
+                .pinned()
+                .contains(SentenceAxis::Level),
+        ),
+        (
+            2,
+            true,
+            json!([{"understanding":"a false report","tag":"journalism"},{"understanding":"a duck","tag":"animal"}]),
+            true,
+            "kanaʁ",
+            true
+        ),
+        "draft generation lost reviewed meanings, requested labels, or the second pronunciation pass"
+    );
+    Ok(())
+}
+
+/// Focused pronunciation refinement preserves all other supplied card metadata.
+#[test]
+fn pronunciation_refinement_changes_only_ipa_with_medium_thinking() -> Result<()> {
+    let meta = CardMeta::new(
+        "ka.naʁ",
+        "lə ka.naʁ naʒ",
+        "a duck",
+        5,
+        "The duck swims.",
+        "duck",
+        "A bird crosses the pond.",
+        "A water bird.",
+        "Le canard nage.",
+    );
+    let mut expected = serde_json::to_value(&meta)?;
+    expected["pronunciation"] = json!("kanaʁ");
+    expected["transcription"] = json!("lə kanaʁ naʒ");
+    let transport = FakeTransport::new(vec![ipa_body("kanaʁ", "lə kanaʁ naʒ")]);
+    let requests = transport.requests.clone();
+    let client = GeminiClient::new("key", transport);
+    let draft = CardDraft::new("canard", "a duck", LanguagePair::new("FR", "EN"));
+    let refined = client.refine_pronunciation(&draft, meta)?;
+    let captured = requests.borrow();
+    let request: Value = serde_json::from_str(&captured[0].1)?;
+    assert_eq!(
+        (
+            captured.len(),
+            serde_json::to_value(refined)?,
+            request["generationConfig"].clone()
+        ),
+        (
+            1,
+            expected,
+            json!({"responseMimeType":"application/json","thinkingConfig":{"thinkingLevel":"MEDIUM"}})
+        ),
+        "focused pronunciation refinement altered other fields or changed its single MEDIUM request"
+    );
+    Ok(())
+}
+
 /// Per-card correction uses Flash and may revise term, understanding, and full meta.
 #[test]
 fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Result<()> {
-    let transport = FakeTransport::new(vec![Ok(body(json!({
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": "{\"term\":\"wound\",\"understanding\":\"verb: to wound someone — past tense of wind in another sense was wrong\",\"pronunciation\":\"waʊnd\",\"transcription\":\"aɪ waʊnd ðə klɒk\",\"meaning\":\"завести\",\"importance\":6,\"source_sentence\":\"Я завел часы.\",\"source_highlight\":\"завел\",\"source_hint\":\"Поворачивал что-то круглое, чтобы оно начало работать.\",\"source_context\":\"Глагол про механические часы.\",\"target_sentence\":\"I wound the clock.\",\"labels\":{\"register\":\"neutral\",\"level\":\"b1\",\"type\":\"statement\",\"approx\":[]}}"
-                }]
-            }
-        }]
-    }))?)]);
+    let transport = FakeTransport::new(vec![
+        Ok(body(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": "{\"term\":\"wound\",\"understanding\":\"verb: past tense of wind — to turn a mechanism\",\"pronunciation\":\"waʊnd\",\"transcription\":\"aɪ waʊnd ðə klɒk\",\"meaning\":\"завести\",\"importance\":6,\"source_sentence\":\"Я завел часы.\",\"source_highlight\":\"завел\",\"source_hint\":\"Поворачивал что-то круглое, чтобы оно начало работать.\",\"source_context\":\"**Значения.**\\n- **Прошедшая форма глагола wind: заводить механизм.**\\n\\n**Контекст.**\\nГлагол про механические часы.\\n\\n**Употребление.**\\nПрямое дополнение называет механизм.\\n\\n**Нюанс.**\\nНеправильная форма прошедшего времени.\",\"target_sentence\":\"I wound the clock.\",\"labels\":{\"register\":\"neutral\",\"level\":\"b1\",\"type\":\"statement\",\"approx\":[]}}"
+                    }]
+                }
+            }]
+        }))?),
+        ipa_body("waʊnd", "aɪ waʊnd ðə klɑk"),
+    ]);
+    let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
     let meta_seed = CardMeta::new(
         "/wound/",
@@ -629,7 +780,7 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
         "context",
         "Example.",
     );
-    let draft = CardDraft::new("wound", "noun: a wound", LanguagePair::new("en", "ru"))
+    let draft = CardDraft::new("wind", "noun: moving air", LanguagePair::new("en", "ru"))
         .with_meta(meta_seed, None);
     let revision = client.correct_card(
         &draft,
@@ -640,6 +791,7 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
     let labels = meta_out
         .sentence_labels()
         .expect("corrected metadata must carry sentence labels");
+    let audited = recorded_phonetic_input(&requests)?;
     assert_eq!(
         (
             term,
@@ -649,15 +801,29 @@ fn card_correction_uses_flash_to_recompose_term_understanding_and_meta() -> Resu
             meta_out.importance(),
             labels.register().token(),
             labels.pinned().is_empty(),
+            meta_out.transcription(),
+            (
+                audited["term"].clone(),
+                audited["reviewed_senses"].clone(),
+                audited["selected"].clone(),
+                audited["target_sentence"].clone(),
+            ),
         ),
         (
             String::from("wound"),
-            String::from("verb: to wound someone — past tense of wind in another sense was wrong"),
+            String::from("verb: past tense of wind — to turn a mechanism"),
             String::from("I wound the clock."),
             String::from("завел"),
             6,
             "neutral",
             true,
+            "aɪ waʊnd ðə klɑk",
+            (
+                json!("wound"),
+                json!([{"understanding": "verb: past tense of wind — to turn a mechanism", "tag": null}]),
+                json!(0),
+                json!("I wound the clock."),
+            ),
         ),
         "card correction must recompose term, understanding, and full meta from Flash JSON"
     );
@@ -680,7 +846,7 @@ fn only_a_per_card_correction_marks_its_metadata_as_rewritten() -> Result<()> {
                     }]
                 }
             }]
-        }))?)]),
+        }))?), ipa_body("ˈbɒrəʊ", "kən aɪ ˈbɒrəʊ jɔː ˈpɛn")]),
     )
     .generate_card_meta(
         "borrow",
@@ -698,7 +864,7 @@ fn only_a_per_card_correction_marks_its_metadata_as_rewritten() -> Result<()> {
                     }]
                 }
             }]
-        }))?)]),
+        }))?), ipa_body("ˈbɒrəʊ", "meɪ aɪ ˈbɒrəʊ jɔː ˈpɛn")]),
     )
     .correct_card(
         &CardDraft::new(
@@ -797,7 +963,7 @@ fn validate_key_lists_models_and_flags_rejected_keys() {
         status: 200,
         body: json!({
             "models": [{
-                "name": "models/gemini-3.7-flash",
+                "name": "models/gemini-3.8-flash",
                 "supportedGenerationMethods": ["generateContent"]
             }]
         })
@@ -1008,15 +1174,15 @@ fn scene_generation_uses_the_registry_as_the_only_production_path() -> Result<()
             2,
             vec![
                 String::from(
-                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
                 ),
                 String::from(
-                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
                 ),
             ],
             (
                 Some("APPLICATION_JSON"),
-                Some("MINIMAL"),
+                Some("LOW"),
                 Some(4096),
                 Some("application/json"),
                 true,
@@ -1462,7 +1628,7 @@ fn recall_review_uses_the_validated_high_resolution_multimodal_contract() -> Res
         ),
         (
             true,
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
             true,
             Some("image/jpeg"),
             Some("AQID"),

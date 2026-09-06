@@ -300,12 +300,13 @@ impl GenerationConfig {
     }
 }
 
-/// One supported Gemini 3 thinking level for bounded scene generation.
+/// One explicit Gemini 3.8 Flash thinking level used by text generation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(super) enum ThinkingLevel {
-    Minimal,
     Low,
+    Medium,
+    High,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -842,15 +843,15 @@ mod tests {
     }
 
     #[test]
-    fn json_mode_scene_controls_serialize_minimal_without_token_ceiling() {
-        let config = GenerationConfig::json_mode().with_thinking_level(ThinkingLevel::Minimal);
+    fn json_mode_scene_controls_serialize_low_without_token_ceiling() {
+        let config = GenerationConfig::json_mode().with_thinking_level(ThinkingLevel::Low);
         let request =
             serde_json::to_string(&Request::text(String::from("compose"), Some(config), None))
                 .expect("scene request must serialize");
         assert_eq!(
             request,
-            r#"{"contents":[{"parts":[{"text":"compose"}]}],"generationConfig":{"responseMimeType":"application/json","thinkingConfig":{"thinkingLevel":"MINIMAL"}}}"#,
-            "minimal JSON-mode thinking changed its Gemini REST shape"
+            r#"{"contents":[{"parts":[{"text":"compose"}]}],"generationConfig":{"responseMimeType":"application/json","thinkingConfig":{"thinkingLevel":"LOW"}}}"#,
+            "low JSON-mode thinking changed its Gemini REST shape"
         );
     }
 

@@ -12,11 +12,12 @@ use crate::languages::catalog;
 
 use super::vault::{CardCell, digest};
 use super::{
-    CardMeta, IntakeTooLarge, LanguagePair, LearningDetection, LearningGuess, MAX_INTAKE_WORDS,
-    RawInputBatch, ScriptDetection, Sense, SentenceLabels, Understood, WordCandidate,
+    CardDraft, CardMeta, IntakeTooLarge, LanguagePair, LearningDetection, LearningGuess,
+    MAX_INTAKE_WORDS, RawInputBatch, ScriptDetection, Sense, SentenceLabels, Understood,
+    WordCandidate,
 };
 
-const UNDERSTANDING_VERSION: &str = "v6";
+const UNDERSTANDING_VERSION: &str = "v8";
 
 /// How many vocabulary lines one intake request carries.
 ///
@@ -25,7 +26,7 @@ const UNDERSTANDING_VERSION: &str = "v6";
 /// chunk is written to the cache as soon as it decodes — so a batch that fails
 /// part-way keeps everything the earlier chunks produced.
 const INTAKE_CHUNK_WORDS: usize = 20;
-const META_POLICY: &str = "v3-initial-sentence-preferences";
+const META_POLICY: &str = "v11-scoped-and-illustrated-usage";
 
 /// Caching decorator for the first-pass understanding contract.
 #[derive(Clone, Debug)]
@@ -255,9 +256,18 @@ impl CardMetaCache {
         understanding: &str,
         pair: &LanguagePair,
     ) -> Result<Option<CardMeta>> {
-        Ok(self
-            .record(term, understanding, pair)?
-            .map(MetaRecord::meta))
+        let cell = CardCell::new(self.root.clone(), pair, term, understanding);
+        self.load_at(&cell)
+    }
+
+    /// Return cached card metadata from one already-resolved card identity.
+    pub(crate) fn load_at(&self, cell: &CardCell) -> Result<Option<CardMeta>> {
+        Ok(self.record_at(cell)?.map(MetaRecord::meta))
+    }
+
+    /// Return cached metadata for one draft's complete reviewed-sense identity.
+    pub(crate) fn load_for_draft(&self, draft: &CardDraft) -> Result<Option<CardMeta>> {
+        self.load_at(&CardCell::for_draft(self.root.clone(), draft))
     }
 
     /// Return cached card meta only when it uses the current generation policy.
@@ -267,8 +277,14 @@ impl CardMetaCache {
         understanding: &str,
         pair: &LanguagePair,
     ) -> Result<Option<CardMeta>> {
+        let cell = CardCell::new(self.root.clone(), pair, term, understanding);
+        self.load_current_at(&cell)
+    }
+
+    /// Return metadata from one card identity only under the current policy.
+    pub(crate) fn load_current_at(&self, cell: &CardCell) -> Result<Option<CardMeta>> {
         Ok(self
-            .record(term, understanding, pair)?
+            .record_at(cell)?
             .filter(MetaRecord::current)
             .map(MetaRecord::meta))
     }
@@ -295,15 +311,16 @@ impl CardMetaCache {
         Ok((META_FILE.to_string(), path, cached))
     }
 
-    /// Atomically replace one metadata record even when its policy is current.
-    pub(crate) fn replace(
+    /// Atomically replace metadata inside one already-resolved card identity.
+    pub(crate) fn replace_at(
         &self,
+        cell: &CardCell,
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
         meta: &CardMeta,
     ) -> Result<(String, PathBuf)> {
-        let cache = CardCell::new(self.root.clone(), pair, term, understanding).cache();
+        let cache = cell.cache();
         replace_json(
             &cache,
             META_FILE,
@@ -312,13 +329,8 @@ impl CardMetaCache {
         Ok((META_FILE.to_string(), cache.filepath(META_FILE)?))
     }
 
-    fn record(
-        &self,
-        term: &str,
-        understanding: &str,
-        pair: &LanguagePair,
-    ) -> Result<Option<MetaRecord>> {
-        let cache = CardCell::new(self.root.clone(), pair, term, understanding).cache();
+    fn record_at(&self, cell: &CardCell) -> Result<Option<MetaRecord>> {
+        let cache = cell.cache();
         if !cache.exists(META_FILE) {
             return Ok(None);
         }
@@ -508,7 +520,7 @@ impl MetaRecord {
             self.source_sentence,
             self.source_highlight,
             self.source_hint,
-            self.source_context,
+            crate::markdown::compact_card_context(&self.source_context),
             self.target_sentence,
         );
         match self.labels {
@@ -891,15 +903,15 @@ mod tests {
     }
 
     #[test]
-    fn combined_intake_contract_uses_the_version_six_understanding_identity() {
+    fn all_text_model_contract_uses_the_version_eight_understanding_identity() {
         let cache = CachedUnderstanding::new(
             ChangingUnderstanding::new(Rc::new(RefCell::new(0))),
             "/tmp/kamishibai-understanding-version-test",
         );
         assert_eq!(
             cache.entry_filename("lantern", "RU", "detect:EN"),
-            "594e83a91b56.json",
-            "language-local examples and explicit-target intake reused an earlier understanding contract"
+            "0c3fff85fd7e.json",
+            "all-text model change reused an earlier understanding contract"
         );
     }
 
@@ -1042,6 +1054,31 @@ mod tests {
     }
 
     #[test]
+    fn cached_card_context_is_compacted_without_rewriting_the_cache_or_other_fields() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let pair = LanguagePair::new("en", "ru");
+        let cache = CardMetaCache::new(directory.path());
+        let context = "**Meaning.**\n- **approval**\n- a benefit\nrecap: one is approval and the other is a benefit.\n\n**Usage.**\nCongratulate a friend.\n\n**Limits.**\nA dry reply can sound dismissive.\n\n**Nuance.**\nWarm intonation helps convey sincerity.";
+        let expected = "**Meaning.**\n- **approval**\n- a benefit\n\n**Usage.**\nCongratulate a friend.\n\n**Limits.**\nA dry reply can sound dismissive.\n\n**Nuance.**\nWarm intonation helps convey sincerity.";
+        let original = meta("Good for you!").with_source_context(context);
+        let (_, path, _) = cache
+            .store("good for you", "approval", &pair, &original)
+            .expect("meta must store");
+        let bytes = fs::read(&path).expect("cached bytes must be readable");
+        let loaded = cache
+            .load("good for you", "approval", &pair)
+            .expect("meta must load");
+        assert_eq!(
+            (
+                loaded,
+                fs::read(&path).expect("cached bytes must remain readable")
+            ),
+            (Some(original.with_source_context(expected)), bytes),
+            "context compaction changed unrelated metadata or wrote to the saved cache"
+        );
+    }
+
+    #[test]
     fn card_meta_cache_reopens_the_same_sentence_for_the_same_understanding() {
         let directory = TempDir::new().expect("tempdir must be created");
         let pair = LanguagePair::new("en", "ru");
@@ -1117,7 +1154,10 @@ mod tests {
         legacy
             .as_object_mut()
             .expect("legacy meta must be an object")
-            .remove("policy");
+            .insert(
+                String::from("policy"),
+                serde_json::json!("v10-explained-and-illustrated-usage"),
+            );
         fs::write(
             cell.filepath(META_FILE)
                 .expect("legacy meta path must resolve"),

@@ -139,12 +139,12 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
     Ok(())
 }
 
-/// Production registry builds reject clause-local writing-dependent scene surfaces.
+/// Production registry caches isolate the Gemini 3.8 text-model configuration.
 #[test]
-fn production_registry_uses_the_version_fifty_five_visual_revision() {
+fn production_registry_uses_the_version_fifty_six_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "1d2c8ce2b3a7a4e1fff92226310f4daaa48871a7d409ce25e182fea4fd936186",
+        "bd31668223fcada1aebcdecd2180f786ed5b6b85ce49e4cfceb796d47d6b45b1",
         "production registry visual revision drifted without a policy-version change"
     );
 }
@@ -674,5 +674,74 @@ fn production_registry_embeds_one_device_budget_and_honest_capability_statuses()
             ]),
         ),
         "device catalog hides budget or overstates an unqualified visual capability"
+    );
+}
+
+/// Both card authoring paths retain the localized appropriateness headings.
+#[test]
+fn card_authoring_and_correction_keep_original_context_headers() {
+    struct Capture(std::rc::Rc<std::cell::RefCell<Vec<serde_json::Value>>>);
+    impl kamishibai::gemini::Transport for Capture {
+        fn post(
+            &self,
+            _url: &str,
+            _key: &str,
+            body: &str,
+        ) -> anyhow::Result<kamishibai::gemini::TransportResponse> {
+            self.0.borrow_mut().push(serde_json::from_str(body)?);
+            anyhow::bail!("Captured request without contacting a provider")
+        }
+    }
+    let mut outcomes = Vec::new();
+    for (known, headers) in [
+        (
+            "EN",
+            [
+                "Meaning.",
+                "Where you'll hear it.",
+                "Where it's out of place.",
+                "Subtlety.",
+            ],
+        ),
+        (
+            "RU",
+            ["Значение.", "Где встречается.", "Где неуместно.", "Нюанс."],
+        ),
+    ] {
+        let requests = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let client = kamishibai::gemini::GeminiClient::new("unused", Capture(requests.clone()));
+        let pair = kamishibai::session::LanguagePair::new("FR", known);
+        let draft = kamishibai::session::CardDraft::new("canard", "a duck", pair.clone());
+        let _author = client.generate_draft_meta(&draft, None);
+        let prior = kamishibai::session::CardMeta::new(
+            "kanaʁ",
+            "lə kanaʁ naʒ",
+            "a duck",
+            5,
+            "The duck swims.",
+            "duck",
+            "A bird crosses the pond.",
+            "A water bird.",
+            "Le canard nage.",
+        );
+        let _correction =
+            client.correct_card(&draft.with_meta(prior, None), "Keep this meaning", &pair);
+        let requests = requests.borrow();
+        outcomes.push(
+            requests.len() == 2
+                && requests.iter().all(|request| {
+                    request["contents"][0]["parts"][0]["text"]
+                        .as_str()
+                        .is_some_and(|prompt| {
+                            headers
+                                .iter()
+                                .all(|header| prompt.contains(&format!("**{header}**")))
+                        })
+                }),
+        );
+    }
+    assert!(
+        outcomes.into_iter().all(|valid| valid),
+        "new-card or correction rendering dropped an original localized context heading"
     );
 }

@@ -75,17 +75,7 @@ fn app_to_record(
         candidates,
     )
     .with_sentences(app.sentence_settings());
-    record.drafts = app
-        .cards()
-        .iter()
-        .map(|draft| DraftRecord {
-            term: draft.term().to_string(),
-            understanding: draft.understanding().to_string(),
-            costs: crate::session::ArtifactCosts::from_artifacts(draft.artifacts()),
-            rewrite: draft.rewrite().cloned(),
-            meta_request: draft.meta_request().cloned(),
-        })
-        .collect();
+    record.drafts = app.cards().iter().map(DraftRecord::from_draft).collect();
     let done = app.done_artifacts();
     if !done.deck.is_empty() {
         record.result = Some(ResultRecord {
@@ -137,20 +127,7 @@ fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
     let drafts: Vec<CardDraft> = record
         .drafts
         .iter()
-        .map(|draft| {
-            let hydrated = CardDraft::new(
-                draft.term.as_str(),
-                draft.understanding.as_str(),
-                pair.clone(),
-            );
-            let hydrated = match &draft.meta_request {
-                Some(selection) => hydrated.requesting_meta(selection.clone()),
-                None => hydrated,
-            };
-            hydrated
-                .with_rewrite(draft.rewrite.clone())
-                .with_costs(draft.costs)
-        })
+        .map(|draft| draft.hydrate(pair.clone()))
         .collect();
     let mut app = app.cards_started(drafts.clone());
     if let Some(result) = record.result.as_ref() {

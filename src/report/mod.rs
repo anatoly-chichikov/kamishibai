@@ -3,6 +3,7 @@
 mod cards;
 mod document;
 mod font;
+mod font_embedding;
 mod layout;
 mod shaping;
 mod thumbnail;

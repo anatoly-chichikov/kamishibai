@@ -13,7 +13,9 @@ use std::path::Path;
 
 use crate::generation::artifact_cache::{ILLUSTRATION_FILE, VOICE_FILE};
 use crate::generation::visual_revision;
-use crate::session::{CardCell, LanguagePair, WordCandidate};
+#[cfg(test)]
+use crate::session::CardCell;
+use crate::session::{LanguagePair, WordCandidate};
 
 use super::liveness;
 use super::store::{DraftRecord, LOCK_FILE, Phase, SessionRecord};
@@ -39,6 +41,7 @@ fn pair_of(record: &SessionRecord) -> LanguagePair {
 }
 
 /// Probe the shared cache for one card's four artifact files, in display order.
+#[cfg(test)]
 pub(super) fn probe_artifacts(
     cache_root: &Path,
     pair: &LanguagePair,
@@ -66,12 +69,16 @@ fn probe_draft(cache_root: &Path, pair: &LanguagePair, draft: &DraftRecord) -> [
     {
         return [false; 4];
     }
-    probe_artifacts(
-        cache_root,
-        pair,
-        draft.term.as_str(),
-        draft.understanding.as_str(),
-    )
+    let cache = super::cell_for_draft(cache_root, pair, draft).cache();
+    let visual = cache
+        .visual(visual_revision())
+        .expect("invariant: production visual revision must be one SHA-256 digest");
+    [
+        super::cached_draft_meta_is_valid(cache_root, pair, draft),
+        cache.exists(VOICE_FILE),
+        super::cached_scene_is_valid(&visual),
+        visual.exists(ILLUSTRATION_FILE),
+    ]
 }
 
 /// Return whether a draft still needs its initial requested metadata.
@@ -434,8 +441,8 @@ mod tests {
     use super::*;
     use crate::generation::artifact_cache::{META_FILE, SCENE_FILE};
     use crate::session::{
-        CardCell, CardDraft, CardMeta, CardMetaCache, CardRewrite, SentenceAxis,
-        SentenceLabelSelection,
+        CardCell, CardDraft, CardMeta, CardMetaCache, CardRewrite, Sense, SentenceAxis,
+        SentenceLabelSelection, WordCandidate,
     };
 
     fn store_meta(home: &TempDir) {
@@ -498,6 +505,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            reviewed_senses: Vec::new(),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: None,
             meta_request: None,
@@ -541,6 +549,40 @@ mod tests {
         assert!(
             status.contains("canard meaning ✓ audio ✓ scene · picture ·"),
             "status text must show each card's artifact presence read from the cache"
+        );
+    }
+
+    #[test]
+    fn status_reads_metadata_from_the_reviewed_sense_identity() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let pair = LanguagePair::new("fr", "en");
+        let candidate = WordCandidate::with_senses(
+            "canard",
+            vec![Sense::plain("a duck"), Sense::plain("a false report")],
+            0,
+            true,
+        );
+        let draft = CardDraft::from_candidate(&candidate, 0, pair.clone());
+        let cell = CardCell::for_draft(home.path(), &draft);
+        let meta = CardMeta::new(
+            "/ka.naʁ/",
+            "/lə ka.naʁ naʒ/",
+            "a duck",
+            5,
+            "The duck swims",
+            "duck",
+            "Think of a pond",
+            "A common concrete noun",
+            "Le canard nage",
+        );
+        CardMetaCache::new(home.path())
+            .replace_at(&cell, draft.term(), draft.understanding(), &pair, &meta)
+            .expect("contextual metadata must store");
+        let mut stored = record();
+        stored.drafts = vec![DraftRecord::from_draft(&draft)];
+        assert!(
+            render_status(&stored, home.path()).contains("canard meaning ✓"),
+            "status ignored metadata stored under the reviewed-sense identity"
         );
     }
 

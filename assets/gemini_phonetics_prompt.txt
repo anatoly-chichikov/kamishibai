@@ -1,0 +1,7 @@
+Verify only the two IPA fields of this vocabulary card. The language, spelling, selected sense and sentence are fixed input, not text to rewrite.
+
+{input_json}
+
+Check the pronunciation of the exact term in the selected sense, then align the sentence transcription with every exact written word. Check lexical stress and the stress of the inflected form independently for each word. Keep the sentence's actual word forms; do not add, omit or replace a segment because a more familiar word comes to mind. Treat the supplied IPA as an untrusted proposal, not pronunciation evidence. Distinguish spelling from sound: a written letter is not evidence that its lookalike IPA symbol is correct. Use ordinary standard pronunciation of the target language, not a contact-language pronunciation or a learner accent. Preserve valid broad IPA conventions and a consistent ordinary standard dialect; do not revise merely to impose narrower phonetic detail or your stylistic preference. Correct substantive stress, segment and word-form errors. If both fields are already correct, return them unchanged.
+
+Return exactly one JSON object with two nonempty string fields, pronunciation and transcription. No slashes, brackets, explanations, markdown or other fields. Never return a revised word, sentence, translation, meaning or description.

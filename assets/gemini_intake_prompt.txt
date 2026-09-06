@@ -7,6 +7,8 @@ Supported target languages:
 Support language for explanations:
 {support_language}
 
+{learner_explanations}
+
 {target_instruction}
 
 For each non-empty input line, return one item with four fields.
@@ -21,7 +23,7 @@ For each non-empty input line, return one item with four fields.
 2. "senses" — an ordered array of 1 to 6 distinct senses. For unambiguous words, one sense is allowed. For polysemous words, provide the practical spread the learner is likely choosing among. Include well-known colloquial or slang senses when they are common enough that a learner is likely to meet them; do not limit the list to formal dictionary defaults.
 
    Ordering rules:
-   - if the user gave a hint after a dash, put the matching sense first;
+   - if the user gave a hint after a dash, put the matching sense first, then order all remaining senses by general modern frequency in the target language;
    - otherwise sort by general modern frequency in the target language, including widespread slang after more central senses when appropriate;
    - do not include duplicates that only rephrase the same sense.
 
@@ -29,7 +31,7 @@ For each non-empty input line, return one item with four fields.
    - "understanding" — exactly one sentence in {support_language}, {understanding_length}, written for a human reader;
    - "tag" — a short disambiguating marker in {support_language}, or null.
 
-   Use "tag" only when the sense genuinely needs a domain, register, region, idiom, archaic, slang, or other disambiguating label. Prefer null for the default general sense. Use a short slang/register tag for popular informal senses.
+   Use "tag" only when the sense genuinely needs a domain, register, region, idiom, archaic, slang, or other disambiguating label. Prefer null for the default general sense. Use a short slang/register tag for popular informal senses. Do not add a tag merely to fill a category. A use being common in one region does not make it exclusive to that region; do not turn an uncertain association into an authoritative label.
 
    These are typed conventions in the actual support language for this request:
 
@@ -38,10 +40,11 @@ For each non-empty input line, return one item with four fields.
    Hard rules for every "understanding":
    - Do not start with any value illustrated by `forbidden.starters`, or any narration of the learning act.
    - Pick exactly one sense. Never join senses using a shape illustrated by `forbidden.joins`.
-   - Mention part of speech, idiom, or register only when it clarifies.
-   - Always abbreviate part-of-speech labels using the local shapes illustrated by `markers.parts`.
-   - Stay tight to the meaning the learner needs; do not add incidental detail.
-   - Never use the local filler shapes illustrated by `forbidden.fillers`.
+   - Start with the meaning in everyday words, not a part-of-speech prefix. `markers.parts` shows optional local notation, not a required label. Explain any distinction that matters without requiring grammar knowledge; use a familiar short tag only when it helps distinguish the sense.
+   - Use the shortest distinguishing definition; include only what separates this sense from the other uses.
+   - A typical example does not define a restriction. Check each qualifier against ordinary valid examples of the same use. Remove imagined details about how the action is performed. A body part, material, scene, or manner is a requirement only when ordinary uses of this sense demand it. Prefer a broader accurate gloss to a narrower unsupported one.
+   - Preserve any construction needed for the sense by naming its actual words when necessary, without inventing a rule for every form of the word. Do not bundle unrelated senses just because they share a translation, and do not split one sense merely because its examples use different objects. Describe current meanings, not word origins or historical relationships; no trusted etymological source is supplied.
+   - Avoid empty introductions illustrated by `forbidden.fillers`; these are not banned words when they express the actual meaning.
    - Never produce a structured "POS · gloss · marker" line. Write a real, scannable sentence.
 
 3. "selected" — always 0 in the intake response.
@@ -67,3 +70,5 @@ Return only JSON with this shape, no prose, no code fences:
 
 Raw input:
 {raw_input}
+
+Before returning, silently test each sense against an ordinary valid use outside the example you first imagined. Remove incidental restrictions and unsupported tags; keep genuine meaning boundaries and the user's morphological form. Check that each sentence states one distinct sense and does not invent a meaning to reach a count. Output only the requested JSON, not this check.

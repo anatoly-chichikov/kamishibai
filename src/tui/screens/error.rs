@@ -1,7 +1,6 @@
-//! Recoverable request error overlay.
+//! Recoverable operation error overlay.
 //!
-//! Shown when a background text pass returns an error. Mirrors the modal
-//! style — solid border, dim message, single key hint to dismiss.
+//! Shows the failed operation and its diagnostic with retry and dismissal actions.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -12,7 +11,6 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use crate::tui::app::App;
 use crate::tui::palette;
 
-const TITLE: &str = " can't reach gemini ";
 /// Gap between the two action hints, matching the text modal's action row.
 const ACTION_GAP: &str = "    ";
 const HORIZONTAL_MARGIN: u16 = 8;
@@ -25,8 +23,12 @@ const CHROME_ROWS: u16 = 5;
 const CHROME_COLUMNS: u16 = 2 + HORIZONTAL_PADDING * 2;
 
 /// Draw one recoverable request error over the current screen.
-pub fn draw(frame: &mut Frame, area: Rect, _app: &App, message: &str) {
-    let inset = panel_rect(area, message);
+pub fn draw(frame: &mut Frame, area: Rect, app: &App, message: &str) {
+    let Some(heading) = app.error_title() else {
+        return;
+    };
+    let title = format!(" {heading} ");
+    let inset = panel_rect(area, title.as_str(), message);
     super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
     let block = Block::default()
@@ -45,7 +47,7 @@ pub fn draw(frame: &mut Frame, area: Rect, _app: &App, message: &str) {
         .split(inner);
     frame.render_widget(message_panel(message), padded(chunks[1]));
     frame.render_widget(hint_panel(), padded(chunks[2]));
-    let title = Span::styled(TITLE, palette::base());
+    let title = Span::styled(title, palette::base());
     let title_rect = Rect {
         x: inset.x + 2,
         y: inset.y,
@@ -98,9 +100,9 @@ fn hint_panel() -> Paragraph<'static> {
 /// derived from the terminal rather than the text. It now takes the room the
 /// message needs and no more, still bounded by the terminal and never narrower
 /// than its own title.
-fn panel_rect(area: Rect, message: &str) -> Rect {
+fn panel_rect(area: Rect, title: &str, message: &str) -> Rect {
     let ceiling = area.width.saturating_sub(HORIZONTAL_MARGIN).max(1);
-    let chrome = super::common::display_width(TITLE).max(actions_width());
+    let chrome = super::common::display_width(title).max(actions_width());
     let floor = u16::try_from(chrome)
         .unwrap_or(u16::MAX)
         .saturating_add(CHROME_COLUMNS);

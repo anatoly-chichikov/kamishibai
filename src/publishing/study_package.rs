@@ -4,7 +4,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+use tempfile::Builder;
 use time::OffsetDateTime;
 use time::format_description::parse as parse_time;
 
@@ -58,12 +59,7 @@ impl<C> StudyPackagePublisher<C> {
     }
 
     fn cell(&self, draft: &CardDraft) -> CardCell {
-        CardCell::new(
-            self.cache.clone(),
-            draft.pair(),
-            draft.term(),
-            draft.understanding(),
-        )
+        CardCell::for_draft(self.cache.clone(), draft)
     }
 }
 
@@ -135,16 +131,39 @@ where
         let stamp = self.clock.stamp()?;
         let prefix = decknaming.prefix.to_uppercase();
         let apkg = self.output.join(format!("{prefix}_{stamp}.apkg"));
-        container.save(&apkg)?;
-        progress.advance(PublishPhase::Report);
         let pdf = self.output.join(format!("{prefix}_{stamp}.pdf"));
-        report.save(&pdf, &Thumbnail::new(1024))?;
+        if apkg.exists() || pdf.exists() {
+            bail!("publication target already exists for stamp '{stamp}'");
+        }
+        let staging = Builder::new()
+            .prefix(".kamishibai-publish-")
+            .tempdir_in(&self.output)?;
+        let staged_apkg = staging.path().join(format!("{prefix}_{stamp}.apkg"));
+        let staged_pdf = staging.path().join(format!("{prefix}_{stamp}.pdf"));
+        container.save(&staged_apkg)?;
+        progress.advance(PublishPhase::Report);
+        report.save(&staged_pdf, &Thumbnail::new(1024))?;
+        commit_publication(&staged_apkg, &apkg, &staged_pdf, &pdf)?;
         Ok(PublishedStudyPackage::new(
             apkg.to_string_lossy().into_owned(),
             pdf.to_string_lossy().into_owned(),
             self.output.to_string_lossy().into_owned(),
         ))
     }
+}
+
+fn commit_publication(
+    staged_apkg: &std::path::Path,
+    apkg: &std::path::Path,
+    staged_pdf: &std::path::Path,
+    pdf: &std::path::Path,
+) -> Result<()> {
+    fs::rename(staged_apkg, apkg).context("could not publish the staged Anki deck")?;
+    if let Err(error) = fs::rename(staged_pdf, pdf) {
+        fs::remove_file(apkg).context("could not roll back an incomplete publication")?;
+        return Err(error).context("could not publish the staged printable report");
+    }
+    Ok(())
 }
 
 fn hold_visuals(mut visuals: Vec<Cache>, timeout: Duration) -> Result<Vec<VisualGuard>> {
@@ -176,6 +195,22 @@ mod tests {
             guards.len(),
             1,
             "duplicate visual paths acquired the same non-reentrant lock twice"
+        );
+    }
+
+    #[test]
+    fn a_failed_second_commit_rolls_back_the_first_published_file() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let staged_apkg = home.path().join("staged.apkg");
+        let staged_pdf = home.path().join("missing.pdf");
+        let apkg = home.path().join("deck.apkg");
+        let pdf = home.path().join("deck.pdf");
+        fs::write(&staged_apkg, b"deck").expect("staged deck must be written");
+        let result = commit_publication(&staged_apkg, &apkg, &staged_pdf, &pdf);
+        assert_eq!(
+            (result.is_err(), apkg.exists(), pdf.exists()),
+            (true, false, false),
+            "a failed report commit left a partial learner-facing package"
         );
     }
 }

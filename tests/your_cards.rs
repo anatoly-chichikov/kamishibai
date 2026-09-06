@@ -476,6 +476,21 @@ fn a_published_batch_with_nothing_owed_stops_offering_regeneration() {
 }
 
 #[test]
+fn completed_artifacts_cannot_claim_that_an_unpublished_batch_is_all_done() {
+    let app = seeded(vec![
+        draft("whilst", ready_artifacts()),
+        draft("at the end", ready_artifacts()),
+    ]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("cards ready · not saved")
+            && rendered.contains("[Ctrl+G] save")
+            && !rendered.contains("all done"),
+        "ready artifacts claimed successful export before either publication path existed: {rendered}"
+    );
+}
+
+#[test]
 fn step_rows_carry_their_own_incremental_costs() {
     let app = seeded(vec![draft("whilst", priced_artifacts())]);
     let rendered = flat(&app);
@@ -1051,6 +1066,64 @@ fn expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane() {
             && !rendered.contains("meaning · pronunciation · transcription · importance")
             && artifact_lines <= 1,
         "opening must reveal one editor-backed meta preview without duplicating the step list: {rendered}"
+    );
+}
+
+#[test]
+fn an_expanded_card_lists_the_selected_reviewed_sense_first_and_bold() {
+    let context = "**Meaning.**\n- **[finance] a place that holds and lends money**\n- the land beside a river\n- [aviation] to tilt an aircraft\n\nRelationship: the concrete edge and financial institution are separate senses; the aircraft use describes a matching sideways tilt.\n\n**Where you'll hear it.**\nBanks, rivers, and flight instructions make the intended sense clear.";
+    let meta = CardMeta::new(
+        "/bank/",
+        "/the bank approved the loan/",
+        "банк",
+        8,
+        "Банк одобрил кредит.",
+        "Банк",
+        "За стойкой считают деньги, а не смотрят на воду.",
+        context,
+        "The bank approved the loan.",
+    );
+    let draft = CardDraft::new(
+        "bank",
+        "[finance] a place that holds and lends money",
+        LanguagePair::new("en", "ru"),
+    )
+    .with_meta(meta, None)
+    .with_artifacts(ready_artifacts());
+    let app = transit(seeded(vec![draft]), AppEvent::KeyEnter).0;
+    let selected = "[finance] a place that holds and lends money";
+    let alternative = "the land beside a river";
+    let third = "[aviation] to tilt an aircraft";
+    let relationship =
+        "Relationship: the concrete edge and financial institution are separate senses;";
+    let buffer = rendered_buffer(&app);
+    let selected_row = position_of(&buffer, selected).1;
+    let alternative_row = position_of(&buffer, alternative).1;
+    let third_row = position_of(&buffer, third).1;
+    let relationship_row = position_of(&buffer, relationship).1;
+    let selected_cells = matching_cells(&app, selected);
+    let alternative_cells = matching_cells(&app, alternative);
+    let third_cells = matching_cells(&app, third);
+    assert_eq!(
+        (
+            selected_row < alternative_row
+                && alternative_row < third_row
+                && third_row < relationship_row,
+            !selected_cells.is_empty()
+                && selected_cells
+                    .iter()
+                    .all(|(_, _, modifier)| modifier.contains(Modifier::BOLD)),
+            !alternative_cells.is_empty()
+                && alternative_cells
+                    .iter()
+                    .all(|(_, _, modifier)| !modifier.contains(Modifier::BOLD)),
+            !third_cells.is_empty()
+                && third_cells
+                    .iter()
+                    .all(|(_, _, modifier)| !modifier.contains(Modifier::BOLD)),
+        ),
+        (true, true, true, true),
+        "the expanded context did not keep the selected reviewed sense first and bold, the alternatives plain, and the relationship explanation below them"
     );
 }
 

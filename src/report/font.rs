@@ -3,10 +3,14 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
 
+use allsorts::binary::read::ReadScope;
+use allsorts::font_data::FontData;
+use allsorts::subset::whole_font;
+use allsorts::tables::FontTableProvider;
 use printpdf::{Color, ParsedFont, Rgb};
 use rust_fontconfig::{FcFontCache, FcPattern, FcWeight, FontSource, OperatingSystem};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 
 /// Resolve one font family + weight to one filesystem path through the report
 /// font cache.
@@ -214,6 +218,25 @@ struct MatchedFont {
     face_index: usize,
 }
 
+impl MatchedFont {
+    /// Extract the selected collection face with every table and original glyph id intact.
+    fn standalone(self) -> Result<Vec<u8>> {
+        if !self.bytes.starts_with(b"ttcf") {
+            return Ok(self.bytes);
+        }
+        let font = ReadScope::new(&self.bytes)
+            .read::<FontData<'_>>()
+            .context("Report font collection could not be parsed")?;
+        let provider = font
+            .table_provider(self.face_index)
+            .context("Selected report font face could not be opened")?;
+        let tags = provider
+            .table_tags()
+            .ok_or_else(|| anyhow!("Selected report font face has no table directory"))?;
+        whole_font(&provider, &tags).context("Selected report font face could not be extracted")
+    }
+}
+
 /// One resolved font: a filesystem path the renderer can hand to printpdf,
 /// plus the face index into a .ttc collection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -362,7 +385,8 @@ pub fn warm_fonts_async() {
 /// Return the parsed font for one family + weight, cached process-wide.
 ///
 /// The first call asks the report font cache for the system match and parses the bytes
-/// directly — bypassing the on-disk materialization step that the public
+/// directly, extracting a selected collection face into a standalone font
+/// without subsetting — bypassing the on-disk materialization step that the public
 /// `FontPath::resolved()` round-tripped through. Later calls return the
 /// cached `Arc` instantly.
 pub(super) fn font_arc(family: &FontFamily, bold: bool) -> Result<Arc<ParsedFont>> {
@@ -376,13 +400,9 @@ pub(super) fn font_arc(family: &FontFamily, bold: bool) -> Result<Arc<ParsedFont
         return Ok(cached);
     }
     let path = if bold { &family.bold } else { &family.regular };
-    let matched = path.matched()?;
-    let font = ParsedFont::from_bytes(
-        matched.bytes.as_slice(),
-        matched.face_index,
-        &mut Vec::new(),
-    )
-    .ok_or_else(|| anyhow!("Font '{}' could not be parsed", path.label()))?;
+    let bytes = path.matched()?.standalone()?;
+    let font = ParsedFont::from_bytes(bytes.as_slice(), 0, &mut Vec::new())
+        .ok_or_else(|| anyhow!("Font '{}' could not be parsed", path.label()))?;
     let arc = Arc::new(font);
     let cached = FONT_PARSE_CACHE
         .lock()
@@ -395,23 +415,10 @@ pub(super) fn font_arc(family: &FontFamily, bold: bool) -> Result<Arc<ParsedFont
 
 /// Return a complex-script face that PDF readers can address by its shaped glyph ids.
 ///
-/// A PDF font stream cannot select a nonzero face from an embedded TrueType
-/// collection. When a requested bold face lives later in a collection, use
-/// the family's regular face-zero font and preserve correct shaping instead
-/// of emitting the bold face's glyph ids against the wrong outlines.
+/// The font cache extracts collection faces before parsing, so both shaping
+/// and PDF embedding address the selected weight at face zero.
 pub(super) fn shaping_font_arc(family: &FontFamily, bold: bool) -> Result<Arc<ParsedFont>> {
-    let requested = font_arc(family, bold)?;
-    if requested.original_index == 0 {
-        return Ok(requested);
-    }
-    let regular = font_arc(family, false)?;
-    if regular.original_index == 0 {
-        return Ok(regular);
-    }
-    bail!(
-        "Font '{}' has no face-zero variant safe for shaped PDF embedding",
-        family.name()
-    )
+    font_arc(family, bold)
 }
 
 /// Return whether the parsed font carries a real (non-notdef) glyph for the
@@ -467,6 +474,92 @@ pub(super) fn target(mm: f32, pixels: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{FontPalette, carries, font_arc, shaping_font_arc};
+    use crate::report::shaping::shape;
+    use printpdf::ParsedFont;
+    use rustybuzz::ttf_parser::Face;
+
+    /// A selected collection weight must survive the PDF shaping boundary.
+    #[test]
+    fn supplemental_shaping_cannot_replace_the_selected_bold_face_with_regular() {
+        let palette = FontPalette::default();
+        let weights = palette
+            .supplemental()
+            .iter()
+            .map(|family| {
+                let matched = family.bold.matched().expect("bold font must resolve");
+                let original = Face::parse(
+                    &matched.bytes,
+                    u32::try_from(matched.face_index).expect("font index must fit"),
+                )
+                .expect("original bold face must parse");
+                let shaped = shaping_font_arc(family, true).expect("bold shaping must resolve");
+                let face = Face::parse(
+                    &shaped.original_bytes,
+                    u32::try_from(shaped.original_index).expect("font index must fit"),
+                )
+                .expect("embedded bold face must parse");
+                (family.name(), original.weight(), face.weight())
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            weights
+                .iter()
+                .all(|(_, selected, embedded)| selected == embedded),
+            "the selected bold face was replaced during shaping: {weights:?}"
+        );
+    }
+
+    /// PDF readers need one standalone font program, not an unaddressable TTC face.
+    #[test]
+    fn supplemental_shaping_cannot_embed_a_font_collection() {
+        let palette = FontPalette::default();
+        let fonts = palette
+            .supplemental()
+            .iter()
+            .flat_map(|family| [false, true].map(|bold| shaping_font_arc(family, bold)))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("supplemental fonts must resolve");
+        assert!(
+            fonts
+                .iter()
+                .all(|font| font.original_index == 0 && !font.original_bytes.starts_with(b"ttcf")),
+            "a shaped PDF font still contains an unaddressable collection"
+        );
+    }
+
+    /// Collection extraction must preserve contextual substitutions, marks and positioning.
+    #[test]
+    fn supplemental_collection_extraction_cannot_change_shaped_glyphs() {
+        let palette = FontPalette::default();
+        let samples = [
+            ("좋은 친구", false),
+            ("سَلَام", true),
+            ("שָׁלוֹם", true),
+            ("किताब अच्छी", false),
+            ("เก่งมาก", false),
+        ];
+        let mut comparisons = Vec::new();
+        for (family, (sample, rtl)) in palette.supplemental().iter().zip(samples) {
+            for bold in [false, true] {
+                let path = if bold { &family.bold } else { &family.regular };
+                let matched = path.matched().expect("supplemental face must resolve");
+                let original =
+                    ParsedFont::from_bytes(&matched.bytes, matched.face_index, &mut Vec::new())
+                        .expect("original collection face must parse");
+                let extracted = shaping_font_arc(family, bold).expect("shaping face must resolve");
+                comparisons.push((
+                    shape(&original, sample, rtl).expect("original face must shape"),
+                    shape(&extracted, sample, rtl).expect("extracted face must shape"),
+                ));
+            }
+        }
+        assert!(
+            comparisons
+                .iter()
+                .all(|(original, extracted)| original == extracted),
+            "collection extraction changed the selected face's shaped glyph ids or positions"
+        );
+    }
 
     /// Regression for the Hiragino Sans GB pitfall: font-kit used to resolve
     /// the bold weight to the exact same .ttc subface as the regular weight,

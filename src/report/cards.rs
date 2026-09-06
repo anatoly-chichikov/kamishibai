@@ -1,4 +1,4 @@
-//! Printable A4 card sheet — four fold-cards per page in monochrome layout.
+//! Printable A4 sheets with four fixed-size foldcards and measured text bounds.
 
 use std::collections::HashSet;
 use std::fs;
@@ -16,7 +16,7 @@ use printpdf::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::languages::{TextDirection, language};
-use crate::markdown::{Block, TextChunk, parse_markdown};
+use crate::markdown::{Block, TextChunk, parse_card_context};
 use crate::vocabulary::VocabularyEntry;
 
 use super::Thumbnail;
@@ -33,7 +33,6 @@ const HALF_H: f32 = 74.25;
 const PAD: f32 = 5.0;
 const IMAGE_X: f32 = 5.0;
 const IMAGE_SIDE: f32 = 55.0;
-const IMAGE_Y: f32 = (HALF_H - IMAGE_SIDE) / 2.0;
 const COL_GAP: f32 = 5.0;
 const TEXT_PAD_RIGHT: f32 = 5.0;
 const PANEL_BORDER_PT: f32 = 0.6;
@@ -45,8 +44,6 @@ const BULLET_MARKER_RTL: &str = "  •";
 const BULLET_INDENT_STEP: f32 = 3.5;
 const BLOCK_GAP_RATIO: f32 = 0.35;
 const HAIR: f32 = 0.4;
-const CUT_DASH: f32 = 1.4;
-const CUT_GAP: f32 = 1.0;
 const BEZIER_CIRCLE_K: f32 = 0.552_284_8;
 
 const PHRASE_SIZE: f32 = 7.65;
@@ -59,6 +56,8 @@ const EXPLAIN_SIZE: f32 = 7.4;
 const EXPLAIN_SIZE_MIN: f32 = 5.5;
 const EXPLAIN_SIZE_STEP: f32 = 0.4;
 const IMP_SIZE: f32 = 6.8;
+const COMPACT_PAD: f32 = 4.0;
+const EXPLAIN_SIZE_FLOOR: f32 = 5.0;
 const ITALIC_SLANT: f32 = 0.21;
 
 const INK: (u8, u8, u8) = (0, 0, 0);
@@ -120,9 +119,9 @@ impl CardSheet {
         let ids = prepared.register(&mut doc);
         let scaled = scale_images(self.cards.as_slice(), thumbnail)?;
         let mut pages: Vec<Vec<Op>> = Vec::new();
-        for chunk_start in (0..self.cards.len().max(1)).step_by(4) {
+        for fragments in self.pages(&prepared)? {
             let mut ops = Vec::new();
-            self.draw_sheet(&mut doc, &mut ops, &prepared, &ids, &scaled, chunk_start);
+            self.draw_sheet(&mut doc, &mut ops, &prepared, &ids, &scaled, &fragments);
             pages.push(ops);
         }
         let save = PdfSaveOptions {
@@ -144,7 +143,7 @@ impl CardSheet {
                     .collect(),
             )
             .save(&save, &mut Vec::new());
-        fs::write(output, pdf)?;
+        fs::write(output, super::font_embedding::normalized(pdf)?)?;
         Ok(())
     }
 
@@ -203,9 +202,32 @@ impl CardSheet {
         })
     }
 
-    /// Render one A4 sheet containing up to four cards starting at the given
-    /// offset. Cut and fold marks track which rows are actually filled so a
-    /// sparse last page only shows the cuts that release real cards.
+    /// Fit every card before drawing and keep four fixed rows on each page.
+    fn pages(&self, fonts: &SheetFonts) -> Result<Vec<Vec<FixedCard>>> {
+        let mut pages = Vec::new();
+        let mut page = Vec::new();
+        for (index, (entry, _)) in self.cards.iter().enumerate() {
+            let plan = CardPlan::build(entry);
+            let faces = CardLayout::build(&plan, fonts).map_err(|error| {
+                anyhow!(
+                    "card {} ({}) cannot fit its fixed printable size: {}",
+                    index + 1,
+                    entry.term.as_str(),
+                    error,
+                )
+            })?;
+            page.push(FixedCard { card: index, faces });
+            if page.len() == 4 {
+                pages.push(std::mem::take(&mut page));
+            }
+        }
+        if !page.is_empty() || pages.is_empty() {
+            pages.push(page);
+        }
+        Ok(pages)
+    }
+
+    /// Draw cut and fold guides at the actual boundaries of measured cards.
     fn draw_sheet(
         &self,
         doc: &mut PdfDocument,
@@ -213,289 +235,422 @@ impl CardSheet {
         fonts: &SheetFonts,
         ids: &SheetIds,
         scaled: &[Option<DynamicImage>],
-        offset: usize,
+        fragments: &[FixedCard],
     ) {
-        let filled = [
-            self.cards.get(offset).is_some(),
-            self.cards.get(offset + 1).is_some(),
-            self.cards.get(offset + 2).is_some(),
-            self.cards.get(offset + 3).is_some(),
-        ];
-        draw_cut_lines(ops, filled);
-        draw_fold_lines(ops, filled);
-        for slot in 0..4 {
-            let Some((entry, _)) = self.cards.get(offset + slot) else {
-                continue;
-            };
-            let image = scaled.get(offset + slot).and_then(Option::as_ref).cloned();
-            let (cell_x, cell_y) = cell_origin(slot);
-            self.draw_card(doc, ops, fonts, ids, entry, image, cell_x, cell_y);
+        draw_cut_lines(ops, fragments);
+        draw_fold_lines(ops, fragments);
+        let mut top = SHEET_H;
+        for fragment in fragments {
+            top -= HALF_H;
+            let image = scaled.get(fragment.card).and_then(Option::as_ref).cloned();
+            push_save_translate(ops, 0.0, top);
+            let image_y = (HALF_H - IMAGE_SIDE) / 2.0;
+            if let Some(decoded) = image {
+                draw_image(doc, ops, decoded, IMAGE_X, image_y, IMAGE_SIDE);
+            }
+            draw_panel_border(ops, IMAGE_X, image_y, IMAGE_SIDE);
+            self.draw_face(ops, fonts, ids, fragment, true);
+            ops.push(Op::RestoreGraphicsState);
+            push_save_translate(ops, CARD_W, top);
+            self.draw_face(ops, fonts, ids, fragment, false);
+            ops.push(Op::RestoreGraphicsState);
         }
     }
 
-    /// Draw one card: the front face on the left half of the row and the back
-    /// face on the right half, both upright. The printed row folds along its
-    /// vertical centre line so the two faces meet back-to-back.
-    #[allow(clippy::too_many_arguments)]
-    fn draw_card(
+    /// Render one bounded face using the same rows that determined its height.
+    fn draw_face(
         &self,
-        doc: &mut PdfDocument,
         ops: &mut Vec<Op>,
         fonts: &SheetFonts,
         ids: &SheetIds,
-        entry: &VocabularyEntry,
-        image: Option<DynamicImage>,
-        cell_x: f32,
-        cell_y: f32,
+        fragment: &FixedCard,
+        front: bool,
     ) {
-        let plan = CardPlan::build(entry);
-        push_save_translate(ops, cell_x, cell_y);
-        self.draw_front(doc, ops, fonts, ids, &plan, image);
-        ops.push(Op::RestoreGraphicsState);
-        push_save_translate(ops, cell_x + CARD_W, cell_y);
-        self.draw_back(ops, fonts, ids, &plan);
-        ops.push(Op::RestoreGraphicsState);
+        let rows = if front {
+            &fragment.faces.front
+        } else {
+            &fragment.faces.back
+        };
+        let (x, width, padding) = if front {
+            let x = IMAGE_X + IMAGE_SIDE + COL_GAP;
+            (x, CARD_W - x - TEXT_PAD_RIGHT, PAD)
+        } else {
+            (
+                fragment.faces.padding,
+                CARD_W - fragment.faces.padding * 2.0,
+                fragment.faces.padding,
+            )
+        };
+        let mut cursor = if front {
+            (HALF_H * 0.70).max(rows_height(rows) + padding)
+        } else {
+            HALF_H - padding
+        };
+        for row in rows {
+            cursor -= row.height();
+            draw_face_row(ops, fonts, ids, row, x, cursor, width);
+        }
+        debug_assert!(
+            cursor >= padding - 0.001,
+            "planned card text crossed its bottom inset"
+        );
     }
+}
 
-    /// Render the front face inside the local (0,0)→(CARD_W, HALF_H) frame:
-    /// manga panel on the left, source sentence and gloss on the right. The
-    /// sentence always starts 30% down from the top so it sits in the panel's
-    /// upper third; the gloss hangs below it, small and faint so it reads only
-    /// on demand.
-    fn draw_front(
-        &self,
-        doc: &mut PdfDocument,
-        ops: &mut Vec<Op>,
-        fonts: &SheetFonts,
-        ids: &SheetIds,
-        plan: &CardPlan,
-        image: Option<DynamicImage>,
-    ) {
-        if let Some(decoded) = image {
-            draw_image(doc, ops, decoded, IMAGE_X, IMAGE_Y, IMAGE_SIDE);
-        }
-        draw_panel_border(ops, IMAGE_X, IMAGE_Y, IMAGE_SIDE);
-        let text_x = IMAGE_X + IMAGE_SIDE + COL_GAP;
-        let text_w = CARD_W - text_x - TEXT_PAD_RIGHT;
-        let phrase_lines = wrap_runs(
-            plan.front_phrase.as_slice(),
-            text_w,
-            PHRASE_SIZE,
-            ClassifierView::from(fonts),
-        );
-        let mut cursor = HALF_H * 0.70;
-        for line in &phrase_lines {
-            cursor -= leading(PHRASE_SIZE);
-            draw_runs(
-                ops,
-                fonts,
-                ids,
-                line,
-                PHRASE_SIZE,
-                text_x,
-                cursor,
-                INK,
-                plan.source_direction,
-                text_w,
-            );
-        }
-        cursor -= leading(PHRASE_SIZE) * 0.4;
-        let gloss_lines = wrap_runs(
-            &[italic_chunk(plan.gloss.as_str())],
-            text_w,
-            GLOSS_SIZE,
-            ClassifierView::from(fonts),
-        );
-        for line in gloss_lines {
-            cursor -= leading(GLOSS_SIZE);
-            draw_runs(
-                ops,
-                fonts,
-                ids,
-                &line,
-                GLOSS_SIZE,
-                text_x,
-                cursor,
-                GLOSS_INK,
-                plan.source_direction,
-                text_w,
-            );
-        }
+/// One text baseline, rule, or importance row with its measured spacing.
+#[derive(Clone, Debug)]
+struct FaceRow {
+    content: RowContent,
+    size: f32,
+    gap: f32,
+    direction: TextDirection,
+}
+
+impl FaceRow {
+    /// Return the complete vertical advance consumed by this row.
+    fn height(&self) -> f32 {
+        self.gap
+            + if matches!(self.content, RowContent::Rule) {
+                self.size
+            } else {
+                leading(self.size)
+            }
     }
+}
 
-    /// Render the back face inside the local (0,0)→(CARD_W, HALF_H) frame:
-    /// target sentence, lemma row, meaning, importance, and explanation.
-    fn draw_back(&self, ops: &mut Vec<Op>, fonts: &SheetFonts, ids: &SheetIds, plan: &CardPlan) {
-        let text_w = CARD_W - PAD * 2.0;
-        let mut cursor = HALF_H - PAD;
-        let en_lines = wrap_runs(
-            plan.back_phrase.as_slice(),
-            text_w,
-            EN_SIZE,
-            ClassifierView::from(fonts),
-        );
-        for line in en_lines {
-            cursor -= leading(EN_SIZE);
-            draw_runs(
-                ops,
-                fonts,
-                ids,
-                &line,
-                EN_SIZE,
-                PAD,
-                cursor,
-                INK,
-                plan.target_direction,
-                text_w,
-            );
-        }
-        cursor -= 1.4;
-        draw_hairline(ops, PAD, cursor, CARD_W - PAD, cursor);
-        cursor -= 1.6;
-        cursor -= leading(LEX_SIZE);
-        draw_runs(
-            ops,
-            fonts,
-            ids,
-            &[bold_chunk(plan.lemma.as_str())],
-            LEX_SIZE,
-            PAD,
-            cursor,
-            INK,
-            plan.target_direction,
-            text_w,
-        );
-        cursor -= leading(IPA_SIZE) * 0.95;
-        draw_mono(
-            ops,
-            fonts,
-            ids,
-            plan.lemma_ipa.as_str(),
-            IPA_SIZE,
-            PAD,
-            cursor,
-            MUTED,
-        );
-        cursor -= leading(MEANING_SIZE) * 0.4;
-        let meaning_lines = wrap_runs(
-            &[plain_chunk(plan.meaning.as_str())],
-            text_w,
-            MEANING_SIZE,
-            ClassifierView::from(fonts),
-        );
-        for line in meaning_lines {
-            cursor -= leading(MEANING_SIZE);
-            draw_runs(
-                ops,
-                fonts,
-                ids,
-                &line,
-                MEANING_SIZE,
-                PAD,
-                cursor,
-                INK,
-                plan.source_direction,
-                text_w,
-            );
-        }
-        cursor -= leading(IMP_SIZE) * 0.4;
-        cursor -= leading(IMP_SIZE);
-        draw_importance(
-            ops,
-            fonts,
-            ids,
-            plan.importance,
-            PAD,
-            cursor,
-            plan.source_direction,
-        );
-        cursor -= leading(EXPLAIN_SIZE) * 0.6;
+/// The rendering role and preserved styled content of one face row.
+#[derive(Clone, Debug)]
+enum RowContent {
+    Text {
+        chunks: Vec<TextChunk>,
+        color: (u8, u8, u8),
+        bullet: Option<BulletLead>,
+    },
+    Mono(String),
+    Rule,
+    Importance(u8),
+}
+
+/// The independently flowing front and back of one vocabulary card.
+#[derive(Clone, Debug)]
+struct CardLayout {
+    front: Vec<FaceRow>,
+    back: Vec<FaceRow>,
+    padding: f32,
+}
+
+impl CardLayout {
+    /// Fit every field inside one fixed face, using compact spacing only when needed.
+    fn build(plan: &CardPlan, fonts: &SheetFonts) -> Result<Self> {
         let view = ClassifierView::from(fonts);
-        let explain_size = fit_explanation(&plan.explanation, text_w, cursor - PAD, view);
-        let block_gap = leading(explain_size) * BLOCK_GAP_RATIO;
-        let marker_width = view.measure(BULLET_MARKER, false, explain_size);
-        'blocks: for (idx, block) in plan.explanation.iter().enumerate() {
-            if idx > 0 {
-                cursor -= block_gap;
-            }
-            match block {
-                Block::Paragraph(chunks) => {
-                    let lines = wrap_runs(chunks.as_slice(), text_w, explain_size, view);
-                    for line in lines {
-                        cursor -= leading(explain_size);
-                        if cursor < PAD {
-                            break 'blocks;
-                        }
-                        draw_runs(
-                            ops,
-                            fonts,
-                            ids,
-                            &line,
-                            explain_size,
-                            PAD,
-                            cursor,
-                            INK,
-                            plan.source_direction,
-                            text_w,
-                        );
-                    }
+        let front_width = CARD_W - IMAGE_X - IMAGE_SIDE - COL_GAP - TEXT_PAD_RIGHT;
+        let mut front = text_rows(
+            &plan.front_phrase,
+            front_width,
+            PHRASE_SIZE,
+            plan.source_direction,
+            INK,
+            view,
+        );
+        let mut hint = text_rows(
+            &[italic_chunk(&plan.gloss)],
+            front_width,
+            GLOSS_SIZE,
+            plan.source_direction,
+            GLOSS_INK,
+            view,
+        );
+        if let Some(row) = hint.first_mut() {
+            row.gap = leading(PHRASE_SIZE) * 0.4;
+        }
+        front.extend(hint);
+        if rows_height(&front) > HALF_H - PAD * 2.0 {
+            return Err(anyhow!(
+                "source sentence and hint need {:.2}mm but only {:.2}mm is available",
+                rows_height(&front),
+                HALF_H - PAD * 2.0
+            ));
+        }
+        for padding in [PAD, COMPACT_PAD] {
+            let mut size = EXPLAIN_SIZE;
+            loop {
+                let back = back_rows(plan, size, fonts, padding);
+                if rows_height(&back) <= HALF_H - padding * 2.0 {
+                    return Ok(Self {
+                        front,
+                        back,
+                        padding,
+                    });
                 }
-                Block::Bullet { indent, chunks } => {
-                    let indent_mm = f32::from(*indent) * BULLET_INDENT_STEP;
-                    let (marker_x, text_x) =
-                        bullet_gutter(plan.source_direction, indent_mm, marker_width, text_w);
-                    let inner_w = (text_w - indent_mm - marker_width).max(10.0);
-                    let lines = wrap_runs(chunks.as_slice(), inner_w, explain_size, view);
-                    for (line_idx, line) in lines.into_iter().enumerate() {
-                        cursor -= leading(explain_size);
-                        if cursor < PAD {
-                            break 'blocks;
-                        }
-                        if line_idx == 0 {
-                            draw_runs(
-                                ops,
-                                fonts,
-                                ids,
-                                &[plain_chunk(bullet_marker(plan.source_direction))],
-                                explain_size,
-                                marker_x,
-                                cursor,
-                                INK,
-                                TextDirection::Ltr,
-                                marker_width,
-                            );
-                        }
-                        draw_runs(
-                            ops,
-                            fonts,
-                            ids,
-                            &line,
-                            explain_size,
-                            text_x,
-                            cursor,
-                            INK,
-                            plan.source_direction,
-                            inner_w,
-                        );
-                    }
+                if size <= EXPLAIN_SIZE_MIN {
+                    break;
                 }
+                size = (size - EXPLAIN_SIZE_STEP).max(EXPLAIN_SIZE_MIN);
             }
+        }
+        for step in 1_u8..=5 {
+            let size = (EXPLAIN_SIZE_MIN - f32::from(step) * 0.1).max(EXPLAIN_SIZE_FLOOR);
+            let back = back_rows(plan, size, fonts, COMPACT_PAD);
+            if rows_height(&back) <= HALF_H - COMPACT_PAD * 2.0 {
+                return Ok(Self {
+                    front,
+                    back,
+                    padding: COMPACT_PAD,
+                });
+            }
+        }
+        let back = back_rows(plan, EXPLAIN_SIZE_FLOOR, fonts, COMPACT_PAD);
+        Err(anyhow!(
+            "back text needs {:.2}mm but only {:.2}mm is available at the {:.1}pt readable floor; shorten the explanation before publishing",
+            rows_height(&back),
+            HALF_H - COMPACT_PAD * 2.0,
+            EXPLAIN_SIZE_FLOOR
+        ))
+    }
+}
+
+/// One vocabulary card whose two faces have passed the fixed-size layout check.
+#[derive(Clone, Debug)]
+struct FixedCard {
+    card: usize,
+    faces: CardLayout,
+}
+
+/// Sum exactly the advances the renderer consumes for these rows.
+fn rows_height(rows: &[FaceRow]) -> f32 {
+    rows.iter().map(FaceRow::height).sum()
+}
+
+/// Wrap one text field with its styling, color, and reading direction intact.
+fn text_rows(
+    chunks: &[TextChunk],
+    width: f32,
+    size: f32,
+    direction: TextDirection,
+    color: (u8, u8, u8),
+    view: ClassifierView<'_>,
+) -> Vec<FaceRow> {
+    wrap_runs(chunks, width, size, view)
+        .into_iter()
+        .map(|chunks| FaceRow {
+            content: RowContent::Text {
+                chunks,
+                color,
+                bullet: None,
+            },
+            size,
+            gap: 0.0,
+            direction,
+        })
+        .collect()
+}
+
+/// Wrap the entire back face so long headings and pronunciations can continue.
+fn back_rows(plan: &CardPlan, size: f32, fonts: &SheetFonts, padding: f32) -> Vec<FaceRow> {
+    let view = ClassifierView::from(fonts);
+    let width = CARD_W - padding * 2.0;
+    let mut rows = text_rows(
+        &plan.back_phrase,
+        width,
+        EN_SIZE,
+        plan.target_direction,
+        INK,
+        view,
+    );
+    rows.push(FaceRow {
+        content: RowContent::Rule,
+        size: 3.0,
+        gap: 0.0,
+        direction: plan.target_direction,
+    });
+    rows.extend(text_rows(
+        &[bold_chunk(&plan.lemma)],
+        width,
+        LEX_SIZE,
+        plan.target_direction,
+        INK,
+        view,
+    ));
+    rows.extend(
+        wrap_mono(
+            &plan.lemma_ipa,
+            width,
+            IPA_SIZE,
+            fonts.classifier_mono.as_ref(),
+        )
+        .into_iter()
+        .map(|text| FaceRow {
+            content: RowContent::Mono(text),
+            size: IPA_SIZE,
+            gap: -leading(IPA_SIZE) * 0.05,
+            direction: TextDirection::Ltr,
+        }),
+    );
+    let mut meaning = text_rows(
+        &[plain_chunk(&plan.meaning)],
+        width,
+        MEANING_SIZE,
+        plan.source_direction,
+        INK,
+        view,
+    );
+    if let Some(row) = meaning.first_mut() {
+        row.gap = leading(MEANING_SIZE) * 0.4;
+    }
+    rows.extend(meaning);
+    rows.push(FaceRow {
+        content: RowContent::Importance(plan.importance),
+        size: IMP_SIZE,
+        gap: leading(IMP_SIZE) * 0.4,
+        direction: plan.source_direction,
+    });
+    let explanation = explanation_layout(&plan.explanation, width, size, view);
+    rows.extend(
+        explanation
+            .rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| FaceRow {
+                content: RowContent::Text {
+                    chunks: row.chunks,
+                    color: INK,
+                    bullet: row.bullet,
+                },
+                size,
+                gap: row.gap_before
+                    + if index == 0 {
+                        leading(EXPLAIN_SIZE) * 0.6
+                    } else {
+                        0.0
+                    },
+                direction: plan.source_direction,
+            }),
+    );
+    if padding < PAD {
+        for row in &mut rows {
+            if row.gap > 0.0 {
+                row.gap *= 0.35;
+            }
+            if matches!(row.content, RowContent::Rule) {
+                row.size = 1.8;
+            }
+        }
+    }
+    rows
+}
+
+/// Wrap pronunciation by graphemes using the same monospace font as drawing.
+fn wrap_mono(text: &str, width: f32, size: f32, font: &ParsedFont) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut advance = 0.0;
+    let units = f32::from(font.font_metrics.units_per_em).max(1.0);
+    for grapheme in text.graphemes(true) {
+        let measured = shape(font, grapheme, false)
+            .map(|glyphs| {
+                glyphs
+                    .iter()
+                    .map(|glyph| f32::from(glyph.x_advance))
+                    .sum::<f32>()
+            })
+            .unwrap_or(units * 0.5)
+            / units
+            * size
+            * 25.4
+            / 72.0;
+        if !current.is_empty() && advance + measured > width {
+            lines.push(std::mem::take(&mut current));
+            advance = 0.0;
+        }
+        current.push_str(grapheme);
+        advance += measured;
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+/// Render exactly one previously measured face row.
+#[allow(clippy::too_many_arguments)]
+fn draw_face_row(
+    ops: &mut Vec<Op>,
+    fonts: &SheetFonts,
+    ids: &SheetIds,
+    row: &FaceRow,
+    x: f32,
+    cursor: f32,
+    width: f32,
+) {
+    match &row.content {
+        RowContent::Rule => draw_hairline(
+            ops,
+            x,
+            cursor + row.size * (1.6 / 3.0),
+            x + width,
+            cursor + row.size * (1.6 / 3.0),
+        ),
+        RowContent::Importance(value) => {
+            draw_importance(ops, fonts, ids, *value, x, cursor, row.direction)
+        }
+        RowContent::Mono(text) => draw_mono(ops, fonts, ids, text, row.size, x, cursor, MUTED),
+        RowContent::Text {
+            chunks,
+            color,
+            bullet,
+        } => {
+            let (text_x, inner) = if let Some(bullet) = bullet {
+                let marker_width =
+                    ClassifierView::from(fonts).measure(BULLET_MARKER, false, row.size);
+                let indent = bullet_indent(bullet.indent, width, marker_width);
+                let (marker_x, text_x) = bullet_gutter(row.direction, indent, marker_width, width);
+                let marker_x = marker_x + x - PAD;
+                let text_x = text_x + x - PAD;
+                if bullet.marker {
+                    draw_runs(
+                        ops,
+                        fonts,
+                        ids,
+                        &[plain_chunk(bullet_marker(row.direction))],
+                        row.size,
+                        marker_x,
+                        cursor,
+                        *color,
+                        TextDirection::Ltr,
+                        marker_width,
+                    );
+                }
+                (text_x, width - indent - marker_width)
+            } else {
+                (x, width)
+            };
+            draw_runs(
+                ops,
+                fonts,
+                ids,
+                chunks,
+                row.size,
+                text_x,
+                cursor,
+                *color,
+                row.direction,
+                inner,
+            );
         }
     }
 }
 
-/// Return the largest size in `[EXPLAIN_SIZE_MIN, EXPLAIN_SIZE]` (stepping by
-/// `EXPLAIN_SIZE_STEP`) at which the wrapped, multi-block explanation fits
-/// inside `available` millimetres of vertical space. Accounts for the
-/// inter-block gap and bullet indents; falls back to the minimum size when
-/// even the smallest pass overflows so the caller can still emit and let the
-/// cursor guard clip the tail.
 /// Return the marker glyphs for one reading direction.
 fn bullet_marker(direction: TextDirection) -> &'static str {
     match direction {
         TextDirection::Ltr => BULLET_MARKER,
         TextDirection::Rtl => BULLET_MARKER_RTL,
     }
+}
+
+/// Keep even imported deep indentation inside the printable text frame.
+fn bullet_indent(indent: u8, width: f32, marker: f32) -> f32 {
+    (f32::from(indent) * BULLET_INDENT_STEP).min((width - marker - 10.0).max(0.0))
 }
 
 /// Return where one bullet's marker and its text frame start.
@@ -507,7 +662,7 @@ fn bullet_marker(direction: TextDirection) -> &'static str {
 /// against its own dot instead of across the card from it.
 ///
 /// The frame's width is `text_w - indent - marker_w` in both directions, which
-/// is why `fit_explanation` needs no direction of its own.
+/// is why explanation wrapping needs no direction of its own.
 fn bullet_gutter(
     direction: TextDirection,
     indent_mm: f32,
@@ -520,33 +675,73 @@ fn bullet_gutter(
     }
 }
 
-fn fit_explanation(blocks: &[Block], width: f32, available: f32, view: ClassifierView<'_>) -> f32 {
-    let mut size = EXPLAIN_SIZE;
-    while size >= EXPLAIN_SIZE_MIN {
-        let block_gap = leading(size) * BLOCK_GAP_RATIO;
-        let marker_width = view.measure(BULLET_MARKER, false, size);
-        let mut total = 0.0_f32;
-        for (idx, block) in blocks.iter().enumerate() {
-            if idx > 0 {
-                total += block_gap;
+/// Wrap every explanation block into immutable rows before rendering begins.
+fn explanation_layout(
+    blocks: &[Block],
+    width: f32,
+    size: f32,
+    view: ClassifierView<'_>,
+) -> ExplanationLayout {
+    let marker_width = view.measure(BULLET_MARKER, false, size);
+    let mut rows = Vec::new();
+    for (index, block) in blocks.iter().enumerate() {
+        let gap_before = explanation_gap(blocks.get(index.wrapping_sub(1)), block, size);
+        let (chunks, inner_w, indent) = match block {
+            Block::Paragraph(chunks) => (chunks.as_slice(), width, None),
+            Block::Bullet { indent, chunks } => {
+                let indent_mm = bullet_indent(*indent, width, marker_width);
+                (
+                    chunks.as_slice(),
+                    (width - indent_mm - marker_width).max(10.0),
+                    Some(*indent),
+                )
             }
-            let (chunks, inner_w) = match block {
-                Block::Paragraph(chunks) => (chunks.as_slice(), width),
-                Block::Bullet { indent, chunks } => {
-                    let indent_mm = f32::from(*indent) * BULLET_INDENT_STEP;
-                    let inner = (width - indent_mm - marker_width).max(10.0);
-                    (chunks.as_slice(), inner)
-                }
-            };
-            let lines = wrap_runs(chunks, inner_w, size, view);
-            total += lines.len() as f32 * leading(size);
+        };
+        for (line_index, chunks) in wrap_runs(chunks, inner_w, size, view)
+            .into_iter()
+            .enumerate()
+        {
+            let gap = if line_index == 0 { gap_before } else { 0.0 };
+            rows.push(ExplanationRow {
+                chunks,
+                gap_before: gap,
+                bullet: indent.map(|value| BulletLead {
+                    indent: value,
+                    marker: line_index == 0,
+                }),
+            });
         }
-        if total <= available {
-            return size;
-        }
-        size -= EXPLAIN_SIZE_STEP;
     }
-    EXPLAIN_SIZE_MIN
+    ExplanationLayout { rows }
+}
+
+/// Return the gap between unlike blocks while keeping one bullet list tight.
+fn explanation_gap(previous: Option<&Block>, current: &Block, size: f32) -> f32 {
+    match (previous, current) {
+        (None, _) | (Some(Block::Bullet { .. }), Block::Bullet { .. }) => 0.0,
+        (Some(_), _) => leading(size) * BLOCK_GAP_RATIO,
+    }
+}
+
+/// One complete explanation plan selected before any back-face text is drawn.
+#[derive(Clone, Debug)]
+struct ExplanationLayout {
+    rows: Vec<ExplanationRow>,
+}
+
+/// One wrapped explanation baseline with its optional bullet gutter.
+#[derive(Clone, Debug)]
+struct ExplanationRow {
+    chunks: Vec<TextChunk>,
+    gap_before: f32,
+    bullet: Option<BulletLead>,
+}
+
+/// One bullet marker placement attached only to its first wrapped row.
+#[derive(Clone, Copy, Debug)]
+struct BulletLead {
+    indent: u8,
+    marker: bool,
 }
 
 /// One card's pre-computed text content with bold-highlighted runs.
@@ -592,7 +787,7 @@ impl CardPlan {
             lemma_ipa: pronounce(entry.pronunciation.as_str()),
             meaning: entry.meaning.as_str().to_string(),
             importance: entry.importance.value(),
-            explanation: parse_markdown(entry.source.context.as_str()),
+            explanation: parse_card_context(entry.source.context.as_str()),
         }
     }
 
@@ -692,12 +887,6 @@ fn pronounce(raw: &str) -> String {
     format!("/{}/", trimmed.trim_matches('/'))
 }
 
-/// Return the bottom-left coordinate of the row for a slot index 0..4. Cards
-/// stack top-to-bottom, each occupying one full-width `HALF_H`-tall row.
-fn cell_origin(slot: usize) -> (f32, f32) {
-    (0.0, SHEET_H - HALF_H * (slot as f32 + 1.0))
-}
-
 /// Push a save-state + translate matrix so the following operations draw in a
 /// local frame whose origin sits at the given page-space coordinate (mm).
 fn push_save_translate(ops: &mut Vec<Op>, tx: f32, ty: f32) {
@@ -707,23 +896,9 @@ fn push_save_translate(ops: &mut Vec<Op>, tx: f32, ty: f32) {
     });
 }
 
-/// Draw the dashed cut lines that separate the stacked cards. Cards stack
-/// top-to-bottom, so the cuts are the horizontal boundaries between rows; a
-/// boundary is emitted only when a real card sits on either side of it, so a
-/// sparse last sheet does not drag empty rules across blank paper.
-fn draw_cut_lines(ops: &mut Vec<Op>, filled: [bool; 4]) {
-    let segments: [(bool, (f32, f32, f32, f32)); 3] = [
-        (
-            filled[0] || filled[1],
-            (0.0, SHEET_H - HALF_H, SHEET_W, SHEET_H - HALF_H),
-        ),
-        (
-            filled[1] || filled[2],
-            (0.0, HALF_H * 2.0, SHEET_W, HALF_H * 2.0),
-        ),
-        (filled[2] || filled[3], (0.0, HALF_H, SHEET_W, HALF_H)),
-    ];
-    if !segments.iter().any(|(visible, _)| *visible) {
+/// Draw dashed cuts only at the actual lower boundaries of occupied rows.
+fn draw_cut_lines(ops: &mut Vec<Op>, fragments: &[FixedCard]) {
+    if fragments.is_empty() {
         return;
     }
     ops.push(Op::SetOutlineColor {
@@ -733,14 +908,16 @@ fn draw_cut_lines(ops: &mut Vec<Op>, filled: [bool; 4]) {
     ops.push(Op::SetLineDashPattern {
         dash: LineDashPattern {
             offset: 0,
-            dash_1: Some((CUT_DASH * 72.0 / 25.4) as i64),
-            gap_1: Some((CUT_GAP * 72.0 / 25.4) as i64),
+            dash_1: Some(3),
+            gap_1: Some(2),
             ..Default::default()
         },
     });
-    for (visible, (x1, y1, x2, y2)) in segments {
-        if visible {
-            draw_line(ops, x1, y1, x2, y2);
+    let mut top = SHEET_H;
+    for _ in fragments {
+        top -= HALF_H;
+        if top > 0.0 {
+            draw_line(ops, 0.0, top, SHEET_W, top);
         }
     }
     ops.push(Op::SetLineDashPattern {
@@ -748,23 +925,20 @@ fn draw_cut_lines(ops: &mut Vec<Op>, filled: [bool; 4]) {
     });
 }
 
-/// Draw one hairline fold guide per filled card — the vertical centre line of
-/// that card's row, where the front and back faces fold back-to-back. Empty
-/// rows stay untouched so the cue only appears where there is something to
-/// fold.
-fn draw_fold_lines(ops: &mut Vec<Op>, filled: [bool; 4]) {
-    if !filled.iter().any(|present| *present) {
+/// Give each occupied foldcard one guide spanning its complete measured height.
+fn draw_fold_lines(ops: &mut Vec<Op>, fragments: &[FixedCard]) {
+    if fragments.is_empty() {
         return;
     }
     ops.push(Op::SetOutlineColor {
         col: rgb_tuple(HAIRLINE),
     });
     ops.push(Op::SetOutlineThickness { pt: Pt(0.4) });
-    for (slot, present) in filled.iter().enumerate() {
-        if *present {
-            let (_, cell_y) = cell_origin(slot);
-            draw_line(ops, CARD_W, cell_y, CARD_W, cell_y + HALF_H);
-        }
+    let mut top = SHEET_H;
+    for _ in fragments {
+        let bottom = top - HALF_H;
+        draw_line(ops, CARD_W, bottom, CARD_W, top);
+        top = bottom;
     }
 }
 
@@ -1261,7 +1435,10 @@ fn wrap_runs(
     let mut current: Vec<TextChunk> = Vec::new();
     let mut current_width = 0.0_f32;
     let space_width = view.measure(" ", false, size);
-    for (space_before, group) in groups {
+    for (space_before, group) in groups
+        .into_iter()
+        .flat_map(|group| split_wide_group(group, width, size, view))
+    {
         let group_width: f32 = group
             .iter()
             .map(|chunk| view.measure(chunk.text.as_str(), chunk.bold, size))
@@ -1291,6 +1468,32 @@ fn wrap_runs(
         lines.push(Vec::new());
     }
     lines
+}
+
+/// Break only an overwide token into grapheme-safe groups without adding spaces.
+fn split_wide_group(
+    group: (bool, Vec<TextChunk>),
+    width: f32,
+    size: f32,
+    view: ClassifierView<'_>,
+) -> Vec<(bool, Vec<TextChunk>)> {
+    if measure_runs(view, &group.1, size) <= width {
+        return vec![group];
+    }
+    let mut groups = Vec::new();
+    for chunk in group.1 {
+        for grapheme in chunk.text.graphemes(true) {
+            groups.push((
+                groups.is_empty() && group.0,
+                vec![TextChunk {
+                    text: grapheme.to_string(),
+                    bold: chunk.bold,
+                    italic: chunk.italic,
+                }],
+            ));
+        }
+    }
+    groups
 }
 
 /// One wrap token: its text, weight, italic flag, and whether whitespace
@@ -1916,12 +2119,49 @@ fn rgb_tuple(rgb: (u8, u8, u8)) -> Color {
 #[cfg(test)]
 mod tests {
     use super::{
-        BULLET_MARKER, BULLET_MARKER_RTL, ClassifierView, FontPalette, PAD, ParsedPalette,
-        bold_split, bullet_gutter, bullet_marker, group_tokens, plain_chunk, tokenize, wrap_runs,
+        BULLET_MARKER, BULLET_MARKER_RTL, CardPlan, CardSheet, ClassifierView, EXPLAIN_SIZE_MIN,
+        FontPalette, PAD, ParsedPalette, bold_split, bullet_gutter, bullet_marker,
+        explanation_layout, group_tokens, plain_chunk, tokenize, wrap_runs,
     };
     use crate::languages::TextDirection;
+    use crate::markdown::{Block, parse_markdown};
     use crate::report::font::font_arc;
+    use crate::vocabulary::{
+        Importance, LanguageCode, NonEmptyText, VocabularyEntry, VocabularySource, VocabularyTarget,
+    };
+    use printpdf::{Op, PdfDocument, TextItem};
     use std::sync::Arc;
+
+    /// Return one realistic dense card whose variable-height rows each wrap
+    /// twice before its six reviewed senses and four context sections.
+    fn dense_six_sense_entry() -> VocabularyEntry {
+        VocabularyEntry {
+            term: NonEmptyText::new("bank").expect("term must be valid"),
+            meaning: NonEmptyText::new(
+                "to tilt an aircraft sideways during a turn by lifting one wing above the other meaning-anchor",
+            )
+            .expect("meaning must be valid"),
+            pronunciation: NonEmptyText::new("bank").expect("pronunciation must be valid"),
+            transcription: NonEmptyText::new("bank").expect("transcription must be valid"),
+            importance: Importance::new(5).expect("importance must be valid"),
+            source: VocabularySource {
+                sentence: NonEmptyText::new("The aircraft made a smooth bank")
+                    .expect("source sentence must be valid"),
+                lang: LanguageCode::new("en").expect("source language must be valid"),
+                highlight: NonEmptyText::new("bank").expect("highlight must be valid"),
+                hint: NonEmptyText::new("a controlled turn").expect("hint must be valid"),
+                context: NonEmptyText::new("**Meaning.**\n- **a financial institution that safeguards deposits and lends money to people and companies [finance]**\n- the sloping ground immediately beside a river, lake, canal, or similar body of water [landform]\n- a stored reserve of blood, data, food, or other resources for future use [reserve]\n- a long row or tier of matching objects arranged closely beside one another [row]\n- to rely confidently on a person, promise, event, or expected future result [rely]\n- to tilt an aircraft sideways while turning by raising one wing above another [aviation]\nThe noun senses grew from ideas of an edge or accumulated mass; the verbs developed separately.\n\n**Where you'll hear it.** Common in finance, geography, computing, medicine, aviation, and dependent plans.\n\n**Where it's out of place.** Do not use the finance sense for a wallet, safe, or ordinary container.\n\n**Subtlety.** Bank on takes a person or outcome; bank the aircraft names deliberate sideways tilt final-context-anchor.")
+                    .expect("context must be valid"),
+            },
+            target: VocabularyTarget {
+                sentence: NonEmptyText::new(
+                    "The pilot banked the aircraft smoothly while approaching the distant runway target-anchor",
+                )
+                .expect("target sentence must be valid"),
+                lang: LanguageCode::new("ru").expect("target language must be valid"),
+            },
+        }
+    }
 
     /// A bullet's text must end up against its own dot, whichever way the card
     /// reads. This is the geometry the Hebrew card got wrong: the marker sat on
@@ -2043,6 +2283,324 @@ mod tests {
         assert!(
             spaced,
             "ordinary whitespace-separated words lost the spaces between them"
+        );
+    }
+
+    /// A dense reviewed-sense list keeps every content token inside the
+    /// available height and spends no vertical gap between adjacent bullets.
+    #[test]
+    fn a_six_sense_explanation_plans_every_token_inside_the_card() {
+        let palette = FontPalette::default();
+        let parsed = ParsedPalette {
+            primary_regular: font_arc(palette.primary(), false).expect("primary must resolve"),
+            primary_bold: font_arc(palette.primary(), true).expect("primary bold must resolve"),
+            cjk_regular: font_arc(palette.cjk(), false).expect("CJK must resolve"),
+            cjk_bold: font_arc(palette.cjk(), true).expect("CJK bold must resolve"),
+            supplemental_regular: palette
+                .supplemental()
+                .iter()
+                .map(|family| font_arc(family, false).expect("supplemental must resolve"))
+                .collect(),
+            supplemental_bold: palette
+                .supplemental()
+                .iter()
+                .map(|family| font_arc(family, true).expect("supplemental bold must resolve"))
+                .collect(),
+            fallback: font_arc(palette.fallback(), false).expect("fallback must resolve"),
+            mono: Arc::clone(
+                &font_arc(palette.primary(), false).expect("test mono substitute must resolve"),
+            ),
+        };
+        let blocks = parse_markdown(
+            "**Meaning.**\n- **a financial institution that safeguards deposits and lends money to people and companies [finance]**\n- the sloping ground immediately beside a river, lake, canal, or similar body of water [landform]\n- a stored reserve of blood, data, food, or other resources for future use [reserve]\n- a long row or tier of matching objects arranged closely beside one another [row]\n- to rely confidently on a person, promise, event, or expected future result [rely]\n- to tilt an aircraft sideways while turning by raising one wing above another [aviation]\nThe noun senses grew from ideas of an edge or accumulated mass; the verbs developed separately.\n\n**Where you'll hear it.** Common in finance, geography, computing, medicine, aviation, and dependent plans.\n\n**Where it's out of place.** Do not use the finance sense for a wallet, safe, or ordinary container.\n\n**Subtlety.** Bank on takes a person or outcome; bank the aircraft names deliberate sideways tilt.",
+        );
+        let view = ClassifierView::from(&parsed);
+        let layout = explanation_layout(&blocks, 95.0, EXPLAIN_SIZE_MIN, view);
+        let expected = blocks
+            .iter()
+            .flat_map(|block| match block {
+                Block::Paragraph(chunks) | Block::Bullet { chunks, .. } => chunks.as_slice(),
+            })
+            .flat_map(|chunk| chunk.text.split_whitespace())
+            .map(String::from)
+            .collect::<Vec<_>>();
+        let actual = layout
+            .rows
+            .iter()
+            .flat_map(|row| row.chunks.as_slice())
+            .flat_map(|chunk| chunk.text.split_whitespace())
+            .map(String::from)
+            .collect::<Vec<_>>();
+        let spaced_bullet_rows = layout
+            .rows
+            .iter()
+            .filter(|row| row.bullet.is_some() && row.gap_before > 0.0)
+            .count();
+        assert_eq!(
+            (actual, spaced_bullet_rows),
+            (expected, 1),
+            "the six-sense plan omitted content or spaced adjacent bullets"
+        );
+    }
+
+    /// Rendering the dense two-line card emits an identifying tail token from
+    /// every reviewed sense and context section instead of stopping at PAD.
+    #[test]
+    fn a_dense_six_sense_back_emits_every_planned_content_tail() {
+        let item = dense_six_sense_entry();
+        let mut sheet = CardSheet::new();
+        sheet.append(&item, None);
+        let fonts = sheet.prepare_fonts().expect("sheet fonts must resolve");
+        let mut document = PdfDocument::new("dense six-sense back");
+        let ids = fonts.register(&mut document);
+        let plan = CardPlan::build(&item);
+        let view = ClassifierView::from(&fonts);
+        let target_lines = wrap_runs(plan.back_phrase.as_slice(), 95.0, super::EN_SIZE, view).len();
+        let meaning_lines = wrap_runs(
+            &[plain_chunk(plan.meaning.as_str())],
+            95.0,
+            super::MEANING_SIZE,
+            view,
+        )
+        .len();
+        let mut ops = Vec::new();
+        for page in sheet.pages(&fonts).expect("card must fit") {
+            for fragment in page {
+                sheet.draw_face(&mut ops, &fonts, &ids, &fragment, false);
+            }
+        }
+        let emitted = ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::ShowText { items } => Some(items.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|item| match item {
+                TextItem::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        let anchors = [
+            "target-anchor",
+            "meaning-anchor",
+            "[finance]",
+            "[landform]",
+            "[reserve]",
+            "[row]",
+            "[rely]",
+            "[aviation]",
+            "plans.",
+            "container.",
+            "final-context-anchor.",
+        ]
+        .map(|anchor| emitted.contains(anchor));
+        assert_eq!(
+            (target_lines, meaning_lines, anchors),
+            (2, 2, [true; 11]),
+            "the dense card did not wrap its fixed rows twice and emit every planned context tail"
+        );
+    }
+
+    /// An unbroken term or URL stays within a narrow face without losing letters.
+    #[test]
+    fn long_unbroken_tokens_wrap_without_escaping_the_text_frame() {
+        let item = dense_six_sense_entry();
+        let mut sheet = CardSheet::new();
+        sheet.append(&item, None);
+        let fonts = sheet.prepare_fonts().expect("sheet fonts must resolve");
+        let view = ClassifierView::from(&fonts);
+        let input = "unbrokenword".repeat(43);
+        let lines = wrap_runs(&[super::bold_chunk(&input)], 35.0, super::PHRASE_SIZE, view);
+        let output = lines
+            .iter()
+            .flatten()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<String>();
+        assert_eq!(
+            (
+                output,
+                lines
+                    .iter()
+                    .all(|line| super::measure_runs(view, line, super::PHRASE_SIZE) <= 35.001)
+            ),
+            (input, true),
+            "an unbroken token lost letters or crossed the narrow face width"
+        );
+    }
+
+    /// Dense reviewed meanings fit one original card without reducing their content.
+    #[test]
+    fn dense_cards_fit_the_original_size_above_the_readable_floor() {
+        let item = dense_six_sense_entry();
+        let mut sheet = CardSheet::new();
+        sheet.append(&item, None);
+        let fonts = sheet.prepare_fonts().expect("sheet fonts must resolve");
+        let pages = sheet.pages(&fonts).expect("dense card must fit");
+        let card = &pages[0][0];
+        let sizes = card
+            .faces
+            .back
+            .iter()
+            .filter_map(|row| match &row.content {
+                super::RowContent::Text {
+                    bullet: Some(_), ..
+                } => Some(row.size),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            pages.len() == 1
+                && pages[0].len() == 1
+                && sizes.iter().all(|size| *size >= super::EXPLAIN_SIZE_MIN)
+                && super::rows_height(&card.faces.back) <= super::HALF_H - card.faces.padding * 2.0,
+            "a dense card changed size, crossed its inset, or fell below the ordinary type floor"
+        );
+    }
+
+    /// Dense and short cards share four original rows and the original guides.
+    #[test]
+    fn dense_cards_keep_four_fixed_rows_and_the_original_cut_guides() {
+        let dense = dense_six_sense_entry();
+        let mut short = dense.clone();
+        short.source.context =
+            NonEmptyText::new("A short explanation").expect("context must be valid");
+        let mut sheet = CardSheet::new();
+        for item in [&short, &dense, &short, &short] {
+            sheet.append(item, None);
+        }
+        let fonts = sheet.prepare_fonts().expect("sheet fonts must resolve");
+        let pages = sheet.pages(&fonts).expect("cards must fit");
+        let geometry = pages
+            .iter()
+            .map(|page| page.iter().map(|card| card.card).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let mut cuts = Vec::new();
+        super::draw_cut_lines(&mut cuts, &pages[0]);
+        let positions = cuts
+            .iter()
+            .filter_map(|op| match op {
+                Op::DrawLine { line } => Some(line.points[0].p.y.0),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let expected = [super::HALF_H * 3.0, super::HALF_H * 2.0, super::HALF_H]
+            .map(|y| printpdf::Point::new(printpdf::Mm(0.0), printpdf::Mm(y)).y.0);
+        assert_eq!(
+            (geometry, positions),
+            (vec![vec![0, 1, 2, 3]], expected.to_vec()),
+            "dense content changed the four-card row allocation or cut positions"
+        );
+    }
+
+    /// The fixed front remains the source prompt without answer-bearing labels.
+    #[test]
+    fn fixed_fronts_dont_disclose_the_target_term() {
+        let mut item = dense_six_sense_entry();
+        item.term = NonEmptyText::new("secretanswer").expect("term must be valid");
+        let mut sheet = CardSheet::new();
+        sheet.append(&item, None);
+        let fonts = sheet.prepare_fonts().expect("sheet fonts must resolve");
+        let mut document = PdfDocument::new("fixed fronts");
+        let ids = fonts.register(&mut document);
+        let pages = sheet.pages(&fonts).expect("card must fit");
+        let mut ops = Vec::new();
+        for card in pages.iter().flatten() {
+            sheet.draw_face(&mut ops, &fonts, &ids, card, true);
+        }
+        let emitted = ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::ShowText { items } => Some(items),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|item| match item {
+                TextItem::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        assert!(
+            !emitted.contains("secretanswer") && !emitted.contains("part"),
+            "a fixed front disclosed the answer or gained a continuation label"
+        );
+    }
+
+    /// Each unbounded imported field fails before rendering outside a fixed face.
+    #[test]
+    fn oversized_fields_are_refused_instead_of_leaving_their_fixed_faces() {
+        let rejected = (0..7)
+            .filter(|index| {
+                let mut item = dense_six_sense_entry();
+                let long = NonEmptyText::new("unboundedword ".repeat(900))
+                    .expect("long text must be valid");
+                match index {
+                    0 => item.source.sentence = long,
+                    1 => item.source.hint = long,
+                    2 => item.target.sentence = long,
+                    3 => item.term = long,
+                    4 => item.pronunciation = long,
+                    5 => item.meaning = long,
+                    _ => item.source.context = long,
+                }
+                let mut sheet = CardSheet::new();
+                sheet.append(&item, None);
+                let fonts = sheet.prepare_fonts().expect("sheet fonts must resolve");
+                sheet.pages(&fonts).is_err()
+            })
+            .count();
+        assert_eq!(
+            rejected, 7,
+            "an unbounded field escaped its fixed face or was silently truncated"
+        );
+    }
+
+    /// Fitting preserves every surviving context character and its emphasis.
+    #[test]
+    fn fixed_fitting_keeps_every_reviewed_sense_and_usage_character() {
+        let item = dense_six_sense_entry();
+        let mut sheet = CardSheet::new();
+        sheet.append(&item, None);
+        let fonts = sheet.prepare_fonts().expect("sheet fonts must resolve");
+        let plan = CardPlan::build(&item);
+        let layout = super::CardLayout::build(&plan, &fonts).expect("card must fit");
+        let expected = plan
+            .explanation
+            .iter()
+            .flat_map(|block| match block {
+                Block::Paragraph(chunks) | Block::Bullet { chunks, .. } => chunks,
+            })
+            .flat_map(|chunk| {
+                chunk
+                    .text
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .map(|character| (character, chunk.bold, chunk.italic))
+            })
+            .collect::<Vec<_>>();
+        let start = layout
+            .back
+            .iter()
+            .position(|row| matches!(row.content, super::RowContent::Importance(_)))
+            .expect("importance must precede context")
+            + 1;
+        let actual = layout.back[start..]
+            .iter()
+            .flat_map(|row| match &row.content {
+                super::RowContent::Text { chunks, .. } => chunks.as_slice(),
+                _ => &[],
+            })
+            .flat_map(|chunk| {
+                chunk
+                    .text
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .map(|character| (character, chunk.bold, chunk.italic))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual, expected,
+            "fixed fitting dropped, reordered, or restyled a reviewed sense or usage explanation"
         );
     }
 

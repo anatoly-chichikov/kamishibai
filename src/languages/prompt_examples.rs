@@ -22,6 +22,11 @@ pub(crate) struct LanguagePromptExamples {
 }
 
 impl LanguagePromptExamples {
+    /// Render localized pairs demonstrating natural learner-facing wording.
+    pub(crate) fn writing(&self) -> Result<String> {
+        Ok(serde_json::to_string_pretty(&self.card.writing)?)
+    }
+
     /// Render localized sense markers and forbidden wording as typed JSON.
     pub(crate) fn sense_conventions(&self) -> Result<String> {
         Ok(serde_json::to_string_pretty(&SenseConventions {
@@ -85,13 +90,6 @@ impl LanguagePromptExamples {
             &self.understanding.intake.secondary,
             &self.understanding.intake.hinted,
         ];
-        let parts = intake.iter().all(|example| {
-            self.understanding
-                .markers
-                .parts
-                .iter()
-                .any(|part| starts_with_case_folded(&example.understanding, part))
-        });
         let tags = intake.iter().all(|example| {
             example.tag.as_ref().is_none_or(|tag| {
                 self.understanding
@@ -112,17 +110,16 @@ impl LanguagePromptExamples {
         let longer = self.recall.focus.longer.to_lowercase();
         let fragment = self.recall.fragment.visible.to_uppercase()
             == self.recall.fragment.sentence_end.to_uppercase();
-        parts
-            && tags
-            && lengths
+        tags && lengths
             && structural
+            && self.card.writing.iter().all(WritingExample::valid)
             && nonempty(self.understanding.markers.tags.iter())
             && nonempty(self.understanding.markers.parts.iter())
             && nonempty(self.understanding.forbidden.starters.iter())
             && nonempty(self.understanding.forbidden.joins.iter())
             && nonempty(self.understanding.forbidden.fillers.iter())
             && nonempty(self.card.hint.bad.iter())
-            && self.card.hint.good.matches("<near target word>").count() == 1
+            && !self.card.hint.good.trim().is_empty()
             && self.spacing.accepts_hint(&self.card.hint.good)
             && self
                 .card
@@ -160,7 +157,9 @@ enum TextSpacing {
 impl TextSpacing {
     fn understanding(self) -> &'static str {
         match self {
-            Self::Words => "between 6 and 14 space-delimited words",
+            Self::Words => {
+                "at most 14 space-delimited words, with no minimum; never pad a complete meaning"
+            }
             Self::Unspaced => {
                 "one natural sentence of comparable brevity without artificial spaces"
             }
@@ -178,7 +177,7 @@ impl TextSpacing {
 
     fn accepts_understanding(self, value: &str) -> bool {
         match self {
-            Self::Words => (6..=14).contains(&value.split_whitespace().count()),
+            Self::Words => (1..=14).contains(&value.split_whitespace().count()),
             Self::Unspaced => !value.contains(' '),
         }
     }
@@ -250,6 +249,23 @@ struct SenseConventions<'a> {
 struct CardExamples {
     hint: HintExamples,
     context: ContextExamples,
+    writing: [WritingExample; 2],
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct WritingExample {
+    bad: String,
+    good: String,
+}
+
+impl WritingExample {
+    #[must_use]
+    fn valid(&self) -> bool {
+        !self.bad.trim().is_empty()
+            && !self.good.trim().is_empty()
+            && self.bad.trim() != self.good.trim()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -306,6 +322,13 @@ pub(crate) fn recall_document() -> String {
         .expect("invariant: typed recall examples must serialize for policy hashing")
 }
 
+/// Recognize the meaning heading shared by supported card explanation formats.
+pub(crate) fn is_meaning_header(header: &str) -> bool {
+    catalog()
+        .values()
+        .any(|examples| examples.card.context.headers[0] == header)
+}
+
 fn catalog() -> &'static BTreeMap<String, LanguagePromptExamples> {
     EXAMPLES.get_or_init(|| {
         let values = serde_json::from_str::<BTreeMap<String, LanguagePromptExamples>>(DOCUMENT)
@@ -324,10 +347,6 @@ fn catalog() -> &'static BTreeMap<String, LanguagePromptExamples> {
     })
 }
 
-fn starts_with_case_folded(value: &str, prefix: &str) -> bool {
-    value.to_lowercase().starts_with(&prefix.to_lowercase())
-}
-
 fn nonempty<'a>(mut values: impl Iterator<Item = &'a String>) -> bool {
     let mut seen = false;
     let filled = values.all(|value| {
@@ -339,8 +358,263 @@ fn nonempty<'a>(mut values: impl Iterator<Item = &'a String>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::examples;
+    use super::{TextSpacing, examples};
     use crate::languages::catalog;
+
+    #[test]
+    fn context_headers_keep_the_original_appropriateness_and_nuance_roles() {
+        let expected = [
+            (
+                "en",
+                [
+                    "Meaning.",
+                    "Where you'll hear it.",
+                    "Where it's out of place.",
+                    "Subtlety.",
+                ],
+            ),
+            ("zh", ["含义", "常见场景", "不适用的场合", "细微差别"]),
+            (
+                "es",
+                [
+                    "Significado.",
+                    "Dónde lo oirás.",
+                    "Dónde desentona.",
+                    "Matiz.",
+                ],
+            ),
+            (
+                "ja",
+                ["意味", "どこで耳にするか", "不自然な場面", "ニュアンス"],
+            ),
+            (
+                "fr",
+                ["Sens.", "Où vous l’entendrez.", "Où il détonne.", "Nuance."],
+            ),
+            (
+                "de",
+                [
+                    "Bedeutung.",
+                    "Wo du es hörst.",
+                    "Wo es unpassend ist.",
+                    "Nuance.",
+                ],
+            ),
+            (
+                "ru",
+                ["Значение.", "Где встречается.", "Где неуместно.", "Нюанс."],
+            ),
+            (
+                "it",
+                [
+                    "Significato.",
+                    "Dove lo sentirai.",
+                    "Dove stona.",
+                    "Sfumatura.",
+                ],
+            ),
+            (
+                "pt",
+                [
+                    "Significado.",
+                    "Onde você ouvirá.",
+                    "Onde não combina.",
+                    "Nuance.",
+                ],
+            ),
+            (
+                "el",
+                [
+                    "Σημασία.",
+                    "Πού θα το ακούσεις.",
+                    "Πού δεν ταιριάζει.",
+                    "Απόχρωση.",
+                ],
+            ),
+            (
+                "nl",
+                [
+                    "Betekenis.",
+                    "Waar je het hoort.",
+                    "Waar het niet past.",
+                    "Nuance.",
+                ],
+            ),
+            (
+                "ko",
+                [
+                    "뜻.",
+                    "자연스럽게 쓰는 상황.",
+                    "어색해지는 상황.",
+                    "말맛과 뉘앙스.",
+                ],
+            ),
+            (
+                "tr",
+                [
+                    "Anlamı.",
+                    "Doğal kullanıldığı yer.",
+                    "Yadırganacağı yer.",
+                    "Söyleyiş inceliği.",
+                ],
+            ),
+            (
+                "pl",
+                [
+                    "Znaczenie.",
+                    "Naturalny kontekst.",
+                    "Kontekst, w którym razi.",
+                    "Odcień znaczeniowy.",
+                ],
+            ),
+            (
+                "uk",
+                [
+                    "Значення.",
+                    "Природний контекст.",
+                    "Недоречний контекст.",
+                    "Смисловий відтінок.",
+                ],
+            ),
+            (
+                "id",
+                [
+                    "Makna.",
+                    "Konteks yang wajar.",
+                    "Konteks yang terasa janggal.",
+                    "Nuansa pemakaian.",
+                ],
+            ),
+            (
+                "hi",
+                [
+                    "अर्थ।",
+                    "स्वाभाविक प्रयोग।",
+                    "जहाँ प्रयोग अटपटा लगे।",
+                    "भाव और लहजा।",
+                ],
+            ),
+            (
+                "ar",
+                [
+                    "المعنى.",
+                    "موضع الاستعمال الطبيعي.",
+                    "موضع لا يلائمه.",
+                    "الإيحاء والأسلوب.",
+                ],
+            ),
+            (
+                "th",
+                [
+                    "ความหมาย",
+                    "บริบทที่ใช้ได้เป็นธรรมชาติ",
+                    "บริบทที่ฟังดูไม่เข้าที่",
+                    "น้ำเสียงและนัย",
+                ],
+            ),
+            (
+                "he",
+                ["משמעות.", "הקשר טבעי.", "הקשר שבו זה צורם.", "גוון ומשלב."],
+            ),
+            (
+                "vi",
+                [
+                    "Nghĩa.",
+                    "Ngữ cảnh dùng tự nhiên.",
+                    "Ngữ cảnh nghe gượng.",
+                    "Sắc thái và văn phong.",
+                ],
+            ),
+            (
+                "cs",
+                [
+                    "Význam.",
+                    "Přirozený kontext.",
+                    "Kontext, kde působí nepatřičně.",
+                    "Významový odstín.",
+                ],
+            ),
+        ];
+        let actual = expected
+            .iter()
+            .map(|(code, _)| {
+                let value: serde_json::Value = serde_json::from_str(
+                    &examples(code)
+                        .context()
+                        .expect("context examples must render"),
+                )
+                .expect("context examples must be JSON");
+                (*code, value["headers"].clone())
+            })
+            .collect::<Vec<_>>();
+        let rendered = expected
+            .iter()
+            .map(|(code, headers)| {
+                (
+                    *code,
+                    serde_json::json!(headers.map(|header| format!("**{header}**"))),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (actual, expected.len()),
+            (rendered, catalog().codes().len()),
+            "context headers lost their original localized appropriateness or nuance role"
+        );
+    }
+
+    #[test]
+    fn short_accurate_understandings_dont_require_padding() {
+        assert!(
+            TextSpacing::Words.accepts_understanding("Гл. Двигаться по воздуху."),
+            "a concise meaning still needs incidental detail just to reach a word minimum"
+        );
+    }
+
+    #[test]
+    fn writing_examples_cannot_have_an_empty_bad_side() {
+        let mut sample = examples("ru");
+        sample.card.writing[0].bad = String::from(" \t");
+        assert!(
+            !sample.valid(),
+            "a writing example accepted an empty bad side"
+        );
+    }
+
+    #[test]
+    fn writing_examples_cannot_have_an_empty_good_side() {
+        let mut sample = examples("ja");
+        sample.card.writing[1].good = String::from(" \t");
+        assert!(
+            !sample.valid(),
+            "a writing example accepted an empty good side"
+        );
+    }
+
+    #[test]
+    fn writing_examples_cannot_treat_padding_as_a_wording_improvement() {
+        let mut sample = examples("en");
+        sample.card.writing[0].bad = format!(" {} ", sample.card.writing[0].good);
+        assert!(
+            !sample.valid(),
+            "a writing example treated whitespace as a wording improvement"
+        );
+    }
+
+    #[test]
+    fn intake_examples_dont_require_grammar_labels() {
+        let mut sample = examples("ru");
+        sample.understanding.intake.primary.understanding =
+            String::from("<одно понятное основное значение>");
+        sample.understanding.intake.secondary.understanding =
+            String::from("<другое отдельное значение>");
+        sample.understanding.intake.hinted.understanding =
+            String::from("<значение из подсказки пользователя>");
+        assert!(
+            sample.valid(),
+            "plain intake examples still require grammar labels before their meanings"
+        );
+    }
 
     #[test]
     fn every_supported_language_has_typed_prompt_examples() {

@@ -9,7 +9,7 @@ use anyhow::{Result, anyhow, bail};
 
 use super::bridge::TuiSession;
 use super::jobs::{ArtifactOutcome, StudyPublishMessage, TextOutcome};
-use super::session::drop_incomplete_artifacts;
+use super::session::drop_incomplete_card_artifacts;
 use super::wiring::{GeminiCardWorkflow, GeminiKeyValidation, interactive_application};
 use crate::application::{CardUseCases, KeyValidation, PublishPhase, PublishProgress};
 use crate::config::{PreferenceStore, Preferences, default_store};
@@ -929,25 +929,14 @@ where
             .cards()
             .iter()
             .filter(|draft| draft.artifacts().has_failed())
-            .map(|draft| {
-                (
-                    draft.pair().clone(),
-                    draft.term().to_string(),
-                    draft.understanding().to_string(),
-                )
-            })
+            .cloned()
             .collect::<Vec<_>>();
         let refused = failed
             .iter()
-            .filter_map(|(pair, term, understanding)| {
-                drop_incomplete_artifacts(
-                    self.cache.as_path(),
-                    pair,
-                    term.as_str(),
-                    understanding.as_str(),
-                )
-                .err()
-                .map(|error| format!("{term}: {error:#}"))
+            .filter_map(|draft| {
+                drop_incomplete_card_artifacts(self.cache.as_path(), draft)
+                    .err()
+                    .map(|error| format!("{}: {error:#}", draft.term()))
             })
             .collect::<Vec<_>>();
         if let Some(first) = refused.first() {
@@ -1288,7 +1277,7 @@ where
             self.app = self.app.clone().generation_cancellation_started();
             self.cancel_stopped_generation(Some(message));
         } else {
-            self.app = self.app.clone().error_shown(message);
+            self.app = self.app.clone().publication_failed(message);
         }
     }
 
@@ -1296,16 +1285,21 @@ where
         if let Some(session) = self.session.as_mut()
             && let Err(error) = session.cancel_and_start_next(&self.app, self.output.as_path())
         {
-            let message = match notice {
-                Some(notice) => format!("{notice}; session not cancelled: {error:#}"),
-                None => format!("session not cancelled: {error:#}"),
+            self.app = match notice {
+                Some(notice) => self
+                    .app
+                    .clone()
+                    .publication_failed(format!("{notice}; session not cancelled: {error:#}")),
+                None => self
+                    .app
+                    .clone()
+                    .error_shown(format!("session not cancelled: {error:#}")),
             };
-            self.app = self.app.clone().error_shown(message);
             return true;
         }
         self.app = self.app.clone().starting_new_batch();
         if let Some(notice) = notice {
-            self.app = self.app.clone().error_shown(notice);
+            self.app = self.app.clone().publication_failed(notice);
         }
         true
     }
@@ -1333,13 +1327,12 @@ fn drafts_from(app: &App) -> Vec<CardDraft> {
         .iter()
         .filter(|candidate| candidate.ok())
         .flat_map(|candidate| {
-            candidate
-                .selected_senses()
-                .iter()
-                .filter_map(|index| candidate.senses().get(*index))
-                .map(|sense| {
-                    CardDraft::new(candidate.term(), sense.understanding(), app.pair().clone())
-                })
+            candidate.selected_senses().iter().filter_map(|index| {
+                candidate
+                    .senses()
+                    .get(*index)
+                    .map(|_| CardDraft::from_candidate(candidate, *index, app.pair().clone()))
+            })
         })
         .collect::<Vec<_>>();
     let count = drafts.len();
@@ -2704,6 +2697,7 @@ mod tests {
             .map(|draft| DraftRecord {
                 term: draft.term().to_string(),
                 understanding: draft.understanding().to_string(),
+                reviewed_senses: Vec::new(),
                 costs: ArtifactCosts::default(),
                 meta_request: None,
                 rewrite: None,
@@ -2801,6 +2795,7 @@ mod tests {
             .map(|draft| DraftRecord {
                 term: draft.term().to_string(),
                 understanding: draft.understanding().to_string(),
+                reviewed_senses: Vec::new(),
                 costs: ArtifactCosts::default(),
                 meta_request: None,
                 rewrite: None,
@@ -3463,6 +3458,7 @@ mod tests {
             DraftRecord {
                 term: String::from("alpha"),
                 understanding: String::from("first understanding"),
+                reviewed_senses: Vec::new(),
                 costs: first,
                 meta_request: None,
                 rewrite: None,
@@ -3470,6 +3466,7 @@ mod tests {
             DraftRecord {
                 term: String::from("beta"),
                 understanding: String::from("second understanding"),
+                reviewed_senses: Vec::new(),
                 costs: second,
                 meta_request: None,
                 rewrite: None,
@@ -3735,6 +3732,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("alpha"),
             understanding: String::from("first understanding"),
+            reviewed_senses: Vec::new(),
             costs: ArtifactCosts::default(),
             meta_request: None,
             rewrite: None,
@@ -3884,6 +3882,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("alpha"),
             understanding: String::from("first understanding"),
+            reviewed_senses: Vec::new(),
             costs: ArtifactCosts::default(),
             meta_request: None,
             rewrite: None,
@@ -4118,11 +4117,17 @@ mod tests {
 
     #[test]
     fn ctrl_g_on_finished_cards_rebuilds_publish_outputs() {
-        let mut shell = shell(review().understood(vec![candidate("whilst")]));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut shell = shell_with(
+            review().understood(vec![candidate("whilst")]),
+            TestWorkflow::counting(Arc::clone(&calls)),
+        );
         shell
             .handle(AppEvent::Generate)
             .expect("generate must start generation");
         settle_shell(&mut shell, 200);
+        let before = calls.load(Ordering::SeqCst);
+        let drafts = shell.app.cards().to_vec();
         let side = shell
             .handle(AppEvent::Generate)
             .expect("Ctrl+G regenerate must start");
@@ -4137,13 +4142,17 @@ mod tests {
                 during,
                 shell.app.done_artifacts().deck.ends_with(".apkg"),
                 shell.app.done_artifacts().report.ends_with(".pdf"),
+                calls.load(Ordering::SeqCst) - before,
+                shell.app.cards() == drafts.as_slice(),
             ),
             (
                 (Side::RegenerateCards, Some(BusyKind::PublishingDeck), true),
                 true,
                 true,
+                1,
+                true,
             ),
-            "Ctrl+G on finished cards must clear stale outputs and rebuild APKG/PDF"
+            "Ctrl+G on finished cards changed cached drafts or called more than the publisher"
         );
     }
 
@@ -4259,6 +4268,71 @@ mod tests {
         assert!(
             settled && shell.engine.is_none(),
             "a failed publish must clear the engine so it stops instead of auto-relooping publish"
+        );
+    }
+
+    #[test]
+    fn a_failed_publication_cannot_render_as_a_gemini_connection_failure() {
+        let mut shell = shell_with(
+            review().understood(vec![candidate("whilst")]),
+            TestWorkflow::publish_failing(),
+        );
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        settle_shell(&mut shell, 300);
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 40))
+            .expect("terminal must initialize");
+        terminal
+            .draw(|frame| crate::tui::draw(frame, &shell.app))
+            .expect("publication failure must render");
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(
+            rendered.contains("could not save your cards")
+                && rendered.contains("publish boom")
+                && !rendered.contains("can't reach gemini")
+                && !rendered.contains("all done"),
+            "publication failure blamed Gemini or claimed that the unsaved package was done"
+        );
+    }
+
+    #[test]
+    fn retrying_a_failed_publication_cannot_regenerate_completed_cards() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut shell = shell_with(
+            review().understood(vec![candidate("whilst")]),
+            TestWorkflow {
+                failure: None,
+                publish_fails: true,
+                calls: Some(Arc::clone(&calls)),
+                _directory: None,
+            },
+        );
+        shell
+            .handle(AppEvent::Generate)
+            .expect("generation must start");
+        settle_shell(&mut shell, 300);
+        let before = calls.load(Ordering::SeqCst);
+        let drafts = shell.app.cards().to_vec();
+        shell
+            .handle(AppEvent::Generate)
+            .expect("the publication retry must start");
+        settle_shell(&mut shell, 300);
+        assert_eq!(
+            (
+                calls.load(Ordering::SeqCst) - before,
+                shell.app.cards() == drafts.as_slice(),
+                shell.app.error_title(),
+                shell.app.done_artifacts().deck.is_empty(),
+            ),
+            (1, true, Some("could not save your cards"), true),
+            "publication retry called generation, changed completed cards, or lost the saving failure"
         );
     }
 

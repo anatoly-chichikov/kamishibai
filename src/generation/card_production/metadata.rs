@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow};
 
 use super::artifact_file;
 use super::cost_accounting::CostAccounting;
-use super::invalidate_card;
+use super::invalidate_draft;
 use super::invalidation::{DependentGuards, clear_for_meta_refresh};
 use crate::gemini::GeminiAccess;
 use crate::generation::artifact_cache::{Cache, META_FILE, ROOT_STAGE_LOCK_TIMEOUT, RootStage};
@@ -44,7 +44,19 @@ impl MetadataProduction {
         request: Option<&SentenceLabelSelection>,
         slot: Option<usize>,
     ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
-        let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
+        let draft = CardDraft::new(term, understanding, pair.clone());
+        self.generate_draft(&draft, request, slot)
+    }
+
+    /// Generate or load one metadata document under its reviewed-sense identity.
+    pub(super) fn generate_draft(
+        &self,
+        draft: &CardDraft,
+        request: Option<&SentenceLabelSelection>,
+        slot: Option<usize>,
+    ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
+        let cell = CardCell::for_draft(self.cache.clone(), draft);
+        let cache = cell.cache();
         let visual = match cache.visual(visual_revision()) {
             Ok(visual) => visual,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
@@ -53,25 +65,23 @@ impl MetadataProduction {
             Ok(meta) => meta,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        match self.meta_cache().load_current(term, understanding, pair) {
+        match self.meta_cache().load_current_at(&cell) {
             Ok(Some(meta)) if request.is_none_or(|request| request.pinned().is_empty()) => {
                 let result = match meta.sentence_labels().cloned() {
                     Some(labels) if !labels.pinned().is_empty() || !labels.approx().is_empty() => {
                         let labels = labels.with_axis_state(AxisSet::default(), AxisSet::default());
                         let meta = meta.with_sentence_labels(labels);
-                        self.replace_cached(term, understanding, pair, &meta)
+                        self.replace_cached_at(&cell, draft, &meta)
                             .map(|file| (meta, Some(file)))
                     }
-                    _ => self
-                        .cached_file(term, understanding, pair)
-                        .map(|file| (meta, Some(file))),
+                    _ => self.cached_file_at(&cell).map(|file| (meta, Some(file))),
                 };
                 return ArtifactAttempt::unmetered(result);
             }
             Ok(Some(meta)) => {
                 if let Some(meta) = requested_cached(meta, request) {
                     let result = self
-                        .replace_cached(term, understanding, pair, &meta)
+                        .replace_cached_at(&cell, draft, &meta)
                         .map(|file| (meta, Some(file)));
                     return ArtifactAttempt::unmetered(result);
                 }
@@ -89,11 +99,9 @@ impl MetadataProduction {
         };
         let costs = self.costs.recorder(cache.clone(), Artifact::Meta, slot);
         let result = client
-            .generate_card_meta_observed(term, understanding, pair, request, |record| {
-                costs.push(record)
-            })
+            .generate_draft_meta_observed(draft, request, |record| costs.push(record))
             .and_then(|meta| {
-                self.replace_generated(&cache, &visual, term, understanding, pair, &meta)
+                self.replace_generated_at(&cell, &cache, &visual, draft, &meta)
                     .map(|file| (meta, Some(file)))
             });
         match costs.cumulative(false) {
@@ -114,13 +122,7 @@ impl MetadataProduction {
             Ok(client) => client,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        let cache = CardCell::new(
-            self.cache.clone(),
-            pair,
-            draft.term(),
-            draft.understanding(),
-        )
-        .cache();
+        let cache = CardCell::for_draft(self.cache.clone(), draft).cache();
         let costs = self.costs.recorder(cache, Artifact::Meta, slot);
         let result =
             client.correct_card_observed(draft, comment, pair, |cost| costs.push_correction(cost));
@@ -145,13 +147,7 @@ impl MetadataProduction {
             Ok(client) => client,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        let cache = CardCell::new(
-            self.cache.clone(),
-            draft.pair(),
-            draft.term(),
-            draft.understanding(),
-        )
-        .cache();
+        let cache = CardCell::for_draft(self.cache.clone(), draft).cache();
         let costs = self.costs.recorder(cache, Artifact::Meta, Some(slot));
         let result = client
             .correct_card_observed(draft, rewrite.note(), draft.pair(), |cost| {
@@ -190,20 +186,14 @@ impl MetadataProduction {
     }
 
     fn replace(&self, draft: &CardDraft, revision: &CardRevision) -> Result<ArtifactFile> {
-        invalidate_card(
-            self.cache.as_path(),
-            draft.pair(),
-            draft.term(),
-            draft.understanding(),
-            false,
-            true,
-        )?;
-        self.store(
-            revision.term(),
-            revision.understanding(),
-            draft.pair(),
-            revision.meta(),
-        )
+        invalidate_draft(self.cache.as_path(), draft, false, true)?;
+        let revised = draft.clone().with_revision(revision.clone(), None);
+        let cell = CardCell::for_draft(self.cache.clone(), &revised);
+        let cache = cell.cache();
+        let visual = cache.visual(visual_revision())?;
+        let _meta = cache.hold_root_stage(RootStage::Meta, ROOT_STAGE_LOCK_TIMEOUT)?;
+        let _dependents = DependentGuards::hold(&cache, &visual)?;
+        self.replace_generated_at(&cell, &cache, &visual, &revised, revision.meta())
     }
 
     pub(super) fn replace_generated(
@@ -215,29 +205,58 @@ impl MetadataProduction {
         pair: &LanguagePair,
         meta: &CardMeta,
     ) -> Result<ArtifactFile> {
+        let cell = CardCell::new(self.cache.clone(), pair, term, understanding);
         clear_for_meta_refresh(cache, visual)?;
-        self.replace_meta(term, understanding, pair, meta, false)
+        self.replace_meta_at(&cell, term, understanding, pair, meta, false)
     }
 
-    fn replace_cached(
+    fn replace_generated_at(
         &self,
-        term: &str,
-        understanding: &str,
-        pair: &LanguagePair,
+        cell: &CardCell,
+        cache: &Cache,
+        visual: &Cache,
+        draft: &CardDraft,
         meta: &CardMeta,
     ) -> Result<ArtifactFile> {
-        self.replace_meta(term, understanding, pair, meta, true)
+        clear_for_meta_refresh(cache, visual)?;
+        self.replace_meta_at(
+            cell,
+            draft.term(),
+            draft.understanding(),
+            draft.pair(),
+            meta,
+            false,
+        )
     }
 
-    fn replace_meta(
+    fn replace_cached_at(
         &self,
+        cell: &CardCell,
+        draft: &CardDraft,
+        meta: &CardMeta,
+    ) -> Result<ArtifactFile> {
+        self.replace_meta_at(
+            cell,
+            draft.term(),
+            draft.understanding(),
+            draft.pair(),
+            meta,
+            true,
+        )
+    }
+
+    fn replace_meta_at(
+        &self,
+        cell: &CardCell,
         term: &str,
         understanding: &str,
         pair: &LanguagePair,
         meta: &CardMeta,
         cached: bool,
     ) -> Result<ArtifactFile> {
-        let (filename, path) = self.meta_cache().replace(term, understanding, pair, meta)?;
+        let (filename, path) =
+            self.meta_cache()
+                .replace_at(cell, term, understanding, pair, meta)?;
         Ok(artifact_file(filename, path, cached, None))
     }
 
@@ -247,7 +266,12 @@ impl MetadataProduction {
         understanding: &str,
         pair: &LanguagePair,
     ) -> Result<ArtifactFile> {
-        let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
+        let cell = CardCell::new(self.cache.clone(), pair, term, understanding);
+        self.cached_file_at(&cell)
+    }
+
+    fn cached_file_at(&self, cell: &CardCell) -> Result<ArtifactFile> {
+        let cache = cell.cache();
         Ok(artifact_file(
             String::from(META_FILE),
             cache.filepath(META_FILE)?,

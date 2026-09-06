@@ -13,15 +13,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "N. <one precise primary meaning in one concise sentence>",
+          "understanding": "<one precise primary meaning in one concise sentence>",
           "tag": null
         },
         "secondary": {
-          "understanding": "N. <one distinct secondary meaning in one concise sentence>",
+          "understanding": "<one distinct secondary meaning in one concise sentence>",
           "tag": null
         },
         "hinted": {
-          "understanding": "V. <the exact meaning selected by the user's hint>",
+          "understanding": "<the exact meaning selected by the user's hint>",
           "tag": null
         },
         "invalid": "This word is not in the detected target language."
@@ -32,13 +32,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Start operating — of a machine.",
+          "good": "A machine starts working."
+        },
+        {
+          "bad": "Indicates the futurity of the action.",
+          "good": "Shows that something will happen later."
+        }
+      ],
       "hint": {
         "bad": [
           "Used when politely asking for something.",
           "Means tired.",
           "Common in business contexts."
         ],
-        "good": "\"<near target word>\" has cranes and trucks; here, rocks enclose still water.",
+        "good": "Rocks enclose still water where a small boat rests.",
         "contrast": "\"<near target word>\" has …; here, …"
       },
       "context": {
@@ -76,15 +86,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "名：<用一个简短句子说明一个准确的主要含义>",
+          "understanding": "<用一个简短句子说明一个准确的主要含义>",
           "tag": null
         },
         "secondary": {
-          "understanding": "名：<用一个简短句子说明另一个不同的含义>",
+          "understanding": "<用一个简短句子说明另一个不同的含义>",
           "tag": null
         },
         "hinted": {
-          "understanding": "动：<准确说明用户提示所指定的含义>",
+          "understanding": "<准确说明用户提示所指定的含义>",
           "tag": null
         },
         "invalid": "这个词不属于检测到的目标语言。"
@@ -95,13 +105,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "开始运转——说的是机器。",
+          "good": "机器开始运转。"
+        },
+        {
+          "bad": "表示动作的将来性。",
+          "good": "说明某件事会在以后发生。"
+        }
+      ],
       "hint": {
         "bad": [
           "用于礼貌地请求某物。",
           "意思是疲倦。",
           "常见于商务语境。"
         ],
-        "good": "「<near target word>」有吊车和卡车；这里有岩石和平静的水面。",
+        "good": "岩石环绕着平静的水面，一艘小船停在其中。",
         "contrast": "「<near target word>」……；这里……"
       },
       "context": {
@@ -134,15 +154,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "Sust. <un sentido principal preciso en una frase breve>",
+          "understanding": "<un sentido principal preciso en una frase breve>",
           "tag": null
         },
         "secondary": {
-          "understanding": "Sust. <otro sentido distinto en una frase breve>",
+          "understanding": "<otro sentido distinto en una frase breve>",
           "tag": null
         },
         "hinted": {
-          "understanding": "V. <el sentido exacto indicado por la pista del usuario>",
+          "understanding": "<el sentido exacto indicado por la pista del usuario>",
           "tag": null
         },
         "invalid": "Esta palabra no pertenece al idioma objetivo detectado."
@@ -153,13 +173,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Empezar a funcionar: dicho de una máquina.",
+          "good": "Una máquina empieza a funcionar."
+        },
+        {
+          "bad": "Indica el carácter futuro de la acción.",
+          "good": "Muestra que algo pasará más tarde."
+        }
+      ],
       "hint": {
         "bad": [
           "Se usa para pedir algo con cortesía.",
           "Significa estar cansado.",
           "Es común en contextos empresariales."
         ],
-        "good": "\"<near target word>\" tiene grúas y camiones; aquí hay rocas y agua tranquila.",
+        "good": "Una barca descansa en agua tranquila entre las rocas.",
         "contrast": "\"<near target word>\" tiene …; aquí …"
       },
       "context": {
@@ -197,15 +227,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "名：<一つの正確な主要語義を短い一文で説明>",
+          "understanding": "<一つの正確な主要語義を短い一文で説明>",
           "tag": null
         },
         "secondary": {
-          "understanding": "名：<別の異なる語義を短い一文で説明>",
+          "understanding": "<別の異なる語義を短い一文で説明>",
           "tag": null
         },
         "hinted": {
-          "understanding": "動：<ユーザーのヒントが指定した意味を正確に説明>",
+          "understanding": "<ユーザーのヒントが指定した意味を正確に説明>",
           "tag": null
         },
         "invalid": "この語は検出された対象言語のものではありません。"
@@ -216,13 +246,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "動き始める。機械について。",
+          "good": "機械が動き始める。"
+        },
+        {
+          "bad": "動作の未来性を示す。",
+          "good": "何かがこれから起こることを表します。"
+        }
+      ],
       "hint": {
         "bad": [
           "丁寧に何かを頼むときに使います。",
           "疲れているという意味です。",
           "ビジネスの場面でよく使います。"
         ],
-        "good": "「<near target word>」にはクレーンとトラックがあり、こちらには岩と静かな水面があります。",
+        "good": "岩に囲まれた静かな水面に小舟が浮かんでいる。",
         "contrast": "「<near target word>」には……、こちらには……"
       },
       "context": {
@@ -255,15 +295,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "N. <un sens principal précis dans une phrase brève>",
+          "understanding": "<un sens principal précis dans une phrase brève>",
           "tag": null
         },
         "secondary": {
-          "understanding": "N. <un autre sens distinct dans une phrase brève>",
+          "understanding": "<un autre sens distinct dans une phrase brève>",
           "tag": null
         },
         "hinted": {
-          "understanding": "V. <le sens exact indiqué par l’indice de l’utilisateur>",
+          "understanding": "<le sens exact indiqué par l’indice de l’utilisateur>",
           "tag": null
         },
         "invalid": "Ce mot n’appartient pas à la langue cible détectée."
@@ -274,13 +314,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Commencer à fonctionner, en parlant d’une machine.",
+          "good": "Une machine se met en marche."
+        },
+        {
+          "bad": "Indique le caractère futur de l’action.",
+          "good": "Montre que quelque chose arrivera plus tard."
+        }
+      ],
       "hint": {
         "bad": [
           "S’emploie pour demander quelque chose poliment.",
           "Signifie être fatigué.",
           "Courant dans les contextes professionnels."
         ],
-        "good": "«<near target word>» montre des grues; ici, des rochers entourent l’eau calme.",
+        "good": "Une barque repose sur l’eau calme entre les rochers.",
         "contrast": "«<near target word>» montre… ; ici…"
       },
       "context": {
@@ -318,15 +368,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "Subst. <eine genaue Hauptbedeutung in einem kurzen Satz>",
+          "understanding": "<eine genaue Hauptbedeutung in einem kurzen Satz>",
           "tag": null
         },
         "secondary": {
-          "understanding": "Subst. <eine andere Bedeutung in einem kurzen Satz>",
+          "understanding": "<eine andere Bedeutung in einem kurzen Satz>",
           "tag": null
         },
         "hinted": {
-          "understanding": "V. <die genaue durch den Hinweis bestimmte Bedeutung>",
+          "understanding": "<die genaue durch den Hinweis bestimmte Bedeutung>",
           "tag": null
         },
         "invalid": "Dieses Wort gehört nicht zur erkannten Zielsprache."
@@ -337,13 +387,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "In Gang kommen – von einer Maschine.",
+          "good": "Eine Maschine fängt an zu laufen."
+        },
+        {
+          "bad": "Zeigt die Zukünftigkeit einer Handlung an.",
+          "good": "Zeigt, dass etwas später passieren wird."
+        }
+      ],
       "hint": {
         "bad": [
           "Wird für eine höfliche Bitte verwendet.",
           "Bedeutet müde.",
           "Ist im Geschäftsumfeld üblich."
         ],
-        "good": "„<near target word>“ zeigt Kräne und Lastwagen; hier umschließen Felsen ruhiges Wasser.",
+        "good": "Zwischen Felsen liegt ein kleines Boot auf ruhigem Wasser.",
         "contrast": "„<near target word>“ zeigt …; hier …"
       },
       "context": {
@@ -381,15 +441,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "Сущ. <одно точное основное значение в коротком предложении>",
+          "understanding": "<одно точное основное значение в коротком предложении>",
           "tag": null
         },
         "secondary": {
-          "understanding": "Сущ. <другое отдельное значение в коротком предложении>",
+          "understanding": "<другое отдельное значение в коротком предложении>",
           "tag": null
         },
         "hinted": {
-          "understanding": "Гл. <точное значение, заданное подсказкой пользователя>",
+          "understanding": "<точное значение, заданное подсказкой пользователя>",
           "tag": null
         },
         "invalid": "Это слово не относится к распознанному целевому языку."
@@ -400,13 +460,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Начинать работать — о машине.",
+          "good": "Машина начинает работать."
+        },
+        {
+          "bad": "Указывает на будущность действия.",
+          "good": "Показывает, что что-то произойдёт позже."
+        }
+      ],
       "hint": {
         "bad": [
           "Используется, когда вежливо о чём-то просят.",
           "Означает усталость.",
           "Часто встречается в деловом контексте."
         ],
-        "good": "«<near target word>»: краны и грузовики; здесь — скалы и тихая вода.",
+        "good": "Небольшая лодка стоит на тихой воде между скалами.",
         "contrast": "«<near target word>»: …; здесь — …"
       },
       "context": {
@@ -444,15 +514,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "S. <un significato principale preciso in una frase breve>",
+          "understanding": "<un significato principale preciso in una frase breve>",
           "tag": null
         },
         "secondary": {
-          "understanding": "S. <un altro significato distinto in una frase breve>",
+          "understanding": "<un altro significato distinto in una frase breve>",
           "tag": null
         },
         "hinted": {
-          "understanding": "V. <il significato esatto indicato dal suggerimento>",
+          "understanding": "<il significato esatto indicato dal suggerimento>",
           "tag": null
         },
         "invalid": "Questa parola non appartiene alla lingua obiettivo rilevata."
@@ -463,13 +533,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Iniziare a funzionare, detto di una macchina.",
+          "good": "Una macchina comincia a funzionare."
+        },
+        {
+          "bad": "Indica la posteriorità dell’azione.",
+          "good": "Indica che qualcosa succederà più tardi."
+        }
+      ],
       "hint": {
         "bad": [
           "Si usa per chiedere qualcosa con cortesia.",
           "Significa essere stanco.",
           "È comune nei contesti aziendali."
         ],
-        "good": "«<near target word>» mostra gru e camion; qui, le rocce circondano l’acqua calma.",
+        "good": "Una barca galleggia sull’acqua calma tra le rocce.",
         "contrast": "«<near target word>» mostra …; qui …"
       },
       "context": {
@@ -507,15 +587,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "S. <um significado principal preciso numa frase breve>",
+          "understanding": "<um significado principal preciso numa frase breve>",
           "tag": null
         },
         "secondary": {
-          "understanding": "S. <outro significado distinto numa frase breve>",
+          "understanding": "<outro significado distinto numa frase breve>",
           "tag": null
         },
         "hinted": {
-          "understanding": "V. <o significado exato indicado pela pista do usuário>",
+          "understanding": "<o significado exato indicado pela pista do usuário>",
           "tag": null
         },
         "invalid": "Esta palavra não pertence ao idioma-alvo detectado."
@@ -526,13 +606,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Começar a funcionar, dito de uma máquina.",
+          "good": "Uma máquina começa a funcionar."
+        },
+        {
+          "bad": "Indica a futuridade da ação.",
+          "good": "Mostra que algo vai acontecer mais tarde."
+        }
+      ],
       "hint": {
         "bad": [
           "Usa-se para pedir algo educadamente.",
           "Significa estar cansado.",
           "É comum em contextos empresariais."
         ],
-        "good": "\"<near target word>\" mostra guindastes e caminhões; aqui, rochas cercam águas calmas.",
+        "good": "Um barco repousa na água calma entre as rochas.",
         "contrast": "\"<near target word>\" mostra …; aqui …"
       },
       "context": {
@@ -570,15 +660,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "Ουσ. <μία ακριβής κύρια σημασία σε σύντομη πρόταση>",
+          "understanding": "<μία ακριβής κύρια σημασία σε σύντομη πρόταση>",
           "tag": null
         },
         "secondary": {
-          "understanding": "Ουσ. <μία άλλη διακριτή σημασία σε σύντομη πρόταση>",
+          "understanding": "<μία άλλη διακριτή σημασία σε σύντομη πρόταση>",
           "tag": null
         },
         "hinted": {
-          "understanding": "Ρήμ. <η ακριβής σημασία που ορίζει η υπόδειξη>",
+          "understanding": "<η ακριβής σημασία που ορίζει η υπόδειξη>",
           "tag": null
         },
         "invalid": "Αυτή η λέξη δεν ανήκει στην αναγνωρισμένη γλώσσα-στόχο."
@@ -589,13 +679,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Αρχίζει να λειτουργεί — για μηχανή.",
+          "good": "Μια μηχανή αρχίζει να λειτουργεί."
+        },
+        {
+          "bad": "Δηλώνει τη μελλοντικότητα της ενέργειας.",
+          "good": "Δείχνει ότι κάτι θα συμβεί αργότερα."
+        }
+      ],
       "hint": {
         "bad": [
           "Χρησιμοποιείται όταν ζητάμε κάτι ευγενικά.",
           "Σημαίνει κουρασμένος.",
           "Είναι συχνό σε επαγγελματικά συμφραζόμενα."
         ],
-        "good": "«<near target word>»: γερανοί και φορτηγά· εδώ, βράχοι και ήρεμο νερό.",
+        "good": "Μια βάρκα επιπλέει σε ήρεμα νερά ανάμεσα σε βράχους.",
         "contrast": "«<near target word>»: …· εδώ, …"
       },
       "context": {
@@ -633,15 +733,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "Zn. <één precieze hoofdbetekenis in een korte zin>",
+          "understanding": "<één precieze hoofdbetekenis in een korte zin>",
           "tag": null
         },
         "secondary": {
-          "understanding": "Zn. <een andere betekenis in een korte zin>",
+          "understanding": "<een andere betekenis in een korte zin>",
           "tag": null
         },
         "hinted": {
-          "understanding": "Ww. <de exacte betekenis die de aanwijzing bepaalt>",
+          "understanding": "<de exacte betekenis die de aanwijzing bepaalt>",
           "tag": null
         },
         "invalid": "Dit woord behoort niet tot de gedetecteerde doeltaal."
@@ -652,13 +752,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Beginnen te werken, gezegd van een machine.",
+          "good": "Een machine begint te werken."
+        },
+        {
+          "bad": "Duidt de toekomstigheid van de handeling aan.",
+          "good": "Laat zien dat iets later zal gebeuren."
+        }
+      ],
       "hint": {
         "bad": [
           "Wordt gebruikt om beleefd iets te vragen.",
           "Betekent moe.",
           "Komt vaak voor in zakelijke contexten."
         ],
-        "good": "‘<near target word>’ toont kranen en vrachtwagens; hier omsluiten rotsen rustig water.",
+        "good": "Een bootje drijft op rustig water tussen de rotsen.",
         "contrast": "‘<near target word>’ toont …; hier …"
       },
       "context": {
@@ -696,15 +806,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "명사: <하나의 정확한 중심 뜻을 짧은 문장으로 설명>",
+          "understanding": "<하나의 정확한 중심 뜻을 짧은 문장으로 설명>",
           "tag": null
         },
         "secondary": {
-          "understanding": "명사: <다른 하나의 뜻을 짧고 분명하게 설명>",
+          "understanding": "<다른 하나의 뜻을 짧고 분명하게 설명>",
           "tag": null
         },
         "hinted": {
-          "understanding": "동사: <사용자 힌트가 가리키는 정확한 뜻을 짧게 설명>",
+          "understanding": "<사용자 힌트가 가리키는 정확한 뜻을 짧게 설명>",
           "tag": null
         },
         "invalid": "이 단어는 감지된 학습 대상 언어에 속하지 않습니다."
@@ -715,13 +825,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "작동하기 시작함 — 기계에 관하여.",
+          "good": "기계가 작동하기 시작해요."
+        },
+        {
+          "bad": "행위의 미래성을 나타냄.",
+          "good": "어떤 일이 나중에 일어난다는 뜻이에요."
+        }
+      ],
       "hint": {
         "bad": [
           "무언가를 정중하게 부탁할 때 씁니다.",
           "피곤하다는 뜻입니다.",
           "업무 상황에서 흔히 씁니다."
         ],
-        "good": "‘<near target word>’ 쪽엔 장독대가 있고, 이쪽엔 대나무 숲이 있다.",
+        "good": "바위 사이 잔잔한 물 위에 작은 배가 떠 있다.",
         "contrast": "‘<near target word>’ 쪽엔 …이 있고, 이쪽엔 …이 있다"
       },
       "context": {
@@ -748,15 +868,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "Ad <tek bir kesin temel anlamı kısa cümlede açıklar>",
+          "understanding": "<tek bir kesin temel anlamı kısa cümlede açıklar>",
           "tag": null
         },
         "secondary": {
-          "understanding": "Ad <ayrı bir ikinci anlamı kısa cümlede açıklar>",
+          "understanding": "<ayrı bir ikinci anlamı kısa cümlede açıklar>",
           "tag": null
         },
         "hinted": {
-          "understanding": "Fiil <kullanıcı ipucunun belirttiği kesin anlamı kısa açıklar>",
+          "understanding": "<kullanıcı ipucunun belirttiği kesin anlamı kısa açıklar>",
           "tag": null
         },
         "invalid": "Bu sözcük algılanan hedef dile ait değil."
@@ -767,13 +887,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Çalışmaya başlamak; bir makine için söylenir.",
+          "good": "Bir makine çalışmaya başlar."
+        },
+        {
+          "bad": "Eylemin gelecekselliğini belirtir.",
+          "good": "Bir şeyin daha sonra olacağını anlatır."
+        }
+      ],
       "hint": {
         "bad": [
           "Kibarca bir şey isterken kullanılır.",
           "Yorgun olmak demektir.",
           "İş ortamında yaygın kullanılır."
         ],
-        "good": "“<near target word>” tarafında vapur ve martılar; burada çamlar sis içinde.",
+        "good": "Kayaların arasında, durgun suda küçük bir tekne duruyor.",
         "contrast": "“<near target word>” tarafında …; burada …"
       },
       "context": {
@@ -800,15 +930,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "Rzecz. <jedno precyzyjne główne znaczenie opisane krótkim zdaniem>",
+          "understanding": "<jedno precyzyjne główne znaczenie opisane krótkim zdaniem>",
           "tag": null
         },
         "secondary": {
-          "understanding": "Rzecz. <inne odrębne znaczenie opisane jednym krótkim zdaniem>",
+          "understanding": "<inne odrębne znaczenie opisane jednym krótkim zdaniem>",
           "tag": null
         },
         "hinted": {
-          "understanding": "Czas. <dokładne znaczenie wskazane przez podpowiedź użytkownika>",
+          "understanding": "<dokładne znaczenie wskazane przez podpowiedź użytkownika>",
           "tag": null
         },
         "invalid": "To słowo nie należy do wykrytego języka docelowego."
@@ -819,13 +949,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Zaczynać działać — o maszynie.",
+          "good": "Maszyna zaczyna działać."
+        },
+        {
+          "bad": "Wskazuje na przyszły charakter czynności.",
+          "good": "Pokazuje, że coś wydarzy się później."
+        }
+      ],
       "hint": {
         "bad": [
           "Używane przy uprzejmym proszeniu o coś.",
           "Oznacza zmęczenie.",
           "Częste w sytuacjach zawodowych."
         ],
-        "good": "„<near target word>” ukazuje rynek i tramwaj; tutaj pomost przecina jezioro.",
+        "good": "Mała łódka unosi się na spokojnej wodzie między skałami.",
         "contrast": "„<near target word>” ukazuje…; tutaj…"
       },
       "context": {
@@ -852,15 +992,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "Ім. <одне точне основне значення у стислому реченні>",
+          "understanding": "<одне точне основне значення у стислому реченні>",
           "tag": null
         },
         "secondary": {
-          "understanding": "Ім. <інше окреме значення в одному стислому реченні>",
+          "understanding": "<інше окреме значення в одному стислому реченні>",
           "tag": null
         },
         "hinted": {
-          "understanding": "Дієсл. <точне значення визначене підказкою користувача>",
+          "understanding": "<точне значення визначене підказкою користувача>",
           "tag": null
         },
         "invalid": "Це слово не належить до визначеної цільової мови."
@@ -871,13 +1011,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Починати працювати — про машину.",
+          "good": "Машина починає працювати."
+        },
+        {
+          "bad": "Указує на майбутність дії.",
+          "good": "Показує, що щось станеться пізніше."
+        }
+      ],
       "hint": {
         "bad": [
           "Уживається для ввічливого прохання.",
           "Означає втому.",
           "Часто трапляється в діловому контексті."
         ],
-        "good": "«<near target word>» показує трамвай і каштани; тут човен пливе серед очерету.",
+        "good": "Між скелями на тихій воді стоїть невеликий човен.",
         "contrast": "«<near target word>» показує…; тут…"
       },
       "context": {
@@ -904,15 +1054,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "N. <satu makna utama yang tepat dalam kalimat ringkas>",
+          "understanding": "<satu makna utama yang tepat dalam kalimat ringkas>",
           "tag": null
         },
         "secondary": {
-          "understanding": "N. <makna lain yang berbeda dalam satu kalimat ringkas>",
+          "understanding": "<makna lain yang berbeda dalam satu kalimat ringkas>",
           "tag": null
         },
         "hinted": {
-          "understanding": "V. <makna tepat yang ditentukan oleh petunjuk pengguna>",
+          "understanding": "<makna tepat yang ditentukan oleh petunjuk pengguna>",
           "tag": null
         },
         "invalid": "Kata ini bukan bagian dari bahasa sasaran yang terdeteksi."
@@ -923,13 +1073,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Mulai beroperasi, tentang mesin.",
+          "good": "Mesin mulai beroperasi."
+        },
+        {
+          "bad": "Menunjukkan sifat masa depan suatu tindakan.",
+          "good": "Menunjukkan bahwa sesuatu akan terjadi nanti."
+        }
+      ],
       "hint": {
         "bad": [
           "Dipakai saat meminta sesuatu dengan sopan.",
           "Berarti merasa lelah.",
           "Umum dalam konteks profesional."
         ],
-        "good": "“<near target word>” menampilkan warung-becak; di sini perahu melintasi sawah.",
+        "good": "Perahu kecil mengapung di air tenang di antara bebatuan.",
         "contrast": "“<near target word>” menampilkan…; di sini…"
       },
       "context": {
@@ -956,15 +1116,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "संज्ञा <एक सटीक मुख्य अर्थ को संक्षिप्त वाक्य में बताए>",
+          "understanding": "<एक सटीक मुख्य अर्थ को संक्षिप्त वाक्य में बताए>",
           "tag": null
         },
         "secondary": {
-          "understanding": "संज्ञा <एक अलग दूसरा अर्थ संक्षिप्त वाक्य में बताए>",
+          "understanding": "<एक अलग दूसरा अर्थ संक्षिप्त वाक्य में बताए>",
           "tag": null
         },
         "hinted": {
-          "understanding": "क्रिया <उपयोगकर्ता के संकेत से चुना सटीक अर्थ बताए>",
+          "understanding": "<उपयोगकर्ता के संकेत से चुना सटीक अर्थ बताए>",
           "tag": null
         },
         "invalid": "यह शब्द पहचानी गई लक्ष्य भाषा का नहीं है।"
@@ -975,13 +1135,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "काम करना शुरू होना — मशीन के बारे में।",
+          "good": "मशीन काम करना शुरू करती है।"
+        },
+        {
+          "bad": "क्रिया की भविष्यकालिकता दर्शाता है।",
+          "good": "बताता है कि कुछ बाद में होगा।"
+        }
+      ],
       "hint": {
         "bad": [
           "विनम्रता से कुछ माँगते समय इसका प्रयोग होता है।",
           "इसका अर्थ थका हुआ है।",
           "व्यावसायिक संदर्भों में यह आम है।"
         ],
-        "good": "“<near target word>” में चायघर है; यहाँ छत पर पतंग है।",
+        "good": "चट्टानों के बीच शांत पानी में छोटी नाव तैर रही है।",
         "contrast": "“<near target word>” में … है; यहाँ … है"
       },
       "context": {
@@ -1008,15 +1178,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "اسم <معنى رئيسي واحد دقيق في جملة موجزة واضحة>",
+          "understanding": "<معنى رئيسي واحد دقيق في جملة موجزة واضحة>",
           "tag": null
         },
         "secondary": {
-          "understanding": "اسم <معنى آخر مستقل ودقيق في جملة موجزة>",
+          "understanding": "<معنى آخر مستقل ودقيق في جملة موجزة>",
           "tag": null
         },
         "hinted": {
-          "understanding": "فعل <المعنى الدقيق الذي تحدده ملاحظة المستخدم>",
+          "understanding": "<المعنى الدقيق الذي تحدده ملاحظة المستخدم>",
           "tag": null
         },
         "invalid": "هذه الكلمة ليست من اللغة الهدف التي تم اكتشافها."
@@ -1027,13 +1197,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "بدء العمل، ويُقال عن آلة.",
+          "good": "تبدأ الآلة بالعمل."
+        },
+        {
+          "bad": "يدل على مستقبلية الحدث.",
+          "good": "يعني أن شيئًا سيحدث لاحقًا."
+        }
+      ],
       "hint": {
         "bad": [
           "تُستخدم عند طلب شيء بأدب.",
           "تعني الشعور بالتعب.",
           "شائعة في السياقات المهنية."
         ],
-        "good": "في «<near target word>» سوق ومظلّات؛ وهنا قارب بين النخيل.",
+        "good": "قارب صغير يطفو على ماء هادئ بين الصخور.",
         "contrast": "في «<near target word>» …؛ وهنا …"
       },
       "context": {
@@ -1060,15 +1240,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "คำนาม<อธิบายความหมายหลักที่แม่นยำหนึ่งความหมายด้วยประโยคสั้น>",
+          "understanding": "<อธิบายความหมายหลักที่แม่นยำหนึ่งความหมายด้วยประโยคสั้น>",
           "tag": null
         },
         "secondary": {
-          "understanding": "คำนาม<อธิบายอีกความหมายหนึ่งที่แตกต่างอย่างชัดเจนด้วยประโยคสั้น>",
+          "understanding": "<อธิบายอีกความหมายหนึ่งที่แตกต่างอย่างชัดเจนด้วยประโยคสั้น>",
           "tag": null
         },
         "hinted": {
-          "understanding": "คำกริยา<อธิบายความหมายตรงตามคำใบ้ของผู้ใช้อย่างแม่นยำ>",
+          "understanding": "<อธิบายความหมายตรงตามคำใบ้ของผู้ใช้อย่างแม่นยำ>",
           "tag": null
         },
         "invalid": "คำนี้ไม่ใช่คำในภาษาเป้าหมายที่ตรวจพบ"
@@ -1079,13 +1259,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "เริ่มทำงาน ใช้กล่าวถึงเครื่องจักร",
+          "good": "เครื่องจักรเริ่มทำงาน"
+        },
+        {
+          "bad": "แสดงความเป็นอนาคตของการกระทำ",
+          "good": "บอกว่าจะมีบางอย่างเกิดขึ้นทีหลัง"
+        }
+      ],
       "hint": {
         "bad": [
           "ใช้เมื่อต้องการขอบางสิ่งอย่างสุภาพ",
           "หมายถึงรู้สึกเหนื่อย",
           "พบบ่อยในบริบทการทำงาน"
         ],
-        "good": "“<near target word>”มีเรือหางยาวที่ตลาดน้ำส่วนภาพนี้มีช้างเดินกลางฝน",
+        "good": "เรือลำเล็กลอยอยู่บนน้ำสงบระหว่างโขดหิน",
         "contrast": "“<near target word>”มี…ส่วนภาพนี้มี…"
       },
       "context": {
@@ -1112,15 +1302,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "ש״ע <משמעות ראשית אחת ומדויקת במשפט קצר וברור>",
+          "understanding": "<משמעות ראשית אחת ומדויקת במשפט קצר וברור>",
           "tag": null
         },
         "secondary": {
-          "understanding": "ש״ע <משמעות נוספת ונבדלת במשפט אחד קצר וברור>",
+          "understanding": "<משמעות נוספת ונבדלת במשפט אחד קצר וברור>",
           "tag": null
         },
         "hinted": {
-          "understanding": "פועל <המשמעות המדויקת שנבחרה לפי רמז המשתמש>",
+          "understanding": "<המשמעות המדויקת שנבחרה לפי רמז המשתמש>",
           "tag": null
         },
         "invalid": "המילה הזאת אינה שייכת לשפת היעד שזוהתה."
@@ -1131,13 +1321,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "להתחיל לפעול — על מכונה.",
+          "good": "המכונה מתחילה לפעול."
+        },
+        {
+          "bad": "מציין את עתידיות הפעולה.",
+          "good": "מראה שמשהו יקרה אחר כך."
+        }
+      ],
       "hint": {
         "bad": [
           "משמש כשמבקשים משהו בנימוס.",
           "פירושו להיות עייף.",
           "נפוץ בהקשרים מקצועיים."
         ],
-        "good": "בציור עם <near target word> רואים שוק; כאן סירה שטה בין קנים.",
+        "good": "סירה קטנה צפה במים שקטים בין הסלעים.",
         "contrast": "בתמונה עם <near target word> רואים…, ואילו כאן…"
       },
       "context": {
@@ -1164,15 +1364,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "Danh từ <một nghĩa chính xác được diễn đạt bằng câu ngắn>",
+          "understanding": "<một nghĩa chính xác được diễn đạt bằng câu ngắn>",
           "tag": null
         },
         "secondary": {
-          "understanding": "Danh từ <một nghĩa khác biệt được diễn đạt bằng câu ngắn>",
+          "understanding": "<một nghĩa khác biệt được diễn đạt bằng câu ngắn>",
           "tag": null
         },
         "hinted": {
-          "understanding": "Động từ <nghĩa chính xác do gợi ý của người dùng chọn>",
+          "understanding": "<nghĩa chính xác do gợi ý của người dùng chọn>",
           "tag": null
         },
         "invalid": "Từ này không thuộc ngôn ngữ đích đã nhận diện."
@@ -1183,13 +1383,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Bắt đầu hoạt động, nói về máy móc.",
+          "good": "Máy bắt đầu hoạt động."
+        },
+        {
+          "bad": "Biểu thị tính tương lai của hành động.",
+          "good": "Cho biết một việc sẽ xảy ra sau này."
+        }
+      ],
       "hint": {
         "bad": [
           "Dùng khi lịch sự yêu cầu điều gì đó.",
           "Có nghĩa là mệt.",
           "Thường gặp trong bối cảnh công việc."
         ],
-        "good": "“<near target word>” có chợ nổi; đây đèn lồng soi hiên nhà.",
+        "good": "Thuyền nhỏ nổi giữa những tảng đá trên mặt nước lặng.",
         "contrast": "“<near target word>” có…; ở đây…"
       },
       "context": {
@@ -1216,15 +1426,15 @@
       },
       "intake": {
         "primary": {
-          "understanding": "Podst. jm. <jeden přesný hlavní význam popsaný krátkou větou>",
+          "understanding": "<jeden přesný hlavní význam popsaný krátkou větou>",
           "tag": null
         },
         "secondary": {
-          "understanding": "Podst. jm. <jiný samostatný význam popsaný jednou krátkou větou>",
+          "understanding": "<jiný samostatný význam popsaný jednou krátkou větou>",
           "tag": null
         },
         "hinted": {
-          "understanding": "Slov. <přesný význam určený uživatelovou nápovědou>",
+          "understanding": "<přesný význam určený uživatelovou nápovědou>",
           "tag": null
         },
         "invalid": "Toto slovo nepatří do rozpoznaného cílového jazyka."
@@ -1235,13 +1445,23 @@
       }
     },
     "card": {
+      "writing": [
+        {
+          "bad": "Začít pracovat, řečeno o stroji.",
+          "good": "Stroj začíná pracovat."
+        },
+        {
+          "bad": "Vyjadřuje budoucnost děje.",
+          "good": "Ukazuje, že se něco stane později."
+        }
+      ],
       "hint": {
         "bad": [
           "Používá se při zdvořilé žádosti o něco.",
           "Znamená únavu.",
           "Časté v pracovních situacích."
         ],
-        "good": "„<near target word>“ ukazuje trh a tramvaj; tady lávka kříží jezero.",
+        "good": "Mezi skalami pluje malý člun po klidné vodě.",
         "contrast": "„<near target word>“ ukazuje…; tady…"
       },
       "context": {

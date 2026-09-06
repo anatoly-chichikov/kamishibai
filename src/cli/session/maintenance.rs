@@ -73,8 +73,8 @@ pub(super) fn rm(args: &RmArgs, render: Render) -> Result<()> {
     if args.cache {
         let root = cache_root(&SystemContext)?;
         let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
-        for (term, understanding) in cached_cells(&record) {
-            purge_artifacts(root.as_path(), &pair, term.as_str(), understanding.as_str())?;
+        for cell in cached_cells(root.as_path(), &pair, &record) {
+            purge_cell(cell)?;
         }
     }
     store.remove(record.id.as_str())?;
@@ -105,15 +105,14 @@ pub(super) fn cache_path(render: Render) -> Result<()> {
     Ok(())
 }
 
-/// Return every (term, understanding) cache cell a session may own: the committed
-/// plan when one exists, otherwise each candidate sense (so an imported or
-/// understood session still has its pre-stored meta cells removed).
-fn cached_cells(record: &SessionRecord) -> Vec<(String, String)> {
+/// Return every cache cell a session may own: contextual committed drafts when
+/// present, otherwise each candidate's legacy singleton sense.
+fn cached_cells(root: &Path, pair: &LanguagePair, record: &SessionRecord) -> Vec<CardCell> {
     if !record.drafts.is_empty() {
         return record
             .drafts
             .iter()
-            .map(|draft| (draft.term.clone(), draft.understanding.clone()))
+            .map(|draft| super::cell_for_draft(root, pair, draft))
             .collect();
     }
     record
@@ -125,9 +124,11 @@ fn cached_cells(record: &SessionRecord) -> Vec<(String, String)> {
                 .senses()
                 .iter()
                 .map(|sense| {
-                    (
-                        candidate.term().to_string(),
-                        sense.understanding().to_string(),
+                    CardCell::new(
+                        root.to_path_buf(),
+                        pair,
+                        candidate.term(),
+                        sense.understanding(),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -136,13 +137,18 @@ fn cached_cells(record: &SessionRecord) -> Vec<(String, String)> {
 }
 
 /// Delete one card after leasing meta, voice, then every sorted visual revision.
+#[cfg(test)]
 fn purge_artifacts(
     root: &Path,
     pair: &LanguagePair,
     term: &str,
     understanding: &str,
 ) -> Result<()> {
-    let cache = CardCell::new(root.to_path_buf(), pair, term, understanding).cache();
+    purge_cell(CardCell::new(root.to_path_buf(), pair, term, understanding))
+}
+
+fn purge_cell(cell: CardCell) -> Result<()> {
+    let cache = cell.cache();
     let folder = cache.path();
     let meta = cache.hold_root_stage(RootStage::Meta, ROOT_STAGE_LOCK_TIMEOUT)?;
     let voice = cache.hold_root_stage(RootStage::Voice, ROOT_STAGE_LOCK_TIMEOUT)?;

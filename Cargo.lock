@@ -2071,8 +2071,9 @@ dependencies = [
 
 [[package]]
 name = "kamishibai"
-version = "1.10.2"
+version = "1.11.0"
 dependencies = [
+ "allsorts",
  "anyhow",
  "assert_cmd",
  "assert_fs",

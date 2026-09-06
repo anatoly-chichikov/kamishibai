@@ -127,8 +127,7 @@ impl Reporter for SessionReporter {
                         settled.term()
                     );
                 }
-                draft.term = String::from(settled.term());
-                draft.understanding = String::from(settled.understanding());
+                draft.synchronize(settled);
                 draft.costs = costs;
                 draft.rewrite = settled.rewrite().cloned();
                 draft.meta_request =
@@ -275,20 +274,7 @@ fn drafts_with_costs(
         .drafts
         .iter()
         .zip(absolute)
-        .map(|(draft, costs)| {
-            let hydrated = CardDraft::new(
-                draft.term.as_str(),
-                draft.understanding.as_str(),
-                pair.clone(),
-            );
-            let hydrated = match &draft.meta_request {
-                Some(selection) => hydrated.requesting_meta(selection.clone()),
-                None => hydrated,
-            };
-            Ok(hydrated
-                .with_rewrite(draft.rewrite.clone())
-                .with_costs(costs))
-        })
+        .map(|(draft, costs)| Ok(draft.hydrate(pair.clone()).with_costs(costs)))
         .collect()
 }
 
@@ -468,6 +454,7 @@ mod tests {
         record.drafts = vec![DraftRecord {
             term: String::from("canard"),
             understanding: String::from("a duck"),
+            reviewed_senses: Vec::new(),
             costs: crate::session::ArtifactCosts::default(),
             rewrite: None,
             meta_request: None,

@@ -73,6 +73,9 @@ impl RawInputBatch {
 
 const MAX_SENSES: usize = 6;
 
+/// Limit one card glossary to its chosen meaning and four prioritized alternatives.
+pub(crate) const MAX_CARD_MEANINGS: usize = 5;
+
 /// One possible meaning for a reviewed word.
 ///
 /// `understanding` is a single short sentence in the user's support language.
@@ -119,6 +122,11 @@ impl Sense {
     /// Return the optional short sense tag.
     pub fn tag(&self) -> Option<&str> {
         self.tag.as_deref()
+    }
+
+    /// Return whether another understanding differs only in case or whitespace.
+    pub(crate) fn matches(&self, understanding: &str) -> bool {
+        normalized(self.understanding()) == normalized(understanding)
     }
 }
 
@@ -301,7 +309,7 @@ fn deduplicated(senses: Vec<Sense>) -> Vec<Sense> {
 }
 
 fn same_understanding(left: &Sense, right: &Sense) -> bool {
-    normalized(left.understanding()) == normalized(right.understanding())
+    left.matches(right.understanding())
 }
 
 fn normalized(value: &str) -> String {

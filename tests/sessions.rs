@@ -498,7 +498,40 @@ fn costed_session_snapshots(cache: &Path, id: &str) -> (PathBuf, Vec<u8>, PathBu
 #[derive(Debug, Default)]
 struct GenerationCalls {
     meta: AtomicUsize,
+    phonetics: AtomicUsize,
     sound: AtomicUsize,
+}
+
+/// Read a complete local HTTP request before inspecting its JSON payload.
+fn complete_request(stream: &mut std::net::TcpStream) -> String {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("request timeout must configure");
+    let mut bytes = Vec::new();
+    loop {
+        let mut chunk = [0u8; 8192];
+        let size = stream.read(&mut chunk).expect("request must read");
+        if size == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..size]);
+        let text = String::from_utf8_lossy(bytes.as_slice());
+        let Some(header_end) = text.find("\r\n\r\n") else {
+            continue;
+        };
+        let length = text[..header_end]
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("content-length: ")
+                    .or_else(|| line.strip_prefix("Content-Length: "))
+            })
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        if bytes.len() >= header_end + 4 + length {
+            break;
+        }
+    }
+    String::from_utf8(bytes).expect("request must be UTF-8")
 }
 
 /// Start a metered stub whose delayed responses expose duplicate generators.
@@ -516,18 +549,24 @@ fn metered_generation_gemini(cell: PathBuf) -> (String, Arc<GenerationCalls>) {
             let cell = cell.clone();
             std::thread::spawn(move || {
                 let mut stream = stream;
-                let mut scratch = [0u8; 65536];
-                let size = stream.read(&mut scratch).unwrap_or(0);
-                let request = String::from_utf8_lossy(&scratch[..size]);
+                let request = complete_request(&mut stream);
                 let sound = request.contains("gemini-3.1-flash-tts-preview");
+                let phonetics = request.contains("Verify only the two IPA fields");
                 if sound {
                     counted.sound.fetch_add(1, Ordering::SeqCst);
+                } else if phonetics {
+                    counted.phonetics.fetch_add(1, Ordering::SeqCst);
                 } else {
                     counted.meta.fetch_add(1, Ordering::SeqCst);
                 }
                 std::thread::sleep(Duration::from_millis(500));
                 let content = if sound {
                     serde_json::json!({"inlineData": {"data": "AAA="}})
+                } else if phonetics {
+                    serde_json::json!({"text": serde_json::json!({
+                        "pronunciation": "kanaʁ",
+                        "transcription": "lə kanaʁ a naʒe dɑ̃ letɑ̃"
+                    }).to_string()})
                 } else {
                     serde_json::json!({"text": serde_json::json!({
                         "pronunciation": "ka.naʁ",
@@ -550,9 +589,10 @@ fn metered_generation_gemini(cell: PathBuf) -> (String, Arc<GenerationCalls>) {
                 let body = serde_json::json!({
                     "candidates": [{"content": {"parts": [content]}}],
                     "usageMetadata": {
-                        "promptTokenCount": 10,
-                        "candidatesTokenCount": 5,
-                        "totalTokenCount": 15
+                        "promptTokenCount": if phonetics { 7 } else { 10 },
+                        "candidatesTokenCount": if phonetics { 3 } else { 5 },
+                        "thoughtsTokenCount": if phonetics { 11 } else { 0 },
+                        "totalTokenCount": if phonetics { 21 } else { 15 }
                     }
                 })
                 .to_string();
@@ -787,6 +827,7 @@ fn concurrent_sessions_share_one_meta_and_sound_request_with_exact_costs() {
             first_ok,
             second_ok,
             calls.meta.load(Ordering::SeqCst),
+            calls.phonetics.load(Ordering::SeqCst),
             calls.sound.load(Ordering::SeqCst),
             meta["requests"].as_u64(),
             meta["cost"]["nanos"].as_u64(),
@@ -798,8 +839,9 @@ fn concurrent_sessions_share_one_meta_and_sound_request_with_exact_costs() {
             true,
             1,
             1,
-            Some(1),
-            Some(52_500),
+            1,
+            Some(2),
+            Some(84_000),
             Some(1),
             Some(110_000),
         ),
@@ -2142,6 +2184,55 @@ fn a_missing_session_in_json_mode_prints_the_error_envelope_with_exit_three() {
 }
 
 #[test]
+fn a_publication_io_failure_keeps_its_diagnostic_in_the_json_envelope() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    let blocked = out.path().join("blocked-output");
+    understood_session_json(cache.path(), &blocked, "save-failure", CARDS_JSON);
+    let cell = first_card_dir(cache.path());
+    seed_artifacts(&cell);
+    let artifacts = artifact_snapshot(&cell);
+    fs::write(&blocked, b"the output location is a file").expect("output blocker must be written");
+    let output = cli(cache.path())
+        .args(["generate", "save-failure", "--wait", "--json"])
+        .timeout(Duration::from_secs(30))
+        .output()
+        .expect("cached generation must reach publication");
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout must carry one JSON envelope");
+    let saved: serde_json::Value = serde_json::from_slice(
+        &fs::read(cache.path().join("sessions/save-failure/session.json"))
+            .expect("failed session must be persisted"),
+    )
+    .expect("failed session must decode");
+    assert_eq!(
+        (
+            output.status.code(),
+            value["ok"].as_bool(),
+            value["error"]["code"].as_str(),
+            value["error"]["message"] == saved["error"],
+            value["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("could not save your cards")),
+            value["error"]["hint"]
+                .as_str()
+                .is_some_and(|hint| !hint.contains("connection") && !hint.contains("key")),
+            artifact_snapshot(&cell) == artifacts,
+        ),
+        (
+            Some(1),
+            Some(false),
+            Some("operational"),
+            true,
+            true,
+            true,
+            true
+        ),
+        "publication failure lost its actual diagnostic, blamed provider access, or changed cached cards"
+    );
+}
+
+#[test]
 fn an_all_failed_waited_run_in_json_mode_prints_the_envelope_not_a_document() {
     let cache = TempDir::new().expect("cache tempdir");
     let out = TempDir::new().expect("output tempdir");
@@ -2174,8 +2265,14 @@ fn an_all_failed_waited_run_in_json_mode_prints_the_envelope_not_a_document() {
             value["error"]["exit"].as_u64(),
             warnings > 0,
             unnamed_events,
+            value["error"]["message"]
+                .as_str()
+                .is_some_and(|message| !message.contains("could not save your cards")),
+            value["error"]["hint"]
+                .as_str()
+                .is_some_and(|hint| !hint.contains("connection") && !hint.contains("key")),
         ),
-        (Some(1), Some(false), Some(1), true, 0),
+        (Some(1), Some(false), Some(1), true, 0, true, true),
         "an all-failed waited run in JSON mode must print one error envelope and tagged warning events"
     );
 }

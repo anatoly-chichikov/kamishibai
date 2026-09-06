@@ -6,6 +6,8 @@ Target language:
 Support language for explanations:
 {support_language}
 
+{learner_explanations}
+
 Term:
 {term}
 
@@ -29,7 +31,7 @@ Each sense has:
 - "understanding" — exactly one sentence in {support_language}, {understanding_length}, written for a human reader;
 - "tag" — a short disambiguating marker in {support_language}, or null.
 
-Use "tag" only when the sense genuinely needs a domain, register, region, idiom, archaic, slang, or other disambiguating label. Prefer null for a general sense, but most results here should have a useful tag.
+Use "tag" only when the sense genuinely needs a domain, register, region, idiom, archaic, slang, or other disambiguating label. Prefer null for a general sense. Do not add a tag merely to fill a category. A use being common in one region does not make it exclusive to that region; do not turn an uncertain association into an authoritative label.
 
 These are typed conventions in the actual support language for this request:
 
@@ -38,10 +40,11 @@ These are typed conventions in the actual support language for this request:
 Hard rules for every "understanding":
 - Do not start with any value illustrated by `forbidden.starters`, or any narration of the learning act.
 - Pick exactly one sense. Never join senses using a shape illustrated by `forbidden.joins`.
-- Mention part of speech, idiom, or register only when it clarifies.
-- Always abbreviate part-of-speech labels using the local shapes illustrated by `markers.parts`.
-- Stay tight to the meaning the learner needs; do not add incidental detail.
-- Never use the local filler shapes illustrated by `forbidden.fillers`.
+- Start with the meaning in everyday words, not a part-of-speech prefix. `markers.parts` shows optional local notation, not a required label. Explain any distinction that matters without requiring grammar knowledge; use a familiar short tag only when it helps distinguish the sense.
+- Use the shortest distinguishing definition; include only what separates this sense from the other uses.
+- A typical example does not define a restriction. Check each qualifier against ordinary valid examples of the same use. Remove imagined details about how the action is performed. A body part, material, scene, or manner is a requirement only when ordinary uses of this sense demand it. Prefer a broader accurate gloss to a narrower unsupported one.
+- Preserve any construction needed for the sense by naming its actual words when necessary, without inventing a rule for every form of the word. Do not bundle unrelated senses just because they share a translation, and do not split one sense merely because its examples use different objects. Describe current meanings, not word origins or historical relationships; no trusted etymological source is supplied.
+- Avoid empty introductions illustrated by `forbidden.fillers`; these are not banned words when they express the actual meaning.
 - Never produce a structured "POS · gloss · marker" line. Write a real, scannable sentence.
 
 Use these localized message examples:
@@ -49,6 +52,8 @@ Use these localized message examples:
 {sense_message_examples}
 
 If the user's request is already covered by one of the shown senses, return an empty "senses" array and use the `listed` message shape. If the requested meaning does not exist in {target_language}, return an empty "senses" array and use the `absent` message shape.
+
+Before returning, silently test each proposed sense against an ordinary valid use outside the example you first imagined. Remove incidental restrictions and unsupported tags. Return fewer senses, including none, rather than inventing a narrow use to fill the list. Check that every addition is a real meaning of this exact term and is not already covered. Output only the requested JSON, not this check.
 
 Return only JSON with this shape, no prose, no code fences:
 

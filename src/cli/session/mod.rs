@@ -53,12 +53,14 @@ use crate::generation::artifact_cache::{
     Cache, ILLUSTRATION_FILE, LEGACY_VISUAL_REVISION_FILE, META_FILE, ROOT_STAGE_LOCK_TIMEOUT,
     RootStage, RootStageGuard, SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_FILE, VisualGuard,
 };
+#[cfg(test)]
 use crate::generation::invalidate_card;
+use crate::generation::invalidate_draft;
 use crate::generation::restart_picture_request_series;
 use crate::generation::visual_revision;
 use crate::languages::{LanguageCode, catalog};
 use crate::runtime::locations::{SystemContext, cache_root};
-use crate::session::{CardCell, CardMetaCache, LanguagePair};
+use crate::session::{CardCell, CardDraft, CardMetaCache, LanguagePair};
 
 use super::error::{self, usage, usage_hint};
 
@@ -300,6 +302,7 @@ pub(in crate::cli::session) fn reset_to_understood(record: &mut SessionRecord) {
 
 /// Delete one card's cached media (and its meta unless `keep_meta`), forcing just
 /// that card to regenerate on the next run.
+#[cfg(test)]
 pub(in crate::cli::session) fn drop_artifacts(
     root: &Path,
     pair: &LanguagePair,
@@ -308,6 +311,17 @@ pub(in crate::cli::session) fn drop_artifacts(
     keep_meta: bool,
 ) -> Result<()> {
     invalidate_card(root, pair, term, understanding, keep_meta, keep_meta)
+}
+
+/// Delete one persisted draft's contextual cache artifacts.
+pub(in crate::cli::session) fn drop_draft_artifacts(
+    root: &Path,
+    pair: &LanguagePair,
+    draft: &DraftRecord,
+    keep_meta: bool,
+) -> Result<()> {
+    let hydrated = draft.hydrate(pair.clone());
+    invalidate_draft(root, &hydrated, keep_meta, keep_meta)
 }
 
 /// Delete one corrected card's stale artifacts while retaining its billed correction cost.
@@ -323,17 +337,39 @@ pub(in crate::cli::session) fn drop_corrected_artifacts(
 
 /// Delete only missing stages and their dependants, retaining every valid
 /// upstream or independent artifact for a failed-card retry.
+#[cfg(test)]
 pub(in crate::cli) fn drop_incomplete_artifacts(
     root: &Path,
     pair: &LanguagePair,
     term: &str,
     understanding: &str,
 ) -> Result<()> {
-    let cache = CardCell::new(root.to_path_buf(), pair, term, understanding).cache();
+    drop_incomplete_cell(
+        root,
+        CardCell::new(root.to_path_buf(), pair, term, understanding),
+    )
+}
+
+/// Delete missing stages and their dependants from one contextual draft cache.
+pub(in crate::cli) fn drop_incomplete_draft_artifacts(
+    root: &Path,
+    pair: &LanguagePair,
+    draft: &DraftRecord,
+) -> Result<()> {
+    drop_incomplete_cell(root, cell_for_draft(root, pair, draft))
+}
+
+/// Delete missing stages and their dependants from one live contextual card.
+pub(in crate::cli) fn drop_incomplete_card_artifacts(root: &Path, draft: &CardDraft) -> Result<()> {
+    drop_incomplete_cell(root, CardCell::for_draft(root.to_path_buf(), draft))
+}
+
+fn drop_incomplete_cell(root: &Path, cell: CardCell) -> Result<()> {
+    let cache = cell.cache();
     let visual = cache.visual(visual_revision())?;
     let _guards = hold_artifacts(&cache, &visual)?;
     restart_picture_request_series(&visual)?;
-    if !cached_meta_is_valid(root, pair, term, understanding) {
+    if !matches!(CardMetaCache::new(root).load_at(&cell), Ok(Some(_))) {
         remove_cached_files(&visual, &[SCENE_FILE, ILLUSTRATION_FILE])?;
         remove_cached_files(
             &cache,
@@ -377,6 +413,7 @@ fn hold_artifacts(cache: &Cache, visual: &Cache) -> Result<ArtifactGuards> {
 }
 
 /// Return whether the cached card metadata can be decoded for this exact card.
+#[cfg(test)]
 pub(in crate::cli::session) fn cached_meta_is_valid(
     root: &Path,
     pair: &LanguagePair,
@@ -387,6 +424,25 @@ pub(in crate::cli::session) fn cached_meta_is_valid(
         CardMetaCache::new(root).load(term, understanding, pair),
         Ok(Some(_))
     )
+}
+
+/// Resolve one persisted draft's complete contextual card cache identity.
+pub(in crate::cli::session) fn cell_for_draft(
+    root: &Path,
+    pair: &LanguagePair,
+    draft: &DraftRecord,
+) -> CardCell {
+    CardCell::for_draft(root.to_path_buf(), &draft.hydrate(pair.clone()))
+}
+
+/// Return whether one contextual draft's cached metadata can be decoded.
+pub(in crate::cli::session) fn cached_draft_meta_is_valid(
+    root: &Path,
+    pair: &LanguagePair,
+    draft: &DraftRecord,
+) -> bool {
+    let cell = cell_for_draft(root, pair, draft);
+    matches!(CardMetaCache::new(root).load_at(&cell), Ok(Some(_)))
 }
 
 /// Return whether the cached scene satisfies the minimum production structure.
