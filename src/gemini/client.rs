@@ -2691,12 +2691,20 @@ mod tests {
             phonetics_body(&correction),
             text_body(&json!("plain response")),
             text_body(&json!("intake response")),
+            text_body(
+                &json!({"senses":[{"understanding":"a false report","tag":"journalism"}],"message":null}),
+            ),
+            phonetics_body(&metadata),
         ]);
         let requests = transport.requests.clone();
         let urls = transport.urls.clone();
         let client = GeminiClient::new("key", transport);
         let pair = LanguagePair::new("fr", "en");
         let draft = CardDraft::new("canard", "a duck", pair.clone());
+        let supplied = serde_json::from_value::<CardMetaResponse>(metadata)
+            .expect("supplied metadata fixture must decode")
+            .into_meta(None)
+            .expect("supplied metadata fixture must validate");
         let mut costs = Vec::new();
         let results = [
             client
@@ -2723,6 +2731,14 @@ mod tests {
                 .complete(TEXT_MODEL, String::from("Freeform prompt"))
                 .is_ok(),
             client.intake_text(String::from("Intake prompt")).is_ok(),
+            client
+                .correct_bulk(
+                    &WordCandidate::new("canard", "a duck", true),
+                    "Include the news use",
+                    &pair,
+                )
+                .is_ok(),
+            client.refine_pronunciation(&draft, supplied).is_ok(),
         ];
         let configs = requests
             .borrow()
@@ -2746,7 +2762,7 @@ mod tests {
                     .collect::<Vec<_>>()
             ),
             (
-                [true; 6],
+                [true; 8],
                 vec![
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "HIGH"}}),
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "MEDIUM"}}),
@@ -2758,6 +2774,8 @@ mod tests {
                     json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "MEDIUM"}}),
                     Value::Null,
                     json!({"maxOutputTokens": INTAKE_MAX_OUTPUT_TOKENS}),
+                    Value::Null,
+                    json!({"responseMimeType": "application/json", "thinkingConfig": {"thinkingLevel": "MEDIUM"}}),
                 ],
                 true,
                 vec![
@@ -3880,6 +3898,81 @@ mod tests {
     }
 
     #[test]
+    fn text_review_recovery_cannot_change_model_or_escape_its_two_request_bound() {
+        let mut outcomes = Vec::new();
+        for recovered in [true, false] {
+            let response = |finished| {
+                body(json!({
+                    "candidates": [{
+                        "content": {"parts": [{
+                            "text": "{\"decision\":\"ALLOW\",\"evidence\":[],\"reason\":\"No visible writing\"}"
+                        }]},
+                        "finishReason": if finished { "STOP" } else { "MAX_TOKENS" }
+                    }],
+                    "usageMetadata": {
+                        "promptTokenCount": 100,
+                        "candidatesTokenCount": 20,
+                        "thoughtsTokenCount": 30,
+                        "totalTokenCount": 150
+                    }
+                }))
+            };
+            let transport = FakeTransport::new(vec![response(false), response(recovered)]);
+            let requests = transport.requests.clone();
+            let urls = transport.urls.clone();
+            let client = GeminiClient::new("key", transport);
+            let mut costs = Vec::new();
+            let result = client.review_text_observed(
+                &TextCheck::new("Hebrew"),
+                "image/jpeg",
+                &[9, 2, 7],
+                |cost| {
+                    costs.push(cost);
+                    Ok(())
+                },
+            );
+            let payloads = requests
+                .borrow()
+                .iter()
+                .map(|request| serde_json::from_str::<Value>(request))
+                .collect::<Result<Vec<_>, _>>()
+                .expect("text review requests must decode");
+            outcomes.push((
+                result.is_ok() == recovered,
+                urls.borrow()
+                    .iter()
+                    .map(|url| url.ends_with("/gemini-3.8-flash:generateContent"))
+                    .collect::<Vec<_>>(),
+                costs
+                    .iter()
+                    .map(|cost| (cost.model().to_string(), cost.requests()))
+                    .collect::<Vec<_>>(),
+                payloads
+                    .iter()
+                    .map(|request| request["generationConfig"]["maxOutputTokens"].as_u64())
+                    .collect::<Vec<_>>(),
+                payloads[0]["contents"] == payloads[1]["contents"],
+                costs.iter().map(|cost| cost.cost().nanos()).sum::<u64>(),
+            ));
+        }
+        assert_eq!(
+            outcomes,
+            vec![
+                (
+                    true,
+                    vec![true, true],
+                    vec![(String::from("gemini-3.8-flash"), 1); 2],
+                    vec![Some(1024), Some(512)],
+                    true,
+                    525_000,
+                );
+                2
+            ],
+            "text review recovery changed model or content, hid usage, or escaped its two-request bound"
+        );
+    }
+
+    #[test]
     fn literal_zoom_review_sends_nine_ordered_png_parts_in_one_request() {
         let transport = FakeTransport::new(vec![text_body(&json!({
             "literal_writing_present": false,
@@ -4141,6 +4234,7 @@ mod tests {
             })),
         ]);
         let requests = transport.requests.clone();
+        let urls = transport.urls.clone();
         let client = GeminiClient::new("key", transport);
         let card = RecallCard::new(
             crate::generation::manga::ShownRecall::new(
@@ -4182,6 +4276,11 @@ mod tests {
                 payloads[1]["contents"][0]["parts"][1]["inlineData"]["data"].as_str(),
                 costs.iter().map(CostRecord::requests).collect::<Vec<_>>(),
                 costs.iter().map(|cost| cost.cost().nanos()).sum::<u64>(),
+                urls.borrow()
+                    .iter()
+                    .map(|url| url.ends_with("/gemini-3.8-flash:generateContent"))
+                    .collect::<Vec<_>>(),
+                costs.iter().map(CostRecord::model).collect::<Vec<_>>(),
             ),
             (
                 true,
@@ -4192,8 +4291,10 @@ mod tests {
                 Some("AQID"),
                 vec![1, 1],
                 1_860_000,
+                vec![true, true],
+                vec!["gemini-3.8-flash", "gemini-3.8-flash"],
             ),
-            "MAX_TOKENS recovery changed the image, exceeded two reviews, or hid billed usage"
+            "MAX_TOKENS recovery changed the image or model, exceeded two reviews, or hid billed usage"
         );
     }
 
@@ -4215,6 +4316,7 @@ mod tests {
         };
         let transport = FakeTransport::new(vec![response(), response()]);
         let requests = transport.requests.clone();
+        let urls = transport.urls.clone();
         let client = GeminiClient::new("key", transport);
         let card = RecallCard::new(
             crate::generation::manga::ShownRecall::new(
@@ -4241,9 +4343,24 @@ mod tests {
             },
         );
         assert_eq!(
-            (result.is_err(), requests.borrow().len(), costs.len()),
-            (true, 2, 2),
-            "persistent MAX_TOKENS escaped the single adaptive review retry"
+            (
+                result.is_err(),
+                requests.borrow().len(),
+                costs.len(),
+                urls.borrow()
+                    .iter()
+                    .map(|url| url.ends_with("/gemini-3.8-flash:generateContent"))
+                    .collect::<Vec<_>>(),
+                costs.iter().map(CostRecord::model).collect::<Vec<_>>(),
+            ),
+            (
+                true,
+                2,
+                2,
+                vec![true, true],
+                vec!["gemini-3.8-flash", "gemini-3.8-flash"],
+            ),
+            "persistent MAX_TOKENS changed the model or escaped the single adaptive review retry"
         );
     }
 
@@ -4263,11 +4380,12 @@ mod tests {
             text_body(&json!({"ok": true})),
         ]);
         let requests = transport.requests.clone();
+        let urls = transport.urls.clone();
         let client = GeminiClient::new("key", transport);
         let mut costs = Vec::new();
         let raw = client
             .structured_text_observed(
-                SCENE_MODEL,
+                FEATURE_MODEL,
                 String::from("same prompt"),
                 &json!({
                     "type": "object",
@@ -4304,6 +4422,11 @@ mod tests {
                 bodies[1]
                     .pointer("/generationConfig/responseMimeType")
                     .and_then(Value::as_str),
+                urls.borrow()
+                    .iter()
+                    .map(|url| url.ends_with("/gemini-3.8-flash:generateContent"))
+                    .collect::<Vec<_>>(),
+                costs.first().map(CostRecord::model),
             ),
             (
                 String::from("{\"ok\":true}"),
@@ -4315,8 +4438,10 @@ mod tests {
                 Some("same prompt"),
                 true,
                 Some("application/json"),
+                vec![true, true],
+                Some("gemini-3.8-flash"),
             ),
-            "schema fallback changed the prompt, call count, or successful cost observation"
+            "schema fallback changed the model, prompt, call count, or successful cost observation"
         );
     }
 
