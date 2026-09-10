@@ -36,6 +36,36 @@ bulk correction is just `BusyKind::BulkCorrection` drawn by the universal busy o
 Sentence-label editing, retry, failure banner and recovery are inline within
 `YourCards` — not separate screens or modals.
 
+## Header copy
+
+The inverted title names the contents of the screen: `setup`, `your words`,
+`word meanings`, or `your cards`. The dim text beside it explains how to work
+with those contents. Card titles stay `your cards` throughout a run; progress
+and outcome counts remain in the body and status bar. File guidance does not
+name export formats, so adding an output does not require changing the header.
+
+| Context | Dim guidance |
+| --- | --- |
+| First setup | `choose your language and add a gemini key` |
+| Key recovery | `add a working gemini key to continue` |
+| Words | `add words or phrases, one per line` |
+| Meaning review | `choose the meanings you want to learn` |
+| Initial generation | `open a card to see how it's coming along` |
+| Staged changes | `apply your changes when you're ready` |
+| Applying changes | `open a card to follow the changes` |
+| Retrying | `browse the ready cards while the rest are being made` |
+| Stopping | `you can browse while the current step finishes` |
+| Idle unfinished cards | `continue with these cards when you're ready` |
+| Ready but unpublished | `save them so you can start learning` |
+| Publishing | `your files will appear here when they're ready` |
+| Published | `your files are ready` |
+| Partial result | `start with the ready cards, then retry the rest` |
+| No completed cards | `try again from where things went wrong` |
+
+Running guidance requires an active artifact or publishing operation. Staged
+changes take precedence over a previously published result. The loss count
+still appears only in the outcome strip; its header offers a next action.
+
 The synthetic PNGs (`00-welcome.png`, `00b-welcome-env.png`,
 `32-welcome-language-grid.png`, `03-change-something-modal.png`, `06-your-cards-retrying.png`,
 `06b-your-cards-retry-stress.png`, `07-your-cards-couldnt-finish.png`, the Esc lifecycle set from
@@ -418,8 +448,8 @@ The first `Esc` from review returns to the preserved words without arming their
 clear. The next `Esc` on `YourWords` arms it, and one more clears them. An open
 inner layer consumes `Esc` before a screen action can arm. While a
 confirmed generation stop drains the current provider request, the header says
-`stopping…`; no new request starts. `Ctrl+C` retains its separate double-press
-quit confirmation on every screen.
+`you can browse while the current step finishes`; no new request starts.
+`Ctrl+C` retains its separate double-press quit confirmation on every screen.
 
 ## Event ownership
 

@@ -156,8 +156,8 @@ fn your_words_renders_placeholder_tagline_and_language_pair() {
     let app = App::new(LanguagePair::new("en", "ru")).confirmed_learning("en");
     let flat = flatten(&app);
     assert!(
-        flat.contains("words you want to learn")
-            && flat.contains("each word becomes a small learning scene")
+        flat.contains("your words")
+            && flat.contains("add words or phrases, one per line")
             && flat.contains("step 1/3")
             && (flat.contains("RU→EN") || flat.contains("RU → EN")),
         "your words screen must render the PDF labels and a language chip on the right: {flat}"
@@ -269,8 +269,8 @@ fn understanding_busy_overlay_keeps_the_your_words_background() {
     assert!(
         side == Side::RunUnderstanding
             && loading.screen() == Screen::YourWords
-            && flat.contains("words you want to learn")
-            && !flat.contains("what i understood"),
+            && flat.contains("your words")
+            && !flat.contains("word meanings"),
         "understanding loader must keep the previous screen behind it until Gemini returns: {flat}"
     );
 }

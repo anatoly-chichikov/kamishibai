@@ -137,7 +137,7 @@ fn done_screen_lists_short_artifact_labels_and_quit_hint() {
     let quit = rendered.find("[Ctrl+C]").unwrap_or(usize::MAX);
     assert!(
         rendered.contains("your cards")
-            && rendered.contains("all done")
+            && rendered.contains("your files are ready")
             && rendered.contains("APKG")
             && rendered.contains("PDF")
             && rendered.contains("[Esc] new cards")

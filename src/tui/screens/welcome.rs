@@ -25,8 +25,9 @@ use crate::tui::screen::{WelcomeFocus, WelcomeStage};
 use crate::tui::text_field::TextField;
 
 const INTRO: &str = "kamishibai turns a list of words you want to learn into an anki deck plus a printable pdf. for each word it writes a natural example sentence, illustrates the scene as a manga panel, and reads it aloud in a natural, native-speaker voice.";
-const HEADLINE: &str = "kamishibai";
-const HINT: &str = "set up two things";
+const HEADLINE: &str = "setup";
+const HINT: &str = "choose your language and add a gemini key";
+const HINT_KEY: &str = "add a working gemini key to continue";
 const SUBMIT_LABEL: &str = "submit";
 const LOAD_ENV_LABEL: &str = "load from env";
 /// Gap between the key field and the notice printed to its right.
@@ -47,8 +48,12 @@ impl ScreenView for Welcome {
         Cow::Borrowed(HEADLINE)
     }
 
-    fn hint(&self, _: &App) -> Cow<'static, str> {
-        Cow::Borrowed(HINT)
+    fn hint(&self, app: &App) -> Cow<'static, str> {
+        Cow::Borrowed(if app.welcome_key_only() {
+            HINT_KEY
+        } else {
+            HINT
+        })
     }
 
     fn lang_chip(&self, _: &App) -> Option<Vec<Span<'static>>> {
@@ -451,4 +456,51 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
     }
     hints.push(super::common::quit_hint(app.quit_pending()));
     hints
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::LanguagePair;
+    use crate::tui::screen::KeySource;
+
+    #[test]
+    fn initial_setup_keeps_both_steps_in_context_on_the_key_field() {
+        let app = App::new(LanguagePair::new("fr", "en"))
+            .opening_welcome(KeySource::Empty, "", false)
+            .welcome_advance();
+        assert_eq!(
+            Welcome.hint(&app),
+            "choose your language and add a gemini key",
+            "the initial key step lost the context of the two-step setup"
+        );
+    }
+
+    #[test]
+    fn key_recovery_cannot_ask_for_an_already_chosen_language() {
+        let app = App::new(LanguagePair::new("fr", "en")).opening_welcome_at(
+            WelcomeStage::EnterKey,
+            KeySource::Empty,
+            "",
+            false,
+        );
+        assert_eq!(
+            Welcome.hint(&app),
+            "add a working gemini key to continue",
+            "key recovery asked the user to repeat the whole setup"
+        );
+    }
+
+    #[test]
+    fn returning_to_the_language_step_restores_the_setup_context() {
+        let app = App::new(LanguagePair::new("fr", "en"))
+            .opening_welcome_at(WelcomeStage::EnterKey, KeySource::Empty, "", false)
+            .welcome_step_back()
+            .welcome_advance();
+        assert_eq!(
+            Welcome.hint(&app),
+            "choose your language and add a gemini key",
+            "revisiting the language step kept the key-only recovery guidance"
+        );
+    }
 }

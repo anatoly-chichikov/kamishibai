@@ -71,6 +71,7 @@ pub struct WelcomeView {
     pub notice: Option<String>,
     pub focus: WelcomeFocus,
     pub env_available: bool,
+    key_only: bool,
 }
 
 impl fmt::Debug for WelcomeView {
@@ -83,6 +84,7 @@ impl fmt::Debug for WelcomeView {
             .field("notice", &self.notice)
             .field("focus", &self.focus)
             .field("env_available", &self.env_available)
+            .field("key_only", &self.key_only)
             .finish()
     }
 }
@@ -96,6 +98,7 @@ impl Default for WelcomeView {
             notice: None,
             focus: WelcomeFocus::Submit,
             env_available: false,
+            key_only: false,
         }
     }
 }
@@ -177,6 +180,41 @@ pub struct CardsView {
     editor: Option<SentenceLabelsEditor>,
     stop: GenerationStopState,
     following: bool,
+    activity: CardActivity,
+}
+
+/// The purpose of the current card pass, retained after transient requests clear.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum CardActivity {
+    #[default]
+    Building,
+    Rewriting,
+    Retrying,
+}
+
+impl CardActivity {
+    fn from_drafts(drafts: &[CardDraft]) -> Self {
+        if drafts
+            .iter()
+            .any(|draft| draft.rewrite().is_some_and(|request| request.started()))
+        {
+            Self::Rewriting
+        } else if drafts.iter().any(|draft| {
+            let artifacts = draft.artifacts();
+            [
+                artifacts.meta(),
+                artifacts.scene(),
+                artifacts.picture(),
+                artifacts.sound(),
+            ]
+            .iter()
+            .any(|slot| slot.tally().done() > 0)
+        }) {
+            Self::Retrying
+        } else {
+            Self::Building
+        }
+    }
 }
 
 /// The cards whose blocks stay expanded while focus walks elsewhere.
@@ -548,6 +586,7 @@ impl App {
             notice: None,
             focus: WelcomeFocus::Submit,
             env_available,
+            key_only: stage == WelcomeStage::EnterKey,
         };
         self.sentence_settings_row = None;
         self
@@ -556,6 +595,12 @@ impl App {
     /// Return the welcome view (read-only).
     pub fn welcome(&self) -> &WelcomeView {
         &self.welcome
+    }
+
+    /// Return whether setup was opened solely to supply a working key.
+    #[must_use]
+    pub(crate) fn welcome_key_only(&self) -> bool {
+        self.welcome.key_only
     }
 
     /// Return the app advanced from picking language to entering a key.
@@ -570,6 +615,7 @@ impl App {
     pub fn welcome_step_back(mut self) -> Self {
         self.welcome.stage = WelcomeStage::PickLanguage;
         self.welcome.notice = None;
+        self.welcome.key_only = false;
         self
     }
 
@@ -1660,6 +1706,7 @@ impl App {
     /// Return the app with a new card session installed.
     pub fn cards_started(mut self, drafts: Vec<CardDraft>) -> Self {
         self.sentence_settings_row = None;
+        let activity = CardActivity::from_drafts(&drafts);
         self.cards = CardsView {
             drafts,
             selected: 0,
@@ -1669,6 +1716,7 @@ impl App {
             editor: None,
             stop: GenerationStopState::Inactive,
             following: true,
+            activity,
         };
         self
     }
@@ -1678,6 +1726,9 @@ impl App {
     /// follows the engine and no card is open, the selection rides along, which
     /// is what lets the viewport stay on the card being built.
     pub fn cards_running(mut self, target: Option<(usize, Artifact)>) -> Self {
+        if target.is_some() && self.cards.activity == CardActivity::Building {
+            self.cards.activity = CardActivity::from_drafts(&self.cards.drafts);
+        }
         self.cards.running = target;
         if let Some((card, _)) = target
             && self.cards.following
@@ -1714,8 +1765,17 @@ impl App {
         self.cards.running
     }
 
+    /// Describe the active card pass only while an artifact is actually running.
+    #[must_use]
+    pub(crate) fn card_activity(&self) -> Option<CardActivity> {
+        self.cards.running.map(|_| self.cards.activity)
+    }
+
     /// Return the app with card drafts replaced while preserving UI cursor state.
     pub fn cards_replaced(mut self, drafts: Vec<CardDraft>) -> Self {
+        if CardActivity::from_drafts(&drafts) == CardActivity::Rewriting {
+            self.cards.activity = CardActivity::Rewriting;
+        }
         let selected = self.cards.selected.min(drafts.len().saturating_sub(1));
         if selected != self.cards.selected || drafts.is_empty() {
             self.cards.editor = None;
@@ -1808,6 +1868,7 @@ impl App {
     /// so the session engine can re-enqueue them.
     pub fn cards_reset_failures(mut self) -> Self {
         self.done = DoneArtifacts::default();
+        self.cards.activity = CardActivity::Retrying;
         for draft in self.cards.drafts.iter_mut() {
             if !draft.artifacts().has_failed() {
                 continue;

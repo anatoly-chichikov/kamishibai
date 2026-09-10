@@ -17,7 +17,6 @@ use crate::tui::app::App;
 use crate::tui::palette;
 
 const HEADLINE: &str = "your cards";
-const HINT_OK: &str = "all done";
 
 /// `ScreenView` handle for the post-generation summary screen.
 pub struct Done;
@@ -27,15 +26,8 @@ impl ScreenView for Done {
         Cow::Borrowed(HEADLINE)
     }
 
-    /// Silent when cards were lost — the outcome strip states that once, in
-    /// the one place bright enough to be seen.
     fn hint(&self, app: &App) -> Cow<'static, str> {
-        let copy = if super::banner::losses(app) > 0 {
-            ""
-        } else {
-            HINT_OK
-        };
-        Cow::Borrowed(copy)
+        Cow::Borrowed(super::your_cards::header_hint(app))
     }
 
     fn status(&self, app: &App) -> Vec<Span<'static>> {

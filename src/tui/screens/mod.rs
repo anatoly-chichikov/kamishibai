@@ -31,13 +31,9 @@ pub mod your_words;
 /// delegating to the body. `body` only receives the inner body rectangle, so a
 /// screen cannot paint over the header or status regions even if it tries.
 pub trait ScreenView {
-    /// Title for the inverted block at the top-left of the header. Takes
-    /// `app` so screens whose label switches with state (`building your cards`
-    /// → `your cards`) can branch without juggling enum variants.
+    /// Name the screen's content in the inverted block at the top-left.
     fn title(&self, app: &App) -> Cow<'static, str>;
-    /// Contextual sub-tagline drawn in dim ink immediately after the title,
-    /// separated by a thin `·`. Return an empty value to drop both the
-    /// separator and the tagline.
+    /// Explain the useful next step in dim ink beside the content title.
     fn hint(&self, app: &App) -> Cow<'static, str>;
     /// Right-edge language chip. Defaults to the standard `support → target`
     /// chip; screens that have not locked in a language pair yet (e.g. the

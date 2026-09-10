@@ -85,7 +85,7 @@ fn ctrl_g_on_your_words_advances_after_understanding_with_language_pair_visible(
         (
             waiting,
             next.screen(),
-            render_contains(&next, "what i understood"),
+            render_contains(&next, "word meanings"),
             render_contains(&next, "RU → EN"),
         ),
         (Screen::YourWords, Screen::WhatIUnderstood, true, true),

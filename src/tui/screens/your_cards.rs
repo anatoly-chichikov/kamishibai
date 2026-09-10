@@ -1,4 +1,4 @@
-//! Renderer for the `your cards` / `building your cards` screen.
+//! Renderer for the `your cards` screen across generation and review.
 //!
 //! Mirrors `kamishibai-simple/project/steps-2.jsx` (StepGenerating). One block
 //! per card: head row plus four step lines (meta · scene · audio · picture).
@@ -21,17 +21,12 @@ use crate::session::{
     Artifact, ArtifactFile, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, CardMeta,
     GenerationCost,
 };
-use crate::tui::app::App;
+use crate::tui::app::{App, BusyKind, CardActivity};
 use crate::tui::disclosure::DisclosureControls;
 use crate::tui::palette;
 use crate::tui::sentence_editor::{LabelEditorRow, SentenceLabelsEditor};
 
-const HEADLINE_WORKING: &str = "building your cards";
-const HEADLINE_DONE: &str = "your cards";
-const HINT_WORKING: &str = "drawing each card one by one";
-const HINT_STOPPING: &str = "stopping…";
-const HINT_DONE: &str = "all done";
-const HINT_UNSAVED: &str = "cards ready · not saved";
+const HEADLINE: &str = "your cards";
 const SPINNER_FRAME_MILLIS: u128 = 250;
 const STEP_LABEL_COL_CHARS: usize = 8;
 const STEP_COST_COL_CHARS: usize = 6;
@@ -103,37 +98,16 @@ struct StepState<'a> {
     line: ArtifactLine<'a>,
 }
 
-/// `ScreenView` handle for the `your cards` / generating screen. Title and
-/// hint switch from the `building` copy to the `done` copy once every card
-/// has either succeeded or terminally failed.
+/// `ScreenView` handle for the cards, with guidance derived from current work.
 pub struct YourCards;
 
 impl ScreenView for YourCards {
-    fn title(&self, app: &App) -> Cow<'static, str> {
-        let copy = if all_finished(app) {
-            HEADLINE_DONE
-        } else {
-            HEADLINE_WORKING
-        };
-        Cow::Borrowed(copy)
+    fn title(&self, _: &App) -> Cow<'static, str> {
+        Cow::Borrowed(HEADLINE)
     }
 
-    /// A settled batch that lost cards says nothing here: the outcome strip
-    /// carries that in one bright tag, and repeating it in dim type beside the
-    /// title would only say the same thing twice, more quietly.
     fn hint(&self, app: &App) -> Cow<'static, str> {
-        let copy = if app.generation_stopping() {
-            HINT_STOPPING
-        } else if !all_finished(app) {
-            HINT_WORKING
-        } else if super::banner::losses(app) > 0 {
-            ""
-        } else if app.done_artifacts().deck.is_empty() || app.done_artifacts().report.is_empty() {
-            HINT_UNSAVED
-        } else {
-            HINT_DONE
-        };
-        Cow::Borrowed(copy)
+        Cow::Borrowed(header_hint(app))
     }
 
     fn status(&self, app: &App) -> Vec<Span<'static>> {
@@ -175,6 +149,51 @@ impl ScreenView for YourCards {
         );
         paint_sentence_editor_cursor(frame, cards_area, app);
     }
+}
+
+/// Explain the useful next step consistently on live and reopened cards.
+pub(super) fn header_hint(app: &App) -> &'static str {
+    if app.busy().is_some_and(|busy| {
+        matches!(
+            busy.kind(),
+            BusyKind::PublishingDeck | BusyKind::PublishingReport
+        )
+    }) {
+        return "your files will appear here when they're ready";
+    }
+    if app.generation_stopping() {
+        return "you can browse while the current step finishes";
+    }
+    if let Some(activity) = app.card_activity() {
+        return match activity {
+            CardActivity::Building => "open a card to see how it's coming along",
+            CardActivity::Rewriting => "open a card to follow the changes",
+            CardActivity::Retrying if app.cards_ready() > 0 => {
+                "browse the ready cards while the rest are being made"
+            }
+            CardActivity::Retrying => "open a card to see how it's coming along",
+        };
+    }
+    if app.cards_pending() > 0 {
+        return "apply your changes when you're ready";
+    }
+    let done = app.done_artifacts();
+    let losses = super::banner::losses(app);
+    if !done.deck.is_empty() && !done.report.is_empty() {
+        return if losses > 0 {
+            "start with the ready cards, then retry the rest"
+        } else {
+            "your files are ready"
+        };
+    }
+    let count = app.cards().len();
+    if count > 0 && app.cards_failed() == count {
+        return "try again from where things went wrong";
+    }
+    if count > 0 && app.cards_ready() == count {
+        return "save them so you can start learning";
+    }
+    "continue with these cards when you're ready"
 }
 
 fn cards_paragraph(app: &App, width: usize) -> Paragraph<'_> {
@@ -1899,6 +1918,277 @@ fn elapsed(app: &App) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::{LanguagePair, SentenceLabelSelection};
+    use crate::tui::app::BusyKind;
+
+    fn draft(ready: bool) -> CardDraft {
+        let artifacts = if ready {
+            CardArtifacts::from_parts(
+                ArtifactSlot::fresh(Artifact::Meta).succeeded(),
+                ArtifactSlot::fresh(Artifact::Scene).succeeded(),
+                ArtifactSlot::fresh(Artifact::Picture).succeeded(),
+                ArtifactSlot::fresh(Artifact::Sound).succeeded(),
+            )
+        } else {
+            CardArtifacts::default()
+        };
+        CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en")).with_artifacts(artifacts)
+    }
+
+    fn app(drafts: Vec<CardDraft>) -> App {
+        App::new(LanguagePair::new("fr", "en")).cards_started(drafts)
+    }
+
+    fn failed() -> CardDraft {
+        draft(false).with_artifacts(CardArtifacts::from_parts(
+            ArtifactSlot::fresh(Artifact::Meta)
+                .attempted()
+                .attempted()
+                .attempted()
+                .attempted(),
+            ArtifactSlot::fresh(Artifact::Scene),
+            ArtifactSlot::fresh(Artifact::Picture),
+            ArtifactSlot::fresh(Artifact::Sound),
+        ))
+    }
+
+    #[test]
+    fn stopped_work_cannot_claim_that_cards_are_being_made() {
+        assert_eq!(
+            YourCards.hint(&app(vec![draft(false)])),
+            "continue with these cards when you're ready",
+            "an idle unfinished batch claimed that generation was running"
+        );
+    }
+
+    #[test]
+    fn a_running_batch_keeps_the_content_title() {
+        assert_eq!(
+            YourCards.title(&app(vec![draft(false)]).cards_running(Some((0, Artifact::Meta)))),
+            "your cards",
+            "a running batch replaced its content title with an operation"
+        );
+    }
+
+    #[test]
+    fn initial_generation_invites_inspecting_the_cards() {
+        assert_eq!(
+            YourCards.hint(&app(vec![draft(false)]).cards_running(Some((0, Artifact::Meta)))),
+            "open a card to see how it's coming along",
+            "initial generation did not explain what can be inspected"
+        );
+    }
+
+    #[test]
+    fn staged_changes_cannot_claim_that_the_published_files_are_current() {
+        let staged = draft(true).staging_rewrite(SentenceLabelSelection::empty(), "use a question");
+        let app = app(vec![staged]).done_published("/o/cards.apkg", "/o/cards.pdf", "/o");
+        assert_eq!(
+            YourCards.hint(&app),
+            "apply your changes when you're ready",
+            "staged edits disappeared behind the existing published files"
+        );
+    }
+
+    #[test]
+    fn active_generation_cannot_invite_applying_new_staged_edits() {
+        let staged = draft(true).staging_rewrite(SentenceLabelSelection::empty(), "use a question");
+        let app = app(vec![draft(false), staged]).cards_running(Some((0, Artifact::Meta)));
+        assert_eq!(
+            YourCards.hint(&app),
+            "open a card to see how it's coming along",
+            "a running batch invited an action that only queues another run"
+        );
+    }
+
+    #[test]
+    fn a_rewrite_keeps_its_context_after_metadata_clears_the_request() {
+        let rewritten = draft(true)
+            .staging_rewrite(SentenceLabelSelection::empty(), "use a question")
+            .starting_rewrite();
+        let app = app(vec![rewritten])
+            .cards_running(Some((0, Artifact::Meta)))
+            .cards_replaced(vec![draft(false)])
+            .cards_running(None)
+            .cards_running(Some((0, Artifact::Sound)));
+        assert_eq!(
+            YourCards.hint(&app),
+            "open a card to follow the changes",
+            "a rewrite lost its purpose as soon as metadata succeeded"
+        );
+    }
+
+    #[test]
+    fn retried_failures_keep_their_context_after_attempts_are_reset() {
+        let app = app(vec![draft(true), failed()])
+            .cards_reset_failures()
+            .cards_running(Some((1, Artifact::Meta)));
+        assert_eq!(
+            YourCards.hint(&app),
+            "browse the ready cards while the rest are being made",
+            "resetting failed attempts erased the retry guidance"
+        );
+    }
+
+    #[test]
+    fn a_retry_cannot_offer_ready_cards_when_none_exist() {
+        let app = app(vec![failed()])
+            .cards_reset_failures()
+            .cards_running(Some((0, Artifact::Meta)));
+        assert_eq!(
+            YourCards.hint(&app),
+            "open a card to see how it's coming along",
+            "retrying a wholly failed batch invited browsing nonexistent ready cards"
+        );
+    }
+
+    #[test]
+    fn an_automatic_retry_only_offers_ready_cards_that_exist() {
+        let retrying = draft(false).with_artifacts(CardArtifacts::from_parts(
+            ArtifactSlot::fresh(Artifact::Meta).attempted(),
+            ArtifactSlot::fresh(Artifact::Scene),
+            ArtifactSlot::fresh(Artifact::Picture),
+            ArtifactSlot::fresh(Artifact::Sound),
+        ));
+        let app = app(vec![draft(true), retrying]).cards_running(Some((1, Artifact::Meta)));
+        assert_eq!(
+            YourCards.hint(&app),
+            "browse the ready cards while the rest are being made",
+            "an automatic retry ignored the available completed cards"
+        );
+    }
+
+    #[test]
+    fn applying_changes_replaces_an_earlier_retry_pass() {
+        let rewritten = draft(true)
+            .staging_rewrite(SentenceLabelSelection::empty(), "use a question")
+            .starting_rewrite();
+        let app = app(vec![failed()])
+            .cards_reset_failures()
+            .cards_replaced(vec![rewritten])
+            .cards_running(Some((0, Artifact::Meta)));
+        assert_eq!(
+            YourCards.hint(&app),
+            "open a card to follow the changes",
+            "starting a rewrite retained guidance from an earlier retry pass"
+        );
+    }
+
+    #[test]
+    fn a_fresh_batch_cannot_inherit_the_previous_retry_guidance() {
+        let app = app(vec![draft(true), failed()])
+            .cards_reset_failures()
+            .cards_started(vec![draft(false)])
+            .cards_running(Some((0, Artifact::Meta)));
+        assert_eq!(
+            YourCards.hint(&app),
+            "open a card to see how it's coming along",
+            "a fresh batch inherited the previous run's retry intent"
+        );
+    }
+
+    #[test]
+    fn stopping_takes_precedence_over_running_and_staged_work() {
+        let staged = draft(true).staging_rewrite(SentenceLabelSelection::empty(), "use a question");
+        let app = app(vec![draft(false), staged])
+            .cards_running(Some((0, Artifact::Meta)))
+            .generation_stop_started();
+        assert_eq!(
+            YourCards.hint(&app),
+            "you can browse while the current step finishes",
+            "a stopping batch offered more work instead of explaining the remaining wait"
+        );
+    }
+
+    #[test]
+    fn saving_reports_where_the_files_will_appear() {
+        assert_eq!(
+            YourCards.hint(&app(vec![draft(true)]).busy_started(BusyKind::PublishingReport)),
+            "your files will appear here when they're ready",
+            "publication claimed its files were already available"
+        );
+    }
+
+    #[test]
+    fn saving_a_stopped_batch_cannot_offer_browsing_through_a_blocking_overlay() {
+        let app = app(vec![draft(true), draft(false)])
+            .generation_stop_started()
+            .busy_started(BusyKind::PublishingDeck);
+        assert_eq!(
+            YourCards.hint(&app),
+            "your files will appear here when they're ready",
+            "a stopped batch offered browsing while its publication overlay blocked input"
+        );
+    }
+
+    #[test]
+    fn ready_artifacts_still_need_saved_files() {
+        assert_eq!(
+            YourCards.hint(&app(vec![draft(true)])),
+            "save them so you can start learning",
+            "ready artifacts skipped the saving step"
+        );
+    }
+
+    #[test]
+    fn published_files_are_the_finished_batchs_result() {
+        let app = app(vec![draft(true)]).done_published("/o/cards.apkg", "/o/cards.pdf", "/o");
+        assert_eq!(
+            YourCards.hint(&app),
+            "your files are ready",
+            "a finished batch did not identify its available result"
+        );
+    }
+
+    #[test]
+    fn partial_results_invite_using_what_is_ready() {
+        let app = app(vec![draft(true), draft(false)]).done_published_counted(
+            "/o/cards.apkg",
+            "/o/cards.pdf",
+            "/o",
+            1,
+            1,
+        );
+        assert_eq!(
+            YourCards.hint(&app),
+            "start with the ready cards, then retry the rest",
+            "partial publication hid the usable cards or the recovery path"
+        );
+    }
+
+    #[test]
+    fn an_unpublished_partial_batch_cannot_claim_that_learning_can_start() {
+        assert_eq!(
+            YourCards.hint(&app(vec![draft(true), failed()])),
+            "continue with these cards when you're ready",
+            "a partially generated batch offered a study result that was never saved"
+        );
+    }
+
+    #[test]
+    fn total_failure_explains_that_work_can_be_retried() {
+        assert_eq!(
+            YourCards.hint(&app(vec![failed()])),
+            "try again from where things went wrong",
+            "a batch with no surviving cards gave no recovery guidance"
+        );
+    }
+
+    #[test]
+    fn reopened_results_share_the_live_cards_guidance() {
+        let app = app(vec![draft(true), draft(false)]).done_published_counted(
+            "/o/cards.apkg",
+            "/o/cards.pdf",
+            "/o",
+            1,
+            1,
+        );
+        assert_eq!(
+            super::super::done::Done.hint(&app),
+            YourCards.hint(&app),
+            "reopening a published batch changed the meaning of its header"
+        );
+    }
 
     fn plain(line: &Line<'static>) -> String {
         line.spans

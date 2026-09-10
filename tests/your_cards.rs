@@ -391,7 +391,7 @@ fn your_cards_lists_each_card_with_term_meta_preview_head_and_step_rows() {
         .find("✓ manga")
         .expect("first card manga row must be visible");
     assert!(
-        rendered.contains("building your cards")
+        rendered.contains("your cards")
             && rendered.contains("2/4 ready")
             && rendered.contains("whilst")
             && rendered.contains("Example with whilst.")
@@ -461,7 +461,7 @@ fn a_published_batch_with_nothing_owed_stops_offering_regeneration() {
     let quit = rendered.find("[Ctrl+C] quit").unwrap_or(usize::MAX);
     assert!(
         rendered.contains("your cards")
-            && rendered.contains("all done")
+            && rendered.contains("your files are ready")
             && rendered.contains("[↑↓] nav")
             && rendered.contains("[Enter/→] open")
             && !rendered.contains("] tune")
@@ -483,9 +483,9 @@ fn completed_artifacts_cannot_claim_that_an_unpublished_batch_is_all_done() {
     ]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("cards ready · not saved")
+        rendered.contains("save them so you can start learning")
             && rendered.contains("[Ctrl+G] save")
-            && !rendered.contains("all done"),
+            && !rendered.contains("your files are ready"),
         "ready artifacts claimed successful export before either publication path existed: {rendered}"
     );
 }
@@ -536,10 +536,10 @@ fn your_cards_footer_shows_total_cost_before_every_card_finishes() {
     ]);
     let rendered = flat(&app);
     assert!(
-        rendered.contains("building your cards")
+        rendered.contains("your cards")
             && rendered.contains("0/2 ready")
             && rendered.contains("$0.01")
-            && !rendered.contains("all done"),
+            && !rendered.contains("your files are ready"),
         "generation footer must increment the dollar total as soon as fresh artifact costs arrive: {rendered}"
     );
 }
@@ -572,7 +572,7 @@ fn draining_generation_says_stopping_without_offering_more_work() {
     let app = seeded(vec![draft("whilst", partial_priced_artifacts())]).generation_stop_started();
     let rendered = flat(&app);
     assert!(
-        rendered.contains("stopping…")
+        rendered.contains("you can browse while the current step finishes")
             && !rendered.contains("[Ctrl+G] regenerate")
             && !rendered.contains("] tune")
             && !rendered.contains("[Esc] again"),
@@ -610,7 +610,7 @@ fn a_batch_that_lost_nothing_carries_no_loss_tag() {
     .done_published_counted("/tmp/cards.apkg", "/tmp/cards.pdf", "/tmp", 2, 0);
     let rendered = flat(&app);
     assert!(
-        !rendered.contains("unfinished") && rendered.contains("all done"),
+        !rendered.contains("unfinished") && rendered.contains("your files are ready"),
         "a clean batch must not be told it lost anything: {rendered}"
     );
 }

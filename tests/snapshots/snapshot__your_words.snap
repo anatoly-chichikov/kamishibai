@@ -3,7 +3,7 @@ source: tests/snapshot.rs
 expression: render(&app)
 ---
                                                                                 
-     words you want to learn  each word becomes a small learning scene  RU→?    
+     your words   add words or phrases, one per line                  RU → ?    
                                                                                 
     01                                                                          
     02                                                                          

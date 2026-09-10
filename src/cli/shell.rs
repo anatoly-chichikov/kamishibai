@@ -4297,7 +4297,7 @@ mod tests {
             rendered.contains("could not save your cards")
                 && rendered.contains("publish boom")
                 && !rendered.contains("can't reach gemini")
-                && !rendered.contains("all done"),
+                && !rendered.contains("your files are ready"),
             "publication failure blamed Gemini or claimed that the unsaved package was done"
         );
     }

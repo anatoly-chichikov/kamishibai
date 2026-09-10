@@ -3,7 +3,7 @@ source: tests/snapshot.rs
 expression: render(&app)
 ---
                                                                                 
-     what i understood   quick check before i build the cards        RU → EN    
+     word meanings   choose the meanings you want to learn           RU → EN    
                                                                                 
     generation guidance   best fit                                              
                                                                                 

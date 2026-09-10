@@ -262,8 +262,8 @@ fn what_i_understood_renders_understanding_rows_with_localized_prompts_and_card_
     assert!(
         rendered.contains("RU → EN")
             && rendered.contains("step 2/3")
-            && rendered.contains("what i understood")
-            && rendered.contains("quick check before i build the cards")
+            && rendered.contains("word meanings")
+            && rendered.contains("choose the meanings you want to learn")
             && rendered.contains("sincerely")
             && rendered.contains("искренне")
             && rendered.contains("expel")
