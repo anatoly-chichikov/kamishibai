@@ -3,7 +3,7 @@ source: tests/snapshot.rs
 expression: render(&app)
 ---
                                                                                 
-     building your cards   drawing each card one by one               RU → ?    
+     your cards   continue with these cards when you're ready         RU → ?    
                                                                                 
                                                                                 
     preparing cards…                                                            

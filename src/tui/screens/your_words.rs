@@ -18,8 +18,8 @@ use crate::session::{MAX_INTAKE_WORDS, RawInputBatch};
 use crate::tui::app::App;
 use crate::tui::palette;
 
-const HEADLINE: &str = "words you want to learn";
-const HINT: &str = "each word becomes a small learning scene";
+const HEADLINE: &str = "your words";
+const HINT: &str = "add words or phrases, one per line";
 const PLACEHOLDER_LINES: usize = 4;
 const PLACEHOLDER_HINT: &str = "type or paste, one item per line";
 

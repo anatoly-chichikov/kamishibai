@@ -372,19 +372,24 @@ fn pick_languages_modal_keeps_every_row_in_one_grid() {
 fn header_hint_sits_left_of_language_chip_on_every_screen() {
     let pair = LanguagePair::new("en", "ru");
     let cases = [
-        (
-            Screen::YourWords,
-            "each word becomes a small learning scene",
-        ),
+        (Screen::YourWords, "add words or phrases, one per line"),
         (
             Screen::WhatIUnderstood,
-            "quick check before i build the cards",
+            "choose the meanings you want to learn",
         ),
-        (Screen::YourCards, "drawing each card one by one"),
-        (Screen::Done, "all done"),
+        (
+            Screen::YourCards,
+            "continue with these cards when you're ready",
+        ),
+        (Screen::Done, "your files are ready"),
     ];
     for (screen, hint) in cases {
         let app = App::new(pair.clone()).with_screen(screen);
+        let app = if screen == Screen::Done {
+            app.done_published("/o/cards.apkg", "/o/cards.pdf", "/o")
+        } else {
+            app
+        };
         let buffer = render(&app);
         let header_row = buffer.lines().nth(1).expect("header row must render");
         let hint_pos = header_row

@@ -1,4 +1,4 @@
-//! Renderer for the `what i understood` screen.
+//! Renderer for the `word meanings` review screen.
 //!
 //! Mirrors `kamishibai-simple/project/steps-1.jsx` (StepUnderstood). One row
 //! per word: number, term, selected-sense count, em-dash, and active sense.
@@ -22,8 +22,8 @@ use crate::tui::palette;
 
 use super::sentence_labels::BatchEditorControl;
 
-const HEADLINE: &str = "what i understood";
-const HINT: &str = "quick check before i build the cards";
+const HEADLINE: &str = "word meanings";
+const HINT: &str = "choose the meanings you want to learn";
 const SETTINGS_LABEL: &str = "generation guidance";
 const DEFAULT_GUIDANCE_LABEL: &str = "best fit";
 const ALTERNATES_LABEL: &str = "also plausible: ";

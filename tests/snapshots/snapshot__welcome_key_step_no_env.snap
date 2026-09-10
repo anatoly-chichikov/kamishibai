@@ -3,7 +3,7 @@ source: tests/snapshot.rs
 expression: "render_sized(&app, 96, 16)"
 ---
                                                                                                 
-     kamishibai   set up two things                                                             
+     setup   choose your language and add a gemini key                                          
                                                                                                 
     kamishibai turns a list of words you want to learn into an anki deck plus a printable       
     pdf. for each word it writes a natural example sentence, illustrates the scene as a         
