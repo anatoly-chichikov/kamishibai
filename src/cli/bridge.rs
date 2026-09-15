@@ -551,9 +551,12 @@ fn fingerprint(app: &App, generating: bool) -> u64 {
     hasher.finish()
 }
 
-fn draft_cost(draft: &CardDraft, artifact: crate::session::Artifact) -> Option<u64> {
+fn draft_cost(
+    draft: &CardDraft,
+    artifact: crate::session::Artifact,
+) -> Option<crate::session::GenerationCost> {
     let costs = crate::session::ArtifactCosts::from_artifacts(draft.artifacts());
-    costs.cost(artifact).map(|cost| cost.nanos())
+    costs.cost(artifact)
 }
 
 /// Map one screen to a stable tag for fingerprinting, avoiding a numeric cast.

@@ -17,6 +17,25 @@ use super::text_gate::{TextReview, TextReviewGate};
 
 type Lazy = Rc<QuietEngine>;
 
+/// Choose how native OCR diagnostics interact with the hosting process.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeOutput {
+    /// Keep the process stdout and stderr intact.
+    Preserve,
+    /// Temporarily mute process streams for the standalone terminal application.
+    Suppress,
+}
+
+impl NativeOutput {
+    /// Serialize one native operation under the selected stream policy.
+    pub(crate) fn run<T>(&self, action: impl FnOnce() -> Result<T>) -> Result<T> {
+        match self {
+            Self::Preserve => locked(action),
+            Self::Suppress => hush(action),
+        }
+    }
+}
+
 /// Pair one authoritative OCR bundle with its compatibility display token.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct BundleSelection {
@@ -44,13 +63,15 @@ impl BundleSelection {
 
 struct QuietEngine {
     item: RefCell<Option<Result<Rc<ocr_rs::OcrEngine>, String>>>,
+    output: NativeOutput,
 }
 
 impl QuietEngine {
     /// Create one shared quiet engine slot.
-    fn new() -> Self {
+    fn new(output: NativeOutput) -> Self {
         Self {
             item: RefCell::new(None),
+            output,
         }
     }
 
@@ -79,10 +100,16 @@ impl QuietEngine {
 }
 
 impl Drop for QuietEngine {
-    /// Drop the cached OCR engine while native diagnostics stay muted.
+    /// Drop the cached OCR engine under the configured host stream policy.
     fn drop(&mut self) {
         if let Some(item) = self.item.get_mut().take() {
-            let _ = locked(|| discarded(item));
+            let _ = match self.output {
+                NativeOutput::Suppress => locked(|| discarded(item)),
+                NativeOutput::Preserve => locked(|| {
+                    drop(item);
+                    Ok(())
+                }),
+            };
         }
     }
 }
@@ -116,11 +143,27 @@ impl TextDetector {
         Self::configured(threshold, BundleSelection::typed(model), cache)
     }
 
+    /// Create an OCR detector with an explicit policy for host process streams.
+    #[must_use]
+    pub fn from_output(
+        threshold: i32,
+        model: OcrModel,
+        cache: impl Into<PathBuf>,
+        output: NativeOutput,
+    ) -> Self {
+        Self {
+            cache: cache.into(),
+            engine: Rc::new(QuietEngine::new(output)),
+            threshold,
+            bundle: BundleSelection::typed(model),
+        }
+    }
+
     /// Create one detector from its complete bundle selection.
     fn configured(threshold: i32, bundle: BundleSelection, cache: impl Into<PathBuf>) -> Self {
         Self {
             cache: cache.into(),
-            engine: Rc::new(QuietEngine::new()),
+            engine: Rc::new(QuietEngine::new(NativeOutput::Suppress)),
             threshold,
             bundle,
         }
@@ -152,7 +195,10 @@ impl TextDetector {
     /// Return the lazily initialized OCR engine.
     fn engine(&self) -> Result<Rc<ocr_rs::OcrEngine>> {
         if self.engine.empty() {
-            let item = hush(|| ocr::engine(self.bundle.model, self.cache.as_path()).map(Rc::new))
+            let item = self
+                .engine
+                .output
+                .run(|| ocr::engine(self.bundle.model, self.cache.as_path()).map(Rc::new))
                 .map_err(|error| error.to_string());
             self.engine.store(item);
         }
@@ -248,7 +294,10 @@ impl ImageText for TextDetector {
     fn detected(&self, image: &GrayImage) -> Result<String> {
         let image = DynamicImage::ImageLuma8(image.clone());
         let engine = self.engine()?;
-        let items = hush(|| Ok(engine.recognize(&image)?))
+        let items = self
+            .engine
+            .output
+            .run(|| Ok(engine.recognize(&image)?))
             .map_err(|error| anyhow!("OCR failed for '{:?}': {}", self.bundle.model, error))?;
         Ok(extracted(items.as_slice(), self.threshold))
     }

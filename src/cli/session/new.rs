@@ -33,7 +33,11 @@ pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
     };
     let out = output_dir(args.out.as_deref())?;
     let store = SessionStore::system()?;
-    let workflow = console::workflow(out.clone())?;
+    if let Some(id) = args.id.as_deref() {
+        available_id(&store, id)?;
+    }
+    let costs = super::SessionCostScope::default();
+    let workflow = console::workflow_for_session(out.clone(), costs.clone())?;
     let session = match args.build.as_deref() {
         Some(path) => build_session(&workflow, path)?,
         None => {
@@ -47,19 +51,10 @@ pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
         return Err(usage("nothing understood: no usable words"));
     }
     let id = match args.id.as_deref() {
-        Some(name) if valid_id(name) => String::from(name),
-        Some(name) => {
-            return Err(usage(format!(
-                "invalid --id '{name}': use letters, digits, '-', '_' or '.'"
-            )));
-        }
+        Some(name) => String::from(name),
         None => mint_id(session.pair.learning())?,
     };
-    if store.exists(id.as_str()) {
-        return Err(usage(format!(
-            "session '{id}' already exists; pick another --id or remove it first"
-        )));
-    }
+    available_id(&store, &id)?;
     let record = SessionRecord::understood(
         id,
         now()?,
@@ -73,6 +68,7 @@ pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
     )
     .with_sentences(sentence_settings(args));
     store.create(&record)?;
+    costs.bind(store.cost_journal(&record))?;
     if args.generate {
         return run_session(&store, record.id.as_str(), args.wait, render, None, false);
     }
@@ -80,6 +76,20 @@ pub(super) fn new(args: &NewArgs, render: Render) -> Result<()> {
         return json::emit_session(&record);
     }
     println!("{}", view::render_understood(&record));
+    Ok(())
+}
+
+fn available_id(store: &SessionStore, id: &str) -> Result<()> {
+    if !valid_id(id) {
+        return Err(usage(format!(
+            "invalid --id '{id}': use letters, digits, '-', '_' or '.'"
+        )));
+    }
+    if store.exists(id) {
+        return Err(usage(format!(
+            "session '{id}' already exists; pick another --id or remove it first"
+        )));
+    }
     Ok(())
 }
 

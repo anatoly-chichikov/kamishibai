@@ -27,6 +27,7 @@ use crate::session::{
 
 use super::codec::{decode, encode};
 use super::cost::priced;
+use super::profile::{GeminiProfile, GenerationStage};
 use super::prompts::{
     render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
     render_phonetics_prompt,
@@ -50,26 +51,13 @@ fn base_url() -> String {
         .unwrap_or_else(|| String::from(BASE_URL))
 }
 
-fn model_catalog_url() -> String {
-    let base = base_url();
-    catalog_url(base.as_str())
-}
-
 fn catalog_url(base: &str) -> String {
     let separator = if base.contains('?') { '&' } else { '?' };
     format!("{base}{separator}pageSize=1000")
 }
 
+#[cfg(test)]
 const TEXT_MODEL: &str = "gemini-3.8-flash";
-const META_MODEL: &str = TEXT_MODEL;
-const FEATURE_MODEL: &str = TEXT_MODEL;
-const SCENE_MODEL: &str = TEXT_MODEL;
-const IMAGE_MODEL: &str = "gemini-3.1-flash-image";
-const RECALL_MODEL: &str = TEXT_MODEL;
-const FIDELITY_MODEL: &str = TEXT_MODEL;
-const LITERAL_ZOOM_MODEL: &str = TEXT_MODEL;
-const TEXT_JUDGE_MODEL: &str = TEXT_MODEL;
-const TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
 /// Output ceiling for one intake chunk.
 ///
 /// Twenty words of the worst-case polysemous shape bill about 11.4k tokens, so
@@ -146,21 +134,29 @@ pub struct HttpTransport {
 impl HttpTransport {
     /// Create one HTTP transport.
     pub fn new() -> Self {
-        Self::with_timeout(HTTP_TIMEOUT)
+        Self::from_timeout(HTTP_TIMEOUT)
+            .expect("invariant: reqwest client must build with the fixed generation timeout")
+    }
+
+    /// Create a transport with a nonzero deadline for each complete HTTP request.
+    ///
+    /// Embedded callers can bound provider work independently of the console's
+    /// five-minute default. The deadline also covers reading the response body.
+    pub fn from_timeout(timeout: Duration) -> Result<Self> {
+        if timeout.is_zero() {
+            bail!("Gemini request timeout must be greater than zero");
+        }
+        let client = Client::builder()
+            .timeout(timeout)
+            .build()
+            .context("could not construct Gemini HTTP transport")?;
+        Ok(Self { client })
     }
 
     /// Create one HTTP transport bounded for credential validation.
     pub(crate) fn credential() -> Self {
-        Self::with_timeout(CREDENTIAL_TIMEOUT)
-    }
-
-    fn with_timeout(timeout: Duration) -> Self {
-        Self {
-            client: Client::builder()
-                .timeout(timeout)
-                .build()
-                .expect("invariant: reqwest client must build with a fixed timeout"),
-        }
+        Self::from_timeout(CREDENTIAL_TIMEOUT)
+            .expect("invariant: reqwest client must build with the fixed credential timeout")
     }
 }
 
@@ -289,6 +285,7 @@ struct CredentialErrorDetail {
 pub struct GeminiClient<T> {
     key: String,
     transport: T,
+    profile: GeminiProfile,
 }
 
 impl<T> fmt::Debug for GeminiClient<T>
@@ -300,6 +297,7 @@ where
             .debug_struct("GeminiClient")
             .field("key", &"[REDACTED]")
             .field("transport", &self.transport)
+            .field("profile", &self.profile)
             .finish()
     }
 }
@@ -348,10 +346,22 @@ where
 {
     /// Create one Gemini client from an API key and transport.
     pub fn new(key: impl Into<String>, transport: T) -> Self {
+        Self::from_profile(key, transport, GeminiProfile::legacy(base_url()))
+    }
+
+    /// Create an isolated client using explicit endpoint, models, and prompt policy.
+    pub fn from_profile(key: impl Into<String>, transport: T, profile: GeminiProfile) -> Self {
         Self {
             key: key.into(),
             transport,
+            profile,
         }
+    }
+
+    /// Return the non-secret cache namespace for this client's generation policy.
+    #[must_use]
+    pub fn profile_identity(&self) -> &str {
+        self.profile.identity()
     }
 
     /// Return the fixed TTS voice pool.
@@ -383,7 +393,7 @@ where
         let feature_schema = registry.feature_schema()?;
         let feature_raw = self
             .structured_text_observed(
-                FEATURE_MODEL,
+                GenerationStage::Features,
                 feature_prompt,
                 &feature_schema,
                 ThinkingLevel::Low,
@@ -402,7 +412,7 @@ where
             render_layout_scene(language, term, sentence, selection.json(), &composer_card)?;
         let composer_raw = self
             .json_text_observed(
-                SCENE_MODEL,
+                GenerationStage::Scene,
                 composer,
                 ThinkingLevel::Low,
                 COMPOSER_MAX_OUTPUT_TOKENS,
@@ -462,7 +472,10 @@ where
         }
         let response = self
             .transport
-            .get(model_catalog_url().as_str(), self.key.as_str())
+            .get(
+                catalog_url(self.profile.endpoint()).as_str(),
+                self.key.as_str(),
+            )
             .map_err(|_| {
                 CredentialProbeError::new(
                     CredentialFailure::Retryable,
@@ -479,7 +492,10 @@ where
                     "Gemini returned an unreadable model catalog",
                 )
             })?;
-        if !catalog.supports(TEXT_MODEL, "generateContent") {
+        if !catalog.supports(
+            self.profile.model(GenerationStage::Intake),
+            "generateContent",
+        ) {
             return Err(CredentialProbeError::new(
                 CredentialFailure::ModelUnavailable,
                 "the configured Gemini text model is unavailable for this API key",
@@ -495,10 +511,24 @@ where
         known: &str,
         target: &LearningTarget,
     ) -> Result<Understood> {
+        self.understand_observed(raw, known, target, |_| Ok(()))
+    }
+
+    /// Understand words while recording every response before validating its payload.
+    pub(crate) fn understand_observed<F>(
+        &self,
+        raw: &RawInputBatch,
+        known: &str,
+        target: &LearningTarget,
+        mut observe: F,
+    ) -> Result<Understood>
+    where
+        F: FnMut(CostRecord) -> Result<()>,
+    {
         let catalog = catalog();
         let prompt = render_intake_prompt(raw.text(), known, target, &catalog)?;
         let decoded: IntakeResponse =
-            serde_json::from_str(unfence(self.intake_text(prompt)?.trim()))?;
+            serde_json::from_str(unfence(self.intake_text(prompt, &mut observe)?.trim()))?;
         let guess = match target {
             LearningTarget::Detect => {
                 let alternates = supported_alternates(
@@ -539,10 +569,30 @@ where
         comment: &str,
         pair: &LanguagePair,
     ) -> Result<SenseCorrection> {
+        self.correct_bulk_observed(candidate, comment, pair, |_| Ok(()))
+    }
+
+    /// Correct senses while recording usage before decoding the returned payload.
+    pub(crate) fn correct_bulk_observed<F>(
+        &self,
+        candidate: &WordCandidate,
+        comment: &str,
+        pair: &LanguagePair,
+        mut observe: F,
+    ) -> Result<SenseCorrection>
+    where
+        F: FnMut(CostRecord) -> Result<()>,
+    {
         let catalog = catalog();
         let prompt = render_bulk_prompt(candidate, comment, pair, &catalog)?;
-        let decoded: SenseCorrectionResponse =
-            serde_json::from_str(unfence(self.text(TEXT_MODEL, prompt)?.trim()))?;
+        let metered =
+            self.request_stage(GenerationStage::Senses, &Request::text(prompt, None, None))?;
+        observe(metered.cost.clone())?;
+        let raw = response_text(&metered.response);
+        if raw.trim().is_empty() {
+            bail!("No text content in Gemini response");
+        }
+        let decoded: SenseCorrectionResponse = serde_json::from_str(unfence(raw.trim()))?;
         Ok(decoded.correction())
     }
 
@@ -612,7 +662,7 @@ where
     {
         let catalog = catalog();
         let prompt = render_card_meta_prompt(draft, request, &catalog)?;
-        let raw = self.card_text_observed(prompt, &mut observe)?;
+        let raw = self.card_text_observed(GenerationStage::Metadata, prompt, &mut observe)?;
         let senses = prioritized_senses(draft);
         let meta = card_meta_from_raw(raw.as_str(), request, &senses)?;
         self.phonetics_observed(draft, meta, draft.pair(), &mut observe)
@@ -659,7 +709,7 @@ where
     {
         let catalog = catalog();
         let prompt = render_card_prompt(draft, comment, pair, &catalog)?;
-        let raw = self.card_text_observed(prompt, &mut observe)?;
+        let raw = self.card_text_observed(GenerationStage::Correction, prompt, &mut observe)?;
         let decoded: CardCorrectionResponse = serde_json::from_str(unfence(raw.trim()))?;
         let revision = contextual_revision(draft, decoded.into_revision(label_selection(draft))?)?;
         let settled = draft.clone().with_revision(revision.clone(), None);
@@ -676,8 +726,8 @@ where
 
     /// Render one compiled prose prompt and return the request cost record.
     pub(crate) fn image_metered(&self, prompt: &str) -> Result<(Vec<u8>, CostRecord)> {
-        let metered = self.request_metered(
-            IMAGE_MODEL,
+        let metered = self.request_stage(
+            GenerationStage::Picture,
             &Request::text(
                 String::from(prompt),
                 Some(GenerationConfig::image()),
@@ -692,8 +742,8 @@ where
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let metered = self.request_metered(
-            IMAGE_MODEL,
+        let metered = self.request_stage(
+            GenerationStage::Picture,
             &Request::text(
                 String::from(prompt),
                 Some(GenerationConfig::image()),
@@ -741,11 +791,13 @@ where
             ))
         };
         let mut metered =
-            self.request_metered(RECALL_MODEL, &request(RECALL_MAX_OUTPUT_TOKENS)?)?;
+            self.request_stage(GenerationStage::Recall, &request(RECALL_MAX_OUTPUT_TOKENS)?)?;
         observe(metered.cost.clone())?;
         if metered.response.finish_reason() == Some("MAX_TOKENS") {
-            metered =
-                self.request_metered(RECALL_MODEL, &request(RECALL_RECOVERY_MAX_OUTPUT_TOKENS)?)?;
+            metered = self.request_stage(
+                GenerationStage::Recall,
+                &request(RECALL_RECOVERY_MAX_OUTPUT_TOKENS)?,
+            )?;
             observe(metered.cost.clone())?;
             if metered.response.finish_reason() == Some("MAX_TOKENS") {
                 bail!(
@@ -785,7 +837,7 @@ where
                 .with_thinking_level(ThinkingLevel::Low)
                 .with_max_output_tokens(FIDELITY_MAX_OUTPUT_TOKENS),
         );
-        let metered = self.request_metered(FIDELITY_MODEL, &request)?;
+        let metered = self.request_stage(GenerationStage::Fidelity, &request)?;
         observe(metered.cost.clone())?;
         if metered.response.finish_reason() == Some("MAX_TOKENS") {
             bail!(
@@ -827,7 +879,7 @@ where
                 .with_thinking_level(ThinkingLevel::Low)
                 .with_max_output_tokens(LITERAL_ZOOM_MAX_OUTPUT_TOKENS),
         );
-        let metered = self.request_metered(LITERAL_ZOOM_MODEL, &request)?;
+        let metered = self.request_stage(GenerationStage::Zoom, &request)?;
         observe(metered.cost.clone())?;
         if metered.response.finish_reason() == Some("MAX_TOKENS") {
             bail!(
@@ -879,12 +931,14 @@ where
                     .with_max_output_tokens(tokens),
             ))
         };
-        let mut metered =
-            self.request_metered(TEXT_JUDGE_MODEL, &request(TEXT_JUDGE_MAX_OUTPUT_TOKENS)?)?;
+        let mut metered = self.request_stage(
+            GenerationStage::Text,
+            &request(TEXT_JUDGE_MAX_OUTPUT_TOKENS)?,
+        )?;
         observe(metered.cost.clone())?;
         if metered.response.finish_reason() == Some("MAX_TOKENS") {
-            metered = self.request_metered(
-                TEXT_JUDGE_MODEL,
+            metered = self.request_stage(
+                GenerationStage::Text,
                 &request(TEXT_JUDGE_RECOVERY_MAX_OUTPUT_TOKENS)?,
             )?;
             observe(metered.cost.clone())?;
@@ -913,8 +967,8 @@ where
 
     /// Generate one PCM audio payload and return the request cost record.
     pub(crate) fn speech_metered(&self, prompt: &str, text: &str) -> Result<(Vec<u8>, CostRecord)> {
-        let metered = self.request_metered(
-            TTS_MODEL,
+        let metered = self.request_stage(
+            GenerationStage::Speech,
             &Request::text(
                 String::from(prompt),
                 Some(GenerationConfig::audio(voice())),
@@ -934,8 +988,8 @@ where
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let metered = self.request_metered(
-            TTS_MODEL,
+        let metered = self.request_stage(
+            GenerationStage::Speech,
             &Request::text(
                 String::from(prompt),
                 Some(GenerationConfig::audio(voice())),
@@ -947,7 +1001,7 @@ where
     }
 
     fn request_metered(&self, model: &str, request: &Request) -> Result<MeteredResponse> {
-        let url = format!("{}/{model}:generateContent", base_url());
+        let url = format!("{}/{model}:generateContent", self.profile.endpoint());
         let body = serde_json::to_string(request)?;
         let response = self
             .transport
@@ -963,6 +1017,11 @@ where
         })
     }
 
+    fn request_stage(&self, stage: GenerationStage, request: &Request) -> Result<MeteredResponse> {
+        let request = request.with_prompt(|prompt| self.profile.render(stage, prompt))?;
+        self.request_metered(self.profile.model(stage), &request)
+    }
+
     fn text(&self, model: &str, prompt: String) -> Result<String> {
         Ok(self.text_metered(model, prompt)?.0)
     }
@@ -971,13 +1030,17 @@ where
     ///
     /// Kept apart from `text_metered` on purpose: that helper is shared with the
     /// free-form completion path, whose request bytes are frozen by contract.
-    fn intake_text(&self, prompt: String) -> Result<String> {
+    fn intake_text<F>(&self, prompt: String, observe: &mut F) -> Result<String>
+    where
+        F: FnMut(CostRecord) -> Result<()>,
+    {
         let request = Request::text(
             prompt,
             Some(GenerationConfig::bounded_text(INTAKE_MAX_OUTPUT_TOKENS)),
             None,
         );
-        let metered = self.request_metered(TEXT_MODEL, &request)?;
+        let metered = self.request_stage(GenerationStage::Intake, &request)?;
+        observe(metered.cost.clone())?;
         if metered.response.finish_reason() == Some("MAX_TOKENS") {
             bail!(
                 "Gemini understanding hit the {}-token output ceiling; retry to resume from the words already understood",
@@ -1000,12 +1063,17 @@ where
         Ok((raw, metered.cost))
     }
 
-    fn card_text_observed<F>(&self, prompt: String, observe: &mut F) -> Result<String>
+    fn card_text_observed<F>(
+        &self,
+        stage: GenerationStage,
+        prompt: String,
+        observe: &mut F,
+    ) -> Result<String>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let metered = self.request_metered(
-            META_MODEL,
+        let metered = self.request_stage(
+            stage,
             &Request::text(
                 prompt,
                 Some(GenerationConfig::json_mode().with_thinking_level(ThinkingLevel::High)),
@@ -1031,8 +1099,8 @@ where
         F: FnMut(CostRecord) -> Result<()>,
     {
         let prompt = render_phonetics_prompt(draft, &meta, pair)?;
-        let metered = self.request_metered(
-            META_MODEL,
+        let metered = self.request_stage(
+            GenerationStage::Phonetics,
             &Request::text(
                 prompt,
                 Some(GenerationConfig::json_mode().with_thinking_level(ThinkingLevel::Medium)),
@@ -1050,7 +1118,7 @@ where
 
     fn structured_text_observed<F>(
         &self,
-        model: &str,
+        stage: GenerationStage,
         prompt: String,
         schema: &Value,
         thinking: ThinkingLevel,
@@ -1064,10 +1132,10 @@ where
             .with_thinking_level(thinking)
             .with_max_output_tokens(max_output_tokens);
         let request = Request::text(prompt.clone(), Some(config), None);
-        let metered = match self.request_metered(model, &request) {
+        let metered = match self.request_stage(stage, &request) {
             Ok(metered) => metered,
-            Err(error) if schema_rejected(&error) => self.request_metered(
-                model,
+            Err(error) if schema_rejected(&error) => self.request_stage(
+                stage,
                 &Request::text(
                     prompt,
                     Some(
@@ -1090,7 +1158,7 @@ where
 
     fn json_text_observed<F>(
         &self,
-        model: &str,
+        stage: GenerationStage,
         prompt: String,
         thinking: ThinkingLevel,
         max_output_tokens: u32,
@@ -1099,8 +1167,8 @@ where
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let metered = self.request_metered(
-            model,
+        let metered = self.request_stage(
+            stage,
             &Request::text(
                 prompt,
                 Some(
@@ -1697,6 +1765,233 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::gemini::profile::{PromptPolicy, StageModels};
+    use std::sync::Arc;
+
+    struct TaggedPrompts {
+        tag: String,
+    }
+
+    impl TaggedPrompts {
+        fn new(tag: String) -> Self {
+            Self { tag }
+        }
+    }
+
+    impl PromptPolicy for TaggedPrompts {
+        fn render(&self, stage: GenerationStage, prompt: &str) -> Result<String> {
+            Ok(format!("{}:{stage:?}:{prompt}", self.tag))
+        }
+    }
+
+    fn configured_profile(tag: &str) -> GeminiProfile {
+        let models = StageModels::default()
+            .with_model(GenerationStage::Picture, format!("{tag}-picture"))
+            .and_then(|models| models.with_model(GenerationStage::Speech, format!("{tag}-speech")))
+            .and_then(|models| models.with_model(GenerationStage::Metadata, format!("{tag}-meta")))
+            .and_then(|models| {
+                models.with_model(GenerationStage::Phonetics, format!("{tag}-phonetics"))
+            })
+            .expect("test model identifiers must validate");
+        GeminiProfile::new(
+            format!("https://{tag}.example/models"),
+            models,
+            format!("{tag}-v3"),
+            Arc::new(TaggedPrompts::new(String::from(tag))),
+        )
+        .expect("test profile must validate")
+    }
+
+    #[test]
+    fn interleaved_explicit_clients_cannot_mix_media_models_or_prompts() {
+        let response = json!({
+            "candidates": [{"content": {"parts": [{"inlineData": {"data": "AQID"}}]}}]
+        });
+        let first = FakeTransport::new(vec![body(response.clone()), body(response.clone())]);
+        let second = FakeTransport::new(vec![body(response.clone()), body(response)]);
+        let client =
+            GeminiClient::from_profile("first-key", first.clone(), configured_profile("first"));
+        let other =
+            GeminiClient::from_profile("second-key", second.clone(), configured_profile("second"));
+        client
+            .image("draw a quiet lake")
+            .expect("first image must decode");
+        other
+            .speech("read the phrase", "bonjour")
+            .expect("second speech must decode");
+        client
+            .speech("read another phrase", "salut")
+            .expect("first speech must decode");
+        other
+            .image("draw a small boat")
+            .expect("second image must decode");
+        let requests = [first.requests.borrow(), second.requests.borrow()];
+        let prompts = requests
+            .iter()
+            .flat_map(|requests| {
+                requests.iter().map(|request| {
+                    serde_json::from_str::<Value>(request).expect("request must decode")["contents"]
+                        [0]["parts"][0]["text"]
+                        .as_str()
+                        .expect("request text must exist")
+                        .to_string()
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (
+                first.urls.borrow().clone(),
+                second.urls.borrow().clone(),
+                prompts
+            ),
+            (
+                vec![
+                    String::from("https://first.example/models/first-picture:generateContent"),
+                    String::from("https://first.example/models/first-speech:generateContent")
+                ],
+                vec![
+                    String::from("https://second.example/models/second-speech:generateContent"),
+                    String::from("https://second.example/models/second-picture:generateContent")
+                ],
+                vec![
+                    String::from("first:Picture:draw a quiet lake"),
+                    String::from("first:Speech:read another phrase"),
+                    String::from("second:Speech:read the phrase"),
+                    String::from("second:Picture:draw a small boat")
+                ],
+            ),
+            "interleaved client operations mixed their endpoint, stage model, or prompt policy"
+        );
+    }
+
+    #[test]
+    fn explicit_metadata_and_phonetics_use_independent_stage_policies() {
+        let value = card_meta_response(sentence_labels_response(
+            "neutral",
+            "a2",
+            "statement",
+            vec![],
+        ));
+        let transport = FakeTransport::new(vec![text_body(&value), phonetics_body(&value)]);
+        let client =
+            GeminiClient::from_profile("key", transport.clone(), configured_profile("tenant"));
+        let mut records = Vec::new();
+        client
+            .generate_draft_meta_observed(
+                &CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en")),
+                None,
+                |record| {
+                    records.push(record);
+                    Ok(())
+                },
+            )
+            .expect("configured card metadata must decode");
+        let stages = transport
+            .requests
+            .borrow()
+            .iter()
+            .map(|request| {
+                serde_json::from_str::<Value>(request).expect("request must decode")["contents"][0]
+                    ["parts"][0]["text"]
+                    .as_str()
+                    .expect("prompt must exist")
+                    .split(':')
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join(":")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (
+                transport.urls.borrow().clone(),
+                stages,
+                records.iter().map(CostRecord::requests).collect::<Vec<_>>()
+            ),
+            (
+                vec![
+                    String::from("https://tenant.example/models/tenant-meta:generateContent"),
+                    String::from("https://tenant.example/models/tenant-phonetics:generateContent")
+                ],
+                vec![
+                    String::from("tenant:Metadata"),
+                    String::from("tenant:Phonetics")
+                ],
+                vec![1, 1],
+            ),
+            "metadata stages ignored explicit models or prompts, or dropped unpriced requests"
+        );
+    }
+
+    #[test]
+    fn prompt_injection_preserves_vision_schema_and_every_image_part() {
+        let transport = FakeTransport::new(vec![text_body(&json!({"accepted": true}))]);
+        let client =
+            GeminiClient::from_profile("key", transport.clone(), configured_profile("vision"));
+        let request = Request::vision_images(
+            String::from("inspect these crops"),
+            "image/png",
+            vec![String::from("AQID"), String::from("BAYI")],
+            GenerationConfig::vision_judge(json!({"type": "object", "properties": {"accepted": {"type": "boolean"}}, "required": ["accepted"]})).expect("vision schema must validate"),
+        );
+        let mut expected = serde_json::to_value(&request).expect("request must encode");
+        expected["contents"][0]["parts"][0]["text"] = json!("vision:Zoom:inspect these crops");
+        client
+            .request_stage(GenerationStage::Zoom, &request)
+            .expect("vision request must succeed");
+        assert_eq!(
+            serde_json::from_str::<Value>(&transport.requests.borrow()[0])
+                .expect("sent request must decode"),
+            expected,
+            "prompt injection changed the schema, safety settings, or image bytes"
+        );
+    }
+
+    struct RefusingPrompts;
+
+    impl PromptPolicy for RefusingPrompts {
+        fn render(&self, _stage: GenerationStage, _prompt: &str) -> Result<String> {
+            bail!("custom prompt is unavailable")
+        }
+    }
+
+    #[test]
+    fn invalid_prompt_policy_cannot_spend_a_provider_request() {
+        let transport = FakeTransport::new(vec![]);
+        let profile = GeminiProfile::new(
+            "https://example.com/models",
+            StageModels::default(),
+            "refusal-v1",
+            Arc::new(RefusingPrompts),
+        )
+        .expect("profile must validate");
+        let result =
+            GeminiClient::from_profile("key", transport.clone(), profile).image("draw a lake");
+        assert!(
+            result.is_err() && transport.requests.borrow().is_empty(),
+            "a rejected prompt reached the provider"
+        );
+    }
+
+    #[test]
+    fn explicit_credential_probe_checks_its_own_intake_model() {
+        let transport = FakeTransport::new(vec![body(
+            json!({"models": [{"name": "models/tenant-intake", "supportedGenerationMethods": ["generateContent"]}]}),
+        )]);
+        let profile = GeminiProfile::from_models(
+            "https://tenant.example/models",
+            StageModels::default()
+                .with_model(GenerationStage::Intake, "tenant-intake")
+                .expect("model must validate"),
+        )
+        .expect("profile must validate");
+        let result = GeminiClient::from_profile("key", transport.clone(), profile).probe_key();
+        assert!(
+            result.is_ok()
+                && transport.urls.borrow().as_slice()
+                    == ["https://tenant.example/models?pageSize=1000"],
+            "credential validation used the process endpoint or the stock intake model"
+        );
+    }
 
     #[derive(Clone, Debug)]
     struct FakeTransport {
@@ -2730,7 +3025,9 @@ mod tests {
             client
                 .complete(TEXT_MODEL, String::from("Freeform prompt"))
                 .is_ok(),
-            client.intake_text(String::from("Intake prompt")).is_ok(),
+            client
+                .intake_text(String::from("Intake prompt"), &mut |_| Ok(()))
+                .is_ok(),
             client
                 .correct_bulk(
                     &WordCandidate::new("canard", "a duck", true),
@@ -3403,6 +3700,9 @@ mod tests {
     #[test]
     fn http_transport_honors_request_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("test listener must bind");
+        listener
+            .set_nonblocking(true)
+            .expect("test listener must be nonblocking");
         let url = format!(
             "http://{}/slow",
             listener
@@ -3410,12 +3710,28 @@ mod tests {
                 .expect("test listener must have address")
         );
         let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("test listener must accept");
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && std::time::Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(1))
+                    }
+                    Err(error) => panic!("test listener failed before accepting: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .expect("test socket read must be bounded");
             let mut buffer = [0; 1024];
             let _ = stream.read(&mut buffer);
             thread::sleep(Duration::from_millis(250));
         });
-        let error = HttpTransport::with_timeout(Duration::from_millis(25))
+        let error = HttpTransport::from_timeout(Duration::from_millis(25))
+            .expect("positive request timeout must validate")
             .post(url.as_str(), "key", "{}")
             .expect_err("slow server must time out");
         server.join().expect("test server must finish");
@@ -3424,6 +3740,14 @@ mod tests {
                 .downcast_ref::<reqwest::Error>()
                 .is_some_and(reqwest::Error::is_timeout)),
             "HTTP transport ignored the configured request timeout"
+        );
+    }
+
+    #[test]
+    fn http_transport_cannot_use_a_zero_request_deadline() {
+        assert!(
+            HttpTransport::from_timeout(Duration::ZERO).is_err(),
+            "a zero request deadline escaped transport configuration validation"
         );
     }
 
@@ -4385,7 +4709,7 @@ mod tests {
         let mut costs = Vec::new();
         let raw = client
             .structured_text_observed(
-                FEATURE_MODEL,
+                GenerationStage::Features,
                 String::from("same prompt"),
                 &json!({
                     "type": "object",

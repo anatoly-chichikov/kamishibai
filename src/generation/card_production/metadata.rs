@@ -174,11 +174,7 @@ impl MetadataProduction {
         let cache = CardCell::new(self.cache.clone(), pair, term, understanding).cache();
         let visual = cache.visual(visual_revision())?;
         let _meta = cache.hold_root_stage(RootStage::Meta, ROOT_STAGE_LOCK_TIMEOUT)?;
-        if self
-            .meta_cache()
-            .load_current(term, understanding, pair)?
-            .is_some()
-        {
+        if self.meta_cache().matches(term, understanding, pair, meta)? {
             return self.cached_file(term, understanding, pair);
         }
         let _dependents = DependentGuards::hold(&cache, &visual)?;
@@ -306,4 +302,120 @@ fn requested_cached(meta: CardMeta, request: Option<&SentenceLabelSelection>) ->
         })?;
     let labels = labels.with_axis_state(request.pinned().clone(), approx);
     Some(meta.with_sentence_labels(request.reconciled(labels)))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::Path;
+
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::generation::artifact_cache::{
+        ILLUSTRATION_FILE, META_COST_FILE, SCENE_FILE, VOICE_FILE,
+    };
+
+    fn production(root: &Path) -> MetadataProduction {
+        MetadataProduction::new(
+            root.to_path_buf(),
+            GeminiAccess::unavailable(),
+            CostAccounting::new(None),
+        )
+    }
+
+    fn meta(sentence: &str) -> CardMeta {
+        CardMeta::new(
+            "ka.naʁ",
+            "sample",
+            "duck",
+            7,
+            "The duck swims",
+            "duck",
+            "a water bird",
+            "A bird near the pond",
+            sentence,
+        )
+    }
+
+    #[test]
+    fn supplied_metadata_cannot_be_replaced_by_an_older_cached_sentence() {
+        let root = TempDir::new().expect("temporary cache must exist");
+        let production = production(root.path());
+        let pair = LanguagePair::new("FR", "EN");
+        let revised = meta("Le canard traverse le jardin");
+        production
+            .store("canard", "a duck", &pair, &meta("Le canard nage"))
+            .expect("original metadata must store");
+        production
+            .store("canard", "a duck", &pair, &revised)
+            .expect("revised metadata must store");
+        assert_eq!(
+            production
+                .meta_cache()
+                .load("canard", "a duck", &pair)
+                .unwrap(),
+            Some(revised),
+            "supplied metadata was silently replaced by an older cached sentence"
+        );
+    }
+
+    #[test]
+    fn replaced_metadata_cannot_reuse_media_from_the_previous_sentence() {
+        let root = TempDir::new().expect("temporary cache must exist");
+        let production = production(root.path());
+        let pair = LanguagePair::new("FR", "EN");
+        production
+            .store("canard", "a duck", &pair, &meta("Le canard nage"))
+            .expect("original metadata must store");
+        let cache = CardCell::new(root.path(), &pair, "canard", "a duck").cache();
+        let visual = cache.visual(visual_revision()).unwrap();
+        let paths = [
+            cache.filepath(VOICE_FILE).unwrap(),
+            visual.filepath(SCENE_FILE).unwrap(),
+            visual.filepath(ILLUSTRATION_FILE).unwrap(),
+        ];
+        for path in &paths {
+            fs::write(path, b"old sentence artifact").unwrap();
+        }
+        let cost = cache.filepath(META_COST_FILE).unwrap();
+        fs::write(&cost, b"previous spend").unwrap();
+        production
+            .store(
+                "canard",
+                "a duck",
+                &pair,
+                &meta("Le canard traverse le jardin"),
+            )
+            .expect("revised metadata must store");
+        assert_eq!(
+            (paths.map(|path| path.exists()), fs::read(cost).unwrap()),
+            ([false; 3], b"previous spend".to_vec()),
+            "metadata replacement retained outdated media or discarded previous spending"
+        );
+    }
+
+    #[test]
+    fn identical_supplied_metadata_cannot_discard_existing_media() {
+        let root = TempDir::new().expect("temporary cache must exist");
+        let production = production(root.path());
+        let pair = LanguagePair::new("FR", "EN");
+        let meta = meta("Le canard nage").with_source_context(
+            "**Meaning.**\n- **a duck**\n- a newspaper hoax\nrecap: one is a bird and the other is a hoax.\n\n**Usage.**\nA bird near the pond.",
+        );
+        production
+            .store("canard", "a duck", &pair, &meta)
+            .expect("original metadata must store");
+        let cache = CardCell::new(root.path(), &pair, "canard", "a duck").cache();
+        let audio = cache.filepath(VOICE_FILE).unwrap();
+        fs::write(&audio, b"current sentence audio").unwrap();
+        production
+            .store("canard", "a duck", &pair, &meta)
+            .expect("identical metadata must remain cached");
+        assert_eq!(
+            fs::read(audio).unwrap(),
+            b"current sentence audio",
+            "storing identical metadata discarded valid audio"
+        );
+    }
 }

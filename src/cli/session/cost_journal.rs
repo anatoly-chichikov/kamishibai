@@ -8,9 +8,11 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use super::liveness;
-use crate::application::GenerationCostLedger;
+use crate::application::{GenerationCostLedger, GenerationScope};
 use crate::generation::artifact_cache::Cache;
-use crate::session::{Artifact, ArtifactCosts, GenerationCost};
+#[cfg(test)]
+use crate::session::{Artifact, GenerationCost};
+use crate::session::{ArtifactCosts, CostRecord};
 
 const JOURNAL_SCHEMA: &str = "kamishibai.session-cost-journal";
 const JOURNAL_VERSION: u8 = 1;
@@ -42,6 +44,20 @@ struct JournalDocument {
     version: u8,
     run: RunIdentity,
     slots: Vec<ArtifactCosts>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    usage: Vec<UsageEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct UsageEntry {
+    scope: GenerationScope,
+    record: CostRecord,
+}
+
+impl UsageEntry {
+    fn new(scope: GenerationScope, record: CostRecord) -> Self {
+        Self { scope, record }
+    }
 }
 
 impl JournalDocument {
@@ -51,6 +67,7 @@ impl JournalDocument {
             version: JOURNAL_VERSION,
             run,
             slots,
+            usage: Vec::new(),
         }
     }
 
@@ -75,39 +92,50 @@ pub(in crate::cli) struct SessionCostJournal {
 /// Late-bindable journal handle shared by a TUI session and cloned workflows.
 #[derive(Clone, Debug, Default)]
 pub(in crate::cli) struct SessionCostScope {
-    journal: Arc<Mutex<Option<SessionCostJournal>>>,
+    state: Arc<Mutex<CostScopeState>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct CostScopeState {
+    journal: Option<SessionCostJournal>,
+    pending: Vec<UsageEntry>,
 }
 
 impl SessionCostScope {
     /// Build a scope already bound to one console session run.
     pub(in crate::cli) fn bound(journal: SessionCostJournal) -> Self {
         Self {
-            journal: Arc::new(Mutex::new(Some(journal))),
+            state: Arc::new(Mutex::new(CostScopeState {
+                journal: Some(journal),
+                pending: Vec::new(),
+            })),
         }
     }
 
     /// Bind a fresh TUI scope once its session identity has been minted.
     pub(in crate::cli) fn bind(&self, journal: SessionCostJournal) -> Result<()> {
         let mut current = self
-            .journal
+            .state
             .lock()
             .map_err(|_| anyhow::anyhow!("session cost scope lock is poisoned"))?;
-        if let Some(existing) = current.as_ref()
+        if let Some(existing) = current.journal.as_ref()
             && existing.address() != journal.address()
         {
             bail!("session cost scope cannot change run identity");
         }
-        *current = Some(journal);
+        journal.record(&current.pending)?;
+        current.pending.clear();
+        current.journal = Some(journal);
         Ok(())
     }
 
     /// Clear the completed run binding before the same TUI starts another batch.
     pub(in crate::cli) fn reset(&self) -> Result<()> {
         let mut current = self
-            .journal
+            .state
             .lock()
             .map_err(|_| anyhow::anyhow!("session cost scope lock is poisoned"))?;
-        *current = None;
+        *current = CostScopeState::default();
         Ok(())
     }
 
@@ -125,16 +153,6 @@ impl SessionCostScope {
             Some(journal) => journal.overlay_existing(fallback),
             None => Ok(fallback.to_vec()),
         }
-    }
-
-    /// Persist one provider delta before downstream artifact settlement.
-    pub(in crate::cli) fn charge(
-        &self,
-        slot: usize,
-        artifact: Artifact,
-        delta: GenerationCost,
-    ) -> Result<ArtifactCosts> {
-        self.journal()?.charge(slot, artifact, delta)
     }
 
     /// Return one slot's authoritative total after reconciling a live snapshot.
@@ -161,20 +179,59 @@ impl SessionCostScope {
 
     fn optional_journal(&self) -> Result<Option<SessionCostJournal>> {
         let current = self
-            .journal
+            .state
             .lock()
             .map_err(|_| anyhow::anyhow!("session cost scope lock is poisoned"))?;
-        Ok(current.clone())
+        Ok(current.journal.clone())
     }
 }
 
 impl GenerationCostLedger for SessionCostScope {
-    fn charge(&self, slot: usize, artifact: Artifact, delta: GenerationCost) -> Result<()> {
-        SessionCostScope::charge(self, slot, artifact, delta).map(|_| ())
+    fn record(&self, scope: GenerationScope, usage: &CostRecord) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("session cost scope lock is poisoned"))?;
+        let entry = UsageEntry::new(scope, usage.clone());
+        match state.journal.as_ref() {
+            Some(journal) => journal.record(&[entry]),
+            None => {
+                state.pending.push(entry);
+                Ok(())
+            }
+        }
     }
 }
 
 impl SessionCostJournal {
+    fn record(&self, entries: &[UsageEntry]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        fs::create_dir_all(&self.directory)?;
+        let _guard = liveness::lock_for_write(&self.directory.join(WRITE_LOCK_FILE))?;
+        let mut document = self
+            .load()?
+            .unwrap_or_else(|| JournalDocument::new(self.run.clone(), Vec::new()));
+        for entry in entries {
+            if let GenerationScope::Card {
+                slot: Some(slot),
+                artifact,
+            } = entry.scope
+            {
+                if document.slots.len() <= slot {
+                    let length = slot
+                        .checked_add(1)
+                        .ok_or_else(|| anyhow::anyhow!("session cost slot overflow"))?;
+                    document.slots.resize(length, ArtifactCosts::default());
+                }
+                document.slots[slot] = document.slots[slot].charged(artifact, entry.record.cost());
+            }
+            document.usage.push(entry.clone());
+        }
+        self.write(&document)
+    }
+
     /// Address one journal by cache root plus the stable session id and creation stamp.
     pub(in crate::cli) fn new(root: &Path, id: &str, created: &str) -> Self {
         Self {
@@ -224,7 +281,8 @@ impl SessionCostJournal {
         Ok(document.slots)
     }
 
-    /// Add one observed provider delta and return that slot's new absolute totals.
+    #[cfg(test)]
+    /// Add one synthetic provider delta to an isolated test journal.
     pub(in crate::cli) fn charge(
         &self,
         slot: usize,
@@ -290,6 +348,92 @@ mod tests {
     use crate::session::{Artifact, ArtifactCosts, GenerationCost};
 
     #[test]
+    fn input_usage_survives_late_binding_without_becoming_card_spend() {
+        let home = TempDir::new().expect("journal directory must exist");
+        let scope = SessionCostScope::default();
+        let intake = CostRecord::new("custom", 1, 43, 11, 54, GenerationCost::unknown());
+        let senses = CostRecord::new("priced", 1, 57, 13, 70, GenerationCost::from_nanos(731_000));
+        scope
+            .record(GenerationScope::Intake, &intake)
+            .expect("unbound intake must be recorded");
+        scope
+            .record(GenerationScope::Senses, &senses)
+            .expect("unbound correction must be recorded");
+        let journal = SessionCostJournal::new(home.path(), "new-input", "created");
+        scope
+            .bind(journal.clone())
+            .expect("input journal must bind");
+        scope
+            .bind(journal.clone())
+            .expect("repeated bind must not repeat usage");
+        let stored = journal
+            .load()
+            .expect("journal must decode")
+            .expect("journal must persist");
+        assert_eq!(
+            (stored.slots, stored.usage),
+            (
+                vec![],
+                vec![
+                    UsageEntry::new(GenerationScope::Intake, intake),
+                    UsageEntry::new(GenerationScope::Senses, senses)
+                ]
+            ),
+            "input usage disappeared, repeated, or was charged to an invented card slot"
+        );
+    }
+
+    #[test]
+    fn mixed_card_usage_remains_incomplete_after_journal_reopen() {
+        let home = TempDir::new().expect("journal directory must exist");
+        let journal = SessionCostJournal::new(home.path(), "mixed-card", "created");
+        let writer = SessionCostScope::bound(journal.clone());
+        let scope = GenerationScope::Card {
+            slot: Some(3),
+            artifact: Artifact::Meta,
+        };
+        writer
+            .record(
+                scope,
+                &CostRecord::new("priced", 1, 37, 17, 54, GenerationCost::from_nanos(191_000)),
+            )
+            .expect("priced usage must record");
+        writer
+            .record(
+                scope,
+                &CostRecord::new("unpriced", 1, 61, 11, 72, GenerationCost::unknown()),
+            )
+            .expect("unpriced usage must record");
+        let reader = SessionCostScope::bound(SessionCostJournal::new(
+            home.path(),
+            "mixed-card",
+            "created",
+        ));
+        let cost = reader
+            .absolute(3, ArtifactCosts::default())
+            .expect("fresh reader must hydrate")
+            .cost(Artifact::Meta)
+            .expect("provider work must retain an estimate state");
+        let usage = journal
+            .load()
+            .expect("journal must decode")
+            .expect("journal must exist")
+            .usage;
+        assert_eq!(
+            (
+                cost.nanos(),
+                cost.total(),
+                usage
+                    .iter()
+                    .map(|entry| entry.record.requests())
+                    .sum::<u32>()
+            ),
+            (191_000, None, 2),
+            "journal reopen erased unpriced requests or exposed a partial cost as complete"
+        );
+    }
+
+    #[test]
     fn a_seeded_journal_overlays_a_stale_draft_with_its_absolute_total() {
         let home = TempDir::new().expect("tempdir must be created");
         let stale =
@@ -347,7 +491,14 @@ mod tests {
             "created-z",
         ));
         let delta = GenerationCost::from_nanos(731);
-        crate::application::GenerationCostLedger::charge(&writer, 2, Artifact::Sound, delta)
+        writer
+            .record(
+                GenerationScope::Card {
+                    slot: Some(2),
+                    artifact: Artifact::Sound,
+                },
+                &CostRecord::new("test", 1, 1, 1, 2, delta),
+            )
             .expect("ledger charge must persist");
         let reader = SessionCostScope::bound(SessionCostJournal::new(
             home.path(),

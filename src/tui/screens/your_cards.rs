@@ -459,7 +459,7 @@ fn row_cost(artifacts: &CardArtifacts, row: StepRow) -> Option<GenerationCost> {
                 .into_iter()
                 .flatten()
                 .sum::<GenerationCost>();
-            (cost.nanos() != 0).then_some(cost)
+            (cost.total() != Some(0)).then_some(cost)
         }
         StepRow::Voice => artifacts.sound().cost(),
         StepRow::Manga => artifacts.picture().cost(),
@@ -1757,7 +1757,7 @@ pub(crate) fn total_cost(app: &App) -> Option<GenerationCost> {
         .iter()
         .filter_map(card_cost)
         .sum::<GenerationCost>();
-    if cost.nanos() == 0 {
+    if cost.total() == Some(0) {
         return None;
     }
     Some(cost)
@@ -1920,6 +1920,27 @@ mod tests {
     use super::*;
     use crate::session::{LanguagePair, SentenceLabelSelection};
     use crate::tui::app::BusyKind;
+
+    #[test]
+    fn unpriced_card_work_cannot_disappear_from_rows_or_totals() {
+        let draft = draft(false).with_costs(
+            crate::session::ArtifactCosts::default()
+                .charged(Artifact::Meta, GenerationCost::unknown()),
+        );
+        let row = row_cost(draft.artifacts(), StepRow::Scene);
+        let total = total_cost(&app(vec![draft]));
+        assert_eq!(
+            (
+                row.map(|cost| cost.dollars()),
+                total.map(|cost| cost.dollars_cents())
+            ),
+            (
+                Some(String::from("cost unknown")),
+                Some(String::from("cost unknown"))
+            ),
+            "unpriced provider work vanished because its known subtotal was zero"
+        );
+    }
 
     fn draft(ready: bool) -> CardDraft {
         let artifacts = if ready {

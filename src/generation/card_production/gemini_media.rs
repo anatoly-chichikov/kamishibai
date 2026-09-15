@@ -154,7 +154,7 @@ pub(super) enum GeminiTextGate {
     /// Detect literal writing with the profile's PP-OCRv5 bundle.
     Ocr(TextDetector),
     /// Detect literal writing directly with Gemini vision.
-    LlmJudge(GeminiText),
+    LlmJudge(Box<GeminiText>),
 }
 
 impl GeminiTextGate {
@@ -164,14 +164,15 @@ impl GeminiTextGate {
         cache: PathBuf,
         client: GeminiClient<HttpTransport>,
         costs: CostRecorder,
+        output: crate::generation::manga::NativeOutput,
     ) -> Self {
         match language.text_gate {
-            TextGate::Ocr(model) => Self::Ocr(TextDetector::cached(60, model, cache)),
-            TextGate::LlmJudge => Self::LlmJudge(GeminiText::new(
+            TextGate::Ocr(model) => Self::Ocr(TextDetector::from_output(60, model, cache, output)),
+            TextGate::LlmJudge => Self::LlmJudge(Box::new(GeminiText::new(
                 client,
                 TextCheck::new(language.prompt.clone()),
                 costs,
-            )),
+            ))),
         }
     }
 
@@ -341,6 +342,7 @@ mod tests {
                 directory.path().to_path_buf(),
                 client.clone(),
                 costs.clone(),
+                crate::generation::manga::NativeOutput::Suppress,
             );
             (gate.gate(), gate.ocr_model())
         });

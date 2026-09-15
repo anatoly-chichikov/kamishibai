@@ -16,6 +16,7 @@ fn adapter_sources() -> Vec<PathBuf> {
     let mut sources = vec![
         root.join("src/gemini/access.rs"),
         root.join("src/gemini/understanding.rs"),
+        root.join("src/gemini/workflow.rs"),
     ];
     sources.extend(rust_sources(
         root.join("src/generation/card_production").as_path(),

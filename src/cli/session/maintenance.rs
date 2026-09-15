@@ -38,6 +38,7 @@ pub(super) fn cancel(args: &IdArg, render: Render) -> Result<()> {
     }
     let updated = store.update(opened.id.as_str(), |record| {
         record.worker = None;
+        record.launch = None;
         record.progress = None;
         if !matches!(
             record.phase,

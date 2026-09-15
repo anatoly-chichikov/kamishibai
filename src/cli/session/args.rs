@@ -316,6 +316,8 @@ pub(in crate::cli) struct IdArg {
 pub(in crate::cli) struct WorkerArgs {
     /// The session id.
     pub(super) id: String,
+    /// The unique launch reserved by the spawning parent.
+    pub(super) launch: String,
 }
 
 /// A session id plus the term of one card.

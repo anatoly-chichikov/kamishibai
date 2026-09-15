@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::application::GenerationCostLedger;
+use crate::application::{GenerationCostLedger, GenerationScope};
 use crate::generation::artifact_cache::{
     Cache, ILLUSTRATION_COST_FILE, META_COST_FILE, ROOT_STAGE_LOCK_TIMEOUT, RootStage,
     SCENE_COST_FILE, VOICE_COST_FILE,
@@ -50,8 +50,7 @@ impl CostAccounting {
         let attribution = self
             .ledger
             .clone()
-            .zip(slot)
-            .map(|(ledger, slot)| SlotCostAttribution::new(ledger, slot));
+            .map(|ledger| SlotCostAttribution::new(ledger, slot));
         CostRecorder::guarded(cache, artifact, attribution, health)
     }
 }
@@ -60,17 +59,23 @@ impl CostAccounting {
 /// Attributes provider cost to one stable card slot.
 pub(super) struct SlotCostAttribution {
     ledger: Arc<dyn GenerationCostLedger>,
-    slot: usize,
+    slot: Option<usize>,
 }
 
 impl SlotCostAttribution {
     /// Bind a workflow ledger to one stable card slot.
-    pub(super) fn new(ledger: Arc<dyn GenerationCostLedger>, slot: usize) -> Self {
+    pub(super) fn new(ledger: Arc<dyn GenerationCostLedger>, slot: Option<usize>) -> Self {
         Self { ledger, slot }
     }
 
-    fn charge(&self, artifact: Artifact, delta: GenerationCost) -> Result<()> {
-        self.ledger.charge(self.slot, artifact, delta)
+    fn record(&self, artifact: Artifact, usage: &CostRecord) -> Result<()> {
+        self.ledger.record(
+            GenerationScope::Card {
+                slot: self.slot,
+                artifact,
+            },
+            usage,
+        )
     }
 }
 
@@ -185,7 +190,7 @@ impl CostRecorder {
 
     fn observe(&self, record: &CostRecord) -> Result<()> {
         if let Some(attribution) = self.attribution.as_ref() {
-            attribution.charge(self.artifact, record.cost())?;
+            attribution.record(self.artifact, record)?;
         }
         let aggregate = self
             .state

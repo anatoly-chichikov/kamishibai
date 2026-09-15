@@ -58,9 +58,17 @@ impl Rates {
 }
 
 pub(super) fn priced(model: &str, usage: Option<&UsageMetadata>) -> CostRecord {
-    match usage {
-        Some(usage) => rates(model).priced(usage, model),
-        None => CostRecord::new(model, 0, 0, 0, 0, GenerationCost::zero()),
+    match (usage, rates(model)) {
+        (Some(usage), Some(rates)) => rates.priced(usage, model),
+        (Some(usage), None) => CostRecord::new(
+            model,
+            1,
+            usage.prompt_token_count,
+            output_tokens(usage),
+            usage.total_token_count,
+            GenerationCost::unknown(),
+        ),
+        (None, _) => CostRecord::unreported(model),
     }
 }
 
@@ -76,8 +84,8 @@ fn output_tokens(usage: &UsageMetadata) -> u64 {
         .saturating_sub(usage.prompt_token_count)
 }
 
-fn rates(model: &str) -> Rates {
-    match model {
+fn rates(model: &str) -> Option<Rates> {
+    Some(match model {
         "gemini-3.8-flash" => Rates {
             input_nanos: GEMINI_3_8_FLASH_INPUT_NANOS,
             output_nanos: GEMINI_3_8_FLASH_OUTPUT_NANOS,
@@ -118,17 +126,29 @@ fn rates(model: &str) -> Rates {
             output_nanos: GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS,
             thinking_nanos: GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS,
         },
-        _ => Rates {
-            input_nanos: 0,
-            output_nanos: 0,
-            thinking_nanos: 0,
-        },
-    }
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_model_usage_cannot_be_reported_as_free_generation() {
+        let usage = UsageMetadata {
+            prompt_token_count: 137,
+            candidates_token_count: 59,
+            thoughts_token_count: 11,
+            total_token_count: 207,
+        };
+        assert_eq!(
+            serde_json::to_value(priced("custom-unpriced-model", Some(&usage)))
+                .expect("usage must encode"),
+            serde_json::json!({"model": "custom-unpriced-model", "requests": 1, "input_tokens": 137, "output_tokens": 70, "total_tokens": 207, "cost": {"nanos": 0, "incomplete": true}}),
+            "an unpriced model erased real usage or claimed a measured zero-dollar request"
+        );
+    }
 
     #[test]
     fn three_eight_flash_cannot_drop_input_output_or_thinking_costs() {
@@ -241,11 +261,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_usage_metadata_is_not_a_billable_record() {
+    fn missing_usage_metadata_preserves_the_request_without_inventing_a_price() {
         assert_eq!(
-            priced("gemini-3.6-flash", None).requests(),
-            0,
-            "missing Gemini usage metadata must not be rendered as a zero-dollar request"
+            serde_json::to_value(priced("gemini-3.6-flash", None))
+                .expect("unreported request must encode"),
+            serde_json::json!({"model":"gemini-3.6-flash", "requests":1, "input_tokens":0, "output_tokens":0, "total_tokens":0, "cost":{"nanos":0,"incomplete":true}, "missing_usage":true}),
+            "missing Gemini usage metadata erased a real request or claimed a zero-dollar price"
         );
     }
 }
