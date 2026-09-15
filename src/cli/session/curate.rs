@@ -166,7 +166,10 @@ pub(super) fn correct(args: &CorrectArgs, render: Render) -> Result<()> {
         .clone()
         .candidate();
     let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
-    let workflow = console::workflow(PathBuf::from(record.out.clone()))?;
+    let workflow = console::workflow_for_session(
+        PathBuf::from(record.out.clone()),
+        super::SessionCostScope::bound(store.cost_journal(&record)),
+    )?;
     let correction = workflow.correct_bulk(&snapshot, args.note.as_str(), &pair)?;
     let mut appended = 0;
     let updated = store.update(id.as_str(), |record| {

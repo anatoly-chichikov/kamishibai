@@ -21,6 +21,7 @@ use crate::application::{
     CardCorrection, CardMetaGeneration, CardProduction, GenerationCostLedger,
 };
 use crate::gemini::GeminiAccess;
+use crate::generation::manga::NativeOutput;
 use crate::languages::LanguageCatalog;
 use crate::session::{
     ArtifactAttempt, ArtifactFile, CardDraft, CardMeta, CardRevision, GenerationCost, LanguagePair,
@@ -63,10 +64,28 @@ impl GeminiCardProduction {
         access: GeminiAccess,
         ledger: Option<Arc<dyn GenerationCostLedger>>,
     ) -> Self {
+        Self::from_output(cache, catalog, access, ledger, NativeOutput::Suppress)
+    }
+
+    /// Compose production with an explicit policy for native OCR diagnostics.
+    #[must_use]
+    pub(crate) fn from_output(
+        cache: PathBuf,
+        catalog: LanguageCatalog,
+        access: GeminiAccess,
+        ledger: Option<Arc<dyn GenerationCostLedger>>,
+        output: NativeOutput,
+    ) -> Self {
         let costs = CostAccounting::new(ledger);
         Self::new(
-            MetadataProduction::new(cache.clone(), access, costs.clone()),
-            VisualProduction::new(cache.clone(), catalog, access, costs.clone()),
+            MetadataProduction::new(cache.clone(), access.clone(), costs.clone()),
+            VisualProduction::new(
+                cache.clone(),
+                catalog,
+                access.clone(),
+                costs.clone(),
+                output,
+            ),
             SoundProduction::new(cache, catalog, access, costs),
         )
     }
@@ -110,18 +129,6 @@ impl CardCorrection for GeminiCardProduction {
 }
 
 impl CardProduction for GeminiCardProduction {
-    fn generate_meta_in(
-        &self,
-        slot: usize,
-        term: &str,
-        understanding: &str,
-        pair: &LanguagePair,
-        request: Option<&SentenceLabelSelection>,
-    ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
-        self.metadata
-            .generate(term, understanding, pair, request, Some(slot))
-    }
-
     fn generate_draft_meta_in(
         &self,
         slot: usize,

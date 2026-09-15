@@ -24,8 +24,9 @@ use crate::cli::console::{
 use crate::session::{Artifact, ArtifactCosts, CardDraft, LanguagePair};
 
 /// Return whether the record still names this process as the generating worker.
-fn owned_by(record: &SessionRecord, pid: i32) -> bool {
+fn owned_by(record: &SessionRecord, pid: i32, launch: &str) -> bool {
     matches!(record.phase, Phase::Generating)
+        && record.launch.as_deref() == Some(launch)
         && record
             .worker
             .as_ref()
@@ -40,6 +41,7 @@ struct SessionReporter {
     store: SessionStore,
     id: String,
     pid: i32,
+    launch: String,
     inner: Box<dyn Reporter>,
     costs: SessionCostScope,
     revoked: Cell<bool>,
@@ -51,6 +53,7 @@ impl SessionReporter {
         store: SessionStore,
         id: String,
         pid: i32,
+        launch: String,
         inner: Box<dyn Reporter>,
         costs: SessionCostScope,
     ) -> Self {
@@ -58,6 +61,7 @@ impl SessionReporter {
             store,
             id,
             pid,
+            launch,
             inner,
             costs,
             revoked: Cell::new(false),
@@ -70,11 +74,12 @@ impl SessionReporter {
     fn fail(&self, message: String) {
         let pid = self.pid;
         let written = self.store.update(self.id.as_str(), |record| {
-            if owned_by(record, pid) {
+            if owned_by(record, pid, &self.launch) {
                 record.phase = Phase::Failed;
                 record.error = Some(message);
                 record.progress = None;
                 record.worker = None;
+                record.launch = None;
             }
             Ok(())
         });
@@ -109,7 +114,7 @@ impl Reporter for SessionReporter {
             artifact: String::from(artifact.label()),
         };
         match self.store.update(self.id.as_str(), |record| {
-            if owned_by(record, pid) {
+            if owned_by(record, pid, &self.launch) {
                 let draft = record
                     .drafts
                     .get_mut(card)
@@ -140,7 +145,7 @@ impl Reporter for SessionReporter {
             }
             Ok(())
         }) {
-            Ok(fresh) => self.revoked.set(!owned_by(&fresh, pid)),
+            Ok(fresh) => self.revoked.set(!owned_by(&fresh, pid, &self.launch)),
             Err(error) => {
                 self.revoked.set(true);
                 *self.persist_failure.borrow_mut() = Some(format!("{error:#}"));
@@ -160,7 +165,7 @@ impl Reporter for SessionReporter {
         let pid = self.pid;
         let mut owned = false;
         let written = self.store.update(self.id.as_str(), |record| {
-            owned = owned_by(record, pid);
+            owned = owned_by(record, pid, &self.launch);
             if !owned {
                 return Ok(());
             }
@@ -176,6 +181,7 @@ impl Reporter for SessionReporter {
                 .then(|| format!("all {} card(s) failed to generate", outcome.failed()));
             record.progress = None;
             record.worker = None;
+            record.launch = None;
             Ok(())
         });
         if let Err(error) = written {
@@ -221,7 +227,12 @@ fn terminal_phase(outcome: &Outcome) -> Phase {
 /// On success the published result is recorded by `finished`; on failure the
 /// session is marked failed — unless the run was revoked by a `cancel`, whose
 /// phase is never overwritten — and the error is returned for the exit code.
-fn execute(store: &SessionStore, id: &str, inner: Box<dyn Reporter>) -> Result<SessionRecord> {
+fn execute(
+    store: &SessionStore,
+    id: &str,
+    launch: &str,
+    inner: Box<dyn Reporter>,
+) -> Result<SessionRecord> {
     let record = store.open(id)?;
     let pair = LanguagePair::new(record.learning.as_str(), record.known.as_str());
     let journal = store.cost_journal(&record);
@@ -230,7 +241,14 @@ fn execute(store: &SessionStore, id: &str, inner: Box<dyn Reporter>) -> Result<S
     ensure_rewrites_started(drafts.as_slice())?;
     let workflow = workflow_for_session(PathBuf::from(record.out), costs.clone())?;
     let pid = i32::try_from(std::process::id())?;
-    let reporter = SessionReporter::new(store.clone(), String::from(id), pid, inner, costs);
+    let reporter = SessionReporter::new(
+        store.clone(),
+        String::from(id),
+        pid,
+        launch.to_string(),
+        inner,
+        costs,
+    );
     match produce(&workflow, drafts, &reporter) {
         Ok(()) => match reporter.persist_failure.borrow_mut().take() {
             Some(message) => {
@@ -303,13 +321,16 @@ fn ensure_record_rewrites_started(record: &SessionRecord) -> Result<()> {
 /// and no other process writes the record while the worker owns it. A cancel
 /// that landed before the claim wins: the claim is refused and the worker exits
 /// without generating.
-fn claim_self(store: &SessionStore, id: &str) -> Result<()> {
+fn claim_self(store: &SessionStore, id: &str, launch: &str) -> Result<()> {
     let pid = i32::try_from(std::process::id())?;
     let started = now()?;
     store.update(id, |record| {
         ensure_record_rewrites_started(record)?;
-        if matches!(record.phase, Phase::Cancelled) {
-            bail!("session '{id}' was cancelled before generation started");
+        if !matches!(record.phase, Phase::Generating)
+            || record.worker.is_some()
+            || record.launch.as_deref() != Some(launch)
+        {
+            bail!("session '{id}' no longer owns this generation launch");
         }
         record.worker = Some(WorkerHandle { pid, started });
         record.phase = Phase::Generating;
@@ -321,11 +342,11 @@ fn claim_self(store: &SessionStore, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// The hidden `__run <id>` entrypoint: claim the session under this detached
+/// The hidden `__run <id> <launch>` entrypoint: claim the session under this detached
 /// process's own pid, then generate in its foreground, recording final state.
 /// Always exits cleanly — the outcome lives in the session file, the error (if
 /// any) in the worker log.
-pub(super) fn run_detached_entry(id: &str) -> Result<()> {
+pub(super) fn run_detached_entry(id: &str, launch: &str) -> Result<()> {
     let store = SessionStore::system()?;
     let _guard = match liveness::hold(&store.lock_path(id)) {
         Ok(Some(file)) => file,
@@ -338,8 +359,8 @@ pub(super) fn run_detached_entry(id: &str) -> Result<()> {
             return Ok(());
         }
     };
-    let claimed =
-        claim_self(&store, id).and_then(|()| execute(&store, id, Box::new(QuietReporter)));
+    let claimed = claim_self(&store, id, launch)
+        .and_then(|()| execute(&store, id, launch, Box::new(QuietReporter)));
     if let Err(error) = claimed {
         eprintln!("worker failed: {error:#}");
     }
@@ -353,12 +374,18 @@ pub(super) fn run_foreground(
     store: &SessionStore,
     id: &str,
     inner: Box<dyn Reporter>,
+    reserved: Option<&SessionRecord>,
 ) -> Result<SessionRecord> {
     let Some(_guard) = liveness::hold(&store.lock_path(id))? else {
         bail!("session '{id}' is already being generated by another worker");
     };
-    claim_self(store, id)?;
-    execute(store, id, inner)
+    let prepared = reserve_run(store, id, reserved)?;
+    let launch = prepared
+        .launch
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("prepared generation has no launch identity"))?;
+    claim_self(store, id, launch)?;
+    execute(store, id, launch, inner)
 }
 
 /// Start a detached background worker for one session. Returns the record as
@@ -370,31 +397,69 @@ pub(super) fn run_foreground(
 /// never writes the record after spawning, so a fast cache-only worker that
 /// finishes and saves `published` first can never be clobbered by a late parent
 /// save reverting it to `generating`.
-pub(super) fn start_background(store: &SessionStore, id: &str) -> Result<SessionRecord> {
+/// A pending rewrite may supply its exact activation record as an owned reservation.
+pub(super) fn start_background(
+    store: &SessionStore,
+    id: &str,
+    reserved: Option<&SessionRecord>,
+) -> Result<SessionRecord> {
     ensure_record_rewrites_started(&store.open(id)?)?;
-    let log = File::create(store.log_path(id))?;
     let exe = std::env::current_exe()?;
-    let record = prepare_background(store, id)?;
-    if let Err(error) = spawn_detached(exe, id, log) {
+    let prepared = prepare_run(store, id, reserved)?;
+    let launch = prepared
+        .launch
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("prepared generation has no launch identity"))?;
+    let spawned = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(store.log_path(id))
+        .map_err(anyhow::Error::from)
+        .and_then(|log| spawn_detached(exe, id, launch, log));
+    if let Err(error) = spawned {
         let _ = store.update(id, |record| {
-            if !matches!(record.phase, Phase::Cancelled) {
+            if record == &prepared {
                 record.phase = Phase::Failed;
+                record.launch = None;
                 record.error = Some(format!("failed to start worker: {error:#}"));
             }
             Ok(())
         });
         return Err(error);
     }
-    Ok(record)
+    Ok(prepared)
 }
 
-fn prepare_background(store: &SessionStore, id: &str) -> Result<SessionRecord> {
+fn prepare_run(
+    store: &SessionStore,
+    id: &str,
+    reserved: Option<&SessionRecord>,
+) -> Result<SessionRecord> {
+    let Some(_guard) = liveness::hold(&store.lock_path(id))? else {
+        bail!("session '{id}' is already being generated by another worker");
+    };
+    reserve_run(store, id, reserved)
+}
+
+fn reserve_run(
+    store: &SessionStore,
+    id: &str,
+    reserved: Option<&SessionRecord>,
+) -> Result<SessionRecord> {
     let record = store.update(id, |record| {
         ensure_record_rewrites_started(record)?;
+        match reserved {
+            Some(expected) if record != expected => {
+                bail!("session '{id}' changed before its reserved generation could start");
+            }
+            Some(_) => {}
+            None => super::generate::refuse_if_starting(record)?,
+        }
         if matches!(record.phase, Phase::Cancelled) {
             bail!("session '{id}' was cancelled before generation started");
         }
         record.worker = None;
+        record.launch = Some(format!("{:032x}", rand::random::<u128>()));
         record.phase = Phase::Generating;
         record.progress = None;
         record.result = None;
@@ -405,12 +470,13 @@ fn prepare_background(store: &SessionStore, id: &str) -> Result<SessionRecord> {
 }
 
 #[cfg(unix)]
-fn spawn_detached(exe: PathBuf, id: &str, log: File) -> Result<i32> {
+fn spawn_detached(exe: PathBuf, id: &str, launch: &str, log: File) -> Result<i32> {
     use std::os::unix::process::CommandExt;
     let err = log.try_clone()?;
     let child = Command::new(exe)
         .arg("__run")
         .arg(id)
+        .arg(launch)
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(err))
@@ -420,11 +486,12 @@ fn spawn_detached(exe: PathBuf, id: &str, log: File) -> Result<i32> {
 }
 
 #[cfg(not(unix))]
-fn spawn_detached(exe: PathBuf, id: &str, log: File) -> Result<i32> {
+fn spawn_detached(exe: PathBuf, id: &str, launch: &str, log: File) -> Result<i32> {
     let err = log.try_clone()?;
     let child = Command::new(exe)
         .arg("__run")
         .arg(id)
+        .arg(launch)
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(err))
@@ -460,6 +527,7 @@ mod tests {
             meta_request: None,
         }];
         record.phase = Phase::Generating;
+        record.launch = Some(String::from("test-launch"));
         record.worker = Some(WorkerHandle {
             pid,
             started: String::from("t"),
@@ -485,6 +553,10 @@ mod tests {
             store.clone(),
             String::from("fr-1"),
             pid,
+            record
+                .launch
+                .clone()
+                .expect("test session must name its launch"),
             Box::new(QuietReporter),
             SessionCostScope::bound(journal),
         )
@@ -870,11 +942,11 @@ mod tests {
         writer.join().expect("concurrent editor must exit");
         let inserted = store.open("fr-1").expect("staged record must open");
         let provider_calls = std::sync::atomic::AtomicUsize::new(0);
-        let background = prepare_background(&store, "fr-1");
+        let background = prepare_run(&store, "fr-1", None);
         if background.is_ok() {
             provider_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
-        let claimed = claim_self(&store, "fr-1");
+        let claimed = claim_self(&store, "fr-1", "stale-launch");
         if claimed.is_ok() {
             provider_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
@@ -944,11 +1016,274 @@ mod tests {
                 Ok(())
             })
             .expect("cancel the session");
-        let prepared = prepare_background(&store, "fr-1");
-        let claimed = claim_self(&store, "fr-1");
+        let prepared = prepare_run(&store, "fr-1", None);
+        let claimed = claim_self(&store, "fr-1", "stale-launch");
         assert!(
             prepared.is_err() && claimed.is_err(),
             "a worker prepared or claimed a session cancelled before its start"
+        );
+    }
+
+    #[test]
+    fn a_second_background_preparation_cannot_replace_an_unclaimed_start() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        let prepared = prepare_run(&store, "fr-1", None).expect("first launch must prepare");
+        let repeated = prepare_run(&store, "fr-1", None);
+        assert_eq!(
+            (
+                repeated.is_err(),
+                store.open("fr-1").expect("session must reopen")
+            ),
+            (true, prepared),
+            "a second launcher replaced the first launch before its worker claimed ownership"
+        );
+    }
+
+    #[test]
+    fn a_delayed_worker_cannot_claim_a_replacement_run_after_it_finishes() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        let stale = prepare_run(&store, "fr-1", None).expect("old launch must prepare");
+        store
+            .update("fr-1", |record| {
+                record.phase = Phase::Cancelled;
+                record.worker = None;
+                Ok(())
+            })
+            .expect("old launch must be cancelled");
+        store
+            .update("fr-1", |record| {
+                super::super::reset_to_understood(record);
+                Ok(())
+            })
+            .expect("replacement launch must resume");
+        let replacement =
+            prepare_run(&store, "fr-1", None).expect("replacement launch must prepare");
+        claim_self(
+            &store,
+            "fr-1",
+            replacement
+                .launch
+                .as_deref()
+                .expect("replacement must name its launch"),
+        )
+        .expect("replacement worker must claim");
+        let pid = i32::try_from(std::process::id()).expect("pid must fit");
+        reporter(&store, pid).finished(&Outcome::for_test(
+            "/new/deck.apkg",
+            "/new/deck.pdf",
+            "/new",
+            1,
+            0,
+        ));
+        let published = store
+            .open("fr-1")
+            .expect("replacement publication must open");
+        let delayed = claim_self(
+            &store,
+            "fr-1",
+            stale
+                .launch
+                .as_deref()
+                .expect("old reservation must name its launch"),
+        );
+        assert_eq!(
+            (
+                delayed.is_err(),
+                store.open("fr-1").expect("publication must survive")
+            ),
+            (true, published),
+            "a delayed worker stole the replacement run and erased its publication"
+        );
+    }
+
+    #[test]
+    fn a_stale_foreground_reservation_cannot_claim_a_replacement_launch() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        let stale = prepare_run(&store, "fr-1", None).expect("old launch must prepare");
+        store
+            .update("fr-1", |record| {
+                super::super::reset_to_understood(record);
+                Ok(())
+            })
+            .expect("replacement must reset old launch");
+        let replacement =
+            prepare_run(&store, "fr-1", None).expect("replacement launch must prepare");
+        let result = run_foreground(&store, "fr-1", Box::new(QuietReporter), Some(&stale));
+        assert_eq!(
+            (
+                result.is_err(),
+                store.open("fr-1").expect("replacement must reopen")
+            ),
+            (true, replacement),
+            "foreground generation ignored its stale reservation and took the replacement launch"
+        );
+    }
+
+    #[test]
+    fn callbacks_from_a_retired_launch_cannot_write_into_a_replacement_with_the_same_pid() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        let retired = reporter(&store, 1);
+        store
+            .update("fr-1", |record| {
+                super::super::reset_to_understood(record);
+                Ok(())
+            })
+            .expect("old launch must be revoked");
+        prepare_run(&store, "fr-1", None).expect("replacement must prepare");
+        let replacement = store
+            .update("fr-1", |record| {
+                record.worker = Some(WorkerHandle {
+                    pid: 1,
+                    started: String::from("replacement"),
+                });
+                Ok(())
+            })
+            .expect("replacement must claim the reused pid");
+        retired.fail(String::from("late failure"));
+        retired.finished(&Outcome::for_test(
+            "/old/deck.apkg",
+            "/old/deck.pdf",
+            "/old",
+            1,
+            0,
+        ));
+        retired.step(
+            0,
+            &CardDraft::new("canard", "a duck", LanguagePair::new("fr", "en")),
+            Artifact::Sound,
+            StepOutcome::Ready { cached: false },
+        );
+        assert_eq!(
+            (
+                retired.revoked(),
+                store.open("fr-1").expect("replacement must reopen")
+            ),
+            (true, replacement),
+            "a retired launch wrote through a reused pid into the replacement run"
+        );
+    }
+
+    #[test]
+    fn an_owned_pending_reservation_can_start_without_reopening_generation_to_other_callers() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        let reserved = store
+            .update("fr-1", |record| {
+                record.worker = None;
+                Ok(())
+            })
+            .expect("pending activation must reserve its run");
+        let unowned = prepare_run(&store, "fr-1", None);
+        let owned = prepare_run(&store, "fr-1", Some(&reserved));
+        assert_eq!(
+            (unowned.is_err(), owned.is_ok()),
+            (true, true),
+            "pending activation either blocked its owner or admitted an unrelated launcher"
+        );
+    }
+
+    #[test]
+    fn a_stale_pending_reservation_cannot_replace_a_changed_session() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        let reserved = store
+            .update("fr-1", |record| {
+                record.worker = None;
+                Ok(())
+            })
+            .expect("pending activation must reserve its run");
+        let changed = store
+            .update("fr-1", |record| {
+                record.out = String::from("/different-output");
+                Ok(())
+            })
+            .expect("concurrent update must persist");
+        let prepared = prepare_run(&store, "fr-1", Some(&reserved));
+        assert_eq!(
+            (
+                prepared.is_err(),
+                store.open("fr-1").expect("changed session must reopen")
+            ),
+            (true, changed),
+            "a stale pending reservation replaced a concurrently changed session"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_background_preparation_cannot_revoke_a_live_worker() {
+        let mode = "KAMISHIBAI_BACKGROUND_PREPARE_RACE";
+        if let Some(root) = std::env::var_os(mode) {
+            let root = PathBuf::from(root);
+            let store = SessionStore::new(root.clone());
+            let _guard = store
+                .hold("fr-1")
+                .expect("worker lock must open")
+                .expect("worker must acquire its lock");
+            let record = store.open("fr-1").expect("prepared launch must open");
+            claim_self(
+                &store,
+                "fr-1",
+                record
+                    .launch
+                    .as_deref()
+                    .expect("prepared launch must have an identity"),
+            )
+            .expect("worker must claim ownership");
+            std::fs::write(root.join("claimed"), b"ready").expect("claim marker must be written");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !root.join("release").exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            return;
+        }
+        let home = TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        generating_session(&store, 1);
+        prepare_run(&store, "fr-1", None).expect("child launch must prepare");
+        let mut child = Command::new(std::env::current_exe().expect("test executable must resolve"))
+            .args(["cli::session::worker::tests::a_stale_background_preparation_cannot_revoke_a_live_worker", "--exact", "--nocapture"])
+            .env(mode, home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("worker child must start");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !home.path().join("claimed").exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let claimed = home.path().join("claimed").exists();
+        let before = store.open("fr-1").expect("claimed session must open");
+        let prepared = prepare_run(&store, "fr-1", None);
+        let after = store.open("fr-1").expect("refused session must open");
+        std::fs::write(home.path().join("release"), b"done")
+            .expect("release marker must be written");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let finished = loop {
+            if let Some(status) = child.try_wait().expect("worker status must read") {
+                break status.success();
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert_eq!(
+            (claimed, prepared.is_err(), after == before, finished),
+            (true, true, true, true),
+            "a stale background launcher revoked the process holding the worker lock"
         );
     }
 

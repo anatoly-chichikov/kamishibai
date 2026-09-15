@@ -10,14 +10,15 @@
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
-use crate::application::{CardProduction, PublishPhase, PublishProgress, StudyPublishing};
+use crate::application::{
+    CardProduction, GenerationRun, PublishPhase, PublishProgress, StudyPublishing,
+};
 
 use super::session::SessionCostScope;
-use super::wiring::{GeminiCardWorkflow, console_workflow, session_workflow};
+use super::wiring::{GeminiCardWorkflow, session_workflow};
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
-    Artifact, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, LanguagePair, SessionEngine,
-    WordCandidate,
+    Artifact, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, LanguagePair, WordCandidate,
 };
 
 use std::path::PathBuf;
@@ -142,12 +143,6 @@ impl PublishProgress for Unwatched {
     fn advance(&self, _phase: PublishPhase) {}
 }
 
-/// Build a console Gemini workflow rooted at the shared cache and output dir.
-pub(super) fn workflow(output: PathBuf) -> Result<GeminiCardWorkflow> {
-    let cache = Locations::new(LocationArgs::default(), SystemContext).cache()?;
-    Ok(console_workflow(cache, output))
-}
-
 /// Build a console workflow whose observed spend belongs to one session run.
 pub(super) fn workflow_for_session(
     output: PathBuf,
@@ -170,25 +165,25 @@ pub(super) fn produce<G>(
 where
     G: CardProduction + StudyPublishing,
 {
-    reporter.generating(drafts.len());
-    let mut engine = SessionEngine::start(drafts);
-    while let Some((card, artifact)) = engine.next_target() {
+    let mut run = GenerationRun::new(drafts)?;
+    reporter.generating(run.drafts().len());
+    while run.next().is_some() {
         if reporter.revoked() {
             bail!("the session no longer names this worker");
         }
-        let draft = engine.drafts()[card].clone();
-        let term = draft.term().to_string();
-        if let Some(error) = advance(workflow, &mut engine, card, artifact, &draft) {
+        let (card, artifact, _event, error) = run
+            .advance(workflow)?
+            .expect("invariant: the running queue has a next artifact")
+            .into_parts();
+        let draft = &run.drafts()[card];
+        let term = draft.term();
+        if let Some(error) = error {
             reporter.warn(format!("{term} · {}: {error}", artifact.label()).as_str());
         }
-        reporter.step(
-            card,
-            &engine.drafts()[card],
-            artifact,
-            outcome_of(&engine, card, artifact),
-        );
+        reporter.step(card, draft, artifact, outcome_of(draft, artifact));
     }
-    let drafts = engine.drafts().to_vec();
+    run.state()?;
+    let drafts = run.into_drafts();
     let cards = drafts.iter().filter(|d| d.artifacts().all_ready()).count();
     let failed = drafts.iter().filter(|d| d.artifacts().has_failed()).count();
     if reporter.revoked() {
@@ -213,46 +208,8 @@ where
     Ok(())
 }
 
-fn advance<G>(
-    workflow: &G,
-    engine: &mut SessionEngine,
-    card: usize,
-    artifact: Artifact,
-    draft: &CardDraft,
-) -> Option<String>
-where
-    G: CardProduction + StudyPublishing,
-{
-    match artifact {
-        Artifact::Meta => {
-            let attempt = workflow.generate_draft_meta_in(card, draft);
-            let error = attempt.error().map(|error| format!("{error:#}"));
-            engine.applied_revision_attempt(card, attempt);
-            error
-        }
-        Artifact::Scene => {
-            let attempt = workflow.generate_scene_in(card, draft);
-            let error = attempt.error().map(|error| format!("{error:#}"));
-            engine.applied_media_attempt(card, artifact, attempt);
-            error
-        }
-        Artifact::Picture => {
-            let attempt = workflow.generate_picture_in(card, draft);
-            let error = attempt.error().map(|error| format!("{error:#}"));
-            engine.applied_media_attempt(card, artifact, attempt);
-            error
-        }
-        Artifact::Sound => {
-            let attempt = workflow.generate_sound_in(card, draft);
-            let error = attempt.error().map(|error| format!("{error:#}"));
-            engine.applied_media_attempt(card, artifact, attempt);
-            error
-        }
-    }
-}
-
-fn outcome_of(engine: &SessionEngine, card: usize, artifact: Artifact) -> StepOutcome<'_> {
-    let slot = slot_for(engine.drafts()[card].artifacts(), artifact);
+fn outcome_of(draft: &CardDraft, artifact: Artifact) -> StepOutcome<'_> {
+    let slot = slot_for(draft.artifacts(), artifact);
     if slot.ready() {
         return StepOutcome::Ready {
             cached: slot.file().map(|file| file.cached()).unwrap_or(false),
@@ -463,6 +420,8 @@ impl Reporter for JsonReporter {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use std::path::Path;
+    use std::sync::Arc;
 
     use anyhow::Result;
 
@@ -473,12 +432,25 @@ mod tests {
         WordCandidate,
     };
 
-    #[derive(Clone, Default)]
-    struct LocalWorkflow;
+    #[derive(Clone)]
+    struct LocalWorkflow {
+        directory: Arc<tempfile::TempDir>,
+    }
+
+    impl Default for LocalWorkflow {
+        fn default() -> Self {
+            Self {
+                directory: Arc::new(
+                    tempfile::TempDir::new().expect("local artifacts need a directory"),
+                ),
+            }
+        }
+    }
 
     #[derive(Clone, Default)]
     struct FailingPictureWorkflow {
         pictures: Cell<usize>,
+        production: LocalWorkflow,
     }
 
     impl CardMetaGeneration for LocalWorkflow {
@@ -517,19 +489,26 @@ mod tests {
     }
 
     impl CardProduction for LocalWorkflow {
-        fn generate_meta_in(
+        fn generate_draft_meta_in(
             &self,
             _slot: usize,
-            term: &str,
-            understanding: &str,
-            pair: &LanguagePair,
-            request: Option<&SentenceLabelSelection>,
-        ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<(CardRevision, Option<ArtifactFile>)> {
             let result = self
-                .generate_card_meta(term, understanding, pair, request)
+                .generate_card_meta(
+                    draft.term(),
+                    draft.understanding(),
+                    draft.pair(),
+                    draft.meta_request(),
+                )
                 .and_then(|meta| {
-                    self.store_card_meta(term, understanding, pair, &meta)
-                        .map(|file| (meta, Some(file)))
+                    self.store_card_meta(draft.term(), draft.understanding(), draft.pair(), &meta)
+                        .map(|file| {
+                            (
+                                CardRevision::new(draft.term(), draft.understanding(), meta),
+                                Some(file),
+                            )
+                        })
                 });
             ArtifactAttempt::unmetered(result)
         }
@@ -539,7 +518,7 @@ mod tests {
             _slot: usize,
             draft: &CardDraft,
         ) -> ArtifactAttempt<ArtifactFile> {
-            ArtifactAttempt::unmetered(Ok(local_file(draft.term(), "scene")))
+            ArtifactAttempt::unmetered(Ok(local_file(self.directory.path(), draft.term(), "scene")))
         }
 
         fn generate_picture_in(
@@ -547,7 +526,11 @@ mod tests {
             _slot: usize,
             draft: &CardDraft,
         ) -> ArtifactAttempt<ArtifactFile> {
-            ArtifactAttempt::unmetered(Ok(local_file(draft.term(), "picture")))
+            ArtifactAttempt::unmetered(Ok(local_file(
+                self.directory.path(),
+                draft.term(),
+                "picture",
+            )))
         }
 
         fn generate_sound_in(
@@ -555,22 +538,17 @@ mod tests {
             _slot: usize,
             draft: &CardDraft,
         ) -> ArtifactAttempt<ArtifactFile> {
-            ArtifactAttempt::unmetered(Ok(local_file(draft.term(), "sound")))
+            ArtifactAttempt::unmetered(Ok(local_file(self.directory.path(), draft.term(), "sound")))
         }
 
         fn store_card_meta(
             &self,
-            _term: &str,
+            term: &str,
             _understanding: &str,
             _pair: &LanguagePair,
             _meta: &CardMeta,
         ) -> Result<ArtifactFile> {
-            Ok(ArtifactFile::new(
-                "meta.json",
-                std::env::temp_dir().join("meta.json"),
-                "1 B",
-                false,
-            ))
+            Ok(local_file(self.directory.path(), term, "meta"))
         }
     }
 
@@ -597,7 +575,8 @@ mod tests {
             pair: &LanguagePair,
             request: Option<&SentenceLabelSelection>,
         ) -> Result<CardMeta> {
-            LocalWorkflow.generate_card_meta(term, understanding, pair, request)
+            self.production
+                .generate_card_meta(term, understanding, pair, request)
         }
     }
 
@@ -608,20 +587,17 @@ mod tests {
             comment: &str,
             pair: &LanguagePair,
         ) -> Result<CardRevision> {
-            LocalWorkflow.correct_card(draft, comment, pair)
+            self.production.correct_card(draft, comment, pair)
         }
     }
 
     impl CardProduction for FailingPictureWorkflow {
-        fn generate_meta_in(
+        fn generate_draft_meta_in(
             &self,
             slot: usize,
-            term: &str,
-            understanding: &str,
-            pair: &LanguagePair,
-            request: Option<&SentenceLabelSelection>,
-        ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
-            LocalWorkflow.generate_meta_in(slot, term, understanding, pair, request)
+            draft: &CardDraft,
+        ) -> ArtifactAttempt<(CardRevision, Option<ArtifactFile>)> {
+            self.production.generate_draft_meta_in(slot, draft)
         }
 
         fn generate_scene_in(
@@ -629,7 +605,7 @@ mod tests {
             slot: usize,
             draft: &CardDraft,
         ) -> ArtifactAttempt<ArtifactFile> {
-            LocalWorkflow.generate_scene_in(slot, draft)
+            self.production.generate_scene_in(slot, draft)
         }
 
         fn generate_picture_in(
@@ -646,7 +622,7 @@ mod tests {
             slot: usize,
             draft: &CardDraft,
         ) -> ArtifactAttempt<ArtifactFile> {
-            LocalWorkflow.generate_sound_in(slot, draft)
+            self.production.generate_sound_in(slot, draft)
         }
 
         fn store_card_meta(
@@ -656,7 +632,8 @@ mod tests {
             pair: &LanguagePair,
             meta: &CardMeta,
         ) -> Result<ArtifactFile> {
-            LocalWorkflow.store_card_meta(term, understanding, pair, meta)
+            self.production
+                .store_card_meta(term, understanding, pair, meta)
         }
     }
 
@@ -666,13 +643,15 @@ mod tests {
             drafts: &[CardDraft],
             progress: &dyn PublishProgress,
         ) -> Result<PublishedStudyPackage> {
-            LocalWorkflow.publish(drafts, progress)
+            self.production.publish(drafts, progress)
         }
     }
 
-    fn local_file(term: &str, kind: &str) -> ArtifactFile {
+    fn local_file(directory: &Path, term: &str, kind: &str) -> ArtifactFile {
         let name = format!("{term}-{kind}");
-        ArtifactFile::new(name.clone(), std::env::temp_dir().join(&name), "1 B", false)
+        let path = directory.join(&name);
+        std::fs::write(&path, b"local artifact").expect("local artifact must write");
+        ArtifactFile::new(name, path, "14 B", false)
     }
 
     #[derive(Default)]
@@ -797,7 +776,7 @@ mod tests {
             CardDraft::new("flaner", "to stroll", pair()),
         ];
         let reporter = RecordingReporter::default();
-        produce(&LocalWorkflow, drafts, &reporter).expect("produce must publish");
+        produce(&LocalWorkflow::default(), drafts, &reporter).expect("produce must publish");
         assert_eq!(
             *reporter.published.borrow(),
             Some((2, 0)),
@@ -809,7 +788,7 @@ mod tests {
     fn produce_runs_artifacts_in_engine_order() {
         let drafts = vec![CardDraft::new("canard", "a duck", pair())];
         let reporter = RecordingReporter::default();
-        produce(&LocalWorkflow, drafts, &reporter).expect("produce must publish");
+        produce(&LocalWorkflow::default(), drafts, &reporter).expect("produce must publish");
         assert_eq!(
             *reporter.steps.borrow(),
             vec![

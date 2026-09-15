@@ -490,7 +490,14 @@ impl RecordingLedger {
 }
 
 impl GenerationCostLedger for RecordingLedger {
-    fn charge(&self, slot: usize, artifact: Artifact, delta: GenerationCost) -> Result<()> {
+    fn record(&self, scope: crate::application::GenerationScope, usage: &CostRecord) -> Result<()> {
+        let crate::application::GenerationScope::Card {
+            slot: Some(slot),
+            artifact,
+        } = scope
+        else {
+            return Ok(());
+        };
         let mut costs = self
             .costs
             .lock()
@@ -498,7 +505,7 @@ impl GenerationCostLedger for RecordingLedger {
         if costs.len() <= slot {
             costs.resize(slot.saturating_add(1), ArtifactCosts::default());
         }
-        costs[slot] = costs[slot].charged(artifact, delta);
+        costs[slot] = costs[slot].charged(artifact, usage.cost());
         Ok(())
     }
 }

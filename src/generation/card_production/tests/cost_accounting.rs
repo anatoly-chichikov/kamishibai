@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn unknown_pricing_keeps_real_usage_in_artifact_storage_and_totals() {
+    let home = TempDir::new().expect("cache directory must exist");
+    let cache = Cache::new("cards/unknown", home.path());
+    let costs = CostRecorder::new(cache.clone(), Artifact::Meta);
+    let known = CostRecord::new("priced", 1, 31, 17, 48, GenerationCost::from_nanos(193_000));
+    let unknown = CostRecord::new("unpriced", 1, 83, 13, 96, GenerationCost::unknown());
+    costs.push(known.clone()).expect("priced usage must record");
+    costs
+        .push(unknown.clone())
+        .expect("unpriced usage must record");
+    assert_eq!(
+        (
+            load_cost_record(&cache, Artifact::Meta).expect("usage must reload"),
+            costs.current(false).expect("current estimate must resolve")
+        ),
+        (
+            Some(known.merged(&unknown)),
+            Some(GenerationCost::from_nanos(193_000) + GenerationCost::unknown())
+        ),
+        "artifact accounting erased unpriced usage or treated its subtotal as complete"
+    );
+}
+
+#[test]
 fn correction_observer_persists_the_exact_billed_request() {
     let home = TempDir::new().expect("tempdir must be created");
     let cache = Cache::new("cards/test", home.path());
@@ -76,7 +100,7 @@ fn provider_observer_journals_session_spend_before_lifetime_sidecar_failure() {
     let recorder = CostRecorder::attributed(
         Cache::failing("cards/test", home.path(), 0),
         Artifact::Picture,
-        Some(SlotCostAttribution::new(Arc::new(ledger.clone()), 0)),
+        Some(SlotCostAttribution::new(Arc::new(ledger.clone()), Some(0))),
     );
     let result = recorder.push(CostRecord::new(
         "gemini-3.1-flash-image",

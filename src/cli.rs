@@ -586,13 +586,21 @@ mod tests {
     #[test]
     fn the_worker_subcommand_parses_yet_stays_hidden() {
         let parsed = matches!(
-            parse(&["kamishibai", "__run", "fr-1"]).command,
+            parse(&["kamishibai", "__run", "fr-1", "reserved-launch"]).command,
             Some(Command::Worker(_))
         );
         let hidden = !command().render_long_help().to_string().contains("__run");
         assert!(
             parsed && hidden,
             "__run must parse but never appear in the help"
+        );
+    }
+
+    #[test]
+    fn a_detached_worker_cannot_start_without_its_reserved_launch_identity() {
+        assert!(
+            Cli::try_parse_from(["kamishibai", "__run", "fr-1"]).is_err(),
+            "a detached worker accepted an id without the spawning launch identity"
         );
     }
 

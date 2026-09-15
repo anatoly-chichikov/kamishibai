@@ -2056,6 +2056,78 @@ fn result_items_in_json_mode_round_trip_into_a_new_build_session() {
 }
 
 #[test]
+fn changed_build_input_cannot_publish_a_previously_cached_sentence() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "original-build", CARDS_JSON);
+    let cell = first_card_dir(cache.path());
+    seed_artifacts(&cell);
+    let mut revised: serde_json::Value = serde_json::from_str(CARDS_JSON).unwrap();
+    revised["entries"][0]["target"]["sentence"] =
+        serde_json::json!("Le canard traverse le jardin.");
+    revised["entries"][0]["source"]["sentence"] = serde_json::json!("The duck crosses the garden.");
+    revised["entries"][0]["target"]["lang"] = serde_json::json!("FR");
+    revised["entries"][0]["source"]["lang"] = serde_json::json!("EN");
+    understood_session(
+        cache.path(),
+        out.path(),
+        "revised-build",
+        &revised.to_string(),
+    );
+    let stale_audio = cell.join("audio.wav").exists();
+    seed_artifacts(&cell);
+    cli(cache.path())
+        .args(["generate", "--wait", "revised-build"])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .success();
+    let result = json_stdout(cli(cache.path()).args(["result", "revised-build", "--json"]));
+    assert_eq!(
+        (
+            stale_audio,
+            &result["items"][0]["target"],
+            &result["items"][0]["source"]
+        ),
+        (
+            false,
+            &revised["entries"][0]["target"],
+            &revised["entries"][0]["source"]
+        ),
+        "a revised build kept old audio or exported a sentence different from its input"
+    );
+}
+
+#[test]
+fn a_refused_duplicate_session_cannot_replace_existing_card_metadata() {
+    let cache = TempDir::new().expect("cache tempdir");
+    let out = TempDir::new().expect("output tempdir");
+    understood_session(cache.path(), out.path(), "existing-build", CARDS_JSON);
+    let cell = first_card_dir(cache.path());
+    seed_artifacts(&cell);
+    let original = artifact_snapshot(&cell);
+    let mut revised: serde_json::Value = serde_json::from_str(CARDS_JSON).unwrap();
+    revised["entries"][0]["target"]["sentence"] = serde_json::json!("Le canard vole.");
+    let input = cache.path().join("revised.json");
+    fs::write(&input, revised.to_string()).unwrap();
+    let output = cli(cache.path())
+        .args([
+            "new",
+            "--build",
+            input.to_str().unwrap(),
+            "--id",
+            "existing-build",
+        ])
+        .timeout(Duration::from_secs(10))
+        .output()
+        .expect("duplicate session attempt must exit");
+    assert_eq!(
+        (output.status.code(), artifact_snapshot(&cell)),
+        (Some(2), original),
+        "a refused duplicate session changed the existing card or its generated media"
+    );
+}
+
+#[test]
 fn ls_in_json_mode_lists_every_session_as_one_item() {
     let cache = TempDir::new().expect("cache tempdir");
     let out = TempDir::new().expect("output tempdir");

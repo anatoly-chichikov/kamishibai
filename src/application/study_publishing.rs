@@ -6,7 +6,7 @@ use crate::session::CardDraft;
 
 /// Paths created by publishing one completed study package.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct PublishedStudyPackage {
+pub struct PublishedStudyPackage {
     deck: String,
     report: String,
     directory: String,
@@ -15,7 +15,7 @@ pub(crate) struct PublishedStudyPackage {
 impl PublishedStudyPackage {
     /// Create one published package from its learner-facing paths.
     #[must_use]
-    pub(crate) fn new(deck: String, report: String, directory: String) -> Self {
+    pub fn new(deck: String, report: String, directory: String) -> Self {
         Self {
             deck,
             report,
@@ -25,14 +25,14 @@ impl PublishedStudyPackage {
 
     /// Consume the package into the paths expected by delivery surfaces.
     #[must_use]
-    pub(crate) fn into_paths(self) -> (String, String, String) {
+    pub fn into_paths(self) -> (String, String, String) {
         (self.deck, self.report, self.directory)
     }
 }
 
 /// The two stages of publishing a study package.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PublishPhase {
+pub enum PublishPhase {
     /// The Anki deck is being written.
     Deck,
     /// The printable report is being written.
@@ -40,13 +40,13 @@ pub(crate) enum PublishPhase {
 }
 
 /// Receives publishing phase changes.
-pub(crate) trait PublishProgress {
+pub trait PublishProgress {
     /// Announce that publishing advanced to `phase`.
     fn advance(&self, phase: PublishPhase);
 }
 
 /// Publish completed cards as an Anki deck and printable report.
-pub(crate) trait StudyPublishing: Clone + Send + 'static {
+pub trait StudyPublishing: Clone + Send + 'static {
     /// Publish the completed subset as one named study package.
     fn publish(
         &self,

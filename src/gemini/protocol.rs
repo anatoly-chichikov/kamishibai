@@ -16,6 +16,22 @@ pub(super) struct Request {
 }
 
 impl Request {
+    /// Transform textual prompt parts while retaining every schema and media part.
+    pub(super) fn with_prompt<F>(&self, mut render: F) -> Result<Self>
+    where
+        F: FnMut(&str) -> Result<String>,
+    {
+        let mut request = self.clone();
+        for content in &mut request.contents {
+            for part in &mut content.parts {
+                if let Some(text) = &part.text {
+                    part.text = Some(render(text)?);
+                }
+            }
+        }
+        Ok(request)
+    }
+
     /// Return one text-only Gemini request.
     pub(super) fn text(
         text: String,

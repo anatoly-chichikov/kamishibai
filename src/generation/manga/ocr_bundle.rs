@@ -3,6 +3,7 @@
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use ocr_rs::{OcrEngine, OcrEngineConfig};
@@ -14,6 +15,7 @@ use crate::languages::OcrModel;
 const CACHE: &str = "ocr-models";
 const URL: &str = "https://raw.githubusercontent.com/zibo-chen/rust-paddle-ocr/next/models";
 const DET: &str = "PP-OCRv5_mobile_det.mnn";
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Return the recognition model filename for one typed bundle.
 fn model_name(model: OcrModel) -> &'static str {
@@ -147,9 +149,8 @@ impl Catalog {
             return Ok(path);
         }
         let staged = self.cache.stage(".part")?;
-        let result = self
-            .write(url(name).as_str(), staged.as_path())
-            .and_then(|_| {
+        let result =
+            download(url(name).as_str(), staged.as_path(), DOWNLOAD_TIMEOUT).and_then(|_| {
                 if ready(staged.as_path()) {
                     return self.cache.commit(staged.as_path(), name);
                 }
@@ -161,21 +162,88 @@ impl Catalog {
         result?;
         Ok(path)
     }
+}
 
-    /// Download one upstream model asset into one staged local file.
-    fn write(&self, url: &str, path: &Path) -> Result<()> {
-        let mut response = Client::new().get(url).send()?.error_for_status()?;
-        let mut writer = BufWriter::new(fs::File::create(path)?);
-        response.copy_to(&mut writer)?;
-        writer.flush()?;
-        Ok(())
-    }
+/// Download one upstream asset into a staged file with a bounded request lifetime.
+fn download(url: &str, path: &Path, timeout: Duration) -> Result<()> {
+    let mut response = Client::builder()
+        .timeout(timeout)
+        .build()?
+        .get(url)
+        .send()?
+        .error_for_status()?;
+    let mut writer = BufWriter::new(fs::File::create(path)?);
+    response.copy_to(&mut writer)?;
+    writer.flush()?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{charset_name, legacy_model, model_name};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use super::{charset_name, download, legacy_model, model_name};
     use crate::languages::OcrModel;
+
+    #[test]
+    fn a_stalled_model_body_cannot_hold_the_ocr_download_open_indefinitely() {
+        let directory = tempfile::TempDir::new().expect("download directory must exist");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("model server must bind");
+        listener
+            .set_nonblocking(true)
+            .expect("model server accept must be bounded");
+        let url = format!(
+            "http://{}/model.mnn",
+            listener
+                .local_addr()
+                .expect("model server address must resolve")
+        );
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("model server could not accept request: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("model request read must be bounded");
+            stream
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .expect("model response write must be bounded");
+            let mut buffer = [0; 1];
+            stream
+                .read_exact(&mut buffer)
+                .expect("model request must arrive");
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nmo")
+                .expect("partial model response must write");
+            thread::sleep(Duration::from_millis(500));
+            let _ = stream.write_all(b"del");
+        });
+        let result = download(
+            &url,
+            &directory.path().join("model.part"),
+            Duration::from_millis(100),
+        );
+        server.join().expect("model server must finish");
+        assert!(
+            result.is_err_and(|error| error.chain().any(|cause| cause
+                .downcast_ref::<reqwest::Error>()
+                .is_some_and(reqwest::Error::is_timeout))),
+            "a stalled OCR model body outlived the configured request timeout"
+        );
+    }
 
     /// German legacy OCR tokens route to the Latin PP-OCRv5 recognizer.
     #[test]

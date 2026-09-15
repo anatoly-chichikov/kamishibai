@@ -8,10 +8,12 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow, bail};
 
 use super::bridge::TuiSession;
-use super::jobs::{ArtifactOutcome, StudyPublishMessage, TextOutcome};
+use super::jobs::{StudyPublishMessage, TextOutcome};
 use super::session::drop_incomplete_card_artifacts;
 use super::wiring::{GeminiCardWorkflow, GeminiKeyValidation, interactive_application};
-use crate::application::{CardUseCases, KeyValidation, PublishPhase, PublishProgress};
+use crate::application::{
+    ArtifactOutcome, CardUseCases, KeyValidation, PublishPhase, PublishProgress, produce_artifact,
+};
 use crate::config::{PreferenceStore, Preferences, default_store};
 use crate::gemini::rejects_key;
 use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
@@ -594,20 +596,7 @@ where
         };
         let draft = engine.drafts()[card].clone();
         let workflow = self.workflow.clone();
-        let job = PendingJob::spawn(move || match artifact {
-            Artifact::Meta => {
-                ArtifactOutcome::Meta(Box::new(workflow.generate_draft_meta_in(card, &draft)))
-            }
-            Artifact::Scene => {
-                ArtifactOutcome::Media(Box::new(workflow.generate_scene_in(card, &draft)))
-            }
-            Artifact::Picture => {
-                ArtifactOutcome::Media(Box::new(workflow.generate_picture_in(card, &draft)))
-            }
-            Artifact::Sound => {
-                ArtifactOutcome::Media(Box::new(workflow.generate_sound_in(card, &draft)))
-            }
-        });
+        let job = PendingJob::spawn(move || produce_artifact(&workflow, card, artifact, &draft));
         self.artifact_job = Some(PendingArtifactJob {
             job,
             card,
@@ -692,12 +681,7 @@ where
             self.app = self.app.clone().cards_running(None);
             return;
         };
-        let _event = match outcome {
-            ArtifactOutcome::Meta(attempt) => engine.applied_revision_attempt(card, *attempt),
-            ArtifactOutcome::Media(attempt) => {
-                engine.applied_media_attempt(card, artifact, *attempt)
-            }
-        };
+        let _event = outcome.apply(engine, card, artifact);
         let drafts = engine
             .drafts()
             .iter()
@@ -1347,10 +1331,7 @@ fn drafts_from(app: &App) -> Vec<CardDraft> {
 }
 
 fn artifact_rejects_key(outcome: &ArtifactOutcome) -> bool {
-    match outcome {
-        ArtifactOutcome::Meta(attempt) => attempt.error().is_some_and(rejects_key),
-        ArtifactOutcome::Media(attempt) => attempt.error().is_some_and(rejects_key),
-    }
+    outcome.error().is_some_and(rejects_key)
 }
 
 fn clear_saved_key_in(store: &PreferenceStore) -> Result<()> {

@@ -4,16 +4,20 @@ mod access;
 mod client;
 mod codec;
 mod cost;
+mod profile;
 mod prompts;
 mod protocol;
 mod scene;
 mod understanding;
+mod workflow;
 
 pub(crate) use access::GeminiAccess;
 pub use client::{CredentialProbeError, GeminiClient, HttpTransport, Transport, TransportResponse};
+pub use profile::{EmbeddedPrompts, GeminiProfile, GenerationStage, PromptPolicy, StageModels};
 pub use protocol::{GeminiApiError, RejectedReply};
 pub(crate) use scene::validate_cached as validate_cached_scene;
 pub(crate) use understanding::GeminiUnderstanding;
+pub use workflow::workflow;
 
 use anyhow::Result;
 

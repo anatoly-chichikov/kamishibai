@@ -45,13 +45,8 @@ pub(super) fn interactive_application(
     costs: SessionCostScope,
 ) -> InteractiveApplication {
     let keys = GeminiAccess::interactive();
-    let workflow = compose(cache, output, keys, Some(cost_ledger(costs)));
+    let workflow = compose(cache, output, keys.clone(), Some(cost_ledger(costs)));
     InteractiveApplication::new(workflow, keys)
-}
-
-/// Compose the console workflow with environment-first key access.
-pub(super) fn console_workflow(cache: PathBuf, output: PathBuf) -> GeminiCardWorkflow {
-    compose(cache, output, GeminiAccess::console(), None)
 }
 
 /// Compose a console session whose spend is attributed to stable card slots.
@@ -75,7 +70,7 @@ fn compose(
     costs: Option<Arc<dyn GenerationCostLedger>>,
 ) -> GeminiCardWorkflow {
     CardWorkflow::new(
-        GeminiUnderstanding::new(access, cache.clone()),
+        GeminiUnderstanding::new(access.clone(), cache.clone(), costs.clone()),
         GeminiCardProduction::from_gemini(cache.clone(), catalog(), access, costs),
         StudyPackagePublisher::new(cache, output, SystemPublicationClock),
     )

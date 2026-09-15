@@ -24,7 +24,7 @@ pub(crate) use recall::{FidelityCheck, FidelityReview, LiteralZoomCheck, Literal
 pub use recall::{HiddenRecall, RecallCard, RecallJudge, RecallReview, ShownRecall};
 pub(crate) use render::MangaRenderRejection;
 pub use render::MangaRenderer;
-pub use text::{TextDetector, TextDetectors, TextEnsemble};
+pub use text::{NativeOutput, TextDetector, TextDetectors, TextEnsemble};
 pub use text_gate::{TextCheck, TextReview, TextReviewGate};
 pub(crate) use zoom::literal_zoom_crops;
 

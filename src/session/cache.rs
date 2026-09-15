@@ -270,23 +270,25 @@ impl CardMetaCache {
         self.load_at(&CardCell::for_draft(self.root.clone(), draft))
     }
 
-    /// Return cached card meta only when it uses the current generation policy.
-    pub(crate) fn load_current(
-        &self,
-        term: &str,
-        understanding: &str,
-        pair: &LanguagePair,
-    ) -> Result<Option<CardMeta>> {
-        let cell = CardCell::new(self.root.clone(), pair, term, understanding);
-        self.load_current_at(&cell)
-    }
-
     /// Return metadata from one card identity only under the current policy.
     pub(crate) fn load_current_at(&self, cell: &CardCell) -> Result<Option<CardMeta>> {
         Ok(self
             .record_at(cell)?
             .filter(MetaRecord::current)
             .map(MetaRecord::meta))
+    }
+
+    /// Check whether the current persisted document contains exactly the supplied metadata.
+    pub(crate) fn matches(
+        &self,
+        term: &str,
+        understanding: &str,
+        pair: &LanguagePair,
+        meta: &CardMeta,
+    ) -> Result<bool> {
+        let cell = CardCell::new(self.root.clone(), pair, term, understanding);
+        Ok(self.record_at(&cell)?.as_ref()
+            == Some(&MetaRecord::from_meta(term, understanding, pair, meta)))
     }
 
     /// Persist one card meta and return filename, path, and whether it already existed.
@@ -1169,7 +1171,12 @@ mod tests {
             .expect("legacy meta lookup must succeed")
             .expect("legacy meta must remain readable");
         let generation_read = cache
-            .load_current("lantern", "a portable lamp", &pair)
+            .load_current_at(&CardCell::new(
+                directory.path(),
+                &pair,
+                "lantern",
+                "a portable lamp",
+            ))
             .expect("generation meta lookup must succeed");
         let stored = cache
             .store(

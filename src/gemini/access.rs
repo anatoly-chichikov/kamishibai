@@ -1,6 +1,7 @@
 //! Runtime access policy for Gemini credentials and key validation.
 
 use anyhow::Result;
+use std::sync::Arc;
 
 use super::{GeminiClient, HttpTransport};
 use crate::application::KeyValidation;
@@ -8,16 +9,17 @@ use crate::config::default_store;
 use crate::runtime::locations::SystemContext;
 
 /// Selects the documented credential precedence for one delivery surface.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 enum KeyLookup {
     Saved,
     Environment,
+    Explicit(Arc<GeminiClient<HttpTransport>>),
     #[cfg(test)]
     Unavailable,
 }
 
 /// Opens Gemini clients using the credential policy of one workflow.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct GeminiAccess {
     keys: KeyLookup,
 }
@@ -40,6 +42,12 @@ impl GeminiAccess {
         Self::new(KeyLookup::Environment)
     }
 
+    /// Bind one caller-owned client without reading environment or preferences.
+    #[must_use]
+    pub(crate) fn from_client(client: GeminiClient<HttpTransport>) -> Self {
+        Self::new(KeyLookup::Explicit(Arc::new(client)))
+    }
+
     #[cfg(test)]
     /// Build access that deterministically refuses to open a client.
     pub(crate) fn unavailable() -> Self {
@@ -48,7 +56,8 @@ impl GeminiAccess {
 
     /// Open a client after resolving the latest saved preferences.
     pub(crate) fn client(&self) -> Result<GeminiClient<HttpTransport>> {
-        match self.keys {
+        match &self.keys {
+            KeyLookup::Explicit(client) => Ok(client.as_ref().clone()),
             KeyLookup::Saved => {
                 let saved = default_store(&SystemContext)?.read()?.api_key;
                 GeminiClient::from_saved(saved.as_deref())

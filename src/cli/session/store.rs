@@ -232,6 +232,9 @@ pub(in crate::cli) struct SessionRecord {
     pub candidates: Vec<CandidateRecord>,
     #[serde(default)]
     pub drafts: Vec<DraftRecord>,
+    /// The generation reservation required before any worker can claim or update it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker: Option<WorkerHandle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -270,6 +273,7 @@ impl SessionRecord {
             words,
             candidates,
             drafts: Vec::new(),
+            launch: None,
             worker: None,
             progress: None,
             result: None,

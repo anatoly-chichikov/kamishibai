@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use super::{
     BulkCorrection, CardCorrection, CardMetaGeneration, CardProduction, LearningTarget,
-    PublishProgress, PublishedStudyPackage, StudyPublishing, Understanding, WordUnderstanding,
+    PublishProgress, PublishedStudyPackage, StudyPublishing, Understanding,
 };
 use crate::session::{
     ArtifactAttempt, ArtifactFile, CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch,
@@ -12,13 +12,29 @@ use crate::session::{
 };
 
 /// Full set of card use cases required by interactive and console surfaces.
-pub(crate) trait CardUseCases: WordUnderstanding + CardProduction + StudyPublishing {}
+pub trait CardUseCases:
+    Understanding
+    + BulkCorrection
+    + CardMetaGeneration
+    + CardCorrection
+    + CardProduction
+    + StudyPublishing
+{
+}
 
-impl<T> CardUseCases for T where T: WordUnderstanding + CardProduction + StudyPublishing {}
+impl<T> CardUseCases for T where
+    T: Understanding
+        + BulkCorrection
+        + CardMetaGeneration
+        + CardCorrection
+        + CardProduction
+        + StudyPublishing
+{
+}
 
 /// Delegates each use case to one independently testable capability.
 #[derive(Clone)]
-pub(crate) struct CardWorkflow<U, P, S> {
+pub struct CardWorkflow<U, P, S> {
     understanding: U,
     production: P,
     publishing: S,
@@ -27,7 +43,7 @@ pub(crate) struct CardWorkflow<U, P, S> {
 impl<U, P, S> CardWorkflow<U, P, S> {
     /// Compose understanding, production, and publishing.
     #[must_use]
-    pub(crate) fn new(understanding: U, production: P, publishing: S) -> Self {
+    pub fn new(understanding: U, production: P, publishing: S) -> Self {
         Self {
             understanding,
             production,
@@ -105,22 +121,8 @@ where
 
 impl<U, P, S> CardProduction for CardWorkflow<U, P, S>
 where
-    U: Clone + Send + 'static,
     P: CardProduction,
-    S: Clone + Send + 'static,
 {
-    fn generate_meta_in(
-        &self,
-        slot: usize,
-        term: &str,
-        understanding: &str,
-        pair: &LanguagePair,
-        request: Option<&SentenceLabelSelection>,
-    ) -> ArtifactAttempt<(CardMeta, Option<ArtifactFile>)> {
-        self.production
-            .generate_meta_in(slot, term, understanding, pair, request)
-    }
-
     fn generate_draft_meta_in(
         &self,
         slot: usize,

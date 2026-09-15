@@ -49,6 +49,7 @@ pub(super) fn run_session(
     store.update(id, |record| {
         refuse_staged_rewrites(record)?;
         refuse_if_live(store, record)?;
+        refuse_if_starting(record)?;
         resume(record, resume_cancelled);
         ensure_plan(record)?;
         if record.drafts.is_empty() {
@@ -58,10 +59,21 @@ pub(super) fn run_session(
         }
         Ok(())
     })?;
+    start_session(store, id, wait, render, intro, None)
+}
+
+fn start_session(
+    store: &SessionStore,
+    id: &str,
+    wait: bool,
+    render: Render,
+    intro: Option<String>,
+    reserved: Option<&SessionRecord>,
+) -> Result<()> {
     if wait {
-        return run_wait(store, id, render, intro);
+        return run_wait(store, id, render, intro, reserved);
     }
-    let record = worker::start_background(store, id)?;
+    let record = worker::start_background(store, id, reserved)?;
     if matches!(render, Render::Json) {
         return json::emit_session(&record);
     }
@@ -100,7 +112,13 @@ fn refuse_staged_rewrites(record: &SessionRecord) -> Result<()> {
 /// operational line + hint on failure. fd 1 is muted for the whole run so the
 /// native OCR engine's libc-buffered chatter never corrupts the one JSON
 /// document, which is written to the saved real descriptor instead.
-fn run_wait(store: &SessionStore, id: &str, render: Render, intro: Option<String>) -> Result<()> {
+fn run_wait(
+    store: &SessionStore,
+    id: &str,
+    render: Render,
+    intro: Option<String>,
+    reserved: Option<&SessionRecord>,
+) -> Result<()> {
     let stdout = MutedStdout::capture()?;
     if matches!(render, Render::Text) {
         let record = store.open(id)?;
@@ -109,7 +127,7 @@ fn run_wait(store: &SessionStore, id: &str, render: Render, intro: Option<String
             eprintln!("{intro}");
         }
     }
-    match worker::run_foreground(store, id, reporter(render)) {
+    match worker::run_foreground(store, id, reporter(render), reserved) {
         Ok(record) => {
             if matches!(render, Render::Json) {
                 stdout.emit(json::session_line(&record)?.as_str())?;
@@ -188,9 +206,13 @@ pub(super) fn regenerate(args: &RegenerateArgs, render: Render) -> Result<()> {
         refuse_staged_rewrites(&record)?;
     }
     preflight_key()?;
-    let intro = if args.pending {
-        let updated = activate_pending(&store, record.id.as_str())?;
-        pending_note(&updated)
+    let reserved = if args.pending {
+        Some(activate_pending(&store, record.id.as_str())?)
+    } else {
+        None
+    };
+    let intro = if let Some(reserved) = &reserved {
+        pending_note(reserved)
     } else {
         match args.card.as_deref() {
             Some(card) if record.source == "cards" && args.note.is_none() => {
@@ -211,16 +233,28 @@ pub(super) fn regenerate(args: &RegenerateArgs, render: Render) -> Result<()> {
             }
         }
     };
-    let result = run_session(
-        &store,
-        record.id.as_str(),
-        args.wait,
-        render,
-        Some(intro),
-        false,
-    );
-    if args.pending && result.is_err() {
-        settle_unclaimed_pending(&store, record.id.as_str());
+    let result = match reserved.as_ref() {
+        Some(reserved) => start_session(
+            &store,
+            record.id.as_str(),
+            args.wait,
+            render,
+            Some(intro),
+            Some(reserved),
+        ),
+        None => run_session(
+            &store,
+            record.id.as_str(),
+            args.wait,
+            render,
+            Some(intro),
+            false,
+        ),
+    };
+    if let Some(reserved) = &reserved
+        && result.is_err()
+    {
+        settle_unclaimed_pending(&store, reserved);
     }
     result
 }
@@ -237,7 +271,8 @@ fn refuse_without_staged(record: &SessionRecord) -> Result<()> {
     Err(usage("no pending card adjustments to regenerate"))
 }
 
-fn refuse_if_starting(record: &SessionRecord) -> Result<()> {
+/// Refuse a second launch while the first detached worker has not claimed its run.
+pub(super) fn refuse_if_starting(record: &SessionRecord) -> Result<()> {
     if matches!(record.phase, Phase::Generating) && record.worker.is_none() {
         return Err(usage(format!(
             "session '{}' is starting generation; wait or cancel it first",
@@ -262,6 +297,7 @@ fn activate_pending(store: &SessionStore, id: &str) -> Result<SessionRecord> {
         }
         record.phase = Phase::Generating;
         record.worker = None;
+        record.launch = None;
         record.progress = None;
         record.result = None;
         record.error = None;
@@ -282,11 +318,12 @@ fn pending_note(record: &SessionRecord) -> String {
     )
 }
 
-fn settle_unclaimed_pending(store: &SessionStore, id: &str) {
-    let _ = store.update(id, |record| {
+fn settle_unclaimed_pending(store: &SessionStore, reserved: &SessionRecord) {
+    let _ = store.update(&reserved.id, |record| {
         refuse_if_live(store, record)?;
-        if matches!(record.phase, Phase::Generating) && record.worker.is_none() {
+        if record == reserved {
             record.phase = Phase::Failed;
+            record.launch = None;
             record.error = Some(String::from("pending regeneration could not start"));
         }
         Ok(())
@@ -501,8 +538,8 @@ impl MutedStdout {
 
 #[cfg(test)]
 mod tests {
-    use super::{cancel_imported_rewrite, ensure_plan, resume};
-    use crate::cli::session::store::{DraftRecord, Phase, SessionRecord};
+    use super::{cancel_imported_rewrite, ensure_plan, resume, settle_unclaimed_pending};
+    use crate::cli::session::store::{DraftRecord, Phase, SessionRecord, SessionStore};
     use crate::session::{
         ArtifactCosts, CandidateRecord, CardRewrite, SentenceBatchSettings, SentenceLabelSelection,
         SentenceLevel, SentenceTypeMix, WordCandidate,
@@ -593,6 +630,41 @@ mod tests {
             record.phase,
             Phase::Cancelled,
             "a pending regeneration continuation resurrected a cancelled session"
+        );
+    }
+
+    #[test]
+    fn failure_of_an_old_pending_launch_cannot_fail_a_changed_reservation() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let mut reserved = SessionRecord::understood(
+            String::from("FR-pending"),
+            String::from("created"),
+            String::from("EN"),
+            String::from("FR"),
+            String::from("/out"),
+            String::from("primary"),
+            String::from("words"),
+            Vec::new(),
+            Vec::new(),
+        );
+        reserved.phase = Phase::Generating;
+        store
+            .create(&reserved)
+            .expect("pending launch must be persisted");
+        let changed = store
+            .update(&reserved.id, |record| {
+                record.out = String::from("/another-output");
+                Ok(())
+            })
+            .expect("concurrent reservation change must persist");
+        settle_unclaimed_pending(&store, &reserved);
+        assert_eq!(
+            store
+                .open(&reserved.id)
+                .expect("changed reservation must reopen"),
+            changed,
+            "failure cleanup from an old launch marked a different reservation failed"
         );
     }
 }

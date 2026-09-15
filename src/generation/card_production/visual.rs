@@ -19,7 +19,7 @@ use crate::gemini::GeminiAccess;
 use crate::generation::artifact_cache::{Cache, IMAGE_ATTEMPTS_DIRECTORY, VISUAL_LOCK_TIMEOUT};
 use crate::generation::manga::{
     BorderDetector, HiddenRecall, Illustration, ImageSource, MangaRenderRejection, MangaRenderer,
-    RecallCard, RecallJudge, ShownRecall,
+    NativeOutput, RecallCard, RecallJudge, ShownRecall,
 };
 use crate::generation::{SceneComposer, visual_revision};
 use crate::languages::LanguageCatalog;
@@ -59,13 +59,15 @@ pub(super) struct VisualProduction {
 struct VisualState {
     pictures: PictureRecovery,
     costs: CostAccounting,
+    output: NativeOutput,
 }
 
 impl VisualState {
-    fn new(costs: CostAccounting) -> Self {
+    fn new(costs: CostAccounting, output: NativeOutput) -> Self {
         Self {
             pictures: PictureRecovery::default(),
             costs,
+            output,
         }
     }
 }
@@ -78,12 +80,13 @@ impl VisualProduction {
         catalog: LanguageCatalog,
         access: GeminiAccess,
         costs: CostAccounting,
+        output: NativeOutput,
     ) -> Self {
         Self {
             cache,
             catalog,
             access,
-            state: VisualState::new(costs),
+            state: VisualState::new(costs, output),
         }
     }
 
@@ -314,7 +317,13 @@ impl VisualProduction {
             cache.clone(),
             accounting,
         );
-        let text = GeminiTextGate::new(&learning, self.cache.clone(), client, picture_costs);
+        let text = GeminiTextGate::new(
+            &learning,
+            self.cache.clone(),
+            client,
+            picture_costs,
+            self.state.output,
+        );
         let renderer =
             production_renderer(picture_client, recall, BorderDetector::new(6, 24, 240, 10))
                 .with_text_judge(text);

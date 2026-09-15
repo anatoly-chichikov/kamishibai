@@ -36,17 +36,22 @@ impl Redirect {
 
     /// Restore stdout and stderr after one redirect.
     pub(super) fn restore(mut self) -> Result<()> {
-        flushed()?;
-        restored_stdout(
-            self.stdout
-                .take()
-                .ok_or_else(|| anyhow!("Saved stdout descriptor is missing"))?,
-        )?;
-        restored_stderr(
-            self.stderr
-                .take()
-                .ok_or_else(|| anyhow!("Saved stderr descriptor is missing"))?,
-        )
+        let flushed = flushed();
+        let restored = self.restore_streams();
+        flushed.and(restored)
+    }
+
+    fn restore_streams(&mut self) -> Result<()> {
+        let stdout = self.stdout.take().map(restored_stdout).transpose();
+        let stderr = self.stderr.take().map(restored_stderr).transpose();
+        stdout.and(stderr).map(|_| ())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Redirect {
+    fn drop(&mut self) {
+        let _ = self.restore_streams();
     }
 }
 
@@ -148,4 +153,69 @@ fn restored_stdout(saved: OwnedFd) -> Result<()> {
 fn restored_stderr(saved: OwnedFd) -> Result<()> {
     rustix::stdio::dup2_stderr(&saved)
         .map_err(|error| anyhow!("Failed to restore stderr: {}", error))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{Redirect, locked, quiet};
+
+    #[test]
+    fn a_panicking_native_call_cannot_leave_host_streams_muted() {
+        let sink = tempfile::NamedTempFile::new().expect("sink must open");
+        let panicked = locked(|| {
+            let outer = Redirect::new(sink.reopen()?)?;
+            let result =
+                std::panic::catch_unwind(|| quiet::<(), _>(|| panic!("native call failed")));
+            rustix::io::write(std::io::stdout(), b"restored stdout\n")?;
+            rustix::io::write(std::io::stderr(), b"restored stderr\n")?;
+            outer.restore()?;
+            Ok(result.is_err())
+        })
+        .expect("streams must restore");
+        let output = std::fs::read_to_string(sink.path()).expect("sink must read");
+        assert!(
+            panicked
+                && output.contains("restored stdout\n")
+                && output.contains("restored stderr\n"),
+            "unwinding a native call permanently muted host output"
+        );
+    }
+
+    #[test]
+    fn embedded_native_operations_cannot_swallow_host_output() {
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+        let marker = "KAMISHIBAI_EMBEDDED_OUTPUT_TEST";
+        if std::env::var_os(marker).is_some() {
+            crate::generation::manga::NativeOutput::Preserve
+                .run(|| {
+                    rustix::io::write(std::io::stdout(), b"host-out-marker\n")?;
+                    rustix::io::write(std::io::stderr(), b"host-err-marker\n")?;
+                    Ok(())
+                })
+                .expect("embedded operation must run");
+            return;
+        }
+        let mut child = Command::new(std::env::current_exe().expect("test executable must resolve"))
+            .args(["generation::manga::redirect::tests::embedded_native_operations_cannot_swallow_host_output", "--exact"])
+            .env(marker, "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn().expect("isolated output test must start");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while child.try_wait().expect("child status must read").is_none() {
+            if Instant::now() >= deadline {
+                child.kill().expect("stalled output test must stop");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let output = child.wait_with_output().expect("child output must collect");
+        assert!(
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("host-out-marker")
+                && String::from_utf8_lossy(&output.stderr).contains("host-err-marker"),
+            "embedded OCR policy swallowed the hosting process output"
+        );
+    }
 }

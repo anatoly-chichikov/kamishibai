@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod anki;
-mod application;
+pub mod application;
 pub mod cli;
 pub mod config;
 pub mod gemini;
