@@ -186,7 +186,10 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
             (app.sense_list_closed(), Side::None)
         }
         (Screen::WhatIUnderstood, None, AppEvent::Cancel) => {
-            let choice = LanguageChoice::new(app.pair().known().to_string(), learning_target(None));
+            let choice = LanguageChoice::new(
+                app.pair().known().to_string(),
+                learning_target(Some(app.pair().learning())),
+            );
             (
                 app.languages_adopted(&choice)
                     .with_screen(Screen::YourWords),
@@ -301,6 +304,15 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (_, Some(ModalKind::PickLanguages), AppEvent::SetLanguages(choice))
             if can_pick_language(app.screen()) =>
         {
+            if app.translation_pending() {
+                if choice.pinned().is_none() {
+                    return (app.picker_facing(PickerSection::Learning), Side::None);
+                }
+                return (
+                    app.close_modal().languages_adopted(&choice),
+                    Side::AdoptLanguagesAndRunUnderstanding(choice),
+                );
+            }
             adopt_languages(app.close_modal(), choice)
         }
         (_, Some(ModalKind::PickLanguages), _) => (app, Side::None),
@@ -662,8 +674,129 @@ fn next_known(current: &str, direction: i32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{CardDraft, CardMeta, LanguagePair};
+    use crate::session::{CardDraft, CardMeta, LanguagePair, Sense, WordCandidate};
     use crate::tui::screen::{KeySource, WelcomeFocus};
+
+    #[test]
+    fn cancelling_translation_cannot_make_a_later_language_change_submit_the_words() {
+        let requested = App::new(LanguagePair::new("EN", "RU"))
+            .seeded_blob("не по себе")
+            .translation_requested();
+        let cancelled = transit(requested, AppEvent::Cancel).0;
+        let opened = transit(
+            cancelled.clone(),
+            AppEvent::OpenLanguagePicker(PickerSection::Learning),
+        )
+        .0;
+        let choice = LanguageChoice::new("RU", learning_target(Some("EN")));
+        let (_, side) = transit(opened, AppEvent::SetLanguages(choice.clone()));
+        assert_eq!(
+            (
+                cancelled.screen(),
+                cancelled.modal(),
+                cancelled.blob(),
+                cancelled.translation_pending(),
+                side,
+            ),
+            (
+                Screen::YourWords,
+                None,
+                "не по себе",
+                false,
+                Side::AdoptLanguages(choice),
+            ),
+            "cancelling translation lost words or left an automatic submission armed"
+        );
+    }
+
+    #[test]
+    fn translation_cannot_continue_without_a_chosen_destination() {
+        let app = App::new(LanguagePair::new("EN", "RU"))
+            .seeded_blob("не по себе")
+            .translation_requested();
+        let (waiting, side) = transit(app, AppEvent::KeyEnter);
+        assert_eq!(
+            (waiting.modal(), waiting.translation_pending(), side),
+            (Some(ModalKind::PickLanguages), true, Side::None),
+            "an unchosen destination re-ran the same request instead of keeping the language choice open"
+        );
+    }
+
+    #[test]
+    fn replacing_reviewed_english_with_russian_cannot_forget_the_learning_language() {
+        let app = App::new(LanguagePair::new("EN", "RU"))
+            .seeded_blob("cat")
+            .confirmed_learning("EN")
+            .understood(vec![WordCandidate::new("cat", "кот", true)])
+            .with_screen(Screen::WhatIUnderstood);
+        let words = transit(app, AppEvent::Cancel)
+            .0
+            .seeded_blob("сумка\nдорога");
+        let (ready, side) = transit(words, AppEvent::Generate);
+        assert_eq!(
+            (ready.learning_pin(), ready.blob(), side),
+            (Some("EN"), "сумка\nдорога", Side::RunUnderstanding),
+            "replacing English with Russian lost the previously understood learning language"
+        );
+    }
+
+    #[test]
+    fn editing_automatically_translated_input_cannot_forget_its_destination() {
+        let app = App::new(LanguagePair::new("EN", "RU"))
+            .seeded_blob("cat\nсумка")
+            .confirmed_learning("EN")
+            .understood(vec![
+                WordCandidate::new("cat", "кот", true),
+                WordCandidate::with_senses(
+                    "сумка",
+                    vec![Sense::translated("bag", "Для вещей", None)],
+                    0,
+                    true,
+                ),
+            ])
+            .with_screen(Screen::WhatIUnderstood);
+        let (words, _) = transit(app, AppEvent::Cancel);
+        assert_eq!(
+            (words.learning_pin(), words.learning_pending(), words.blob()),
+            (Some("EN"), false, "cat\nсумка"),
+            "editing mixed words forgot the destination of their reviewed translations"
+        );
+    }
+
+    #[test]
+    fn editing_translated_input_cannot_drop_its_explicit_learning_language() {
+        let choice = LanguageChoice::new("RU", learning_target(Some("EN")));
+        let app = App::new(LanguagePair::new("EN", "RU"))
+            .languages_adopted(&choice)
+            .seeded_blob("мне не по себе")
+            .understood(vec![WordCandidate::with_senses(
+                "мне не по себе",
+                vec![Sense::translated("I feel uneasy", "Мне тревожно", None)],
+                0,
+                true,
+            )])
+            .with_screen(Screen::WhatIUnderstood);
+        let words = transit(app, AppEvent::Cancel).0;
+        let edited = transit(words, AppEvent::KeyChar('!')).0;
+        let (ready, side) = transit(edited, AppEvent::Generate);
+        assert_eq!(
+            (
+                ready.screen(),
+                ready.learning_pin(),
+                ready.learning_pending(),
+                ready.blob(),
+                side
+            ),
+            (
+                Screen::YourWords,
+                Some("EN"),
+                false,
+                "мне не по себе!",
+                Side::RunUnderstanding
+            ),
+            "editing a translated phrase silently returned its destination to automatic detection"
+        );
+    }
 
     fn enter_key(env_available: bool) -> App {
         App::new(LanguagePair::new("en", "ru")).opening_welcome_at(

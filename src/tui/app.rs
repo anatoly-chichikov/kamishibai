@@ -36,7 +36,14 @@ pub struct App {
     new_batch_pending: bool,
     word_clear_pending: bool,
     picker_cursor: PickerCursor,
+    picker_purpose: PickerPurpose,
     learning_target: LearningTarget,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PickerPurpose {
+    Languages,
+    Translation,
 }
 
 /// Keeps the failed operation attached to its diagnostic for honest recovery copy.
@@ -443,6 +450,7 @@ impl App {
             new_batch_pending: false,
             word_clear_pending: false,
             picker_cursor,
+            picker_purpose: PickerPurpose::Languages,
             learning_target: LearningTarget::Detect,
         }
     }
@@ -756,6 +764,7 @@ impl App {
     pub fn with_screen(mut self, next: Screen) -> Self {
         self.screen = next;
         self.modal = None;
+        self.picker_purpose = PickerPurpose::Languages;
         self.input.modal.clear();
         self.cards.editor = None;
         self.sentence_settings_row = None;
@@ -919,6 +928,7 @@ impl App {
     /// Return the app with a modal opened.
     pub fn with_modal(mut self, modal: ModalKind) -> Self {
         self.modal = Some(modal);
+        self.picker_purpose = PickerPurpose::Languages;
         self.input.modal.clear();
         self
     }
@@ -926,8 +936,29 @@ impl App {
     /// Return the app with the current modal dismissed.
     pub fn close_modal(mut self) -> Self {
         self.modal = None;
+        self.picker_purpose = PickerPurpose::Languages;
         self.input.modal.clear();
         self
+    }
+
+    /// Ask for the destination of the entered words before continuing understanding.
+    #[must_use]
+    pub fn translation_requested(self) -> Self {
+        let cursor = PickerCursor::opening(self.pair.known(), None, PickerSection::Learning);
+        let mut app = self
+            .busy_finished()
+            .error_cleared()
+            .with_screen(Screen::YourWords)
+            .with_modal(ModalKind::PickLanguages)
+            .with_picker_cursor(cursor);
+        app.picker_purpose = PickerPurpose::Translation;
+        app
+    }
+
+    /// Return whether confirming a destination should continue the pending translation.
+    #[must_use]
+    pub fn translation_pending(&self) -> bool {
+        self.picker_purpose == PickerPurpose::Translation
     }
 
     /// Return the chip highlighted in each half of the language picker modal

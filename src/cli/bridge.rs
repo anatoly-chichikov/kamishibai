@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 
 use crate::session::{CandidateRecord, CardDraft, LanguagePair, WordCandidate};
-use crate::tui::{App, Screen};
+use crate::tui::{App, LanguageChoice, Screen, learning_target};
 
 use super::session::{
     DraftRecord, Phase, ResultRecord, SessionCostScope, SessionOpener, SessionRecord, SessionStore,
@@ -116,6 +116,16 @@ fn record_to_app(record: &SessionRecord) -> (App, Option<Vec<CardDraft>>) {
         .with_sentence_settings(record.sentences)
         .seeded_blob(record.words.join("\n"))
         .confirmed_learning(record.learning.clone());
+    if candidates
+        .iter()
+        .flat_map(|candidate| candidate.senses())
+        .any(|sense| sense.translation().is_some())
+    {
+        app = app.languages_adopted(&LanguageChoice::new(
+            record.known.clone(),
+            learning_target(Some(record.learning.as_str())),
+        ));
+    }
     if !candidates.is_empty() {
         app = app
             .with_screen(Screen::WhatIUnderstood)
@@ -530,6 +540,11 @@ fn fingerprint(app: &App, generating: bool) -> u64 {
         candidate.ok().hash(&mut hasher);
         candidate.selected_senses().hash(&mut hasher);
         candidate.senses().len().hash(&mut hasher);
+        for sense in candidate.senses() {
+            sense.understanding().hash(&mut hasher);
+            sense.tag().hash(&mut hasher);
+            sense.translation().hash(&mut hasher);
+        }
     }
     for draft in app.cards() {
         draft.term().hash(&mut hasher);
@@ -634,6 +649,59 @@ mod tests {
                 true,
             ),
             "an understood app must survive the record round-trip with its curation intact"
+        );
+    }
+
+    #[test]
+    fn a_resumed_translation_cannot_lose_its_destination_when_edited() {
+        let app = App::new(LanguagePair::new("EN", "RU"))
+            .seeded_blob("мне не по себе")
+            .understood(vec![WordCandidate::with_senses(
+                "мне не по себе",
+                vec![Sense::translated("I feel uneasy", "Мне тревожно", None)],
+                0,
+                true,
+            )])
+            .with_screen(Screen::WhatIUnderstood);
+        let record = app_to_record(
+            &app,
+            String::from("translated"),
+            String::from("t"),
+            "tui",
+            "primary",
+            "/out",
+            None,
+        );
+        let (reopened, _) = record_to_app(&record);
+        let words = crate::tui::transit(reopened, crate::tui::AppEvent::Cancel).0;
+        assert_eq!(
+            (
+                words.screen(),
+                words.learning_pin(),
+                words.learning_pending(),
+                words.blob()
+            ),
+            (Screen::YourWords, Some("EN"), false, "мне не по себе"),
+            "reopening and editing a translated session lost its recorded learning-language destination"
+        );
+    }
+
+    #[test]
+    fn resuming_ordinary_vocabulary_cannot_invent_a_learning_language_pin() {
+        let record = app_to_record(
+            &understood_app(),
+            String::from("ordinary"),
+            String::from("t"),
+            "tui",
+            "primary",
+            "/out",
+            None,
+        );
+        let (reopened, _) = record_to_app(&record);
+        assert_eq!(
+            reopened.learning_pin(),
+            None,
+            "resuming ordinary vocabulary changed the existing automatic-detection policy"
         );
     }
 
@@ -1306,6 +1374,36 @@ mod tests {
             fingerprint(&plain, true),
             fingerprint(&priced, true),
             "a cost-only UI update was debounced instead of being saved for reopen"
+        );
+    }
+
+    #[test]
+    fn a_changed_translation_cannot_be_debounced_as_an_unchanged_review() {
+        let pair = LanguagePair::new("en", "ru");
+        let first = App::new(pair.clone()).understood(vec![WordCandidate::with_senses(
+            "запас",
+            vec![Sense::translated(
+                "reserve",
+                "То, что оставлено на потом",
+                None,
+            )],
+            0,
+            true,
+        )]);
+        let changed = App::new(pair).understood(vec![WordCandidate::with_senses(
+            "запас",
+            vec![Sense::translated(
+                "stock",
+                "То, что оставлено на потом",
+                None,
+            )],
+            0,
+            true,
+        )]);
+        assert_ne!(
+            fingerprint(&first, false),
+            fingerprint(&changed, false),
+            "a different translation was not recognized as a durable review change"
         );
     }
 

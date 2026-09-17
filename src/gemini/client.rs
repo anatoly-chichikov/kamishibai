@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::application::LearningTarget;
+use crate::application::{LearningLanguageRequired, LearningTarget};
 use crate::generation::layout::{LayoutRegistry, feature_prompt_data, render_feature_prompt};
 use crate::generation::manga::{
     FidelityCheck, FidelityReview, LiteralZoomCheck, LiteralZoomReview, RecallCard, RecallReview,
@@ -526,17 +526,37 @@ where
         F: FnMut(CostRecord) -> Result<()>,
     {
         let catalog = catalog();
-        let prompt = render_intake_prompt(raw.text(), known, target, &catalog)?;
+        let prompt = render_intake_prompt(raw, known, target, &catalog)?;
         let decoded: IntakeResponse =
             serde_json::from_str(unfence(self.intake_text(prompt, &mut observe)?.trim()))?;
         let guess = match target {
             LearningTarget::Detect => {
+                if decoded.needs_learning_language
+                    || decoded.target_lang.trim().is_empty()
+                    || decoded.target_lang.eq_ignore_ascii_case(known)
+                {
+                    return Err(LearningLanguageRequired.into());
+                }
+                let returned = catalog
+                    .resolve(decoded.target_lang.as_str())
+                    .context("Gemini understanding returned an unsupported target language")?;
+                if raw.context().is_none()
+                    && decoded
+                        .items
+                        .iter()
+                        .any(|item| item.senses.iter().any(|sense| sense.translation.is_some()))
+                    && !decoded.items.iter().any(|item| {
+                        item.ok && item.senses.iter().all(|sense| sense.translation.is_none())
+                    })
+                {
+                    return Err(LearningLanguageRequired.into());
+                }
                 let alternates = supported_alternates(
                     decoded.alternates.as_slice(),
                     decoded.target_lang.as_str(),
                     &catalog,
                 );
-                LearningGuess::new(decoded.target_lang, true).with_alternates(alternates)
+                LearningGuess::new(returned.to_string(), true).with_alternates(alternates)
             }
             LearningTarget::Explicit(expected) => {
                 let returned = catalog
@@ -593,7 +613,12 @@ where
             bail!("No text content in Gemini response");
         }
         let decoded: SenseCorrectionResponse = serde_json::from_str(unfence(raw.trim()))?;
-        Ok(decoded.correction())
+        decoded.correction(
+            candidate
+                .senses()
+                .iter()
+                .any(|sense| sense.translation().is_some()),
+        )
     }
 
     /// Build the rich card meta for one term using the Flash text model.
@@ -1469,6 +1494,8 @@ fn speech_from_response(response: &Response, text: &str) -> Result<Vec<u8>> {
 struct IntakeResponse {
     target_lang: String,
     #[serde(default)]
+    needs_learning_language: bool,
+    #[serde(default)]
     alternates: Vec<String>,
     items: Vec<IntakeItem>,
 }
@@ -1520,12 +1547,13 @@ struct IntakeItem {
 
 impl IntakeItem {
     fn candidate(self) -> Result<WordCandidate> {
+        validate_translations(&self.senses, false)?;
         let term = nonempty(self.term.as_str(), "candidate");
         let mut senses = self
             .senses
             .into_iter()
             .map(SenseItem::sense)
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>>>()?;
         if senses.is_empty()
             && let Some(understanding) = self.understanding
         {
@@ -1535,7 +1563,12 @@ impl IntakeItem {
         if senses.is_empty() {
             senses.push(Sense::plain("модель не поняла слово"));
         }
-        Ok(WordCandidate::with_senses(term, senses, self.selected, ok))
+        let selected = if senses.iter().any(|sense| sense.translation().is_some()) {
+            0
+        } else {
+            self.selected
+        };
+        Ok(WordCandidate::with_senses(term, senses, selected, ok))
     }
 }
 
@@ -1544,12 +1577,32 @@ struct SenseItem {
     understanding: String,
     #[serde(default)]
     tag: Option<String>,
+    #[serde(default)]
+    translation: Option<String>,
 }
 
 impl SenseItem {
-    fn sense(self) -> Sense {
-        Sense::new(self.understanding, self.tag)
+    fn sense(self) -> Result<Sense> {
+        match self.translation {
+            Some(term) if term.trim().is_empty() => {
+                bail!("Gemini understanding returned an empty learning expression")
+            }
+            Some(_) if self.understanding.trim().is_empty() => {
+                bail!("Gemini understanding returned a translated sense without an explanation")
+            }
+            Some(term) => Ok(Sense::translated(term.trim(), self.understanding, self.tag)),
+            None => Ok(Sense::new(self.understanding, self.tag)),
+        }
     }
+}
+
+fn validate_translations(senses: &[SenseItem], required: bool) -> Result<()> {
+    if (required || senses.iter().any(|sense| sense.translation.is_some()))
+        && senses.iter().any(|sense| sense.translation.is_none())
+    {
+        bail!("Gemini understanding omitted a learning expression from a translated sense");
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1561,13 +1614,14 @@ struct SenseCorrectionResponse {
 }
 
 impl SenseCorrectionResponse {
-    fn correction(self) -> SenseCorrection {
+    fn correction(self, translated: bool) -> Result<SenseCorrection> {
+        validate_translations(&self.senses, translated)?;
         let senses = self
             .senses
             .into_iter()
             .map(SenseItem::sense)
-            .collect::<Vec<_>>();
-        SenseCorrection::new(senses, self.message)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(SenseCorrection::new(senses, self.message))
     }
 }
 
@@ -1767,6 +1821,141 @@ mod tests {
     use super::*;
     use crate::gemini::profile::{PromptPolicy, StageModels};
     use std::sync::Arc;
+
+    #[test]
+    fn translated_intake_cannot_invent_a_destination_during_autodetection() {
+        let response = json!({
+            "target_lang": "RU",
+            "items": [{"term": "лук", "senses": [{"translation": "onion", "understanding": "Овощ"}], "ok": true}]
+        });
+        let client = GeminiClient::new(
+            "unused",
+            FakeTransport::new(vec![body(json!({
+                "candidates": [{"content": {"parts": [{"text": response.to_string()}]}}]
+            }))]),
+        );
+        let result = client.understand(&RawInputBatch::new("лук"), "RU", &LearningTarget::Detect);
+        assert!(
+            result.is_err(),
+            "autodetection accepted an English translation under a Russian learning pair"
+        );
+    }
+
+    #[test]
+    fn translated_intake_cannot_generate_the_original_known_language_term() {
+        let candidate = serde_json::from_value::<IntakeItem>(json!({
+            "term": "мне не по себе",
+            "senses": [{"translation": "I feel uneasy", "understanding": "Мне тревожно и неуютно", "tag": null}],
+            "selected": 0,
+            "ok": true
+        }))
+        .expect("intake must decode")
+        .candidate()
+        .expect("translated intake must validate");
+        let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("EN", "RU"));
+        assert_eq!(
+            (candidate.term(), draft.term(), draft.understanding()),
+            ("мне не по себе", "I feel uneasy", "Мне тревожно и неуютно"),
+            "translated intake lost the original request or generated a card in the known language"
+        );
+    }
+
+    #[test]
+    fn translated_intake_cannot_accept_a_missing_equivalent_in_one_sense() {
+        let candidate = serde_json::from_value::<IntakeItem>(json!({
+            "term": "лук",
+            "senses": [
+                {"translation": "onion", "understanding": "Овощ"},
+                {"understanding": "Оружие для стрельбы"}
+            ],
+            "ok": true
+        }))
+        .expect("intake must decode")
+        .candidate();
+        assert!(
+            candidate.is_err(),
+            "a translated row accepted a sense that would generate the known-language term"
+        );
+    }
+
+    #[test]
+    fn translated_intake_cannot_accept_an_empty_equivalent() {
+        let candidate = serde_json::from_value::<IntakeItem>(json!({
+            "term": "лук",
+            "senses": [{"translation": "  ", "understanding": "Овощ"}],
+            "ok": true
+        }))
+        .expect("intake must decode")
+        .candidate();
+        assert!(
+            candidate.is_err(),
+            "a translated row accepted an empty learning expression"
+        );
+    }
+
+    #[test]
+    fn translated_intake_cannot_fall_back_to_the_input_when_its_explanation_is_empty() {
+        let candidate = serde_json::from_value::<IntakeItem>(json!({
+            "term": "лук",
+            "senses": [{"translation": "onion", "understanding": "   "}],
+            "ok": true
+        }))
+        .expect("intake must decode")
+        .candidate();
+        assert!(
+            candidate.is_err(),
+            "normalizing a blank translated explanation made a known-language card eligible for generation"
+        );
+    }
+
+    #[test]
+    fn translated_intake_cannot_skip_the_first_ranked_equivalent() {
+        let candidate = serde_json::from_value::<IntakeItem>(json!({
+            "term": "лук",
+            "senses": [
+                {"translation": "onion", "understanding": "Овощ"},
+                {"translation": "bow", "understanding": "Оружие для стрельбы"}
+            ],
+            "selected": 1,
+            "ok": true
+        }))
+        .expect("intake must decode")
+        .candidate()
+        .expect("translated intake must validate");
+        assert_eq!(
+            candidate.sense().translation(),
+            Some("onion"),
+            "the default translation skipped the first ranked meaning"
+        );
+    }
+
+    #[test]
+    fn translated_correction_cannot_append_a_sense_without_its_learning_term() {
+        let correction = serde_json::from_value::<SenseCorrectionResponse>(json!({
+            "senses": [{"understanding": "Подобранная одежда", "tag": "мода"}],
+            "message": null
+        }))
+        .expect("correction must decode")
+        .correction(true);
+        assert!(
+            correction.is_err(),
+            "a reverse correction lost its translation and would generate the known-language word"
+        );
+    }
+
+    #[test]
+    fn translated_correction_can_report_an_already_listed_meaning() {
+        let correction = serde_json::from_value::<SenseCorrectionResponse>(json!({
+            "senses": [],
+            "message": "Это значение уже есть в списке"
+        }))
+        .expect("correction must decode")
+        .correction(true);
+        assert!(
+            correction.is_ok(),
+            "a translated row could not report an already listed meaning without an unnecessary translation"
+        );
+    }
 
     struct TaggedPrompts {
         tag: String,

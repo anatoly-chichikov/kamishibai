@@ -464,7 +464,7 @@ fn understanding_uses_flash_and_returns_sense_rows() -> Result<()> {
         "candidates": [{
             "content": {
                 "parts": [{
-                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"senses\":[{\"understanding\":\"past tense of \\\"wreck\\\" — destroyed or crashed\",\"tag\":null}],\"selected\":0,\"ok\":true},{\"term\":\"окно\",\"senses\":[{\"understanding\":\"this is Russian, not the target language\",\"tag\":null}],\"selected\":0,\"ok\":false}]}"
+                    "text": "{\"target_lang\":\"en\",\"items\":[{\"term\":\"wrecked\",\"senses\":[{\"understanding\":\"past tense of \\\"wreck\\\" — destroyed or crashed\",\"tag\":null}],\"selected\":0,\"ok\":true},{\"term\":\"窓\",\"senses\":[{\"understanding\":\"this is Japanese, outside the selected language pair\",\"tag\":null}],\"selected\":0,\"ok\":false}]}"
                 }]
             }
         }]
@@ -472,7 +472,7 @@ fn understanding_uses_flash_and_returns_sense_rows() -> Result<()> {
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
     let understood = client.understand(
-        &RawInputBatch::new("wrecked\nокно"),
+        &RawInputBatch::new("wrecked\n窓"),
         "ru",
         &LearningTarget::Detect,
     )?;
@@ -492,12 +492,12 @@ fn understanding_uses_flash_and_returns_sense_rows() -> Result<()> {
         (
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
             true,
-            "en",
+            "EN",
             "wrecked",
             "past tense of \"wreck\" — destroyed or crashed",
             1,
             true,
-            "окно",
+            "窓",
             false,
         ),
         "understanding must use Flash, return human-language sense rows, and mark off-language rows ok=false"

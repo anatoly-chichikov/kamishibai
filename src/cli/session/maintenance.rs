@@ -13,7 +13,7 @@ use crate::generation::artifact_cache::{
 };
 use crate::generation::visual_revision;
 use crate::runtime::locations::{SystemContext, cache_root};
-use crate::session::{CardCell, LanguagePair};
+use crate::session::{CardCell, CardDraft, LanguagePair};
 
 use super::args::{IdArg, RmArgs};
 use super::liveness;
@@ -107,7 +107,7 @@ pub(super) fn cache_path(render: Render) -> Result<()> {
 }
 
 /// Return every cache cell a session may own: contextual committed drafts when
-/// present, otherwise each candidate's legacy singleton sense.
+/// present, translated draft contexts, or ordinary candidates' legacy singletons.
 fn cached_cells(root: &Path, pair: &LanguagePair, record: &SessionRecord) -> Vec<CardCell> {
     if !record.drafts.is_empty() {
         return record
@@ -124,13 +124,18 @@ fn cached_cells(root: &Path, pair: &LanguagePair, record: &SessionRecord) -> Vec
             candidate
                 .senses()
                 .iter()
-                .map(|sense| {
-                    CardCell::new(
+                .enumerate()
+                .map(|(index, sense)| match sense.translation() {
+                    Some(_) => CardCell::for_draft(
+                        root,
+                        &CardDraft::from_candidate(&candidate, index, pair.clone()),
+                    ),
+                    None => CardCell::new(
                         root.to_path_buf(),
                         pair,
                         candidate.term(),
                         sense.understanding(),
-                    )
+                    ),
                 })
                 .collect::<Vec<_>>()
         })
@@ -227,6 +232,90 @@ mod tests {
 
     use super::*;
     use crate::generation::artifact_cache::{META_FILE, VOICE_FILE};
+    use crate::session::{CandidateRecord, Sense, WordCandidate};
+
+    #[test]
+    fn an_understood_translation_cannot_resolve_cache_cleanup_to_its_original_term() {
+        let home = TempDir::new().expect("the cache directory must exist");
+        let pair = LanguagePair::new("EN", "RU");
+        let record = SessionRecord::understood(
+            String::from("translated-cleanup"),
+            String::from("2026-09-17T08:00:00Z"),
+            String::from("RU"),
+            String::from("EN"),
+            home.path().to_string_lossy().into_owned(),
+            String::from("primary"),
+            String::from("words"),
+            vec![String::from("держать"), String::from("fall")],
+            vec![
+                CandidateRecord::from_candidate(&WordCandidate::with_senses(
+                    "держать",
+                    vec![
+                        Sense::translated("hold", "Не выпускать из рук", None),
+                        Sense::translated("keep", "Продолжать хранить", None),
+                        Sense::translated(
+                            "hold",
+                            "Сохранять положение",
+                            Some(String::from("положение")),
+                        ),
+                    ],
+                    0,
+                    true,
+                )),
+                CandidateRecord::from_candidate(&WordCandidate::with_senses(
+                    "fall",
+                    vec![Sense::plain("Падать вниз"), Sense::plain("Осень")],
+                    0,
+                    true,
+                )),
+            ],
+        );
+        let cells = [
+            CardCell::with_reviewed_senses(
+                home.path(),
+                &pair,
+                "hold",
+                "Не выпускать из рук",
+                &[
+                    Sense::plain("Не выпускать из рук"),
+                    Sense::tagged("Сохранять положение", "положение"),
+                ],
+            ),
+            CardCell::new(home.path(), &pair, "keep", "Продолжать хранить"),
+            CardCell::with_reviewed_senses(
+                home.path(),
+                &pair,
+                "hold",
+                "Сохранять положение",
+                &[
+                    Sense::tagged("Сохранять положение", "положение"),
+                    Sense::plain("Не выпускать из рук"),
+                ],
+            ),
+            CardCell::new(home.path(), &pair, "fall", "Падать вниз"),
+            CardCell::new(home.path(), &pair, "fall", "Осень"),
+        ];
+        for (index, cell) in cells.iter().enumerate() {
+            fs::write(
+                cell.cache()
+                    .filepath(META_FILE)
+                    .expect("the expected metadata path must resolve"),
+                index.to_string(),
+            )
+            .expect("the expected cached metadata must be seeded");
+        }
+        let resolved = cached_cells(home.path(), &pair, &record)
+            .into_iter()
+            .map(|cell| fs::read_to_string(cell.cache().path().join(META_FILE)).ok())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            resolved,
+            (0..5)
+                .map(|index| Some(index.to_string()))
+                .collect::<Vec<_>>(),
+            "cleanup lost translated terms or reviewed context, or changed ordinary candidate cache identity"
+        );
+    }
 
     fn purge_child(root: &Path) -> Child {
         Command::new(std::env::current_exe().expect("test binary must resolve"))

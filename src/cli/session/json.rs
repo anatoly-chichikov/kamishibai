@@ -121,6 +121,8 @@ struct CandidateDoc {
 #[derive(Serialize)]
 struct SenseDoc {
     #[serde(skip_serializing_if = "Option::is_none")]
+    translation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tag: Option<String>,
     understanding: String,
     selected: bool,
@@ -290,6 +292,7 @@ fn candidates_doc(record: &SessionRecord) -> Option<CandidatesDoc> {
                 .iter()
                 .enumerate()
                 .map(|(index, sense)| SenseDoc {
+                    translation: sense.translation().map(String::from),
                     tag: sense.tag().map(String::from),
                     understanding: String::from(sense.understanding()),
                     selected: candidate.ok() && candidate.selected_senses().contains(&index),
@@ -699,6 +702,55 @@ mod tests {
                 serde_json::json!({"types": "best-fit"}),
             ),
             "an understood document must carry candidate senses and best-fit example settings while omitting the cards block"
+        );
+    }
+
+    #[test]
+    fn understood_json_exposes_translations_only_for_known_language_senses() {
+        let home = TempDir::new().expect("tempdir must be created");
+        let mut record = record();
+        record.candidates.push(CandidateRecord::from_candidate(
+            &WordCandidate::with_senses(
+                "duck",
+                vec![
+                    Sense::translated("canard", "a water bird", None),
+                    Sense::translated(
+                        "se baisser",
+                        "to lower your head",
+                        Some(String::from("verb")),
+                    ),
+                ],
+                0,
+                true,
+            ),
+        ));
+        let value = value_of(&record, home.path());
+        assert_eq!(
+            (
+                value["candidates"]["items"][0]["senses"][0].get("translation"),
+                value["candidates"]["items"][1].clone(),
+            ),
+            (
+                None,
+                serde_json::json!({
+                    "term": "duck",
+                    "included": true,
+                    "senses": [
+                        {
+                            "translation": "canard",
+                            "understanding": "a water bird",
+                            "selected": true
+                        },
+                        {
+                            "translation": "se baisser",
+                            "tag": "verb",
+                            "understanding": "to lower your head",
+                            "selected": false
+                        }
+                    ]
+                }),
+            ),
+            "understood JSON lost a translation, changed its original input, or added an absent field"
         );
     }
 

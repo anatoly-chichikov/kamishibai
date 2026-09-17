@@ -31,8 +31,12 @@ impl ScreenView for YourWords {
         Cow::Borrowed(HEADLINE)
     }
 
-    fn hint(&self, _: &App) -> Cow<'static, str> {
-        Cow::Borrowed(HINT)
+    fn hint(&self, app: &App) -> Cow<'static, str> {
+        Cow::Borrowed(if app.learning_pin().is_some() {
+            "add words in either language, one per line"
+        } else {
+            HINT
+        })
     }
 
     fn status(&self, app: &App) -> Vec<Span<'static>> {

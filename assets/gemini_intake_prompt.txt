@@ -11,9 +11,13 @@ Support language for explanations:
 
 {target_instruction}
 
-For each non-empty input line, return one item with four fields.
+For each non-empty input line, return one item with four fields. Process every line independently: a batch may mix vocabulary in the target language with words or phrases in the support language.
 
-1. "term" — the surface form to learn. Distill it from the line:
+Once the target language is selected or detected from the full batch, a word or phrase in the support language is a request for how to say that in the target language. Keep its original wording in "term" and provide a natural target-language equivalent in each sense's "translation". Do not reject it as off-language. Preserve the communicative intent of a whole phrase instead of extracting an arbitrary word. Prefer natural wording over a literal translation; keep tone, politeness, register, and essential nuance. Use a short idiomatic phrase when no single word fits. A batch entirely in the support language is valid when the target is explicitly selected.
+
+If an expression is ordinary in both languages, prefer its target-language reading unless the line's context or hint clearly asks for a translation from the support language. Input in neither language remains invalid. During automatic detection, infer the destination from vocabulary outside the support language anywhere in the full batch, even when support-language lines are the majority. If the entire batch is in the support language and no target is selected, return {"target_lang":"","needs_learning_language":true,"alternates":[],"items":[]} so the app can ask which language to translate into. Never invent a destination or choose the support language itself as the destination.
+
+1. "term" — the input expression shown on the review row. For support-language translation requests, retain the original word or whole phrase (without a separate dash hint). For target-language vocabulary, distill it from the line:
    - if the line is a single word or phrase, that is the term;
    - if the line is a sentence, pick the word or phrase the user most likely wants to learn;
    - if the line has a comment after a dash or em-dash, the part before the dash is usually the term;
@@ -23,11 +27,14 @@ For each non-empty input line, return one item with four fields.
 2. "senses" — an ordered array of 1 to 6 distinct senses. For unambiguous words, one sense is allowed. For polysemous words, provide the practical spread the learner is likely choosing among. Include well-known colloquial or slang senses when they are common enough that a learner is likely to meet them; do not limit the list to formal dictionary defaults.
 
    Ordering rules:
+   - for a support-language request, list distinct intended meanings of the input, each with its best target-language equivalent; do not list every meaning of the translated word or pad the list with interchangeable synonyms;
+   - put the most natural equivalent for the hinted context first; without a hint, put the common everyday meaning first and use the most idiomatic neutral wording for it;
    - if the user gave a hint after a dash, put the matching sense first, then order all remaining senses by general modern frequency in the target language;
    - otherwise sort by general modern frequency in the target language, including widespread slang after more central senses when appropriate;
    - do not include duplicates that only rephrase the same sense.
 
    Each sense has:
+   - "translation" — for a support-language request, one non-empty word or phrase in the required target language expressing this exact sense; different meanings may need different translations. For target-language input, omit this field or use null;
    - "understanding" — exactly one sentence in {support_language}, {understanding_length}, written for a human reader;
    - "tag" — a short disambiguating marker in {support_language}, or null.
 
@@ -49,13 +56,13 @@ For each non-empty input line, return one item with four fields.
 
 3. "selected" — always 0 in the intake response.
 
-4. "ok" — boolean. `true` when the item belongs to the chosen target language and can be turned into a card. `false` when it cannot: not in the target language, gibberish, or empty after trim. When `ok` is false, return exactly one sense whose "understanding" briefly states the reason in {support_language}, with "tag": null.
+4. "ok" — boolean. `true` for target-language vocabulary or a support-language expression that has a natural equivalent in the selected or detected target language. `false` for input in neither language, gibberish, or empty input. When `ok` is false, return exactly one sense whose "understanding" briefly states the reason in {support_language}, with "tag": null and no translation. For a valid support-language request, EVERY sense must carry its own non-empty "translation"; the explanation stays entirely in the support language, without repeating the translated expression as a prefix.
 
 Target-neutral output-shape examples in {support_language}:
 
 {intake_examples}
 
-`primary` and `secondary` illustrate two distinct senses for one placeholder target term. `hinted` illustrates the first sense for a placeholder term followed by a dash hint. `invalid` is the understanding for a placeholder off-language term with `ok=false`. The placeholders are structural and are never literal vocabulary to copy.
+`primary` and `secondary` illustrate two distinct senses for one placeholder target term. `hinted` illustrates the first sense for a placeholder term followed by a dash hint. `invalid` is the understanding for a placeholder term in neither accepted language with `ok=false`. The placeholders are structural and are never literal vocabulary to copy. For a support-language request, use the same shape with the original expression in "term" and an additional "translation" in each sense.
 
 Also report "alternates" — the supported languages this same input would read as, other than the chosen target.
 
@@ -66,7 +73,12 @@ Also report "alternates" — the supported languages this same input would read 
 
 Return only JSON with this shape, no prose, no code fences:
 
-{"target_lang":"<iso code of the chosen target language>","alternates":["<iso code>"],"items":[{"term":"<surface form>","senses":[{"understanding":"<one sentence in the support language>","tag":null}],"selected":0,"ok":true}]}
+{"target_lang":"<iso code of the chosen target language>","alternates":["<iso code>"],"items":[{"term":"<input expression>","senses":[{"translation":null,"understanding":"<one sentence in the support language>","tag":null}],"selected":0,"ok":true}]}
+
+Full batch for determining the target language only (do not produce items for these context lines unless they also appear in Raw input):
+{batch_context}
+
+Produce exactly one item per non-empty line in the following Raw input section only.
 
 Raw input:
 {raw_input}

@@ -198,8 +198,12 @@ pub(super) fn render_understood(record: &SessionRecord) -> String {
             let mark = if chosen { '*' } else { ' ' };
             let _ = writeln!(
                 out,
-                "    {mark} {} {}{}",
+                "    {mark} {} {}{}{}",
                 index + 1,
+                sense
+                    .translation()
+                    .map(|translation| format!("{translation}: "))
+                    .unwrap_or_default(),
                 tag_prefix(sense.tag()),
                 sense.understanding()
             );
@@ -786,6 +790,35 @@ mod tests {
                 && status.contains("  canard")
                 && status.contains("    * 2 a hoax"),
             "an understood session must list candidate senses with the selected one marked"
+        );
+    }
+
+    #[test]
+    fn understood_status_keeps_the_original_and_each_translation_with_its_meaning() {
+        use crate::session::CandidateRecord;
+        let mut record = record();
+        record.drafts = Vec::new();
+        record.candidates = vec![CandidateRecord::from_candidate(
+            &WordCandidate::with_senses(
+                "duck",
+                vec![
+                    Sense::translated("canard", "a water bird", None),
+                    Sense::translated(
+                        "se baisser",
+                        "to lower your head",
+                        Some(String::from("verb")),
+                    ),
+                ],
+                0,
+                true,
+            ),
+        )];
+        let status = render_understood(&record);
+        assert!(
+            status.contains("  duck\n")
+                && status.contains("    * 1 canard: a water bird\n")
+                && status.contains("      2 se baisser: (verb) to lower your head\n"),
+            "understood status hid the original or detached a translation from its sense: {status}"
         );
     }
 }

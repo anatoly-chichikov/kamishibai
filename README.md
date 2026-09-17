@@ -123,3 +123,5 @@ Twenty-two languages:
 - `cs` Czech
 
 Choose your language once. The app uses it for card labels, then detects what you're learning from each batch: paste French words for a French deck, Japanese words for a Japanese deck. When a word lives in several languages at once, `Ctrl+L` sets the pair for that batch yourself.
+
+You can enter words and phrases in either language and mix them in one batch. The app detects the learning language from foreign words in the list and translates the words in your own language into it. If you enter only your own language, it uses the language already selected for that batch, or asks which language you want to learn. The review keeps your original expression and shows a natural translation with an explanation; when meanings need different translations, choose among them as usual. The first option follows your context, or the common everyday meaning when you give no hint. The selected expression becomes a card in the language you're learning.

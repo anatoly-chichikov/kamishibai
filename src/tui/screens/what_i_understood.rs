@@ -401,6 +401,16 @@ fn candidate_line<'a>(
     term_width: usize,
     width: u16,
 ) -> Vec<Line<'a>> {
+    if stacked(term_width, usize::from(width)) {
+        return stacked_candidate_line(
+            index,
+            candidate,
+            index == selected,
+            expanded_count,
+            gloss,
+            width,
+        );
+    }
     let is_selected = index == selected;
     let row_style = palette::Ink::Detail.on(is_selected);
     let num_style = palette::Ink::Aside.on(is_selected);
@@ -454,6 +464,71 @@ fn candidate_line<'a>(
     lines
 }
 
+fn stacked_candidate_line<'a>(
+    index: usize,
+    candidate: &'a WordCandidate,
+    selected: bool,
+    expanded_count: Option<usize>,
+    gloss: Gloss,
+    width: u16,
+) -> Vec<Line<'a>> {
+    let style = palette::Ink::Detail.on(selected);
+    let term_style = if candidate.ok() {
+        palette::Ink::Subject.on(selected)
+    } else {
+        style.add_modifier(Modifier::CROSSED_OUT)
+    };
+    let available = usize::from(width).saturating_sub(4).max(1);
+    let label = stacked_label(candidate, expanded_count);
+    let mut lines = super::common::wrap_words(&label, available, available)
+        .into_iter()
+        .enumerate()
+        .map(|(row, chunk)| {
+            let prefix = if row == 0 {
+                format!("{:0>2}  ", index + 1)
+            } else {
+                String::from("    ")
+            };
+            let pad = available.saturating_sub(super::common::display_width(&chunk));
+            Line::from(vec![
+                Span::styled(prefix, palette::Ink::Aside.on(selected)),
+                Span::styled(chunk, term_style),
+                Span::styled(" ".repeat(pad), style),
+            ])
+        })
+        .collect::<Vec<_>>();
+    if !gloss.text().is_empty() {
+        lines.extend(marked_lines(
+            gloss.separator().trim_start(),
+            gloss.text(),
+            4,
+            style,
+            style,
+            width,
+        ));
+    }
+    lines
+}
+
+fn stacked_label(candidate: &WordCandidate, expanded_count: Option<usize>) -> String {
+    match inline_indicator(candidate, expanded_count) {
+        Some(indicator) => format!("{} {indicator}", candidate.term()),
+        None => String::from(candidate.term()),
+    }
+}
+
+fn stacked(term_width: usize, width: usize) -> bool {
+    width.saturating_sub(4 + term_width + 5) < 16
+}
+
+fn sense_indent(term_width: usize, width: usize) -> usize {
+    if stacked(term_width, width) {
+        4
+    } else {
+        4 + term_width + 5
+    }
+}
+
 fn sense_line<'a>(
     index: usize,
     sense: &'a Sense,
@@ -471,14 +546,18 @@ fn sense_line<'a>(
         palette::Ink::Aside.on(focused)
     };
     let text = sense_text(sense);
-    let indent = 4 + term_width + 5;
+    let indent = sense_indent(term_width, usize::from(width));
     marked_lines(marker, text.as_str(), indent, style, style, width)
 }
 
 fn sense_text(sense: &Sense) -> String {
-    match sense.tag() {
+    let understanding = match sense.tag() {
         Some(tag) => format!("[{tag}] {}", sense.understanding()),
         None => sense.understanding().to_string(),
+    };
+    match sense.translation() {
+        Some(translation) => format!("{translation}: {understanding}"),
+        None => understanding,
     }
 }
 
@@ -527,6 +606,19 @@ fn candidate_line_rows(
     term_width: usize,
     width: usize,
 ) -> usize {
+    if stacked(term_width, width) {
+        let head = marked_line_rows(&stacked_label(candidate, None), 0, 4, width);
+        return if gloss.text().is_empty() {
+            head
+        } else {
+            head.saturating_add(marked_line_rows(
+                gloss.text(),
+                4,
+                super::common::display_width(gloss.separator().trim_start()),
+                width,
+            ))
+        };
+    }
     let separator_width = super::common::display_width(gloss.separator());
     let label_width = candidate_label_len(candidate);
     let gloss_start = 4 + term_width.max(label_width) + separator_width;
@@ -537,11 +629,21 @@ fn candidate_line_rows(
 }
 
 fn sense_rows(sense: &Sense, term_width: usize, width: usize) -> usize {
-    marked_line_rows(sense_text(sense).as_str(), 4 + term_width + 5, 4, width)
+    marked_line_rows(
+        sense_text(sense).as_str(),
+        sense_indent(term_width, width),
+        4,
+        width,
+    )
 }
 
 fn selected_meaning_rows(sense: &Sense, term_width: usize, width: usize) -> usize {
-    marked_line_rows(sense_text(sense).as_str(), 4 + term_width + 5, 3, width)
+    marked_line_rows(
+        sense_text(sense).as_str(),
+        sense_indent(term_width, width),
+        3,
+        width,
+    )
 }
 
 fn marked_line_rows(text: &str, indent: usize, marker_width: usize, width: usize) -> usize {
@@ -644,7 +746,7 @@ fn candidate_block<'a>(
 /// em-dash indented one gloss column past the top-level dash, so the meanings
 /// read as nested under the word rather than as peers of the other rows.
 fn selected_meaning_line<'a>(sense: &'a Sense, term_width: usize, width: u16) -> Vec<Line<'a>> {
-    let indent = 4 + term_width + 5;
+    let indent = sense_indent(term_width, usize::from(width));
     let marker = "—  ";
     let text = sense_text(sense);
     marked_lines(
@@ -689,7 +791,7 @@ fn marked_lines<'a>(
 }
 
 fn add_more_line<'a>(focused: bool, term_width: usize, width: u16) -> Line<'a> {
-    let indent = 4 + term_width + 5;
+    let indent = sense_indent(term_width, usize::from(width));
     let marker = "    ";
     let text = "+ add more";
     let used = indent + super::common::display_width(marker) + super::common::display_width(text);
@@ -881,6 +983,86 @@ mod tests {
         assert!(
             counted.iter().all(|(drawn, counted)| drawn == counted),
             "the renderer and the scroll clamp disagreed on a review shape, got {counted:?}"
+        );
+    }
+
+    #[test]
+    fn translated_sense_wrapping_keeps_rendering_and_scroll_heights_together() {
+        let candidate = WordCandidate::with_senses(
+            "успеть",
+            vec![
+                Sense::translated(
+                    "make it in time",
+                    "Прибыть вовремя, пока встреча еще не закончилась и все участники ждут.",
+                    None,
+                ),
+                Sense::translated(
+                    "manage to finish",
+                    "Суметь закончить работу до установленного срока.",
+                    Some(String::from("действие")),
+                ),
+            ],
+            0,
+            true,
+        );
+        let shapes = [
+            review(vec![candidate.clone()]),
+            review(vec![candidate.clone()]).sense_list_toggled(),
+            review(vec![candidate.selecting_senses(vec![0, 1])]),
+        ];
+        let counted = [40, 64, 90, 132]
+            .into_iter()
+            .flat_map(|width| {
+                shapes.iter().map(move |app| {
+                    (
+                        body_lines(app, width).len(),
+                        usize::from(content_height(app, usize::from(width))),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            counted.iter().all(|(drawn, counted)| drawn == counted),
+            "translation wrapping made the rendered rows disagree with scrolling: {counted:?}"
+        );
+    }
+
+    #[test]
+    fn long_native_phrases_keep_the_original_and_translations_inside_a_narrow_view() {
+        let original = "не успеть прийти на встречу вовремя";
+        let candidate = WordCandidate::with_senses(
+            original,
+            vec![
+                Sense::translated("be late for a meeting", "Опоздать на встречу.", None),
+                Sense::translated("miss a meeting", "Не попасть на встречу.", None),
+            ],
+            0,
+            true,
+        );
+        let shapes = [
+            review(vec![candidate.clone()]),
+            review(vec![candidate.clone()]).sense_list_toggled(),
+            review(vec![candidate.selecting_senses(vec![0, 1])]),
+        ];
+        let rendered = shapes
+            .iter()
+            .map(|app| {
+                let lines = body_lines(app, 40);
+                let fits = lines.iter().skip(2).all(|line| line.width() <= 40);
+                let text = lines
+                    .iter()
+                    .map(|line| line.to_string().trim().to_owned())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                fits && text.contains(original)
+                    && text.contains("be late for a meeting:")
+                    && text.contains("Опоздать на встречу.")
+                    && lines.len() == usize::from(content_height(app, 40))
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            rendered.iter().all(|complete| *complete),
+            "a long native phrase pushed its label or translation out of the view: {rendered:?}"
         );
     }
 }

@@ -14,5 +14,5 @@ pub use generation_run::{GenerationRun, GenerationStep};
 pub(crate) use key_validation::KeyValidation;
 pub use study_publishing::{PublishPhase, PublishProgress, PublishedStudyPackage, StudyPublishing};
 pub(crate) use understanding::WordUnderstanding;
-pub use understanding::{BulkCorrection, LearningTarget, Understanding};
+pub use understanding::{BulkCorrection, LearningLanguageRequired, LearningTarget, Understanding};
 pub use workflow::{CardUseCases, CardWorkflow};

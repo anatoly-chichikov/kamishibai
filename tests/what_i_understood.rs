@@ -177,6 +177,22 @@ fn single_candidate() -> WordCandidate {
     )
 }
 
+fn translated_candidate() -> WordCandidate {
+    WordCandidate::with_senses(
+        "успеть",
+        vec![
+            Sense::translated("make it", "Прибыть вовремя.", None),
+            Sense::translated(
+                "manage to",
+                "Суметь сделать до срока.",
+                Some(String::from("действие")),
+            ),
+        ],
+        0,
+        true,
+    )
+}
+
 struct FakeUnderstanding;
 
 impl Understanding for FakeUnderstanding {
@@ -290,6 +306,55 @@ fn multi_sense_word_renders_collapsed_with_active_index() {
             && rendered.contains("1/3")
             && !rendered.contains("берег"),
         "collapsed multi-sense rows must show active first sense and a selected/total indicator: {rendered}"
+    );
+}
+
+#[test]
+fn known_language_input_shows_its_default_translation_beside_the_original() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![translated_candidate()]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("успеть")
+            && rendered.contains("make it: Прибыть вовремя.")
+            && rendered.contains("1/2")
+            && !rendered.contains("manage to"),
+        "a known-language phrase lost its original, default English translation, or meaning: {rendered}"
+    );
+}
+
+#[test]
+fn opening_known_language_input_lists_each_translation_with_its_own_meaning() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![translated_candidate()]);
+    let opened = transit(app, AppEvent::KeyEnter).0;
+    let rendered = flat(&opened);
+    assert!(
+        rendered.contains("успеть")
+            && rendered.contains("multiple meanings:")
+            && rendered.contains("make it: Прибыть вовремя.")
+            && rendered.contains("manage to: [действие] Суметь сделать до срока."),
+        "the sense list lost an English alternative or detached its explanation: {rendered}"
+    );
+}
+
+#[test]
+fn multiple_selected_translations_remain_visible_after_collapsing() {
+    let app = App::new(LanguagePair::new("en", "ru"))
+        .with_screen(Screen::WhatIUnderstood)
+        .confirmed_learning("en")
+        .understood(vec![translated_candidate().selecting_senses(vec![0, 1])]);
+    let rendered = flat(&app);
+    assert!(
+        rendered.contains("2/2")
+            && rendered.contains("multiple meanings:")
+            && rendered.contains("make it: Прибыть вовремя.")
+            && rendered.contains("manage to: [действие] Суметь сделать до срока."),
+        "a collapsed review hid one of the translations selected for cards: {rendered}"
     );
 }
 

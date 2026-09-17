@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::application::{LearningTarget, Understanding};
+use crate::application::{LearningLanguageRequired, LearningTarget, Understanding};
 use crate::generation::artifact_cache::{Cache, META_FILE};
 use crate::languages::catalog;
 
@@ -17,7 +17,7 @@ use super::{
     WordCandidate,
 };
 
-const UNDERSTANDING_VERSION: &str = "v8";
+const UNDERSTANDING_VERSION: &str = "v10";
 
 /// How many vocabulary lines one intake request carries.
 ///
@@ -40,14 +40,21 @@ struct UnderstandingScope<'a> {
     known: &'a str,
     identity: &'a str,
     target: &'a LearningTarget,
+    context: Option<&'a str>,
 }
 
 impl<'a> UnderstandingScope<'a> {
-    fn new(known: &'a str, identity: &'a str, target: &'a LearningTarget) -> Self {
+    fn new(
+        known: &'a str,
+        identity: &'a str,
+        target: &'a LearningTarget,
+        context: Option<&'a str>,
+    ) -> Self {
         Self {
             known,
             identity,
             target,
+            context,
         }
     }
 }
@@ -77,37 +84,49 @@ where
         if words > MAX_INTAKE_WORDS {
             return Err(IntakeTooLarge::new(words).into());
         }
+        let entries = normalized_entries(raw);
+        let context = raw.context().map_or_else(
+            || entries.join("\n"),
+            |context| normalized_entries(&RawInputBatch::new(context)).join("\n"),
+        );
         let detected = match target {
-            LearningTarget::Detect => ScriptDetection.detect(raw.text(), &catalog())?,
+            LearningTarget::Detect => ScriptDetection.detect(&context, &catalog())?,
             LearningTarget::Explicit(code) => LearningGuess::new(code.to_string(), true),
         };
         let known = known.to_uppercase();
         let target_code = detected.code().to_uppercase();
         let target_identity = match target {
-            LearningTarget::Detect => format!("detect:{target_code}"),
+            LearningTarget::Detect => format!("detect:{target_code}:{}", digest(&[&context])),
             LearningTarget::Explicit(code) => format!("explicit:{code}"),
         };
-        let scope = UnderstandingScope::new(known.as_str(), target_identity.as_str(), target);
+        let scope = UnderstandingScope::new(
+            known.as_str(),
+            target_identity.as_str(),
+            target,
+            matches!(target, LearningTarget::Detect).then_some(context.as_str()),
+        );
         let cache = Cache::new(
             format!("understanding/{known}-{target_code}"),
             self.root.clone(),
         );
-        let entries = normalized_entries(raw);
         let mut merged = vec![None; entries.len()];
         let mut misses = Vec::new();
-        let mut guess = None;
+        let mut guess = match target {
+            LearningTarget::Detect => None,
+            LearningTarget::Explicit(code) => Some(LearningGuess::new(code.to_string(), true)),
+        };
         for (index, entry) in entries.iter().enumerate() {
             let filename = self.entry_filename(entry, scope.known, scope.identity);
             if cache.exists(filename.as_str()) {
                 let record: EntryRecord = read_json(&cache, filename.as_str())?;
-                guess = guess.or_else(|| Some(record.guess()));
+                reconcile(&mut guess, record.guess(), target)?;
                 merged[index] = Some(record.candidate());
             } else {
                 misses.push(EntryMiss::new(index, entry));
             }
         }
         if !misses.is_empty() {
-            let (returned, candidates) = self.missing(&cache, scope, misses)?;
+            let (returned, candidates) = self.missing(&cache, scope, misses, guess)?;
             guess = Some(returned);
             for (index, candidate) in candidates {
                 merged[index] = Some(candidate);
@@ -120,8 +139,25 @@ where
                 candidate.ok_or_else(|| anyhow!("understanding cache left entry {index} empty"))
             })
             .collect::<Result<Vec<_>>>()?;
+        if matches!(target, LearningTarget::Detect)
+            && candidates
+                .iter()
+                .flat_map(WordCandidate::senses)
+                .any(|sense| sense.translation().is_some())
+            && !candidates.iter().any(|candidate| {
+                candidate.ok()
+                    && candidate
+                        .senses()
+                        .iter()
+                        .all(|sense| sense.translation().is_none())
+            })
+        {
+            return Err(LearningLanguageRequired.into());
+        }
         let guess = match target {
-            LearningTarget::Detect => guess.unwrap_or(detected),
+            LearningTarget::Detect => {
+                guess.unwrap_or_else(|| LearningGuess::new(target_code, detected.confident()))
+            }
             LearningTarget::Explicit(code) => LearningGuess::new(code.to_string(), true),
         };
         Ok(Understood::new(guess, candidates))
@@ -141,22 +177,27 @@ impl<T> CachedUnderstanding<T> {
         cache: &Cache,
         scope: UnderstandingScope<'_>,
         misses: Vec<EntryMiss>,
+        mut guess: Option<LearningGuess>,
     ) -> Result<(LearningGuess, Vec<(usize, WordCandidate)>)>
     where
         T: Understanding,
     {
         let unique = deduplicated(&misses);
-        let mut guess: Option<LearningGuess> = None;
         let mut resolved: Vec<(usize, WordCandidate)> = Vec::new();
         for chunk in unique.chunks(INTAKE_CHUNK_WORDS) {
             let understood = self.chunk_understood(scope, chunk)?;
-            guess = guess.or_else(|| Some(understood.guess().clone()));
+            reconcile(&mut guess, understood.guess().clone(), scope.target)?;
             for ((entry, rows), candidate) in chunk.iter().zip(understood.candidates()) {
                 let filename = self.entry_filename(entry, scope.known, scope.identity);
                 write_json(
                     cache,
                     filename.as_str(),
-                    &EntryRecord::from_candidate(understood.guess(), candidate),
+                    &EntryRecord::from_candidate(
+                        guess
+                            .as_ref()
+                            .expect("invariant: a validated chunk has a learning language"),
+                        candidate,
+                    ),
                 )?;
                 for row in rows {
                     resolved.push((*row, candidate.clone()));
@@ -186,6 +227,10 @@ impl<T> CachedUnderstanding<T> {
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
+        let raw = match scope.context {
+            Some(context) => raw.with_context(context),
+            None => raw,
+        };
         let understood = self.inner.understand(&raw, scope.known, scope.target)?;
         enforce_target(&understood, scope.target)?;
         if understood.candidates().len() == chunk.len() {
@@ -202,6 +247,34 @@ impl<T> CachedUnderstanding<T> {
         }
         Ok(retried)
     }
+}
+
+fn reconcile(
+    current: &mut Option<LearningGuess>,
+    returned: LearningGuess,
+    target: &LearningTarget,
+) -> Result<()> {
+    let code = catalog()
+        .resolve(returned.code())
+        .context("understanding returned an unsupported target language")?;
+    if let Some(previous) = current {
+        if previous.code() != code.as_ref() {
+            if matches!(target, LearningTarget::Detect) {
+                return Err(LearningLanguageRequired.into());
+            }
+            return Err(anyhow!(
+                "understanding target '{}' conflicts with batch target '{}'",
+                code,
+                previous.code()
+            ));
+        }
+    } else {
+        *current = Some(
+            LearningGuess::new(code.to_string(), returned.confident())
+                .with_alternates(returned.alternates().to_vec()),
+        );
+    }
+    Ok(())
 }
 
 /// Group repeated vocabulary lines so one line is asked about exactly once.
@@ -451,6 +524,8 @@ impl CandidateRecord {
 struct SenseRecord {
     understanding: String,
     tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    translation: Option<String>,
 }
 
 impl SenseRecord {
@@ -458,11 +533,15 @@ impl SenseRecord {
         Self {
             understanding: sense.understanding().to_string(),
             tag: sense.tag().map(String::from),
+            translation: sense.translation().map(String::from),
         }
     }
 
     fn sense(self) -> Sense {
-        Sense::new(self.understanding, self.tag)
+        match self.translation {
+            Some(term) => Sense::translated(term, self.understanding, self.tag),
+            None => Sense::new(self.understanding, self.tag),
+        }
     }
 }
 
@@ -615,6 +694,54 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn an_understanding_entry_cannot_lose_translations_when_saved() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let cache = Cache::new(String::from("understanding/RU-EN"), directory.path());
+        let candidate = WordCandidate::with_senses(
+            "лук",
+            vec![
+                Sense::translated("onion", "Овощ со слоями", None),
+                Sense::translated(
+                    "bow",
+                    "Оружие для стрельбы стрелами",
+                    Some(String::from("оружие")),
+                ),
+            ],
+            1,
+            true,
+        );
+        write_json(
+            &cache,
+            "translated.json",
+            &EntryRecord::from_candidate(&LearningGuess::new("EN", true), &candidate),
+        )
+        .expect("translated entry must save");
+        let record: EntryRecord = read_json(&cache, "translated.json").expect("entry must reopen");
+        assert_eq!(
+            record.candidate(),
+            candidate,
+            "a cached translation lost its input, learning terms, selected sense, or tags"
+        );
+    }
+
+    #[test]
+    fn a_legacy_candidate_without_translations_cannot_change_its_learning_term() {
+        let record: CandidateRecord = serde_json::from_str(
+            r#"{"term":"stumble","senses":[{"understanding":"Споткнуться","tag":null}],"selected_senses":[0],"ok":true}"#,
+        )
+        .expect("legacy candidate must decode");
+        let candidate = record.candidate();
+        assert_eq!(
+            (
+                candidate.sense().term(candidate.term()),
+                candidate.sense().translation()
+            ),
+            ("stumble", None),
+            "a legacy untranslated candidate stopped using its original learning term"
+        );
+    }
+
     #[derive(Clone)]
     struct ChangingUnderstanding {
         calls: Rc<RefCell<usize>>,
@@ -755,6 +882,244 @@ mod tests {
                 .collect();
             Ok(Understood::new(LearningGuess::new("EN", true), candidates))
         }
+    }
+
+    enum ContextReply {
+        Complete,
+        ShortFirst,
+        FailSecond,
+        SwitchTarget,
+    }
+
+    struct ContextUnderstanding {
+        seen: Rc<RefCell<Vec<RawInputBatch>>>,
+        reply: ContextReply,
+    }
+
+    impl ContextUnderstanding {
+        fn new(seen: Rc<RefCell<Vec<RawInputBatch>>>, reply: ContextReply) -> Self {
+            Self { seen, reply }
+        }
+    }
+
+    impl Understanding for ContextUnderstanding {
+        fn understand(
+            &self,
+            raw: &RawInputBatch,
+            _known: &str,
+            _target: &LearningTarget,
+        ) -> Result<Understood> {
+            self.seen.borrow_mut().push(raw.clone());
+            let call = self.seen.borrow().len();
+            if matches!(self.reply, ContextReply::FailSecond) && call == 2 {
+                return Err(anyhow!("the second chunk failed"));
+            }
+            let context = raw.context().unwrap_or(raw.text());
+            let language = if context.lines().any(|word| word == "cat") {
+                "EN"
+            } else {
+                "FR"
+            };
+            let target = if matches!(self.reply, ContextReply::SwitchTarget) && call == 2 {
+                "EL"
+            } else {
+                language
+            };
+            let kept = if matches!(self.reply, ContextReply::ShortFirst) && call == 1 {
+                raw.word_count().saturating_sub(1)
+            } else {
+                raw.word_count()
+            };
+            let candidates = raw
+                .lines()
+                .take(kept)
+                .map(|entry| {
+                    if entry
+                        .chars()
+                        .any(|character| ('\u{0400}'..='\u{04ff}').contains(&character))
+                    {
+                        WordCandidate::with_senses(
+                            entry,
+                            vec![Sense::translated(format!("{target}:{entry}"), target, None)],
+                            0,
+                            true,
+                        )
+                    } else {
+                        WordCandidate::new(entry, target, true)
+                    }
+                })
+                .collect();
+            Ok(Understood::new(
+                LearningGuess::new(target, true),
+                candidates,
+            ))
+        }
+    }
+
+    fn mixed_blob() -> String {
+        (0..INTAKE_CHUNK_WORDS)
+            .map(|index| format!("слово-{index}"))
+            .chain(std::iter::once(String::from("cat")))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn automatic_native_only_batch_cannot_invent_a_learning_language() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            ContextUnderstanding::new(seen.clone(), ContextReply::Complete),
+            directory.path(),
+        );
+        let input = RawInputBatch::new("сумка\nдорога");
+        let first = cache.understand(&input, "RU", &LearningTarget::Detect);
+        let second = cache.understand(&input, "RU", &LearningTarget::Detect);
+        assert_eq!(
+            (
+                first.is_err_and(|error| error.is::<LearningLanguageRequired>()),
+                second.is_err_and(|error| error.is::<LearningLanguageRequired>()),
+                seen.borrow().len(),
+            ),
+            (true, true, 1),
+            "native-only input invented a destination through the cache wrapper or on cache replay"
+        );
+    }
+
+    #[test]
+    fn a_support_only_chunk_cannot_lose_the_learning_language_evidence() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            ContextUnderstanding::new(seen.clone(), ContextReply::Complete),
+            directory.path(),
+        );
+        let input = mixed_blob();
+        let understood = cache
+            .understand(&RawInputBatch::new(&input), "RU", &LearningTarget::Detect)
+            .expect("support-only chunks must use the complete batch context");
+        assert_eq!(
+            (
+                understood.guess().code(),
+                seen.borrow()
+                    .iter()
+                    .map(RawInputBatch::word_count)
+                    .collect::<Vec<_>>(),
+                seen.borrow()
+                    .iter()
+                    .all(|raw| raw.context() == Some(input.as_str())),
+            ),
+            ("EN", vec![INTAKE_CHUNK_WORDS, 1], true),
+            "chunking lost target-language evidence or increased the provider row count"
+        );
+    }
+
+    #[test]
+    fn a_short_reply_retry_cannot_drop_the_complete_language_context() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            ContextUnderstanding::new(seen.clone(), ContextReply::ShortFirst),
+            directory.path(),
+        );
+        let input = mixed_blob();
+        cache
+            .understand(&RawInputBatch::new(&input), "RU", &LearningTarget::Detect)
+            .expect("a short chunk must be retried");
+        assert_eq!(
+            (
+                seen.borrow()
+                    .iter()
+                    .map(RawInputBatch::word_count)
+                    .collect::<Vec<_>>(),
+                seen.borrow()
+                    .iter()
+                    .all(|raw| raw.context() == Some(input.as_str())),
+            ),
+            (vec![INTAKE_CHUNK_WORDS, INTAKE_CHUNK_WORDS, 1], true),
+            "retry discarded the full batch context or re-requested unrelated rows"
+        );
+    }
+
+    #[test]
+    fn partially_cached_input_cannot_hide_the_learning_language_evidence() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            ContextUnderstanding::new(seen.clone(), ContextReply::FailSecond),
+            directory.path(),
+        );
+        let input = format!("cat\n{}\nпоследнее", blob(INTAKE_CHUNK_WORDS - 1));
+        let first = cache.understand(&RawInputBatch::new(&input), "RU", &LearningTarget::Detect);
+        let retried = cache
+            .understand(&RawInputBatch::new(&input), "RU", &LearningTarget::Detect)
+            .expect("partial cache must resume the missing chunk");
+        assert_eq!(
+            (
+                first.is_err(),
+                retried.guess().code(),
+                seen.borrow()
+                    .iter()
+                    .map(RawInputBatch::word_count)
+                    .collect::<Vec<_>>(),
+                seen.borrow().last().and_then(RawInputBatch::context) == Some(input.as_str()),
+            ),
+            (true, "EN", vec![INTAKE_CHUNK_WORDS, 1, 1], true),
+            "partial cache hid the target-language evidence or re-requested completed rows"
+        );
+    }
+
+    #[test]
+    fn automatic_chunks_cannot_mix_different_learning_languages() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            ContextUnderstanding::new(seen, ContextReply::SwitchTarget),
+            directory.path(),
+        );
+        assert!(
+            cache
+                .understand(
+                    &RawInputBatch::new(mixed_blob()),
+                    "RU",
+                    &LearningTarget::Detect
+                )
+                .expect_err("conflicting chunk languages must require a choice")
+                .is::<LearningLanguageRequired>(),
+            "understanding merged candidates from conflicting target languages"
+        );
+    }
+
+    #[test]
+    fn cached_candidates_cannot_mix_different_learning_languages() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let cache = CachedUnderstanding::new(
+            ContextUnderstanding::new(Rc::new(RefCell::new(Vec::new())), ContextReply::Complete),
+            directory.path(),
+        );
+        let input = "cat\nсумка";
+        cache
+            .understand(&RawInputBatch::new(input), "RU", &LearningTarget::Detect)
+            .expect("mixed input must be understood");
+        let namespace = Cache::new("understanding/RU-RU", directory.path());
+        let identity = format!("detect:RU:{}", digest(&[input]));
+        let filename = cache.entry_filename("сумка", "RU", &identity);
+        write_json(
+            &namespace,
+            &filename,
+            &EntryRecord::from_candidate(
+                &LearningGuess::new("FR", true),
+                &WordCandidate::new("сумка", "FR", true),
+            ),
+        )
+        .expect("a conflicting cache record must be seeded");
+        assert!(
+            cache
+                .understand(&RawInputBatch::new(input), "RU", &LearningTarget::Detect)
+                .expect_err("conflicting cached languages must require a choice")
+                .is::<LearningLanguageRequired>(),
+            "understanding silently merged cache entries for different target languages"
+        );
     }
 
     fn blob(count: usize) -> String {
@@ -905,15 +1270,16 @@ mod tests {
     }
 
     #[test]
-    fn all_text_model_contract_uses_the_version_eight_understanding_identity() {
+    fn automatic_translations_cannot_reuse_explicit_only_intake_entries() {
         let cache = CachedUnderstanding::new(
             ChangingUnderstanding::new(Rc::new(RefCell::new(0))),
             "/tmp/kamishibai-understanding-version-test",
         );
+        let current = cache.entry_filename("lantern", "RU", "detect:EN");
         assert_eq!(
-            cache.entry_filename("lantern", "RU", "detect:EN"),
-            "0c3fff85fd7e.json",
-            "all-text model change reused an earlier understanding contract"
+            (UNDERSTANDING_VERSION, current != "edc365f7fa08.json"),
+            ("v10", true),
+            "automatic translations reused the intake policy that rejected them"
         );
     }
 
@@ -1017,20 +1383,49 @@ mod tests {
     }
 
     #[test]
+    fn automatic_batches_cannot_reuse_an_entry_from_a_different_language_context() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let cache = CachedUnderstanding::new(
+            ContextUnderstanding::new(Rc::new(RefCell::new(Vec::new())), ContextReply::Complete),
+            directory.path(),
+        );
+        cache
+            .understand(
+                &RawInputBatch::new("cat\nсумка"),
+                "RU",
+                &LearningTarget::Detect,
+            )
+            .expect("English context must be understood");
+        let second = cache
+            .understand(
+                &RawInputBatch::new("chat\nсумка"),
+                "RU",
+                &LearningTarget::Detect,
+            )
+            .expect("French context must be understood independently");
+        assert_eq!(
+            (
+                second.guess().code(),
+                second.candidates()[1].understanding()
+            ),
+            ("FR", "FR"),
+            "automatic understanding reused a translation from another batch context"
+        );
+    }
+
+    #[test]
     fn cached_entry_is_reused_when_a_new_entry_is_added_to_the_batch() {
         let directory = TempDir::new().expect("tempdir must be created");
         let calls = Rc::new(RefCell::new(0));
         let cache =
             CachedUnderstanding::new(ChangingUnderstanding::new(calls.clone()), directory.path());
+        let target =
+            LearningTarget::Explicit(catalog().resolve("EN").expect("English must resolve"));
         cache
-            .understand(&RawInputBatch::new("catdog"), "ru", &LearningTarget::Detect)
+            .understand(&RawInputBatch::new("catdog"), "ru", &target)
             .expect("first understanding must succeed");
         let second = cache
-            .understand(
-                &RawInputBatch::new("catdog\nflower"),
-                "ru",
-                &LearningTarget::Detect,
-            )
+            .understand(&RawInputBatch::new("catdog\nflower"), "ru", &target)
             .expect("second understanding must succeed");
         let candidates = second
             .candidates()

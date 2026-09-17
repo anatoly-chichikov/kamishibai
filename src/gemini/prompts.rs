@@ -5,7 +5,8 @@ use crate::application::LearningTarget;
 use crate::languages::LanguageCatalog;
 use crate::prompt::PromptTemplate;
 use crate::session::{
-    CardDraft, CardMeta, LanguagePair, SentenceAxis, SentenceLabelSelection, WordCandidate,
+    CardDraft, CardMeta, LanguagePair, RawInputBatch, SentenceAxis, SentenceLabelSelection,
+    WordCandidate,
 };
 
 const INTAKE_PROMPT: &str = include_str!("../../assets/gemini_intake_prompt.txt");
@@ -17,7 +18,7 @@ const LEARNER_EXPLANATIONS: &str = include_str!("../../assets/learner_explanatio
 
 /// Render the human-in-the-loop intake prompt.
 pub(super) fn render_intake_prompt(
-    raw: &str,
+    raw: &RawInputBatch,
     known: &str,
     target: &LearningTarget,
     catalog: &LanguageCatalog,
@@ -40,7 +41,11 @@ pub(super) fn render_intake_prompt(
             ),
             ("{sense_conventions}", examples.sense_conventions()?),
             ("{intake_examples}", examples.intake()?),
-            ("{raw_input}", String::from(raw)),
+            ("{raw_input}", String::from(raw.text())),
+            (
+                "{batch_context}",
+                String::from(raw.context().unwrap_or(raw.text())),
+            ),
         ],
     )
 }
@@ -57,7 +62,13 @@ pub(super) fn render_bulk_prompt(
     let senses = candidate
         .senses()
         .iter()
-        .map(|sense| json!({"understanding": sense.understanding(), "tag": sense.tag()}))
+        .map(|sense| {
+            let mut value = json!({"understanding": sense.understanding(), "tag": sense.tag()});
+            if let Some(term) = sense.translation() {
+                value["translation"] = json!(term);
+            }
+            value
+        })
         .collect::<Vec<_>>();
     render(
         SENSE_PROMPT,
@@ -78,6 +89,20 @@ pub(super) fn render_bulk_prompt(
             ("{sense_conventions}", examples.sense_conventions()?),
             ("{sense_message_examples}", examples.sense_messages()?),
             ("{term}", String::from(candidate.term())),
+            (
+                "{translation_instruction}",
+                String::from(
+                    if candidate
+                        .senses()
+                        .iter()
+                        .any(|sense| sense.translation().is_some())
+                    {
+                        "This row is a support-language translation request. Term is the original expression in the support language. Add missing intended meanings of that expression, each with its best idiomatic target-language translation. Every returned sense must include translation. Respect the user's context and tone; prefer natural everyday wording over a literal calque. Do not add unrelated meanings of the existing target-language translations or lists of interchangeable synonyms."
+                    } else {
+                        "This row is target-language vocabulary. Add meanings of this exact term and omit translation on every returned sense."
+                    },
+                ),
+            ),
             ("{shown_senses}", serde_json::to_string_pretty(&senses)?),
             ("{user_request}", String::from(comment)),
         ],
@@ -314,7 +339,7 @@ fn language_choices(catalog: &LanguageCatalog) -> Result<String> {
 fn target_instruction(target: &LearningTarget, catalog: &LanguageCatalog) -> Result<String> {
     match target {
         LearningTarget::Detect => Ok(String::from(
-            "Choose exactly one dominant target language for the whole batch. One non-trivial item is enough to fix the language; treat the whole batch as that language.",
+            "Choose exactly one dominant target language from vocabulary outside the support language in the full batch. One non-trivial foreign-language item is enough to fix the destination, even when support-language entries are the majority. Translate the support-language entries into that destination. If no destination can be inferred, set needs_learning_language to true instead of guessing.",
         )),
         LearningTarget::Explicit(code) => {
             let profile = catalog.item(code.as_ref())?;
@@ -349,8 +374,8 @@ mod tests {
     use crate::application::LearningTarget;
     use crate::languages::catalog;
     use crate::session::{
-        AxisSet, CardDraft, CardMeta, LanguagePair, Register, Sense, SentenceAxis, SentenceKind,
-        SentenceLabelSelection, SentenceLabels, SentenceLevel, WordCandidate,
+        AxisSet, CardDraft, CardMeta, LanguagePair, RawInputBatch, Register, Sense, SentenceAxis,
+        SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel, WordCandidate,
     };
 
     #[test]
@@ -370,7 +395,12 @@ mod tests {
             let pair = LanguagePair::new("en", known);
             let draft = CardDraft::new("term", "one precise sense", pair.clone());
             [
-                render_intake_prompt("term", known, &LearningTarget::Detect, &catalog),
+                render_intake_prompt(
+                    &RawInputBatch::new("term"),
+                    known,
+                    &LearningTarget::Detect,
+                    &catalog,
+                ),
                 render_bulk_prompt(&candidate, "add one sense", &pair, &catalog),
                 render_card_meta_prompt(&draft, None, &catalog),
                 render_card_prompt(&draft, "", &pair, &catalog),
@@ -433,7 +463,12 @@ mod tests {
         let candidate = WordCandidate::new("term", literal, true);
         let draft = CardDraft::new("term", literal, pair.clone());
         let preserved = [
-            render_intake_prompt(literal, "ru", &LearningTarget::Detect, &catalog),
+            render_intake_prompt(
+                &RawInputBatch::new(literal),
+                "ru",
+                &LearningTarget::Detect,
+                &catalog,
+            ),
             render_bulk_prompt(&candidate, literal, &pair, &catalog),
             render_card_meta_prompt(&draft, None, &catalog),
             render_card_prompt(&draft, literal, &pair, &catalog),
@@ -454,7 +489,12 @@ mod tests {
             let pair = LanguagePair::new("en", known);
             let draft = CardDraft::new("term", "one precise sense", pair.clone());
             [
-                render_intake_prompt("term", known, &LearningTarget::Detect, &catalog),
+                render_intake_prompt(
+                    &RawInputBatch::new("term"),
+                    known,
+                    &LearningTarget::Detect,
+                    &catalog,
+                ),
                 render_bulk_prompt(&candidate, "add one sense", &pair, &catalog),
                 render_card_meta_prompt(&draft, None, &catalog),
                 render_card_prompt(&draft, "", &pair, &catalog),
@@ -492,8 +532,13 @@ mod tests {
 
     #[test]
     fn english_intake_cannot_embed_russian_support_examples() {
-        let prompt = render_intake_prompt("râler", "en", &LearningTarget::Detect, &catalog())
-            .expect("english intake prompt must render");
+        let prompt = render_intake_prompt(
+            &RawInputBatch::new("râler"),
+            "en",
+            &LearningTarget::Detect,
+            &catalog(),
+        )
+        .expect("english intake prompt must render");
         assert!(
             prompt.contains("\"fin.\"")
                 && !prompt.contains("фин.")
@@ -797,8 +842,13 @@ mod tests {
                 .expect("correction prompt must render"),
         ];
         let senses = [
-            render_intake_prompt("anchor", "fr", &LearningTarget::Detect, &catalog())
-                .expect("intake prompt must render"),
+            render_intake_prompt(
+                &RawInputBatch::new("anchor"),
+                "fr",
+                &LearningTarget::Detect,
+                &catalog(),
+            )
+            .expect("intake prompt must render"),
             render_bulk_prompt(&candidate, "another common use", &pair, &catalog())
                 .expect("sense prompt must render"),
         ];
@@ -825,8 +875,13 @@ mod tests {
         let pair = LanguagePair::new("en", "fr");
         let candidate = WordCandidate::new("anchor", "a heavy mooring device", true);
         let prompts = [
-            render_intake_prompt("anchor", "fr", &LearningTarget::Detect, &catalog())
-                .expect("intake prompt must render"),
+            render_intake_prompt(
+                &RawInputBatch::new("anchor"),
+                "fr",
+                &LearningTarget::Detect,
+                &catalog(),
+            )
+            .expect("intake prompt must render"),
             render_bulk_prompt(&candidate, "another common use", &pair, &catalog())
                 .expect("sense prompt must render"),
         ];
@@ -1113,13 +1168,23 @@ mod tests {
 
     #[test]
     fn cjk_prompts_use_lexical_length_rules_without_artificial_spaces() {
-        let chinese = render_intake_prompt("批准", "zh", &LearningTarget::Detect, &catalog())
-            .expect("chinese intake prompt must render");
+        let chinese = render_intake_prompt(
+            &RawInputBatch::new("批准"),
+            "zh",
+            &LearningTarget::Detect,
+            &catalog(),
+        )
+        .expect("chinese intake prompt must render");
         let draft = CardDraft::new("承認", "同意して認めること", LanguagePair::new("en", "ja"));
         let japanese = render_card_meta_prompt(&draft, None, &catalog())
             .expect("japanese card prompt must render");
-        let english = render_intake_prompt("râler", "en", &LearningTarget::Detect, &catalog())
-            .expect("english intake prompt must render");
+        let english = render_intake_prompt(
+            &RawInputBatch::new("râler"),
+            "en",
+            &LearningTarget::Detect,
+            &catalog(),
+        )
+        .expect("english intake prompt must render");
         assert!(
             chinese.contains("without artificial spaces")
                 && japanese.contains("comparable brevity")
@@ -1133,7 +1198,13 @@ mod tests {
         let catalog = catalog();
         let candidate = WordCandidate::new("term", "one precise sense", true);
         let complete = catalog.codes().into_iter().all(|known| {
-            render_intake_prompt("term", known, &LearningTarget::Detect, &catalog).is_ok()
+            render_intake_prompt(
+                &RawInputBatch::new("term"),
+                known,
+                &LearningTarget::Detect,
+                &catalog,
+            )
+            .is_ok()
                 && catalog.codes().into_iter().all(|learning| {
                     let pair = LanguagePair::new(learning, known);
                     let draft = CardDraft::new("term", "one precise sense", pair.clone());

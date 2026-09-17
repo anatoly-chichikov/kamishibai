@@ -1,9 +1,15 @@
 //! Application ports for turning raw words into curatable candidates.
 
 use anyhow::Result;
+use thiserror::Error;
 
 use crate::languages::LanguageCode;
 use crate::session::{LanguagePair, RawInputBatch, SenseCorrection, Understood, WordCandidate};
+
+/// Ask for a destination when the input cannot establish the learning language.
+#[derive(Debug, Error)]
+#[error("Which language would you like to translate these words into?")]
+pub struct LearningLanguageRequired;
 
 /// How the understanding pass chooses the language being learned.
 #[derive(Clone, Debug, Eq, PartialEq)]
