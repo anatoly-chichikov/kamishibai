@@ -76,7 +76,12 @@ fn draw_picker(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(block, inset);
     let content = padded(inner);
     frame.render_widget(picker_panel(app, picker_rows(area)), content);
-    paint_title(frame, inset, "languages");
+    let title = if app.translation_pending() {
+        "translate your words"
+    } else {
+        "languages"
+    };
+    paint_title(frame, inset, title);
 }
 
 fn surround() -> Block<'static> {
@@ -159,19 +164,29 @@ const PINNED_ROW: u16 = 4;
 
 fn picker_panel(app: &App, visible: usize) -> Paragraph<'static> {
     let cursor = app.picker_cursor();
+    let question = if app.translation_pending() {
+        "Which language would you like to translate into?"
+    } else {
+        ""
+    };
     let mut lines = vec![
-        Line::from(""),
+        Line::from(Span::styled(question, palette::Ink::Detail.on(false))),
         Line::from(headings(cursor.section())),
         Line::from(rules()),
-        Line::from(across(gutter(), |section| pinned_cell(section, cursor))),
+        Line::from(across(gutter(), |section| {
+            pinned_cell(section, cursor, app.translation_pending())
+        })),
     ];
     for row in 0..visible {
         lines.push(Line::from(across(gutter(), |section| {
             scrolling_cell(section, cursor, row, visible)
         })));
     }
-    let mut actions = super::common::FooterHint::primary("Enter", "confirm").spans();
-    actions.push(Span::styled(String::from("  "), palette::base()));
+    let mut actions = Vec::new();
+    if !app.translation_pending() || cursor.choice().pinned().is_some() {
+        actions.extend(super::common::FooterHint::primary("Enter", "confirm").spans());
+        actions.push(Span::styled(String::from("  "), palette::base()));
+    }
     actions.extend(super::common::FooterHint::secondary("←→", "column").spans());
     actions.push(Span::styled(String::from("  "), palette::base()));
     actions.extend(super::common::FooterHint::ghost("↑↓", "nav").spans());
@@ -254,7 +269,17 @@ fn rules() -> Vec<Span<'static>> {
 
 /// Build the row pinned above both lists. Only the learning column fills it,
 /// with `auto`; the blank left of it is what lines the two catalogs up.
-fn pinned_cell(section: PickerSection, cursor: PickerCursor) -> Vec<Span<'static>> {
+fn pinned_cell(
+    section: PickerSection,
+    cursor: PickerCursor,
+    translation: bool,
+) -> Vec<Span<'static>> {
+    if translation && section == PickerSection::Learning {
+        return vec![Span::styled(
+            super::common::pad_right("choose a language below", section.column_width()),
+            palette::Ink::Aside.on(false),
+        )];
+    }
     let pinned = (0..section.scrolling_first()).next();
     let text = pinned
         .map(|index| section.row_text(index))
@@ -472,6 +497,54 @@ mod tests {
     use crate::tui::picker::{PickerCursor, PickerSection};
 
     use super::{SECTIONS, picker_geometry, picker_rows, window};
+
+    fn translation_prompt(width: u16) -> String {
+        let app = crate::tui::App::new(crate::session::LanguagePair::new("EN", "RU"))
+            .seeded_blob("сумка\nдорога")
+            .translation_requested();
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, 24))
+            .expect("a test terminal must open");
+        terminal
+            .draw(|frame| crate::tui::draw(frame, &app))
+            .expect("the translation choice must render");
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer[(column, row)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn translation_choice_cannot_hide_its_question_behind_a_technical_error() {
+        let broken = [80, 120]
+            .into_iter()
+            .filter(|width| {
+                let rendered = translation_prompt(*width);
+                !rendered.contains("Which language would you like to translate into?")
+                    || !rendered.contains("choose a language below")
+                    || !rendered.contains("what you're learning")
+                    || rendered.contains("could not complete request")
+                    || rendered.contains("--learning")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            broken,
+            Vec::<u16>::new(),
+            "the translation choice clipped its plain-language question or showed a technical failure"
+        );
+    }
+
+    #[test]
+    fn translation_choice_cannot_promise_confirmation_without_a_destination() {
+        assert!(
+            !translation_prompt(120).contains("[Enter] confirm"),
+            "the translation choice offered a confirmation key that could not continue"
+        );
+    }
 
     /// A terminal tall enough to show every language without scrolling.
     fn tall() -> Rect {

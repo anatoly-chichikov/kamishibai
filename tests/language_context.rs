@@ -582,7 +582,7 @@ fn the_unpinned_learning_half_opens_on_the_auto_chip() {
 }
 
 #[test]
-fn escape_from_review_returns_new_words_to_auto_detection() {
+fn escape_from_review_keeps_the_learning_language_for_edited_words() {
     let pinned = transit(
         reviewed().seeded_blob("chat").confirmed_learning("en"),
         AppEvent::SetLanguages(pinned_choice("ru", "de")),
@@ -604,8 +604,15 @@ fn escape_from_review_returns_new_words_to_auto_detection() {
             typed.blob(),
             PickerSection::Learning.code_at(opened.picker_cursor().index(PickerSection::Learning),),
         ),
-        (Screen::YourWords, "RU", None, true, "chatx", None),
-        "Escape from review kept the previous learning language for newly edited words"
+        (
+            Screen::YourWords,
+            "RU",
+            Some("DE"),
+            false,
+            "chatx",
+            Some("de")
+        ),
+        "Escape from review lost the learning language for newly edited words"
     );
 }
 

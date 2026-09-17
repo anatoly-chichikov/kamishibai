@@ -14,6 +14,8 @@ Term:
 Already shown senses:
 {shown_senses}
 
+{translation_instruction}
+
 User request:
 {user_request}
 
@@ -28,6 +30,7 @@ The shown senses are already available on screen. Treat this request as a search
 Return up to 3 new senses that match the user's request and do not duplicate any shown sense. Append-style order is fine: the most relevant new sense first.
 
 Each sense has:
+- "translation" — when this is a support-language request, one non-empty natural equivalent in {target_language} for this exact intended meaning; otherwise omit it or use null;
 - "understanding" — exactly one sentence in {support_language}, {understanding_length}, written for a human reader;
 - "tag" — a short disambiguating marker in {support_language}, or null.
 
@@ -51,10 +54,12 @@ Use these localized message examples:
 
 {sense_message_examples}
 
-If the user's request is already covered by one of the shown senses, return an empty "senses" array and use the `listed` message shape. If the requested meaning does not exist in {target_language}, return an empty "senses" array and use the `absent` message shape.
+If the user's request is already covered by one of the shown senses, return an empty "senses" array and use the `listed` message shape. For target-language vocabulary, if the requested meaning does not exist in {target_language}, return an empty "senses" array and use the `absent` message shape. For a support-language request, supply a natural equivalent for a real meaning of the original expression, even when it needs a different target-language word or a short phrase; return no senses only if the requested meaning is not real or is already covered.
 
 Before returning, silently test each proposed sense against an ordinary valid use outside the example you first imagined. Remove incidental restrictions and unsupported tags. Return fewer senses, including none, rather than inventing a narrow use to fill the list. Check that every addition is a real meaning of this exact term and is not already covered. Output only the requested JSON, not this check.
 
 Return only JSON with this shape, no prose, no code fences:
 
-{"senses":[{"understanding":"<one sentence in the support language>","tag":"<short localized tag>"}],"message":null}
+{"senses":[{"translation":null,"understanding":"<one sentence in the support language>","tag":"<short localized tag>"}],"message":null}
+
+For a support-language request replace translation:null with the actual non-empty target-language expression in every new sense. For target-language vocabulary keep it null or omit it.

@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.12.0
+Release: 1.13.0
 
 Overview
 
@@ -26,7 +26,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.12.0/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.13.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -203,6 +203,30 @@ target. Every explicit target and autodetection use separate understanding-cache
 identities. `--known` falls back to saved config; without either value, the
 command refuses and points to `config --known`.
 
+Each input line may be in either the known or learning language. An explicit
+learning language fixes the destination; autodetection infers it from foreign
+vocabulary anywhere in the full batch, even when known-language lines dominate.
+Known-language words and whole phrases request a natural expression in the
+learning language. For example, `new --word "мне не по себе" --known RU
+--learning EN --json` proposes an English expression with a Russian explanation.
+The candidate `term` retains the original input; each translated sense adds a
+non-empty `translation` field containing its learning-language expression.
+Ordinary learning-language senses omit `translation`. The first sense is selected
+by default: an input hint takes priority, otherwise the common everyday meaning
+comes first. Distinct meanings may have different translations. Mixed batches
+keep one candidate per input line. `select`, `exclude`, and `correct` address the
+original candidate term; committed cards use the selected translated expression,
+so later `adjust` and `regenerate --card` address that learning-language term.
+Translations and selections persist across cache hits and session resumes.
+For input entirely in the known language, supply `--learning`. In the TUI, a
+previously selected or resolved destination is retained while editing the batch.
+If no destination is known, the language picker asks which language to translate
+into and automatically resumes understanding after selection. Automatic intake
+chunks receive the full batch as detection context and must agree on one target.
+Automatic cache identities include the normalized full batch so context-dependent
+translations cannot leak between language destinations. Explicit targets retain
+per-entry cache reuse when more words are added.
+
 `--level` pins one lowercase operational CEFR band for the surrounding
 language on every card. Without it, metadata writes the natural example first
 and attributes its honest level afterward. `--types best-fit` leaves each
@@ -284,8 +308,10 @@ natural result keeps its actual attribution and records the requested target
 separately. That pinned axis is also named in `approx`; this is a best-effort
 outcome, not a failed card.
 
-Every committed card also keeps the complete sense list that was visible on
-`What I Understood`. Its selected sense is first; the remaining reviewed senses
+Every committed card also keeps the reviewed senses for its learning-language
+expression from `What I Understood`. For a translated input, meanings that require
+a different translated expression remain on the review row and are excluded
+from that card's glossary. Its selected sense is first; the remaining reviewed senses
 keep their original priority and tags. The displayed glossary contains at most
 five meanings: the selected one first in bold, followed by the four highest-priority
 alternatives. The original review order prioritizes current frequency and any

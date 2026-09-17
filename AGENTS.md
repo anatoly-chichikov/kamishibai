@@ -69,6 +69,8 @@ Initial batch generation guidance is separate from that post-generation rewrite 
 
 ## Architecture
 
+Understanding accepts input in either half of the pair with a selected or automatically detected learning language. `WordCandidate::term` retains the original review expression; `Sense::translation` optionally carries its natural learning-language equivalent. Different senses can resolve to different terms. `CardDraft::from_candidate` uses the selected learning expression and keeps only reviewed senses for that expression, with translation provenance stripped from the finalized card glossary. Candidate records preserve translations in both the understanding cache and `session.json`; the review TUI, plain console, and JSON expose them. Corrections to translated rows must return a translation for every new sense. Autodetection uses foreign-language words anywhere in the full batch as destination evidence, even when known-language lines are the majority. Every chunk receives the full batch as detection context, and automatic cache identities include that context; explicit targets retain per-entry cache reuse. Known-language-only input works with a selected or previously resolved target. Without one, `LearningLanguageRequired` opens the TUI language picker with a plain question and keeps the words intact; choosing a target resumes understanding. Returning from review to edit the same batch retains its resolved target. The default choice is the first, context-matched or common everyday meaning. The understanding cache policy must change when this intake contract changes.
+
 The runtime is split into a few focused modules:
 
 - `src/vocabulary`: validates the strict JSON document and exposes canonical entry types

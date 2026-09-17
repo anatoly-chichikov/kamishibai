@@ -761,31 +761,39 @@ impl CardDraft {
 
     /// Create one draft from a reviewed candidate and the sense chosen for this card.
     ///
-    /// The chosen sense is placed first. Every other reviewed sense follows in
-    /// the candidate's original display order, with its optional tag intact.
+    /// The chosen sense is placed first, followed by the other meanings of that
+    /// learning-language term in review order. Input translations settle into
+    /// the draft's term and leave no review-only metadata on its meanings.
     #[must_use]
     pub fn from_candidate(candidate: &WordCandidate, selected: usize, pair: LanguagePair) -> Self {
         let chosen = candidate
             .senses()
             .get(selected)
             .unwrap_or_else(|| panic!("invariant: selected sense index {selected} must exist"));
-        let reviewed_senses = std::iter::once(chosen.clone())
-            .chain(
-                candidate
-                    .senses()
-                    .iter()
-                    .enumerate()
-                    .filter(|(index, _)| *index != selected)
-                    .map(|(_, sense)| sense.clone()),
-            )
+        let term = chosen.term(candidate.term());
+        let matching = candidate
+            .senses()
+            .iter()
+            .enumerate()
+            .filter(|(_, sense)| sense.term(candidate.term()) == term)
+            .collect::<Vec<_>>();
+        let priority = matching
+            .iter()
+            .position(|(index, _)| *index == selected)
+            .expect("invariant: a chosen sense must match its own learning term");
+        let priorities = std::iter::once(priority)
+            .chain((0..matching.len()).filter(|index| *index != priority))
+            .collect::<Vec<_>>();
+        let reviewed_senses = priorities
+            .iter()
+            .map(|index| {
+                let sense = matching[*index].1;
+                Sense::new(sense.understanding(), sense.tag().map(String::from))
+            })
             .collect();
-        Self::new(candidate.term(), chosen.understanding(), pair)
+        Self::new(term, chosen.understanding(), pair)
             .with_reviewed_senses(reviewed_senses)
-            .with_sense_priorities(
-                std::iter::once(selected)
-                    .chain((0..candidate.senses().len()).filter(|index| *index != selected))
-                    .collect(),
-            )
+            .with_sense_priorities(priorities)
     }
 
     /// Return the draft carrying a non-empty, selected-first reviewed sense list.
@@ -1168,6 +1176,92 @@ fn normalized_priorities(priorities: Vec<usize>, count: usize) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_known_language_phrase_cannot_become_the_generated_learning_term() {
+        let candidate = WordCandidate::with_senses(
+            "мне не по себе",
+            vec![Sense::translated(
+                "feel uneasy",
+                "Испытывать тревогу или неловкость",
+                None,
+            )],
+            0,
+            true,
+        );
+        let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("en", "ru"));
+        assert_eq!(
+            (draft.term(), draft.reviewed_senses()),
+            (
+                "feel uneasy",
+                [Sense::plain("Испытывать тревогу или неловкость")].as_slice()
+            ),
+            "a translated card retained the input phrase or review-only translation metadata"
+        );
+    }
+
+    #[test]
+    fn a_translated_card_cannot_inherit_meanings_of_another_learning_term() {
+        let candidate = WordCandidate::with_senses(
+            "лук",
+            vec![
+                Sense::translated("onion", "Овощ со слоями", None),
+                Sense::translated("bow", "Оружие для стрельбы стрелами", None),
+            ],
+            1,
+            true,
+        );
+        let draft = CardDraft::from_candidate(&candidate, 1, LanguagePair::new("en", "ru"));
+        assert_eq!(
+            (
+                draft.term(),
+                draft.reviewed_senses(),
+                draft.sense_priority(0)
+            ),
+            (
+                "bow",
+                [Sense::plain("Оружие для стрельбы стрелами")].as_slice(),
+                0
+            ),
+            "a bow card inherited the onion meaning or a priority outside its filtered senses"
+        );
+    }
+
+    #[test]
+    fn translated_meanings_of_one_learning_term_cannot_lose_their_relative_priorities() {
+        let candidate = WordCandidate::with_senses(
+            "держать",
+            vec![
+                Sense::translated("hold", "Не выпускать из рук", None),
+                Sense::translated("keep", "Продолжать хранить", None),
+                Sense::translated(
+                    "hold",
+                    "Сохранять положение",
+                    Some(String::from("положение")),
+                ),
+            ],
+            2,
+            true,
+        );
+        let draft = CardDraft::from_candidate(&candidate, 2, LanguagePair::new("en", "ru"));
+        assert_eq!(
+            (
+                draft.term(),
+                draft.reviewed_senses(),
+                [draft.sense_priority(0), draft.sense_priority(1)],
+            ),
+            (
+                "hold",
+                [
+                    Sense::tagged("Сохранять положение", "положение"),
+                    Sense::plain("Не выпускать из рук")
+                ]
+                .as_slice(),
+                [1, 0],
+            ),
+            "filtering translated meanings lost the selected-first order, tags, or relative priorities"
+        );
+    }
 
     fn meta() -> CardMeta {
         CardMeta::new(

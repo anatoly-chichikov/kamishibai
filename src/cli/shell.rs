@@ -760,6 +760,10 @@ where
                     };
                 }
                 Err(error) => {
+                    if error.is::<crate::application::LearningLanguageRequired>() {
+                        self.app = self.app.clone().translation_requested();
+                        return;
+                    }
                     if rejects_key(&error) {
                         self.recover_key_rejection();
                         return;
@@ -1466,10 +1470,15 @@ mod tests {
             &self,
             raw: &RawInputBatch,
             my: &str,
-            _target: &LearningTarget,
+            target: &LearningTarget,
         ) -> Result<Understood> {
             self.ready()?;
-            let guess = ScriptDetection.detect(raw.text(), &catalog_for_detection())?;
+            let guess = match target {
+                LearningTarget::Detect => {
+                    ScriptDetection.detect(raw.text(), &catalog_for_detection())?
+                }
+                LearningTarget::Explicit(code) => LearningGuess::new(code.as_ref(), true),
+            };
             let candidates = raw
                 .text()
                 .lines()
@@ -1813,6 +1822,76 @@ mod tests {
             .with_screen(Screen::WhatIUnderstood)
             .confirmed_learning("en")
             .understood(vec![candidate("whilst")])
+    }
+
+    #[test]
+    fn unknown_translation_destination_opens_the_language_choice_without_losing_words() {
+        let mut shell = shell(
+            App::new(pair())
+                .with_screen(Screen::YourWords)
+                .seeded_blob("как-бы\nсумка\nдорога")
+                .busy_started(BusyKind::Understanding),
+        );
+        shell.finish_text(TextOutcome::Understanding(Err(
+            crate::application::LearningLanguageRequired.into(),
+        )));
+        assert_eq!(
+            (
+                shell.app.modal(),
+                shell.app.picker_cursor().section(),
+                shell.app.blob(),
+                shell.app.busy().is_none(),
+                shell.app.error().is_none(),
+            ),
+            (
+                Some(ModalKind::PickLanguages),
+                crate::tui::PickerSection::Learning,
+                "как-бы\nсумка\nдорога",
+                true,
+                true,
+            ),
+            "a missing translation destination stranded the learner behind an error or lost their words"
+        );
+    }
+
+    #[test]
+    fn choosing_the_missing_translation_language_automatically_reads_the_same_words() {
+        let mut shell = shell(
+            App::new(pair())
+                .with_screen(Screen::YourWords)
+                .seeded_blob("сумка\nдорога"),
+        );
+        shell.finish_text(TextOutcome::Understanding(Err(
+            crate::application::LearningLanguageRequired.into(),
+        )));
+        let section = crate::tui::PickerSection::Learning;
+        shell
+            .handle(AppEvent::LanguagePickerPoint(
+                section,
+                section.chip_for("EN"),
+            ))
+            .expect("a destination must be selectable");
+        shell
+            .handle(AppEvent::KeyEnter)
+            .expect("confirming a destination must continue understanding");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.learning_pin(),
+                shell.app.blob(),
+                shell.app.candidates().len(),
+                shell.app.modal(),
+            ),
+            (
+                Screen::WhatIUnderstood,
+                Some("EN"),
+                "сумка\nдорога",
+                2,
+                None,
+            ),
+            "choosing a translation destination did not continue the original request"
+        );
     }
 
     #[test]

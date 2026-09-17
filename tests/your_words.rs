@@ -165,6 +165,18 @@ fn your_words_renders_placeholder_tagline_and_language_pair() {
 }
 
 #[test]
+fn pinned_learning_language_explains_that_words_can_be_entered_in_either_language() {
+    let app = App::new(LanguagePair::new("en", "ru")).languages_adopted(
+        &kamishibai::tui::LanguageChoice::new("RU", kamishibai::tui::learning_target(Some("en"))),
+    );
+    let flat = flatten(&app);
+    assert!(
+        flat.contains("add words in either language, one per line"),
+        "the entry hint hid known-language input after the learning language was chosen: {flat}"
+    );
+}
+
+#[test]
 fn your_words_footer_shows_language_shortcut() {
     let app = App::new(LanguagePair::new("en", "ru"));
     let flat = flatten(&app);

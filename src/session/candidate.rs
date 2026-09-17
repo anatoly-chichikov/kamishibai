@@ -32,12 +32,28 @@ impl IntakeTooLarge {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RawInputBatch {
     text: String,
+    context: Option<String>,
 }
 
 impl RawInputBatch {
     /// Create one raw input batch from a blob of pasted text.
     pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into() }
+        Self {
+            text: text.into(),
+            context: None,
+        }
+    }
+
+    /// Retain the full input as language evidence when this batch contains only a chunk.
+    #[must_use]
+    pub(crate) fn with_context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    /// Return whole-batch language evidence without adding review rows to this chunk.
+    pub(crate) fn context(&self) -> Option<&str> {
+        self.context.as_deref()
     }
 
     /// Return the raw text as-is.
@@ -80,11 +96,13 @@ pub(crate) const MAX_CARD_MEANINGS: usize = 5;
 ///
 /// `understanding` is a single short sentence in the user's support language.
 /// `tag` is a short domain, register, region, idiom, or part-of-use marker
-/// shown only when the sense needs it.
+/// shown only when the sense needs it. `translation` names the learning-language
+/// term when the user entered this meaning in their support language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Sense {
     understanding: String,
     tag: Option<String>,
+    translation: Option<String>,
 }
 
 impl Sense {
@@ -101,7 +119,26 @@ impl Sense {
         Self {
             understanding: understanding.into(),
             tag,
+            translation: None,
         }
+    }
+
+    /// Create one support-language meaning with its natural learning-language term.
+    #[must_use]
+    pub fn translated(
+        term: impl Into<String>,
+        understanding: impl Into<String>,
+        tag: Option<String>,
+    ) -> Self {
+        let term = term.into();
+        let term = term.trim();
+        assert!(
+            !term.is_empty(),
+            "invariant: a translated sense must name a learning-language term"
+        );
+        let mut sense = Self::new(understanding, tag);
+        sense.translation = Some(term.to_string());
+        sense
     }
 
     /// Create one untagged sense.
@@ -122,6 +159,18 @@ impl Sense {
     /// Return the optional short sense tag.
     pub fn tag(&self) -> Option<&str> {
         self.tag.as_deref()
+    }
+
+    /// Return the learning-language translation when this sense came from support-language input.
+    #[must_use]
+    pub fn translation(&self) -> Option<&str> {
+        self.translation.as_deref()
+    }
+
+    /// Resolve the term to learn, using the input term for an untranslated sense.
+    #[must_use]
+    pub fn term<'a>(&'a self, fallback: &'a str) -> &'a str {
+        self.translation().unwrap_or(fallback)
     }
 
     /// Return whether another understanding differs only in case or whitespace.
@@ -167,14 +216,15 @@ impl WordCandidate {
         selected: Vec<usize>,
         ok: bool,
     ) -> Self {
-        let mut senses = deduplicated(senses);
+        let term = term.into();
+        let mut senses = deduplicated(senses, term.as_str());
         if senses.is_empty() {
             senses.push(Sense::plain("модель не поняла слово"));
         }
         senses.truncate(MAX_SENSES);
         let selected = normalized_selection(selected, senses.len());
         Self {
-            term: term.into(),
+            term,
             senses,
             selected,
             ok,
@@ -252,14 +302,14 @@ impl WordCandidate {
     /// Append non-duplicate senses and select the first appended one.
     pub fn with_added_senses(mut self, senses: Vec<Sense>) -> (Self, Option<usize>) {
         let mut first = None;
-        for sense in deduplicated(senses) {
+        for sense in deduplicated(senses, self.term()) {
             if self.senses.len() >= MAX_SENSES {
                 break;
             }
             if self
                 .senses
                 .iter()
-                .any(|existing| same_understanding(existing, &sense))
+                .any(|existing| same_understanding(existing, &sense, self.term()))
             {
                 continue;
             }
@@ -291,7 +341,7 @@ fn normalized_selection(selected: Vec<usize>, len: usize) -> Vec<usize> {
     output
 }
 
-fn deduplicated(senses: Vec<Sense>) -> Vec<Sense> {
+fn deduplicated(senses: Vec<Sense>, fallback: &str) -> Vec<Sense> {
     let mut output = Vec::new();
     for sense in senses {
         if sense.understanding().trim().is_empty() {
@@ -299,7 +349,7 @@ fn deduplicated(senses: Vec<Sense>) -> Vec<Sense> {
         }
         if output
             .iter()
-            .any(|existing| same_understanding(existing, &sense))
+            .any(|existing| same_understanding(existing, &sense, fallback))
         {
             continue;
         }
@@ -308,8 +358,9 @@ fn deduplicated(senses: Vec<Sense>) -> Vec<Sense> {
     output
 }
 
-fn same_understanding(left: &Sense, right: &Sense) -> bool {
+fn same_understanding(left: &Sense, right: &Sense, fallback: &str) -> bool {
     left.matches(right.understanding())
+        && normalized(left.term(fallback)) == normalized(right.term(fallback))
 }
 
 fn normalized(value: &str) -> String {
@@ -318,4 +369,87 @@ fn normalized(value: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_explicit_copy_of_the_input_term_cannot_duplicate_a_meaning() {
+        let candidate = WordCandidate::with_senses(
+            "stock",
+            vec![
+                Sense::plain("То, что оставлено на потом"),
+                Sense::translated("stock", "То, что оставлено на потом", None),
+            ],
+            0,
+            true,
+        );
+        assert_eq!(
+            candidate.senses().len(),
+            1,
+            "an explicit copy of the original learning term duplicated the same meaning"
+        );
+    }
+
+    #[test]
+    fn identical_glosses_cannot_discard_distinct_translations() {
+        let candidate = WordCandidate::with_senses(
+            "запас",
+            vec![
+                Sense::translated("reserve", "То, что оставлено на потом", None),
+                Sense::translated("stock", "То, что оставлено на потом", None),
+            ],
+            0,
+            true,
+        );
+        assert_eq!(
+            candidate.senses().len(),
+            2,
+            "different learning terms collapsed because their explanations matched"
+        );
+    }
+
+    #[test]
+    fn adding_senses_cannot_discard_a_new_translation_with_a_matching_gloss() {
+        let (candidate, added) = WordCandidate::with_senses(
+            "запас",
+            vec![Sense::translated(
+                "reserve",
+                "То, что оставлено на потом",
+                None,
+            )],
+            0,
+            true,
+        )
+        .with_added_senses(vec![Sense::translated(
+            "stock",
+            "То, что оставлено на потом",
+            None,
+        )]);
+        assert_eq!(
+            (added, candidate.sense().term(candidate.term())),
+            (Some(1), "stock"),
+            "a new translation could not be added and selected independently"
+        );
+    }
+
+    #[test]
+    fn repeated_translations_cannot_duplicate_a_normalized_meaning() {
+        let candidate = WordCandidate::with_senses(
+            "запас",
+            vec![
+                Sense::translated("reserve", "То, что оставлено на потом", None),
+                Sense::translated(" reserve ", " то, что оставлено  на потом ", None),
+            ],
+            0,
+            true,
+        );
+        assert_eq!(
+            candidate.senses().len(),
+            1,
+            "whitespace variants of one translated meaning became duplicate choices"
+        );
+    }
 }
