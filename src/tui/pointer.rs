@@ -79,6 +79,15 @@ pub fn reset_mouse_pointer<W: Write>(out: &mut W) {
 }
 
 fn clickable_at(app: &App, terminal: Rect, column: u16, row: u16) -> bool {
+    if app.modal() == Some(ModalKind::PickTranslationLanguage) {
+        return super::translation_geometry::row_at(
+            terminal,
+            app.translation_cursor(),
+            column,
+            row,
+        )
+        .is_some();
+    }
     if app.modal() == Some(ModalKind::PickLanguages) {
         return picker_geometry::row_at(terminal, app.picker_cursor(), column, row).is_some();
     }

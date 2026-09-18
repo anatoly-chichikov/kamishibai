@@ -8,6 +8,7 @@ pub struct LearningGuess {
     code: String,
     confident: bool,
     alternates: Vec<String>,
+    requires_confirmation: bool,
 }
 
 impl LearningGuess {
@@ -17,7 +18,21 @@ impl LearningGuess {
             code: code.into(),
             confident,
             alternates: Vec::new(),
+            requires_confirmation: false,
         }
+    }
+
+    /// Mark a recent-language proposal that needs approval before creating cards.
+    #[must_use]
+    pub fn with_confirmation(mut self, required: bool) -> Self {
+        self.requires_confirmation = required;
+        self
+    }
+
+    /// Return whether this target was proposed from history rather than input evidence.
+    #[must_use]
+    pub fn requires_confirmation(&self) -> bool {
+        self.requires_confirmation
     }
 
     /// Return the guess carrying the languages that were equally plausible.

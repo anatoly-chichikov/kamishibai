@@ -20,6 +20,8 @@ pub enum ModalKind {
     /// moves between the halves, `←/→` moves inside one, and `Enter` confirms
     /// both at once. The active pair is pre-selected.
     PickLanguages,
+    /// Choose only a translation destination when the input cannot establish one.
+    PickTranslationLanguage,
 }
 
 /// Stage the first-run Welcome screen is currently on.

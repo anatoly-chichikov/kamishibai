@@ -1,6 +1,6 @@
 //! Centered modals.
 //!
-//! Two visual patterns share the same centred surround (solid border, padded
+//! Three visual patterns share the same centred surround (solid border, padded
 //! content, action row):
 //!
 //! 1. The text modal (`ChangeSomething`) — a single text-input field with an
@@ -16,6 +16,10 @@
 //!    bright. A column longer than the window scrolls, showing a thumb against
 //!    the right edge. Action row is `[Enter] confirm · [←→] column · [↑↓] nav ·
 //!    [Esc] cancel`. No text input, no cursor.
+//! 3. The translation destination picker (`PickTranslationLanguage`) — one
+//!    list with recent choices first and a dashed divider before the remaining
+//!    languages. The newest eligible choice is highlighted, but only Enter
+//!    adopts it and continues the pending translation.
 //!
 //! All modals are rendered last in the frame so they sit on top of the
 //! fullscreen screen beneath them.
@@ -28,7 +32,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::tui::app::App;
 use crate::tui::palette;
-use crate::tui::picker::{PickerCursor, PickerSection};
+use crate::tui::picker::{PickerCursor, PickerSection, TranslationCursor};
 use crate::tui::screen::ModalKind;
 use crate::tui::text_field::TextField;
 
@@ -44,6 +48,7 @@ const INPUT_LINE_OFFSET: u16 = 1;
 pub fn draw(frame: &mut Frame, area: Rect, kind: ModalKind, app: &App) {
     match kind {
         ModalKind::PickLanguages => draw_picker(frame, area, app),
+        ModalKind::PickTranslationLanguage => draw_translation(frame, area, app),
         ModalKind::ChangeSomething => draw_text_modal(frame, area, kind, app),
     }
 }
@@ -76,12 +81,126 @@ fn draw_picker(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(block, inset);
     let content = padded(inner);
     frame.render_widget(picker_panel(app, picker_rows(area)), content);
-    let title = if app.translation_pending() {
-        "translate your words"
+    paint_title(frame, inset, "languages");
+}
+
+const TRANSLATION_WIDTH: u16 = 55;
+const TRANSLATION_CHROME: usize = 8;
+const TRANSLATION_FIRST_ROW: u16 = 5;
+
+fn draw_translation(frame: &mut Frame, area: Rect, app: &App) {
+    let cursor = app.translation_cursor();
+    let inset = translation_inset(area, cursor);
+    super::common::paint_background(frame, inset);
+    frame.render_widget(Clear, inset);
+    let block = surround();
+    let content = padded(block.inner(inset));
+    frame.render_widget(block, inset);
+    let visible = translation_rows(area, cursor);
+    let offset = window(cursor.rows(), cursor.row(cursor.selected()), visible);
+    let width = usize::from(content.width).saturating_sub(SCROLLBAR_GUTTER);
+    let heading = if cursor.history_visible(offset) {
+        "recently selected"
+    } else if cursor.has_history() {
+        "other languages"
     } else {
         "languages"
     };
-    paint_title(frame, inset, title);
+    let question = "Which language would you like to translate into?";
+    let question = if super::common::display_width(question) <= usize::from(content.width) {
+        question
+    } else {
+        "Translate into which language?"
+    };
+    let mut lines = if app.translation_preview() {
+        vec![
+            Line::from(Span::styled(
+                "Prepared using your last choice",
+                palette::Ink::Detail.on(false),
+            )),
+            Line::from(Span::styled(
+                format!("{} → {}", app.pair().known(), app.pair().learning()),
+                palette::Ink::Subject.on(false),
+            )),
+            Line::from(Span::styled(
+                "Confirm or choose below",
+                palette::Ink::Detail.on(false),
+            )),
+            Line::from(Span::styled(heading, palette::Ink::Aside.on(false))),
+        ]
+    } else {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(question, palette::Ink::Detail.on(false))),
+            Line::from(""),
+            Line::from(Span::styled(heading, palette::Ink::Aside.on(false))),
+        ]
+    };
+    for row in 0..visible {
+        let index = cursor.index(offset + row);
+        let (text, style) = match index {
+            Some(index) => {
+                let chip = PickerSection::Known.chip_for(&cursor.codes()[index]);
+                (
+                    super::common::pad_right(&PickerSection::Known.row_text(chip), width),
+                    row_style(index == cursor.selected(), true),
+                )
+            }
+            None => {
+                let label = "╌╌ other languages ";
+                (
+                    format!(
+                        "{label}{}",
+                        "╌".repeat(width.saturating_sub(super::common::display_width(label)))
+                    ),
+                    palette::rule(),
+                )
+            }
+        };
+        lines.push(Line::from(vec![
+            Span::styled(text, style),
+            Span::styled(" ", palette::base()),
+            scrollbar_cell(cursor.rows(), offset, row, visible),
+        ]));
+    }
+    let mut actions = super::common::FooterHint::primary("Enter", "confirm").spans();
+    let navigation = super::common::FooterHint::ghost("↑↓", "nav").spans();
+    let cancel = super::common::FooterHint::ghost("Esc", "cancel").spans();
+    let full_width = actions
+        .iter()
+        .chain(&navigation)
+        .chain(&cancel)
+        .map(|span| super::common::display_width(span.content.as_ref()))
+        .sum::<usize>()
+        + 4;
+    if full_width <= usize::from(content.width) {
+        actions.push(Span::styled("  ", palette::base()));
+        actions.extend(navigation);
+    }
+    actions.push(Span::styled("  ", palette::base()));
+    actions.extend(cancel);
+    lines.push(Line::from(""));
+    lines.push(Line::from(actions));
+    frame.render_widget(Paragraph::new(lines).style(palette::base()), content);
+    paint_title(frame, inset, "translate your words");
+}
+
+fn translation_rows(area: Rect, cursor: &TranslationCursor) -> usize {
+    let ceiling = usize::from(
+        super::common::frame_rects(area)
+            .disclaimer
+            .y
+            .saturating_sub(area.y),
+    );
+    ceiling
+        .saturating_sub(TRANSLATION_CHROME)
+        .clamp(1, cursor.rows().max(1))
+}
+
+fn translation_inset(area: Rect, cursor: &TranslationCursor) -> Rect {
+    let height =
+        u16::try_from(translation_rows(area, cursor) + TRANSLATION_CHROME).unwrap_or(u16::MAX);
+    super::common::overlay_rect(area, TRANSLATION_WIDTH, height)
 }
 
 fn surround() -> Block<'static> {
@@ -118,6 +237,7 @@ fn text_title(kind: ModalKind) -> &'static str {
     match kind {
         ModalKind::ChangeSomething => "what meanings did we miss?",
         ModalKind::PickLanguages => "languages",
+        ModalKind::PickTranslationLanguage => "translate your words",
     }
 }
 
@@ -128,7 +248,7 @@ fn text_field<'a>(kind: ModalKind, app: &'a App) -> TextField<'a> {
 fn text_placeholder(kind: ModalKind) -> &'static str {
     match kind {
         ModalKind::ChangeSomething => "write the missing meaning however you want",
-        ModalKind::PickLanguages => "",
+        ModalKind::PickLanguages | ModalKind::PickTranslationLanguage => "",
     }
 }
 
@@ -164,29 +284,19 @@ const PINNED_ROW: u16 = 4;
 
 fn picker_panel(app: &App, visible: usize) -> Paragraph<'static> {
     let cursor = app.picker_cursor();
-    let question = if app.translation_pending() {
-        "Which language would you like to translate into?"
-    } else {
-        ""
-    };
     let mut lines = vec![
-        Line::from(Span::styled(question, palette::Ink::Detail.on(false))),
+        Line::from(""),
         Line::from(headings(cursor.section())),
         Line::from(rules()),
-        Line::from(across(gutter(), |section| {
-            pinned_cell(section, cursor, app.translation_pending())
-        })),
+        Line::from(across(gutter(), |section| pinned_cell(section, cursor))),
     ];
     for row in 0..visible {
         lines.push(Line::from(across(gutter(), |section| {
             scrolling_cell(section, cursor, row, visible)
         })));
     }
-    let mut actions = Vec::new();
-    if !app.translation_pending() || cursor.choice().pinned().is_some() {
-        actions.extend(super::common::FooterHint::primary("Enter", "confirm").spans());
-        actions.push(Span::styled(String::from("  "), palette::base()));
-    }
+    let mut actions = super::common::FooterHint::primary("Enter", "confirm").spans();
+    actions.push(Span::styled(String::from("  "), palette::base()));
     actions.extend(super::common::FooterHint::secondary("←→", "column").spans());
     actions.push(Span::styled(String::from("  "), palette::base()));
     actions.extend(super::common::FooterHint::ghost("↑↓", "nav").spans());
@@ -269,17 +379,7 @@ fn rules() -> Vec<Span<'static>> {
 
 /// Build the row pinned above both lists. Only the learning column fills it,
 /// with `auto`; the blank left of it is what lines the two catalogs up.
-fn pinned_cell(
-    section: PickerSection,
-    cursor: PickerCursor,
-    translation: bool,
-) -> Vec<Span<'static>> {
-    if translation && section == PickerSection::Learning {
-        return vec![Span::styled(
-            super::common::pad_right("choose a language below", section.column_width()),
-            palette::Ink::Aside.on(false),
-        )];
-    }
+fn pinned_cell(section: PickerSection, cursor: PickerCursor) -> Vec<Span<'static>> {
     let pinned = (0..section.scrolling_first()).next();
     let text = pinned
         .map(|index| section.row_text(index))
@@ -490,13 +590,151 @@ pub mod picker_geometry {
     }
 }
 
+/// Shared hit geometry for the single-column translation destination list.
+pub mod translation_geometry {
+    use super::{
+        HORIZONTAL_PADDING, SCROLLBAR_GUTTER, TRANSLATION_FIRST_ROW, translation_inset,
+        translation_rows, window,
+    };
+    use crate::tui::picker::TranslationCursor;
+    use ratatui::layout::Rect;
+
+    /// Return the language under the pointer, excluding headings and the divider.
+    #[must_use]
+    pub fn row_at(area: Rect, cursor: &TranslationCursor, x: u16, y: u16) -> Option<usize> {
+        (0..cursor.codes().len()).find(|index| {
+            row_rect(area, cursor, *index).is_some_and(|rect| {
+                y == rect.y && x >= rect.x && x < rect.x.saturating_add(rect.width)
+            })
+        })
+    }
+
+    /// Return a language's visible row rectangle, or none when it is scrolled out.
+    #[must_use]
+    pub fn row_rect(area: Rect, cursor: &TranslationCursor, index: usize) -> Option<Rect> {
+        if index >= cursor.codes().len() {
+            return None;
+        }
+        let inset = translation_inset(area, cursor);
+        let visible = translation_rows(area, cursor);
+        let offset = window(cursor.rows(), cursor.row(cursor.selected()), visible);
+        let row = cursor.row(index).checked_sub(offset)?;
+        if row >= visible {
+            return None;
+        }
+        let x = inset.x + 1 + HORIZONTAL_PADDING;
+        let y = inset.y + TRANSLATION_FIRST_ROW + u16::try_from(row).unwrap_or(u16::MAX);
+        let width = inset.width.saturating_sub(
+            2 + HORIZONTAL_PADDING * 2 + u16::try_from(SCROLLBAR_GUTTER).unwrap_or(u16::MAX),
+        );
+        (y < inset.y + inset.height.saturating_sub(1)).then_some(Rect {
+            x,
+            y,
+            width,
+            height: 1,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ratatui::layout::Rect;
 
     use crate::tui::picker::{PickerCursor, PickerSection};
 
-    use super::{SECTIONS, picker_geometry, picker_rows, window};
+    use super::{SECTIONS, picker_geometry, picker_rows, translation_geometry, window};
+    use crate::tui::picker::TranslationCursor;
+
+    #[test]
+    fn translation_clicks_cannot_select_the_dashed_separator() {
+        let cursor = TranslationCursor::opening("RU", &[String::from("FR")]);
+        let area = Rect::new(0, 0, 96, 40);
+        let recent = translation_geometry::row_rect(area, &cursor, 0)
+            .expect("the recent row must be visible");
+        let next =
+            translation_geometry::row_rect(area, &cursor, 1).expect("the next row must be visible");
+        assert_eq!(
+            (
+                translation_geometry::row_at(area, &cursor, recent.x, recent.y),
+                translation_geometry::row_at(area, &cursor, recent.x, recent.y + 1),
+                translation_geometry::row_at(area, &cursor, next.x, next.y)
+            ),
+            (Some(0), None, Some(1)),
+            "translation hit geometry selected the divider or shifted a neighboring language"
+        );
+    }
+
+    #[test]
+    fn translation_scroll_cannot_hide_its_highlight_or_misroute_a_click() {
+        let cursor = TranslationCursor::opening("RU", &[String::from("JA"), String::from("FR")]);
+        let broken = [14, 24, 40]
+            .into_iter()
+            .flat_map(|height| {
+                (0..cursor.codes().len()).filter_map({
+                    let cursor = cursor.clone();
+                    move |index| {
+                        let chosen = cursor.clone().chosen(index);
+                        let area = Rect::new(0, 0, 80, height);
+                        let hit =
+                            translation_geometry::row_rect(area, &chosen, index).and_then(|rect| {
+                                translation_geometry::row_at(area, &chosen, rect.x, rect.y)
+                            });
+                        (hit != Some(index)).then_some((height, index))
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            broken,
+            Vec::<(u16, usize)>::new(),
+            "a scrolled translation destination disappeared or pointed to another language"
+        );
+    }
+
+    #[test]
+    fn translation_history_cannot_render_out_of_order_or_leave_its_latest_choice_unhighlighted() {
+        let app = crate::tui::App::new(crate::session::LanguagePair::new("EN", "RU"))
+            .with_learning_history(vec![String::from("JA"), String::from("FR")])
+            .translation_requested();
+        let area = Rect::new(0, 0, 80, 40);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
+                .expect("a test terminal must open");
+        terminal
+            .draw(|frame| crate::tui::draw(frame, &app))
+            .expect("the translation list must render");
+        let buffer = terminal.backend().buffer();
+        let first = translation_geometry::row_rect(area, app.translation_cursor(), 0)
+            .expect("the latest choice must be visible");
+        let second = translation_geometry::row_rect(area, app.translation_cursor(), 1)
+            .expect("the older choice must be visible");
+        let third = translation_geometry::row_rect(area, app.translation_cursor(), 2)
+            .expect("the remaining catalog must be visible");
+        let code = |row: u16| {
+            (first.x..first.x + 2)
+                .map(|x| buffer[(x, row)].symbol())
+                .collect::<String>()
+        };
+        assert_eq!(
+            (
+                code(first.y),
+                code(second.y),
+                code(third.y),
+                buffer[(first.x, second.y + 1)].symbol(),
+                buffer[(first.x, first.y)].fg,
+                buffer[(first.x, first.y)].bg
+            ),
+            (
+                String::from("JA"),
+                String::from("FR"),
+                String::from("EN"),
+                "╌",
+                super::palette::BG,
+                super::palette::FG
+            ),
+            "rendered translation history lost its order, divider, or most-recent highlight"
+        );
+    }
 
     fn translation_prompt(width: u16) -> String {
         let app = crate::tui::App::new(crate::session::LanguagePair::new("EN", "RU"))
@@ -525,8 +763,9 @@ mod tests {
             .filter(|width| {
                 let rendered = translation_prompt(*width);
                 !rendered.contains("Which language would you like to translate into?")
-                    || !rendered.contains("choose a language below")
-                    || !rendered.contains("what you're learning")
+                    || rendered.contains("your language")
+                    || rendered.contains("auto")
+                    || rendered.contains("[←→] column")
                     || rendered.contains("could not complete request")
                     || rendered.contains("--learning")
             })
@@ -539,10 +778,94 @@ mod tests {
     }
 
     #[test]
-    fn translation_choice_cannot_promise_confirmation_without_a_destination() {
+    fn translation_choice_cannot_require_an_arrow_before_confirming_a_destination() {
         assert!(
-            !translation_prompt(120).contains("[Enter] confirm"),
-            "the translation choice offered a confirmation key that could not continue"
+            translation_prompt(120).contains("[Enter] confirm"),
+            "the translation choice failed to offer immediate confirmation of its highlighted destination"
+        );
+    }
+
+    #[test]
+    fn translation_choice_cannot_clip_its_question_escape_or_highlight_on_narrow_screens() {
+        let broken = [40, 55, 80, 120]
+            .into_iter()
+            .filter(|width| {
+                let app = crate::tui::App::new(crate::session::LanguagePair::new("EN", "RU"))
+                    .with_learning_history(vec![String::from("JA"), String::from("FR")])
+                    .translation_requested();
+                let area = Rect::new(0, 0, *width, 24);
+                let mut terminal =
+                    ratatui::Terminal::new(ratatui::backend::TestBackend::new(*width, 24))
+                        .expect("a test terminal must open");
+                terminal
+                    .draw(|frame| crate::tui::draw(frame, &app))
+                    .expect("the translation list must render");
+                let buffer = terminal.backend().buffer();
+                let rendered = (0..area.height)
+                    .map(|row| {
+                        (0..area.width)
+                            .map(|column| buffer[(column, row)].symbol())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let first = translation_geometry::row_rect(area, app.translation_cursor(), 0)
+                    .expect("the latest choice must be visible");
+                let highlighted = (first.x..first.x + 2)
+                    .map(|x| buffer[(x, first.y)].symbol())
+                    .collect::<String>();
+                (!rendered.contains("Which language would you like to translate into?")
+                    && !rendered.contains("Translate into which language?"))
+                    || !rendered.contains("[Enter] confirm")
+                    || !rendered.contains("[Esc] cancel")
+                    || highlighted != "JA"
+                    || buffer[(first.x, first.y)].fg != super::palette::BG
+                    || buffer[(first.x, first.y)].bg != super::palette::FG
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            broken,
+            Vec::<u16>::new(),
+            "a narrow translation modal clipped its question, confirmation, escape, or latest-language highlight"
+        );
+    }
+
+    #[test]
+    fn translation_preview_cannot_clip_its_pair_explanation_or_confirmation() {
+        let broken = [40, 55, 80, 120]
+            .into_iter()
+            .filter(|width| {
+                let app = crate::tui::App::new(crate::session::LanguagePair::new("FR", "RU"))
+                    .with_learning_history(vec![String::from("FR"), String::from("JA")])
+                    .confirmed_learning("FR")
+                    .with_screen(crate::tui::Screen::WhatIUnderstood)
+                    .translation_proposed();
+                let mut terminal =
+                    ratatui::Terminal::new(ratatui::backend::TestBackend::new(*width, 24))
+                        .expect("a test terminal must open");
+                terminal
+                    .draw(|frame| crate::tui::draw(frame, &app))
+                    .expect("the prepared translation must render");
+                let buffer = terminal.backend().buffer();
+                let rendered = (0..buffer.area.height)
+                    .map(|row| {
+                        (0..buffer.area.width)
+                            .map(|column| buffer[(column, row)].symbol())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                !rendered.contains("Prepared using your last choice")
+                    || !rendered.contains("RU → FR")
+                    || !rendered.contains("Confirm or choose below")
+                    || !rendered.contains("[Enter] confirm")
+                    || !rendered.contains("[Esc] cancel")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            broken,
+            Vec::<u16>::new(),
+            "the prepared-language question hid its reason, language pair, or confirmation keys"
         );
     }
 

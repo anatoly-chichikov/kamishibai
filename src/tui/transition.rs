@@ -26,8 +26,8 @@ pub enum Side {
     StopGeneration,
     RegenerateFailed,
     RegenerateCards,
-    /// Adopt one language pair before any words were read. Only the known half
-    /// is persisted; the learning half stays a session-local pin.
+    /// Adopt one language pair before any words were read. The known half and
+    /// explicit learning history are persisted; the target pin stays local.
     AdoptLanguages(LanguageChoice),
     /// Persist one changed generation-guidance policy under its learning
     /// language without waiting for the editor to close or generation to start.
@@ -288,6 +288,44 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (Screen::WhatIUnderstood, Some(ModalKind::ChangeSomething), AppEvent::KeyBackspace) => {
             (app.rubbed(), Side::None)
         }
+        (_, Some(ModalKind::PickTranslationLanguage), AppEvent::NavPrev) => {
+            (app.translation_advanced(-1), Side::None)
+        }
+        (_, Some(ModalKind::PickTranslationLanguage), AppEvent::NavNext) => {
+            (app.translation_advanced(1), Side::None)
+        }
+        (
+            _,
+            Some(ModalKind::PickTranslationLanguage),
+            AppEvent::TranslationLanguagePoint(index),
+        ) => (app.translation_chosen(index), Side::None),
+        (_, Some(ModalKind::PickTranslationLanguage), AppEvent::Cancel) => {
+            let next = if app.translation_preview() {
+                let choice = LanguageChoice::new(app.pair().known(), learning_target(None));
+                app.languages_adopted(&choice)
+                    .understood(Vec::new())
+                    .with_screen(Screen::YourWords)
+            } else {
+                app.close_modal()
+            };
+            (next, Side::None)
+        }
+        (_, Some(ModalKind::PickTranslationLanguage), AppEvent::KeyEnter | AppEvent::Submit) => {
+            let choice = app.translation_cursor().choice(app.pair().known());
+            if app.translation_preview() && !rereads(&app, &choice) {
+                return (
+                    app.close_modal().languages_adopted(&choice),
+                    Side::AdoptLanguages(choice),
+                );
+            }
+            (
+                app.close_modal()
+                    .languages_adopted(&choice)
+                    .understood(Vec::new()),
+                Side::AdoptLanguagesAndRunUnderstanding(choice),
+            )
+        }
+        (_, Some(ModalKind::PickTranslationLanguage), _) => (app, Side::None),
         (_, Some(ModalKind::PickLanguages), AppEvent::LanguagePickerPrev) => {
             (app.picker_cursor_advanced(-1), Side::None)
         }
@@ -304,15 +342,6 @@ pub fn transit(app: App, event: AppEvent) -> (App, Side) {
         (_, Some(ModalKind::PickLanguages), AppEvent::SetLanguages(choice))
             if can_pick_language(app.screen()) =>
         {
-            if app.translation_pending() {
-                if choice.pinned().is_none() {
-                    return (app.picker_facing(PickerSection::Learning), Side::None);
-                }
-                return (
-                    app.close_modal().languages_adopted(&choice),
-                    Side::AdoptLanguagesAndRunUnderstanding(choice),
-                );
-            }
             adopt_languages(app.close_modal(), choice)
         }
         (_, Some(ModalKind::PickLanguages), _) => (app, Side::None),
@@ -608,11 +637,16 @@ fn can_pick_language(screen: Screen) -> bool {
     matches!(screen, Screen::YourWords | Screen::WhatIUnderstood)
 }
 
-/// Adopt one confirmed pair. A choice that changes nothing is swallowed, so
-/// confirming the modal by reflex never costs a provider call.
+/// Adopt one confirmed pair, remembering explicit choices without rereading
+/// words when the language is unchanged.
 fn adopt_languages(app: App, choice: LanguageChoice) -> (App, Side) {
     if settled(&app, &choice) {
-        return (app, Side::None);
+        let side = if choice.pinned().is_some() {
+            Side::AdoptLanguages(choice)
+        } else {
+            Side::None
+        };
+        return (app, side);
     }
     let rereads = rereads(&app, &choice);
     if rereads && RawInputBatch::new(app.blob()).word_count() > MAX_INTAKE_WORDS {
@@ -677,6 +711,99 @@ mod tests {
     use crate::session::{CardDraft, CardMeta, LanguagePair, Sense, WordCandidate};
     use crate::tui::screen::{KeySource, WelcomeFocus};
 
+    fn translation_preview() -> App {
+        App::new(LanguagePair::new("FR", "RU"))
+            .with_learning_history(vec![String::from("FR"), String::from("JA")])
+            .seeded_blob("не по себе")
+            .confirmed_learning("FR")
+            .understood(vec![WordCandidate::with_senses(
+                "не по себе",
+                vec![Sense::translated("mal à l'aise", "Неловко", None)],
+                0,
+                true,
+            )])
+            .with_screen(Screen::WhatIUnderstood)
+            .translation_proposed()
+    }
+
+    #[test]
+    fn translation_preview_cannot_repeat_understanding_when_its_language_is_confirmed() {
+        let (ready, side) = transit(translation_preview(), AppEvent::KeyEnter);
+        assert_eq!(
+            (
+                ready.screen(),
+                ready.modal(),
+                ready.learning_pin(),
+                ready.candidates().len(),
+                side,
+            ),
+            (
+                Screen::WhatIUnderstood,
+                None,
+                Some("FR"),
+                1,
+                Side::AdoptLanguages(LanguageChoice::new("RU", learning_target(Some("FR")))),
+            ),
+            "confirming the prepared language discarded its review or requested it twice"
+        );
+    }
+
+    #[test]
+    fn translation_preview_cannot_highlight_a_different_language_than_the_prepared_review() {
+        let app = translation_preview()
+            .with_learning_history(vec![String::from("JA"), String::from("FR")])
+            .translation_proposed();
+        assert_eq!(
+            app.translation_cursor().choice(app.pair().known()).pinned(),
+            Some("FR"),
+            "refreshing language history moved confirmation away from the prepared destination"
+        );
+    }
+
+    #[test]
+    fn translation_preview_cannot_keep_old_translations_after_changing_its_language() {
+        let chosen = transit(translation_preview(), AppEvent::NavNext).0;
+        let (ready, side) = transit(chosen, AppEvent::KeyEnter);
+        assert_eq!(
+            (ready.learning_pin(), ready.candidates().len(), side),
+            (
+                Some("JA"),
+                0,
+                Side::AdoptLanguagesAndRunUnderstanding(LanguageChoice::new(
+                    "RU",
+                    learning_target(Some("JA")),
+                )),
+            ),
+            "changing the proposed language retained the wrong translations or skipped rereading"
+        );
+    }
+
+    #[test]
+    fn translation_preview_cannot_leave_unconfirmed_candidates_after_cancelling() {
+        let (words, side) = transit(translation_preview(), AppEvent::Cancel);
+        assert_eq!(
+            (
+                words.screen(),
+                words.modal(),
+                words.learning_pin(),
+                words.learning_pending(),
+                words.candidates().len(),
+                words.blob(),
+                side,
+            ),
+            (
+                Screen::YourWords,
+                None,
+                None,
+                true,
+                0,
+                "не по себе",
+                Side::None
+            ),
+            "cancelling the prepared translation lost words or left an unconfirmed review usable"
+        );
+    }
+
     #[test]
     fn cancelling_translation_cannot_make_a_later_language_change_submit_the_words() {
         let requested = App::new(LanguagePair::new("EN", "RU"))
@@ -710,15 +837,97 @@ mod tests {
     }
 
     #[test]
-    fn translation_cannot_continue_without_a_chosen_destination() {
+    fn translation_cannot_require_navigation_when_no_history_exists() {
         let app = App::new(LanguagePair::new("EN", "RU"))
             .seeded_blob("не по себе")
             .translation_requested();
         let (waiting, side) = transit(app, AppEvent::KeyEnter);
         assert_eq!(
-            (waiting.modal(), waiting.translation_pending(), side),
-            (Some(ModalKind::PickLanguages), true, Side::None),
-            "an unchosen destination re-ran the same request instead of keeping the language choice open"
+            (waiting.modal(), waiting.learning_pin(), side),
+            (
+                None,
+                Some("EN"),
+                Side::AdoptLanguagesAndRunUnderstanding(LanguageChoice::new(
+                    "RU",
+                    learning_target(Some("EN"))
+                ))
+            ),
+            "the first eligible language was not confirmable immediately"
+        );
+    }
+
+    #[test]
+    fn translation_history_cannot_pin_a_destination_before_confirmation() {
+        let app = App::new(LanguagePair::new("EN", "RU"))
+            .with_learning_history(vec![String::from("JA"), String::from("FR")])
+            .seeded_blob("не по себе")
+            .translation_requested();
+        assert_eq!(
+            (
+                app.modal(),
+                app.learning_pin(),
+                app.translation_cursor().choice(app.pair().known()).pinned()
+            ),
+            (Some(ModalKind::PickTranslationLanguage), None, Some("JA")),
+            "opening the translation list committed history without an explicit confirmation"
+        );
+    }
+
+    #[test]
+    fn translation_confirmation_cannot_lose_the_recent_destination_or_words() {
+        let app = App::new(LanguagePair::new("EN", "RU"))
+            .with_learning_history(vec![String::from("JA"), String::from("FR")])
+            .seeded_blob("не по себе")
+            .translation_requested();
+        let (ready, side) = transit(app, AppEvent::KeyEnter);
+        assert_eq!(
+            (ready.learning_pin(), ready.blob(), side),
+            (
+                Some("JA"),
+                "не по себе",
+                Side::AdoptLanguagesAndRunUnderstanding(LanguageChoice::new(
+                    "RU",
+                    learning_target(Some("JA"))
+                ))
+            ),
+            "confirming a recent destination lost its language, words, or continuation"
+        );
+    }
+
+    #[test]
+    fn a_new_batch_cannot_discard_learning_history_or_automatically_pin_it() {
+        let app = App::new(LanguagePair::new("EN", "RU"))
+            .with_learning_history(vec![String::from("FR"), String::from("DE")])
+            .starting_new_batch()
+            .translation_requested();
+        assert_eq!(
+            (
+                app.learning_pin(),
+                app.translation_cursor().choice(app.pair().known()).pinned()
+            ),
+            (None, Some("FR")),
+            "starting a new batch discarded history or used it as an automatic target"
+        );
+    }
+
+    #[test]
+    fn translation_navigation_cannot_stop_on_the_history_divider() {
+        let app = App::new(LanguagePair::new("EN", "RU"))
+            .with_learning_history(vec![String::from("FR")])
+            .translation_requested();
+        let (app, moved) = transit(app, AppEvent::NavNext);
+        let (app, confirmed) = transit(app, AppEvent::KeyEnter);
+        assert_eq!(
+            (moved, app.learning_pin(), confirmed),
+            (
+                Side::None,
+                Some("EN"),
+                Side::AdoptLanguagesAndRunUnderstanding(LanguageChoice::new(
+                    "RU",
+                    learning_target(Some("EN"))
+                ))
+            ),
+            "translation navigation stopped on the divider or confirmed during movement"
         );
     }
 

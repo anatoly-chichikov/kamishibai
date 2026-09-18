@@ -6,6 +6,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
+use time::OffsetDateTime;
 
 use super::bridge::TuiSession;
 use super::jobs::{StudyPublishMessage, TextOutcome};
@@ -20,7 +21,9 @@ use crate::runtime::locations::{LocationArgs, Locations, SystemContext};
 use crate::session::{
     Artifact, ArtifactAttempt, CardDraft, RawInputBatch, SentenceBatchSettings, SessionEngine,
 };
-use crate::tui::{App, AppEvent, BusyKind, KeySource, Screen, Side, WelcomeStage, transit};
+use crate::tui::{
+    App, AppEvent, BusyKind, KeySource, LanguageChoice, Screen, Side, WelcomeStage, transit,
+};
 
 const ANIMATION_FRAME_MILLIS: u64 = 250;
 const IDLE_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
@@ -137,6 +140,8 @@ impl Shell<GeminiCardWorkflow, GeminiKeyValidation> {
         };
         let costs = session.cost_scope();
         let (workflow, keys) = interactive_application(cache, output.clone(), costs).into_parts();
+        let store = default_store(&SystemContext)?;
+        let app = app.with_learning_history(store.read()?.recent_learning());
         Ok(Self {
             app,
             engine: None,
@@ -151,7 +156,7 @@ impl Shell<GeminiCardWorkflow, GeminiKeyValidation> {
             dwell: STEP_DWELL,
             workflow,
             keys,
-            store: default_store(&SystemContext)?,
+            store,
             session: Some(session),
             output,
             cache: cache_root,
@@ -754,6 +759,11 @@ where
                         .with_sentence_settings(settings)
                         .understood_preserving_senses(understood.candidates().to_vec())
                         .with_alternates(understood.guess().alternates().to_vec());
+                    let app = if understood.guess().requires_confirmation() {
+                        app.translation_proposed()
+                    } else {
+                        app
+                    };
                     self.app = match preference_error {
                         Some(error) => app.error_shown(error),
                         None => app,
@@ -761,7 +771,14 @@ where
                 }
                 Err(error) => {
                     if error.is::<crate::application::LearningLanguageRequired>() {
-                        self.app = self.app.clone().translation_requested();
+                        self.app = match self.store.read() {
+                            Ok(preferences) => self
+                                .app
+                                .clone()
+                                .with_learning_history(preferences.recent_learning())
+                                .translation_requested(),
+                            Err(error) => self.app.clone().error_shown(error.to_string()),
+                        };
                         return;
                     }
                     if rejects_key(&error) {
@@ -859,7 +876,7 @@ where
                 })?;
             }
             Side::AdoptLanguagesAndRunUnderstanding(choice) => {
-                self.persist_preferences(|prefs| prefs.adopt(choice.known()))?;
+                self.remember_languages(&choice)?;
                 self.retarget_session()?;
                 self.run_understanding()?;
             }
@@ -867,7 +884,7 @@ where
                 let _ = self.start_publish(false)?;
             }
             Side::AdoptLanguages(choice) => {
-                self.persist_preferences(|prefs| prefs.adopt(choice.known()))?;
+                self.remember_languages(&choice)?;
             }
             Side::RememberSentenceSettings { learning, settings } => {
                 self.persist_preferences(|prefs| prefs.remember(learning.as_str(), settings))?;
@@ -937,7 +954,9 @@ where
 
     /// Read the current words under the pair the app is carrying.
     fn run_understanding(&mut self) -> Result<()> {
-        let raw = RawInputBatch::new(self.app.blob());
+        let history = self.store.read()?.recent_learning();
+        let raw = RawInputBatch::new(self.app.blob()).with_learning_history(history.clone());
+        self.app = self.app.clone().with_learning_history(history);
         let known = self.app.pair().known().to_string();
         let target = self.app.learning_target().clone();
         let workflow = self.workflow.clone();
@@ -969,9 +988,27 @@ where
 
     /// Persist a preference update to this shell's own store. Tests inject a
     /// throwaway store, so the suite never mutates the real user preferences.
-    fn persist_preferences(&self, update: impl FnOnce(Preferences) -> Preferences) -> Result<()> {
-        self.store.update(update)?;
+    fn persist_preferences(
+        &mut self,
+        update: impl FnOnce(Preferences) -> Preferences,
+    ) -> Result<()> {
+        let preferences = self.store.update(update)?;
+        self.app = self
+            .app
+            .clone()
+            .with_learning_history(preferences.recent_learning());
         Ok(())
+    }
+
+    fn remember_languages(&mut self, choice: &LanguageChoice) -> Result<()> {
+        let timestamp = OffsetDateTime::now_utc();
+        self.persist_preferences(|preferences| {
+            let preferences = preferences.adopt(choice.known());
+            match choice.pinned() {
+                Some(learning) => preferences.with_learning_language(learning, timestamp),
+                None => preferences,
+            }
+        })
     }
 
     fn recover_key_rejection(&mut self) {
@@ -1475,7 +1512,17 @@ mod tests {
             self.ready()?;
             let guess = match target {
                 LearningTarget::Detect => {
-                    ScriptDetection.detect(raw.text(), &catalog_for_detection())?
+                    let detected = ScriptDetection.detect(raw.text(), &catalog_for_detection())?;
+                    match raw
+                        .learning_history()
+                        .iter()
+                        .find(|code| !code.eq_ignore_ascii_case(my))
+                    {
+                        Some(code) if detected.code().eq_ignore_ascii_case(my) => {
+                            LearningGuess::new(code, true).with_confirmation(true)
+                        }
+                        _ => detected,
+                    }
                 }
                 LearningTarget::Explicit(code) => LearningGuess::new(code.as_ref(), true),
             };
@@ -1825,6 +1872,155 @@ mod tests {
     }
 
     #[test]
+    fn native_input_prepares_the_latest_language_and_guidance_before_confirmation() {
+        let settings =
+            SentenceBatchSettings::new(Some(SentenceLevel::B2), SentenceTypeMix::Dialogue);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut shell = shell_with(
+            App::new(pair()).seeded_blob("сумка\nдорога"),
+            TestWorkflow::counting(calls.clone()),
+        );
+        shell
+            .store
+            .write(
+                &Preferences::new("RU")
+                    .with_learning_language("FR", OffsetDateTime::UNIX_EPOCH)
+                    .with_learning_language(
+                        "EL",
+                        OffsetDateTime::UNIX_EPOCH + time::Duration::days(3),
+                    )
+                    .remember("EL", settings),
+            )
+            .expect("recent languages and guidance must persist");
+        shell
+            .handle(AppEvent::Generate)
+            .expect("understanding must start");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.modal(),
+                shell.app.pair().learning(),
+                shell.app.learning_pin(),
+                shell.app.candidates().len(),
+                shell.app.sentence_settings(),
+                calls.load(Ordering::SeqCst)
+            ),
+            (
+                Screen::WhatIUnderstood,
+                Some(ModalKind::PickTranslationLanguage),
+                "EL",
+                None,
+                2,
+                settings,
+                1
+            ),
+            "native input failed to prepare the latest language with its own guidance before asking for confirmation"
+        );
+    }
+
+    #[test]
+    fn confirming_a_prepared_translation_cannot_repeat_understanding() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut shell = shell_with(
+            App::new(pair()).seeded_blob("сумка"),
+            TestWorkflow::counting(calls.clone()),
+        );
+        shell
+            .store
+            .write(&Preferences::new("RU").with_learning_language("EL", OffsetDateTime::UNIX_EPOCH))
+            .expect("history must persist");
+        shell
+            .handle(AppEvent::Generate)
+            .expect("understanding must start");
+        settle_shell(&mut shell, 200);
+        shell
+            .handle(AppEvent::KeyEnter)
+            .expect("prepared language must confirm");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.modal(),
+                shell.app.learning_pin(),
+                shell.app.candidates().len(),
+                calls.load(Ordering::SeqCst)
+            ),
+            (Screen::WhatIUnderstood, None, Some("EL"), 1, 1),
+            "confirming the prepared language repeated understanding or discarded its result"
+        );
+    }
+
+    #[test]
+    fn changing_a_prepared_translation_reloads_understanding_and_target_guidance() {
+        let settings =
+            SentenceBatchSettings::new(Some(SentenceLevel::A2), SentenceTypeMix::Questions);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut shell = shell_with(
+            App::new(pair()).seeded_blob("сумка"),
+            TestWorkflow::counting(calls.clone()),
+        );
+        shell
+            .store
+            .write(
+                &Preferences::new("RU")
+                    .with_learning_language("FR", OffsetDateTime::UNIX_EPOCH)
+                    .with_learning_language(
+                        "EL",
+                        OffsetDateTime::UNIX_EPOCH + time::Duration::days(3),
+                    )
+                    .remember("FR", settings),
+            )
+            .expect("history and French guidance must persist");
+        shell
+            .handle(AppEvent::Generate)
+            .expect("understanding must start");
+        settle_shell(&mut shell, 200);
+        shell
+            .handle(AppEvent::NavNext)
+            .expect("French must highlight");
+        shell
+            .handle(AppEvent::KeyEnter)
+            .expect("French must confirm");
+        settle_shell(&mut shell, 200);
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.modal(),
+                shell.app.learning_pin(),
+                shell.app.sentence_settings(),
+                calls.load(Ordering::SeqCst)
+            ),
+            (Screen::WhatIUnderstood, None, Some("FR"), settings, 2),
+            "changing the prepared language failed to reread the words once with the new language's guidance"
+        );
+    }
+
+    #[test]
+    fn a_confirmed_learning_language_cannot_disappear_from_saved_history() {
+        let mut shell = shell(App::new(pair()).seeded_blob("сумка"));
+        shell
+            .handle(AppEvent::OpenLanguagePicker(
+                crate::tui::PickerSection::Learning,
+            ))
+            .expect("the language picker must open");
+        shell
+            .handle(AppEvent::SetLanguages(crate::tui::LanguageChoice::new(
+                "RU",
+                crate::tui::learning_target(Some("EL")),
+            )))
+            .expect("the learning language must confirm");
+        let saved: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(shell.store.path()).expect("confirmed choices must persist"),
+        )
+        .expect("saved preferences must remain JSON");
+        assert_eq!(
+            saved["learning_languages"][0]["language"], "EL",
+            "the confirmed learning language was omitted from the persistent history"
+        );
+    }
+
+    #[test]
     fn unknown_translation_destination_opens_the_language_choice_without_losing_words() {
         let mut shell = shell(
             App::new(pair())
@@ -1838,14 +2034,14 @@ mod tests {
         assert_eq!(
             (
                 shell.app.modal(),
-                shell.app.picker_cursor().section(),
+                shell.app.learning_pin(),
                 shell.app.blob(),
                 shell.app.busy().is_none(),
                 shell.app.error().is_none(),
             ),
             (
-                Some(ModalKind::PickLanguages),
-                crate::tui::PickerSection::Learning,
+                Some(ModalKind::PickTranslationLanguage),
+                None,
                 "как-бы\nсумка\nдорога",
                 true,
                 true,
@@ -1864,13 +2060,6 @@ mod tests {
         shell.finish_text(TextOutcome::Understanding(Err(
             crate::application::LearningLanguageRequired.into(),
         )));
-        let section = crate::tui::PickerSection::Learning;
-        shell
-            .handle(AppEvent::LanguagePickerPoint(
-                section,
-                section.chip_for("EN"),
-            ))
-            .expect("a destination must be selectable");
         shell
             .handle(AppEvent::KeyEnter)
             .expect("confirming a destination must continue understanding");
@@ -1891,6 +2080,134 @@ mod tests {
                 None,
             ),
             "choosing a translation destination did not continue the original request"
+        );
+    }
+
+    #[test]
+    fn a_saved_destination_cannot_start_translation_without_confirmation() {
+        let mut shell = shell(App::new(pair()).seeded_blob("сумка\nдорога"));
+        shell
+            .store
+            .write(
+                &Preferences::new("RU")
+                    .with_learning_language("FR", OffsetDateTime::UNIX_EPOCH)
+                    .with_learning_language(
+                        "EL",
+                        OffsetDateTime::UNIX_EPOCH + time::Duration::days(2),
+                    ),
+            )
+            .expect("language history must persist");
+        shell.finish_text(TextOutcome::Understanding(Err(
+            crate::application::LearningLanguageRequired.into(),
+        )));
+        assert_eq!(
+            (
+                shell.app.modal(),
+                shell.app.translation_cursor().choice("RU").pinned(),
+                shell.app.learning_pin(),
+                shell.app.blob(),
+                shell.text.is_none(),
+            ),
+            (
+                Some(ModalKind::PickTranslationLanguage),
+                Some("EL"),
+                None,
+                "сумка\nдорога",
+                true,
+            ),
+            "saved history was ignored or started translation before the learner confirmed"
+        );
+    }
+
+    #[test]
+    fn reconfirming_a_pinned_language_cannot_leave_it_behind_an_older_choice() {
+        let choice = LanguageChoice::new("RU", crate::tui::learning_target(Some("EL")));
+        let mut shell = shell(App::new(pair()).languages_adopted(&choice));
+        shell
+            .store
+            .write(
+                &Preferences::new("RU")
+                    .with_learning_language("EL", OffsetDateTime::UNIX_EPOCH)
+                    .with_learning_language(
+                        "FR",
+                        OffsetDateTime::UNIX_EPOCH + time::Duration::days(1),
+                    ),
+            )
+            .expect("past choices must persist");
+        shell
+            .handle(AppEvent::OpenLanguagePicker(
+                crate::tui::PickerSection::Learning,
+            ))
+            .expect("the pinned language picker must open");
+        shell
+            .handle(AppEvent::KeyEnter)
+            .expect("the existing language must confirm");
+        assert_eq!(
+            (
+                shell
+                    .store
+                    .read()
+                    .expect("history must restore")
+                    .recent_learning(),
+                shell.text.is_none(),
+            ),
+            (vec![String::from("EL"), String::from("FR")], true),
+            "reconfirming a pinned target failed to refresh history or unnecessarily reread words"
+        );
+    }
+
+    #[test]
+    fn one_enter_cannot_lose_the_restored_destination_or_its_next_session_history() {
+        let mut shell = shell(App::new(pair()).seeded_blob("сумка"));
+        shell
+            .store
+            .write(&Preferences::new("RU").with_learning_language("EL", OffsetDateTime::UNIX_EPOCH))
+            .expect("a previous destination must persist");
+        shell.finish_text(TextOutcome::Understanding(Err(
+            crate::application::LearningLanguageRequired.into(),
+        )));
+        shell
+            .handle(AppEvent::KeyEnter)
+            .expect("one confirmation must start understanding");
+        settle_shell(&mut shell, 200);
+        let restored = shell.store.read().expect("confirmed history must restore");
+        let fresh = App::new(pair())
+            .with_learning_history(restored.recent_learning())
+            .seeded_blob("дорога")
+            .translation_requested();
+        assert_eq!(
+            (
+                shell.app.screen(),
+                shell.app.learning_pin(),
+                shell.app.modal(),
+                fresh.translation_cursor().choice("RU").pinned(),
+                fresh.learning_pin(),
+            ),
+            (Screen::WhatIUnderstood, Some("EL"), None, Some("EL"), None),
+            "one Enter did not use the saved destination or silently pinned it for a fresh batch"
+        );
+    }
+
+    #[test]
+    fn cancelling_a_suggested_destination_cannot_rewrite_learning_history() {
+        let mut shell = shell(App::new(pair()).seeded_blob("сумка"));
+        let saved = Preferences::new("RU").with_learning_language("EL", OffsetDateTime::UNIX_EPOCH);
+        shell.store.write(&saved).expect("history must persist");
+        shell.finish_text(TextOutcome::Understanding(Err(
+            crate::application::LearningLanguageRequired.into(),
+        )));
+        shell.handle(AppEvent::NavNext).expect("focus must move");
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("the choice must cancel");
+        assert_eq!(
+            (
+                shell.store.read().expect("history must remain readable"),
+                shell.app.blob(),
+                shell.app.learning_pin(),
+            ),
+            (saved, "сумка", None),
+            "browsing or cancelling a destination changed saved choices or discarded the input"
         );
     }
 

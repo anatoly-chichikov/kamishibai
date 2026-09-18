@@ -51,6 +51,8 @@ pub enum AppEvent {
     SetLanguages(LanguageChoice),
     /// Mouse highlighted one row of one picker column without confirming.
     LanguagePickerPoint(PickerSection, usize),
+    /// Mouse highlighted one eligible translation destination without confirming.
+    TranslationLanguagePoint(usize),
     /// User moved the focused picker column one row up.
     LanguagePickerPrev,
     /// User moved the focused picker column one row down.
@@ -103,6 +105,7 @@ impl AppEvent {
     pub fn targets(&self) -> Option<ModalKind> {
         match self {
             AppEvent::SendCorrection(_) => Some(ModalKind::ChangeSomething),
+            AppEvent::TranslationLanguagePoint(_) => Some(ModalKind::PickTranslationLanguage),
             AppEvent::LanguagePickerPoint(_, _)
             | AppEvent::LanguagePickerPrev
             | AppEvent::LanguagePickerNext
