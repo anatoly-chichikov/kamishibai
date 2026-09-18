@@ -1,8 +1,11 @@
-use std::collections::BTreeMap;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use time::OffsetDateTime;
 
+use crate::languages::catalog;
 use crate::session::SentenceBatchSettings;
 
 use super::DEFAULT_MY_LANGUAGE;
@@ -19,6 +22,37 @@ pub struct Preferences {
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     sentences: BTreeMap<String, SentenceBatchSettings>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_learning_languages"
+    )]
+    learning_languages: Vec<LearningLanguage>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct LearningLanguage {
+    language: String,
+    last_selected_at: i64,
+}
+
+fn deserialize_learning_languages<'de, D>(
+    deserializer: D,
+) -> Result<Vec<LearningLanguage>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(ordered_learning_languages(Vec::deserialize(deserializer)?))
+}
+
+fn ordered_learning_languages(mut languages: Vec<LearningLanguage>) -> Vec<LearningLanguage> {
+    languages.sort_by_key(|language| Reverse(language.last_selected_at));
+    for language in &mut languages {
+        language.language = language.language.trim().to_ascii_uppercase();
+    }
+    let mut unique = BTreeSet::new();
+    languages.retain(|language| unique.insert(language.language.clone()));
+    languages
 }
 
 impl fmt::Debug for Preferences {
@@ -29,6 +63,7 @@ impl fmt::Debug for Preferences {
             .field("my_language_confirmed", &self.my_language_confirmed)
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .field("sentences", &self.sentences)
+            .field("learning_languages", &self.learning_languages)
             .finish()
     }
 }
@@ -42,6 +77,7 @@ impl Default for Preferences {
             my_language_confirmed: false,
             api_key: None,
             sentences: BTreeMap::new(),
+            learning_languages: Vec::new(),
         }
     }
 }
@@ -56,6 +92,7 @@ impl Preferences {
             my_language_confirmed: true,
             api_key: None,
             sentences: BTreeMap::new(),
+            learning_languages: Vec::new(),
         }
     }
 
@@ -66,6 +103,7 @@ impl Preferences {
             my_language_confirmed: true,
             api_key: self.api_key.clone(),
             sentences: self.sentences.clone(),
+            learning_languages: self.learning_languages.clone(),
         }
     }
 
@@ -78,6 +116,7 @@ impl Preferences {
             my_language_confirmed: self.my_language_confirmed,
             api_key: if key.is_empty() { None } else { Some(key) },
             sentences: self.sentences.clone(),
+            learning_languages: self.learning_languages.clone(),
         }
     }
 
@@ -88,6 +127,7 @@ impl Preferences {
             my_language_confirmed: self.my_language_confirmed,
             api_key: None,
             sentences: self.sentences.clone(),
+            learning_languages: self.learning_languages.clone(),
         }
     }
 
@@ -129,7 +169,46 @@ impl Preferences {
             my_language_confirmed: self.my_language_confirmed,
             api_key: self.api_key.clone(),
             sentences,
+            learning_languages: self.learning_languages.clone(),
         }
+    }
+
+    /// Remember an explicit learning-language selection with its Unix timestamp
+    /// in seconds, retaining only its latest choice and sorting newest first.
+    #[must_use]
+    pub fn with_learning_language(&self, language: &str, timestamp: OffsetDateTime) -> Self {
+        let language = catalog()
+            .resolve(language.trim())
+            .expect("invariant: learning history requires a supported language")
+            .to_string();
+        let mut learning_languages = vec![LearningLanguage {
+            language: language.clone(),
+            last_selected_at: timestamp.unix_timestamp(),
+        }];
+        learning_languages.extend(
+            self.learning_languages
+                .iter()
+                .filter(|entry| entry.language != language)
+                .cloned(),
+        );
+        Self {
+            my_language: self.my_language.clone(),
+            my_language_confirmed: self.my_language_confirmed,
+            api_key: self.api_key.clone(),
+            sentences: self.sentences.clone(),
+            learning_languages: ordered_learning_languages(learning_languages),
+        }
+    }
+
+    /// List previously selected supported learning languages newest first;
+    /// unsupported saved codes remain stored but cannot appear in a picker.
+    #[must_use]
+    pub fn recent_learning(&self) -> Vec<String> {
+        self.learning_languages
+            .iter()
+            .filter_map(|entry| catalog().resolve(entry.language.as_str()).ok())
+            .map(|language| language.to_string())
+            .collect()
     }
 
     /// Return whether startup still needs an explicit language confirmation.

@@ -8,6 +8,7 @@ use std::time::Duration;
 use kamishibai::config::{PreferenceStore, Preferences};
 use kamishibai::session::{SentenceBatchSettings, SentenceLevel, SentenceTypeMix};
 use tempfile::tempdir;
+use time::OffsetDateTime;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -26,6 +27,139 @@ fn preference_store_persists_my_language_across_reads() {
         restored,
         Preferences::new("ru"),
         "persisted my_language must survive a round trip"
+    );
+}
+
+#[test]
+fn learning_language_history_cannot_disappear_when_other_preferences_change() {
+    let home = tempdir().expect("must create temp home");
+    let store = PreferenceStore::at(home.path().join("preferences.json"));
+    fs::write(
+        store.path(),
+        serde_json::to_vec(&serde_json::json!({
+            "my_language": "RU",
+            "my_language_confirmed": true,
+            "learning_languages": [{"language": "EL", "last_selected_at": 1790000041}]
+        }))
+        .expect("seed history must serialize"),
+    )
+    .expect("seed history must persist");
+    store
+        .update(|preferences| {
+            preferences
+                .adopt("UK")
+                .with_api_key("saved-secret")
+                .remember(
+                    "EL",
+                    SentenceBatchSettings::new(Some(SentenceLevel::B1), SentenceTypeMix::Dialogue),
+                )
+                .without_api_key()
+        })
+        .expect("preference changes must persist");
+    let document: serde_json::Value = serde_json::from_slice(
+        fs::read(store.path())
+            .expect("preferences must remain readable")
+            .as_slice(),
+    )
+    .expect("preferences must remain JSON");
+    assert_eq!(
+        document["learning_languages"],
+        serde_json::json!([{"language": "EL", "last_selected_at": 1790000041}]),
+        "changing unrelated preferences discarded the learning-language history"
+    );
+}
+
+#[test]
+fn repeated_learning_language_choices_cannot_duplicate_or_keep_an_old_date() {
+    let home = tempdir().expect("must create temp home");
+    let store = PreferenceStore::at(home.path().join("preferences.json"));
+    let preferences = Preferences::new("RU")
+        .with_learning_language(
+            "en",
+            OffsetDateTime::from_unix_timestamp(1790000041).expect("date must be valid"),
+        )
+        .with_learning_language(
+            "fr",
+            OffsetDateTime::from_unix_timestamp(1790000073).expect("date must be valid"),
+        )
+        .with_learning_language(
+            " EN ",
+            OffsetDateTime::from_unix_timestamp(1790000109).expect("date must be valid"),
+        );
+    store.write(&preferences).expect("history must persist");
+    let restored = store.read().expect("history must restore");
+    let document = serde_json::to_value(&restored).expect("history must serialize");
+    assert_eq!(
+        (
+            restored.recent_learning(),
+            document["learning_languages"].clone()
+        ),
+        (
+            vec![String::from("EN"), String::from("FR")],
+            serde_json::json!([
+                {"language": "EN", "last_selected_at": 1790000109},
+                {"language": "FR", "last_selected_at": 1790000073}
+            ]),
+        ),
+        "learning-language history duplicated a code, kept a stale date, or lost its order"
+    );
+}
+
+#[test]
+fn equal_dates_cannot_put_an_earlier_choice_ahead_of_the_last_choice() {
+    let timestamp = OffsetDateTime::from_unix_timestamp(1790000041).expect("date must be valid");
+    let preferences = Preferences::new("RU")
+        .with_learning_language("EN", timestamp)
+        .with_learning_language("JA", timestamp)
+        .with_learning_language("EL", timestamp)
+        .with_learning_language("EN", timestamp);
+    assert_eq!(
+        preferences.recent_learning(),
+        vec![String::from("EN"), String::from("EL"), String::from("JA")],
+        "equal timestamps lost the user's most recent language choice"
+    );
+}
+
+#[test]
+fn loaded_history_cannot_offer_unsupported_or_duplicate_languages() {
+    let home = tempdir().expect("must create temp home");
+    let store = PreferenceStore::at(home.path().join("preferences.json"));
+    fs::write(
+        store.path(),
+        serde_json::to_vec(&serde_json::json!({
+            "my_language": "RU",
+            "my_language_confirmed": true,
+            "api_key": "preserved-secret",
+            "learning_languages": [
+                {"language": "en", "last_selected_at": 1790000041},
+                {"language": "zz", "last_selected_at": 1790000139},
+                {"language": "fr", "last_selected_at": 1790000073},
+                {"language": " EN ", "last_selected_at": 1790000109}
+            ]
+        }))
+        .expect("legacy history must serialize"),
+    )
+    .expect("legacy history must persist");
+    let restored = store
+        .update(|preferences| preferences.adopt("UK"))
+        .expect("legacy history must remain writable");
+    let document = serde_json::to_value(&restored).expect("history must serialize");
+    assert_eq!(
+        (
+            restored.recent_learning(),
+            restored.api_key.as_deref(),
+            document["learning_languages"].clone(),
+        ),
+        (
+            vec![String::from("EN"), String::from("FR")],
+            Some("preserved-secret"),
+            serde_json::json!([
+                {"language": "ZZ", "last_selected_at": 1790000139},
+                {"language": "EN", "last_selected_at": 1790000109},
+                {"language": "FR", "last_selected_at": 1790000073}
+            ]),
+        ),
+        "legacy history offered an unsupported or duplicate language, or damaged other preferences"
     );
 }
 
@@ -160,8 +294,14 @@ fn legacy_preference_without_confirmation_cannot_silently_pick_german() {
             restored.requires_language_choice(),
             restored.startup_language().to_string(),
             restored.guidance("de"),
+            restored.recent_learning(),
         ),
-        (true, String::from("en"), SentenceBatchSettings::default(),),
+        (
+            true,
+            String::from("en"),
+            SentenceBatchSettings::default(),
+            Vec::<String>::new(),
+        ),
         "legacy preferences without confirmation must not silently select German"
     );
 }
@@ -213,7 +353,7 @@ fn a_known_language_update_preserves_the_saved_key() {
 fn concurrent_updates_preserve_independent_fields() {
     let home = tempdir().expect("must create temp home");
     let store = PreferenceStore::at(home.path().join("kamishibai").join("preferences.json"));
-    let barrier = Arc::new(Barrier::new(4));
+    let barrier = Arc::new(Barrier::new(5));
     let language_store = store.clone();
     let language_barrier = Arc::clone(&barrier);
     let language = thread::spawn(move || {
@@ -240,6 +380,17 @@ fn concurrent_updates_preserve_independent_fields() {
             )
         })
     });
+    let history_store = store.clone();
+    let history_barrier = Arc::clone(&barrier);
+    let history = thread::spawn(move || {
+        history_barrier.wait();
+        history_store.update(|preferences| {
+            preferences.with_learning_language(
+                "FR",
+                OffsetDateTime::from_unix_timestamp(1790000041).expect("date must be valid"),
+            )
+        })
+    });
     barrier.wait();
     language
         .join()
@@ -252,17 +403,23 @@ fn concurrent_updates_preserve_independent_fields() {
         .join()
         .expect("guidance thread must finish")
         .expect("guidance update must succeed");
+    history
+        .join()
+        .expect("history thread must finish")
+        .expect("history update must succeed");
     let restored = store.read().expect("read must succeed");
     assert_eq!(
         (
             restored.my_language.as_str(),
             restored.api_key.as_deref(),
             restored.guidance("EL"),
+            restored.recent_learning(),
         ),
         (
             "ru",
             Some("concurrent-secret"),
             SentenceBatchSettings::new(Some(SentenceLevel::B2), SentenceTypeMix::Dialogue,),
+            vec![String::from("FR")],
         ),
         "serialized updates lost one independently changed field"
     );

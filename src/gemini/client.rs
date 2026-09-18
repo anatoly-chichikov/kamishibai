@@ -29,8 +29,8 @@ use super::codec::{decode, encode};
 use super::cost::priced;
 use super::profile::{GeminiProfile, GenerationStage};
 use super::prompts::{
-    render_bulk_prompt, render_card_meta_prompt, render_card_prompt, render_intake_prompt,
-    render_phonetics_prompt,
+    recent_learning_languages, render_bulk_prompt, render_card_meta_prompt, render_card_prompt,
+    render_intake_prompt, render_phonetics_prompt,
 };
 use super::protocol::{
     GeminiApiError, GenerationConfig, RejectedReply, Request, Response, ThinkingLevel, api_error,
@@ -540,7 +540,27 @@ where
                 let returned = catalog
                     .resolve(decoded.target_lang.as_str())
                     .context("Gemini understanding returned an unsupported target language")?;
-                if raw.context().is_none()
+                if decoded.used_recent_language {
+                    let history = recent_learning_languages(raw, known, &catalog);
+                    if history.first().map(String::as_str) != Some(returned.as_ref()) {
+                        bail!(
+                            "Gemini understanding proposed a language other than the latest selected learning language"
+                        );
+                    }
+                    if (raw.context().is_none() && !decoded.items.iter().any(|item| item.ok))
+                        || decoded.items.iter().any(|item| {
+                            item.ok
+                                && (item.senses.is_empty()
+                                    || item.senses.iter().any(|sense| sense.translation.is_none()))
+                        })
+                    {
+                        bail!(
+                            "Gemini understanding used recent-language history for input that is not entirely in your language"
+                        );
+                    }
+                }
+                if !decoded.used_recent_language
+                    && raw.context().is_none()
                     && decoded
                         .items
                         .iter()
@@ -556,9 +576,16 @@ where
                     decoded.target_lang.as_str(),
                     &catalog,
                 );
-                LearningGuess::new(returned.to_string(), true).with_alternates(alternates)
+                LearningGuess::new(returned.to_string(), true)
+                    .with_alternates(alternates)
+                    .with_confirmation(decoded.used_recent_language)
             }
             LearningTarget::Explicit(expected) => {
+                if decoded.used_recent_language {
+                    bail!(
+                        "Gemini understanding returned a suggested language for an explicitly selected target"
+                    );
+                }
                 let returned = catalog
                     .resolve(decoded.target_lang.as_str())
                     .context("Gemini understanding returned an unsupported target language")?;
@@ -1496,6 +1523,8 @@ struct IntakeResponse {
     #[serde(default)]
     needs_learning_language: bool,
     #[serde(default)]
+    used_recent_language: bool,
+    #[serde(default)]
     alternates: Vec<String>,
     items: Vec<IntakeItem>,
 }
@@ -1821,6 +1850,193 @@ mod tests {
     use super::*;
     use crate::gemini::profile::{PromptPolicy, StageModels};
     use std::sync::Arc;
+
+    #[test]
+    fn recent_language_intake_cannot_skip_confirmation_of_a_native_only_batch() {
+        let response = recent_language_response("en");
+        let client = GeminiClient::new("unused", FakeTransport::new(vec![text_body(&response)]));
+        let raw = RawInputBatch::new("лук").with_learning_history(vec![
+            String::from("RU"),
+            String::from("en"),
+            String::from("EL"),
+        ]);
+        let understood = client
+            .understand(&raw, "RU", &LearningTarget::Detect)
+            .expect("the most recent eligible target must produce a proposed understanding");
+        assert_eq!(
+            (
+                understood.guess().code(),
+                understood.guess().requires_confirmation(),
+                understood.candidates()[0].senses()[0].translation()
+            ),
+            ("EN", true, Some("onion")),
+            "a native-only proposal lost its target, translation or confirmation requirement"
+        );
+    }
+
+    #[test]
+    fn recent_language_intake_cannot_use_an_older_or_missing_language() {
+        let histories = [
+            vec![String::from("EL"), String::from("EN")],
+            Vec::new(),
+            vec![String::from("RU"), String::from("unknown")],
+        ];
+        let rejected = histories.into_iter().all(|history| {
+            let client = GeminiClient::new(
+                "unused",
+                FakeTransport::new(vec![text_body(&recent_language_response("en"))]),
+            );
+            client
+                .understand(
+                    &RawInputBatch::new("лук").with_learning_history(history),
+                    "RU",
+                    &LearningTarget::Detect,
+                )
+                .is_err()
+        });
+        assert!(
+            rejected,
+            "a recent-language proposal accepted a target other than the latest eligible choice"
+        );
+    }
+
+    #[test]
+    fn recent_language_intake_cannot_relabel_foreign_vocabulary_as_a_native_only_proposal() {
+        let mut response = recent_language_response("en");
+        response["items"]
+            .as_array_mut()
+            .expect("items must be an array")
+            .push(json!({
+                "term": "cat", "senses": [{"understanding": "Домашнее животное"}], "ok": true
+            }));
+        let client = GeminiClient::new("unused", FakeTransport::new(vec![text_body(&response)]));
+        let result = client.understand(
+            &RawInputBatch::new("лук\ncat").with_learning_history(vec![String::from("EN")]),
+            "RU",
+            &LearningTarget::Detect,
+        );
+        assert!(
+            result.is_err(),
+            "foreign vocabulary was accepted as a native-only recent-language proposal"
+        );
+    }
+
+    #[test]
+    fn recent_language_intake_cannot_override_an_explicit_choice() {
+        let client = GeminiClient::new(
+            "unused",
+            FakeTransport::new(vec![text_body(&recent_language_response("en"))]),
+        );
+        let result = client.understand(
+            &RawInputBatch::new("лук").with_learning_history(vec![String::from("EN")]),
+            "RU",
+            &LearningTarget::Explicit(catalog().resolve("EN").expect("English must resolve")),
+        );
+        assert!(
+            result.is_err(),
+            "an explicitly chosen target accepted a contradictory history-derived response"
+        );
+    }
+
+    #[test]
+    fn foreign_intake_cannot_inherit_a_recent_language_confirmation() {
+        let response = json!({
+            "target_lang": "el", "used_recent_language": false,
+            "items": [{"term": "γάτα", "senses": [{"understanding": "Домашняя кошка"}], "ok": true}]
+        });
+        let client = GeminiClient::new("unused", FakeTransport::new(vec![text_body(&response)]));
+        let understood = client
+            .understand(
+                &RawInputBatch::new("γάτα").with_learning_history(vec![String::from("EN")]),
+                "RU",
+                &LearningTarget::Detect,
+            )
+            .expect("foreign vocabulary must determine the target");
+        assert_eq!(
+            (
+                understood.guess().code(),
+                understood.guess().requires_confirmation()
+            ),
+            ("EL", false),
+            "foreign vocabulary inherited the previous language or its confirmation requirement"
+        );
+    }
+
+    #[test]
+    fn native_intake_chunks_cannot_override_a_target_detected_elsewhere_in_the_batch() {
+        let mut response = recent_language_response("en");
+        response["used_recent_language"] = json!(false);
+        let transport = FakeTransport::new(vec![text_body(&response)]);
+        let requests = transport.requests.clone();
+        let client = GeminiClient::new("unused", transport);
+        let understood = client
+            .understand(
+                &RawInputBatch::new("лук")
+                    .with_context("лук\ncat")
+                    .with_learning_history(vec![String::from("EL")]),
+                "RU",
+                &LearningTarget::Detect,
+            )
+            .expect("foreign evidence outside the current chunk must keep its detected target");
+        let request: Value = serde_json::from_str(&requests.borrow()[0])
+            .expect("the recorded REST request must decode");
+        let prompt = request["contents"][0]["parts"][0]["text"]
+            .as_str()
+            .expect("the intake request must contain its prompt");
+        assert_eq!(
+            (
+                understood.guess().code(),
+                understood.guess().requires_confirmation(),
+                prompt.contains("лук\ncat"),
+                prompt.contains("Most recently selected learning language: EL (Greek)")
+            ),
+            ("EN", false, true, true),
+            "a native-only chunk lost its full-batch evidence or incorrectly used the recent language"
+        );
+    }
+
+    #[test]
+    fn native_intake_cannot_accept_a_recent_translation_without_a_confirmation_flag() {
+        let mut response = recent_language_response("en");
+        response["used_recent_language"] = json!(false);
+        let client = GeminiClient::new("unused", FakeTransport::new(vec![text_body(&response)]));
+        let result = client.understand(
+            &RawInputBatch::new("лук").with_learning_history(vec![String::from("EN")]),
+            "RU",
+            &LearningTarget::Detect,
+        );
+        assert!(
+            result.is_err(),
+            "a native-only recent translation bypassed explicit confirmation"
+        );
+    }
+
+    #[test]
+    fn invalid_intake_chunks_cannot_discard_a_native_batch_language_proposal() {
+        let response = json!({
+            "target_lang": "en", "used_recent_language": true,
+            "items": [{"term": "????", "senses": [{"understanding": "Неизвестное слово"}], "ok": false}]
+        });
+        let client = GeminiClient::new("unused", FakeTransport::new(vec![text_body(&response)]));
+        let result = client.understand(
+            &RawInputBatch::new("????")
+                .with_context("лук\n????")
+                .with_learning_history(vec![String::from("EN")]),
+            "RU",
+            &LearningTarget::Detect,
+        );
+        assert!(
+            result.is_ok_and(|understood| understood.guess().requires_confirmation()),
+            "an invalid-only chunk discarded the proposal established by the whole native-language batch"
+        );
+    }
+
+    fn recent_language_response(target: &str) -> Value {
+        json!({
+            "target_lang": target, "used_recent_language": true,
+            "items": [{"term": "лук", "senses": [{"translation": "onion", "understanding": "Овощ"}], "ok": true}]
+        })
+    }
 
     #[test]
     fn translated_intake_cannot_invent_a_destination_during_autodetection() {

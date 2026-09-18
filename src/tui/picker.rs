@@ -7,6 +7,9 @@
 //!
 //! The learning half carries one extra leading chip — `auto` — which is the
 //! way back to `LearningTarget::Detect` after a pin.
+//!
+//! `TranslationCursor` handles the narrower question of a missing destination:
+//! it offers eligible languages in history order without the known half or auto.
 
 use std::sync::OnceLock;
 
@@ -293,6 +296,124 @@ pub struct LanguageChoice {
     learning: LearningTarget,
 }
 
+/// A translation destination list, ordered by explicit learning history first.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TranslationCursor {
+    codes: Vec<String>,
+    recent: usize,
+    selected: usize,
+}
+
+impl TranslationCursor {
+    /// Construct one list with a recent prefix and a highlighted language index.
+    #[must_use]
+    pub fn new(codes: Vec<String>, recent: usize, selected: usize) -> Self {
+        Self {
+            codes,
+            recent,
+            selected,
+        }
+    }
+
+    /// Open on the most recent eligible choice, followed by the remaining catalog.
+    #[must_use]
+    pub fn opening(known: &str, history: &[String]) -> Self {
+        let mut codes = Vec::new();
+        for code in history {
+            if let Ok(code) = catalog().resolve(code)
+                && !code.as_ref().eq_ignore_ascii_case(known)
+                && !codes.contains(&code.to_string())
+            {
+                codes.push(code.to_string());
+            }
+        }
+        let recent = codes.len();
+        for code in catalog().codes() {
+            let code = code.to_uppercase();
+            if !code.eq_ignore_ascii_case(known) && !codes.contains(&code) {
+                codes.push(code);
+            }
+        }
+        Self::new(codes, recent, 0)
+    }
+
+    /// Return the eligible language codes in visible order, without the divider.
+    #[must_use]
+    pub fn codes(&self) -> &[String] {
+        &self.codes
+    }
+
+    /// Return the highlighted language index, excluding the divider.
+    #[must_use]
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
+    /// Return whether the list starts with previously selected languages.
+    #[must_use]
+    pub fn has_history(&self) -> bool {
+        self.recent > 0
+    }
+
+    /// Return whether a visible row belongs to the history group or its divider.
+    #[must_use]
+    pub fn history_visible(&self, row: usize) -> bool {
+        self.has_history() && row <= self.recent
+    }
+
+    /// Return the number of display rows, including a divider when both groups exist.
+    #[must_use]
+    pub fn rows(&self) -> usize {
+        self.codes.len() + usize::from(self.divided())
+    }
+
+    /// Return the display row occupied by a language index.
+    #[must_use]
+    pub fn row(&self, index: usize) -> usize {
+        index + usize::from(self.divided() && index >= self.recent)
+    }
+
+    /// Resolve a display row to a language index, leaving the divider unselectable.
+    #[must_use]
+    pub fn index(&self, row: usize) -> Option<usize> {
+        if row >= self.rows() || (self.divided() && row == self.recent) {
+            return None;
+        }
+        Some(row - usize::from(self.divided() && row > self.recent))
+    }
+
+    /// Move between languages without stopping on the divider.
+    #[must_use]
+    pub fn advanced(self, delta: i32) -> Self {
+        let total = i32::try_from(self.codes.len()).unwrap_or(1).max(1);
+        let selected = (i32::try_from(self.selected).unwrap_or(0) + delta).rem_euclid(total);
+        self.chosen(usize::try_from(selected).unwrap_or(0))
+    }
+
+    /// Highlight a language without adopting it as the learning target.
+    #[must_use]
+    pub fn chosen(self, selected: usize) -> Self {
+        Self {
+            selected: selected.min(self.codes.len().saturating_sub(1)),
+            ..self
+        }
+    }
+
+    /// Produce the explicit destination accepted by pressing Enter.
+    #[must_use]
+    pub fn choice(&self, known: &str) -> LanguageChoice {
+        let code = self
+            .codes
+            .get(self.selected)
+            .expect("invariant: the translation catalog contains an eligible language");
+        LanguageChoice::new(known.to_uppercase(), learning_target(Some(code)))
+    }
+
+    fn divided(&self) -> bool {
+        self.recent > 0 && self.recent < self.codes.len()
+    }
+}
+
 impl LanguageChoice {
     /// Create one confirmed choice from a known code and a learning policy.
     #[must_use]
@@ -327,9 +448,64 @@ impl LanguageChoice {
 
 #[cfg(test)]
 mod tests {
-    use super::{LanguageChoice, PickerCursor, PickerSection, learning_target};
+    use super::{LanguageChoice, PickerCursor, PickerSection, TranslationCursor, learning_target};
     use crate::application::LearningTarget;
     use crate::languages::catalog;
+
+    #[test]
+    fn translation_history_cannot_include_unknown_duplicate_or_known_languages() {
+        let cursor = TranslationCursor::opening(
+            "RU",
+            &[
+                String::from("ru"),
+                String::from("ja"),
+                String::from("unsupported"),
+                String::from("FR"),
+                String::from("JA"),
+            ],
+        );
+        let codes = cursor.codes();
+        assert_eq!(
+            (
+                &codes[..3],
+                codes.iter().filter(|code| *code == "JA").count(),
+                codes
+                    .iter()
+                    .any(|code| code == "RU" || code == "UNSUPPORTED")
+            ),
+            (
+                &[String::from("JA"), String::from("FR"), String::from("EN")][..],
+                1,
+                false
+            ),
+            "translation history lost its order or retained an invalid destination"
+        );
+    }
+
+    #[test]
+    fn translation_divider_cannot_be_selected_as_a_language() {
+        let cursor = TranslationCursor::opening("RU", &[String::from("DE"), String::from("FR")]);
+        assert_eq!(
+            (
+                cursor.index(1),
+                cursor.index(2),
+                cursor.index(3),
+                cursor.row(2)
+            ),
+            (Some(1), None, Some(2), 3),
+            "the translation divider consumed a language index"
+        );
+    }
+
+    #[test]
+    fn translation_navigation_cannot_wrap_onto_the_known_language() {
+        let cursor = TranslationCursor::opening("CS", &[]).advanced(-1);
+        assert_eq!(
+            cursor.choice("CS").pinned(),
+            Some("NL"),
+            "translation navigation wrapped onto the excluded known language"
+        );
+    }
 
     #[test]
     fn the_learning_half_carries_one_more_chip_than_the_catalog() {

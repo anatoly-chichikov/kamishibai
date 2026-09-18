@@ -17,7 +17,7 @@ use super::{
     WordCandidate,
 };
 
-const UNDERSTANDING_VERSION: &str = "v10";
+const UNDERSTANDING_VERSION: &str = "v11";
 
 /// How many vocabulary lines one intake request carries.
 ///
@@ -40,7 +40,7 @@ struct UnderstandingScope<'a> {
     known: &'a str,
     identity: &'a str,
     target: &'a LearningTarget,
-    context: Option<&'a str>,
+    context: Option<&'a RawInputBatch>,
 }
 
 impl<'a> UnderstandingScope<'a> {
@@ -48,7 +48,7 @@ impl<'a> UnderstandingScope<'a> {
         known: &'a str,
         identity: &'a str,
         target: &'a LearningTarget,
-        context: Option<&'a str>,
+        context: Option<&'a RawInputBatch>,
     ) -> Self {
         Self {
             known,
@@ -96,14 +96,19 @@ where
         let known = known.to_uppercase();
         let target_code = detected.code().to_uppercase();
         let target_identity = match target {
-            LearningTarget::Detect => format!("detect:{target_code}:{}", digest(&[&context])),
+            LearningTarget::Detect => format!(
+                "detect:{target_code}:{}",
+                digest(&[&context, &raw.learning_history().join("\n")])
+            ),
             LearningTarget::Explicit(code) => format!("explicit:{code}"),
         };
+        let context =
+            RawInputBatch::new(context).with_learning_history(raw.learning_history().to_vec());
         let scope = UnderstandingScope::new(
             known.as_str(),
             target_identity.as_str(),
             target,
-            matches!(target, LearningTarget::Detect).then_some(context.as_str()),
+            matches!(target, LearningTarget::Detect).then_some(&context),
         );
         let cache = Cache::new(
             format!("understanding/{known}-{target_code}"),
@@ -139,27 +144,15 @@ where
                 candidate.ok_or_else(|| anyhow!("understanding cache left entry {index} empty"))
             })
             .collect::<Result<Vec<_>>>()?;
-        if matches!(target, LearningTarget::Detect)
-            && candidates
-                .iter()
-                .flat_map(WordCandidate::senses)
-                .any(|sense| sense.translation().is_some())
-            && !candidates.iter().any(|candidate| {
-                candidate.ok()
-                    && candidate
-                        .senses()
-                        .iter()
-                        .all(|sense| sense.translation().is_none())
-            })
-        {
-            return Err(LearningLanguageRequired.into());
-        }
         let guess = match target {
             LearningTarget::Detect => {
                 guess.unwrap_or_else(|| LearningGuess::new(target_code, detected.confident()))
             }
             LearningTarget::Explicit(code) => LearningGuess::new(code.to_string(), true),
         };
+        if matches!(target, LearningTarget::Detect) {
+            validate_detection(&guess, &candidates, &known, raw.learning_history())?;
+        }
         Ok(Understood::new(guess, candidates))
     }
 }
@@ -228,7 +221,9 @@ impl<T> CachedUnderstanding<T> {
                 .join("\n"),
         );
         let raw = match scope.context {
-            Some(context) => raw.with_context(context),
+            Some(context) => raw
+                .with_context(context.text())
+                .with_learning_history(context.learning_history().to_vec()),
             None => raw,
         };
         let understood = self.inner.understand(&raw, scope.known, scope.target)?;
@@ -258,6 +253,9 @@ fn reconcile(
         .resolve(returned.code())
         .context("understanding returned an unsupported target language")?;
     if let Some(previous) = current {
+        if previous.requires_confirmation() != returned.requires_confirmation() {
+            return Err(LearningLanguageRequired.into());
+        }
         if previous.code() != code.as_ref() {
             if matches!(target, LearningTarget::Detect) {
                 return Err(LearningLanguageRequired.into());
@@ -271,8 +269,57 @@ fn reconcile(
     } else {
         *current = Some(
             LearningGuess::new(code.to_string(), returned.confident())
-                .with_alternates(returned.alternates().to_vec()),
+                .with_alternates(returned.alternates().to_vec())
+                .with_confirmation(returned.requires_confirmation()),
         );
+    }
+    Ok(())
+}
+
+fn validate_detection(
+    guess: &LearningGuess,
+    candidates: &[WordCandidate],
+    known: &str,
+    history: &[String],
+) -> Result<()> {
+    let translated = candidates
+        .iter()
+        .flat_map(WordCandidate::senses)
+        .any(|sense| sense.translation().is_some());
+    let foreign = candidates.iter().any(|candidate| {
+        candidate.ok()
+            && candidate
+                .senses()
+                .iter()
+                .all(|sense| sense.translation().is_none())
+    });
+    if guess.requires_confirmation() {
+        let recent = history
+            .iter()
+            .filter_map(|language| catalog().resolve(language).ok())
+            .find(|language| !language.as_ref().eq_ignore_ascii_case(known));
+        let valid_translation = candidates.iter().any(|candidate| {
+            candidate.ok()
+                && candidate
+                    .senses()
+                    .iter()
+                    .any(|sense| sense.translation().is_some())
+        });
+        let untranslated = candidates.iter().any(|candidate| {
+            candidate.ok()
+                && candidate
+                    .senses()
+                    .iter()
+                    .any(|sense| sense.translation().is_none())
+        });
+        if !valid_translation
+            || untranslated
+            || !recent.is_some_and(|language| language.as_ref().eq_ignore_ascii_case(guess.code()))
+        {
+            return Err(LearningLanguageRequired.into());
+        }
+    } else if translated && !foreign {
+        return Err(LearningLanguageRequired.into());
     }
     Ok(())
 }
@@ -445,6 +492,8 @@ struct EntryRecord {
     /// alternates keep loading — they simply offer none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     alternates: Vec<String>,
+    #[serde(default)]
+    requires_confirmation: bool,
     item: CandidateRecord,
 }
 
@@ -454,6 +503,7 @@ impl EntryRecord {
             target_lang: guess.code().to_string(),
             confident: guess.confident(),
             alternates: guess.alternates().to_vec(),
+            requires_confirmation: guess.requires_confirmation(),
             item: CandidateRecord::from_candidate(candidate),
         }
     }
@@ -461,6 +511,7 @@ impl EntryRecord {
     fn guess(&self) -> LearningGuess {
         LearningGuess::new(self.target_lang.clone(), self.confident)
             .with_alternates(self.alternates.clone())
+            .with_confirmation(self.requires_confirmation)
     }
 
     fn candidate(self) -> WordCandidate {
@@ -964,6 +1015,295 @@ mod tests {
             .join("\n")
     }
 
+    enum RecentReply {
+        Complete,
+        ShortFirst,
+        ForceConfirmation,
+        SwitchConfirmation,
+    }
+
+    struct RecentUnderstanding {
+        seen: Rc<RefCell<Vec<RawInputBatch>>>,
+        reply: RecentReply,
+    }
+
+    impl RecentUnderstanding {
+        fn new(seen: Rc<RefCell<Vec<RawInputBatch>>>, reply: RecentReply) -> Self {
+            Self { seen, reply }
+        }
+    }
+
+    impl Understanding for RecentUnderstanding {
+        fn understand(
+            &self,
+            raw: &RawInputBatch,
+            _known: &str,
+            target: &LearningTarget,
+        ) -> Result<Understood> {
+            self.seen.borrow_mut().push(raw.clone());
+            let call = self.seen.borrow().len();
+            let foreign = raw
+                .context()
+                .unwrap_or(raw.text())
+                .lines()
+                .any(|line| line == "cat");
+            let code = match target {
+                LearningTarget::Explicit(code) => code.as_ref(),
+                LearningTarget::Detect if foreign => "EN",
+                LearningTarget::Detect => raw.learning_history()[0].as_str(),
+            };
+            let confirmation = matches!(target, LearningTarget::Detect)
+                && (!foreign || matches!(self.reply, RecentReply::ForceConfirmation))
+                && !(matches!(self.reply, RecentReply::SwitchConfirmation) && call == 2);
+            let kept = if matches!(self.reply, RecentReply::ShortFirst) && call == 1 {
+                raw.word_count().saturating_sub(1)
+            } else {
+                raw.word_count()
+            };
+            let candidates = raw
+                .lines()
+                .take(kept)
+                .map(|entry| {
+                    if entry == "cat" {
+                        WordCandidate::new(entry, "Кошка", true)
+                    } else {
+                        WordCandidate::with_senses(
+                            entry,
+                            vec![Sense::translated(
+                                format!("{code}:{entry}"),
+                                "Перевод",
+                                None,
+                            )],
+                            0,
+                            true,
+                        )
+                    }
+                })
+                .collect();
+            Ok(Understood::new(
+                LearningGuess::new(code, true).with_confirmation(confirmation),
+                candidates,
+            ))
+        }
+    }
+
+    #[test]
+    fn cached_recent_translations_cannot_skip_confirmation_or_call_the_provider_again() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            RecentUnderstanding::new(seen.clone(), RecentReply::Complete),
+            directory.path(),
+        );
+        let input = RawInputBatch::new("сумка\nдорога")
+            .with_learning_history(vec![String::from("FR"), String::from("EN")]);
+        cache
+            .understand(&input, "RU", &LearningTarget::Detect)
+            .expect("recent translations must be proposed");
+        let replayed = cache
+            .understand(&input, "RU", &LearningTarget::Detect)
+            .expect("recent translations must replay");
+        assert_eq!(
+            (
+                replayed.guess().code(),
+                replayed.guess().requires_confirmation(),
+                seen.borrow().len()
+            ),
+            ("FR", true, 1),
+            "cached recent translations bypassed confirmation or repeated a provider call"
+        );
+    }
+
+    #[test]
+    fn automatic_recent_translations_cannot_reuse_a_different_ordered_history() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            RecentUnderstanding::new(seen.clone(), RecentReply::Complete),
+            directory.path(),
+        );
+        let mut languages = Vec::new();
+        for history in [["FR", "EN"], ["EN", "FR"], ["EN", "EL"]] {
+            let input = RawInputBatch::new("сумка")
+                .with_learning_history(history.map(String::from).to_vec());
+            languages.push(
+                cache
+                    .understand(&input, "RU", &LearningTarget::Detect)
+                    .expect("recent translations must be proposed")
+                    .guess()
+                    .code()
+                    .to_string(),
+            );
+        }
+        assert_eq!(
+            (languages, seen.borrow().len()),
+            (
+                vec![String::from("FR"), String::from("EN"), String::from("EN")],
+                3
+            ),
+            "automatic cache ignored a changed current or previous learning language"
+        );
+    }
+
+    #[test]
+    fn explicit_translations_cannot_change_cache_identity_with_recent_history() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            RecentUnderstanding::new(seen.clone(), RecentReply::Complete),
+            directory.path(),
+        );
+        let target = LearningTarget::Explicit(catalog().resolve("EL").expect("Greek must resolve"));
+        for recent in ["FR", "EN"] {
+            let input =
+                RawInputBatch::new("сумка").with_learning_history(vec![String::from(recent)]);
+            cache
+                .understand(&input, "RU", &target)
+                .expect("explicit translations must succeed");
+        }
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "recent history defeated explicit per-entry cache reuse"
+        );
+    }
+
+    #[test]
+    fn recent_language_context_cannot_disappear_from_chunks_or_retries() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let cache = CachedUnderstanding::new(
+            RecentUnderstanding::new(seen.clone(), RecentReply::ShortFirst),
+            directory.path(),
+        );
+        let input = RawInputBatch::new(
+            (0..=INTAKE_CHUNK_WORDS)
+                .map(|index| format!("слово-{index}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .with_learning_history(vec![String::from("FR"), String::from("EN")]);
+        let understood = cache
+            .understand(&input, "RU", &LearningTarget::Detect)
+            .expect("recent translation chunks must succeed");
+        assert_eq!(
+            (
+                seen.borrow()
+                    .iter()
+                    .map(RawInputBatch::word_count)
+                    .collect::<Vec<_>>(),
+                seen.borrow()
+                    .iter()
+                    .all(|chunk| chunk.learning_history() == input.learning_history()
+                        && chunk.context() == Some(input.text())),
+                understood.guess().requires_confirmation()
+            ),
+            (vec![INTAKE_CHUNK_WORDS, INTAKE_CHUNK_WORDS, 1], true, true),
+            "chunking or retry lost recent languages, batch context, or confirmation"
+        );
+    }
+
+    #[test]
+    fn mixed_input_cannot_be_presented_as_a_recent_language_proposal() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let cache = CachedUnderstanding::new(
+            RecentUnderstanding::new(
+                Rc::new(RefCell::new(Vec::new())),
+                RecentReply::ForceConfirmation,
+            ),
+            directory.path(),
+        );
+        let input =
+            RawInputBatch::new("сумка\ncat").with_learning_history(vec![String::from("EN")]);
+        assert!(
+            cache
+                .understand(&input, "RU", &LearningTarget::Detect)
+                .is_err(),
+            "mixed input was incorrectly offered as a recent-language fallback"
+        );
+    }
+
+    #[test]
+    fn recent_history_cannot_override_foreign_words_in_the_complete_batch() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let cache = CachedUnderstanding::new(
+            RecentUnderstanding::new(Rc::new(RefCell::new(Vec::new())), RecentReply::Complete),
+            directory.path(),
+        );
+        let input =
+            RawInputBatch::new(mixed_blob()).with_learning_history(vec![String::from("FR")]);
+        let understood = cache
+            .understand(&input, "RU", &LearningTarget::Detect)
+            .expect("foreign words must determine the learning language");
+        assert_eq!(
+            (
+                understood.guess().code(),
+                understood.guess().requires_confirmation()
+            ),
+            ("EN", false),
+            "recent language displaced foreign-word evidence or added confirmation to mixed input"
+        );
+    }
+
+    #[test]
+    fn chunks_cannot_disagree_about_recent_language_confirmation() {
+        let directory = TempDir::new().expect("tempdir must be created");
+        let cache = CachedUnderstanding::new(
+            RecentUnderstanding::new(
+                Rc::new(RefCell::new(Vec::new())),
+                RecentReply::SwitchConfirmation,
+            ),
+            directory.path(),
+        );
+        let input = RawInputBatch::new(
+            (0..=INTAKE_CHUNK_WORDS)
+                .map(|index| format!("слово-{index}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .with_learning_history(vec![String::from("FR")]);
+        assert!(
+            cache
+                .understand(&input, "RU", &LearningTarget::Detect)
+                .is_err(),
+            "conflicting chunk confirmation flags were silently combined"
+        );
+    }
+
+    #[test]
+    fn recent_proposals_cannot_name_an_older_or_missing_learning_language() {
+        let candidates = vec![WordCandidate::with_senses(
+            "сумка",
+            vec![Sense::translated("sac", "Вещь для переноски", None)],
+            0,
+            true,
+        )];
+        let guess = LearningGuess::new("FR", true).with_confirmation(true);
+        let refused = [Vec::new(), vec![String::from("EN"), String::from("FR")]]
+            .iter()
+            .all(|history| validate_detection(&guess, &candidates, "RU", history).is_err());
+        assert!(
+            refused,
+            "a recent proposal invented a destination or skipped the latest eligible language"
+        );
+    }
+
+    #[test]
+    fn recent_proposals_cannot_be_blocked_by_ineligible_history_entries() {
+        let candidates = vec![WordCandidate::with_senses(
+            "сумка",
+            vec![Sense::translated("sac", "Вещь для переноски", None)],
+            0,
+            true,
+        )];
+        let guess = LearningGuess::new("FR", true).with_confirmation(true);
+        let history = ["ru", "unknown", "fr", "EN"].map(String::from);
+        assert!(
+            validate_detection(&guess, &candidates, "RU", &history).is_ok(),
+            "known or unsupported history entries displaced the latest eligible language"
+        );
+    }
+
     #[test]
     fn automatic_native_only_batch_cannot_invent_a_learning_language() {
         let directory = TempDir::new().expect("tempdir must be created");
@@ -1102,7 +1442,7 @@ mod tests {
             .understand(&RawInputBatch::new(input), "RU", &LearningTarget::Detect)
             .expect("mixed input must be understood");
         let namespace = Cache::new("understanding/RU-RU", directory.path());
-        let identity = format!("detect:RU:{}", digest(&[input]));
+        let identity = format!("detect:RU:{}", digest(&[input, ""]));
         let filename = cache.entry_filename("сумка", "RU", &identity);
         write_json(
             &namespace,
@@ -1270,16 +1610,17 @@ mod tests {
     }
 
     #[test]
-    fn automatic_translations_cannot_reuse_explicit_only_intake_entries() {
+    fn recent_proposals_cannot_reuse_the_previous_intake_policy() {
         let cache = CachedUnderstanding::new(
             ChangingUnderstanding::new(Rc::new(RefCell::new(0))),
             "/tmp/kamishibai-understanding-version-test",
         );
         let current = cache.entry_filename("lantern", "RU", "detect:EN");
+        let previous = format!("{}.json", digest(&["v10", "RU", "detect:EN", "lantern"]));
         assert_eq!(
-            (UNDERSTANDING_VERSION, current != "edc365f7fa08.json"),
-            ("v10", true),
-            "automatic translations reused the intake policy that rejected them"
+            (UNDERSTANDING_VERSION, current != previous),
+            ("v11", true),
+            "recent proposals reused an intake policy without history or confirmation"
         );
     }
 
@@ -1376,9 +1717,12 @@ mod tests {
         .expect("legacy entry must be written");
         let record: EntryRecord = read_json(&cache, "legacy.json").expect("legacy entry must load");
         assert_eq!(
-            record.guess().alternates(),
-            Vec::<String>::new().as_slice(),
-            "an entry predating alternates must load offering none"
+            (
+                record.guess().alternates(),
+                record.guess().requires_confirmation()
+            ),
+            (Vec::<String>::new().as_slice(), false),
+            "a legacy entry invented alternates or a recent-language confirmation"
         );
     }
 

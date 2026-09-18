@@ -34,7 +34,10 @@ pub(super) fn render_intake_prompt(
             ),
             ("{supported_languages}", language_choices(catalog)?),
             ("{support_language}", language_label(catalog, support.code)?),
-            ("{target_instruction}", target_instruction(target, catalog)?),
+            (
+                "{target_instruction}",
+                target_instruction(raw, known, target, catalog)?,
+            ),
             (
                 "{understanding_length}",
                 String::from(examples.understanding_length()),
@@ -336,19 +339,62 @@ fn language_choices(catalog: &LanguageCatalog) -> Result<String> {
     Ok(items.join(", "))
 }
 
-fn target_instruction(target: &LearningTarget, catalog: &LanguageCatalog) -> Result<String> {
+fn target_instruction(
+    raw: &RawInputBatch,
+    known: &str,
+    target: &LearningTarget,
+    catalog: &LanguageCatalog,
+) -> Result<String> {
     match target {
-        LearningTarget::Detect => Ok(String::from(
-            "Choose exactly one dominant target language from vocabulary outside the support language in the full batch. One non-trivial foreign-language item is enough to fix the destination, even when support-language entries are the majority. Translate the support-language entries into that destination. If no destination can be inferred, set needs_learning_language to true instead of guessing.",
-        )),
+        LearningTarget::Detect => {
+            let history = recent_learning_languages(raw, known, catalog);
+            let mut instruction = String::from(
+                "Choose exactly one dominant target language from vocabulary outside the support language in the full batch. One non-trivial foreign-language item is enough to fix the destination, even when support-language entries are the majority. Translate the support-language entries into that destination and set used_recent_language to false. Foreign-language vocabulary in the full batch always takes priority over this history, even when that vocabulary is in a different language from the most recent choice. Never use a support-language-only chunk to ignore foreign vocabulary elsewhere in the full batch.",
+            );
+            if let Some(latest) = history.first() {
+                let earlier = history
+                    .iter()
+                    .skip(1)
+                    .map(|code| Ok(format!("{code} ({})", catalog.item(code)?.prompt)))
+                    .collect::<Result<Vec<_>>>()?;
+                let latest = format!("{latest} ({})", catalog.item(latest)?.prompt);
+                instruction.push_str(&format!(
+                    "\nMost recently selected learning language: {}\nEarlier selected learning languages, newest first: {}\nThis history describes the user's recent study choices; it is not an explicit target for this batch. ONLY if all meaningful vocabulary in the full batch is in the support language and there is no foreign-language vocabulary anywhere in it, translate into the most recently selected learning language as a proposal. In that case return its code as target_lang, used_recent_language: true, needs_learning_language: false, and alternates: []; generate the full understanding and translations now so the user can confirm the proposal without another request. Never choose an older history entry. Any foreign-language vocabulary disables this fallback entirely and must determine the target instead.",
+                    latest,
+                    if earlier.is_empty() { String::from("none") } else { earlier.join(", ") }
+                ));
+            } else {
+                instruction.push_str("\nThere is no previously selected learning language. If no destination can be inferred, set needs_learning_language to true and used_recent_language to false instead of guessing.");
+            }
+            Ok(instruction)
+        }
         LearningTarget::Explicit(code) => {
             let profile = catalog.item(code.as_ref())?;
             Ok(format!(
-                "The required target language is {code} ({}). Use exactly this target for the whole batch. Do not detect or choose another target language.",
+                "The required target language is {code} ({}). Use exactly this target for the whole batch. Do not detect or choose another target language. Set used_recent_language to false because this target is already explicitly selected.",
                 profile.prompt
             ))
         }
     }
+}
+
+/// Keep recent supported learning destinations in their original order for intake context.
+pub(super) fn recent_learning_languages(
+    raw: &RawInputBatch,
+    known: &str,
+    catalog: &LanguageCatalog,
+) -> Vec<String> {
+    let mut history = Vec::new();
+    for language in raw.learning_history() {
+        let Ok(code) = catalog.resolve(language) else {
+            continue;
+        };
+        let code = code.to_string();
+        if !code.eq_ignore_ascii_case(known) && !history.contains(&code) {
+            history.push(code);
+        }
+    }
+    history
 }
 
 fn language_label(catalog: &LanguageCatalog, code: &str) -> Result<String> {
@@ -377,6 +423,30 @@ mod tests {
         AxisSet, CardDraft, CardMeta, LanguagePair, RawInputBatch, Register, Sense, SentenceAxis,
         SentenceKind, SentenceLabelSelection, SentenceLabels, SentenceLevel, WordCandidate,
     };
+
+    #[test]
+    fn recent_language_prompt_cannot_hide_history_or_override_foreign_evidence() {
+        let raw = RawInputBatch::new("лук")
+            .with_context("лук\ncat")
+            .with_learning_history(vec![
+                String::from("unknown"),
+                String::from("ru"),
+                String::from("el"),
+                String::from("EN"),
+                String::from("EL"),
+                String::from("FR"),
+            ]);
+        let prompt = render_intake_prompt(&raw, "RU", &LearningTarget::Detect, &catalog())
+            .expect("the history-aware prompt must render");
+        assert!(
+            prompt.contains("Most recently selected learning language: EL (Greek)")
+                && prompt.contains("Earlier selected learning languages, newest first: EN (English), FR (French)")
+                && prompt.contains("Foreign-language vocabulary in the full batch always takes priority over this history")
+                && prompt.contains("used_recent_language")
+                && prompt.contains("лук\ncat"),
+            "the intake prompt lost ordered history, whole-batch evidence or the history fallback boundary"
+        );
+    }
 
     #[test]
     fn learner_prompts_cannot_omit_their_local_writing_examples() {

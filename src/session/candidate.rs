@@ -33,6 +33,7 @@ impl IntakeTooLarge {
 pub struct RawInputBatch {
     text: String,
     context: Option<String>,
+    learning_history: Vec<String>,
 }
 
 impl RawInputBatch {
@@ -41,7 +42,21 @@ impl RawInputBatch {
         Self {
             text: text.into(),
             context: None,
+            learning_history: Vec::new(),
         }
+    }
+
+    /// Supply previously selected learning languages from most to least recent.
+    #[must_use]
+    pub fn with_learning_history(mut self, languages: Vec<String>) -> Self {
+        self.learning_history = languages;
+        self
+    }
+
+    /// Return recent learning languages as context for native-only input.
+    #[must_use]
+    pub fn learning_history(&self) -> &[String] {
+        &self.learning_history
     }
 
     /// Retain the full input as language evidence when this batch contains only a chunk.

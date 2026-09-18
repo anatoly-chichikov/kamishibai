@@ -31,7 +31,7 @@ use crate::tui::{
     App, AppEvent, KeySource, ModalKind, MousePointer, Screen, Side, WelcomeFocus, WelcomeStage,
     draw, language_chip_at, latin_key, link_at, mouse_pointer_at, picker_geometry,
     reset_mouse_pointer, review_event_at, scroll_body_width, scroll_viewport,
-    sentence_label_event_at, to_app, welcome_control_at, welcome_language_at,
+    sentence_label_event_at, to_app, translation_geometry, welcome_control_at, welcome_language_at,
     welcome_language_step, write_mouse_pointer,
 };
 
@@ -312,7 +312,21 @@ where
                     dirty |= shell.disarm_destructive_escape();
                     mouse_position = Some((mouse.column, mouse.row));
                     write_pointer_at(terminal, shell.app(), rect, mouse_position);
-                    if shell.app().modal() == Some(ModalKind::PickLanguages) {
+                    if shell.app().modal() == Some(ModalKind::PickTranslationLanguage) {
+                        if let Some(index) = translation_geometry::row_at(
+                            rect,
+                            shell.app().translation_cursor(),
+                            mouse.column,
+                            mouse.row,
+                        ) {
+                            let side = shell.handle(AppEvent::TranslationLanguagePoint(index))?;
+                            if side == Side::ExitApp {
+                                return Ok(());
+                            }
+                            dirty = true;
+                            dirty |= shell.tick()?;
+                        }
+                    } else if shell.app().modal() == Some(ModalKind::PickLanguages) {
                         if let Some((section, index)) = picker_geometry::row_at(
                             rect,
                             shell.app().picker_cursor(),
@@ -432,6 +446,13 @@ fn welcome_language_arrow(app: &App, rect: Rect, event: &AppEvent) -> Option<App
 /// one when the pointer is elsewhere. Moving the cursor rather than a separate
 /// offset is what keeps the modal's visible window derived from the pick alone.
 fn picker_scroll(app: &App, rect: Rect, column: u16, up: bool) -> Option<AppEvent> {
+    if app.modal() == Some(ModalKind::PickTranslationLanguage) {
+        return Some(if up {
+            AppEvent::NavPrev
+        } else {
+            AppEvent::NavNext
+        });
+    }
     if app.modal() != Some(ModalKind::PickLanguages) {
         return None;
     }

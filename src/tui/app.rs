@@ -11,7 +11,7 @@ use crate::session::{
     WordCandidate,
 };
 
-use super::picker::{LanguageChoice, PickerCursor, PickerSection};
+use super::picker::{LanguageChoice, PickerCursor, PickerSection, TranslationCursor};
 use super::screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
 use super::sentence_editor::{BatchSettingsRow, LabelEditorRow, SentenceLabelsEditor};
 
@@ -36,14 +36,9 @@ pub struct App {
     new_batch_pending: bool,
     word_clear_pending: bool,
     picker_cursor: PickerCursor,
-    picker_purpose: PickerPurpose,
+    learning_history: Vec<String>,
+    translation_cursor: TranslationCursor,
     learning_target: LearningTarget,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PickerPurpose {
-    Languages,
-    Translation,
 }
 
 /// Keeps the failed operation attached to its diagnostic for honest recovery copy.
@@ -428,6 +423,7 @@ impl App {
     pub fn new(pair: LanguagePair) -> Self {
         let pair = paired(pair.learning(), pair.known());
         let picker_cursor = PickerCursor::opening(pair.known(), None, PickerSection::Known);
+        let translation_cursor = TranslationCursor::opening(pair.known(), &[]);
         Self {
             screen: Screen::YourWords,
             modal: None,
@@ -450,7 +446,8 @@ impl App {
             new_batch_pending: false,
             word_clear_pending: false,
             picker_cursor,
-            picker_purpose: PickerPurpose::Languages,
+            learning_history: Vec::new(),
+            translation_cursor,
             learning_target: LearningTarget::Detect,
         }
     }
@@ -559,7 +556,7 @@ impl App {
 
     /// Start a clean batch while preserving the user's current language direction.
     pub fn starting_new_batch(self) -> Self {
-        Self::new(self.pair)
+        Self::new(self.pair).with_learning_history(self.learning_history)
     }
 
     /// Return the app rerouted onto the first-run Welcome screen starting
@@ -764,7 +761,6 @@ impl App {
     pub fn with_screen(mut self, next: Screen) -> Self {
         self.screen = next;
         self.modal = None;
-        self.picker_purpose = PickerPurpose::Languages;
         self.input.modal.clear();
         self.cards.editor = None;
         self.sentence_settings_row = None;
@@ -928,7 +924,6 @@ impl App {
     /// Return the app with a modal opened.
     pub fn with_modal(mut self, modal: ModalKind) -> Self {
         self.modal = Some(modal);
-        self.picker_purpose = PickerPurpose::Languages;
         self.input.modal.clear();
         self
     }
@@ -936,29 +931,74 @@ impl App {
     /// Return the app with the current modal dismissed.
     pub fn close_modal(mut self) -> Self {
         self.modal = None;
-        self.picker_purpose = PickerPurpose::Languages;
         self.input.modal.clear();
         self
     }
 
     /// Ask for the destination of the entered words before continuing understanding.
     #[must_use]
-    pub fn translation_requested(self) -> Self {
-        let cursor = PickerCursor::opening(self.pair.known(), None, PickerSection::Learning);
-        let mut app = self
-            .busy_finished()
+    pub fn translation_requested(mut self) -> Self {
+        self.translation_cursor =
+            TranslationCursor::opening(self.pair.known(), &self.learning_history);
+        self.busy_finished()
             .error_cleared()
             .with_screen(Screen::YourWords)
-            .with_modal(ModalKind::PickLanguages)
-            .with_picker_cursor(cursor);
-        app.picker_purpose = PickerPurpose::Translation;
-        app
+            .with_modal(ModalKind::PickTranslationLanguage)
+    }
+
+    /// Ask for confirmation of a prepared recent-language translation over its review.
+    #[must_use]
+    pub fn translation_proposed(mut self) -> Self {
+        let cursor = TranslationCursor::opening(self.pair.known(), &self.learning_history);
+        let selected = cursor
+            .codes()
+            .iter()
+            .position(|code| code.eq_ignore_ascii_case(self.pair.learning()))
+            .expect("invariant: the proposed learning language must be an eligible destination");
+        self.translation_cursor = cursor.chosen(selected);
+        self.busy_finished()
+            .error_cleared()
+            .with_screen(Screen::WhatIUnderstood)
+            .with_modal(ModalKind::PickTranslationLanguage)
+    }
+
+    /// Return whether the visible translation review still needs destination confirmation.
+    #[must_use]
+    pub fn translation_preview(&self) -> bool {
+        self.translation_pending() && self.screen == Screen::WhatIUnderstood
     }
 
     /// Return whether confirming a destination should continue the pending translation.
     #[must_use]
     pub fn translation_pending(&self) -> bool {
-        self.picker_purpose == PickerPurpose::Translation
+        self.modal == Some(ModalKind::PickTranslationLanguage)
+    }
+
+    /// Hydrate recent explicit learning choices without selecting a target automatically.
+    #[must_use]
+    pub fn with_learning_history(mut self, history: Vec<String>) -> Self {
+        self.learning_history = history;
+        self
+    }
+
+    /// Return the highlighted translation destination and its ordered language list.
+    #[must_use]
+    pub fn translation_cursor(&self) -> &TranslationCursor {
+        &self.translation_cursor
+    }
+
+    /// Move the translation highlight while keeping the learning target unconfirmed.
+    #[must_use]
+    pub fn translation_advanced(mut self, delta: i32) -> Self {
+        self.translation_cursor = self.translation_cursor.advanced(delta);
+        self
+    }
+
+    /// Highlight a clicked translation language without confirming the request.
+    #[must_use]
+    pub fn translation_chosen(mut self, index: usize) -> Self {
+        self.translation_cursor = self.translation_cursor.chosen(index);
+        self
     }
 
     /// Return the chip highlighted in each half of the language picker modal

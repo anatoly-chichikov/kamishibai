@@ -422,7 +422,7 @@ impl TuiSession {
     /// failed save records the fingerprint anyway, so the event loop surfaces
     /// the error once instead of hammering the disk; the next edit retries.
     pub(super) fn save(&mut self, app: &App, output: &Path, generating: bool) -> Result<()> {
-        if app.candidates().is_empty() && app.cards().is_empty() {
+        if app.translation_preview() || (app.candidates().is_empty() && app.cards().is_empty()) {
             return Ok(());
         }
         let print = fingerprint(app, generating);
@@ -854,6 +854,40 @@ mod tests {
                 }),
             ),
             "partial publication tally drifted when cache readiness was not hydrated"
+        );
+    }
+
+    #[test]
+    fn an_unconfirmed_translation_cannot_be_saved_as_a_reviewed_session() {
+        let home = tempfile::TempDir::new().expect("tempdir must be created");
+        let store = SessionStore::new(home.path());
+        let mut session = TuiSession::fresh_in(store.clone());
+        let app = understood_app().translation_proposed();
+        session
+            .save(&app, home.path(), false)
+            .expect("a pending choice must be safe to skip");
+        let before = session.id.is_none();
+        let (confirmed, _) = crate::tui::transit(app, crate::tui::AppEvent::KeyEnter);
+        session
+            .save(&confirmed, home.path(), false)
+            .expect("confirmed review must persist");
+        let path = home
+            .path()
+            .join("sessions")
+            .join(
+                session
+                    .id
+                    .as_deref()
+                    .expect("confirmed session must have an id"),
+            )
+            .join("session.json");
+        let record: SessionRecord =
+            serde_json::from_slice(&std::fs::read(path).expect("confirmed session must load"))
+                .expect("confirmed session must remain valid");
+        assert_eq!(
+            (before, record.candidates.len()),
+            (true, 2),
+            "a proposed language became a saved session without confirmation or failed to save after Enter"
         );
     }
 
