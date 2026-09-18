@@ -17,8 +17,8 @@
 //!    the right edge. Action row is `[Enter] confirm · [←→] column · [↑↓] nav ·
 //!    [Esc] cancel`. No text input, no cursor.
 //! 3. The translation destination picker (`PickTranslationLanguage`) — one
-//!    list with recent choices first and a dashed divider before the remaining
-//!    languages. The newest eligible choice is highlighted, but only Enter
+//!    list in catalog order. The newest eligible choice is highlighted in its
+//!    usual position, or the first eligible language for a new learner. Only Enter
 //!    adopts it and continues the pending translation.
 //!
 //! All modals are rendered last in the frame so they sit on top of the
@@ -85,8 +85,8 @@ fn draw_picker(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 const TRANSLATION_WIDTH: u16 = 55;
-const TRANSLATION_CHROME: usize = 8;
-const TRANSLATION_FIRST_ROW: u16 = 5;
+const TRANSLATION_CHROME: usize = 6;
+const TRANSLATION_FIRST_ROW: u16 = 2;
 
 fn draw_translation(frame: &mut Frame, area: Rect, app: &App) {
     let cursor = app.translation_cursor();
@@ -99,64 +99,14 @@ fn draw_translation(frame: &mut Frame, area: Rect, app: &App) {
     let visible = translation_rows(area, cursor);
     let offset = window(cursor.rows(), cursor.row(cursor.selected()), visible);
     let width = usize::from(content.width).saturating_sub(SCROLLBAR_GUTTER);
-    let heading = if cursor.history_visible(offset) {
-        "recently selected"
-    } else if cursor.has_history() {
-        "other languages"
-    } else {
-        "languages"
-    };
-    let question = "Which language would you like to translate into?";
-    let question = if super::common::display_width(question) <= usize::from(content.width) {
-        question
-    } else {
-        "Translate into which language?"
-    };
-    let mut lines = if app.translation_preview() {
-        vec![
-            Line::from(Span::styled(
-                "Prepared using your last choice",
-                palette::Ink::Detail.on(false),
-            )),
-            Line::from(Span::styled(
-                format!("{} → {}", app.pair().known(), app.pair().learning()),
-                palette::Ink::Subject.on(false),
-            )),
-            Line::from(Span::styled(
-                "Confirm or choose below",
-                palette::Ink::Detail.on(false),
-            )),
-            Line::from(Span::styled(heading, palette::Ink::Aside.on(false))),
-        ]
-    } else {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled(question, palette::Ink::Detail.on(false))),
-            Line::from(""),
-            Line::from(Span::styled(heading, palette::Ink::Aside.on(false))),
-        ]
-    };
+    let mut lines = vec![Line::from("")];
     for row in 0..visible {
-        let index = cursor.index(offset + row);
-        let (text, style) = match index {
-            Some(index) => {
-                let chip = PickerSection::Known.chip_for(&cursor.codes()[index]);
-                (
-                    super::common::pad_right(&PickerSection::Known.row_text(chip), width),
-                    row_style(index == cursor.selected(), true),
-                )
-            }
-            None => {
-                let label = "╌╌ other languages ";
-                (
-                    format!(
-                        "{label}{}",
-                        "╌".repeat(width.saturating_sub(super::common::display_width(label)))
-                    ),
-                    palette::rule(),
-                )
-            }
-        };
+        let index = cursor
+            .index(offset + row)
+            .expect("invariant: each visible translation row names a language");
+        let chip = PickerSection::Known.chip_for(&cursor.codes()[index]);
+        let text = super::common::pad_right(&PickerSection::Known.row_text(chip), width);
+        let style = row_style(index == cursor.selected(), true);
         lines.push(Line::from(vec![
             Span::styled(text, style),
             Span::styled(" ", palette::base()),
@@ -181,8 +131,16 @@ fn draw_translation(frame: &mut Frame, area: Rect, app: &App) {
     actions.extend(cancel);
     lines.push(Line::from(""));
     lines.push(Line::from(actions));
+    lines.push(Line::from(""));
     frame.render_widget(Paragraph::new(lines).style(palette::base()), content);
-    paint_title(frame, inset, "translate your words");
+    let title = "Which language do you want to learn?";
+    let title = if super::common::display_width(title) <= usize::from(inset.width.saturating_sub(6))
+    {
+        title
+    } else {
+        "Choose a learning language"
+    };
+    paint_title(frame, inset, title);
 }
 
 fn translation_rows(area: Rect, cursor: &TranslationCursor) -> usize {
@@ -237,7 +195,7 @@ fn text_title(kind: ModalKind) -> &'static str {
     match kind {
         ModalKind::ChangeSomething => "what meanings did we miss?",
         ModalKind::PickLanguages => "languages",
-        ModalKind::PickTranslationLanguage => "translate your words",
+        ModalKind::PickTranslationLanguage => "Which language do you want to learn?",
     }
 }
 
@@ -599,7 +557,7 @@ pub mod translation_geometry {
     use crate::tui::picker::TranslationCursor;
     use ratatui::layout::Rect;
 
-    /// Return the language under the pointer, excluding headings and the divider.
+    /// Return the language under the pointer, excluding the title and padding.
     #[must_use]
     pub fn row_at(area: Rect, cursor: &TranslationCursor, x: u16, y: u16) -> Option<usize> {
         (0..cursor.codes().len()).find(|index| {
@@ -646,7 +604,7 @@ mod tests {
     use crate::tui::picker::TranslationCursor;
 
     #[test]
-    fn translation_clicks_cannot_select_the_dashed_separator() {
+    fn translation_clicks_cannot_leave_a_gap_between_languages() {
         let cursor = TranslationCursor::opening("RU", &[String::from("FR")]);
         let area = Rect::new(0, 0, 96, 40);
         let recent = translation_geometry::row_rect(area, &cursor, 0)
@@ -659,8 +617,8 @@ mod tests {
                 translation_geometry::row_at(area, &cursor, recent.x, recent.y + 1),
                 translation_geometry::row_at(area, &cursor, next.x, next.y)
             ),
-            (Some(0), None, Some(1)),
-            "translation hit geometry selected the divider or shifted a neighboring language"
+            (Some(0), Some(1), Some(1)),
+            "translation hit geometry left a non-language row between neighboring languages"
         );
     }
 
@@ -705,11 +663,13 @@ mod tests {
             .expect("the translation list must render");
         let buffer = terminal.backend().buffer();
         let first = translation_geometry::row_rect(area, app.translation_cursor(), 0)
-            .expect("the latest choice must be visible");
-        let second = translation_geometry::row_rect(area, app.translation_cursor(), 1)
-            .expect("the older choice must be visible");
-        let third = translation_geometry::row_rect(area, app.translation_cursor(), 2)
-            .expect("the remaining catalog must be visible");
+            .expect("the first catalog language must be visible");
+        let selected = translation_geometry::row_rect(
+            area,
+            app.translation_cursor(),
+            app.translation_cursor().selected(),
+        )
+        .expect("the saved language must be visible");
         let code = |row: u16| {
             (first.x..first.x + 2)
                 .map(|x| buffer[(x, row)].symbol())
@@ -718,21 +678,23 @@ mod tests {
         assert_eq!(
             (
                 code(first.y),
-                code(second.y),
-                code(third.y),
-                buffer[(first.x, second.y + 1)].symbol(),
-                buffer[(first.x, first.y)].fg,
-                buffer[(first.x, first.y)].bg
+                code(first.y + 1),
+                code(first.y + 2),
+                code(selected.y),
+                selected.y - first.y,
+                buffer[(selected.x, selected.y)].fg,
+                buffer[(selected.x, selected.y)].bg
             ),
             (
-                String::from("JA"),
-                String::from("FR"),
                 String::from("EN"),
-                "╌",
+                String::from("ZH"),
+                String::from("ES"),
+                String::from("JA"),
+                3,
                 super::palette::BG,
                 super::palette::FG
             ),
-            "rendered translation history lost its order, divider, or most-recent highlight"
+            "saved history reordered the catalog, inserted a separator, or lost the saved language highlight"
         );
     }
 
@@ -762,7 +724,7 @@ mod tests {
             .into_iter()
             .filter(|width| {
                 let rendered = translation_prompt(*width);
-                !rendered.contains("Which language would you like to translate into?")
+                !rendered.contains("Which language do you want to learn?")
                     || rendered.contains("your language")
                     || rendered.contains("auto")
                     || rendered.contains("[←→] column")
@@ -809,13 +771,17 @@ mod tests {
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
-                let first = translation_geometry::row_rect(area, app.translation_cursor(), 0)
-                    .expect("the latest choice must be visible");
+                let first = translation_geometry::row_rect(
+                    area,
+                    app.translation_cursor(),
+                    app.translation_cursor().selected(),
+                )
+                .expect("the latest choice must be visible");
                 let highlighted = (first.x..first.x + 2)
                     .map(|x| buffer[(x, first.y)].symbol())
                     .collect::<String>();
-                (!rendered.contains("Which language would you like to translate into?")
-                    && !rendered.contains("Translate into which language?"))
+                (!rendered.contains("Which language do you want to learn?")
+                    && !rendered.contains("Choose a learning language"))
                     || !rendered.contains("[Enter] confirm")
                     || !rendered.contains("[Esc] cancel")
                     || highlighted != "JA"
@@ -831,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn translation_preview_cannot_clip_its_pair_explanation_or_confirmation() {
+    fn translation_preview_cannot_crowd_its_title_or_repeat_instructions() {
         let broken = [40, 55, 80, 120]
             .into_iter()
             .filter(|width| {
@@ -847,17 +813,30 @@ mod tests {
                     .draw(|frame| crate::tui::draw(frame, &app))
                     .expect("the prepared translation must render");
                 let buffer = terminal.backend().buffer();
-                let rendered = (0..buffer.area.height)
+                let inset = super::translation_inset(buffer.area, app.translation_cursor());
+                let rendered = (inset.y..inset.y + inset.height)
                     .map(|row| {
-                        (0..buffer.area.width)
+                        (inset.x..inset.x + inset.width)
                             .map(|column| buffer[(column, row)].symbol())
                             .collect::<String>()
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
-                !rendered.contains("Prepared using your last choice")
-                    || !rendered.contains("RU → FR")
-                    || !rendered.contains("Confirm or choose below")
+                let first =
+                    translation_geometry::row_rect(buffer.area, app.translation_cursor(), 0)
+                        .expect("the latest choice must remain visible");
+                let blank = (inset.x + 1..inset.x + inset.width - 1)
+                    .all(|column| buffer[(column, inset.y + 1)].symbol() == " ");
+                (!rendered.contains("Which language do you want to learn?")
+                    && !rendered.contains("Choose a learning language"))
+                    || rendered.contains("Prepared")
+                    || rendered.contains("RU → FR")
+                    || rendered.contains("Confirm or choose")
+                    || rendered.contains("recently selected")
+                    || rendered.contains("other languages")
+                    || rendered.contains("╌")
+                    || !blank
+                    || first.y != inset.y + 2
                     || !rendered.contains("[Enter] confirm")
                     || !rendered.contains("[Esc] cancel")
             })
@@ -865,7 +844,7 @@ mod tests {
         assert_eq!(
             broken,
             Vec::<u16>::new(),
-            "the prepared-language question hid its reason, language pair, or confirmation keys"
+            "the language choice crowded its title, repeated instructions, or hid confirmation keys"
         );
     }
 

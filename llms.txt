@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.13.1
+Release: 1.13.2
 
 Overview
 
@@ -26,7 +26,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.13.1/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.13.2/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -226,8 +226,9 @@ opens a single-column confirmation picker over the review. Enter accepts that
 prepared result without another request; choosing a different target rereads the
 words and loads its saved generation guidance. Escape returns to the input. With
 no history, the picker asks for a destination before preparing translations.
-Previously selected languages appear newest first above a dashed divider and the
-remaining catalog. Foreign vocabulary always takes priority over history. Confirmed
+Languages stay in their usual catalog order, with the latest eligible saved
+choice highlighted in place; without history, the first eligible language is
+highlighted. Foreign vocabulary always takes priority over history. Confirmed
 TUI choices in both language pickers share `learning_languages` in
 preferences.json, with canonical `language` and `last_selected_at` Unix seconds.
 History survives restarts and other preference changes, and never replaces an
