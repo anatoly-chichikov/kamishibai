@@ -9,7 +9,7 @@
 //! way back to `LearningTarget::Detect` after a pin.
 //!
 //! `TranslationCursor` handles the narrower question of a missing destination:
-//! it offers eligible languages in history order without the known half or auto.
+//! it keeps catalog order and highlights the most recent eligible destination.
 
 use std::sync::OnceLock;
 
@@ -296,93 +296,68 @@ pub struct LanguageChoice {
     learning: LearningTarget,
 }
 
-/// A translation destination list, ordered by explicit learning history first.
+/// A fixed catalog of translation destinations with a remembered selection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TranslationCursor {
     codes: Vec<String>,
-    recent: usize,
     selected: usize,
 }
 
 impl TranslationCursor {
-    /// Construct one list with a recent prefix and a highlighted language index.
+    /// Construct one list with a highlighted language index.
     #[must_use]
-    pub fn new(codes: Vec<String>, recent: usize, selected: usize) -> Self {
-        Self {
-            codes,
-            recent,
-            selected,
-        }
+    pub fn new(codes: Vec<String>, selected: usize) -> Self {
+        Self { codes, selected }
     }
 
-    /// Open on the most recent eligible choice, followed by the remaining catalog.
+    /// Highlight the most recent eligible choice at its fixed catalog position.
     #[must_use]
     pub fn opening(known: &str, history: &[String]) -> Self {
-        let mut codes = Vec::new();
-        for code in history {
-            if let Ok(code) = catalog().resolve(code)
-                && !code.as_ref().eq_ignore_ascii_case(known)
-                && !codes.contains(&code.to_string())
-            {
-                codes.push(code.to_string());
-            }
-        }
-        let recent = codes.len();
-        for code in catalog().codes() {
-            let code = code.to_uppercase();
-            if !code.eq_ignore_ascii_case(known) && !codes.contains(&code) {
-                codes.push(code);
-            }
-        }
-        Self::new(codes, recent, 0)
+        let codes: Vec<String> = catalog()
+            .codes()
+            .iter()
+            .filter(|code| !code.eq_ignore_ascii_case(known))
+            .map(|code| code.to_uppercase())
+            .collect();
+        let selected = history
+            .iter()
+            .filter_map(|code| catalog().resolve(code).ok())
+            .find_map(|code| codes.iter().position(|entry| entry == code.as_ref()))
+            .unwrap_or(0);
+        Self::new(codes, selected)
     }
 
-    /// Return the eligible language codes in visible order, without the divider.
+    /// Return the eligible language codes in catalog order.
     #[must_use]
     pub fn codes(&self) -> &[String] {
         &self.codes
     }
 
-    /// Return the highlighted language index, excluding the divider.
+    /// Return the highlighted language index.
     #[must_use]
     pub fn selected(&self) -> usize {
         self.selected
     }
 
-    /// Return whether the list starts with previously selected languages.
-    #[must_use]
-    pub fn has_history(&self) -> bool {
-        self.recent > 0
-    }
-
-    /// Return whether a visible row belongs to the history group or its divider.
-    #[must_use]
-    pub fn history_visible(&self, row: usize) -> bool {
-        self.has_history() && row <= self.recent
-    }
-
-    /// Return the number of display rows, including a divider when both groups exist.
+    /// Return the number of selectable display rows.
     #[must_use]
     pub fn rows(&self) -> usize {
-        self.codes.len() + usize::from(self.divided())
+        self.codes.len()
     }
 
     /// Return the display row occupied by a language index.
     #[must_use]
     pub fn row(&self, index: usize) -> usize {
-        index + usize::from(self.divided() && index >= self.recent)
+        index
     }
 
-    /// Resolve a display row to a language index, leaving the divider unselectable.
+    /// Resolve a display row to its language index inside the catalog.
     #[must_use]
     pub fn index(&self, row: usize) -> Option<usize> {
-        if row >= self.rows() || (self.divided() && row == self.recent) {
-            return None;
-        }
-        Some(row - usize::from(self.divided() && row > self.recent))
+        (row < self.rows()).then_some(row)
     }
 
-    /// Move between languages without stopping on the divider.
+    /// Move between languages, wrapping at the ends of the catalog.
     #[must_use]
     pub fn advanced(self, delta: i32) -> Self {
         let total = i32::try_from(self.codes.len()).unwrap_or(1).max(1);
@@ -407,10 +382,6 @@ impl TranslationCursor {
             .get(self.selected)
             .expect("invariant: the translation catalog contains an eligible language");
         LanguageChoice::new(known.to_uppercase(), learning_target(Some(code)))
-    }
-
-    fn divided(&self) -> bool {
-        self.recent > 0 && self.recent < self.codes.len()
     }
 }
 
@@ -453,7 +424,27 @@ mod tests {
     use crate::languages::catalog;
 
     #[test]
-    fn translation_history_cannot_include_unknown_duplicate_or_known_languages() {
+    fn translation_history_cannot_reorder_the_language_catalog() {
+        let cursor = TranslationCursor::opening("RU", &[String::from("DE"), String::from("JA")]);
+        assert_eq!(
+            cursor.codes(),
+            TranslationCursor::opening("RU", &[]).codes(),
+            "saved destinations changed the fixed catalog order"
+        );
+    }
+
+    #[test]
+    fn translation_history_cannot_move_the_highlighted_language_from_its_catalog_position() {
+        let cursor = TranslationCursor::opening("RU", &[String::from("DE"), String::from("JA")]);
+        assert_eq!(
+            (cursor.selected(), cursor.choice("RU").pinned()),
+            (5, Some("DE")),
+            "the last destination was not highlighted at its normal catalog position"
+        );
+    }
+
+    #[test]
+    fn translation_history_cannot_select_unknown_or_known_languages() {
         let cursor = TranslationCursor::opening(
             "RU",
             &[
@@ -464,36 +455,52 @@ mod tests {
                 String::from("JA"),
             ],
         );
-        let codes = cursor.codes();
         assert_eq!(
-            (
-                &codes[..3],
-                codes.iter().filter(|code| *code == "JA").count(),
-                codes
-                    .iter()
-                    .any(|code| code == "RU" || code == "UNSUPPORTED")
-            ),
-            (
-                &[String::from("JA"), String::from("FR"), String::from("EN")][..],
-                1,
-                false
-            ),
-            "translation history lost its order or retained an invalid destination"
+            (cursor.selected(), cursor.choice("RU").pinned()),
+            (3, Some("JA")),
+            "the cursor failed to skip an ineligible recent destination"
         );
     }
 
     #[test]
-    fn translation_divider_cannot_be_selected_as_a_language() {
+    fn translation_history_cannot_insert_extra_rows_in_the_catalog() {
         let cursor = TranslationCursor::opening("RU", &[String::from("DE"), String::from("FR")]);
         assert_eq!(
             (
                 cursor.index(1),
                 cursor.index(2),
                 cursor.index(3),
-                cursor.row(2)
+                cursor.row(2),
+                cursor.rows(),
+                cursor.index(cursor.rows())
             ),
-            (Some(1), None, Some(2), 3),
-            "the translation divider consumed a language index"
+            (
+                Some(1),
+                Some(2),
+                Some(3),
+                2,
+                catalog().codes().len() - 1,
+                None
+            ),
+            "saved destinations inserted a gap into the language list"
+        );
+    }
+
+    #[test]
+    fn translation_without_history_cannot_skip_english() {
+        assert_eq!(
+            TranslationCursor::opening("RU", &[]).choice("RU").pinned(),
+            Some("EN"),
+            "a fresh picker failed to highlight English first"
+        );
+    }
+
+    #[test]
+    fn translation_without_history_cannot_offer_the_known_language_first() {
+        assert_eq!(
+            TranslationCursor::opening("EN", &[]).choice("EN").pinned(),
+            Some("ZH"),
+            "a fresh picker failed to skip the known language"
         );
     }
 

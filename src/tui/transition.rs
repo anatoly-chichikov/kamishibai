@@ -767,11 +767,11 @@ mod tests {
         assert_eq!(
             (ready.learning_pin(), ready.candidates().len(), side),
             (
-                Some("JA"),
+                Some("DE"),
                 0,
                 Side::AdoptLanguagesAndRunUnderstanding(LanguageChoice::new(
                     "RU",
-                    learning_target(Some("JA")),
+                    learning_target(Some("DE")),
                 )),
             ),
             "changing the proposed language retained the wrong translations or skipped rereading"
@@ -911,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn translation_navigation_cannot_stop_on_the_history_divider() {
+    fn translation_navigation_cannot_skip_the_next_catalog_language() {
         let app = App::new(LanguagePair::new("EN", "RU"))
             .with_learning_history(vec![String::from("FR")])
             .translation_requested();
@@ -921,13 +921,13 @@ mod tests {
             (moved, app.learning_pin(), confirmed),
             (
                 Side::None,
-                Some("EN"),
+                Some("DE"),
                 Side::AdoptLanguagesAndRunUnderstanding(LanguageChoice::new(
                     "RU",
-                    learning_target(Some("EN"))
+                    learning_target(Some("DE"))
                 ))
             ),
-            "translation navigation stopped on the divider or confirmed during movement"
+            "translation navigation skipped the next catalog language or confirmed during movement"
         );
     }
 

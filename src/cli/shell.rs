@@ -1976,8 +1976,15 @@ mod tests {
             .handle(AppEvent::Generate)
             .expect("understanding must start");
         settle_shell(&mut shell, 200);
+        let french = shell
+            .app
+            .translation_cursor()
+            .codes()
+            .iter()
+            .position(|code| code == "FR")
+            .expect("French must remain in the catalog");
         shell
-            .handle(AppEvent::NavNext)
+            .handle(AppEvent::TranslationLanguagePoint(french))
             .expect("French must highlight");
         shell
             .handle(AppEvent::KeyEnter)
