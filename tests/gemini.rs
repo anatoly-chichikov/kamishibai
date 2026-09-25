@@ -2,9 +2,13 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use anyhow::Result;
-use kamishibai::gemini::{GeminiClient, Transport, TransportResponse, rejects_key};
+use kamishibai::gemini::{
+    GeminiClient, GeminiProfile, GenerationStage, PromptPolicy, StageModels, Transport,
+    TransportResponse, rejects_key,
+};
 use kamishibai::generation::manga::{HiddenRecall, RecallCard, ShownRecall};
 use kamishibai::languages::catalog;
 use kamishibai::session::{
@@ -1660,26 +1664,34 @@ fn image_generation_surfaces_blocked_response_diagnostics() {
     );
 }
 
-/// TTS generation targets the 3.1 flash preview with a pooled voice.
+/// TTS generation separates the transcript from its directions and requests PCM.
 #[test]
-fn tts_generation_targets_the_3_1_flash_preview_with_a_pooled_voice() -> Result<()> {
+fn tts_generation_targets_3_8_with_a_verbatim_transcript_and_pcm() -> Result<()> {
     let transport = FakeTransport::new(vec![Ok(body(
         json!({"candidates":[{"content":{"parts":[{"inlineData":{"data":"AQID"}}]}}]}),
     )?)]);
     let requests = transport.requests.clone();
     let client = GeminiClient::new("key", transport);
-    let bytes = client.speech("Say in natural English: {text}", "demo")?;
+    let bytes = client.speech(
+        "Say in natural English: Where’s my café?",
+        "Where’s my café?",
+    )?;
     let items = requests.borrow();
     let body = serde_json::from_str::<Value>(&items[0].1)?;
-    let voice =
-        body["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"]
-            .as_str()
-            .unwrap_or_default();
+    let voice = body["generationConfig"]["speechConfig"]["voiceConfig"]["voice"]
+        .as_str()
+        .unwrap_or_default();
     assert_eq!(
         (
             bytes,
             items.len(),
             items[0].0.as_str(),
+            body["contents"][0]["parts"][0].clone(),
+            body["generationConfig"]["responseFormat"].clone(),
+            body["generationConfig"]["responseModalities"].clone(),
+            body["generationConfig"]["speechConfig"]["voiceConfig"]
+                .get("prebuiltVoiceConfig")
+                .is_none(),
             GeminiClient::new("key", FakeTransport::new(Vec::new()))
                 .voices()
                 .contains(&voice)
@@ -1687,10 +1699,185 @@ fn tts_generation_targets_the_3_1_flash_preview_with_a_pooled_voice() -> Result<
         (
             vec![1, 2, 3],
             1,
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent",
+            json!({"text": "Where’s my café?", "speech_metadata": {"style": "Say in natural English"}}),
+            json!({"audio": {"mimeType": "AUDIO_L16", "sampleRate": 24000}}),
+            json!(["AUDIO"]),
+            true,
             true
         ),
-        "tts generation no longer hits the 3.1 flash preview exactly once with a pooled voice"
+        "tts generation lost its verbatim transcript, directions, PCM format, or pooled voice"
+    );
+    Ok(())
+}
+
+/// Explicit legacy speech models retain their original prompt and voice schema.
+#[test]
+fn legacy_tts_overrides_cannot_receive_the_new_speech_schema() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{"content": {"parts": [{"inlineData": {"data": "AAA="}}]}}]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let models = StageModels::default()
+        .with_model(GenerationStage::Speech, "gemini-3.1-flash-tts-preview")?;
+    let profile = GeminiProfile::from_models("https://example.com/models", models)?;
+    GeminiClient::from_profile("key", transport, profile)
+        .speech("Say in natural French: Bonsoir.", "Bonsoir.")?;
+    let requests = requests.borrow();
+    let request: Value = serde_json::from_str(&requests[0].1)?;
+    assert_eq!(
+        (
+            requests[0].0.as_str(),
+            request["contents"].clone(),
+            request["generationConfig"].get("responseFormat").is_none(),
+            request["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"].is_string()
+        ),
+        (
+            "https://example.com/models/gemini-3.1-flash-tts-preview:generateContent",
+            json!([{"parts": [{"text": "Say in natural French: Bonsoir."}]}]),
+            true,
+            true
+        ),
+        "an explicitly selected legacy TTS model received an incompatible request"
+    );
+    Ok(())
+}
+
+/// Rewrites only the delivery directions for an isolated speech-profile test.
+struct SpeechDirections;
+
+impl PromptPolicy for SpeechDirections {
+    fn render(&self, _stage: GenerationStage, prompt: &str) -> Result<String> {
+        Ok(format!("Quietly. {prompt}"))
+    }
+}
+
+/// Speech policies cannot rewrite the exact transcript or truncate embedded colons.
+#[test]
+fn tts_prompt_policies_cannot_rewrite_the_verbatim_transcript() -> Result<()> {
+    let transcript = "He said: Say in natural English: café, please.";
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{"content": {"parts": [{"inlineData": {"data": "AAA="}}]}}]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let profile = GeminiProfile::new(
+        "https://example.com/models",
+        StageModels::default(),
+        "quiet-v1",
+        Arc::new(SpeechDirections),
+    )?;
+    GeminiClient::from_profile("key", transport, profile).speech(
+        &format!("Say in natural English: {transcript}\n"),
+        transcript,
+    )?;
+    let requests = requests.borrow();
+    let request: Value = serde_json::from_str(&requests[0].1)?;
+    assert_eq!(
+        request["contents"][0]["parts"][0],
+        json!({"text": transcript, "speech_metadata": {"style": "Quietly. Say in natural English"}}),
+        "the speech policy rewrote the transcript or failed to isolate its delivery directions"
+    );
+    Ok(())
+}
+
+/// A transcript alone needs neither artificial directions nor a rewritten payload.
+#[test]
+fn tts_without_directions_cannot_refuse_a_verbatim_transcript() -> Result<()> {
+    let transcript = "Καλημέρα, κόσμε!";
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{"content": {"parts": [{"inlineData": {"data": "AAA="}}]}}]
+    }))?)]);
+    let requests = transport.requests.clone();
+    GeminiClient::new("key", transport).speech(transcript, transcript)?;
+    let requests = requests.borrow();
+    let request: Value = serde_json::from_str(&requests[0].1)?;
+    assert_eq!(
+        request["contents"][0]["parts"][0],
+        json!({"text": transcript, "speech_metadata": {"style": ""}}),
+        "a transcript without directions was refused or acquired artificial speech instructions"
+    );
+    Ok(())
+}
+
+/// Custom speech policies still control requests whose original style is empty.
+#[test]
+fn tts_without_directions_cannot_bypass_a_custom_prompt_policy() -> Result<()> {
+    let transcript = "Καλημέρα, κόσμε!";
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{"content": {"parts": [{"inlineData": {"data": "AAA="}}]}}]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let profile = GeminiProfile::new(
+        "https://example.com/models",
+        StageModels::default(),
+        "quiet-v1",
+        Arc::new(SpeechDirections),
+    )?;
+    GeminiClient::from_profile("key", transport, profile).speech(transcript, transcript)?;
+    let requests = requests.borrow();
+    let request: Value = serde_json::from_str(&requests[0].1)?;
+    assert_eq!(
+        request["contents"][0]["parts"][0],
+        json!({"text": transcript, "speech_metadata": {"style": "Quietly. "}}),
+        "a request without initial speech directions bypassed its explicit prompt policy"
+    );
+    Ok(())
+}
+
+/// Flash-Lite uses the same explicit PCM and separated speech request as Flash.
+#[test]
+fn flash_lite_tts_cannot_fall_back_to_the_legacy_request() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{"content": {"parts": [{"inlineData": {"data": "AAA="}}]}}]
+    }))?)]);
+    let requests = transport.requests.clone();
+    let models =
+        StageModels::default().with_model(GenerationStage::Speech, "gemini-3.8-flash-lite-tts")?;
+    let profile = GeminiProfile::from_models("https://example.com/models", models)?;
+    GeminiClient::from_profile("key", transport, profile)
+        .speech("Say in natural Greek: Καλημέρα!", "Καλημέρα!")?;
+    let requests = requests.borrow();
+    let request: Value = serde_json::from_str(&requests[0].1)?;
+    assert_eq!(
+        (
+            request["contents"][0]["parts"][0].clone(),
+            request["generationConfig"]["responseFormat"].clone()
+        ),
+        (
+            json!({"text": "Καλημέρα!", "speech_metadata": {"style": "Say in natural Greek"}}),
+            json!({"audio": {"mimeType": "AUDIO_L16", "sampleRate": 24000}})
+        ),
+        "Flash-Lite TTS received the obsolete combined-prompt request"
+    );
+    Ok(())
+}
+
+/// A WAV response cannot be mistaken for the requested raw PCM payload.
+#[test]
+fn tts_wav_responses_cannot_be_wrapped_in_a_second_wav_header() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "audio/wav", "data": "UklGRg=="}}]}}]
+    }))?)]);
+    assert!(
+        GeminiClient::new("key", transport)
+            .speech("Read softly: Hello.", "Hello.")
+            .is_err(),
+        "a WAV response was accepted as raw PCM and would receive a second WAV header"
+    );
+    Ok(())
+}
+
+/// PCM at a different sample rate cannot acquire a misleading 24 kHz WAV header.
+#[test]
+fn tts_pcm_at_another_rate_cannot_be_labelled_as_24_khz() -> Result<()> {
+    let transport = FakeTransport::new(vec![Ok(body(json!({
+        "candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "audio/L16;rate=48000", "data": "AAA="}}]}}]
+    }))?)]);
+    assert!(
+        GeminiClient::new("key", transport)
+            .speech("Read softly: Hello.", "Hello.")
+            .is_err(),
+        "PCM at another sample rate was accepted under a 24 kHz WAV header"
     );
     Ok(())
 }

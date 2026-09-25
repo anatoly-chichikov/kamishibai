@@ -550,7 +550,7 @@ fn metered_generation_gemini(cell: PathBuf) -> (String, Arc<GenerationCalls>) {
             std::thread::spawn(move || {
                 let mut stream = stream;
                 let request = complete_request(&mut stream);
-                let sound = request.contains("gemini-3.1-flash-tts-preview");
+                let sound = request.contains("gemini-3.8-flash-tts");
                 let phonetics = request.contains("Verify only the two IPA fields");
                 if sound {
                     counted.sound.fetch_add(1, Ordering::SeqCst);
@@ -822,6 +822,11 @@ fn concurrent_sessions_share_one_meta_and_sound_request_with_exact_costs() {
             .as_slice(),
     )
     .expect("the sound cost must decode");
+    let expected_sound = if time::OffsetDateTime::now_utc().year() < 2027 {
+        50_000
+    } else {
+        100_000
+    };
     assert_eq!(
         (
             first_ok,
@@ -843,7 +848,7 @@ fn concurrent_sessions_share_one_meta_and_sound_request_with_exact_costs() {
             Some(2),
             Some(84_000),
             Some(1),
-            Some(110_000),
+            Some(expected_sound),
         ),
         "two sessions sharing one card duplicated Gemini spend or corrupted its exact costs"
     );

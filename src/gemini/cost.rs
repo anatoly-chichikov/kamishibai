@@ -21,6 +21,11 @@ const GEMINI_3_1_FLASH_IMAGE_OUTPUT_NANOS: u64 = 60_000;
 const GEMINI_3_1_FLASH_IMAGE_THINKING_NANOS: u64 = 3_000;
 const GEMINI_3_1_FLASH_TTS_INPUT_NANOS: u64 = 1_000;
 const GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS: u64 = 20_000;
+const GEMINI_3_8_FLASH_TTS_INPUT_NANOS: u64 = 1_000;
+const GEMINI_3_8_FLASH_TTS_OUTPUT_NANOS: u64 = 18_000;
+const GEMINI_3_8_FLASH_LITE_TTS_INPUT_NANOS: u64 = 1_000;
+const GEMINI_3_8_FLASH_LITE_TTS_OUTPUT_NANOS: u64 = 12_000;
+const GEMINI_3_8_TTS_PROMOTION_END_UTC: i64 = 1_798_761_600;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Rates {
@@ -57,8 +62,17 @@ impl Rates {
     }
 }
 
+/// Estimates a response's cost using the paid-tier rates in effect at receipt.
 pub(super) fn priced(model: &str, usage: Option<&UsageMetadata>) -> CostRecord {
-    match (usage, rates(model)) {
+    priced_at(
+        model,
+        usage,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )
+}
+
+fn priced_at(model: &str, usage: Option<&UsageMetadata>, timestamp: i64) -> CostRecord {
+    match (usage, rates(model, timestamp)) {
         (Some(usage), Some(rates)) => rates.priced(usage, model),
         (Some(usage), None) => CostRecord::new(
             model,
@@ -84,7 +98,12 @@ fn output_tokens(usage: &UsageMetadata) -> u64 {
         .saturating_sub(usage.prompt_token_count)
 }
 
-fn rates(model: &str) -> Option<Rates> {
+fn rates(model: &str, timestamp: i64) -> Option<Rates> {
+    let discount = if timestamp < GEMINI_3_8_TTS_PROMOTION_END_UTC {
+        2
+    } else {
+        1
+    };
     Some(match model {
         "gemini-3.8-flash" => Rates {
             input_nanos: GEMINI_3_8_FLASH_INPUT_NANOS,
@@ -125,6 +144,16 @@ fn rates(model: &str) -> Option<Rates> {
             input_nanos: GEMINI_3_1_FLASH_TTS_INPUT_NANOS,
             output_nanos: GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS,
             thinking_nanos: GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS,
+        },
+        "gemini-3.8-flash-tts" => Rates {
+            input_nanos: GEMINI_3_8_FLASH_TTS_INPUT_NANOS / discount,
+            output_nanos: GEMINI_3_8_FLASH_TTS_OUTPUT_NANOS / discount,
+            thinking_nanos: GEMINI_3_8_FLASH_TTS_OUTPUT_NANOS / discount,
+        },
+        "gemini-3.8-flash-lite-tts" => Rates {
+            input_nanos: GEMINI_3_8_FLASH_LITE_TTS_INPUT_NANOS / discount,
+            output_nanos: GEMINI_3_8_FLASH_LITE_TTS_OUTPUT_NANOS / discount,
+            thinking_nanos: GEMINI_3_8_FLASH_LITE_TTS_OUTPUT_NANOS / discount,
         },
         _ => return None,
     })
@@ -257,6 +286,74 @@ mod tests {
                 .nanos(),
             10_300_000,
             "tts pricing must apply text input and audio output token rates"
+        );
+    }
+
+    #[test]
+    fn three_eight_tts_cannot_end_its_promotion_before_2027_utc() {
+        let usage = UsageMetadata {
+            prompt_token_count: 137,
+            candidates_token_count: 59,
+            thoughts_token_count: 0,
+            total_token_count: 196,
+        };
+        assert_eq!(
+            priced_at("gemini-3.8-flash-tts", Some(&usage), 1_798_761_599)
+                .cost()
+                .total(),
+            Some(599_500),
+            "Gemini 3.8 Flash TTS lost its promotional rates before midnight UTC on January 1, 2027"
+        );
+    }
+
+    #[test]
+    fn three_eight_tts_cannot_keep_promotional_rates_in_2027() {
+        let usage = UsageMetadata {
+            prompt_token_count: 137,
+            candidates_token_count: 59,
+            thoughts_token_count: 0,
+            total_token_count: 196,
+        };
+        assert_eq!(
+            priced_at("gemini-3.8-flash-tts", Some(&usage), 1_798_761_600)
+                .cost()
+                .total(),
+            Some(1_199_000),
+            "Gemini 3.8 Flash TTS retained promotional rates at midnight UTC on January 1, 2027"
+        );
+    }
+
+    #[test]
+    fn three_eight_lite_tts_cannot_end_its_promotion_before_2027_utc() {
+        let usage = UsageMetadata {
+            prompt_token_count: 137,
+            candidates_token_count: 59,
+            thoughts_token_count: 0,
+            total_token_count: 196,
+        };
+        assert_eq!(
+            priced_at("gemini-3.8-flash-lite-tts", Some(&usage), 1_798_761_599)
+                .cost()
+                .total(),
+            Some(422_500),
+            "Gemini 3.8 Flash-Lite TTS lost its promotional rates before midnight UTC on January 1, 2027"
+        );
+    }
+
+    #[test]
+    fn three_eight_lite_tts_cannot_keep_promotional_rates_in_2027() {
+        let usage = UsageMetadata {
+            prompt_token_count: 137,
+            candidates_token_count: 59,
+            thoughts_token_count: 0,
+            total_token_count: 196,
+        };
+        assert_eq!(
+            priced_at("gemini-3.8-flash-lite-tts", Some(&usage), 1_798_761_600)
+                .cost()
+                .total(),
+            Some(845_000),
+            "Gemini 3.8 Flash-Lite TTS retained promotional rates at midnight UTC on January 1, 2027"
         );
     }
 

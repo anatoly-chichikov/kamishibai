@@ -16,7 +16,7 @@ pub(super) struct Request {
 }
 
 impl Request {
-    /// Transform textual prompt parts while retaining every schema and media part.
+    /// Transform prompt directions while retaining transcripts, schemas, and media.
     pub(super) fn with_prompt<F>(&self, mut render: F) -> Result<Self>
     where
         F: FnMut(&str) -> Result<String>,
@@ -24,7 +24,9 @@ impl Request {
         let mut request = self.clone();
         for content in &mut request.contents {
             for part in &mut content.parts {
-                if let Some(text) = &part.text {
+                if let Some(metadata) = &mut part.speech_metadata {
+                    metadata.style = render(&metadata.style)?;
+                } else if let Some(text) = &part.text {
                     part.text = Some(render(text)?);
                 }
             }
@@ -43,10 +45,26 @@ impl Request {
                 parts: vec![RequestPart {
                     text: Some(text),
                     inline_data: None,
+                    speech_metadata: None,
                 }],
             }],
             generation_config,
             safety_settings,
+        }
+    }
+
+    /// Return a speech request whose transcript stays separate from its directions.
+    pub(super) fn speech(text: String, style: String, voice: &str) -> Self {
+        Self {
+            contents: vec![Content {
+                parts: vec![RequestPart {
+                    text: Some(text),
+                    inline_data: None,
+                    speech_metadata: Some(SpeechMetadata { style }),
+                }],
+            }],
+            generation_config: Some(GenerationConfig::speech(voice)),
+            safety_settings: None,
         }
     }
 
@@ -63,6 +81,7 @@ impl Request {
                     RequestPart {
                         text: Some(text),
                         inline_data: None,
+                        speech_metadata: None,
                     },
                     RequestPart {
                         text: None,
@@ -70,6 +89,7 @@ impl Request {
                             mime_type: String::from(mime_type),
                             data,
                         }),
+                        speech_metadata: None,
                     },
                 ],
             }],
@@ -89,6 +109,7 @@ impl Request {
         parts.push(RequestPart {
             text: Some(text),
             inline_data: None,
+            speech_metadata: None,
         });
         parts.extend(data.into_iter().map(|data| RequestPart {
             text: None,
@@ -96,6 +117,7 @@ impl Request {
                 mime_type: String::from(mime_type),
                 data,
             }),
+            speech_metadata: None,
         }));
         Self {
             contents: vec![Content { parts }],
@@ -116,6 +138,13 @@ struct RequestPart {
     text: Option<String>,
     #[serde(rename = "inlineData", skip_serializing_if = "Option::is_none")]
     inline_data: Option<RequestInlineData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speech_metadata: Option<SpeechMetadata>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct SpeechMetadata {
+    style: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -184,13 +213,38 @@ impl GenerationConfig {
             response_modalities: Some(vec![String::from("AUDIO")]),
             image_config: None,
             speech_config: Some(SpeechConfig {
-                voice_config: VoiceConfig {
+                voice_config: VoiceConfig::Legacy {
                     prebuilt_voice_config: PrebuiltVoiceConfig {
                         voice_name: String::from(voice),
                     },
                 },
             }),
             response_format: None,
+            response_mime_type: None,
+            response_schema: None,
+            max_output_tokens: None,
+            thinking_config: None,
+            temperature: None,
+            media_resolution: None,
+        }
+    }
+
+    /// Return explicit raw PCM output and the current speech voice selection.
+    pub(super) fn speech(voice: &str) -> Self {
+        Self {
+            response_modalities: Some(vec![String::from("AUDIO")]),
+            image_config: None,
+            speech_config: Some(SpeechConfig {
+                voice_config: VoiceConfig::Current {
+                    voice: String::from(voice),
+                },
+            }),
+            response_format: Some(ResponseFormat::Audio {
+                audio: AudioResponseFormat {
+                    mime_type: String::from("AUDIO_L16"),
+                    sample_rate: 24_000,
+                },
+            }),
             response_mime_type: None,
             response_schema: None,
             max_output_tokens: None,
@@ -207,7 +261,7 @@ impl GenerationConfig {
             response_modalities: None,
             image_config: None,
             speech_config: None,
-            response_format: Some(ResponseFormat {
+            response_format: Some(ResponseFormat::Text {
                 text: TextResponseFormat {
                     mime_type: String::from("APPLICATION_JSON"),
                     schema,
@@ -283,7 +337,7 @@ impl GenerationConfig {
             response_modalities: None,
             image_config: None,
             speech_config: None,
-            response_format: Some(ResponseFormat {
+            response_format: Some(ResponseFormat::Text {
                 text: TextResponseFormat {
                     mime_type: String::from("APPLICATION_JSON"),
                     schema,
@@ -402,8 +456,18 @@ fn validate_response_schema(schema: &Value) -> Result<()> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-struct ResponseFormat {
-    text: TextResponseFormat,
+#[serde(untagged)]
+enum ResponseFormat {
+    Text { text: TextResponseFormat },
+    Audio { audio: AudioResponseFormat },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct AudioResponseFormat {
+    #[serde(rename = "mimeType")]
+    mime_type: String,
+    #[serde(rename = "sampleRate")]
+    sample_rate: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -426,9 +490,15 @@ struct SpeechConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-struct VoiceConfig {
-    #[serde(rename = "prebuiltVoiceConfig")]
-    prebuilt_voice_config: PrebuiltVoiceConfig,
+#[serde(untagged)]
+enum VoiceConfig {
+    Legacy {
+        #[serde(rename = "prebuiltVoiceConfig")]
+        prebuilt_voice_config: PrebuiltVoiceConfig,
+    },
+    Current {
+        voice: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -508,6 +578,8 @@ pub(super) struct ResponsePart {
 
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct InlineData {
+    #[serde(rename = "mimeType")]
+    pub(super) mime_type: Option<String>,
     pub(super) data: String,
 }
 

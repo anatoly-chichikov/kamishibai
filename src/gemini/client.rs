@@ -1012,6 +1012,10 @@ where
     }
 
     /// Generate one PCM audio payload from the configured TTS model.
+    ///
+    /// Current models preserve `text` verbatim and use `prompt` as delivery
+    /// directions, removing its trailing copy of the transcript when present.
+    /// Explicit legacy model overrides receive the combined prompt unchanged.
     pub fn speech(&self, prompt: &str, text: &str) -> Result<Vec<u8>> {
         let (data, _) = self.speech_metered(prompt, text)?;
         Ok(data)
@@ -1019,15 +1023,12 @@ where
 
     /// Generate one PCM audio payload and return the request cost record.
     pub(crate) fn speech_metered(&self, prompt: &str, text: &str) -> Result<(Vec<u8>, CostRecord)> {
-        let metered = self.request_stage(
-            GenerationStage::Speech,
-            &Request::text(
-                String::from(prompt),
-                Some(GenerationConfig::audio(voice())),
-                None,
-            ),
-        )?;
-        Ok((speech_from_response(&metered.response, text)?, metered.cost))
+        let metered =
+            self.request_stage(GenerationStage::Speech, &self.speech_request(prompt, text))?;
+        Ok((
+            speech_from_response(&metered.response, text, self.profile.structured_speech())?,
+            metered.cost,
+        ))
     }
 
     /// Generate one PCM audio payload and report usage before local audio decoding.
@@ -1040,16 +1041,25 @@ where
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let metered = self.request_stage(
-            GenerationStage::Speech,
-            &Request::text(
-                String::from(prompt),
-                Some(GenerationConfig::audio(voice())),
-                None,
-            ),
-        )?;
+        let metered =
+            self.request_stage(GenerationStage::Speech, &self.speech_request(prompt, text))?;
         observe(metered.cost.clone())?;
-        speech_from_response(&metered.response, text)
+        speech_from_response(&metered.response, text, self.profile.structured_speech())
+    }
+
+    fn speech_request(&self, prompt: &str, text: &str) -> Request {
+        if self.profile.structured_speech() {
+            return Request::speech(
+                String::from(text),
+                String::from(speech_style(prompt, text)),
+                voice(),
+            );
+        }
+        Request::text(
+            String::from(prompt),
+            Some(GenerationConfig::audio(voice())),
+            None,
+        )
     }
 
     fn request_metered(&self, model: &str, request: &Request) -> Result<MeteredResponse> {
@@ -1500,7 +1510,18 @@ fn image_from_response(response: &Response) -> Result<Vec<u8>> {
     bail!("No image data found in response");
 }
 
-fn speech_from_response(response: &Response, text: &str) -> Result<Vec<u8>> {
+fn speech_style<'a>(prompt: &'a str, text: &str) -> &'a str {
+    let prompt = prompt.trim_end();
+    prompt
+        .strip_suffix(text.trim_end())
+        .or_else(|| prompt.strip_suffix("{text}"))
+        .unwrap_or(prompt)
+        .trim_end()
+        .trim_end_matches(':')
+        .trim()
+}
+
+fn speech_from_response(response: &Response, text: &str, structured: bool) -> Result<Vec<u8>> {
     if response.candidates.is_empty() {
         bail!("No candidates in audio response for '{}'", text);
     }
@@ -1514,7 +1535,31 @@ fn speech_from_response(response: &Response, text: &str) -> Result<Vec<u8>> {
     else {
         bail!("No content in audio response for '{}'", text);
     };
+    if structured && let Some(mime) = &data.mime_type {
+        validate_pcm(mime)?;
+    }
     decode(&data.data)
+}
+
+fn validate_pcm(mime: &str) -> Result<()> {
+    let mut parts = mime.split(';').map(str::trim);
+    let kind = parts.next().unwrap_or_default();
+    let compatible = kind.eq_ignore_ascii_case("audio/L16")
+        && parts.all(|part| {
+            let Some((name, value)) = part.split_once('=') else {
+                return false;
+            };
+            match name.trim().to_ascii_lowercase().as_str() {
+                "rate" => value.trim() == "24000",
+                "channels" => value.trim() == "1",
+                "codec" => value.trim().eq_ignore_ascii_case("pcm"),
+                _ => true,
+            }
+        });
+    if !compatible {
+        bail!("Gemini speech returned {mime} instead of mono 24 kHz 16-bit PCM");
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2270,6 +2315,43 @@ mod tests {
     }
 
     #[test]
+    fn observed_speech_cannot_skip_the_new_request_or_usage_record() {
+        let transport = FakeTransport::new(vec![body(json!({
+            "candidates": [{"content": {"parts": [{"inlineData": {
+                "mimeType": "audio/L16;codec=pcm;rate=24000", "data": "AAA="
+            }}]}}],
+            "usageMetadata": {"promptTokenCount": 17, "candidatesTokenCount": 23, "totalTokenCount": 40}
+        }))]);
+        let client = GeminiClient::new("key", transport.clone());
+        let mut records = Vec::new();
+        let bytes = client
+            .speech_observed("Say in natural French: Salut !", "Salut !", |cost| {
+                records.push(cost);
+                Ok(())
+            })
+            .expect("observed speech must decode");
+        let request: Value = serde_json::from_str(&transport.requests.borrow()[0])
+            .expect("observed speech request must decode");
+        assert_eq!(
+            (
+                bytes,
+                records.len(),
+                records[0].model(),
+                request["contents"][0]["parts"][0].clone(),
+                request["generationConfig"]["responseFormat"].clone()
+            ),
+            (
+                vec![0, 0],
+                1,
+                "gemini-3.8-flash-tts",
+                json!({"text": "Salut !", "speech_metadata": {"style": "Say in natural French"}}),
+                json!({"audio": {"mimeType": "AUDIO_L16", "sampleRate": 24000}})
+            ),
+            "the production speech route lost its current request schema or usage record"
+        );
+    }
+
+    #[test]
     fn explicit_metadata_and_phonetics_use_independent_stage_policies() {
         let value = card_meta_response(sentence_labels_response(
             "neutral",
@@ -2374,6 +2456,26 @@ mod tests {
         assert!(
             result.is_err() && transport.requests.borrow().is_empty(),
             "a rejected prompt reached the provider"
+        );
+    }
+
+    #[test]
+    fn speech_without_directions_cannot_bypass_a_refusing_policy() {
+        let transport = FakeTransport::new(vec![body(json!({
+            "candidates": [{"content": {"parts": [{"inlineData": {"data": "AAA="}}]}}]
+        }))]);
+        let profile = GeminiProfile::new(
+            "https://example.com/models",
+            StageModels::default(),
+            "refusal-v1",
+            Arc::new(RefusingPrompts),
+        )
+        .expect("profile must validate");
+        let result = GeminiClient::from_profile("key", transport.clone(), profile)
+            .speech("Καλημέρα!", "Καλημέρα!");
+        assert!(
+            result.is_err() && transport.requests.borrow().is_empty(),
+            "speech without directions bypassed a refusing policy and spent a provider request"
         );
     }
 

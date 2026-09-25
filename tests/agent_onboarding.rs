@@ -506,7 +506,7 @@ fn configured_new_can_generate_and_wait_in_one_offline_call() {
                     .is_some_and(|request| request.contains("Verify only the two IPA fields")
                         && request.contains("gemini-3.8-flash:generateContent")),
                 requests.get(3).is_some_and(
-                    |request| request.contains("gemini-3.1-flash-tts-preview:generateContent")
+                    |request| request.contains("gemini-3.8-flash-tts:generateContent")
                 ),
             ],
         ),
