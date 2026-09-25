@@ -8,7 +8,7 @@ use anyhow::{Result, bail};
 use sha2::{Digest, Sha256};
 
 const DEFAULT_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta/models";
-const PROFILE_VERSION: &str = "kamishibai-gemini-profile-v1";
+const PROFILE_VERSION: &str = "kamishibai-gemini-profile-v2";
 
 /// Identifies one provider operation without exposing delivery-specific controls.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -45,7 +45,7 @@ impl GenerationStage {
     fn model(self) -> &'static str {
         match self {
             Self::Picture => "gemini-3.1-flash-image",
-            Self::Speech => "gemini-3.1-flash-tts-preview",
+            Self::Speech => "gemini-3.8-flash-tts",
             _ => "gemini-3.8-flash",
         }
     }
@@ -94,6 +94,9 @@ impl StageModels {
 /// Implementations must be deterministic and immutable for the profile revision.
 /// Change that revision whenever prompt behavior changes. The resulting prompt
 /// must preserve the stage's output contract; existing decoders still validate it.
+/// For Gemini 3.8 speech, only delivery directions are adapted; the transcript
+/// remains verbatim in its separate request field. Legacy speech models retain
+/// the combined prompt contract.
 pub trait PromptPolicy: Send + Sync {
     /// Return the prompt to send for one stage, or fail before a provider request.
     fn render(&self, stage: GenerationStage, prompt: &str) -> Result<String>;
@@ -185,9 +188,19 @@ impl GeminiProfile {
         self.models.resolve(stage)
     }
 
+    /// Determine whether speech uses separate transcript and delivery directions.
+    pub(super) fn structured_speech(&self) -> bool {
+        matches!(
+            self.model(GenerationStage::Speech),
+            "gemini-3.8-flash-tts" | "gemini-3.8-flash-lite-tts"
+        )
+    }
+
     pub(super) fn render(&self, stage: GenerationStage, prompt: &str) -> Result<String> {
         let rendered = self.prompts.render(stage, prompt)?;
-        if rendered.trim().is_empty() {
+        if rendered.trim().is_empty()
+            && !(stage == GenerationStage::Speech && self.structured_speech())
+        {
             bail!("Gemini prompt policy returned an empty prompt for {stage:?}");
         }
         Ok(rendered)

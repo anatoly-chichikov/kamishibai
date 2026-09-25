@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.13.2
+Release: 1.13.3
 
 Overview
 
@@ -10,7 +10,8 @@ manga panel.
 All text generation and image-reading judgments use `gemini-3.8-flash`,
 including understanding, sense correction, card writing, feature extraction,
 and scene composition. Image output uses `gemini-3.1-flash-image`; speech
-synthesis uses `gemini-3.1-flash-tts-preview`.
+synthesis uses `gemini-3.8-flash-tts`. Existing cached audio is retained;
+the current speech model applies when an audio artifact is generated.
 
 This file describes the headless console contract for agents and scripts.
 Running `kamishibai` with no arguments opens the interactive TUI, which is out
@@ -26,7 +27,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.13.2/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.13.3/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
