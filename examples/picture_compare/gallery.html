@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Сравнение картинок</title>
+<style>
+:root{--bg:#f4f1ea;--surface:#fffdf8;--ink:#1d1b17;--muted:#6b665c;--line:#ddd6c8;--accent:#b4441f;--ok:#2f7a4a;--warn:#a86f0a;--bad:#b3261e;--idle:#8a857a;--shade:rgba(20,18,15,.94);--paper:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#151412;--surface:#1f1d1a;--ink:#ece8df;--muted:#a19b8f;--line:#36322c;--accent:#e57a48;--ok:#62b380;--warn:#dcaa45;--bad:#ea6b60;--idle:#8d877c;--shade:rgba(8,7,6,.95);--paper:#f4f1ea}}
+:root[data-theme=dark]{--bg:#151412;--surface:#1f1d1a;--ink:#ece8df;--muted:#a19b8f;--line:#36322c;--accent:#e57a48;--ok:#62b380;--warn:#dcaa45;--bad:#ea6b60;--idle:#8d877c;--shade:rgba(8,7,6,.95);--paper:#f4f1ea}
+*{box-sizing:border-box}
+html{scroll-padding-top:64px}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:1440px;margin:0 auto;padding:40px 24px 80px}
+button{font:inherit;color:inherit}
+.eyebrow{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600}
+h1{font:600 clamp(28px,4.4vw,44px)/1.1 ui-serif,Georgia,"Times New Roman",serif;margin:8px 0 14px}
+.lede{max-width:880px;color:var(--muted);margin:0 0 28px}
+.lede strong{color:var(--ink);font-weight:600}
+.summary{border-collapse:separate;border-spacing:0;width:100%;max-width:1040px;background:var(--surface);border:1px solid var(--line);border-radius:12px;font-variant-numeric:tabular-nums}
+.summary th,.summary td{padding:10px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.summary tr:last-child>*{border-bottom:0}
+.summary thead th{font-size:13px;font-weight:600}
+.summary thead th small{display:block;overflow-wrap:anywhere;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);font-weight:400}
+.summary tbody th{font-weight:500;color:var(--muted);width:32%}
+.summary td.better{color:var(--ok);font-weight:600}
+.summary td.worse{color:var(--bad);font-weight:600}
+.summary .hint{display:block;font-size:12px;color:var(--muted);font-weight:400}
+.hidden-note{color:var(--muted);font-size:14px;padding:14px 16px;border:1px dashed var(--line);border-radius:12px;max-width:1040px}
+.bar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 90%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);margin:28px -24px 0;padding:10px 24px;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:transparent;padding:6px 11px;font-size:13px;cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--bg)}
+.toggle{display:inline-flex;gap:6px;align-items:center;font-size:13px;cursor:pointer;user-select:none}
+.toggle input{accent-color:var(--accent);margin:0}
+.count{margin-left:auto;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.card{padding:34px 0 30px;border-bottom:1px solid var(--line)}
+.head{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;align-items:baseline;margin-bottom:16px}
+.num{font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+.term{font:600 22px/1.2 ui-serif,Georgia,"Times New Roman",serif}
+.target{grid-column:2;font-size:17px;max-width:960px}
+.target strong{color:var(--accent);font-weight:600}
+.source{grid-column:2;color:var(--muted);max-width:960px}
+.flag{grid-column:2;font-size:12px;color:var(--warn)}
+.pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0}
+.panel h3{margin:0 0 10px;font-size:14px;display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.panel h3 small{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);font-weight:400;overflow-wrap:anywhere}
+.frame{display:block;width:100%;padding:0;border:0;background:var(--paper);border-radius:6px;cursor:zoom-in;overflow:hidden}
+.frame img{display:block;width:100%;aspect-ratio:1;object-fit:contain}
+.empty{display:grid;place-items:center;aspect-ratio:1;border:1px dashed var(--line);border-radius:6px;color:var(--muted);text-align:center;padding:20px;font-size:14px}
+.verdict{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;margin-top:10px;font-size:14px}
+.badge{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex:none}
+.accepted{color:var(--ok)}.salvaged{color:var(--warn)}.failed,.rejected{color:var(--bad)}.error{color:var(--idle)}
+.meta{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.note{color:var(--muted);font-size:13px;margin:6px 0 0;overflow-wrap:anywhere}
+.strip{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.thumb{position:relative;width:64px;height:64px;border-radius:7px;border:2px solid currentColor;padding:0;background:var(--paper);cursor:zoom-in;overflow:hidden}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb span{position:absolute;right:2px;bottom:2px;background:var(--surface);color:var(--ink);font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;padding:2px 4px;border-radius:4px}
+.vote{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;font-size:14px;color:var(--muted)}
+.vote button{font-size:13px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 13px;cursor:pointer}
+.vote button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+.nothing{padding:40px 0;color:var(--muted)}
+.box{position:fixed;inset:0;z-index:20;background:var(--shade);display:none;flex-direction:column;padding:14px 20px 18px;color:#f2efe8}
+.box.open{display:flex}
+.box header{display:flex;gap:6px 16px;align-items:baseline;flex-wrap:wrap;margin-bottom:12px}
+.box header b{font:600 18px ui-serif,Georgia,serif}
+.box header span{color:#cfc9bd}
+.box .keys{font-size:12px;color:#a8a296;margin-left:auto}
+.box .close{border:1px solid #57524a;background:transparent;border-radius:8px;padding:4px 10px;cursor:pointer;color:#f2efe8}
+.views{flex:1;display:grid;gap:16px;min-height:0;grid-auto-rows:minmax(0,1fr)}
+.views.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.views figure{margin:0;display:flex;flex-direction:column;min-height:0;min-width:0}
+.views img{flex:1;min-height:0;width:100%;object-fit:contain;background:var(--paper);border-radius:6px}
+.views .empty{flex:1;aspect-ratio:auto;border-color:#57524a;color:#a8a296}
+.views figcaption{font-size:13px;margin-top:6px;color:#e2ddd2;display:flex;flex-wrap:wrap;gap:4px 12px}
+.views figcaption .reason{flex-basis:100%;color:#b9b3a7}
+.box .accepted{color:#7cc795}.box .salvaged{color:#e6b95a}.box .rejected,.box .failed{color:#f08a80}.box .error{color:#a8a296}
+footer{margin-top:40px;font-size:13px;color:var(--muted);max-width:880px}
+footer a{color:var(--accent)}
+@media (max-width:760px){main{padding:24px 16px 60px}.bar{margin:20px -16px 0;padding:10px 16px}.pair{gap:10px}.panel{padding:8px}.thumb{width:44px;height:44px}.count{margin-left:0}.summary tbody th{width:auto}.summary{table-layout:fixed;font-size:13px}.summary th,.summary td{padding:8px 9px;overflow-wrap:anywhere}.panel h3 small{display:none}.lede{font-size:14px}.views.two{grid-template-columns:1fr;grid-auto-rows:minmax(0,1fr)}.box .keys{display:none}.head{grid-template-columns:1fr}.target,.source,.flag{grid-column:1}}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">Kamishibai · картинки</div>
+<h1 id="title">Сравнение моделей картинок</h1>
+<p class="lede" id="lede"></p>
+<div id="summary"></div>
+<div class="bar" role="toolbar" aria-label="Фильтры">
+  <div class="seg" id="filters"></div>
+  <label class="toggle"><input type="checkbox" id="attempts"> все попытки</label>
+  <label class="toggle"><input type="checkbox" id="blind"> вслепую</label>
+  <span class="count" id="count"></span>
+</div>
+<div id="cards"></div>
+<footer>Клик по картинке открывает обе крупно: <b>←/→</b> соседние карточки, <b>1/2/3</b> голос (левая/одинаково/правая) с переходом дальше, <b>Esc</b> закрыть. Голоса хранятся только в этом браузере. Данные прогона лежат в <a href="manifest.json">manifest.json</a>; кадры и вердикты — в папке samples.</footer>
+</main>
+<div class="box" id="box" role="dialog" aria-modal="true" aria-label="Крупный просмотр"></div>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const data = JSON.parse(document.getElementById('data').textContent);
+const NAMES = {'gemini-3.1-flash-image': 'Nano Banana 2', 'gemini-nano-banana-2.1': 'Nano Banana 2.1', 'gemini-3.1-flash-lite-image': 'Nano Banana 2 Lite', 'gemini-3-pro-image': 'Nano Banana Pro'};
+const CATEGORY = {accepted: 'принят', topology: 'раскладка панелей', ocr: 'текст на картинке (OCR)', recall_text: 'текст на картинке', text_judge: 'сбой проверки текста', color: 'не монохром', borderless: 'нет рамки', other: 'другое', error: 'ошибка запроса'};
+const PENALTY = {topology: 'раскладка', text: 'текст', fidelity: 'сцена', literal: 'надписи'};
+const slots = data.arms.map(arm => arm.slot);
+const DEFAULT_THINKING = {'gemini-3.1-flash-image': 'minimal', 'gemini-nano-banana-2.1': 'medium', 'gemini-3.1-flash-lite-image': 'minimal'};
+const model = Object.fromEntries(data.arms.map(arm => [arm.slot, arm.model]));
+const thinking = Object.fromEntries(data.arms.map(arm => [arm.slot, arm.thinking || null]));
+const name = slot => NAMES[model[slot]] || model[slot];
+const level = slot => thinking[slot] ? `thinking ${thinking[slot]}` : DEFAULT_THINKING[model[slot]] ? `thinking ${DEFAULT_THINKING[model[slot]]} (по умолчанию)` : 'thinking по умолчанию';
+const prefix = 'picture-compare:' + data.arms.map(arm => arm.model + '@' + (arm.thinking || 'default')).join('|') + ':';
+const store = {
+  get(key, fallback) { try { const value = localStorage.getItem(prefix + key); return value === null ? fallback : JSON.parse(value); } catch { return fallback; } },
+  set(key, value) { try { localStorage.setItem(prefix + key, JSON.stringify(value)); } catch {} }
+};
+const state = {filter: store.get('filter', 'all'), blind: store.get('blind', false), attempts: store.get('attempts', true), votes: store.get('votes', {}), seed: store.get('seed', null), box: null};
+if (state.seed === null) { state.seed = Math.floor(Math.random() * 2147483647); store.set('seed', state.seed); }
+const FILTERS = [
+  ['all', 'Все', () => true],
+  ['differ', 'Исходы разные', card => { const [a, b] = slots.map(slot => card.runs[slot]); return !a || !b || a.verdict.outcome !== b.verdict.outcome || a.verdict.attempts !== b.verdict.attempts; }],
+  ['retries', 'С ретраями', card => slots.some(slot => card.runs[slot] && card.runs[slot].verdict.attempts > 1)],
+  ['trouble', 'Salvage и провалы', card => slots.some(slot => !card.runs[slot] || card.runs[slot].verdict.outcome !== 'accepted')],
+  ['unvoted', 'Без голоса', (card, index) => !state.votes[voteKey(card, index)]]
+];
+
+function el(tag, attrs, ...kids) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === 'class') node.className = value;
+    else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value === true ? '' : value);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    node.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return node;
+}
+function plural(count, one, few, many) {
+  const tens = count % 100, units = count % 10;
+  if (tens >= 11 && tens <= 14) return many;
+  return units === 1 ? one : units >= 2 && units <= 4 ? few : many;
+}
+const attemptsWord = count => `${count} ${plural(count, 'попытки', 'попыток', 'попыток')}`;
+const share = (part, whole) => whole > 1 ? ` · ${Math.round(part * 100 / whole)}%` : '';
+const sum = values => values.reduce((total, value) => total + value, 0);
+const mean = values => values.length ? sum(values) / values.length : null;
+const median = values => { if (!values.length) return null; const sorted = [...values].sort((a, b) => a - b); const middle = sorted.length >> 1; return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2; };
+const dollars = nanos => '$' + (nanos / 1e9).toFixed(nanos >= 1e9 ? 2 : 3);
+const voteKey = (card, index) => (index + 1) + ':' + card.term;
+function swapped(index) {
+  let hash = Math.imul(state.seed ^ Math.imul(index + 1, 2654435761), 1597334677);
+  hash ^= hash >>> 15;
+  return state.blind && (hash & 1) === 1;
+}
+const order = index => swapped(index) ? [...slots].reverse() : [...slots];
+const label = (index, slot) => state.blind ? (order(index).indexOf(slot) === 0 ? 'Вариант A' : 'Вариант B') : name(slot);
+function finalFrame(run) {
+  return run.frames.find(frame => frame.verdict.status === 'salvaged') || [...run.frames].reverse().find(frame => frame.verdict.status === 'accepted') || null;
+}
+function finalScore(run) {
+  const frame = finalFrame(run);
+  return frame && typeof frame.verdict.score === 'number' ? frame.verdict.score : null;
+}
+function outcomeText(verdict) {
+  if (verdict.outcome === 'accepted') return verdict.attempts <= 1 ? 'принята с первой попытки' : `принята с ${verdict.attempts}-й попытки`;
+  if (verdict.outcome === 'salvaged') return `salvage после ${attemptsWord(verdict.attempts)}`;
+  return `не получилось за ${verdict.attempts} ${plural(verdict.attempts, 'попытку', 'попытки', 'попыток')}`;
+}
+function spendText(run) {
+  const spend = run.effort.spend;
+  const mark = spend.pricing === 'unknown' ? '≥' : '';
+  return `${mark}${dollars(spend.image + spend.review)} · ${Math.round(run.effort.seconds)} с`;
+}
+function frameText(frame) {
+  const verdict = frame.verdict;
+  const parts = [`попытка ${frame.sequence}`, verdict.status === 'accepted' ? 'принята' : verdict.status === 'salvaged' ? 'salvage' : verdict.status === 'rejected' ? 'отклонена' : verdict.status];
+  if (typeof verdict.score === 'number') parts.push(`балл ${verdict.score}`);
+  if (verdict.category && verdict.category !== 'accepted') parts.push(CATEGORY[verdict.category] || verdict.category);
+  return parts.join(' · ');
+}
+function penaltyText(frame) {
+  const penalties = frame.verdict.penalties;
+  if (!penalties) return null;
+  const items = Object.entries(penalties).filter(([, value]) => value > 0).map(([key, value]) => `${PENALTY[key] || key} −${value}`);
+  return items.length ? 'штрафы: ' + items.join(', ') : 'без штрафов';
+}
+
+function stats(slot) {
+  const runs = data.cards.map(card => card.runs[slot]).filter(Boolean);
+  const count = outcome => runs.filter(run => run.verdict.outcome === outcome).length;
+  const rejected = runs.flatMap(run => run.frames).filter(frame => frame.verdict.status === 'rejected' || frame.verdict.status === 'error' || frame.verdict.status === 'salvaged');
+  const reasons = {};
+  for (const frame of rejected) { const key = frame.verdict.category || 'other'; reasons[key] = (reasons[key] || 0) + 1; }
+  const requests = sum(runs.map(run => run.effort.spend.requests));
+  const pricing = runs.some(run => run.effort.spend.pricing === 'unknown') ? 'unknown' : 'exact';
+  return {
+    runs: runs.length,
+    done: count('accepted') + count('salvaged'),
+    first: runs.filter(run => run.verdict.outcome === 'accepted' && run.verdict.attempts <= 1).length,
+    salvaged: count('salvaged'),
+    failed: count('failed'),
+    attempts: mean(runs.map(run => run.verdict.attempts)),
+    score: mean(runs.map(finalScore).filter(score => score !== null)),
+    rejected: rejected.length,
+    reasons,
+    perImage: requests ? sum(runs.map(run => run.effort.spend.image)) / requests : null,
+    perCard: runs.length ? sum(runs.map(run => run.effort.spend.image + run.effort.spend.review)) / runs.length : null,
+    total: sum(runs.map(run => run.effort.spend.image + run.effort.spend.review)),
+    seconds: median(runs.map(run => run.effort.seconds)),
+    pricing
+  };
+}
+function votes() {
+  const tally = {equal: 0};
+  for (const slot of slots) tally[slot] = 0;
+  for (const value of Object.values(state.votes)) if (value in tally) tally[value] += 1;
+  return tally;
+}
+function renderSummary() {
+  const root = document.getElementById('summary');
+  root.replaceChildren();
+  const tally = votes();
+  const cast = sum(Object.values(tally));
+  if (state.blind) {
+    root.append(el('p', {class: 'hidden-note'}, `Слепой режим: имена моделей, стоимость и сводка скрыты, стороны перемешаны. Голосов: ${cast} из ${data.cards.length}. Снимите «вслепую», чтобы увидеть итог.`));
+    return;
+  }
+  const [base, cand] = slots.map(stats);
+  const mark = pricing => pricing === 'unknown' ? '≥' : '';
+  const fixed = (value, digits) => value === null ? '—' : value.toFixed(digits);
+  const rows = [
+    ['Готово карточек', s => `${s.done} из ${s.runs}${share(s.done, s.runs)}`, s => s.done, 1],
+    ['Принято с первой попытки', s => `${s.first} из ${s.runs}${share(s.first, s.runs)}`, s => s.first, 1],
+    ['Salvage', s => String(s.salvaged), s => s.salvaged, -1, 'ни один кадр не прошёл, взят лучший из отклонённых'],
+    ['Не получилось', s => String(s.failed), s => s.failed, -1],
+    ['Попыток на карточку', s => fixed(s.attempts, 2), s => s.attempts, -1, 'в среднем, максимум 4'],
+    ['Балл итогового кадра', s => fixed(s.score, 1), s => s.score, 1, 'в среднем, 0–100 по нашей шкале судей'],
+    ['Отклонённых кадров', s => String(s.rejected), s => s.rejected, -1],
+    ['Почему отклоняли', s => Object.entries(s.reasons).sort((a, b) => b[1] - a[1]).map(([key, value]) => `${CATEGORY[key] || key} ${value}`).join(', ') || '—', null, 0],
+    ['Рендер, за один кадр', s => s.perImage === null ? '—' : mark(s.pricing) + dollars(s.perImage), s => s.perImage, -1, 'только модель картинки'],
+    ['Стадия картинки, на карточку', s => s.perCard === null ? '—' : mark(s.pricing) + dollars(s.perCard), s => s.perCard, -1, 'рендер + судьи + перекомпоновка сцены'],
+    ['Стадия картинки, всего', s => mark(s.pricing) + dollars(s.total), s => s.total, -1],
+    ['Время стадии, медиана', s => s.seconds === null ? '—' : `${Math.round(s.seconds)} с`, s => s.seconds, -1, 'включая ретраи и судей; прогон шёл в несколько потоков']
+  ];
+  if (cast) rows.push(['Ваши голоса «лучше»', s => '', null, 0, `одинаково: ${tally.equal}`]);
+  const body = rows.map(([title, show, value, direction, hint]) => {
+    const cells = [base, cand].map((s, column) => {
+      if (title.startsWith('Ваши')) return el('td', {}, String(tally[slots[column]]));
+      let tone = null;
+      if (column === 1 && direction && value) {
+        const a = value(base), b = value(cand);
+        if (a !== null && b !== null && Math.abs(a - b) > 1e-9) tone = (b - a) * direction > 0 ? 'better' : 'worse';
+      }
+      return el('td', {class: tone}, show(s));
+    });
+    return el('tr', {}, el('th', {scope: 'row'}, title, hint ? el('span', {class: 'hint'}, hint) : null), cells);
+  });
+  root.append(el('table', {class: 'summary'},
+    el('thead', {}, el('tr', {}, el('th', {}, ''), slots.map(slot => el('th', {scope: 'col'}, name(slot), slot === 'baseline' ? ' · сейчас' : ' · кандидат', el('small', {}, model[slot]), el('small', {}, level(slot)))))),
+    el('tbody', {}, body)));
+}
+
+function sentence(card) {
+  const lower = card.target.toLowerCase();
+  const at = lower.indexOf(card.term.toLowerCase());
+  if (at < 0) return card.target;
+  return [card.target.slice(0, at), el('strong', {}, card.target.slice(at, at + card.term.length)), card.target.slice(at + card.term.length)];
+}
+function panel(card, index, slot) {
+  const run = card.runs[slot];
+  const head = el('h3', {}, el('span', {}, label(index, slot)), state.blind ? null : el('small', {}, `${model[slot]} · ${level(slot)}`));
+  if (!run) return el('div', {class: 'panel'}, head, el('div', {class: 'empty'}, 'Нет данных: перезапустите сравнение, записанные карточки сохранятся'));
+  const verdict = run.verdict;
+  const picture = verdict.picture
+    ? el('button', {class: 'frame', 'aria-label': `Открыть «${card.term}» крупно`, onclick: () => openPair(index)}, el('img', {src: verdict.picture, alt: `${card.term}: ${label(index, slot)}`, loading: 'lazy'}))
+    : el('div', {class: 'empty'}, 'Картинки нет');
+  const score = finalScore(run);
+  const line = el('div', {class: 'verdict'},
+    el('span', {class: 'badge ' + verdict.outcome}, el('span', {class: 'dot'}), outcomeText(verdict)),
+    score === null ? null : el('span', {class: 'meta'}, `балл ${score}`),
+    state.blind ? null : el('span', {class: 'meta'}, spendText(run)));
+  const note = verdict.outcome === 'failed' && verdict.note ? el('p', {class: 'note'}, verdict.note) : null;
+  const strip = state.attempts && run.frames.length
+    ? el('div', {class: 'strip'}, run.frames.map((frame, at) => el('button', {class: 'thumb ' + frame.verdict.status, title: frameText(frame), 'aria-label': frameText(frame), onclick: () => openFrame(index, slot, at)},
+        frame.image ? el('img', {src: frame.image, alt: '', loading: 'lazy'}) : null,
+        el('span', {}, typeof frame.verdict.score === 'number' ? frame.verdict.score : '—'))))
+    : null;
+  return el('div', {class: 'panel'}, head, picture, line, note, strip);
+}
+function voteRow(card, index) {
+  const key = voteKey(card, index);
+  const current = state.votes[key] || null;
+  const [left, right] = order(index);
+  const option = (text, value) => el('button', {'aria-pressed': String(current === value), onclick: () => vote(key, current === value ? null : value)}, text);
+  return el('div', {class: 'vote'}, 'Что лучше?', option('← левая', left), option('одинаково', 'equal'), option('правая →', right));
+}
+function cardNode(card, index) {
+  const candidate = card.runs[slots[1]];
+  const flag = candidate && !candidate.effort.shared_scene ? el('div', {class: 'flag'}, 'Сцена у моделей разная: базовая модель не довела сцену до конца') : null;
+  return el('section', {class: 'card', id: `card-${index + 1}`},
+    el('div', {class: 'head'}, el('span', {class: 'num'}, String(index + 1).padStart(2, '0')), el('span', {class: 'term'}, card.term),
+      el('div', {class: 'target'}, sentence(card)), el('div', {class: 'source'}, card.source), flag),
+    el('div', {class: 'pair'}, order(index).map(slot => panel(card, index, slot))),
+    voteRow(card, index));
+}
+const visible = () => data.cards.map((card, index) => index).filter(index => FILTERS.find(([key]) => key === state.filter)[2](data.cards[index], index));
+function renderCards() {
+  const root = document.getElementById('cards');
+  const shown = visible();
+  root.replaceChildren(...(shown.length ? shown.map(index => cardNode(data.cards[index], index)) : [el('p', {class: 'nothing'}, 'Под этот фильтр карточек нет.')]));
+  document.getElementById('count').textContent = `${shown.length} из ${data.cards.length} · голосов ${Object.keys(state.votes).length}`;
+}
+function renderFilters() {
+  const root = document.getElementById('filters');
+  root.replaceChildren(...FILTERS.map(([key, text]) => el('button', {'aria-pressed': String(state.filter === key), onclick: () => { state.filter = key; store.set('filter', key); renderFilters(); renderCards(); }}, text)));
+}
+function vote(key, value) {
+  if (value) state.votes[key] = value; else delete state.votes[key];
+  store.set('votes', state.votes);
+  const index = Number(key.split(':')[0]) - 1;
+  const node = document.getElementById(`card-${index + 1}`);
+  if (node && state.filter !== 'unvoted') node.replaceWith(cardNode(data.cards[index], index));
+  else renderCards();
+  document.getElementById('count').textContent = `${visible().length} из ${data.cards.length} · голосов ${Object.keys(state.votes).length}`;
+  renderSummary();
+}
+
+function openPair(index) { state.box = {mode: 'pair', index}; drawBox(); }
+function openFrame(index, slot, at) { state.box = {mode: 'frame', index, slot, at}; drawBox(); }
+function closeBox() { state.box = null; const box = document.getElementById('box'); box.classList.remove('open'); box.replaceChildren(); }
+function figure(run, slot, index) {
+  const verdict = run && run.verdict;
+  const score = run ? finalScore(run) : null;
+  return el('figure', {},
+    verdict && verdict.picture ? el('img', {src: verdict.picture, alt: `${data.cards[index].term}: ${label(index, slot)}`}) : el('div', {class: 'empty'}, 'Картинки нет'),
+    el('figcaption', {}, el('b', {}, label(index, slot)), verdict ? el('span', {class: verdict.outcome}, outcomeText(verdict)) : null, score === null ? null : el('span', {}, `балл ${score}`)));
+}
+function drawBox() {
+  const box = document.getElementById('box');
+  const view = state.box;
+  const card = data.cards[view.index];
+  const header = el('header', {}, el('b', {}, `${String(view.index + 1).padStart(2, '0')} · ${card.term}`), el('span', {}, card.target),
+    el('span', {class: 'keys'}, view.mode === 'pair' ? '←/→ карточки · 1 левая · 2 одинаково · 3 правая · Esc' : '←/→ попытки · Esc'),
+    el('button', {class: 'close', onclick: closeBox}, 'Закрыть'));
+  let views;
+  if (view.mode === 'pair') {
+    views = el('div', {class: 'views two'}, order(view.index).map(slot => figure(card.runs[slot], slot, view.index)));
+  } else {
+    const frame = card.runs[view.slot].frames[view.at];
+    views = el('div', {class: 'views'}, el('figure', {},
+      frame.image ? el('img', {src: frame.image, alt: frameText(frame)}) : el('div', {class: 'empty'}, 'Кадр не сохранён: запрос не дошёл до картинки'),
+      el('figcaption', {}, el('b', {}, label(view.index, view.slot)), el('span', {class: frame.verdict.status}, frameText(frame)), el('span', {}, penaltyText(frame)),
+        frame.verdict.reason ? el('span', {class: 'reason'}, frame.verdict.reason) : null)));
+  }
+  box.replaceChildren(header, views);
+  box.classList.add('open');
+}
+function step(delta) {
+  const view = state.box;
+  if (view.mode === 'frame') {
+    const count = data.cards[view.index].runs[view.slot].frames.length;
+    view.at = (view.at + delta + count) % count;
+    drawBox();
+    return;
+  }
+  const shown = visible();
+  const at = shown.indexOf(view.index);
+  const next = at < 0 ? shown[0] : shown[at + delta];
+  if (next === undefined) return;
+  view.index = next;
+  drawBox();
+  const node = document.getElementById(`card-${next + 1}`);
+  if (node) node.scrollIntoView({block: 'start'});
+}
+document.addEventListener('keydown', event => {
+  if (!state.box || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.key === 'Escape') { closeBox(); return; }
+  if (event.key === 'ArrowRight') { event.preventDefault(); step(1); return; }
+  if (event.key === 'ArrowLeft') { event.preventDefault(); step(-1); return; }
+  if (state.box.mode !== 'pair' || !['1', '2', '3'].includes(event.key)) return;
+  const index = state.box.index;
+  const card = data.cards[index];
+  const [left, right] = order(index);
+  vote(voteKey(card, index), event.key === '1' ? left : event.key === '2' ? 'equal' : right);
+  if (state.filter === 'unvoted') { const shown = visible(); const next = shown.find(item => item > index); if (next === undefined) { closeBox(); return; } state.box.index = next; drawBox(); return; }
+  step(1);
+});
+document.getElementById('box').addEventListener('click', event => { if (event.target.id === 'box') closeBox(); });
+
+const [baseName, candName] = slots.map(name);
+const pinned = data.arms.every(arm => arm.thinking) && data.arms[0].thinking === data.arms[1].thinking ? data.arms[0].thinking : null;
+document.getElementById('title').textContent = `${baseName} → ${candName}` + (pinned ? ` · thinking ${pinned}` : '');
+document.getElementById('lede').append(
+  `${data.cards.length} ${plural(data.cards.length, 'реальная карточка', 'реальные карточки', 'реальных карточек')} из вашего кэша. Сцену для каждой карточки сочиняют один раз, и обе модели получают её без изменений. Дальше идёт весь продакшн-путь картинки: рендер, проверка текста, судьи (подсказка ответа, верность сцене, zoom), `,
+  el('strong', {}, 'до 4 попыток'), ', при двух текстовых отказах подряд сцена перекомпонуется, в конце salvage. Отличается только модель рендера. ',
+  pinned ? `Уровень размышления рендера задан явно: ${pinned} у обеих моделей. ` : `Уровень размышления рендера не задан, у каждой модели свой по умолчанию: ${slots.map(slot => `${name(slot)} — ${level(slot)}`).join(', ')}. `,
+  'Стоимость считает само приложение; если цена модели ему неизвестна, сумма помечена «≥»: это нижняя граница без такой модели.');
+const blind = document.getElementById('blind');
+const attempts = document.getElementById('attempts');
+blind.checked = state.blind;
+attempts.checked = state.attempts;
+blind.addEventListener('change', () => { state.blind = blind.checked; store.set('blind', state.blind); renderSummary(); renderCards(); });
+attempts.addEventListener('change', () => { state.attempts = attempts.checked; store.set('attempts', state.attempts); renderCards(); });
+renderSummary();
+renderFilters();
+renderCards();
+</script>
+</body>
+</html>
