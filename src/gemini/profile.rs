@@ -44,7 +44,7 @@ pub enum GenerationStage {
 impl GenerationStage {
     fn model(self) -> &'static str {
         match self {
-            Self::Picture => "gemini-3.1-flash-image",
+            Self::Picture => "gemini-nano-banana-2.1",
             Self::Speech => "gemini-3.8-flash-tts",
             _ => "gemini-3.8-flash",
         }

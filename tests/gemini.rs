@@ -1530,16 +1530,18 @@ fn image_generation_keeps_the_image_modality_and_square_aspect_ratio() -> Result
             request["generationConfig"]["imageConfig"]["aspectRatio"].as_str(),
             request["safetySettings"]
                 .as_array()
-                .map(|items| items.len())
+                .map(|items| items.len()),
+            request["generationConfig"].get("thinkingConfig").is_none()
         ),
         (
             String::from(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent"
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-nano-banana-2.1:generateContent"
             ),
             Some("A cat sleeps in a finished black-and-white manga panel"),
             Some("IMAGE"),
             Some("1:1"),
             Some(4),
+            true,
         ),
         "image generation request no longer keeps the frozen modality and aspect-ratio contract"
     );

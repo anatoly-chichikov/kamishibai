@@ -19,6 +19,9 @@ const GEMINI_2_5_FLASH_LITE_OUTPUT_NANOS: u64 = 400;
 const GEMINI_3_1_FLASH_IMAGE_INPUT_NANOS: u64 = 500;
 const GEMINI_3_1_FLASH_IMAGE_OUTPUT_NANOS: u64 = 60_000;
 const GEMINI_3_1_FLASH_IMAGE_THINKING_NANOS: u64 = 3_000;
+const GEMINI_NANO_BANANA_2_1_INPUT_NANOS: u64 = 1_500;
+const GEMINI_NANO_BANANA_2_1_OUTPUT_NANOS: u64 = 30_000;
+const GEMINI_NANO_BANANA_2_1_THINKING_NANOS: u64 = 7_500;
 const GEMINI_3_1_FLASH_TTS_INPUT_NANOS: u64 = 1_000;
 const GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS: u64 = 20_000;
 const GEMINI_3_8_FLASH_TTS_INPUT_NANOS: u64 = 1_000;
@@ -140,6 +143,11 @@ fn rates(model: &str, timestamp: i64) -> Option<Rates> {
             output_nanos: GEMINI_3_1_FLASH_IMAGE_OUTPUT_NANOS,
             thinking_nanos: GEMINI_3_1_FLASH_IMAGE_THINKING_NANOS,
         },
+        "gemini-nano-banana-2.1" => Rates {
+            input_nanos: GEMINI_NANO_BANANA_2_1_INPUT_NANOS,
+            output_nanos: GEMINI_NANO_BANANA_2_1_OUTPUT_NANOS,
+            thinking_nanos: GEMINI_NANO_BANANA_2_1_THINKING_NANOS,
+        },
         "gemini-3.1-flash-tts-preview" => Rates {
             input_nanos: GEMINI_3_1_FLASH_TTS_INPUT_NANOS,
             output_nanos: GEMINI_3_1_FLASH_TTS_OUTPUT_NANOS,
@@ -239,6 +247,23 @@ mod tests {
                 .dollars(),
             "$.0688",
             "image pricing must price generated image and thinking tokens at their distinct rates"
+        );
+    }
+
+    #[test]
+    fn nano_banana_2_1_usage_cannot_inherit_the_previous_image_rates() {
+        let usage = UsageMetadata {
+            prompt_token_count: 200,
+            candidates_token_count: 1_120,
+            thoughts_token_count: 500,
+            total_token_count: 1_820,
+        };
+        assert_eq!(
+            priced("gemini-nano-banana-2.1", Some(&usage))
+                .cost()
+                .nanos(),
+            37_650_000,
+            "Nano Banana 2.1 lost its own input, image-output, or thinking rate"
         );
     }
 
