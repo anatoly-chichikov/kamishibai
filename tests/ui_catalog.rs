@@ -1,58 +1,22 @@
 //! Structural, copy and provenance checks for the authored TUI intent inventory.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
+use std::time::Duration;
 
+use crate::example::Example;
 use catalog::Catalog;
 
 #[path = "common/tui_catalog.rs"]
 mod catalog;
 
-fn gallery() -> PathBuf {
-    let build = Command::new(env!("CARGO"))
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .args([
-            "build",
-            "--example",
-            "tui_states",
-            "--offline",
-            "--locked",
-            "--quiet",
-        ])
-        .output()
-        .expect("invariant: capture example build must be launchable");
-    if !build.status.success() {
-        panic!(
-            "capture example build failed: {}",
-            String::from_utf8_lossy(&build.stderr)
-        );
-    }
-    std::env::current_exe()
-        .expect("invariant: running test executable must have a path")
-        .parent()
-        .and_then(Path::parent)
-        .expect("invariant: test executable must live in the profile deps directory")
-        .join("examples")
-        .join(format!("tui_states{}", std::env::consts::EXE_SUFFIX))
+fn gallery() -> Example {
+    Example::built("tui_states")
 }
 
-fn printed(binary: &Path, arguments: &[&str]) -> String {
-    let output = Command::new(binary)
-        .args(arguments)
-        .output()
-        .expect("invariant: capture gallery must be launchable");
-    if !output.status.success() {
-        panic!(
-            "capture gallery {arguments:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    String::from_utf8(output.stdout).expect("invariant: capture gallery prints UTF-8")
-}
-
-fn fixture_names(binary: &Path) -> Vec<String> {
-    printed(binary, &["--list-states"])
+fn fixture_names(gallery: &Example) -> Vec<String> {
+    gallery
+        .printed(&["--list-states"], Duration::from_secs(30))
         .lines()
         .map(str::to_owned)
         .collect()
@@ -88,11 +52,14 @@ fn tui_catalog_cannot_publish_broken_states_routes_or_evidence() {
 
 #[test]
 fn catalog_copy_cannot_drift_from_the_rendered_scenes() {
-    let binary = gallery();
-    let renders = fixture_names(&binary)
+    let gallery = gallery();
+    let renders = fixture_names(&gallery)
         .into_iter()
         .map(|name| {
-            let screen = printed(&binary, &["--state", &name, "--render", "160x48"]);
+            let screen = gallery.printed(
+                &["--state", &name, "--render", "160x48"],
+                Duration::from_secs(30),
+            );
             (name, screen)
         })
         .collect::<Vec<_>>();

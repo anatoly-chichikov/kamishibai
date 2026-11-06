@@ -12,22 +12,9 @@ use std::time::Duration;
 
 use expectrl::process::Healthcheck;
 use expectrl::session::OsSession;
-use expectrl::{Expect, Session, spawn};
+use expectrl::{Expect, Session};
 
-fn example_binary(name: &str) -> PathBuf {
-    let status = Command::new(env!("CARGO"))
-        .args(["build", "--example", name, "--quiet"])
-        .status()
-        .expect("cargo build must succeed");
-    assert!(status.success(), "{name} example must build");
-    std::env::current_exe()
-        .expect("invariant: running test executable must have a path")
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("invariant: test executable must live in the profile deps directory")
-        .join("examples")
-        .join(name)
-}
+use crate::example::Example;
 
 fn kamishibai_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_kamishibai"))
@@ -63,9 +50,8 @@ fn pty_binary_without_key_opens_welcome_setup() {
 
 #[test]
 fn pty_flow_advances_from_your_words_to_what_i_understood() {
-    let binary = example_binary("tui_skeleton");
     let mut session =
-        spawn(binary.to_str().expect("path must be utf-8")).expect("spawn must succeed");
+        Session::spawn(Example::built("tui_skeleton").command()).expect("spawn must succeed");
     session.set_expect_timeout(Some(Duration::from_secs(10)));
     session
         .expect("[screen] Your words")
@@ -87,7 +73,7 @@ fn pty_flow_advances_from_your_words_to_what_i_understood() {
 }
 
 fn state_demo(state: &str) -> OsSession {
-    let mut command = Command::new(example_binary("tui_states"));
+    let mut command = Example::built("tui_states").command();
     command.args(["--state", state]);
     command.env("TERM_PROGRAM", "iTerm.app");
     let mut session = Session::spawn(command).expect("spawn must succeed");

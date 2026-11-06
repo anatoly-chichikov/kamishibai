@@ -15,6 +15,8 @@ mod config;
 mod config_cli;
 mod done;
 mod embedded_workflow;
+#[path = "common/example.rs"]
+mod example;
 mod failure_recovery;
 mod gemini;
 mod illustration;
