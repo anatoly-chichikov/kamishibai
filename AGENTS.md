@@ -1,4 +1,4 @@
-cd //l/c/m- &&   -- --c && c .lcl/c//-cd# AGENTS.md
+# AGENTS.md
 
 This file provides guidance to Codex when working in this repository.
 
@@ -156,14 +156,27 @@ Homebrew is a separate, manual follow-up in the tap repository **`anatoly-chichi
 
 ## TUI changes
 
-Interface knowledge lives in typed RON, not in Markdown. [docs/tui-states/catalog.ron](docs/tui-states/catalog.ron) holds the shared rules with their rationale, every state with its header and footer copy, transitions, scenarios, linked behavior tests, known gaps and capture evidence, and what each verification command establishes; [docs/tui-states/recording.ron](docs/tui-states/recording.ron) holds the VHS capture procedure. Their schemas are `tests/common/tui_catalog.rs` and `tests/common/tui_recording.rs`. Read the affected states, scenarios and rules before changing a TUI feature.
+Interface knowledge lives in typed RON beside the code, not in Markdown. [docs/tui-states/catalog.ron](docs/tui-states/catalog.ron) maps the interface and [docs/tui-states/recording.ron](docs/tui-states/recording.ron) holds the VHS capture procedure. Their schemas are `tests/common/tui_catalog.rs` and `tests/common/tui_recording.rs`, and `cargo test --test all -- ui_catalog:: ui_recording::` checks both against the code, the real renderer and the captures.
+
+The catalog reads top-down: rules, screens, states, scenarios. A rule is a cross-screen law whose `scope` is `Everywhere`, whole screens or named states. A screen's ID is the prefix of every state on it: `welcome`, `words`, `review`, `cards`, `done`. A state holds its surface, chrome, expectations and actions, the grounds it rests on and its captures; a scenario is a route through states. Every entry opens with one head line, `Kind(head: Head(id: "…", intent: "…"),`, whose intent says what the entry gives the learner and what it protects. Build on that intent: change it only when a request changes what the learner gets, and record code that contradicts an expectation as a `Gap` instead of rewriting either.
+
+Navigate with grep from the repository root:
+
+```sh
+grep -n -A1 'Rule(head' docs/tui-states/catalog.ron                  # rules with intent and scope
+grep -n 'Screen(head' docs/tui-states/catalog.ron                    # screens; the ID prefixes their states
+grep -n 'State(head: Head(id: "cards\.' docs/tui-states/catalog.ron  # one screen's states with intents
+grep -n 'Scenario(head' docs/tui-states/catalog.ron                  # scenarios with intents
+grep -n '"cards.pending"' docs/tui-states/catalog.ron                # an entry, moves into it, routes and scopes
+grep -n 'src/tui/screens/your_cards.rs' docs/tui-states/catalog.ron  # from code to the entries citing it
+```
 
 Complete each TUI feature in the same task:
 
-1. Update the affected intent, expectations, rationale and transitions from the request; preserve unrelated behavior, and add stable state and scenario IDs plus transition edges for a new path. Record code that contradicts an expectation as a `Gap` pointing at that code instead of weakening the expectation.
-2. Update sources, linked `tests`, the prepared scene in `examples/tui_states.rs`, and the state's `header` and `footer`; the copy of every prepared scene is compared with the real renderer.
+1. Read the affected rules, screen, states and scenarios first. A new situation gets a state ID on its screen's prefix, transition edges, a scenario where a route changes, and a place in the scope of every rule that governs it.
+2. Update chrome, expectations, actions and grounds, and the prepared scene in `examples/tui_states.rs`; every prepared scene's header and footer are compared with the real renderer.
 3. Recapture the affected scenes with the synthetic tapes as `recording.ron` describes, inspect every rewritten PNG at each affected width, and update the capture's revision and note. An absent capture stays `Missing` with a reason; an older capture is never presented as current evidence.
 4. Run `cargo test --test all -- ui_catalog:: ui_recording::`, the relevant behavior tests, `cargo fmt`, and `cargo clippy --all-targets --all-features -- -D warnings`.
-5. Report the state and scenario IDs updated, the checks run, the captures inspected, and any remaining missing evidence or gaps in the delivery summary.
+5. Report the IDs updated, the checks run, the captures inspected, and any remaining gaps or missing evidence.
 
 Keep interface behavior out of this file and out of new Markdown; when a concept needs a new property, extend the RON schema instead.
