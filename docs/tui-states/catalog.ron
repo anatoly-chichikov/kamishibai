@@ -3,7 +3,7 @@ Catalog(
     verifications: [
         Verification(
             command: "cargo test --test all ui_catalog::",
-            establishes: "The catalog decodes into its typed schema; every entry's head sits on one line and its ID is unique across kinds; each intent has at least 8 words and at most 180 characters and is neither a placeholder, a duplicate nor a retelling of the screen; state IDs carry their screen's prefix and scopes name real screens and states; actions, routes, sources, tests and gaps point at real states, symbols and test functions; every capture decodes, is cataloged and is written by the tape its origin names; every prepared scene is a catalog state whose header and footer equal what the real renderer draws",
+            establishes: "The catalog decodes into its typed schema; every entry's head sits on one line and its ID is unique across kinds; each intent has at least 8 words and at most 180 characters and is neither a placeholder, a duplicate nor a retelling of the screen; every screen entry names a runtime screen, state IDs carry their screen's prefix and scopes name real screens and states; actions, routes, sources, tests and gaps point at real states, symbols and test functions; every capture decodes, is cataloged and is written by the tape its origin names; every prepared scene is a catalog state whose header and footer equal what the real renderer draws",
             limits: "It never executes a described transition, judges whether an intent is true to the product, or compares a PNG with today's renderer; the chrome of states without a prepared scene stays unverified",
         ),
         Verification(
@@ -38,7 +38,7 @@ Catalog(
         ),
     ],
     rules: [
-        Rule(head: Head(id: "inventory.boundary", intent: "Agents editing the TUI can trust this catalog, because its copy, links, tests and captures fail loudly once they drift from the code"),
+        Rule(head: Head(id: "inventory.boundary", intent: "Agents editing the TUI can rely on this catalog's links and copy: every reference, test and capture origin must resolve, and prepared scenes must draw its header and footer"),
             scope: Everywhere,
             expectations: [
                 "The catalog is the authored inventory of intended states, transitions and scenarios; it is not proof that every transition executes",
@@ -60,7 +60,7 @@ Catalog(
             ],
             grounds: Grounds(
                 rationale: [
-                    "Hand-written Markdown maps drifted from the code unnoticed, and the earlier typed contract checked only its own shape, file paths and a few literal words; this catalog also compares its copy with the real renderer and its links, sources, tests and captures with the repository, so drift fails loudly",
+                    "Hand-written Markdown maps drifted from the code unnoticed, and the earlier typed contract checked only its own shape, file paths and a few literal words; this catalog also compares its copy with the real renderer and resolves its links, sources, tests and capture origins against the repository, so that drift fails loudly; it never compares a capture's pixels with today's renderer",
                 ],
                 sources: [
                     Source(file: "src/tui/screen.rs", symbol: "Screen"),
@@ -980,7 +980,7 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "shell.ownership", intent: "Developers can test every interface move as a pure state change without a terminal, provider or clock, because timing, input and side effects live only in the shell"),
+        Rule(head: Head(id: "shell.ownership", intent: "Developers can test each transit step as a pure state change without a terminal, provider or clock, because timing, input reading and side effects stay in the shell"),
             scope: Everywhere,
             expectations: [
                 "transit(App, AppEvent) returns the next App and a Side; it performs no IO and the shell executes every Side",

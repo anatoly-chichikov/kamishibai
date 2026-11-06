@@ -484,6 +484,17 @@ fn scope(
 }
 
 fn screens_of(screens: &[Screen], states: &[State], faults: &mut Vec<Violation>) {
+    for screen in screens {
+        if !runtime_screens()
+            .iter()
+            .any(|runtime| screen_name(*runtime) == screen.screen)
+        {
+            faults.push(Violation::UnknownSurface(format!(
+                "screen {} names {}, which is not a runtime screen",
+                screen.head.id, screen.screen
+            )));
+        }
+    }
     for runtime in runtime_screens() {
         let name = screen_name(runtime);
         let entries = screens
@@ -1471,6 +1482,25 @@ mod tests {
                 .iter()
                 .any(|fault| matches!(fault, Violation::Scope(_))),
             "a rule scope listed no screen and still passed"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_describe_a_screen_the_runtime_does_not_have() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        let mut inventory = catalog(vec![state("cards.open")], Vec::new());
+        inventory.map.screens.push(Screen {
+            head: head(
+                "phantom",
+                "A phantom screen keeps every typed word intact while the learner continues",
+            ),
+            screen: String::from("Phantom"),
+        });
+        assert!(
+            inventory.inspect(directory.path()).iter().any(
+                |fault| matches!(fault, Violation::UnknownSurface(name) if name.contains("Phantom"))
+            ),
+            "catalog described a screen the runtime does not have"
         );
     }
 

@@ -1,10 +1,16 @@
 //! Repository examples built in the running test's own Cargo profile and run within a deadline.
+//!
+//! Each launch runs in its own process group on Unix. One deadline covers the process and the
+//! reading of its output; once it passes, the whole group is killed so no descendant outlives it.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
-use std::thread::{self, JoinHandle};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 use std::time::{Duration, Instant};
+
+use anyhow::{Result, bail};
 
 /// One example binary Cargo built for this test run; build it with `built` and launch it with `command` or `printed`.
 pub(crate) struct Example {
@@ -26,7 +32,8 @@ impl Example {
             "--locked",
             "--quiet",
         ]);
-        let output = bounded(command, Duration::from_secs(600));
+        let output = bounded(command, Duration::from_secs(600))
+            .unwrap_or_else(|error| panic!("example {name} could not be built: {error:#}"));
         if !output.status.success() {
             panic!(
                 "example {name} failed to build: {}",
@@ -49,7 +56,12 @@ impl Example {
     pub(crate) fn printed(&self, arguments: &[&str], timeout: Duration) -> String {
         let mut command = self.command();
         command.args(arguments);
-        let output = bounded(command, timeout);
+        let output = bounded(command, timeout).unwrap_or_else(|error| {
+            panic!(
+                "example {} {arguments:?} did not finish: {error:#}",
+                self.binary.display()
+            )
+        });
         if !output.status.success() {
             panic!(
                 "example {} {arguments:?} failed: {}",
@@ -95,7 +107,9 @@ fn executable(messages: &str, name: &str) -> PathBuf {
         .expect("invariant: cargo must report the executable of the example it built")
 }
 
-fn bounded(mut command: Command, timeout: Duration) -> Output {
+fn bounded(mut command: Command, timeout: Duration) -> Result<Output> {
+    let deadline = Instant::now() + timeout;
+    isolated(&mut command);
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -104,54 +118,141 @@ fn bounded(mut command: Command, timeout: Duration) -> Output {
         .expect("invariant: child process must be launchable");
     let stdout = drained(child.stdout.take());
     let stderr = drained(child.stderr.take());
-    let status = reaped(&mut child, timeout);
-    Output {
+    let status = reaped(&mut child, deadline);
+    let stdout = collected(&stdout, deadline);
+    let stderr = collected(&stderr, deadline);
+    let (Some(status), Some(stdout), Some(stderr)) = (status, stdout, stderr) else {
+        terminate(&mut child);
+        bail!(
+            "process {} or a descendant holding its output outlived the {timeout:?} deadline",
+            child.id()
+        );
+    };
+    Ok(Output {
         status,
-        stdout: stdout
-            .join()
-            .expect("invariant: stdout reader must not panic"),
-        stderr: stderr
-            .join()
-            .expect("invariant: stderr reader must not panic"),
-    }
+        stdout,
+        stderr,
+    })
 }
 
-fn drained(pipe: Option<impl Read + Send + 'static>) -> JoinHandle<Vec<u8>> {
+fn drained(pipe: Option<impl Read + Send + 'static>) -> Receiver<Vec<u8>> {
+    let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut bytes = Vec::new();
         if let Some(mut pipe) = pipe {
             let _ = pipe.read_to_end(&mut bytes);
         }
-        bytes
-    })
+        let _ = sender.send(bytes);
+    });
+    receiver
 }
 
-fn reaped(child: &mut Child, timeout: Duration) -> ExitStatus {
-    let deadline = Instant::now() + timeout;
+fn collected(output: &Receiver<Vec<u8>>, deadline: Instant) -> Option<Vec<u8>> {
+    output
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .ok()
+}
+
+fn reaped(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
     loop {
         if let Some(status) = child
             .try_wait()
             .expect("invariant: child status must be readable")
         {
-            return status;
+            return Some(status);
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!(
-                "child process {} outlived its {timeout:?} deadline",
-                child.id()
-            );
+            return None;
         }
         thread::sleep(Duration::from_millis(25));
     }
 }
 
+#[cfg(unix)]
+fn isolated(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn isolated(_command: &mut Command) {}
+
+#[cfg(unix)]
+fn terminate(child: &mut Child) {
+    use rustix::process::{Pid, Signal, kill_process_group};
+    let _ = kill_process_group(Pid::from_child(child), Signal::KILL);
+    let _ = child.wait();
+}
+
+#[cfg(not(unix))]
+fn terminate(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::path::Path;
     use std::path::PathBuf;
+    #[cfg(unix)]
+    use std::process::Command;
+    #[cfg(unix)]
+    use std::time::{Duration, Instant};
 
+    #[cfg(unix)]
+    use super::bounded;
     use super::{executable, named};
+
+    #[cfg(unix)]
+    fn launcher(script: &str) -> Command {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", script]);
+        command
+    }
+
+    #[cfg(unix)]
+    fn gone(record: &Path, patience: Duration) -> bool {
+        let raw = std::fs::read_to_string(record)
+            .expect("invariant: the launcher must record its descendant")
+            .trim()
+            .parse::<i32>()
+            .expect("invariant: the record must hold a process ID");
+        let pid = rustix::process::Pid::from_raw(raw)
+            .expect("invariant: a recorded process ID must be positive");
+        let deadline = Instant::now() + patience;
+        while Instant::now() < deadline {
+            if rustix::process::test_kill_process(pid).is_err() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_descendant_holding_the_output_cannot_outlast_the_deadline() {
+        let started = Instant::now();
+        let outcome = bounded(launcher("sleep 5 &"), Duration::from_millis(200));
+        assert!(
+            outcome.is_err() && started.elapsed() < Duration::from_secs(2),
+            "a background descendant kept the output open past the deadline"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_deadline_cannot_leave_a_descendant_running() {
+        let directory = tempfile::tempdir().expect("invariant: temporary directory must exist");
+        let record = directory.path().join("descendant.pid");
+        let script = format!("sleep 5 & echo $! > '{}'; wait", record.display());
+        let _ = bounded(launcher(&script), Duration::from_millis(300));
+        assert!(
+            gone(&record, Duration::from_secs(2)),
+            "the deadline stopped the launcher but left its descendant running"
+        );
+    }
 
     #[test]
     fn the_debug_directory_cannot_be_passed_to_cargo_as_a_profile_name() {
