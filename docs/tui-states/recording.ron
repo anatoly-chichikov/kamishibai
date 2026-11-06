@@ -1,25 +1,161 @@
 Recording(
-    version: 1,
-    tapes: [
-        Tape(
-            file: "docs/tui-states/states.tape",
-            drives: Scenes,
-            purpose: "Launch every prepared scene of examples/tui_states by its stable ID and capture it without Gemini; each Screenshot belongs to the scene launched just before it, which catalog.ron records as that state's Synthetic capture",
-            geometry: "2250x1688 px at FontSize 36, the 2x frame every wide capture shares",
-        ),
-        Tape(
-            file: "docs/tui-states/states-narrow.tape",
-            drives: Scenes,
-            purpose: "Capture the intentionally narrow card-tag and generation-guidance layouts from the same prepared scenes",
-            geometry: "1200x1688 px at FontSize 36; VHS accepts geometry only at the top of a tape, so narrow captures need their own tape",
-        ),
-        Tape(
-            file: "docs/tui-states/capture.tape",
-            drives: Binary,
-            purpose: "Run the real release binary against Gemini with an isolated data, cache and output directory, writing the Live captures and the raw README recording live/capture.gif",
-            geometry: "2250x1688 px at FontSize 36 so the monochrome palette survives the final GIF downscale",
-        ),
-    ],
+    version: 2,
+    procedure: Procedure(
+        tapes: [
+            Tape(
+                file: "docs/tui-states/states.tape",
+                drives: Scenes,
+                purpose: "Launch every prepared scene of examples/tui_states by its stable ID and capture it without Gemini; each Screenshot belongs to the scene launched just before it, which catalog.ron records as that state's Synthetic capture",
+                geometry: "2250x1688 px at FontSize 36, the 2x frame every wide capture shares",
+            ),
+            Tape(
+                file: "docs/tui-states/states-narrow.tape",
+                drives: Scenes,
+                purpose: "Capture the intentionally narrow card-tag and generation-guidance layouts from the same prepared scenes",
+                geometry: "1200x1688 px at FontSize 36; VHS accepts geometry only at the top of a tape, so narrow captures need their own tape",
+            ),
+            Tape(
+                file: "docs/tui-states/capture.tape",
+                drives: Binary,
+                purpose: "Run the real release binary against Gemini with an isolated data, cache and output directory, writing the Live captures and the raw README recording live/capture.gif",
+                geometry: "2250x1688 px at FontSize 36 so the monochrome palette survives the final GIF downscale",
+            ),
+        ],
+        steps: [
+            Step(
+                title: "Build the release binary and gallery",
+                commands: [
+                    "cargo build --release",
+                    "cargo build --release --example tui_states",
+                ],
+                explanation: [
+                    "Run from the repository root; the live tape launches target/release/kamishibai and both synthetic tapes launch target/release/examples/tui_states for every capture",
+                    "No recording-only key patch is needed because Ctrl+G is a plain control byte that crossterm reads in raw mode",
+                ],
+            ),
+            Step(
+                title: "Record the synthetic scenes",
+                commands: [
+                    "cd docs/tui-states",
+                    "vhs states.tape",
+                    "vhs states-narrow.tape",
+                    "rm -f states-throwaway.gif states-narrow-throwaway.gif",
+                ],
+                explanation: [
+                    "No Gemini call happens; every capture starts its own gallery process with --state <id>, waits until the AI reminder every scene draws is on screen, repaints with Ctrl+L, and holds the scene 2.5 s on each side of the Screenshot before quitting",
+                    "Inserting or reordering scenes in examples/tui_states.rs cannot redirect a capture, because tapes name scenes by stable ID",
+                    "The two Welcome key shots are the same EnterKey stage: 00-welcome has no environment key and offers only submit, while 00b-welcome-env fakes an available GEMINI_API_KEY and adds the focused load from env chip; the tape exports no key",
+                    "Inspect every rewritten PNG at each width before treating it as current evidence, then update the capture notes in catalog.ron",
+                ],
+            ),
+            Step(
+                title: "Record the live flow",
+                commands: [
+                    "vhs capture.tape",
+                ],
+                explanation: [
+                    "Run from docs/tui-states with GEMINI_API_KEY exported; this is a paid real run of roughly five to seven minutes because the tape starts from an empty cache and later regenerates one tuned card",
+                    "The tape clears and reuses /tmp/kamishibai-vhs-data, /tmp/kamishibai-vhs-cache and /tmp/kamishibai-vhs-home, so it never touches the operator's own preferences, cache or output",
+                    "Live captures are the user-flow evidence; prepared scenes only prove rendering",
+                ],
+            ),
+            Step(
+                title: "Stash the raw recording",
+                commands: [
+                    "cp live/capture.gif /tmp/raw.gif",
+                ],
+                explanation: [
+                    "Keep /tmp/raw.gif, and any separately recorded /tmp/adjust-raw.gif or /tmp/nav-adjust-raw.gif, so the slice and encode pass can be redone without VHS or Gemini",
+                    "Windows in timings.conf name their source main, adjust or nav, which encode.sh reads from RAW, ADJUST_RAW and NAV_RAW",
+                ],
+            ),
+            Step(
+                title: "Detect scene transitions",
+                commands: [
+                    "ffmpeg -i /tmp/raw.gif -vf \"select='gt(scene,0.005)',showinfo\" -f null - 2>&1 | awk '/pts_time/{gsub(/.*pts_time:/,\"\");print $1}' > /tmp/transitions.txt",
+                    "gcat /tmp/transitions.txt",
+                ],
+                explanation: [
+                    "The 0.005 threshold catches the major TUI transitions; the default 0.3 finds none because a TUI frame changes only a slice of cells",
+                    "The number of transitions is not fixed: it grows whenever a new state joins the flow",
+                ],
+            ),
+            Step(
+                title: "Dump a frame at every transition",
+                commands: [
+                    "mkdir -p /tmp/cuts && rm -f /tmp/cuts/*.png",
+                    "ffmpeg -y -ss 0 -i /tmp/raw.gif -frames:v 1 /tmp/cuts/cut-00.png",
+                    "i=1; while read t; do ffmpeg -y -ss \"$t\" -i /tmp/raw.gif -frames:v 1 /tmp/cuts/cut-$(printf %02d $i)-t${t}.png; i=$((i+1)); done < /tmp/transitions.txt",
+                    "open /tmp/cuts",
+                ],
+                explanation: [
+                    "Look at every cut and map it to a catalog state before classifying the sections between cuts",
+                    "A new state surfaces as an additional transition; slot it into a section kind by inspecting its cut frame instead of dropping it",
+                ],
+            ),
+            Step(
+                title: "Propose the slice plan to the operator",
+                commands: [],
+                explanation: [
+                    "Before running ffmpeg, print one row per section with its kind, source window, sampling rate and projected output duration, and wait for the operator's approval",
+                    "Classify each section with the section kinds below; the slices list the standard flow's usual mapping",
+                ],
+            ),
+            Step(
+                title: "Encode the README GIF",
+                commands: [
+                    "RAW=/tmp/raw.gif ADJUST_RAW=/tmp/adjust-raw.gif NAV_RAW=/tmp/nav-adjust-raw.gif ./encode.sh",
+                ],
+                explanation: [
+                    "timings.conf is the single source of truth for section windows, durations and raw sources; encode.sh prints the exact final duration and writes every section boundary to timings.timeline.txt",
+                    "encode.sh splices the finale caption live/caption.png; only live/capture.gif is committed, and MAKE_HIRES=1 adds a local-only capture.hires.mp4 master",
+                ],
+            ),
+            Step(
+                title: "Confirm the change set",
+                commands: [
+                    "git status --short",
+                ],
+                explanation: [
+                    "Only regenerated assets and intentional code or catalog changes should be staged; keep the raws while another timing pass is still possible",
+                ],
+            ),
+        ],
+        pitfalls: [
+            Pitfall(
+                rule: "Never sample a spinner section below 25 fps",
+                reason: "Each source frame stands for N × 40 ms of real rotation, so with N above 1 the spinner turns N times too fast; keep 25 fps and shorten the window instead",
+            ),
+            Pitfall(
+                rule: "Never treat review or another click-through state as a workflow section",
+                reason: "Ctrl+G fires right after candidates land, so the raw recording shows review for about 1.5 s; a static splice for two to three seconds keeps the glosses readable",
+            ),
+            Pitfall(
+                rule: "Never carry section windows over from a previous recording",
+                reason: "Gemini latency swings between roughly two and seven minutes per run, so scene detection must run first every time",
+            ),
+            Pitfall(
+                rule: "Never count transitions in advance",
+                reason: "New states join the flow over time and scene detection surfaces them; classify unknown cuts by inspecting them instead of dropping them",
+            ),
+            Pitfall(
+                rule: "Never delete the raw recordings before deciding no further slice pass is needed",
+                reason: "Re-recording costs minutes of Gemini wall-clock, while re-slicing is local and preserves the original takes",
+            ),
+            Pitfall(
+                rule: "Never fix an already encoded GIF by duplicating its frames",
+                reason: "A derivative GIF has already lost spinner sampling fidelity; go back to the raw recording",
+            ),
+            Pitfall(
+                rule: "Never photograph a freshly launched scene after a fixed sleep alone",
+                reason: "VHS writes a Screenshot from the next frame it records and captures that frame's cursor and text layers separately, so a frame recorded while q quits the scene mixes the shell prompt with the scene's cursor; waiting for the AI reminder, repainting with Ctrl+L and holding the scene 2.5 s on each side of the shot keeps the whole frame on the scene",
+            ),
+            Pitfall(
+                rule: "Never reintroduce the temporary Ctrl+S recording chord",
+                reason: "Ctrl+G is the generation key everywhere and needs no recording-only patch",
+            ),
+        ],
+    ),
     demo: Demo(
         known: "EN",
         learning: "FR",
@@ -33,169 +169,37 @@ Recording(
             "capture.tape was last recorded on 2026-08-25, before the 1.11.1 header copy; its wait patterns were moved to the current copy on 2026-10-01 without a live run, so the next live recording is the first to exercise them",
         ],
     ),
-    steps: [
-        Step(
-            title: "Build the release binary and gallery",
-            commands: [
-                "cargo build --release",
-                "cargo build --release --example tui_states",
-            ],
-            explanation: [
-                "Run from the repository root; the live tape launches target/release/kamishibai and both synthetic tapes launch target/release/examples/tui_states for every capture",
-                "No recording-only key patch is needed because Ctrl+G is a plain control byte that crossterm reads in raw mode",
-            ],
-        ),
-        Step(
-            title: "Record the synthetic scenes",
-            commands: [
-                "cd docs/tui-states",
-                "vhs states.tape",
-                "vhs states-narrow.tape",
-                "rm -f states-throwaway.gif states-narrow-throwaway.gif",
-            ],
-            explanation: [
-                "No Gemini call happens; every capture starts its own gallery process with --state <id>, waits until the AI reminder every scene draws is on screen, repaints with Ctrl+L, and holds the scene 2.5 s on each side of the Screenshot before quitting",
-                "Inserting or reordering scenes in examples/tui_states.rs cannot redirect a capture, because tapes name scenes by stable ID",
-                "The two Welcome key shots are the same EnterKey stage: 00-welcome has no environment key and offers only submit, while 00b-welcome-env fakes an available GEMINI_API_KEY and adds the focused load from env chip; the tape exports no key",
-                "Inspect every rewritten PNG at each width before treating it as current evidence, then update the capture notes in catalog.ron",
-            ],
-        ),
-        Step(
-            title: "Record the live flow",
-            commands: [
-                "vhs capture.tape",
-            ],
-            explanation: [
-                "Run from docs/tui-states with GEMINI_API_KEY exported; this is a paid real run of roughly five to seven minutes because the tape starts from an empty cache and later regenerates one tuned card",
-                "The tape clears and reuses /tmp/kamishibai-vhs-data, /tmp/kamishibai-vhs-cache and /tmp/kamishibai-vhs-home, so it never touches the operator's own preferences, cache or output",
-                "Live captures are the user-flow evidence; prepared scenes only prove rendering",
-            ],
-        ),
-        Step(
-            title: "Stash the raw recording",
-            commands: [
-                "cp live/capture.gif /tmp/raw.gif",
-            ],
-            explanation: [
-                "Keep /tmp/raw.gif, and any separately recorded /tmp/adjust-raw.gif or /tmp/nav-adjust-raw.gif, so the slice and encode pass can be redone without VHS or Gemini",
-                "Windows in timings.conf name their source main, adjust or nav, which encode.sh reads from RAW, ADJUST_RAW and NAV_RAW",
-            ],
-        ),
-        Step(
-            title: "Detect scene transitions",
-            commands: [
-                "ffmpeg -i /tmp/raw.gif -vf \"select='gt(scene,0.005)',showinfo\" -f null - 2>&1 | awk '/pts_time/{gsub(/.*pts_time:/,\"\");print $1}' > /tmp/transitions.txt",
-                "gcat /tmp/transitions.txt",
-            ],
-            explanation: [
-                "The 0.005 threshold catches the major TUI transitions; the default 0.3 finds none because a TUI frame changes only a slice of cells",
-                "The number of transitions is not fixed: it grows whenever a new state joins the flow",
-            ],
-        ),
-        Step(
-            title: "Dump a frame at every transition",
-            commands: [
-                "mkdir -p /tmp/cuts && rm -f /tmp/cuts/*.png",
-                "ffmpeg -y -ss 0 -i /tmp/raw.gif -frames:v 1 /tmp/cuts/cut-00.png",
-                "i=1; while read t; do ffmpeg -y -ss \"$t\" -i /tmp/raw.gif -frames:v 1 /tmp/cuts/cut-$(printf %02d $i)-t${t}.png; i=$((i+1)); done < /tmp/transitions.txt",
-                "open /tmp/cuts",
-            ],
-            explanation: [
-                "Look at every cut and map it to a catalog state before classifying the sections between cuts",
-                "A new state surfaces as an additional transition; slot it into a section kind by inspecting its cut frame instead of dropping it",
-            ],
-        ),
-        Step(
-            title: "Propose the slice plan to the operator",
-            commands: [],
-            explanation: [
-                "Before running ffmpeg, print one row per section with its kind, source window, sampling rate and projected output duration, and wait for the operator's approval",
-                "Classify each section with the section kinds below; the slices list the standard flow's usual mapping",
-            ],
-        ),
-        Step(
-            title: "Encode the README GIF",
-            commands: [
-                "RAW=/tmp/raw.gif ADJUST_RAW=/tmp/adjust-raw.gif NAV_RAW=/tmp/nav-adjust-raw.gif ./encode.sh",
-            ],
-            explanation: [
-                "timings.conf is the single source of truth for section windows, durations and raw sources; encode.sh prints the exact final duration and writes every section boundary to timings.timeline.txt",
-                "encode.sh splices the finale caption live/caption.png; only live/capture.gif is committed, and MAKE_HIRES=1 adds a local-only capture.hires.mp4 master",
-            ],
-        ),
-        Step(
-            title: "Confirm the change set",
-            commands: [
-                "git status --short",
-            ],
-            explanation: [
-                "Only regenerated assets and intentional code or catalog changes should be staged; keep the raws while another timing pass is still possible",
-            ],
-        ),
-    ],
-    sections: [
-        Section(
-            kind: "workflow",
-            signal: "A user-driven step or new content: typing, candidates landing, the final view landing",
-            sampling: "25 fps over the section's natural window, preserving real-time animation",
-        ),
-        Section(
-            kind: "read",
-            signal: "A state the recording shows only briefly but the viewer needs time to read, such as review clicked through by Ctrl+G after about a second",
-            sampling: "A static splice of the matching live PNG held two to three seconds; never the raw window",
-        ),
-        Section(
-            kind: "indicator-wait",
-            signal: "A spinner or progress wait that is static apart from its indicator: the understanding pass or the generation queue",
-            sampling: "Short real-time windows at 25 fps around meaningful milestones; never one long wait resampled into a time-lapse",
-        ),
-        Section(
-            kind: "transition",
-            signal: "A cross-fade between two states shorter than a second",
-            sampling: "Usually skipped or rolled into the neighbouring section",
-        ),
-    ],
-    slices: [
-        Slice(label: "A typing", window: "0 s to the first busy frame", kind: "workflow", output: "about 1.5 s"),
-        Slice(label: "B understanding", window: "first busy frame to candidates appearing", kind: "indicator-wait", output: "about 1.2 s"),
-        Slice(label: "C review", window: "candidates window, spliced from 02-what-i-understood.png", kind: "read", output: "1 to 3 s"),
-        Slice(label: "D first generation", window: "building starts to all cards done: 0.2 s windows around each visible redraw including retry ticks until the fifth card fills the viewport, then one 0.6 s publish transition to the completed batch", kind: "indicator-wait", output: "about 4.6 s"),
-        Slice(label: "E tuning", window: "first completed batch: walk to chouette, open the editor, focus level and move a2 to b1", kind: "workflow", output: "about 5.4 s"),
-        Slice(label: "F regeneration", window: "1 pending to completion: hold the struck sentence, press Ctrl+G, then one consistent 0.6 s beat per regenerated artifact", kind: "indicator-wait", output: "about 3 s"),
-        Slice(label: "G result", window: "final completion to the end: hold the rewritten collapsed b1 card without reopening the editor", kind: "read", output: "about 3.2 s"),
-    ],
-    pitfalls: [
-        Pitfall(
-            rule: "Never sample a spinner section below 25 fps",
-            reason: "Each source frame stands for N × 40 ms of real rotation, so with N above 1 the spinner turns N times too fast; keep 25 fps and shorten the window instead",
-        ),
-        Pitfall(
-            rule: "Never treat review or another click-through state as a workflow section",
-            reason: "Ctrl+G fires right after candidates land, so the raw recording shows review for about 1.5 s; a static splice for two to three seconds keeps the glosses readable",
-        ),
-        Pitfall(
-            rule: "Never carry section windows over from a previous recording",
-            reason: "Gemini latency swings between roughly two and seven minutes per run, so scene detection must run first every time",
-        ),
-        Pitfall(
-            rule: "Never count transitions in advance",
-            reason: "New states join the flow over time and scene detection surfaces them; classify unknown cuts by inspecting them instead of dropping them",
-        ),
-        Pitfall(
-            rule: "Never delete the raw recordings before deciding no further slice pass is needed",
-            reason: "Re-recording costs minutes of Gemini wall-clock, while re-slicing is local and preserves the original takes",
-        ),
-        Pitfall(
-            rule: "Never fix an already encoded GIF by duplicating its frames",
-            reason: "A derivative GIF has already lost spinner sampling fidelity; go back to the raw recording",
-        ),
-        Pitfall(
-            rule: "Never photograph a freshly launched scene after a fixed sleep alone",
-            reason: "VHS writes a Screenshot from the next frame it records and captures that frame's cursor and text layers separately, so a frame recorded while q quits the scene mixes the shell prompt with the scene's cursor; waiting for the AI reminder, repainting with Ctrl+L and holding the scene 2.5 s on each side of the shot keeps the whole frame on the scene",
-        ),
-        Pitfall(
-            rule: "Never reintroduce the temporary Ctrl+S recording chord",
-            reason: "Ctrl+G is the generation key everywhere and needs no recording-only patch",
-        ),
-    ],
+    sampling: Sampling(
+        sections: [
+            Section(
+                kind: "workflow",
+                signal: "A user-driven step or new content: typing, candidates landing, the final view landing",
+                sampling: "25 fps over the section's natural window, preserving real-time animation",
+            ),
+            Section(
+                kind: "read",
+                signal: "A state the recording shows only briefly but the viewer needs time to read, such as review clicked through by Ctrl+G after about a second",
+                sampling: "A static splice of the matching live PNG held two to three seconds; never the raw window",
+            ),
+            Section(
+                kind: "indicator-wait",
+                signal: "A spinner or progress wait that is static apart from its indicator: the understanding pass or the generation queue",
+                sampling: "Short real-time windows at 25 fps around meaningful milestones; never one long wait resampled into a time-lapse",
+            ),
+            Section(
+                kind: "transition",
+                signal: "A cross-fade between two states shorter than a second",
+                sampling: "Usually skipped or rolled into the neighbouring section",
+            ),
+        ],
+        slices: [
+            Slice(label: "A typing", window: "0 s to the first busy frame", kind: "workflow", output: "about 1.5 s"),
+            Slice(label: "B understanding", window: "first busy frame to candidates appearing", kind: "indicator-wait", output: "about 1.2 s"),
+            Slice(label: "C review", window: "candidates window, spliced from 02-what-i-understood.png", kind: "read", output: "1 to 3 s"),
+            Slice(label: "D first generation", window: "building starts to all cards done: 0.2 s windows around each visible redraw including retry ticks until the fifth card fills the viewport, then one 0.6 s publish transition to the completed batch", kind: "indicator-wait", output: "about 4.6 s"),
+            Slice(label: "E tuning", window: "first completed batch: walk to chouette, open the editor, focus level and move a2 to b1", kind: "workflow", output: "about 5.4 s"),
+            Slice(label: "F regeneration", window: "1 pending to completion: hold the struck sentence, press Ctrl+G, then one consistent 0.6 s beat per regenerated artifact", kind: "indicator-wait", output: "about 3 s"),
+            Slice(label: "G result", window: "final completion to the end: hold the rewritten collapsed b1 card without reopening the editor", kind: "read", output: "about 3.2 s"),
+        ],
+    ),
 )

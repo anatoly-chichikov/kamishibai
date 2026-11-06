@@ -12,12 +12,26 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 pub(super) struct Recording {
     version: u32,
-    tapes: Vec<Tape>,
+    procedure: Procedure,
     demo: Demo,
+    sampling: Sampling,
+}
+
+/// How captures are made: the tapes, the operator steps that run them and the mistakes to avoid.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Procedure {
+    tapes: Vec<Tape>,
     steps: Vec<Step>,
+    pitfalls: Vec<Pitfall>,
+}
+
+/// How the demo GIF is cut: the section kinds and the slices of the standard flow classified by them.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Sampling {
     sections: Vec<Section>,
     slices: Vec<Slice>,
-    pitfalls: Vec<Pitfall>,
 }
 
 /// One VHS tape: what it drives, how it is framed, and why it exists.
@@ -106,11 +120,12 @@ impl Recording {
     #[must_use]
     pub(super) fn inspect(&self, root: &Path) -> Vec<Fault> {
         let mut faults = Vec::new();
-        if self.version != 1 {
+        if self.version != 2 {
             faults.push(Fault::Version(self.version));
         }
         let directory = root.join("docs/tui-states");
-        let listed = self
+        let procedure = &self.procedure;
+        let listed = procedure
             .tapes
             .iter()
             .map(|tape| tape.file.clone())
@@ -129,7 +144,7 @@ impl Recording {
             }
         }
         let mut live = String::new();
-        for tape in &self.tapes {
+        for tape in &procedure.tapes {
             text(&tape.purpose, "tape purpose", &mut faults);
             text(&tape.geometry, "tape geometry", &mut faults);
             let Ok(document) = fs::read_to_string(root.join(&tape.file)) else {
@@ -157,10 +172,10 @@ impl Recording {
         for line in &self.demo.story {
             text(line, "demo story", &mut faults);
         }
-        if self.steps.is_empty() {
+        if procedure.steps.is_empty() {
             faults.push(Fault::Empty(String::from("steps")));
         }
-        for step in &self.steps {
+        for step in &procedure.steps {
             text(&step.title, "step title", &mut faults);
             for line in step.commands.iter().chain(&step.explanation) {
                 text(line, &step.title, &mut faults);
@@ -176,16 +191,17 @@ impl Recording {
             }
         }
         let kinds = self
+            .sampling
             .sections
             .iter()
             .map(|section| section.kind.as_str())
             .collect::<HashSet<_>>();
-        for section in &self.sections {
+        for section in &self.sampling.sections {
             text(&section.kind, "section kind", &mut faults);
             text(&section.signal, &section.kind, &mut faults);
             text(&section.sampling, &section.kind, &mut faults);
         }
-        for slice in &self.slices {
+        for slice in &self.sampling.slices {
             text(&slice.label, "slice label", &mut faults);
             text(&slice.window, &slice.label, &mut faults);
             text(&slice.output, &slice.label, &mut faults);
@@ -196,10 +212,10 @@ impl Recording {
                 )));
             }
         }
-        if self.pitfalls.is_empty() {
+        if procedure.pitfalls.is_empty() {
             faults.push(Fault::Empty(String::from("pitfalls")));
         }
-        for pitfall in &self.pitfalls {
+        for pitfall in &procedure.pitfalls {
             text(&pitfall.rule, "pitfall rule", &mut faults);
             text(&pitfall.reason, &pitfall.rule, &mut faults);
         }
@@ -218,33 +234,39 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use super::{Demo, Drive, Fault, Pitfall, Recording, Section, Slice, Step, Tape};
+    use super::{
+        Demo, Drive, Fault, Pitfall, Procedure, Recording, Sampling, Section, Slice, Step, Tape,
+    };
 
     fn recording(tapes: Vec<Tape>, words: Vec<String>, slices: Vec<Slice>) -> Recording {
         Recording {
-            version: 1,
-            tapes,
+            version: 2,
+            procedure: Procedure {
+                tapes,
+                steps: vec![Step {
+                    title: String::from("Record"),
+                    commands: vec![String::from("vhs states.tape")],
+                    explanation: vec![String::from("Synthetic scenes need no provider")],
+                }],
+                pitfalls: vec![Pitfall {
+                    rule: String::from("Never resample a spinner"),
+                    reason: String::from("It spins faster than real time"),
+                }],
+            },
             demo: Demo {
                 known: String::from("EN"),
                 learning: String::from("FR"),
                 words,
                 story: vec![String::from("Type the words and build one batch")],
             },
-            steps: vec![Step {
-                title: String::from("Record"),
-                commands: vec![String::from("vhs states.tape")],
-                explanation: vec![String::from("Synthetic scenes need no provider")],
-            }],
-            sections: vec![Section {
-                kind: String::from("workflow"),
-                signal: String::from("New content lands"),
-                sampling: String::from("25 fps on the natural window"),
-            }],
-            slices,
-            pitfalls: vec![Pitfall {
-                rule: String::from("Never resample a spinner"),
-                reason: String::from("It spins faster than real time"),
-            }],
+            sampling: Sampling {
+                sections: vec![Section {
+                    kind: String::from("workflow"),
+                    signal: String::from("New content lands"),
+                    sampling: String::from("25 fps on the natural window"),
+                }],
+                slices,
+            },
         }
     }
 

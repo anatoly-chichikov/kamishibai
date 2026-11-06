@@ -15,8 +15,7 @@ pub(super) struct Catalog {
     version: u32,
     verifications: Vec<Verification>,
     rules: Vec<Rule>,
-    states: Vec<State>,
-    scenarios: Vec<Scenario>,
+    map: Map,
 }
 
 /// One command that checks the TUI, what a green run establishes, and what it leaves unproven.
@@ -28,13 +27,36 @@ struct Verification {
     limits: String,
 }
 
-/// A shared rule: its intent, the expectations it imposes, and why it exists.
+/// The state map: every runtime state and the scenarios that route through them.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Map {
+    states: Vec<State>,
+    scenarios: Vec<Scenario>,
+}
+
+/// The one-line head every entry opens with: its stable ID and the intent an edit must preserve.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Head {
+    id: String,
+    intent: String,
+}
+
+/// A shared rule: its head, the expectations it imposes, and what it rests on.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Rule {
-    id: String,
-    intent: String,
+    head: Head,
     expectations: Vec<String>,
+    grounds: Grounds,
+}
+
+/// What an entry rests on: why it exists, the code that implements it, the tests that check it and the gaps where code disagrees.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Grounds {
+    #[serde(default)]
     rationale: Vec<String>,
     sources: Vec<Source>,
     tests: Vec<Check>,
@@ -50,13 +72,24 @@ struct Gap {
     sources: Vec<Source>,
 }
 
+/// One runtime situation: its head, its contract, what it rests on and the captures that show it.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct State {
-    id: String,
-    surface: Surface,
-    intent: String,
+    head: Head,
     contract: Contract,
+    grounds: Grounds,
+    evidence: Evidence,
+}
+
+/// What a state promises: where it lives, the chrome it draws, what must hold and where each event leads.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Contract {
+    surface: Surface,
+    chrome: Chrome,
+    expectations: Vec<String>,
+    actions: Vec<Action>,
 }
 
 #[derive(Deserialize)]
@@ -74,26 +107,13 @@ enum Overlay {
     Error,
 }
 
+/// The header title, the dim tagline beside it and the footer hints, as the renderer draws them.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Contract {
-    header: Header,
-    footer: Vec<String>,
-    expectations: Vec<String>,
-    actions: Vec<Action>,
-    evidence: Evidence,
-    sources: Vec<Source>,
-    tests: Vec<Check>,
-    #[serde(default)]
-    gaps: Vec<Gap>,
-}
-
-/// The header title and the dim tagline beside it.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Header {
+struct Chrome {
     title: String,
     hint: String,
+    footer: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -143,11 +163,11 @@ struct Check {
     test: String,
 }
 
+/// A route through states with the expectations it must keep and the tests that walk it.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Scenario {
-    id: String,
-    intent: String,
+    head: Head,
     route: Vec<String>,
     expectations: Vec<String>,
     tests: Vec<Check>,
@@ -186,7 +206,7 @@ impl Catalog {
     pub(super) fn inspect_scenes(&self, names: &[String]) -> Vec<Violation> {
         names
             .iter()
-            .filter(|name| !self.states.iter().any(|state| &state.id == *name))
+            .filter(|name| !self.map.states.iter().any(|state| &state.head.id == *name))
             .map(|name| Violation::UnknownState(name.clone()))
             .collect()
     }
@@ -198,23 +218,23 @@ impl Catalog {
     pub(super) fn inspect_renders(&self, renders: &[(String, String)]) -> Vec<Violation> {
         let mut faults = Vec::new();
         for (id, screen) in renders {
-            let Some(state) = self.states.iter().find(|state| &state.id == id) else {
+            let Some(state) = self.map.states.iter().find(|state| &state.head.id == id) else {
                 faults.push(Violation::UnknownState(id.clone()));
                 continue;
             };
-            let header = &state.contract.header;
-            let drawn = tagline(screen, &header.title);
-            if drawn != Some(header.hint.as_str()) {
+            let chrome = &state.contract.chrome;
+            let drawn = tagline(screen, &chrome.title);
+            if drawn != Some(chrome.hint.as_str()) {
                 faults.push(Violation::Header(format!(
                     "{id}: catalog {:?} / {:?} but renderer drew {drawn:?}",
-                    header.title, header.hint
+                    chrome.title, chrome.hint
                 )));
             }
             let footer = hints(screen.lines().last().unwrap_or_default());
-            if footer != state.contract.footer {
+            if footer != chrome.footer {
                 faults.push(Violation::Footer(format!(
                     "{id}: catalog {:?} but renderer drew {footer:?}",
-                    state.contract.footer
+                    chrome.footer
                 )));
             }
         }
@@ -225,73 +245,69 @@ impl Catalog {
     #[must_use]
     pub(super) fn inspect(&self, root: &Path) -> Vec<Violation> {
         let mut faults = Vec::new();
-        if self.version != 1 {
+        if self.version != 2 {
             faults.push(Violation::Version(self.version));
         }
         verifications(&self.verifications, root, &mut faults);
-        identifiers(&self.rules, |rule| &rule.id, "rules", &mut faults);
-        identifiers(&self.states, |state| &state.id, "states", &mut faults);
+        let states = &self.map.states;
+        identifiers(&self.rules, |rule| &rule.head.id, "rules", &mut faults);
+        identifiers(states, |state| &state.head.id, "states", &mut faults);
         identifiers(
-            &self.scenarios,
-            |scenario| &scenario.id,
+            &self.map.scenarios,
+            |scenario| &scenario.head.id,
             "scenarios",
             &mut faults,
         );
         for rule in &self.rules {
-            text(&rule.intent, &rule.id, &mut faults);
-            expectations(&rule.expectations, &rule.id, &mut faults);
-            sources(&rule.sources, root, &rule.id, &mut faults);
-            checks(&rule.tests, root, &rule.id, &mut faults);
-            for reason in &rule.rationale {
-                text(reason, &rule.id, &mut faults);
-            }
-            gaps(&rule.gaps, root, &rule.id, &mut faults);
+            text(&rule.head.intent, &rule.head.id, &mut faults);
+            expectations(&rule.expectations, &rule.head.id, &mut faults);
+            grounds(&rule.grounds, root, &rule.head.id, &mut faults);
         }
-        let ids = self
-            .states
+        let ids = states
             .iter()
-            .map(|state| state.id.as_str())
+            .map(|state| state.head.id.as_str())
             .collect::<HashSet<_>>();
-        for state in &self.states {
-            text(&state.intent, &state.id, &mut faults);
-            surface(&state.surface, &state.id, &mut faults);
-            text(&state.contract.header.title, &state.id, &mut faults);
-            text(&state.contract.header.hint, &state.id, &mut faults);
-            for hint in &state.contract.footer {
-                text(hint, &state.id, &mut faults);
+        for state in states {
+            let owner = &state.head.id;
+            let contract = &state.contract;
+            text(&state.head.intent, owner, &mut faults);
+            surface(&contract.surface, owner, &mut faults);
+            text(&contract.chrome.title, owner, &mut faults);
+            text(&contract.chrome.hint, owner, &mut faults);
+            for hint in &contract.chrome.footer {
+                text(hint, owner, &mut faults);
             }
-            expectations(&state.contract.expectations, &state.id, &mut faults);
-            sources(&state.contract.sources, root, &state.id, &mut faults);
-            checks(&state.contract.tests, root, &state.id, &mut faults);
-            captures(&state.contract.evidence, root, &state.id, &mut faults);
-            gaps(&state.contract.gaps, root, &state.id, &mut faults);
-            for action in &state.contract.actions {
-                text(&action.event, &state.id, &mut faults);
-                text(&action.condition, &state.id, &mut faults);
-                text(&action.expectation, &state.id, &mut faults);
+            expectations(&contract.expectations, owner, &mut faults);
+            grounds(&state.grounds, root, owner, &mut faults);
+            captures(&state.evidence, root, owner, &mut faults);
+            for action in &contract.actions {
+                text(&action.event, owner, &mut faults);
+                text(&action.condition, owner, &mut faults);
+                text(&action.expectation, owner, &mut faults);
                 if !ids.contains(action.target.as_str()) {
                     faults.push(Violation::UnknownState(format!(
-                        "{} -> {}",
-                        state.id, action.target
+                        "{owner} -> {}",
+                        action.target
                     )));
                 }
             }
         }
-        for scenario in &self.scenarios {
-            text(&scenario.intent, &scenario.id, &mut faults);
-            expectations(&scenario.expectations, &scenario.id, &mut faults);
-            checks(&scenario.tests, root, &scenario.id, &mut faults);
+        for scenario in &self.map.scenarios {
+            let owner = &scenario.head.id;
+            text(&scenario.head.intent, owner, &mut faults);
+            expectations(&scenario.expectations, owner, &mut faults);
+            checks(&scenario.tests, root, owner, &mut faults);
             if scenario.route.len() < 2 {
-                faults.push(Violation::Empty(format!("{} route", scenario.id)));
+                faults.push(Violation::Empty(format!("{owner} route")));
             }
             for id in &scenario.route {
                 if !ids.contains(id.as_str()) {
-                    faults.push(Violation::UnknownState(format!("{}: {}", scenario.id, id)));
+                    faults.push(Violation::UnknownState(format!("{owner}: {id}")));
                 }
             }
             for pair in scenario.route.windows(2) {
-                let linked = self.states.iter().any(|state| {
-                    state.id == pair[0]
+                let linked = states.iter().any(|state| {
+                    state.head.id == pair[0]
                         && state
                             .contract
                             .actions
@@ -300,15 +316,15 @@ impl Catalog {
                 });
                 if !linked {
                     faults.push(Violation::DisconnectedRoute(format!(
-                        "{}: {} -> {}",
-                        scenario.id, pair[0], pair[1]
+                        "{owner}: {} -> {}",
+                        pair[0], pair[1]
                     )));
                 }
             }
         }
-        coverage(&self.states, &mut faults);
-        inventory_captures(&self.states, root, &mut faults);
-        provenance(&self.states, root, &mut faults);
+        coverage(states, &mut faults);
+        inventory_captures(states, root, &mut faults);
+        provenance(states, root, &mut faults);
         faults
     }
 }
@@ -363,6 +379,15 @@ fn expectations(values: &[String], owner: &str, faults: &mut Vec<Violation>) {
     for value in values {
         text(value, owner, faults);
     }
+}
+
+fn grounds(value: &Grounds, root: &Path, owner: &str, faults: &mut Vec<Violation>) {
+    for reason in &value.rationale {
+        text(reason, owner, faults);
+    }
+    sources(&value.sources, root, owner, faults);
+    checks(&value.tests, root, owner, faults);
+    gaps(&value.gaps, root, owner, faults);
 }
 
 fn surface(value: &Surface, owner: &str, faults: &mut Vec<Violation>) {
@@ -517,31 +542,32 @@ fn relative(path: &Path) -> bool {
 fn coverage(states: &[State], faults: &mut Vec<Violation>) {
     for screen in screens() {
         let name = screen_name(screen);
-        if !states.iter().any(|state| state.surface.screen == name) {
+        if !states
+            .iter()
+            .any(|state| state.contract.surface.screen == name)
+        {
             faults.push(Violation::MissingSurface(name.to_owned()));
         }
     }
     for modal in modals() {
         let name = modal_name(modal);
-        if !states
-            .iter()
-            .any(|state| matches!(&state.surface.overlay, Overlay::Modal(value) if value == name))
-        {
+        if !states.iter().any(|state| {
+            matches!(&state.contract.surface.overlay, Overlay::Modal(value) if value == name)
+        }) {
             faults.push(Violation::MissingSurface(name.to_owned()));
         }
     }
     for job in jobs() {
         let name = busy_name(job);
-        if !states
-            .iter()
-            .any(|state| matches!(&state.surface.overlay, Overlay::Busy(value) if value == name))
-        {
+        if !states.iter().any(|state| {
+            matches!(&state.contract.surface.overlay, Overlay::Busy(value) if value == name)
+        }) {
             faults.push(Violation::MissingSurface(name.to_owned()));
         }
     }
     if !states
         .iter()
-        .any(|state| matches!(state.surface.overlay, Overlay::Error))
+        .any(|state| matches!(state.contract.surface.overlay, Overlay::Error))
     {
         faults.push(Violation::MissingSurface(String::from("Error")));
     }
@@ -554,7 +580,7 @@ fn inventory_captures(states: &[State], root: &Path, faults: &mut Vec<Violation>
     };
     let known = states
         .iter()
-        .flat_map(|state| match &state.contract.evidence {
+        .flat_map(|state| match &state.evidence {
             Evidence::Missing(_) => Vec::new(),
             Evidence::Captured(shots) => shots.iter().map(|shot| root.join(&shot.file)).collect(),
         })
@@ -582,7 +608,7 @@ fn provenance(states: &[State], root: &Path, faults: &mut Vec<Violation>) {
         .collect::<Vec<_>>();
     let live = screenshots(root, "capture.tape", faults);
     for state in states {
-        let Evidence::Captured(shots) = &state.contract.evidence else {
+        let Evidence::Captured(shots) = &state.evidence else {
             continue;
         };
         for shot in shots {
@@ -590,7 +616,7 @@ fn provenance(states: &[State], root: &Path, faults: &mut Vec<Violation>) {
                 list.iter().any(|(scene, file)| {
                     *file == shot.file
                         && (shot.origin != Origin::Synthetic
-                            || scene.as_deref() == Some(state.id.as_str()))
+                            || scene.as_deref() == Some(state.head.id.as_str()))
                 })
             };
             let backed = match shot.origin {
@@ -601,7 +627,7 @@ fn provenance(states: &[State], root: &Path, faults: &mut Vec<Violation>) {
             if !backed {
                 faults.push(Violation::Provenance(format!(
                     "{}: {} is not written as a {} capture of this state",
-                    state.id,
+                    state.head.id,
                     shot.file.display(),
                     match shot.origin {
                         Origin::Synthetic => "synthetic",
@@ -614,7 +640,7 @@ fn provenance(states: &[State], root: &Path, faults: &mut Vec<Violation>) {
     }
     let owned = |origin: Origin, scene: Option<&str>, file: &Path| {
         states.iter().any(|state| {
-            scene.is_none_or(|scene| scene == state.id) && captured(state, &origin, file)
+            scene.is_none_or(|scene| scene == state.head.id) && captured(state, &origin, file)
         })
     };
     for (scene, file) in &synthetic {
@@ -636,7 +662,7 @@ fn provenance(states: &[State], root: &Path, faults: &mut Vec<Violation>) {
 }
 
 fn captured(state: &State, origin: &Origin, file: &Path) -> bool {
-    match &state.contract.evidence {
+    match &state.evidence {
         Evidence::Missing(_) => false,
         Evidence::Captured(shots) => shots
             .iter()
@@ -735,27 +761,35 @@ mod tests {
     use std::fs;
 
     use super::{
-        Action, Catalog, Check, Contract, Evidence, Gap, Header, Origin, Overlay, Scenario, Shot,
-        Source, State, Surface, Verification, Violation,
+        Action, Catalog, Check, Chrome, Contract, Evidence, Gap, Grounds, Head, Map, Origin,
+        Overlay, Scenario, Shot, Source, State, Surface, Verification, Violation,
     };
+
+    fn head(id: &str, intent: &str) -> Head {
+        Head {
+            id: id.to_owned(),
+            intent: intent.to_owned(),
+        }
+    }
 
     fn state(id: &str) -> State {
         State {
-            id: id.to_owned(),
-            surface: Surface {
-                screen: String::from("YourCards"),
-                overlay: Overlay::Clear,
-            },
-            intent: String::from("Inspect a prepared card"),
+            head: head(id, "Inspect a prepared card"),
             contract: Contract {
-                header: Header {
+                surface: Surface {
+                    screen: String::from("YourCards"),
+                    overlay: Overlay::Clear,
+                },
+                chrome: Chrome {
                     title: String::from("your cards"),
                     hint: String::from("open a card to follow progress"),
+                    footer: vec![String::from("[Esc] stop"), String::from("[Ctrl+C] quit")],
                 },
-                footer: vec![String::from("[Esc] stop"), String::from("[Ctrl+C] quit")],
                 expectations: vec![String::from("Focus stays on its head")],
                 actions: Vec::new(),
-                evidence: Evidence::Missing(String::from("No capture recorded")),
+            },
+            grounds: Grounds {
+                rationale: Vec::new(),
                 sources: vec![Source {
                     file: "render.rs".into(),
                     symbol: String::from("render"),
@@ -763,16 +797,16 @@ mod tests {
                 tests: Vec::new(),
                 gaps: Vec::new(),
             },
+            evidence: Evidence::Missing(String::from("No capture recorded")),
         }
     }
 
     fn catalog(states: Vec<State>, scenarios: Vec<Scenario>) -> Catalog {
         Catalog {
-            version: 1,
+            version: 2,
             verifications: Vec::new(),
             rules: Vec::new(),
-            states,
-            scenarios,
+            map: Map { states, scenarios },
         }
     }
 
@@ -831,8 +865,7 @@ mod tests {
     fn catalog_cannot_accept_a_route_without_a_transition() {
         let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
         let scenario = Scenario {
-            id: String::from("cards.inspect"),
-            intent: String::from("Read a card"),
+            head: head("cards.inspect", "Read a card"),
             route: vec![String::from("cards.closed"), String::from("cards.open")],
             expectations: vec![String::from("Keep the head focused")],
             tests: Vec::new(),
@@ -872,7 +905,7 @@ mod tests {
         )
         .expect("invariant: test fixture must be writable");
         let mut entry = state("cards.open");
-        entry.contract.tests.push(Check {
+        entry.grounds.tests.push(Check {
             file: "cards.rs".into(),
             test: String::from("opening_lights_the_editor"),
         });
@@ -891,7 +924,7 @@ mod tests {
         fs::write(directory.path().join("broken.png"), "not an image")
             .expect("invariant: image fixture must be writable");
         let mut entry = state("cards.open");
-        entry.contract.evidence = Evidence::Captured(vec![Shot {
+        entry.evidence = Evidence::Captured(vec![Shot {
             file: "broken.png".into(),
             origin: Origin::Unrecorded,
             revision: None,
@@ -939,8 +972,8 @@ mod tests {
     fn catalog_cannot_accept_a_source_outside_the_repository() {
         let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
         let mut entry = state("cards.open");
-        entry.contract.sources[0].file = directory.path().join("render.rs");
-        fs::write(&entry.contract.sources[0].file, "fn render() {}\n")
+        entry.grounds.sources[0].file = directory.path().join("render.rs");
+        fs::write(&entry.grounds.sources[0].file, "fn render() {}\n")
             .expect("invariant: source fixture must be writable");
         assert!(
             catalog(vec![entry], Vec::new())
@@ -968,7 +1001,7 @@ mod tests {
             .save(tapes.join("live/open.png"))
             .expect("invariant: image fixture must encode");
         let mut entry = state("cards.open");
-        entry.contract.evidence = Evidence::Captured(vec![Shot {
+        entry.evidence = Evidence::Captured(vec![Shot {
             file: "docs/tui-states/live/open.png".into(),
             origin: Origin::Synthetic,
             revision: None,
@@ -1036,7 +1069,7 @@ mod tests {
         fs::write(directory.path().join("render.rs"), "fn render() {}\n")
             .expect("invariant: source fixture must be writable");
         let mut entry = state("cards.open");
-        entry.contract.gaps.push(Gap {
+        entry.grounds.gaps.push(Gap {
             summary: String::from("Escape stop is advertised over errors"),
             sources: vec![Source {
                 file: "render.rs".into(),
