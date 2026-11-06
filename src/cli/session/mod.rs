@@ -28,6 +28,7 @@ mod config;
 mod cost_journal;
 mod curate;
 mod generate;
+mod import;
 mod json;
 mod liveness;
 mod maintenance;
@@ -104,6 +105,7 @@ pub(super) fn handle(command: &Command, render: Render, opener: &dyn SessionOpen
         Command::Rm(args) => maintenance::rm(args, render),
         Command::CachePath => maintenance::cache_path(render),
         Command::Config(args) => config::config(args, render),
+        Command::Import(args) => import::import(args, render),
         Command::Worker(args) => worker::run_detached_entry(args.id.as_str(), args.launch.as_str()),
     }
 }

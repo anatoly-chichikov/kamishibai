@@ -1,6 +1,6 @@
 [package]
 name = "kamishibai"
-version = "1.13.4"
+version = "1.14.0"
 edition = "2024"
 rust-version = "1.95.0"
 description = "Turn a list of words into an illustrated Anki deck with native-speaker audio"
@@ -27,7 +27,7 @@ ratatui = "=0.30.0"
 regex = "=1.12.3"
 reqwest = { version = "=0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
 rustix = { version = "=1.1.4", features = ["stdio", "process", "fs"] }
-rusqlite = { version = "=0.39.0", default-features = false, features = ["bundled"] }
+rusqlite = { version = "=0.39.0", default-features = false, features = ["bundled", "collation"] }
 rust-fontconfig = { version = "=2.0.0", default-features = false, features = ["std", "parsing"] }
 rustybuzz = "=0.20.1"
 serde = { version = "=1.0.228", features = ["derive"] }

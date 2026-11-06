@@ -90,7 +90,7 @@ fn every_contract_bash_command_parses_with_the_binary_grammar() {
         .map(|(line, _)| line)
         .collect::<Vec<_>>();
     assert!(
-        commands.len() == 14 && failures.is_empty(),
+        commands.len() == 17 && failures.is_empty(),
         "documented bash commands no longer parse or one was skipped: found {}, failures: {failures:?}",
         commands.len()
     );

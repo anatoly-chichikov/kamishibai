@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.13.4
+Release: 1.14.0
 
 Overview
 
@@ -28,7 +28,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.13.4/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.14.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -877,3 +877,82 @@ while :; do
 done
 deck=$(kamishibai result --json | jq -r .paths.deck)
 ```
+
+Anki history files (no Gemini key or generation session required)
+
+`kamishibai import anki [--profile NAME | --collection PATH] [--deck NAME]…
+[--out DIR] [--save] [--json]` prepares a local file for Kamishibai web.
+It never edits Anki, syncs it, uploads anything, or applies an import.
+
+Agent consent protocol:
+1. Ask the user to Sync Anki on their devices, then quit desktop Anki normally.
+2. Preview the collection. Show the selected decks, notes/cards, reviews,
+   mistakes, media, missing files and estimated size to the user.
+3. Only after the user agrees, run the same selection with --save.
+4. Give the verified file path and the next step: Kamishibai web → your account
+   → import from anki. The web report and its apply button are a separate consent.
+
+```bash
+kamishibai import anki --json
+kamishibai import anki --profile 'User 1' --deck 'French::Daily' --json
+kamishibai import anki --collection /tmp/anki/collection.anki2 --deck French --out /tmp/history --save --json
+```
+
+Without --save this is a read-only preview and creates no output directory or
+file. --save reads the collection afresh, writes and verifies an archive.
+Default decks contain notes whose model starts with `Kamishibai Vocabulary Model`.
+--deck replaces that selection with exact full names; repeat it for several decks.
+Subdecks use `::` and are separate choices, never implicitly included by a parent.
+Filtered cards use their home deck and original due value. The file includes only
+selected decks, their notes, note types, cards, reviews and referenced media;
+reviews for deleted cards are omitted. Mistakes count selected ease=1 log rows.
+
+KAMISHIBAI_ANKI overrides the exact Anki root for profile discovery. Otherwise
+use the platform data directory's Anki2 and, on Linux, the Flatpak Anki2 root.
+Several profiles require --profile or --collection; discovery does not guess.
+Any collection.anki2-wal, including an empty file, refuses reading. Available
+system process/open-file probes supplement WAL detection. The reader uses an
+immutable, read-only SQLite connection, query_only, and before/after SHA-256.
+Only schema 18 is supported. The installed Anki version is included when known,
+otherwise `unknown`. Anki must remain closed throughout reading and saving.
+
+--out overrides the Downloads destination for this command; KAMISHIBAI_OUTPUT
+belongs to generated study packages and does not override Anki history output.
+The file is kamishibai-anki-YYYY-MM-DD.zip (UTC); collisions use -2, -3, etc.
+A private .part is written beside it, reopened and checked, then published without
+overwriting any existing file. Unix permissions are 0600. Failed writes remove
+.part. Output can contain sensitive study history: let the user choose where to
+share it. Missing media are listed in the preview and are not invented; restore
+them using Anki's Tools → Check Media before attempting the web import.
+
+JSON success is one document with ok=true, profile, anki="closed", preview,
+save_to, save_command, file (null during preview) and next. preview contains:
+- decks: all available decks with id, name, selected, notes, cards, reviews,
+  mistakes (counts use home decks and omit deleted-card reviews);
+- counts: notes, cards, reviews, mistakes, media (filename references), files
+  (unique content hashes), bytes (unique media payload bytes);
+- missing_media: missing or unsafe referenced names;
+- snapshot_size: JSON bytes. Total payload size is this plus counts.bytes;
+  ZIP headers add a small amount. Deck-list counts are never a cached header.
+The ready-to-run save_command uses POSIX shell quoting. Machine clients should
+pass their own argument array, especially on Windows.
+
+Errors use the ordinary Refusal JSON envelope and stderr hint: open Anki/WAL or
+changed collection → exit 4, retryable; missing/ambiguous profile, missing deck,
+empty default selection or conflicting flags → exit 2; unsupported schema,
+snapshot over 64 MiB, I/O or validation failure → exit 1. Unsupported schemas
+advise updating kamishibai; oversized snapshots advise fewer --deck selections.
+
+File contract v1: an uncompressed (stored) ZIP, Zip64 when necessary, containing
+exactly header.json, snapshot.json and one media/<sha256> per unique media hash.
+header.json is {format:"kamishibai-anki-history",version:1,written_at:<UTC RFC3339>,
+writer:<CLI version string>,snapshot:{sha256:<lowercase SHA-256>,size:<bytes>}}.
+snapshot.json is the server's strict Manifest (collection, decks, notetypes,
+notes, cards, revlog, media); no extra fields. collection.profile is empty, and
+neither source filesystem paths nor profile names are added. Raw note HTML and
+referenced media names retain their original content. snapshot.json is limited
+to 64 MiB before any output is written. Media over 16 MiB remain in the file;
+the server decides which types and sizes it can accept. The validator checks
+version, shape, exact entry membership, ZIP CRC, snapshot SHA-256 and size, and
+every media SHA-256 and size. A future Manifest change requires file version 2
+and a web reader update before a CLI writer update.

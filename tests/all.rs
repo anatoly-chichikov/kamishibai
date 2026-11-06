@@ -6,6 +6,7 @@
 mod agent_contract;
 mod agent_onboarding;
 mod anki;
+mod anki_history;
 mod assets;
 mod audio;
 mod batch_sentence_settings;

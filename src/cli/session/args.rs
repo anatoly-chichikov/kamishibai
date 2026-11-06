@@ -45,9 +45,39 @@ pub(in crate::cli) enum Command {
     CachePath,
     /// Save or show persisted preferences: known language and Gemini API key.
     Config(ConfigArgs),
+    /// Preview or save external study history for Kamishibai web.
+    #[command(subcommand)]
+    Import(ImportCommand),
     /// Internal: run the detached generation worker for a session.
     #[command(name = "__run", hide = true)]
     Worker(WorkerArgs),
+}
+
+/// External history sources supported without credentials or a generation session.
+#[derive(Debug, Subcommand)]
+pub(in crate::cli) enum ImportCommand {
+    /// Preview a closed Anki collection; write a history file only with --save.
+    Anki(AnkiArgs),
+}
+
+/// Exact source, deck and output choices for Anki history preparation.
+#[derive(Debug, Args)]
+pub(in crate::cli) struct AnkiArgs {
+    /// Profile folder name; required when several profiles exist.
+    #[arg(long, value_name = "NAME", conflicts_with = "collection")]
+    pub(super) profile: Option<String>,
+    /// Explicit collection.anki2 path instead of profile discovery.
+    #[arg(long, value_name = "PATH")]
+    pub(super) collection: Option<PathBuf>,
+    /// Exact full deck name, repeatable; defaults to Kamishibai model decks.
+    #[arg(long = "deck", value_name = "NAME")]
+    pub(super) decks: Vec<String>,
+    /// Output directory; defaults to Downloads and is untouched during preview.
+    #[arg(long, value_name = "DIR")]
+    pub(super) out: Option<PathBuf>,
+    /// Read again, then save and verify a private history file.
+    #[arg(long)]
+    pub(super) save: bool,
 }
 
 /// Arguments for `new`: exactly one input form — repeated `--word`s, a `--words`
