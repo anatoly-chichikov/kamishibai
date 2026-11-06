@@ -10,7 +10,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use super::manifest::{Card, Collection, Deck, Manifest, Note, Notetype, Revlog};
 use super::summary::DeckSummary;
-use super::{HistoryError, Snapshot, media};
+use super::{ArchiveSource, HistoryError, Snapshot, media};
 
 /// Process-inspection port; tests can model running Anki and changes during a read.
 pub trait AnkiProcess {
@@ -191,7 +191,13 @@ pub fn read(
     if media::digest(&mut File::open(&path)?)? != before {
         return Err(HistoryError::Changed);
     }
-    let snapshot = Snapshot::new(manifest, media.files, decks, media.missing);
+    let source = ArchiveSource::new(
+        path.parent()
+            .expect("invariant: canonical collection has a parent")
+            .to_path_buf(),
+        media.files,
+    );
+    let snapshot = Snapshot::new(manifest, source, decks, media.missing);
     snapshot.preview()?;
     Ok(snapshot)
 }

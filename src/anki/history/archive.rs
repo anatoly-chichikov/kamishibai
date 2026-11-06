@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -82,6 +82,7 @@ pub(super) fn save(
     written: OffsetDateTime,
     writer: &str,
 ) -> Result<PathBuf, HistoryError> {
+    let directory = destination(snapshot, directory)?;
     let bytes = encode(&snapshot.manifest)?;
     let header = Header {
         format: "kamishibai-anki-history".into(),
@@ -96,7 +97,7 @@ pub(super) fn save(
             size: u64::try_from(bytes.len()).expect("invariant: bounded snapshot size fits in u64"),
         },
     };
-    fs::create_dir_all(directory)?;
+    fs::create_dir_all(&directory)?;
     let directory = directory.canonicalize()?;
     let mut temporary = tempfile::Builder::new()
         .prefix(".kamishibai-anki-")
@@ -107,7 +108,7 @@ pub(super) fn save(
     zip.write_all(&serde_json::to_vec(&header)?)?;
     zip.start_file("snapshot.json", options(header.snapshot.size))?;
     zip.write_all(&bytes)?;
-    for (hash, path) in &snapshot.files {
+    for (hash, path) in &snapshot.source.files {
         let mut file = File::open(path)?;
         zip.start_file(format!("media/{hash}"), options(file.metadata()?.len()))?;
         io::copy(&mut file, &mut zip)?;
@@ -135,6 +136,50 @@ pub(super) fn save(
             .checked_add(1)
             .expect("invariant: output collision count fits in u64");
     }
+}
+
+fn destination(snapshot: &Snapshot, directory: &Path) -> Result<PathBuf, HistoryError> {
+    let directory = resolve(directory)?;
+    let profile = &snapshot.source.profile;
+    let root = profile
+        .ancestors()
+        .find(|path| {
+            path.file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("Anki2"))
+        })
+        .unwrap_or(profile);
+    if directory.starts_with(root) {
+        return Err(HistoryError::Destination);
+    }
+    Ok(directory)
+}
+
+fn resolve(directory: &Path) -> io::Result<PathBuf> {
+    let absolute = std::env::current_dir()?.join(directory);
+    let mut resolved = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            Component::CurDir => {}
+            Component::Normal(_) => {
+                resolved.push(component.as_os_str());
+                match resolved.canonicalize() {
+                    Ok(path) => resolved = path,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        match resolved.symlink_metadata() {
+                            Err(missing) if missing.kind() == io::ErrorKind::NotFound => {}
+                            _ => return Err(error),
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            component => resolved.push(component.as_os_str()),
+        }
+    }
+    Ok(resolved)
 }
 
 fn options(size: u64) -> SimpleFileOptions {

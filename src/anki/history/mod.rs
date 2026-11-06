@@ -35,6 +35,9 @@ pub enum HistoryError {
     /// A source or deck selection needs to be made explicitly.
     #[error("{0}")]
     Selection(String),
+    /// Saving must leave the source profile and its Anki root untouched.
+    #[error("cannot save Anki history inside the Anki profile or Anki2 folder")]
+    Destination,
     /// The snapshot exceeds the web API limit; select fewer decks.
     #[error("the Anki snapshot exceeds 64 MiB; select fewer decks")]
     Oversized,
@@ -58,21 +61,32 @@ pub enum HistoryError {
 /// Selected raw rows and content-addressed media; source paths never serialize.
 pub struct Snapshot {
     manifest: Manifest,
-    files: BTreeMap<String, PathBuf>,
+    source: ArchiveSource,
     decks: Vec<summary::DeckSummary>,
     missing: Vec<String>,
+}
+
+struct ArchiveSource {
+    profile: PathBuf,
+    files: BTreeMap<String, PathBuf>,
+}
+
+impl ArchiveSource {
+    fn new(profile: PathBuf, files: BTreeMap<String, PathBuf>) -> Self {
+        Self { profile, files }
+    }
 }
 
 impl Snapshot {
     fn new(
         manifest: Manifest,
-        files: BTreeMap<String, PathBuf>,
+        source: ArchiveSource,
         decks: Vec<summary::DeckSummary>,
         missing: Vec<String>,
     ) -> Self {
         Self {
             manifest,
-            files,
+            source,
             decks,
             missing,
         }
@@ -91,6 +105,7 @@ impl Snapshot {
 
     /// Write and verify a private, uncompressed archive without replacing any file.
     /// Pass UTC time and the writer version explicitly for reproducible exports.
+    /// Refuse destinations inside the source profile or its Anki2 root before writing.
     pub fn save(
         &self,
         directory: &Path,

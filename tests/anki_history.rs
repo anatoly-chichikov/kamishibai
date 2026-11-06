@@ -811,3 +811,201 @@ fn duplicate_zip_names_cannot_hide_an_extra_entry() {
         "ZIP name deduplication hid an extra archive entry"
     );
 }
+
+#[test]
+fn review_save_cannot_write_inside_the_anki_profile() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let profile = path.parent().unwrap();
+    let before = inventory(profile);
+    let snapshot = kamishibai::anki::history::read(&path, &[], &Closed, "unknown").unwrap();
+    let _ = snapshot.save(
+        profile,
+        time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
+        "1.14.0",
+    );
+    assert!(
+        before == inventory(profile),
+        "saving changed the Anki profile directory"
+    );
+}
+
+#[test]
+fn saving_cannot_create_a_missing_profile_subdirectory() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let profile = path.parent().unwrap();
+    let before = inventory(profile);
+    let snapshot = kamishibai::anki::history::read(&path, &[], &Closed, "unknown").unwrap();
+    let result = snapshot.save(
+        &profile.join("exports-529/nested-83"),
+        time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
+        "1.14.0",
+    );
+    assert!(
+        result.is_err() && before == inventory(profile),
+        "saving created a directory inside the Anki profile"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn saving_cannot_follow_a_symlink_into_the_profile() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let profile = path.parent().unwrap();
+    let alias = root.path().join("linked-721");
+    std::os::unix::fs::symlink(profile, &alias).unwrap();
+    let before = inventory(profile);
+    let snapshot = kamishibai::anki::history::read(&path, &[], &Closed, "unknown").unwrap();
+    let result = snapshot.save(
+        &alias,
+        time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
+        "1.14.0",
+    );
+    assert!(
+        result.is_err() && before == inventory(profile),
+        "saving followed a symlink into the Anki profile"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn saving_cannot_create_a_missing_subdirectory_through_a_profile_symlink() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let profile = path.parent().unwrap();
+    let alias = root.path().join("linked-361");
+    std::os::unix::fs::symlink(profile, &alias).unwrap();
+    let before = inventory(profile);
+    let snapshot = kamishibai::anki::history::read(&path, &[], &Closed, "unknown").unwrap();
+    let result = snapshot.save(
+        &alias.join("missing-957/nested-31"),
+        time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
+        "1.14.0",
+    );
+    assert!(
+        result.is_err() && before == inventory(profile),
+        "saving created a directory through a profile symlink"
+    );
+}
+
+#[test]
+fn saving_cannot_write_into_the_anki_root() {
+    let root = TempDir::new().unwrap();
+    let anki = root.path().join("Anki2");
+    let path = collection(&anki);
+    let before = inventory(&anki);
+    let snapshot = kamishibai::anki::history::read(&path, &[], &Closed, "unknown").unwrap();
+    let result = snapshot.save(
+        &anki,
+        time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
+        "1.14.0",
+    );
+    assert!(
+        result.is_err() && before == inventory(&anki),
+        "saving changed the Anki root directory"
+    );
+}
+
+#[test]
+fn saving_cannot_create_a_sibling_inside_the_anki_root() {
+    let root = TempDir::new().unwrap();
+    let anki = root.path().join("Anki2");
+    let path = collection(&anki);
+    let before = inventory(&anki);
+    let snapshot = kamishibai::anki::history::read(&path, &[], &Closed, "unknown").unwrap();
+    let result = snapshot.save(
+        &anki.join("exports-493/nested-17"),
+        time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
+        "1.14.0",
+    );
+    assert!(
+        result.is_err() && before == inventory(&anki),
+        "saving created a sibling directory inside the Anki root"
+    );
+}
+
+#[test]
+fn console_saving_into_the_profile_requires_a_different_output_directory() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let profile = path.parent().unwrap();
+    let before = inventory(profile);
+    let output = command(root.path(), profile)
+        .args(["--collection"])
+        .arg(&path)
+        .arg("--save")
+        .output()
+        .unwrap();
+    let doc: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        output.status.code() == Some(2)
+            && doc["error"]["code"] == "usage"
+            && doc["error"]["hint"]
+                .as_str()
+                .is_some_and(|hint| hint.contains("--out"))
+            && before == inventory(profile),
+        "unsafe output was accepted, lost its usage refusal or changed the profile: {doc}"
+    );
+}
+
+#[test]
+fn saving_cannot_reenter_the_profile_after_missing_parent_components() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let profile = path.parent().unwrap();
+    let before = inventory(root.path());
+    let snapshot = kamishibai::anki::history::read(&path, &[], &Closed, "unknown").unwrap();
+    let result = snapshot.save(
+        &root
+            .path()
+            .join("missing-619/..")
+            .join(profile.file_name().unwrap()),
+        time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
+        "1.14.0",
+    );
+    assert!(
+        result.is_err() && before == inventory(root.path()),
+        "saving traversed missing parents and changed the source tree"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_collection_cannot_hide_its_profile_from_saving() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let alias = root.path().join("linked-collection-197.anki2");
+    std::os::unix::fs::symlink(&path, &alias).unwrap();
+    let profile = path.parent().unwrap();
+    let before = inventory(profile);
+    let snapshot = kamishibai::anki::history::read(&alias, &[], &Closed, "unknown").unwrap();
+    let result = snapshot.save(
+        profile,
+        time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
+        "1.14.0",
+    );
+    assert!(
+        result.is_err() && before == inventory(profile),
+        "a collection symlink hid the source profile from the output guard"
+    );
+}
+
+#[test]
+fn a_similarly_named_sibling_remains_a_valid_output_directory() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let profile = path.parent().unwrap();
+    let before = inventory(profile);
+    let snapshot = kamishibai::anki::history::read(&path, &[], &Closed, "unknown").unwrap();
+    let result = snapshot.save(
+        &root.path().join("Private-profile-947-export/nested-23"),
+        time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
+        "1.14.0",
+    );
+    assert!(
+        result.is_ok() && before == inventory(profile),
+        "saving refused a safe sibling or changed the profile"
+    );
+}

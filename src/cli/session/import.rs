@@ -130,6 +130,10 @@ fn refusal(failure: HistoryError) -> anyhow::Error {
             failure.to_string(),
             "choose --profile NAME, --collection PATH or an exact --deck NAME",
         ),
+        HistoryError::Destination => error::usage_hint(
+            failure.to_string(),
+            "pass --out DIR outside the Anki profile and Anki2 folder",
+        ),
         HistoryError::Schema(_) => error::operational_hint(
             failure.to_string(),
             "update kamishibai before reading this Anki schema",
