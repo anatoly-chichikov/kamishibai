@@ -1,22 +1,29 @@
-//! Visual demo that renders every TUI state the design mockup covers.
+//! Offline visual gallery for synthetic TUI captures.
 //!
-//! `cargo run --example tui_states` walks the design states. Navigation is
+//! `cargo run --example tui_states -- --list-states` lists stable capture IDs.
+//! `--state review.translation-preview` opens one capture directly, without
+//! Gemini calls, and `--state cards.closed --render 160x48` prints that
+//! capture as plain text at the given terminal size instead of opening the
+//! terminal; the TUI catalog check reads headers and footers that way.
+//! Interactive navigation is
 //! absolute, not cumulative: type a state index then `Space` to jump straight
 //! to it (e.g. `5` then `Space` shows state 5). A bare `Space` with no digits
-//! queued steps forward one, `←`/`p` steps back, and `q` exits. `Enter` only
+//! queued steps forward one, `←`/`p` steps back, `Ctrl+L` repaints the current
+//! scene, and `q` exits. `Enter` only
 //! clears the queued digits, so the stray Return the shell injects when it
 //! launches the binary can neither drift nor contaminate the index. Absolute
-//! jumps keep VHS screenshots reproducible — a dropped or coalesced keystroke
-//! cannot accumulate across the run. Intended for VHS/tmux screenshots so the
-//! live render can be compared against `Kamishibai TUI A.html`.
+//! jumps remain available for manual browsing; VHS and the PTY tests use named
+//! launches so inserting or reordering gallery entries cannot select another
+//! capture.
 
 use std::io::{self, stdout};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use clap::Parser;
 use crossterm::ExecutableCommand;
 use crossterm::event::MouseEventKind;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -31,25 +38,98 @@ use kamishibai::tui::{
     Screen, draw, mouse_pointer_at, reset_mouse_pointer, transit, write_mouse_pointer,
 };
 use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
+use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::layout::Rect;
 
 const POINTER_REFRESH: Duration = Duration::from_millis(50);
 
+#[derive(Parser)]
+struct Arguments {
+    #[arg(
+        long,
+        conflicts_with = "list_states",
+        help = "Open one stable capture ID"
+    )]
+    state: Option<String>,
+    #[arg(long, help = "List stable capture IDs without opening the terminal")]
+    list_states: bool,
+    #[arg(
+        long,
+        requires = "state",
+        value_name = "COLUMNSxROWS",
+        value_parser = area,
+        help = "Print the chosen capture as plain text at this terminal size"
+    )]
+    render: Option<Rect>,
+}
+
 fn main() -> Result<()> {
+    let arguments = Arguments::parse();
     let states = build_states();
+    if arguments.list_states {
+        for (id, _) in &states {
+            println!("{id}");
+        }
+        return Ok(());
+    }
+    let index = state_index(&states, arguments.state.as_deref())?;
+    if let Some(area) = arguments.render {
+        println!("{}", rendered(&states[index].1, area)?);
+        return Ok(());
+    }
     enable_raw_mode()?;
     let mut out = stdout();
     out.execute(EnterAlternateScreen)?;
     enable_hover_mouse_capture(&mut out);
     write_mouse_pointer(&mut out, MousePointer::Arrow);
     let mut terminal = Terminal::new(CrosstermBackend::new(out))?;
-    let result = run(&mut terminal, &states);
+    let result = run(&mut terminal, &states, index);
     reset_mouse_pointer(terminal.backend_mut());
     disable_hover_mouse_capture(terminal.backend_mut());
     disable_raw_mode()?;
     terminal.backend_mut().execute(LeaveAlternateScreen)?;
     Ok(result?)
+}
+
+fn state_index(states: &[(&str, App)], requested: Option<&str>) -> Result<usize> {
+    match requested {
+        Some(id) => states
+            .iter()
+            .position(|(candidate, _)| *candidate == id)
+            .with_context(|| {
+                format!("unknown capture state {id}; run --list-states for available identifiers")
+            }),
+        None => Ok(0),
+    }
+}
+
+fn area(text: &str) -> Result<Rect, String> {
+    let (columns, rows) = text
+        .split_once('x')
+        .ok_or_else(|| format!("terminal size {text} must read COLUMNSxROWS"))?;
+    let width = columns
+        .parse::<u16>()
+        .map_err(|error| format!("terminal width {columns} is not a cell count: {error}"))?;
+    let height = rows
+        .parse::<u16>()
+        .map_err(|error| format!("terminal height {rows} is not a cell count: {error}"))?;
+    Ok(Rect::new(0, 0, width, height))
+}
+
+fn rendered(app: &App, area: Rect) -> Result<String> {
+    let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))?;
+    terminal.draw(|frame| draw(frame, app))?;
+    let buffer = terminal.backend().buffer();
+    Ok((0..area.height)
+        .map(|row| {
+            (0..area.width)
+                .map(|column| buffer[(column, row)].symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 fn enable_hover_mouse_capture<W: io::Write>(out: &mut W) {
@@ -64,9 +144,9 @@ fn disable_hover_mouse_capture<W: io::Write>(out: &mut W) {
 
 fn run(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-    states: &[(String, App)],
+    states: &[(&str, App)],
+    mut index: usize,
 ) -> io::Result<()> {
-    let mut index = 0usize;
     let mut pending = String::new();
     let mut mouse_position: Option<(u16, u16)> = None;
     let mut force_redraw = true;
@@ -75,7 +155,7 @@ fn run(
             terminal.clear()?;
             force_redraw = false;
         }
-        let (label, app) = &states[index];
+        let (_, app) = &states[index];
         terminal.draw(|frame| {
             draw(frame, app);
         })?;
@@ -90,7 +170,6 @@ fn run(
             let next = mouse_pointer_at(app, rect, column, row);
             write_mouse_pointer(terminal.backend_mut(), next);
         }
-        let _ = label;
         let timeout = if mouse_position.is_some() {
             POINTER_REFRESH
         } else {
@@ -100,6 +179,9 @@ fn run(
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        force_redraw = true;
+                    }
                     KeyCode::Char(c) if c.is_ascii_digit() => pending.push(c),
                     KeyCode::Char(' ') => {
                         if let Ok(target) = pending.parse::<usize>() {
@@ -558,7 +640,7 @@ fn cards_with_first(first: CardDraft) -> App {
         .with_elapsed(Duration::from_secs(41))
 }
 
-fn build_states() -> Vec<(String, App)> {
+fn build_states() -> Vec<(&'static str, App)> {
     let words_seed = "dépaysement\nflâner\ncanard\nchouette";
     let base_words = App::new(pair()).seeded_blob(words_seed);
 
@@ -868,135 +950,118 @@ fn build_states() -> Vec<(String, App)> {
         .seeded_blob(words_seed)
         .busy_started(BusyKind::Understanding)
         .busy_elapsed(Duration::from_millis(540));
+    let translation_preview = App::new(pair())
+        .seeded_blob("duck\nowl")
+        .confirmed_learning("fr")
+        .with_learning_history(vec![String::from("FR")])
+        .understood(vec![
+            WordCandidate::with_senses(
+                "duck",
+                vec![Sense::translated(
+                    "canard",
+                    "noun; a duck on a pond or a plate",
+                    None,
+                )],
+                0,
+                true,
+            ),
+            WordCandidate::with_senses(
+                "owl",
+                vec![Sense::translated("chouette", "noun; an owl", None)],
+                0,
+                true,
+            ),
+        ])
+        .translation_proposed();
     vec![
-        (String::from("00 · Welcome · no env key"), welcome_no_env),
-        (
-            String::from("00b · Welcome · env key available"),
-            welcome_env,
-        ),
-        (String::from("01 · Your words"), base_words),
-        (
-            String::from("01b · Busy · understanding"),
-            busy_understanding,
-        ),
-        (String::from("02 · What I understood"), review),
-        (
-            String::from("02b · Change something · modal"),
-            change_something,
-        ),
-        (
-            String::from("03 · Your cards · S1 collapsed label tags"),
-            base_cards,
-        ),
-        (
-            String::from("03b · Your cards · S2 editor settings"),
-            label_editor,
-        ),
-        (String::from("03c · Your cards · retrying"), retrying),
-        (String::from("03d · Your cards · couldn't finish"), failed),
-        (String::from("04 · Done"), done),
-        (
-            String::from("05 · Your cards · S3 pending register editor"),
-            register_pinned,
-        ),
-        (
-            String::from("06 · Your cards · S4 pending note editor"),
-            note_typed,
-        ),
-        (
-            String::from("07 · Your cards · S5 restored defaults"),
-            restored,
-        ),
-        (
-            String::from("08 · Your cards · S6 multiple pending"),
-            multiple_pending,
-        ),
-        (
-            String::from("09 · Your cards · S7 regenerating"),
-            regenerating,
-        ),
-        (
-            String::from("10 · Your cards · S8 regenerated"),
-            regenerated,
-        ),
-        (
-            String::from("11 · Your cards · S9 approximate pin"),
-            approximate,
-        ),
-        (
-            String::from("12 · Your cards · S10 narrow label tags"),
-            narrow,
-        ),
-        (
-            String::from("13 · Your cards · S11 mouse-selected editor"),
-            mouse_selected,
-        ),
-        (
-            String::from("14 · Your cards · S12 legacy editor settings"),
-            legacy,
-        ),
-        (
-            String::from("03e · Your cards · retry layout stress"),
-            retry_stress,
-        ),
-        (String::from("15 · Esc · clear words armed"), words_clear),
-        (String::from("16 · Esc · review back"), review_back),
-        (String::from("17 · Esc · generation stop armed"), stop_armed),
-        (String::from("18 · Esc · generation stopping"), stopping),
-        (String::from("19 · Esc · partial publish"), partial),
-        (
-            String::from("02c · What I understood · generation guidance"),
-            batch_sentence_settings,
-        ),
-        (
-            String::from("02d · What I understood · plausible alternates"),
-            ambiguous,
-        ),
-        (
-            String::from("02e · Languages · pair picker modal"),
-            language_pair_modal,
-        ),
-        (
-            String::from("00c · Welcome · language grid"),
-            welcome_language,
-        ),
-        (
-            String::from("20 · Your cards · parked multi-expanded"),
-            parked_multi,
-        ),
-        (
-            String::from("02f · What I understood · open sense list"),
-            polysemous,
-        ),
+        ("welcome.key", welcome_no_env),
+        ("welcome.key-env", welcome_env),
+        ("words.editing", base_words),
+        ("words.understanding", busy_understanding),
+        ("review.closed", review),
+        ("review.correction", change_something),
+        ("cards.closed", base_cards),
+        ("cards.tuning", label_editor),
+        ("cards.retrying", retrying),
+        ("cards.failed", failed),
+        ("done.published", done),
+        ("cards.pending-register", register_pinned),
+        ("cards.pending-note", note_typed),
+        ("cards.restored", restored),
+        ("cards.multiple-pending", multiple_pending),
+        ("cards.rewriting", regenerating),
+        ("cards.rewritten", regenerated),
+        ("cards.approximate", approximate),
+        ("cards.narrow", narrow),
+        ("cards.mouse-tuning", mouse_selected),
+        ("cards.legacy-tuning", legacy),
+        ("cards.retry-stress", retry_stress),
+        ("words.clear-armed", words_clear),
+        ("words.returned", review_back),
+        ("cards.stop-armed", stop_armed),
+        ("cards.stopping", stopping),
+        ("cards.partial", partial),
+        ("review.guidance", batch_sentence_settings),
+        ("review.alternates", ambiguous),
+        ("review.languages", language_pair_modal),
+        ("welcome.language", welcome_language),
+        ("cards.parked", parked_multi),
+        ("review.senses", polysemous),
+        ("review.translation-preview", translation_preview),
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn named_capture_cannot_change_when_the_gallery_is_reordered() {
+        let mut states = build_states();
+        states.reverse();
+        let index = state_index(&states, Some("review.translation-preview"))
+            .expect("the named translation capture must resolve");
+        assert!(
+            states[index].1.translation_preview(),
+            "named capture selection depended on the gallery's original position"
+        );
+    }
+
+    #[test]
+    fn unknown_capture_cannot_fall_back_to_the_default_screen() {
+        assert!(
+            state_index(&build_states(), Some("missing.capture")).is_err(),
+            "an unknown capture silently opened the default screen"
+        );
+    }
+
+    #[test]
+    fn translation_preview_keeps_the_review_behind_its_destination_question() {
+        let states = build_states();
+        let (_, app) = states
+            .iter()
+            .find(|(id, _)| *id == "review.translation-preview")
+            .expect("the destination-confirmation capture is missing");
+        let rendered =
+            rendered(app, Rect::new(0, 0, 120, 50)).expect("translation preview must render");
+        assert!(
+            app.translation_preview()
+                && app.blob() == "duck\nowl"
+                && app.candidates()[0].sense().translation() == Some("canard")
+                && rendered.contains("Which language do you want to learn?"),
+            "the prepared translation capture lost its reviewed candidates or confirmation question"
+        );
+    }
 
     #[test]
     fn retry_layout_stress_state_keeps_attempt_history_on_card_heads() {
         let states = build_states();
         let (_, app) = states
-            .get(21)
-            .expect("retry layout stress state must stay at index 21");
-        let backend = TestBackend::new(120, 50);
-        let mut terminal = Terminal::new(backend).expect("backend must initialize");
-        terminal
-            .draw(|frame| draw(frame, app))
-            .expect("retry layout stress state must render");
-        let buffer = terminal.backend().buffer();
-        let rendered = (0..buffer.area.height)
-            .map(|row| {
-                (0..buffer.area.width)
-                    .map(|column| buffer[(column, row)].symbol())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .iter()
+            .find(|(id, _)| *id == "cards.retry-stress")
+            .expect("retry layout stress capture must exist");
+        let rendered =
+            rendered(app, Rect::new(0, 0, 120, 50)).expect("retry layout stress state must render");
         assert!(
             [
                 "◐ ",
@@ -1032,22 +1097,11 @@ mod tests {
     fn batch_sentence_settings_state_keeps_both_carousels_visible() {
         let states = build_states();
         let (_, app) = states
-            .get(27)
-            .expect("generation guidance state must stay at index 27");
-        let backend = TestBackend::new(120, 50);
-        let mut terminal = Terminal::new(backend).expect("backend must initialize");
-        terminal
-            .draw(|frame| draw(frame, app))
-            .expect("generation guidance state must render");
-        let buffer = terminal.backend().buffer();
-        let rendered = (0..buffer.area.height)
-            .map(|row| {
-                (0..buffer.area.width)
-                    .map(|column| buffer[(column, row)].symbol())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .iter()
+            .find(|(id, _)| *id == "review.guidance")
+            .expect("generation guidance capture must exist");
+        let rendered =
+            rendered(app, Rect::new(0, 0, 120, 50)).expect("generation guidance state must render");
         assert!(
             rendered.contains("generation guidance")
                 && !rendered.contains("generation guidance   b1")
@@ -1064,22 +1118,11 @@ mod tests {
     fn review_back_state_keeps_words_and_shows_an_unarmed_clear() {
         let states = build_states();
         let (_, app) = states
-            .get(23)
-            .expect("review back state must stay at index 23");
-        let backend = TestBackend::new(120, 50);
-        let mut terminal = Terminal::new(backend).expect("backend must initialize");
-        terminal
-            .draw(|frame| draw(frame, app))
-            .expect("review back state must render");
-        let buffer = terminal.backend().buffer();
-        let rendered = (0..buffer.area.height)
-            .map(|row| {
-                (0..buffer.area.width)
-                    .map(|column| buffer[(column, row)].symbol())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .iter()
+            .find(|(id, _)| *id == "words.returned")
+            .expect("review back capture must exist");
+        let rendered =
+            rendered(app, Rect::new(0, 0, 120, 50)).expect("review back state must render");
         assert!(
             app.screen() == Screen::YourWords
                 && app.blob() == "dépaysement\nflâner\ncanard\nchouette"
@@ -1094,22 +1137,11 @@ mod tests {
     fn partial_publish_state_uses_canonical_uppercase_artifact_names() {
         let states = build_states();
         let (_, app) = states
-            .get(26)
-            .expect("partial publish state must stay at index 26");
-        let backend = TestBackend::new(120, 50);
-        let mut terminal = Terminal::new(backend).expect("backend must initialize");
-        terminal
-            .draw(|frame| draw(frame, app))
-            .expect("partial publish state must render");
-        let buffer = terminal.backend().buffer();
-        let rendered = (0..buffer.area.height)
-            .map(|row| {
-                (0..buffer.area.width)
-                    .map(|column| buffer[(column, row)].symbol())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .iter()
+            .find(|(id, _)| *id == "cards.partial")
+            .expect("partial publish capture must exist");
+        let rendered =
+            rendered(app, Rect::new(0, 0, 120, 50)).expect("partial publish state must render");
         assert!(
             rendered.contains("FR_2026-06-01_183029.apkg")
                 && rendered.contains("FR_2026-06-01_183029.pdf")

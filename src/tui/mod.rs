@@ -4,7 +4,7 @@
 //! plus the renderer entry point. Concrete `ratatui` and `crossterm` use
 //! lives in the screen modules and the input mapper.
 //!
-//! The full state map lives in `docs/tui-states/state-map.md`.
+//! The intent, state, and scenario inventory lives in `docs/tui-states/catalog.ron`.
 
 mod app;
 mod disclosure;

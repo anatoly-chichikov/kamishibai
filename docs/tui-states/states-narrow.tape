@@ -14,22 +14,30 @@ Type "cd ../.. && clear"
 Enter
 Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor"
 Enter
-Type "./target/release/examples/tui_states"
-Enter
 Show
 
-# index 18 — S10: whole tags wrap onto later artifact rows; impossible summaries hide
-Type "18"
-Space
-Sleep 800ms
+# Each capture launches one prepared scene by stable ID, waits for the AI reminder every
+# scene draws, repaints with Ctrl+L, and holds the scene on screen around the shot,
+# because VHS writes a Screenshot from recorded frames that lag behind the tape.
+
+# cards.narrow — S10: whole tags wrap onto later artifact rows; impossible summaries hide
+Type "./target/release/examples/tui_states --state cards.narrow"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
 Screenshot "live/20-s10-label-tags-narrow.png"
-
-# index 27 — generation guidance wraps with the same mouse geometry at narrow width
-Type "27"
-Space
-Sleep 800ms
-Screenshot "live/29-batch-sentence-settings-narrow.png"
-Sleep 250ms
-
+Sleep 2500ms
 Type "q"
-Sleep 250ms
+Sleep 500ms
+
+# review.guidance — generation guidance wraps with the same mouse geometry at narrow width
+Type "./target/release/examples/tui_states --state review.guidance"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/29-batch-sentence-settings-narrow.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms

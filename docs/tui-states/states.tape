@@ -14,196 +14,350 @@ Type "cd ../.. && clear"
 Enter
 Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor"
 Enter
-Type "./target/release/examples/tui_states"
-Enter
 Show
 
-# The walker uses ABSOLUTE navigation: `Type "<n>"` then `Space` jumps straight
-# to state <n>, so a dropped or coalesced keystroke cannot accumulate across the
-# run and the stray Return that launches the binary cannot contaminate the
-# index. Each screenshot re-asserts its target index. Keep the uniform 800ms
-# settle after the jump so VHS never captures a mid-repaint frame.
+# Each capture launches one prepared scene by stable ID, waits for the AI reminder every
+# scene draws, repaints with Ctrl+L, and holds the scene on screen around the shot,
+# because VHS writes a Screenshot from recorded frames that lag behind the tape.
 
-# index 0 — Welcome · key step with no GEMINI_API_KEY in env (submit only)
-Type "0"
-Space
-Sleep 800ms
+# welcome.key — Welcome · key step with no GEMINI_API_KEY in env (submit only)
+Type "./target/release/examples/tui_states --state welcome.key"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
 Screenshot "live/00-welcome.png"
-
-# index 1 — Welcome · key step with GEMINI_API_KEY in env (load-from-env chip)
-Type "1"
-Space
-Sleep 800ms
-Screenshot "live/00b-welcome-env.png"
-
-# index 4 — WhatIUnderstood with the closed batch sentence summary
-Type "4"
-Space
-Sleep 800ms
-Screenshot "live/02-what-i-understood.png"
-
-# index 5 — ChangeSomething modal over WhatIUnderstood
-Type "5"
-Space
-Sleep 800ms
-Screenshot "live/03-change-something-modal.png"
-
-# index 6 — S1: three collapsed tags continue inline after the audio status
-Type "6"
-Space
-Sleep 800ms
-Screenshot "live/11-s1-label-tags.png"
-
-# index 7 — S2: editor opens below the complete artifact block
-Type "7"
-Space
-Sleep 800ms
-Screenshot "live/12-s2-label-editor.png"
-
-# index 8 — YourCards with inline retry indicators
-Type "8"
-Space
-Sleep 800ms
-Screenshot "live/06-your-cards-retrying.png"
-
-# index 9 — YourCards couldn't finish (terminal failure)
-Type "9"
-Space
-Sleep 800ms
-Screenshot "live/07-your-cards-couldnt-finish.png"
-
-# index 11 — S3: pending register remains visible in the below-artifacts editor
-Type "11"
-Space
-Sleep 800ms
-Screenshot "live/13-s3-label-pending-register.png"
-
-# index 12 — S4: pending note continues below the editor axes
-Type "12"
-Space
-Sleep 800ms
-Screenshot "live/14-s4-label-pending-note.png"
-
-# index 13 — S5: collapsed defaults restored automatically clear pending
-Type "13"
-Space
-Sleep 800ms
-Screenshot "live/15-s5-label-restored.png"
-
-# index 14 — S6: two collapsed cards accumulate independently before regeneration
-Type "14"
-Space
-Sleep 800ms
-Screenshot "live/16-s6-label-multiple-pending.png"
-
-# index 15 — S7: Ctrl+G activates the accumulated batch
-Type "15"
-Space
-Sleep 800ms
-Screenshot "live/17-s7-label-regenerating.png"
-
-# index 16 — S8: pinned tags stay audio-anchored despite picture rejections
-Type "16"
-Space
-Sleep 800ms
-Screenshot "live/18-s8-label-regenerated.png"
-
-# index 17 — S9: collapsed card keeps the actual register beside its requested target
-Type "17"
-Space
-Sleep 800ms
-Screenshot "live/19-s9-label-approx.png"
-
-# index 19 — S11: mouse-selected chip in the below-artifacts editor
-Type "19"
-Space
-Sleep 800ms
-Screenshot "live/21-s11-label-mouse-selection.png"
-
-# index 20 — S12: legacy metadata opens a below-artifacts editor with no active chips
-Type "20"
-Space
-Sleep 800ms
-Screenshot "live/22-s12-label-legacy-meta.png"
-
-# index 21 — active audio plus retry, recovery and terminal rows as a layout stress test
-Type "21"
-Space
-Sleep 800ms
-Screenshot "live/06b-your-cards-retry-stress.png"
-
-# index 22 — first Esc on nonempty YourWords arms a guarded clear
-Type "22"
-Space
-Sleep 800ms
-Screenshot "live/23-esc-words-clear.png"
-
-# index 23 — review back preserves words with a fresh unarmed Esc clear
-Type "23"
-Space
-Sleep 800ms
-Screenshot "live/24-esc-review-back.png"
-
-# index 24 — first Esc during generation arms a guarded stop
-Type "24"
-Space
-Sleep 800ms
-Screenshot "live/25-esc-generation-stop.png"
-
-# index 25 — confirmed stop drains the current artifact
-Type "25"
-Space
-Sleep 800ms
-Screenshot "live/26-generation-stopping.png"
-
-# index 26 — completed subset is published as a settled partial batch
-Type "26"
-Space
-Sleep 800ms
-Screenshot "live/27-generation-partial.png"
-
-# index 27 — generation guidance retains b1 + questions in both inline carousels
-Type "27"
-Space
-Sleep 800ms
-Screenshot "live/28-batch-sentence-settings.png"
-Sleep 250ms
-
-# index 28 — the pass reports languages the same words would equally have read as
-Type "28"
-Space
-Sleep 800ms
-Screenshot "live/30-plausible-alternates.png"
-Sleep 250ms
-
-# index 29 — the pair modal, opened on the learning half from the header chip
-Type "29"
-Space
-Sleep 800ms
-Screenshot "live/31-language-pair-modal.png"
-Sleep 250ms
-
-# index 30 — Welcome · the language step, laid out as a grid across the width
-Type "30"
-Space
-Sleep 800ms
-Screenshot "live/32-welcome-language-grid.png"
-Sleep 250ms
-
-# index 31 — two parked cards stay expanded while the walk stands on a third
-Type "31"
-Space
-Sleep 800ms
-Screenshot "live/33-your-cards-parked.png"
-Sleep 250ms
-
-# index 32 — an open sense list: the head names its meanings instead of
-# repeating one, and the rows step down from chosen to unchosen
-Type "32"
-Space
-Sleep 800ms
-Screenshot "live/34-open-sense-list.png"
-Sleep 250ms
-
+Sleep 2500ms
 Type "q"
-Sleep 250ms
+Sleep 500ms
+
+# welcome.key-env — Welcome · key step with GEMINI_API_KEY in env (load-from-env chip)
+Type "./target/release/examples/tui_states --state welcome.key-env"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/00b-welcome-env.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# review.closed — WhatIUnderstood with the closed batch sentence summary
+Type "./target/release/examples/tui_states --state review.closed"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/36-word-meanings.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# review.correction — ChangeSomething modal over WhatIUnderstood
+Type "./target/release/examples/tui_states --state review.correction"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/03-change-something-modal.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.closed — S1: three collapsed tags continue inline after the audio status
+Type "./target/release/examples/tui_states --state cards.closed"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/11-s1-label-tags.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.tuning — S2: editor opens below the complete artifact block
+Type "./target/release/examples/tui_states --state cards.tuning"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/12-s2-label-editor.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.retrying — YourCards with inline retry indicators
+Type "./target/release/examples/tui_states --state cards.retrying"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/06-your-cards-retrying.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.failed — YourCards couldn't finish (terminal failure)
+Type "./target/release/examples/tui_states --state cards.failed"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/07-your-cards-couldnt-finish.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.pending-register — S3: pending register remains visible in the below-artifacts editor
+Type "./target/release/examples/tui_states --state cards.pending-register"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/13-s3-label-pending-register.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.pending-note — S4: pending note continues below the editor axes
+Type "./target/release/examples/tui_states --state cards.pending-note"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/14-s4-label-pending-note.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.restored — S5: collapsed defaults restored automatically clear pending
+Type "./target/release/examples/tui_states --state cards.restored"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/15-s5-label-restored.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.multiple-pending — S6: two collapsed cards accumulate independently before regeneration
+Type "./target/release/examples/tui_states --state cards.multiple-pending"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/16-s6-label-multiple-pending.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.rewriting — S7: Ctrl+G activates the accumulated batch
+Type "./target/release/examples/tui_states --state cards.rewriting"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/17-s7-label-regenerating.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.rewritten — S8: pinned tags stay audio-anchored despite picture rejections
+Type "./target/release/examples/tui_states --state cards.rewritten"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/18-s8-label-regenerated.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.approximate — S9: collapsed card keeps the actual register beside its requested target
+Type "./target/release/examples/tui_states --state cards.approximate"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/19-s9-label-approx.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.mouse-tuning — S11: mouse-selected chip in the below-artifacts editor
+Type "./target/release/examples/tui_states --state cards.mouse-tuning"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/21-s11-label-mouse-selection.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.legacy-tuning — S12: legacy metadata opens a below-artifacts editor with no active chips
+Type "./target/release/examples/tui_states --state cards.legacy-tuning"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/22-s12-label-legacy-meta.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.retry-stress — active audio plus retry, recovery and terminal rows as a layout stress test
+Type "./target/release/examples/tui_states --state cards.retry-stress"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/06b-your-cards-retry-stress.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# words.clear-armed — first Esc on nonempty YourWords arms a guarded clear
+Type "./target/release/examples/tui_states --state words.clear-armed"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/23-esc-words-clear.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# words.returned — review back preserves words with a fresh unarmed Esc clear
+Type "./target/release/examples/tui_states --state words.returned"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/24-esc-review-back.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.stop-armed — first Esc during generation arms a guarded stop
+Type "./target/release/examples/tui_states --state cards.stop-armed"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/25-esc-generation-stop.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.stopping — confirmed stop drains the current artifact
+Type "./target/release/examples/tui_states --state cards.stopping"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/26-generation-stopping.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.partial — completed subset is published as a settled partial batch
+Type "./target/release/examples/tui_states --state cards.partial"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/27-generation-partial.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# review.guidance — generation guidance retains b1 + questions in both inline carousels
+Type "./target/release/examples/tui_states --state review.guidance"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/28-batch-sentence-settings.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# review.alternates — the pass reports languages the same words would equally have read as
+Type "./target/release/examples/tui_states --state review.alternates"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/30-plausible-alternates.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# review.languages — the pair modal, opened on the learning half from the header chip
+Type "./target/release/examples/tui_states --state review.languages"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/31-language-pair-modal.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# welcome.language — Welcome · the language step, laid out as a grid across the width
+Type "./target/release/examples/tui_states --state welcome.language"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/32-welcome-language-grid.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.parked — two parked cards stay expanded while the walk stands on a third
+Type "./target/release/examples/tui_states --state cards.parked"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/33-your-cards-parked.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# review.senses — an open sense list: the head names its meanings instead of
+# repeating one, and the rows step down from chosen to unchosen
+Type "./target/release/examples/tui_states --state review.senses"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/34-open-sense-list.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# review.translation-preview — prepared meanings await confirmation of the destination
+Type "./target/release/examples/tui_states --state review.translation-preview"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/35-translation-preview.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# done.published — a reopened published session settles on the final cards view
+Type "./target/release/examples/tui_states --state done.published"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/37-done-published.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms

@@ -11,6 +11,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use expectrl::process::Healthcheck;
+use expectrl::session::OsSession;
 use expectrl::{Expect, Session, spawn};
 
 fn example_binary(name: &str) -> PathBuf {
@@ -19,9 +20,11 @@ fn example_binary(name: &str) -> PathBuf {
         .status()
         .expect("cargo build must succeed");
     assert!(status.success(), "{name} example must build");
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target")
-        .join("debug")
+    std::env::current_exe()
+        .expect("invariant: running test executable must have a path")
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("invariant: test executable must live in the profile deps directory")
         .join("examples")
         .join(name)
 }
@@ -83,13 +86,18 @@ fn pty_flow_advances_from_your_words_to_what_i_understood() {
     );
 }
 
-#[test]
-fn pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells() {
-    let binary = example_binary("tui_states");
-    let mut command = Command::new(binary);
+fn state_demo(state: &str) -> OsSession {
+    let mut command = Command::new(example_binary("tui_states"));
+    command.args(["--state", state]);
     command.env("TERM_PROGRAM", "iTerm.app");
     let mut session = Session::spawn(command).expect("spawn must succeed");
     session.set_expect_timeout(Some(Duration::from_secs(10)));
+    session
+}
+
+#[test]
+fn pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells() {
+    let mut session = state_demo("cards.closed");
     let coordinate_mode = session
         .expect(b"\x1b[?1006h".as_slice())
         .expect("state demo must enable SGR mouse coordinates");
@@ -113,13 +121,6 @@ fn pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells() {
         .expect(b"\x1b]22;left_ptr\x1b\\".as_slice())
         .expect("state demo must keep reasserting the iTerm arrow while the pointer is stationary");
     session
-        .send("6")
-        .expect("must type the Your cards state index");
-    session
-        .send(" ")
-        .expect("must jump to the Your cards state (index 6)");
-    std::thread::sleep(Duration::from_millis(300));
-    session
         .send("\x1b[<35;11;5M")
         .expect("must send mouse move over the folder chip on the collapsed chip row");
     session.expect(b"\x1b]22;hand2\x1b\\".as_slice()).expect(
@@ -131,17 +132,6 @@ fn pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells() {
     session
         .expect(b"\x1b]22;left_ptr\x1b\\".as_slice())
         .expect("state demo must switch back to the iTerm arrow over plain cells");
-    session.send("10").expect("must type the Done state index");
-    session
-        .send(" ")
-        .expect("must jump to the Done state (index 10)");
-    std::thread::sleep(Duration::from_millis(300));
-    session
-        .send("\x1b[<35;9;5M")
-        .expect("must send mouse move over done artifact placeholder");
-    session
-        .expect(b"\x1b]22;hand2\x1b\\".as_slice())
-        .expect("state demo must switch to the iTerm hand pointer over a done placeholder");
     let exited = session
         .get_process_mut()
         .exit(true)
@@ -149,5 +139,22 @@ fn pty_state_demo_switches_mouse_pointer_between_link_and_plain_cells() {
     assert!(
         exited && !enabled_click_only,
         "state demo process must exit after pointer verification and must use all-motion reporting instead of click-only reporting"
+    );
+}
+
+#[test]
+fn pty_state_demo_cannot_keep_the_arrow_over_a_done_placeholder() {
+    let mut session = state_demo("done.published");
+    session
+        .expect(b"\x1b]22;left_ptr\x1b\\".as_slice())
+        .expect("state demo must set the iTerm arrow pointer on launch");
+    session
+        .send("\x1b[<35;9;5M")
+        .expect("must send mouse move over done artifact placeholder");
+    let pointed = session.expect(b"\x1b]22;hand2\x1b\\".as_slice()).is_ok();
+    let _ = session.get_process_mut().exit(true);
+    assert!(
+        pointed,
+        "state demo kept the arrow over a published done placeholder instead of the hand pointer"
     );
 }
