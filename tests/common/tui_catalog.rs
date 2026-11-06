@@ -1,11 +1,11 @@
 //! Typed intent inventory for the TUI and its structural, copy and evidence checks.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result};
-use kamishibai::tui::{BusyKind, ModalKind, Screen};
+use kamishibai::tui::{self, BusyKind, ModalKind};
 use serde::Deserialize;
 
 /// Authored interface intent; load with `try_from_document` and inspect its links and copy.
@@ -27,12 +27,21 @@ struct Verification {
     limits: String,
 }
 
-/// The state map: every runtime state and the scenarios that route through them.
+/// The state map: the screens, every runtime state on them and the scenarios that route through them.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Map {
+    screens: Vec<Screen>,
     states: Vec<State>,
     scenarios: Vec<Scenario>,
+}
+
+/// One runtime screen: its head, whose ID prefixes every state on it, and the runtime screen it names.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Screen {
+    head: Head,
+    screen: String,
 }
 
 /// The one-line head every entry opens with: its stable ID and the intent an edit must preserve.
@@ -43,13 +52,22 @@ struct Head {
     intent: String,
 }
 
-/// A shared rule: its head, the expectations it imposes, and what it rests on.
+/// A shared rule: its head, where it applies, the expectations it imposes, and what it rests on.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Rule {
     head: Head,
+    scope: Scope,
     expectations: Vec<String>,
     grounds: Grounds,
+}
+
+/// Where a rule applies: every state, whole screens by their ID, or named states.
+#[derive(Deserialize)]
+enum Scope {
+    Everywhere,
+    Screens(Vec<String>),
+    States(Vec<String>),
 }
 
 /// What an entry rests on: why it exists, the code that implements it, the tests that check it and the gaps where code disagrees.
@@ -193,7 +211,17 @@ pub(super) enum Violation {
     Header(String),
     Footer(String),
     UnknownCommand(String),
+    Intent(String),
+    Layout(String),
+    Scope(String),
+    Misplaced(String),
 }
+
+const PLACEHOLDERS: [&str; 6] = ["todo", "tbd", "fixme", "xxx", "placeholder", "lorem"];
+
+const RETELLINGS: [&str; 8] = [
+    "show", "shows", "display", "displays", "render", "renders", "list", "lists",
+];
 
 impl Catalog {
     /// Decode the authored RON document without accepting unknown fields.
@@ -251,6 +279,12 @@ impl Catalog {
         verifications(&self.verifications, root, &mut faults);
         let states = &self.map.states;
         identifiers(&self.rules, |rule| &rule.head.id, "rules", &mut faults);
+        identifiers(
+            &self.map.screens,
+            |screen| &screen.head.id,
+            "screens",
+            &mut faults,
+        );
         identifiers(states, |state| &state.head.id, "states", &mut faults);
         identifiers(
             &self.map.scenarios,
@@ -258,19 +292,26 @@ impl Catalog {
             "scenarios",
             &mut faults,
         );
-        for rule in &self.rules {
-            text(&rule.head.intent, &rule.head.id, &mut faults);
-            expectations(&rule.expectations, &rule.head.id, &mut faults);
-            grounds(&rule.grounds, root, &rule.head.id, &mut faults);
-        }
+        heads(&self.heads(), &mut faults);
         let ids = states
             .iter()
             .map(|state| state.head.id.as_str())
             .collect::<HashSet<_>>();
+        let places = self
+            .map
+            .screens
+            .iter()
+            .map(|screen| screen.head.id.as_str())
+            .collect::<HashSet<_>>();
+        for rule in &self.rules {
+            expectations(&rule.expectations, &rule.head.id, &mut faults);
+            grounds(&rule.grounds, root, &rule.head.id, &mut faults);
+            scope(&rule.scope, &places, &ids, &rule.head.id, &mut faults);
+        }
+        screens_of(&self.map.screens, states, &mut faults);
         for state in states {
             let owner = &state.head.id;
             let contract = &state.contract;
-            text(&state.head.intent, owner, &mut faults);
             surface(&contract.surface, owner, &mut faults);
             text(&contract.chrome.title, owner, &mut faults);
             text(&contract.chrome.hint, owner, &mut faults);
@@ -294,7 +335,6 @@ impl Catalog {
         }
         for scenario in &self.map.scenarios {
             let owner = &scenario.head.id;
-            text(&scenario.head.intent, owner, &mut faults);
             expectations(&scenario.expectations, owner, &mut faults);
             checks(&scenario.tests, root, owner, &mut faults);
             if scenario.route.len() < 2 {
@@ -326,6 +366,147 @@ impl Catalog {
         inventory_captures(states, root, &mut faults);
         provenance(states, root, &mut faults);
         faults
+    }
+
+    /// Check that every entry's head sits on a single line of `document`.
+    ///
+    /// That line is what `grep -n 'State(head'` prints, so kind, ID and intent always arrive together.
+    #[must_use]
+    pub(super) fn inspect_layout(&self, document: &str) -> Vec<Violation> {
+        let lines = document.lines().map(str::trim).collect::<Vec<_>>();
+        self.heads()
+            .into_iter()
+            .filter(|(kind, head)| {
+                let opening = format!("{kind}(head: Head(id: \"{}\", intent: \"", head.id);
+                lines
+                    .iter()
+                    .filter(|line| line.starts_with(&opening) && line.ends_with("\"),"))
+                    .count()
+                    != 1
+            })
+            .map(|(kind, head)| Violation::Layout(format!("{kind} {}", head.id)))
+            .collect()
+    }
+
+    fn heads(&self) -> Vec<(&'static str, &Head)> {
+        self.rules
+            .iter()
+            .map(|rule| ("Rule", &rule.head))
+            .chain(
+                self.map
+                    .screens
+                    .iter()
+                    .map(|screen| ("Screen", &screen.head)),
+            )
+            .chain(self.map.states.iter().map(|state| ("State", &state.head)))
+            .chain(
+                self.map
+                    .scenarios
+                    .iter()
+                    .map(|scenario| ("Scenario", &scenario.head)),
+            )
+            .collect()
+    }
+}
+
+fn heads(values: &[(&'static str, &Head)], faults: &mut Vec<Violation>) {
+    let mut kinds = HashMap::new();
+    let mut intents = HashMap::new();
+    for (kind, head) in values {
+        let owner = format!("{kind} {}", head.id);
+        if let Some(other) = kinds.insert(head.id.as_str(), *kind)
+            && other != *kind
+        {
+            faults.push(Violation::Duplicate(format!(
+                "{} names both a {other} and a {kind}",
+                head.id
+            )));
+        }
+        text(&head.intent, &owner, faults);
+        intent(&head.intent, &owner, faults);
+        if let Some(other) = intents.insert(head.intent.as_str(), owner.clone()) {
+            faults.push(Violation::Duplicate(format!(
+                "{owner} repeats the intent of {other}"
+            )));
+        }
+    }
+}
+
+fn intent(value: &str, owner: &str, faults: &mut Vec<Violation>) {
+    if value.trim().is_empty() {
+        return;
+    }
+    let lowered = value.to_lowercase();
+    let words = lowered.split_whitespace().collect::<Vec<_>>();
+    let placeholder = lowered.contains("...")
+        || lowered.contains('…')
+        || lowered
+            .split(|symbol: char| !symbol.is_ascii_alphanumeric())
+            .any(|token| PLACEHOLDERS.contains(&token));
+    let problem = if placeholder {
+        Some("is a placeholder")
+    } else if words.len() < 8 {
+        Some("names an action instead of the value it protects")
+    } else if value.chars().count() > 180 {
+        Some("is too long to read on one grep line")
+    } else if words.first().is_some_and(|word| RETELLINGS.contains(word)) {
+        Some("retells the screen instead of its value")
+    } else {
+        None
+    };
+    if let Some(problem) = problem {
+        faults.push(Violation::Intent(format!("{owner} {problem}: {value:?}")));
+    }
+}
+
+fn scope(
+    value: &Scope,
+    places: &HashSet<&str>,
+    states: &HashSet<&str>,
+    owner: &str,
+    faults: &mut Vec<Violation>,
+) {
+    let (names, known, kind) = match value {
+        Scope::Everywhere => return,
+        Scope::Screens(names) => (names, places, "screen"),
+        Scope::States(names) => (names, states, "state"),
+    };
+    if names.is_empty() {
+        faults.push(Violation::Scope(format!("{owner} names no {kind}")));
+    }
+    for name in names {
+        if !known.contains(name.as_str()) {
+            faults.push(Violation::Scope(format!(
+                "{owner} names unknown {kind} {name}"
+            )));
+        }
+    }
+}
+
+fn screens_of(screens: &[Screen], states: &[State], faults: &mut Vec<Violation>) {
+    for runtime in runtime_screens() {
+        let name = screen_name(runtime);
+        let entries = screens
+            .iter()
+            .filter(|screen| screen.screen == name)
+            .count();
+        if entries != 1 {
+            faults.push(Violation::MissingSurface(format!(
+                "screen {name} has {entries} catalog entries instead of one"
+            )));
+        }
+    }
+    for state in states {
+        let prefix = state.head.id.split('.').next().unwrap_or_default();
+        let placed = screens.iter().any(|screen| {
+            screen.head.id == prefix && screen.screen == state.contract.surface.screen
+        });
+        if !placed {
+            faults.push(Violation::Misplaced(format!(
+                "{} lives on {} but its prefix names no screen entry for it",
+                state.head.id, state.contract.surface.screen
+            )));
+        }
     }
 }
 
@@ -391,7 +572,7 @@ fn grounds(value: &Grounds, root: &Path, owner: &str, faults: &mut Vec<Violation
 }
 
 fn surface(value: &Surface, owner: &str, faults: &mut Vec<Violation>) {
-    if !screens()
+    if !runtime_screens()
         .iter()
         .any(|screen| screen_name(*screen) == value.screen)
     {
@@ -540,7 +721,7 @@ fn relative(path: &Path) -> bool {
 }
 
 fn coverage(states: &[State], faults: &mut Vec<Violation>) {
-    for screen in screens() {
+    for screen in runtime_screens() {
         let name = screen_name(screen);
         if !states
             .iter()
@@ -700,23 +881,23 @@ fn screenshots(
     shots
 }
 
-fn screens() -> [Screen; 5] {
+fn runtime_screens() -> [tui::Screen; 5] {
     [
-        Screen::Welcome,
-        Screen::YourWords,
-        Screen::WhatIUnderstood,
-        Screen::YourCards,
-        Screen::Done,
+        tui::Screen::Welcome,
+        tui::Screen::YourWords,
+        tui::Screen::WhatIUnderstood,
+        tui::Screen::YourCards,
+        tui::Screen::Done,
     ]
 }
 
-fn screen_name(screen: Screen) -> &'static str {
+fn screen_name(screen: tui::Screen) -> &'static str {
     match screen {
-        Screen::Welcome => "Welcome",
-        Screen::YourWords => "YourWords",
-        Screen::WhatIUnderstood => "WhatIUnderstood",
-        Screen::YourCards => "YourCards",
-        Screen::Done => "Done",
+        tui::Screen::Welcome => "Welcome",
+        tui::Screen::YourWords => "YourWords",
+        tui::Screen::WhatIUnderstood => "WhatIUnderstood",
+        tui::Screen::YourCards => "YourCards",
+        tui::Screen::Done => "Done",
     }
 }
 
@@ -762,7 +943,8 @@ mod tests {
 
     use super::{
         Action, Catalog, Check, Chrome, Contract, Evidence, Gap, Grounds, Head, Map, Origin,
-        Overlay, Scenario, Shot, Source, State, Surface, Verification, Violation,
+        Overlay, Rule, Scenario, Scope, Screen, Shot, Source, State, Surface, Verification,
+        Violation,
     };
 
     fn head(id: &str, intent: &str) -> Head {
@@ -772,9 +954,13 @@ mod tests {
         }
     }
 
+    fn purpose(id: &str) -> String {
+        format!("The prepared card {id} stays readable while the learner walks the batch")
+    }
+
     fn state(id: &str) -> State {
         State {
-            head: head(id, "Inspect a prepared card"),
+            head: head(id, &purpose(id)),
             contract: Contract {
                 surface: Surface {
                     screen: String::from("YourCards"),
@@ -806,8 +992,52 @@ mod tests {
             version: 2,
             verifications: Vec::new(),
             rules: Vec::new(),
-            map: Map { states, scenarios },
+            map: Map {
+                screens: vec![Screen {
+                    head: head(
+                        "cards",
+                        "One committed batch is followed from its first card to the saved files",
+                    ),
+                    screen: String::from("YourCards"),
+                }],
+                states,
+                scenarios,
+            },
         }
+    }
+
+    fn rule(id: &str, scope: Scope) -> Rule {
+        Rule {
+            head: head(
+                id,
+                &format!("The shared rule {id} keeps every card readable in the batch"),
+            ),
+            scope,
+            expectations: vec![String::from("Cards stay aligned")],
+            grounds: Grounds {
+                rationale: Vec::new(),
+                sources: vec![Source {
+                    file: "render.rs".into(),
+                    symbol: String::from("render"),
+                }],
+                tests: Vec::new(),
+                gaps: Vec::new(),
+            },
+        }
+    }
+
+    fn intended(intent: &str) -> Catalog {
+        let mut entry = state("cards.open");
+        entry.head.intent = intent.to_owned();
+        catalog(vec![entry], Vec::new())
+    }
+
+    fn rejects_intent(intent: &str) -> bool {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        intended(intent)
+            .inspect(directory.path())
+            .iter()
+            .any(|fault| matches!(fault, Violation::Intent(_)))
     }
 
     fn screen(header: &str, footer: &str) -> String {
@@ -865,7 +1095,10 @@ mod tests {
     fn catalog_cannot_accept_a_route_without_a_transition() {
         let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
         let scenario = Scenario {
-            head: head("cards.inspect", "Read a card"),
+            head: head(
+                "cards.inspect",
+                "Reading a card keeps its head focused while the walk moves on",
+            ),
             route: vec![String::from("cards.closed"), String::from("cards.open")],
             expectations: vec![String::from("Keep the head focused")],
             tests: Vec::new(),
@@ -1109,6 +1342,164 @@ mod tests {
                 .iter()
                 .any(|fault| matches!(fault, Violation::UnknownCommand(_))),
             "a verification named a test module the harness does not declare"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_accept_an_empty_intent() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        assert!(
+            intended("  ")
+                .inspect(directory.path())
+                .iter()
+                .any(|fault| matches!(fault, Violation::Empty(_))),
+            "catalog accepted an entry whose intent is blank"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_accept_a_placeholder_intent() {
+        assert!(
+            rejects_intent("TODO describe what this state protects for the learner later"),
+            "catalog accepted a placeholder as an intent"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_accept_an_intent_that_only_names_an_action() {
+        assert!(
+            rejects_intent("Wait for credential validation"),
+            "catalog accepted an action label as an intent"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_accept_an_intent_too_long_for_one_grep_line() {
+        assert!(
+            rejects_intent(&"The learner keeps every typed word intact ".repeat(5)),
+            "catalog accepted an intent too long to read on one grep line"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_accept_an_intent_that_retells_the_screen() {
+        assert!(
+            rejects_intent("Shows the key field with a submit button and a back hint"),
+            "catalog accepted an intent that only retells the screen"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_accept_two_entries_with_one_intent() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        let mut twin = state("cards.closed");
+        twin.head.intent = purpose("cards.open");
+        assert!(
+            catalog(vec![state("cards.open"), twin], Vec::new())
+                .inspect(directory.path())
+                .iter()
+                .any(|fault| matches!(fault, Violation::Duplicate(_))),
+            "catalog accepted one intent copied onto two entries"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_reuse_an_id_across_entry_kinds() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        let mut inventory = catalog(vec![state("cards.open")], Vec::new());
+        inventory.rules.push(rule("cards.open", Scope::Everywhere));
+        assert!(
+            inventory
+                .inspect(directory.path())
+                .iter()
+                .any(|fault| matches!(fault, Violation::Duplicate(_))),
+            "catalog let a rule and a state share one ID"
+        );
+    }
+
+    #[test]
+    fn state_cannot_sit_on_a_screen_its_prefix_does_not_name() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        assert!(
+            catalog(vec![state("review.open")], Vec::new())
+                .inspect(directory.path())
+                .iter()
+                .any(|fault| matches!(fault, Violation::Misplaced(_))),
+            "a state's ID prefix disagreed with its screen unnoticed"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_leave_a_runtime_screen_without_an_entry() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        assert!(
+            catalog(vec![state("cards.open")], Vec::new())
+                .inspect(directory.path())
+                .iter()
+                .any(|fault| matches!(fault, Violation::MissingSurface(name) if name.contains("Welcome"))),
+            "a runtime screen had no catalog entry and nothing noticed"
+        );
+    }
+
+    #[test]
+    fn rule_scope_cannot_name_an_unknown_state() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        let mut inventory = catalog(vec![state("cards.open")], Vec::new());
+        inventory.rules.push(rule(
+            "cards.alignment",
+            Scope::States(vec![String::from("cards.vanished")]),
+        ));
+        assert!(
+            inventory
+                .inspect(directory.path())
+                .iter()
+                .any(|fault| matches!(fault, Violation::Scope(_))),
+            "a rule scope named a state the catalog does not have"
+        );
+    }
+
+    #[test]
+    fn rule_scope_cannot_be_an_empty_list() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        let mut inventory = catalog(vec![state("cards.open")], Vec::new());
+        inventory
+            .rules
+            .push(rule("cards.alignment", Scope::Screens(Vec::new())));
+        assert!(
+            inventory
+                .inspect(directory.path())
+                .iter()
+                .any(|fault| matches!(fault, Violation::Scope(_))),
+            "a rule scope listed no screen and still passed"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_split_an_entry_head_across_lines() {
+        let document = format!(
+            "        State(\n            head: Head(id: \"cards.open\", intent: \"{}\"),\n",
+            purpose("cards.open")
+        );
+        assert!(
+            catalog(vec![state("cards.open")], Vec::new())
+                .inspect_layout(&document)
+                .iter()
+                .any(|fault| matches!(fault, Violation::Layout(_))),
+            "an entry head split across lines escaped the grep layout check"
+        );
+    }
+
+    #[test]
+    fn a_one_line_head_cannot_raise_a_layout_fault() {
+        let document = format!(
+            "        Screen(head: Head(id: \"cards\", intent: \"One committed batch is followed from its first card to the saved files\"),\n        State(head: Head(id: \"cards.open\", intent: \"{}\"),\n",
+            purpose("cards.open")
+        );
+        assert!(
+            catalog(vec![state("cards.open")], Vec::new())
+                .inspect_layout(&document)
+                .is_empty(),
+            "a correctly laid out head was reported as split"
         );
     }
 }

@@ -3,8 +3,8 @@ Catalog(
     verifications: [
         Verification(
             command: "cargo test --test all ui_catalog::",
-            establishes: "The catalog decodes into its typed schema; actions, routes, sources, tests and gaps point at real states, symbols and test functions; every capture decodes, is cataloged and is written by the tape its origin names; every prepared scene is a catalog state whose header and footer equal what the real renderer draws",
-            limits: "It never executes a described transition, judges the intent, or compares a PNG with today's renderer; header and footer of states without a prepared scene stay unverified",
+            establishes: "The catalog decodes into its typed schema; every entry's head sits on one line and its ID is unique across kinds; each intent has at least 8 words and at most 180 characters and is neither a placeholder, a duplicate nor a retelling of the screen; state IDs carry their screen's prefix and scopes name real screens and states; actions, routes, sources, tests and gaps point at real states, symbols and test functions; every capture decodes, is cataloged and is written by the tape its origin names; every prepared scene is a catalog state whose header and footer equal what the real renderer draws",
+            limits: "It never executes a described transition, judges whether an intent is true to the product, or compares a PNG with today's renderer; the chrome of states without a prepared scene stays unverified",
         ),
         Verification(
             command: "cargo test --test all ui_recording::",
@@ -38,7 +38,8 @@ Catalog(
         ),
     ],
     rules: [
-        Rule(head: Head(id: "inventory.boundary", intent: "Keep interface intent inspectable beside the code"),
+        Rule(head: Head(id: "inventory.boundary", intent: "Agents editing the TUI can trust this catalog, because its copy, links, tests and captures fail loudly once they drift from the code"),
+            scope: Everywhere,
             expectations: [
                 "The catalog is the authored inventory of intended states, transitions and scenarios; it is not proof that every transition executes",
                 "Screen and overlay describe runtime locations; inline editors, retry and failure variants remain states of those locations",
@@ -46,14 +47,20 @@ Catalog(
                 "Screenshot fixtures show rendered appearance; transition, shell and PTY tests provide different kinds of behavior evidence",
                 "caption.png and capture.gif are demo assets, not independent interface states",
                 "Update affected intent, states, routes, sources and evidence in the same change as each TUI feature",
-                "header and footer record what the prepared scene renders when the state has one and the representative situation otherwise; the S-series card scenes are idle unfinished batches with no running card, which is why they offer both [Ctrl+G] regenerate and [Esc] stop",
+                "chrome records the header title, header hint and footer that the prepared scene renders when the state has one, and the representative situation otherwise; the S-series card scenes are idle unfinished batches with no running card, which is why they offer both [Ctrl+G] regenerate and [Esc] stop",
                 "tests lists only checks whose assertions exercise the entry; an empty list means no automated behavior check exists yet",
                 "gaps records code behavior that contradicts an expectation today and points at the code; the expectation keeps the intended behavior",
                 "rationale records why a rule exists, so a later change can tell a deliberate constraint from an accident",
+                "Every entry opens with one head line, Kind(head: Head(id: ..., intent: ...)), so a grep lists kind, ID and intent together",
+                "An intent says first what the entry gives the learner, or the developer for a rule about code, and then at most two things it protects; every other guarantee belongs in expectations",
+                "An intent names a key only when that key is itself what is protected, and it is derived from code, tests, rules and history; an intent the sources cannot settle stays partial and its question goes to the owner",
+                "An intent changes only when a request changes what the learner gets; code that contradicts an expectation becomes a gap instead",
+                "A rule's scope names where it applies: Everywhere, whole screens by their ID, or individual states",
+                "A screen's ID is the prefix of every state on it: welcome, words, review, cards and done",
             ],
             grounds: Grounds(
                 rationale: [
-                    "Hand-written Markdown maps and an untyped contract drifted from the code without any check noticing; a typed inventory with copy, link and provenance checks fails loudly instead",
+                    "Hand-written Markdown maps drifted from the code unnoticed, and the earlier typed contract checked only its own shape, file paths and a few literal words; this catalog also compares its copy with the real renderer and its links, sources, tests and captures with the repository, so drift fails loudly",
                 ],
                 sources: [
                     Source(file: "src/tui/screen.rs", symbol: "Screen"),
@@ -69,7 +76,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "chrome.stack", intent: "Keep a single familiar terminal surface"),
+        Rule(head: Head(id: "chrome.stack", intent: "Every screen keeps one familiar frame of header, body, reminder and key bar, and no screen or overlay may hide the reminder that AI output needs checking"),
+            scope: Everywhere,
             expectations: [
                 "The UI stack is frozen: ratatui renders and crossterm owns the terminal backend, input and terminal control; no alternative UI stack is allowed",
                 "The full terminal is divided into header, scrollable body, persistent AI reminder, dashed divider and status/footer",
@@ -91,7 +99,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "chrome.header", intent: "Name the contents and give the next useful instruction"),
+        Rule(head: Head(id: "chrome.header", intent: "The header names what is on screen and the one next step worth taking; counts stay in the body, so the card title holds still for a whole run"),
+            scope: Everywhere,
             expectations: [
                 "The inverted title reads setup, your words, word meanings or your cards; the card title stays your cards through generation, rewriting, publication and the reopened Done view",
                 "Welcome hints choose your language and add a gemini key; a launch or recovery that only needs a key hints add a working gemini key to continue",
@@ -119,7 +128,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "chrome.language-pair", intent: "Make the learning direction visible"),
+        Rule(head: Head(id: "chrome.language-pair", intent: "Which direction a batch is built in stays visible on every screen after setup, and the pair can change only until cards are committed"),
+            scope: Everywhere,
             expectations: [
                 "Every screen after Welcome shows a bold bright canonical CODE → CODE chip, with ? for an unresolved learning language; Welcome shows no chip",
                 "YourWords and WhatIUnderstood edit the pair through Ctrl+L or either header half; on review either half opens the learning column",
@@ -153,7 +163,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "visual.rank-focus", intent: "Give rank, focus and links consistent meanings"),
+        Rule(head: Head(id: "visual.rank-focus", intent: "Any row reads at a glance because ink, row band, weight and underline each keep one meaning on every screen"),
+            scope: Everywhere,
             expectations: [
                 "Ink::Subject names the subject, chosen value, built term, destination file or broken artifact; Detail explains it; Aside carries indices, costs, timings and inactive markers, except that the status bar's ready count and total cost read Subject",
                 "A focused body row keeps its rank inks and gains HL #26262a plus bold across the whole row",
@@ -183,7 +194,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "keyboard.grammar", intent: "Let the same keys mean the same action across screens"),
+        Rule(head: Head(id: "keyboard.grammar", intent: "A key learned on one screen does the same on every other, and walking past an open block never closes what was opened"),
+            scope: Everywhere,
             expectations: [
                 "Up/Down walk vertically through lists, open blocks and editor rows; Left/Right first serve a focused horizontal control",
                 "On a disclosure head Right opens what Enter opens and Left closes what Escape closes",
@@ -216,7 +228,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "keyboard.layouts", intent: "Keep shortcuts tied to physical Latin keys while preserving typed text"),
+        Rule(head: Head(id: "keyboard.layouts", intent: "Printed shortcuts work from Russian, Ukrainian or Greek layouts without switching, while every typed word keeps exactly the letters entered"),
+            scope: Everywhere,
             expectations: [
                 "Ctrl/Cmd shortcuts fold through latin_key; review and card commands fold ordinary letters only outside real text inputs",
                 "ЙЦУКЕН, Ukrainian and Greek layouts can trigger the printed English shortcuts",
@@ -240,7 +253,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "footer.promises", intent: "Only advertise actions the current state can perform"),
+        Rule(head: Head(id: "footer.promises", intent: "Each footer hint can be trusted to act right now, so a key that would only scold or silently queue a restart stays off the bar"),
+            scope: Everywhere,
             expectations: [
                 "ScreenView provides left status and right hints; render_screen suppresses base hints under modal or busy ownership and retains global quit",
                 "Ctrl+G is hidden above the intake or card ceiling, while card work is running, and on a finished result with nothing staged; it reads save when every card is ready but unpublished",
@@ -303,7 +317,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "footer.rank-order", intent: "Keep the action and exit legible in a narrow terminal"),
+        Rule(head: Head(id: "footer.rank-order", intent: "However narrow the terminal, the main action and the way out stay on the bar; hints drop whole rather than clip, and quit yields only to the main action or an armed key"),
+            scope: Everywhere,
             expectations: [
                 "Primary uses Subject, Secondary uses Detail and Ghost uses Aside; ordinary hints are neither bold nor underlined",
                 "Armed confirmations alone use a bright bold hint",
@@ -347,7 +362,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "words.intake", intent: "Accept the learner's original lines without surprising text interpretation"),
+        Rule(head: Head(id: "words.intake", intent: "Lines go in exactly as typed or pasted, one item per line with commas kept, and they survive a return from review or a missing-destination question"),
+            scope: Screens(["words"]),
             expectations: [
                 "Plain Enter inserts a newline; commas remain literal content and Ctrl+G is the separate understanding chord",
                 "Raw words and phrases are preserved when returning from review and when translation needs a destination",
@@ -375,7 +391,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "language.translation-choice", intent: "Confirm a missing translation destination without discarding input"),
+        Rule(head: Head(id: "language.translation-choice", intent: "Own-language input gets one plain question about which language to learn while the words wait intact, and a prepared proposal becomes a session only once confirmed"),
+            scope: States(["words.translation-choice", "review.translation-preview"]),
             expectations: [
                 "PickTranslationLanguage is a single column with no known-language column, auto option, grouping or history explanation",
                 "Ask which language to learn once and leave one blank row before the catalog-ordered language list",
@@ -402,7 +419,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "review.senses", intent: "Make meaning selection an immediate, reversible review"),
+        Rule(head: Head(id: "review.selection", intent: "Before any paid work starts, each line shows how it was read and which meanings become cards; no choice is ever tentative, so none can be lost"),
+            scope: Screens(["review"]),
             expectations: [
                 "Rows preserve the original expression and show each sense's optional learning-language translation; different senses may resolve to different card terms",
                 "Candidate rows read index Aside, term Subject, separator Aside and gloss Detail; excluded rows keep a struck term and explanation",
@@ -437,7 +455,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "review.guidance", intent: "Keep initial batch preferences distinct from later card rewrites"),
+        Rule(head: Head(id: "review.batch-guidance", intent: "Level and phrase kinds for a whole batch can be steered before generation, remembered per learning language, at no extra request and apart from later card rewrites"),
+            scope: Screens(["review"]),
             expectations: [
                 "A nonempty review begins with generation guidance, a muted best fit tag by default, and one blank row before the words",
                 "Explicit compact tags replace best fit in level-then-format order; all compact tags disappear while the two inline carousels are open",
@@ -470,7 +489,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "cards.attribution", intent: "Keep descriptive labels distinct from requested constraints"),
+        Rule(head: Head(id: "cards.attribution", intent: "Each sentence carries labels for what it actually turned out to be, kept apart from what was asked, so an approximation stays honest and no label is invented"),
+            scope: Screens(["cards"]),
             expectations: [
                 "Register, phrase kind and lowercase CEFR describe the produced sentence; CEFR measures surrounding language and exempts the target term",
                 "Default generation writes a natural sentence first and then describes its level; an explicit initial batch level or later card-level change constrains generation",
@@ -499,7 +519,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "cards.head-and-steps", intent: "Let progress, price and artifact access stay aligned"),
+        Rule(head: Head(id: "cards.head-and-steps", intent: "Every card says how far it got, what it cost and where its files are in shared columns, and a broken step is the only bright mark on a healthy screen"),
+            scope: Screens(["cards"]),
             expectations: [
                 "Every head preserves absolute batch number and term → sentence; the head shows one total cost and one retry summary",
                 "A term is Subject only when all four artifacts are ready; missing, failed or staged cards use Aside while ordinary sentences stay Detail",
@@ -535,7 +556,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "cards.disclosure", intent: "Separate reading a card from editing its request"),
+        Rule(head: Head(id: "cards.disclosure", intent: "Any card can be opened just to read it and closed again freely; changing it takes a deliberate step into the editor, so reading never edits by accident"),
+            scope: Screens(["cards"]),
             expectations: [
                 "Enter, Right and Space open step rows, four unlit tune rows, metadata and rejected attempts while focus stays on the head",
                 "Down from an open tunable head lights register; walking in from below lights note; navigation saturates inside the final card rather than cycling",
@@ -567,7 +589,16 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "cards.carousel", intent: "Make every choice discoverable through the same track"),
+        Rule(head: Head(id: "cards.carousel", intent: "All choices of a tuning question sit on one shared track, so it is clear where the current value stands and any choice is reached the same way by key or click"),
+            scope: States([
+                "cards.tuning",
+                "cards.mouse-tuning",
+                "cards.legacy-tuning",
+                "cards.pending-register",
+                "cards.pending-level",
+                "cards.pending-note",
+                "review.guidance",
+            ]),
             expectations: [
                 "Questions are how should it sound?, what kind of phrase? and what's the desired level?; one more thing introduces the single-line say what should change note",
                 "The focused question and two chevrons are white and bold; other questions are Aside and the chosen chip is inverted",
@@ -597,7 +628,21 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "cards.rewrite-transaction", intent: "Stage edits together while keeping the current result usable"),
+        Rule(head: Head(id: "cards.rewrite-transaction", intent: "Changes staged on any number of cards leave the current sentences, files and deck usable, and nothing is regenerated until one Ctrl+G applies them all"),
+            scope: States([
+                "cards.tuning",
+                "cards.mouse-tuning",
+                "cards.legacy-tuning",
+                "cards.pending-register",
+                "cards.pending-level",
+                "cards.pending-note",
+                "cards.pending",
+                "cards.multiple-pending",
+                "cards.restored",
+                "cards.rewriting",
+                "cards.rewritten",
+                "cards.approximate",
+            ]),
             expectations: [
                 "Every choice or note edit stages immediately; current artifacts, cached metadata and publication remain until Ctrl+G activates the whole pending batch",
                 "A staged sentence is struck, step rows use Aside and metadata is muted; staged requested choices remain visible",
@@ -631,7 +676,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "cards.retry-evidence", intent: "Explain spent attempts without cluttering live rows"),
+        Rule(head: Head(id: "cards.retry-evidence", intent: "Why each paid attempt was rejected stays visible on its card, linked to that attempt's own frame or reply, while live rows stay as quiet as a first try"),
+            scope: Screens(["cards"]),
             expectations: [
                 "Each artifact receives one ordinary attempt plus three retries; all active attempts use the same spinner without a retry number",
                 "The head's ↻N follows total cost when present, sums min(done,retries) across artifacts, omits zero and counts unmetered/undiagnosed spent attempts; a four-attempt terminal artifact contributes three",
@@ -668,7 +714,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "cards.progress-census", intent: "Say progress once with durable meanings"),
+        Rule(head: Head(id: "cards.progress-census", intent: "Progress is said once, as ready against total, in words that mean the same in header, hints, status and glyphs; a staged card never counts as ready"),
+            scope: Screens(["cards"]),
             expectations: [
                 "CardPhase derives Adjusted, Failed, Working, Ready in that precedence so intact staged cards remain pending",
                 "The live status shows ready against total once, then pending count when nonzero, cost and elapsed",
@@ -692,7 +739,18 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "cards.viewport-follow", intent: "Keep the active card and what comes next visible"),
+        Rule(head: Head(id: "cards.viewport-follow", intent: "While a batch builds, the running card stays in view with the queued words below it, and the view never fights a learner who scrolls or opens a card"),
+            scope: States([
+                "cards.generating",
+                "cards.retrying",
+                "cards.rewriting",
+                "cards.stopping",
+                "cards.open",
+                "cards.parked",
+                "cards.scroll-end",
+                "cards.published",
+                "cards.partial",
+            ]),
             expectations: [
                 "New and restarted generation arm following and the engine selects the running card",
                 "Follow aims 30 percent down the viewport, showing the unreached tail; a tall card falls back to the bottom position needed to fit its rows",
@@ -723,7 +781,16 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "result.outcome", intent: "Hand back outputs and state losses in one place"),
+        Rule(head: Head(id: "result.outcome", intent: "A settled batch hands back folder, deck and PDF in one strip and states the number of unfinished cards exactly once, even when nothing could be saved"),
+            scope: States([
+                "cards.published",
+                "cards.partial",
+                "cards.all-failed",
+                "cards.new-batch-armed",
+                "cards.reopened",
+                "done.published",
+                "done.new-batch-armed",
+            ]),
             expectations: [
                 "A settled outcome strip shows FOLDER, APKG and PDF as Subject underlined labels over Detail paths behind a gutter",
                 "A bold bright unfinished tag sits at the right edge level with the first output row; it is the only place the loss count is stated",
@@ -763,7 +830,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "escape.lifecycle", intent: "Make destructive actions require a second deliberate beat"),
+        Rule(head: Head(id: "escape.lifecycle", intent: "Words, a running build or a settled result are never lost to one stray key; each loss takes a second press within a second, and Escape peels the nearest layer first"),
+            scope: Everywhere,
             expectations: [
                 "Clear words, stop generation, start new cards and quit each use independent one-second confirmation windows",
                 "The first destructive key names the consequence and then changes to a bright bold again; any other key, mapped or not, a click, a drag, the wheel or the timeout disarms an Escape confirmation, while an armed quit survives mouse input and unmapped keys",
@@ -796,7 +864,21 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "overlay.ownership", intent: "Keep waiting and failure actions honest"),
+        Rule(head: Head(id: "overlay.ownership", intent: "Waiting on a request or recovering from one never costs work: a running request ignores stray keys, and one retry press dismisses the error and reruns what failed"),
+            scope: States([
+                "welcome.checking-key",
+                "welcome.key-invalid",
+                "welcome.key-recovery",
+                "words.understanding",
+                "words.error",
+                "words.stopped-publish-error",
+                "review.understanding",
+                "review.correcting",
+                "review.correction-error",
+                "cards.publish-deck",
+                "cards.publish-report",
+                "cards.publish-error",
+            ]),
             expectations: [
                 "Understanding, bulk correction, key validation, deck publication and report publication share one blocking busy overlay",
                 "Busy swallows all dispatched non-redraw input; global Ctrl+C is handled by the terminal shell before transit",
@@ -846,7 +928,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "cards.metadata-preview", intent: "Use labels that explain the generated study material"),
+        Rule(head: Head(id: "cards.metadata-preview", intent: "An open card names each part of the study material in plain terms, with statements for what was made and questions only for what can be changed"),
+            scope: States(["cards.open", "cards.tuning", "cards.parked", "cards.scroll-end", "cards.rewriting", "cards.legacy-tuning"]),
             expectations: [
                 "Expanded metadata labels are the phrase, in your language, a visual clue, word meaning, word pronunciation, phrase pronunciation and worth learning",
                 "Show the right context only for nonempty context",
@@ -862,7 +945,16 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "startup.routing", intent: "Open each launch on the first screen that can still do work"),
+        Rule(head: Head(id: "startup.routing", intent: "Each launch opens on the first screen that still has work to do, and the learner's own language is asked once because every gloss is written in it"),
+            scope: States([
+                "welcome.language",
+                "welcome.key",
+                "welcome.key-env",
+                "welcome.key-recovery",
+                "words.empty",
+                "cards.reopened",
+                "done.published",
+            ]),
             expectations: [
                 "Without a confirmed known language a launch opens Welcome's language stage with en preselected and any saved key restored into the key step",
                 "A confirmed language without a saved key opens Welcome's key stage with add a working gemini key to continue; GEMINI_API_KEY alone never skips it and only adds the load from env action",
@@ -888,7 +980,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "shell.ownership", intent: "Keep interface transitions pure and every side effect in the shell"),
+        Rule(head: Head(id: "shell.ownership", intent: "Developers can test every interface move as a pure state change without a terminal, provider or clock, because timing, input and side effects live only in the shell"),
+            scope: Everywhere,
             expectations: [
                 "transit(App, AppEvent) returns the next App and a Side; it performs no IO and the shell executes every Side",
                 "The terminal loop redraws on resize and consumes Ctrl+C and the Ctrl+N/Ctrl+P scroll pair before transit; the shell pumps the session engine and owns every timed destructive confirmation (Esc clear, stop and new cards, Ctrl+C quit), stop draining and publication",
@@ -914,7 +1007,8 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "removed.features", intent: "Keep deliberately removed features from returning"),
+        Rule(head: Head(id: "removed.features", intent: "Features cut for confusing the learner stay out, and each reason is kept so a later change does not quietly bring back a half-working key or screen"),
+            scope: Everywhere,
             expectations: [
                 "There is no [L] flip key and no [T] target-cycle key",
                 "There is no per-card modal; sentence tuning lives inline below the card's step rows",
@@ -952,8 +1046,25 @@ Catalog(
         ),
     ],
     map: Map(
+        screens: [
+            Screen(head: Head(id: "welcome", intent: "Setup asks only what cannot be guessed: the learner's own language once and a Gemini key that has been checked; a later key failure asks for the key alone"),
+                screen: "Welcome",
+            ),
+            Screen(head: Head(id: "words", intent: "Words and phrases arrive in either language exactly as typed; nothing is sent until asked for, and nothing typed is lost to a single key"),
+                screen: "YourWords",
+            ),
+            Screen(head: Head(id: "review", intent: "Before any card is paid for, each word shows how it was read and which meanings will become cards; the batch stays editable until generation starts"),
+                screen: "WhatIUnderstood",
+            ),
+            Screen(head: Head(id: "cards", intent: "The learner follows one committed batch from first card to saved files and may browse, tune, retry or stop at any point without losing a finished card"),
+                screen: "YourCards",
+            ),
+            Screen(head: Head(id: "done", intent: "Reopening a finished session hands back its saved files and cards as they were published, with a deliberate two-press way to start a fresh batch"),
+                screen: "Done",
+            ),
+        ],
         states: [
-            State(head: Head(id: "welcome.language", intent: "Choose the language the learner already knows"),
+            State(head: Head(id: "welcome.language", intent: "Every gloss and translation will be written in the language chosen here, so the learner names it first and no saved or environment key can skip the choice"),
                 contract: Contract(
                     surface: Surface(screen: "Welcome", overlay: Clear),
                     chrome: Chrome(title: "setup", hint: "choose your language and add a gemini key", footer: ["[Enter] next", "[↑↓←→] language", "[Ctrl+C] quit"]),
@@ -1007,7 +1118,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "welcome.key", intent: "Supply and validate a Gemini credential"),
+            State(head: Head(id: "welcome.key", intent: "The Gemini key added here is what every later request runs on; it is checked before anything is saved, and the chosen language stays answered above it"),
                 contract: Contract(
                     surface: Surface(screen: "Welcome", overlay: Clear),
                     chrome: Chrome(title: "setup", hint: "choose your language and add a gemini key", footer: ["[Enter] submit", "[Esc] back", "[Ctrl+C] quit"]),
@@ -1060,7 +1171,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "welcome.key-env", intent: "Load an available environment key through explicit setup"),
+            State(head: Head(id: "welcome.key-env", intent: "An exported GEMINI_API_KEY can be loaded with one action instead of retyped, yet it is checked and saved like a typed key and never loaded silently"),
                 contract: Contract(
                     surface: Surface(screen: "Welcome", overlay: Clear),
                     chrome: Chrome(title: "setup", hint: "choose your language and add a gemini key", footer: ["[Enter] load from env", "[←→] move", "[Esc] back", "[Ctrl+C] quit"]),
@@ -1116,7 +1227,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "welcome.checking-key", intent: "Wait for credential validation"),
+            State(head: Head(id: "welcome.checking-key", intent: "The learner moves on with a key Gemini has accepted, back to the words or the paused card plan; nothing is saved before that answer and the plan resumes unchanged"),
                 contract: Contract(
                     surface: Surface(screen: "Welcome", overlay: Busy("CheckingKey")),
                     chrome: Chrome(title: "setup", hint: "choose your language and add a gemini key", footer: ["[Ctrl+C] quit"]),
@@ -1170,7 +1281,7 @@ Catalog(
                 ),
                 evidence: Missing("No credential-check screenshot has recorded capture evidence"),
             ),
-            State(head: Head(id: "welcome.key-invalid", intent: "Correct a rejected or missing key"),
+            State(head: Head(id: "welcome.key-invalid", intent: "A missing or rejected key is answered with the reason and stays editable in place; the chosen language stays confirmed and a failed key is never saved as working"),
                 contract: Contract(
                     surface: Surface(screen: "Welcome", overlay: Clear),
                     chrome: Chrome(title: "setup", hint: "choose your language and add a gemini key", footer: ["[Enter] submit", "[Esc] back", "[Ctrl+C] quit"]),
@@ -1212,7 +1323,7 @@ Catalog(
                 ),
                 evidence: Missing("No inline key-failure screenshot exists"),
             ),
-            State(head: Head(id: "welcome.key-recovery", intent: "Replace a rejected credential without losing committed work"),
+            State(head: Head(id: "welcome.key-recovery", intent: "When a saved key stops working, only the key is asked for again, while committed cards, their costs and the typed words wait to continue"),
                 contract: Contract(
                     surface: Surface(screen: "Welcome", overlay: Clear),
                     chrome: Chrome(title: "setup", hint: "add a working gemini key to continue", footer: ["[Enter] submit", "[Esc] back", "[Ctrl+C] quit"]),
@@ -1263,7 +1374,7 @@ Catalog(
                 ),
                 evidence: Missing("No rejected-saved-key recovery screenshot exists"),
             ),
-            State(head: Head(id: "words.empty", intent: "Begin a vocabulary batch"),
+            State(head: Head(id: "words.empty", intent: "A batch starts simply by typing or pasting; no bright key competes with typing, and the learning language may stay open until the words reveal it"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Clear),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+L] languages", "[Ctrl+C] quit"]),
@@ -1308,7 +1419,7 @@ Catalog(
                 ),
                 evidence: Missing("No empty-input screenshot has recorded evidence"),
             ),
-            State(head: Head(id: "words.editing", intent: "Prepare original words or phrases for understanding"),
+            State(head: Head(id: "words.editing", intent: "The batch is shaped freely, one item per line; plain Enter only adds a line and commas stay text, so nothing is sent or split by accident"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Clear),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+G] understand", "[Esc] clear", "[Ctrl+L] languages", "[Ctrl+C] quit"]),
@@ -1380,7 +1491,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "words.returned", intent: "Revise a previously reviewed batch"),
+            State(head: Head(id: "words.returned", intent: "Back from review, the same words wait to be edited, with the resolved learning language kept after a step back, and the clear starts unarmed"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Clear),
                     chrome: Chrome(title: "your words", hint: "add words in either language, one per line", footer: ["[Ctrl+G] understand", "[Esc] clear", "[Ctrl+L] languages", "[Ctrl+C] quit"]),
@@ -1432,7 +1543,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "words.clear-armed", intent: "Confirm clearing the current input"),
+            State(head: Head(id: "words.clear-armed", intent: "The learner's typed words survive a stray Esc: only a second Esc within one second discards them, and any other key, click or the timeout keeps them"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Clear),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Esc] again", "[Ctrl+C] quit"]),
@@ -1480,7 +1591,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "words.over-limit", intent: "Reduce intake before sending a large request"),
+            State(head: Head(id: "words.over-limit", intent: "An oversized batch is caught before anything is sent, with the number of lines to remove, because an intake request beyond 60 lines would outrun its timeout"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Clear),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Esc] clear", "[Ctrl+L] languages", "[Ctrl+C] quit"]),
@@ -1516,7 +1627,7 @@ Catalog(
                 ),
                 evidence: Missing("No oversized-intake screenshot exists"),
             ),
-            State(head: Head(id: "words.languages", intent: "Select either half of the input language pair"),
+            State(head: Head(id: "words.languages", intent: "Either half of the language pair can be set before the words are read, and choosing a pair never edits or sends them"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Modal("PickLanguages")),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+C] quit"]),
@@ -1562,7 +1673,7 @@ Catalog(
                 ),
                 evidence: Missing("No pair-picker-over-input screenshot exists; review.languages covers the shared renderer"),
             ),
-            State(head: Head(id: "words.understanding", intent: "Resolve vocabulary meanings and learning language"),
+            State(head: Head(id: "words.understanding", intent: "The whole batch is read together, so each line's language and meanings are judged in context; keys cannot alter it mid-request and the words survive any outcome"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Busy("Understanding")),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+C] quit"]),
@@ -1652,7 +1763,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "words.translation-choice", intent: "Choose the missing learning destination"),
+            State(head: Head(id: "words.translation-choice", intent: "Input typed only in the learner's own language waits intact while one plain question settles which language to learn, and cancelling keeps every line"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Modal("PickTranslationLanguage")),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+C] quit"]),
@@ -1699,7 +1810,7 @@ Catalog(
                 ),
                 evidence: Missing("No input-backed missing-destination screenshot exists"),
             ),
-            State(head: Head(id: "words.error", intent: "Recover from a failed understanding request"),
+            State(head: Head(id: "words.error", intent: "The typed batch survives a failed understanding pass intact under the real reason and can be sent again without retyping a line"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Error),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+G] understand", "[Esc] clear", "[Ctrl+L] languages", "[Ctrl+C] quit"]),
@@ -1744,7 +1855,7 @@ Catalog(
                 ),
                 evidence: Missing("No understanding-error screenshot exists"),
             ),
-            State(head: Head(id: "words.stopped-publish-error", intent: "Start clean after saving a stopped subset failed"),
+            State(head: Head(id: "words.stopped-publish-error", intent: "A stopped run that could not be saved ends in a clean start with the saving reason shown, and the old run is closed for good rather than resumed"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Error),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+L] languages", "[Ctrl+C] quit"]),
@@ -1780,7 +1891,7 @@ Catalog(
                 ),
                 evidence: Missing("No stopped-publication failure screenshot exists"),
             ),
-            State(head: Head(id: "words.quit-armed", intent: "Confirm leaving the application"),
+            State(head: Head(id: "words.quit-armed", intent: "An accidental Ctrl+C never closes the app: quitting takes a second press within a second, and this confirmation leaves the words and any armed Escape alone"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Clear),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+G] understand", "[Esc] clear", "[Ctrl+L] languages", "[Ctrl+C] again"]),
@@ -1814,7 +1925,7 @@ Catalog(
                 ),
                 evidence: Missing("No global-quit confirmation screenshot exists"),
             ),
-            State(head: Head(id: "review.understanding", intent: "Reread the original batch after changing its language interpretation"),
+            State(head: Head(id: "review.understanding", intent: "After the reading language changes, the same original lines are read again instead of relabeling old meanings, with the review kept in view"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Busy("Understanding")),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+C] quit"]),
@@ -1880,7 +1991,7 @@ Catalog(
                 ),
                 evidence: Missing("No review-backed understanding-overlay screenshot exists; words.understanding covers the shared loader"),
             ),
-            State(head: Head(id: "review.closed", intent: "Approve vocabulary meanings before paid artifact generation"),
+            State(head: Head(id: "review.closed", intent: "Every word appears as it was read, with the meanings chosen so far, so the learner decides what becomes paid cards; a plan above 80 cards never starts"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Clear),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+G] generate", "[↑] guidance", "[Enter/→] open", "[D] drop", "[↑↓] nav", "[Ctrl+L] languages", "[Esc] back", "[Ctrl+C] quit"]),
@@ -1984,7 +2095,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "review.senses", intent: "Choose among meanings while retaining the larger review"),
+            State(head: Head(id: "review.senses", intent: "The learner picks which meanings of each word become paid cards; a choice applies the moment it is made and closing the list never loses it"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Clear),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Space] select", "[Ctrl+G] generate", "[Enter/←] close", "[C] collapse", "[↑↓] nav", "[Ctrl+C] quit"]),
@@ -2062,7 +2173,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "review.senses-selected", intent: "See chosen meanings take effect immediately"),
+            State(head: Head(id: "review.senses-selected", intent: "The card count changes the moment a meaning is picked, and the pick holds when the list closes and when generation starts"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Clear),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Space] select", "[Ctrl+G] generate", "[Enter/←] close", "[C] collapse", "[↑↓] nav", "[Ctrl+C] quit"]),
@@ -2119,7 +2230,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "review.correction", intent: "Describe meanings that understanding missed"),
+            State(head: Head(id: "review.correction", intent: "A missing meaning is described in the learner's own words; typing stays inside the box and cancelling leaves the chosen meanings untouched"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Modal("ChangeSomething")),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+C] quit"]),
@@ -2173,7 +2284,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "review.correcting", intent: "Wait for additional meanings to be prepared"),
+            State(head: Head(id: "review.correcting", intent: "Requested meanings join the word's list once ready; meanwhile keys cannot touch the review, and a translated word gets a learning-language term for each new meaning"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Busy("BulkCorrection")),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+C] quit"]),
@@ -2223,7 +2334,7 @@ Catalog(
                 ),
                 evidence: Missing("No bulk-correction busy screenshot exists"),
             ),
-            State(head: Head(id: "review.correction-error", intent: "Retry a failed meaning correction"),
+            State(head: Head(id: "review.correction-error", intent: "The typed description and the review survive a failed correction as they were, so the same request can go again without retyping"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Error),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+C] quit"]),
@@ -2258,7 +2369,7 @@ Catalog(
                 ),
                 evidence: Missing("No meaning-correction error screenshot exists"),
             ),
-            State(head: Head(id: "review.guidance", intent: "Choose how the initial example sentences should be generated"),
+            State(head: Head(id: "review.guidance", intent: "The batch's first sentences get the level and phrase kinds chosen here; each choice is kept for that learning language and closing the editor loses none"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Clear),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+G] generate", "[←→] pick", "[↑↓] nav", "[Enter/Esc] close"]),
@@ -2326,7 +2437,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "review.alternates", intent: "Inspect language ambiguity without obscuring the resolved review"),
+            State(head: Head(id: "review.alternates", intent: "Languages the words could equally belong to sit one click away, and choosing one reads the original lines again instead of relabeling them"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Clear),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+G] generate", "[↑] guidance", "[Enter/→] open", "[D] drop", "[↑↓] nav", "[Ctrl+L] languages", "[Esc] back", "[Ctrl+C] quit"]),
@@ -2383,7 +2494,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "review.languages", intent: "Reconsider the pair before committing cards"),
+            State(head: Head(id: "review.languages", intent: "The pair can still be corrected before any card is committed, and a change that leaves the reading valid costs no new request"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Modal("PickLanguages")),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+C] quit"]),
@@ -2442,7 +2553,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "review.translation-preview", intent: "Confirm a prepared translation destination before committing the review"),
+            State(head: Head(id: "review.translation-preview", intent: "Own-language input arrives already reviewed in the latest learning language; confirming it costs no second request and nothing is saved before that"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Modal("PickTranslationLanguage")),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+C] quit"]),
@@ -2503,7 +2614,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "review.over-limit", intent: "Reduce the selected card plan before generation"),
+            State(head: Head(id: "review.over-limit", intent: "Meanings are trimmed until the plan fits the 80-card ceiling that keeps one batch under two hours and twenty dollars; nothing is committed meanwhile"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Clear),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[↑] guidance", "[Enter/→] open", "[D] drop", "[C] expand", "[↑↓] nav", "[Ctrl+L] languages", "[Esc] back", "[Ctrl+C] quit"]),
@@ -2544,7 +2655,7 @@ Catalog(
                 ),
                 evidence: Missing("No oversized-card-plan screenshot exists"),
             ),
-            State(head: Head(id: "review.excluded", intent: "Explain rejected or off-language input without quietly deleting it"),
+            State(head: Head(id: "review.excluded", intent: "Rejected or other-language lines stay visible with the reason instead of vanishing silently, and they never turn into cards"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Clear),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+G] generate", "[Enter/→] open", "[D] drop", "[↑↓] nav", "[Ctrl+L] languages", "[Esc] back", "[Ctrl+C] quit"]),
@@ -2596,7 +2707,7 @@ Catalog(
                 ),
                 evidence: Missing("No explicit excluded-row screenshot exists"),
             ),
-            State(head: Head(id: "review.translated", intent: "Approve learning-language equivalents for known-language input"),
+            State(head: Head(id: "review.translated", intent: "Each meaning of own-language input is reviewed beside its natural learning-language term, and each card is built only from the term chosen for it"),
                 contract: Contract(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Clear),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+G] generate", "[↑] guidance", "[Enter/→] open", "[D] drop", "[↑↓] nav", "[Ctrl+L] languages", "[Esc] back", "[Ctrl+C] quit"]),
@@ -2641,7 +2752,7 @@ Catalog(
                 ),
                 evidence: Missing("No bilingual sense-translation screenshot exists"),
             ),
-            State(head: Head(id: "cards.generating", intent: "Follow the initial card build while browsing the batch"),
+            State(head: Head(id: "cards.generating", intent: "The batch builds card by card while any card can be browsed or opened; stopping takes a confirmation and never cuts the running request short"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "open a card to see how it's coming along", footer: ["[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -2723,7 +2834,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.closed", intent: "Read a compact card with artifact and sentence-label summaries"),
+            State(head: Head(id: "cards.closed", intent: "Each card reads at a glance, with term, phrase, cost, steps and sentence labels in fixed columns, and a click on its labels opens tuning without changing anything"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "continue with these cards when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -2787,7 +2898,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.open", intent: "Inspect a card before deliberately entering tuning"),
+            State(head: Head(id: "cards.open", intent: "An opened card shows its sentence and study material in full; tune rows say what could change, yet nothing changes until the learner steps into them"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "your files are ready", footer: ["[Enter/←] close", "[↓] tune", "[C] collapse", "[↑↓] nav", "[Ctrl+C] quit"]),
@@ -2857,7 +2968,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.tuning", intent: "Stage an intentional sentence adjustment"),
+            State(head: Head(id: "cards.tuning", intent: "One card can be asked for a different register, phrase kind, level or a note; each change is staged at once while the current sentence and files stay intact"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "continue with these cards when you're ready", footer: ["[Ctrl+G] regenerate", "[←→] pick", "[↑↓] nav", "[Esc] close", "[Ctrl+C] quit"]),
@@ -2948,7 +3059,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.parked", intent: "Keep expanded cards available while browsing another row"),
+            State(head: Head(id: "cards.parked", intent: "Several cards stay open while moving through the batch; walking away parks an editor with its staged changes and leaves its card open"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "continue with these cards when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] collapse", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -3000,7 +3111,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.pending-register", intent: "Review a staged register request before activating it"),
+            State(head: Head(id: "cards.pending-register", intent: "A requested register sits beside the sentence it would replace, and that sentence stays usable until the batch is applied"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "apply your changes when you're ready", footer: ["[Ctrl+G] regenerate", "[←→] pick", "[↑↓] nav", "[Esc] close", "[Ctrl+C] quit"]),
@@ -3065,7 +3176,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.pending-level", intent: "Review a staged surrounding-language level request"),
+            State(head: Head(id: "cards.pending-level", intent: "An easier or harder surrounding sentence can be requested while the word being learned stays exempt, and the request never overwrites the measured level"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "apply your changes when you're ready", footer: ["[Ctrl+G] regenerate", "[←→] pick", "[↑↓] nav", "[Esc] close", "[Ctrl+C] quit"]),
@@ -3113,7 +3224,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.pending-note", intent: "Review a staged free-text rewrite instruction"),
+            State(head: Head(id: "cards.pending-note", intent: "A free note tells a card what should change, and every letter typed stays in the note instead of firing shortcuts or replacing label requests"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "apply your changes when you're ready", footer: ["[Ctrl+G] regenerate", "[←→] pick", "[↑↓] nav", "[Esc] close", "[Ctrl+C] quit"]),
@@ -3171,7 +3282,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.pending", intent: "Keep staged changes visible in a collapsed card"),
+            State(head: Head(id: "cards.pending", intent: "A collapsed card still shows what was asked of it, so a staged request is not forgotten, and the published files stay in place until the batch is applied"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "apply your changes when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] new cards", "[Ctrl+C] quit"]),
@@ -3229,7 +3340,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.multiple-pending", intent: "Apply several independent card requests together"),
+            State(head: Head(id: "cards.multiple-pending", intent: "Requests lined up on several cards are applied in one go, and every card left untouched stays ready as it is"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "apply your changes when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -3272,7 +3383,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.restored", intent: "Return to generated defaults without an unnecessary rewrite"),
+            State(head: Head(id: "cards.restored", intent: "Putting a card back to its generated values drops the request, so no rewrite is paid for that would change nothing and the original result stays"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "continue with these cards when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -3317,7 +3428,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.rewriting", intent: "Follow the committed rewrite batch"),
+            State(head: Head(id: "cards.rewriting", intent: "Applied rewrites can be followed card by card while each previous text stays readable, and old output is discarded only at the moment the batch is applied"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "open a card to follow the changes", footer: ["[Enter/←] close", "[C] collapse", "[↑↓] nav", "[Ctrl+C] quit"]),
@@ -3394,7 +3505,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.rewritten", intent: "Inspect the completed requested revision"),
+            State(head: Head(id: "cards.rewritten", intent: "Rewritten sentences and the requested values they met stand out at a glance, so the one card that was touched differs from the ones that were not"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "continue with these cards when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -3448,7 +3559,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.approximate", intent: "Explain a best-effort result without inventing exact compliance"),
+            State(head: Head(id: "cards.approximate", intent: "When a request is met only approximately, the actual result stays beside the requested target, and the card never claims a match it did not reach"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "continue with these cards when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -3494,7 +3605,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.narrow", intent: "Read a complete attribution strip in limited width"),
+            State(head: Head(id: "cards.narrow", intent: "In a narrow terminal, label groups appear whole or not at all, and the card head remains a way into tuning when no labels fit"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "continue with these cards when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -3545,7 +3656,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.mouse-tuning", intent: "Apply a tune choice directly from a pointer gesture"),
+            State(head: Head(id: "cards.mouse-tuning", intent: "Tuning works with the mouse as well as with keys; a first click on another card only selects it, and every clickable cell matches what is drawn"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "apply your changes when you're ready", footer: ["[Ctrl+G] regenerate", "[←→] pick", "[↑↓] nav", "[Esc] close", "[Ctrl+C] quit"]),
@@ -3604,7 +3715,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.legacy-tuning", intent: "Adjust a cached card with missing label attribution"),
+            State(head: Head(id: "cards.legacy-tuning", intent: "A card made before sentence labels existed can still be tuned without inventing labels it never had, and only an explicit choice creates a request"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "continue with these cards when you're ready", footer: ["[Ctrl+G] regenerate", "[←→] pick", "[↑↓] nav", "[Esc] close", "[Ctrl+C] quit"]),
@@ -3656,7 +3767,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.retrying", intent: "Continue generation after an artifact failure"),
+            State(head: Head(id: "cards.retrying", intent: "Browsing goes on while a failed step is retried; the row stays as quiet as a first try, and every spent attempt is counted and explained on the card"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "continue with these cards when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -3714,7 +3825,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.retry-stress", intent: "Inspect simultaneous visual variants of paid attempt history"),
+            State(head: Head(id: "cards.retry-stress", intent: "When attempts pile up on several cards at once, every row keeps its form and aligned costs; this prepared scene samples the forms without claiming a route"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "browse the ready cards while the rest are being made", footer: ["[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -3751,7 +3862,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.failed", intent: "Keep an unfinished card inspectable and recoverable"),
+            State(head: Head(id: "cards.failed", intent: "A card that ran out of attempts stays in the batch with its evidence and costs, so the finished cards still ship and this one can be resumed later"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "continue with these cards when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] new cards", "[Ctrl+C] quit"]),
@@ -3809,7 +3920,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.all-failed", intent: "Explain that the batch produced no usable cards"),
+            State(head: Head(id: "cards.all-failed", intent: "Even when no card survived, what was lost is stated and a retry can start from where things went wrong, with every failed card open to inspection"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "try again from where things went wrong", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] new cards", "[Ctrl+C] quit"]),
@@ -3861,7 +3972,7 @@ Catalog(
                 ),
                 evidence: Missing("No all-cards-failed final screenshot exists"),
             ),
-            State(head: Head(id: "cards.stop-armed", intent: "Confirm stopping the active build"),
+            State(head: Head(id: "cards.stop-armed", intent: "A build can be stopped without a slip ending it: the first Esc only arms, the running request carries on, and only a second Esc within one second stops"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "browse the ready cards while the rest are being made", footer: ["[Esc] again", "[Ctrl+C] quit"]),
@@ -3907,7 +4018,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.stopping", intent: "Wait for the current request to finish before stopping"),
+            State(head: Head(id: "cards.stopping", intent: "Browsing continues while the current step finishes; no new paid request starts, and that step's result is kept before deciding what can be saved"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "you can browse while the current step finishes", footer: ["[Enter/→] open", "[C] expand", "[↑↓] nav", "[Ctrl+C] quit"]),
@@ -3961,7 +4072,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.partial", intent: "Start studying a stopped or incomplete published subset"),
+            State(head: Head(id: "cards.partial", intent: "Studying can start with the cards that finished while the rest wait for a retry; the files hold only complete cards and the unfinished count appears once"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "start with the ready cards, then retry the rest", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] new cards", "[Ctrl+C] quit"]),
@@ -4013,7 +4124,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.publish-deck", intent: "Package the complete cards into the Anki deck"),
+            State(head: Head(id: "cards.publish-deck", intent: "The Anki deck is visibly being packaged rather than a last card looking stuck, and a saving failure keeps every complete card for another try"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Busy("PublishingDeck")),
                     chrome: Chrome(title: "your cards", hint: "your files will appear here when they're ready", footer: ["[Ctrl+C] quit"]),
@@ -4057,7 +4168,7 @@ Catalog(
                 ),
                 evidence: Missing("No deck-publication busy screenshot exists"),
             ),
-            State(head: Head(id: "cards.publish-report", intent: "Prepare the printable report alongside the deck"),
+            State(head: Head(id: "cards.publish-report", intent: "The printable PDF is prepared right after the deck under the same wait, and file paths appear only once both have been saved"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Busy("PublishingReport")),
                     chrome: Chrome(title: "your cards", hint: "your files will appear here when they're ready", footer: ["[Ctrl+C] quit"]),
@@ -4106,7 +4217,7 @@ Catalog(
                 ),
                 evidence: Missing("No report-publication busy screenshot exists"),
             ),
-            State(head: Head(id: "cards.publish-error", intent: "Retry saving the already generated study material"),
+            State(head: Head(id: "cards.publish-error", intent: "A failed save never costs the generated cards: with every card ready a retry only saves again, and paid regeneration happens only for cards that failed"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Error),
                     chrome: Chrome(title: "your cards", hint: "save them so you can start learning", footer: ["[Ctrl+G] save", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -4162,7 +4273,7 @@ Catalog(
                 ),
                 evidence: Missing("No publication-failure screenshot exists"),
             ),
-            State(head: Head(id: "cards.published", intent: "Use the finished live batch and its delivered files"),
+            State(head: Head(id: "cards.published", intent: "Finished files arrive on the same screen the batch was built on and open from their links, and finished cards are not offered for regeneration"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "your files are ready", footer: ["[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] new cards", "[Ctrl+C] quit"]),
@@ -4228,7 +4339,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.new-batch-armed", intent: "Confirm leaving the settled result for fresh input"),
+            State(head: Head(id: "cards.new-batch-armed", intent: "A fresh batch can start without restarting the app, yet the settled result stays until a second Esc within one second, and preferences carry over"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "your files are ready", footer: ["[Esc] again", "[Ctrl+C] quit"]),
@@ -4277,7 +4388,7 @@ Catalog(
                 ),
                 evidence: Missing("No live-final new-batch confirmation screenshot exists"),
             ),
-            State(head: Head(id: "cards.scroll-end", intent: "Read the lower part of a long expanded card"),
+            State(head: Head(id: "cards.scroll-end", intent: "A long open card can be read to its end, down to the rejected attempts, while the key bar stays put and the view stops following the engine"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "your files are ready", footer: ["[Enter/←] close", "[↓] tune", "[C] collapse", "[↑↓] nav", "[Ctrl+C] quit"]),
@@ -4318,7 +4429,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.reopened", intent: "Resume a stored session that ended partial, failed or cancelled"),
+            State(head: Head(id: "cards.reopened", intent: "An unfinished session reopens ready to finish, with finished artifacts coming back from the cache so only what is missing is generated again"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "start with the ready cards, then retry the rest", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] new cards", "[Ctrl+C] quit"]),
@@ -4370,7 +4481,7 @@ Catalog(
                 ),
                 evidence: Missing("No reopened-session capture exists; examples/tui_states.rs has no scene for hydrated drafts"),
             ),
-            State(head: Head(id: "done.published", intent: "Resume an existing published session"),
+            State(head: Head(id: "done.published", intent: "A reopened published session gives back its files and cards exactly as they were saved, in the language pair they were made for"),
                 contract: Contract(
                     surface: Surface(screen: "Done", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "your files are ready", footer: ["[Esc] new cards", "[Ctrl+C] quit"]),
@@ -4427,7 +4538,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "done.new-batch-armed", intent: "Confirm starting a clean batch from a reopened session"),
+            State(head: Head(id: "done.new-batch-armed", intent: "A fresh start from a reopened session stays in the same window, while the saved result remains until a second Esc within one second confirms"),
                 contract: Contract(
                     surface: Surface(screen: "Done", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "your files are ready", footer: ["[Esc] again", "[Ctrl+C] quit"]),
@@ -4466,7 +4577,7 @@ Catalog(
             ),
         ],
         scenarios: [
-            Scenario(head: Head(id: "setup.new-learner", intent: "Complete explicit first-use setup"),
+            Scenario(head: Head(id: "setup.new-learner", intent: "A first launch reaches the words through two questions only, the learner's own language and then a key Gemini accepts, in that order"),
                 route: ["welcome.language", "welcome.key", "welcome.checking-key", "words.empty", "words.editing"],
                 expectations: [
                     "Language selection precedes credential validation and raw input becomes editable only after a working key is saved",
@@ -4478,7 +4589,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "successful_precommit_key_check_returns_to_words_without_an_engine"),
                 ],
             ),
-            Scenario(head: Head(id: "setup.environment-key", intent: "Use an environment credential without bypassing setup"),
+            Scenario(head: Head(id: "setup.environment-key", intent: "An exported GEMINI_API_KEY still leaves the language question in place, and the exported key is checked before it is saved"),
                 route: ["welcome.language", "welcome.key-env", "welcome.key", "welcome.checking-key", "words.empty"],
                 expectations: [
                     "Explicit language choice and validation still happen when the environment supplies a key",
@@ -4491,7 +4602,7 @@ Catalog(
                     Check(file: "tests/language_context.rs", test: "welcome_key_is_checked_before_it_is_saved"),
                 ],
             ),
-            Scenario(head: Head(id: "setup.invalid-key", intent: "Recover from a failed credential check"),
+            Scenario(head: Head(id: "setup.invalid-key", intent: "A rejected key costs nothing already answered: the key form stays editable and the chosen language is kept for the next try"),
                 route: ["welcome.key", "welcome.checking-key", "welcome.key-invalid", "welcome.key", "welcome.checking-key", "words.empty"],
                 expectations: [
                     "Failure remains editable and never discards the known language",
@@ -4501,7 +4612,7 @@ Catalog(
                     Check(file: "tests/language_context.rs", test: "rejected_key_notice_renders_on_the_key_step"),
                 ],
             ),
-            Scenario(head: Head(id: "setup.rejected-saved-key", intent: "Resume a committed run after replacing a rejected saved key"),
+            Scenario(head: Head(id: "setup.rejected-saved-key", intent: "A saved key rejected mid-build is swapped for a working one, and the same plan, artifacts and costs carry on from where they paused"),
                 route: ["cards.generating", "welcome.key-recovery", "welcome.checking-key", "cards.generating"],
                 expectations: [
                     "The same plan, artifacts and cost scope resume after successful validation",
@@ -4511,7 +4622,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "successful_key_recovery_resumes_the_same_costed_card_plan"),
                 ],
             ),
-            Scenario(head: Head(id: "words.clear", intent: "Require confirmation before discarding words"),
+            Scenario(head: Head(id: "words.clear", intent: "Wiping the batch is always deliberate, taking a second press, and the wipe also forgets the hidden review behind the words"),
                 route: ["words.editing", "words.clear-armed", "words.empty"],
                 expectations: [
                     "First Escape only arms; the second within one second clears input and hidden review",
@@ -4522,7 +4633,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "confirmed_words_clear_forgets_the_hidden_review"),
                 ],
             ),
-            Scenario(head: Head(id: "words.clear-disarmed", intent: "Keep input after a timed-out clear"),
+            Scenario(head: Head(id: "words.clear-disarmed", intent: "A clear armed by mistake falls away on its own; another action or a second's wait leaves every typed line in place"),
                 route: ["words.editing", "words.clear-armed", "words.editing"],
                 expectations: [
                     "Another action or timeout preserves the text",
@@ -4532,7 +4643,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "another_key_disarms_words_clear_before_editing"),
                 ],
             ),
-            Scenario(head: Head(id: "words.limit", intent: "Reduce oversized input without a provider request"),
+            Scenario(head: Head(id: "words.limit", intent: "An oversized batch is trimmed before any request is made, and once it fits the 60-line ceiling the words go through as usual"),
                 route: ["words.editing", "words.over-limit", "words.editing", "words.understanding", "review.closed"],
                 expectations: [
                     "Understanding is unavailable above 60 lines and resumes after reducing input",
@@ -4543,7 +4654,7 @@ Catalog(
                     Check(file: "tests/your_words.rs", test: "a_word_list_exactly_at_the_ceiling_still_starts_the_pass"),
                 ],
             ),
-            Scenario(head: Head(id: "words.choose-languages", intent: "Set a language pair before understanding"),
+            Scenario(head: Head(id: "words.choose-languages", intent: "The language pair can be settled before the words are sent, and setting it alone never sends or changes them"),
                 route: ["words.editing", "words.languages", "words.editing", "words.understanding", "review.closed"],
                 expectations: [
                     "Pair selection changes no text and does not submit the batch by itself",
@@ -4553,7 +4664,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "reconfirming_a_pinned_language_cannot_leave_it_behind_an_older_choice"),
                 ],
             ),
-            Scenario(head: Head(id: "words.error-retry", intent: "Retry understanding with the original batch"),
+            Scenario(head: Head(id: "words.error-retry", intent: "After a failed pass the same batch goes again without retyping and reaches review as if nothing had happened"),
                 route: ["words.editing", "words.understanding", "words.error", "words.understanding", "review.closed"],
                 expectations: [
                     "Ctrl+G clears the error and retries input in one action",
@@ -4563,7 +4674,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "text_pass_failure_stays_in_the_tui_as_recoverable_error"),
                 ],
             ),
-            Scenario(head: Head(id: "translation.missing-destination", intent: "Choose a destination when native-language input lacks one"),
+            Scenario(head: Head(id: "translation.missing-destination", intent: "Words typed only in the learner's own language get their learning language from one question and are then read for that target without retyping"),
                 route: ["words.editing", "words.understanding", "words.translation-choice", "words.understanding", "review.closed"],
                 expectations: [
                     "Words survive the question and the confirmed target drives understanding",
@@ -4574,7 +4685,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "one_enter_cannot_lose_the_restored_destination_or_its_next_session_history"),
                 ],
             ),
-            Scenario(head: Head(id: "translation.confirm-preview", intent: "Accept a prepared recent destination without a repeated request"),
+            Scenario(head: Head(id: "translation.confirm-preview", intent: "Confirming the prepared recent language keeps the review already on screen, so no second understanding pass is paid for"),
                 route: ["words.editing", "words.understanding", "review.translation-preview", "review.translated"],
                 expectations: [
                     "The target remains highlighted in catalog order and Enter keeps prepared candidates",
@@ -4586,7 +4697,7 @@ Catalog(
                     Check(file: "src/tui/transition.rs", test: "translation_preview_cannot_highlight_a_different_language_than_the_prepared_review"),
                 ],
             ),
-            Scenario(head: Head(id: "translation.change-preview", intent: "Choose another target for the same original input"),
+            Scenario(head: Head(id: "translation.change-preview", intent: "Picking another language than the prepared one discards the stale proposal and reads the same words afresh for the new target"),
                 route: ["words.editing", "words.understanding", "review.translation-preview", "review.understanding", "review.closed"],
                 expectations: [
                     "Stale proposed translations are discarded before a fresh understanding request",
@@ -4596,7 +4707,7 @@ Catalog(
                     Check(file: "src/tui/transition.rs", test: "translation_preview_cannot_keep_old_translations_after_changing_its_language"),
                 ],
             ),
-            Scenario(head: Head(id: "translation.cancel-preview", intent: "Dismiss the proposal without committing history or a session"),
+            Scenario(head: Head(id: "translation.cancel-preview", intent: "Backing out of a proposal returns to intact words, and nothing unconfirmed lingers as a session or in language history"),
                 route: ["words.editing", "words.understanding", "review.translation-preview", "words.editing"],
                 expectations: [
                     "Cancellation returns intact input and no unconfirmed candidates survive",
@@ -4606,7 +4717,7 @@ Catalog(
                     Check(file: "src/cli/bridge.rs", test: "an_unconfirmed_translation_cannot_be_saved_as_a_reviewed_session"),
                 ],
             ),
-            Scenario(head: Head(id: "translation.review", intent: "Commit reviewed learning expressions from native input"),
+            Scenario(head: Head(id: "translation.review", intent: "Cards from own-language input are built from the learning-language terms approved in review, never from the original phrase itself"),
                 route: ["words.editing", "words.understanding", "review.translated", "cards.generating"],
                 expectations: [
                     "Chosen senses determine learning expressions rather than silently replacing the original review identity",
@@ -4617,7 +4728,7 @@ Catalog(
                     Check(file: "src/session/draft.rs", test: "a_known_language_phrase_cannot_become_the_generated_learning_term"),
                 ],
             ),
-            Scenario(head: Head(id: "review.sense-selection", intent: "Choose multiple meanings and generate them directly"),
+            Scenario(head: Head(id: "review.sense-selection", intent: "Several meanings can be picked and sent straight to generation, and every pick survives the lists closing on the way"),
                 route: ["review.closed", "review.senses", "review.senses-selected", "review.closed", "cards.generating"],
                 expectations: [
                     "Space commits immediately and closing the list does not roll back the choice",
@@ -4629,7 +4740,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "generation_uses_every_selected_understanding"),
                 ],
             ),
-            Scenario(head: Head(id: "review.correct-meaning", intent: "Add missing senses through the focused candidate"),
+            Scenario(head: Head(id: "review.correct-meaning", intent: "A missed meaning is added from the word it belongs to and returns selected into the same review, without starting over"),
                 route: ["review.closed", "review.senses", "review.correction", "review.correcting", "review.senses", "review.closed"],
                 expectations: [
                     "Correction is reached from + add more and successful meanings return to the retained review",
@@ -4641,14 +4752,14 @@ Catalog(
                     Check(file: "tests/what_i_understood.rs", test: "appended_narrow_sense_is_selected_and_the_list_stays_open"),
                 ],
             ),
-            Scenario(head: Head(id: "review.correction-recovery", intent: "Recover retained correction text after a failed request"),
+            Scenario(head: Head(id: "review.correction-recovery", intent: "Missing-meaning requests that fail keep their description, so the same request can be sent again and the review carries on"),
                 route: ["review.senses", "review.correction", "review.correcting", "review.correction-error", "review.correction", "review.correcting", "review.senses"],
                 expectations: [
                     "Ctrl+G is the intended retry; today dismissing the error and pressing Enter resends, recorded as a gap on review.correction-error",
                 ],
                 tests: [],
             ),
-            Scenario(head: Head(id: "review.back-without-clear", intent: "Revise input without arming its destructive clear"),
+            Scenario(head: Head(id: "review.back-without-clear", intent: "Stepping back from review to edit never leaves the words one key from deletion; clearing still takes two fresh presses"),
                 route: ["review.closed", "words.returned", "words.clear-armed", "words.empty"],
                 expectations: [
                     "Escape from review preserves words; clearing needs two fresh Escape presses on input",
@@ -4659,7 +4770,7 @@ Catalog(
                     Check(file: "examples/tui_states.rs", test: "review_back_state_keeps_words_and_shows_an_unarmed_clear"),
                 ],
             ),
-            Scenario(head: Head(id: "review.choose-guidance", intent: "Save initial batch choices and generate from the editor"),
+            Scenario(head: Head(id: "review.choose-guidance", intent: "Batch guidance set in the open editor goes straight into generation, and mixed formats are dealt out evenly per group of three"),
                 route: ["review.closed", "review.guidance", "cards.generating"],
                 expectations: [
                     "Guidance is inline and mixed allocates one statement, question and dialogue per group of 3",
@@ -4671,7 +4782,7 @@ Catalog(
                     Check(file: "tests/batch_sentence_settings.rs", test: "expanded_guidance_hides_summary_chips_and_uses_card_editor_questions"),
                 ],
             ),
-            Scenario(head: Head(id: "review.guidance-collapse", intent: "Close guidance without losing selected preferences"),
+            Scenario(head: Head(id: "review.guidance-collapse", intent: "Closing the guidance editor keeps both choices, and the batch is generated with exactly what was last set"),
                 route: ["review.closed", "review.guidance", "review.closed", "cards.generating"],
                 expectations: [
                     "Enter/Escape retain both settings and generation uses the recorded choices",
@@ -4682,7 +4793,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "drafts_expand_batch_sentence_settings_after_candidate_selection"),
                 ],
             ),
-            Scenario(head: Head(id: "review.language-reread", intent: "Reconsider learning language without keeping stale senses"),
+            Scenario(head: Head(id: "review.language-reread", intent: "A changed learning language triggers a reread only when the old meanings no longer fit, so no stale sense survives and no pass is paid twice"),
                 route: ["review.closed", "review.languages", "review.understanding", "review.closed"],
                 expectations: [
                     "A changed pair reruns understanding only when the existing review is no longer valid",
@@ -4694,7 +4805,7 @@ Catalog(
                     Check(file: "tests/language_context.rs", test: "dropping_a_pin_hands_the_language_back_to_detection"),
                 ],
             ),
-            Scenario(head: Head(id: "review.alternate-language", intent: "Adopt a plausible alternate destination"),
+            Scenario(head: Head(id: "review.alternate-language", intent: "Adopting a plausible alternate language reads the batch again for it rather than relabeling the old translations"),
                 route: ["words.understanding", "review.alternates", "review.understanding", "review.closed"],
                 expectations: [
                     "The alternative triggers understanding rather than relabeling old translations",
@@ -4705,7 +4816,7 @@ Catalog(
                     Check(file: "tests/what_i_understood.rs", test: "the_review_names_the_languages_the_pass_found_equally_plausible"),
                 ],
             ),
-            Scenario(head: Head(id: "review.plan-limit", intent: "Reduce expanded senses to fit the committed plan"),
+            Scenario(head: Head(id: "review.plan-limit", intent: "The 80-card ceiling counts every selected meaning, and meanings are trimmed until the plan fits before generation can start"),
                 route: ["review.closed", "review.over-limit", "review.senses", "review.closed", "cards.generating"],
                 expectations: [
                     "The 80-card ceiling applies after sense expansion",
@@ -4715,7 +4826,7 @@ Catalog(
                     Check(file: "tests/what_i_understood.rs", test: "a_plan_exactly_at_the_card_ceiling_still_starts_generation"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.open-and-tune", intent: "Inspect before entering tuning and peel focus back one layer"),
+            Scenario(head: Head(id: "cards.open-and-tune", intent: "Reading a card, tuning it on purpose and backing out happen one layer at a time, never closing more than intended"),
                 route: ["cards.closed", "cards.open", "cards.tuning", "cards.open", "cards.closed"],
                 expectations: [
                     "Opening stays on the head; Down enters register; first Escape parks and second collapses",
@@ -4725,7 +4836,7 @@ Catalog(
                     Check(file: "tests/your_cards.rs", test: "walking_into_an_open_card_lights_its_first_question_alone"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.parked-reading", intent: "Keep multiple expanded cards while navigating"),
+            Scenario(head: Head(id: "cards.parked-reading", intent: "Cards opened along the way stay open as the walk moves on, and a single sweep closes them all once the reading is done"),
                 route: ["cards.closed", "cards.parked", "cards.tuning", "cards.parked", "cards.closed"],
                 expectations: [
                     "Walking out parks the editor and C closes all open cards",
@@ -4735,7 +4846,7 @@ Catalog(
                     Check(file: "tests/your_cards.rs", test: "walking_back_onto_a_parked_card_reenters_its_editor_at_the_note_row"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.stage-and-restore", intent: "Undo a staged request without regenerating"),
+            Scenario(head: Head(id: "cards.stage-and-restore", intent: "A staged request is taken back by putting the values back, with nothing regenerated and the card left as it was"),
                 route: ["cards.closed", "cards.open", "cards.tuning", "cards.pending-register", "cards.restored", "cards.open"],
                 expectations: [
                     "Defaults plus blank note remove pending while keeping current artifacts",
@@ -4745,7 +4856,7 @@ Catalog(
                     Check(file: "tests/session_engine.rs", test: "returning_to_baseline_with_a_blank_note_removes_the_staged_rewrite"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.stage-note-and-apply", intent: "Apply a full-card note alongside a label preset"),
+            Scenario(head: Head(id: "cards.stage-note-and-apply", intent: "A note and label changes on one card travel as a single request, and the old output stays usable until the batch is applied"),
                 route: ["cards.closed", "cards.open", "cards.tuning", "cards.pending-register", "cards.pending-note", "cards.pending", "cards.rewriting", "cards.rewritten"],
                 expectations: [
                     "Staging preserves old output and Ctrl+G activates the whole requested preset",
@@ -4757,7 +4868,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "ctrl_g_runs_a_staged_sentence_rewrite_inside_the_artifact_engine"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.stage-level", intent: "Request a surrounding-language level without constraining the term"),
+            Scenario(head: Head(id: "cards.stage-level", intent: "A level request travels from the editor to a rewrite without constraining the word being learned or overwriting the measured level"),
                 route: ["cards.closed", "cards.open", "cards.tuning", "cards.pending-level", "cards.pending", "cards.rewriting"],
                 expectations: [
                     "The requested level remains distinct from actual descriptive attribution",
@@ -4766,7 +4877,7 @@ Catalog(
                     Check(file: "src/gemini/prompts.rs", test: "level_only_correction_moves_from_b1_to_b2_without_changing_other_axes"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.accumulate", intent: "Activate independently staged cards together"),
+            Scenario(head: Head(id: "cards.accumulate", intent: "Independently staged cards are applied in one batch, and every card nobody touched stays ready and unchanged"),
                 route: ["cards.pending", "cards.multiple-pending", "cards.rewriting", "cards.rewritten"],
                 expectations: [
                     "Unedited ready cards remain intact and all pending requests activate atomically",
@@ -4776,7 +4887,7 @@ Catalog(
                     Check(file: "tests/sentence_labels_editor.rs", test: "ctrl_g_keeps_multiple_independent_pending_cards_in_one_bulk_request"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.best-effort", intent: "Keep actual attribution visible when a pinned target is approximate"),
+            Scenario(head: Head(id: "cards.best-effort", intent: "A pinned target that is only approximated keeps the actual value beside it after the rewrite and again when the card is reopened"),
                 route: ["cards.pending", "cards.rewriting", "cards.approximate", "cards.open"],
                 expectations: [
                     "Actual value and requested target are displayed separately",
@@ -4787,7 +4898,7 @@ Catalog(
                     Check(file: "src/gemini/client.rs", test: "correction_preserves_an_approximate_actual_label_and_requested_target"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.narrow-layout", intent: "Retain a tuning path when summary tags no longer fit"),
+            Scenario(head: Head(id: "cards.narrow-layout", intent: "On a narrow terminal, tuning and the step rows stay reachable even when the label summary has to hide entirely"),
                 route: ["cards.closed", "cards.narrow", "cards.tuning", "cards.open", "cards.closed"],
                 expectations: [
                     "Whole groups wrap or hide atomically while step rows and disclosure remain available",
@@ -4798,7 +4909,7 @@ Catalog(
                     Check(file: "tests/your_cards.rs", test: "too_narrow_collapsed_card_hides_the_atomic_tag_summary"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.mouse-choice", intent: "Focus and stage through the same pointer gesture"),
+            Scenario(head: Head(id: "cards.mouse-choice", intent: "A tag click opens the editor without changing anything, and a choice click stages exactly that value, kept after the editor closes"),
                 route: ["cards.closed", "cards.tuning", "cards.mouse-tuning", "cards.pending", "cards.rewriting"],
                 expectations: [
                     "A tag click opens the editor on register without applying anything; a click on a choice focuses its row and stages it, and the request persists after close",
@@ -4808,7 +4919,7 @@ Catalog(
                     Check(file: "tests/sentence_labels_editor.rs", test: "clicking_an_unfocused_cards_tags_selects_it_and_opens_its_editor"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.legacy-labels", intent: "Tune old metadata without inventing an attribution"),
+            Scenario(head: Head(id: "cards.legacy-labels", intent: "An old card without label data is retuned through the same editor, and only the values actually picked become a request"),
                 route: ["cards.legacy-tuning", "cards.pending-register", "cards.rewriting", "cards.rewritten"],
                 expectations: [
                     "Empty axes use the same track and only explicit choices create requests",
@@ -4818,14 +4929,14 @@ Catalog(
                     Check(file: "src/tui/sentence_editor.rs", test: "axis_advance_selects_and_pins_the_first_legacy_choice"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.retry-and-publish", intent: "Continue paid retries then publish the surviving complete set"),
+            Scenario(head: Head(id: "cards.retry-and-publish", intent: "Paid retries run their course and the finished cards are published anyway, with each card's attempt history still open to inspection"),
                 route: ["cards.generating", "cards.retrying", "cards.failed", "cards.publish-deck", "cards.publish-report", "cards.partial"],
                 expectations: [
                     "Attempt history stays inspectable and partial output counts only complete cards",
                 ],
                 tests: [],
             ),
-            Scenario(head: Head(id: "cards.retry-stress-reading", intent: "Inspect stress-fixture appearance without claiming a live transition route"),
+            Scenario(head: Head(id: "cards.retry-stress-reading", intent: "Reading the stress scene shows developers that every archived link opens that attempt's own output, without claiming a route a learner takes"),
                 route: ["cards.retry-stress", "cards.open", "cards.scroll-end", "cards.open"],
                 expectations: [
                     "The fixture samples row forms; archived links refer to each rejected attempt's own output",
@@ -4835,7 +4946,7 @@ Catalog(
                     Check(file: "tests/your_cards.rs", test: "clicking_a_rejected_frame_opens_the_archived_picture"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.stop-partial", intent: "Drain the current request and publish completed cards"),
+            Scenario(head: Head(id: "cards.stop-partial", intent: "A stopped build still gives the learner every finished card as a partial deck; the running request is kept and nothing new is paid for"),
                 route: ["cards.generating", "cards.stop-armed", "cards.stopping", "cards.publish-deck", "cards.publish-report", "cards.partial"],
                 expectations: [
                     "No next provider request starts and the outcome remains a partial durable result",
@@ -4846,7 +4957,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "confirmed_stop_omits_a_ready_card_with_an_uncommitted_rewrite"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.stop-empty", intent: "Cancel a build that has no complete card"),
+            Scenario(head: Head(id: "cards.stop-empty", intent: "Stopping before any card finished leads to a clean start under a new session and cost scope, with the abandoned run closed"),
                 route: ["cards.generating", "cards.stop-armed", "cards.stopping", "words.empty"],
                 expectations: [
                     "The old session is cancelled and a clean identity/cost scope replaces it",
@@ -4857,7 +4968,7 @@ Catalog(
                     Check(file: "src/cli/bridge.rs", test: "cancelling_without_ready_cards_rotates_into_an_unpersisted_clean_batch"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.stop-disarmed", intent: "Keep generation alive after an unconfirmed stop"),
+            Scenario(head: Head(id: "cards.stop-disarmed", intent: "An armed stop that is never confirmed lapses on its own, and the build carries on untouched"),
                 route: ["cards.generating", "cards.stop-armed", "cards.generating"],
                 expectations: [
                     "A timeout or another action disarms without stopping the engine",
@@ -4867,7 +4978,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "another_key_disarms_generation_stop_without_stopping_the_engine"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.publish-success", intent: "Deliver both output artifacts and retain the live card view"),
+            Scenario(head: Head(id: "cards.publish-success", intent: "A finished batch is saved as deck and PDF without a key press, and the view stays on the cards that were just built"),
                 route: ["review.closed", "cards.generating", "cards.publish-deck", "cards.publish-report", "cards.published"],
                 expectations: [
                     "Publication is automatic and the live final stays on YourCards",
@@ -4878,7 +4989,7 @@ Catalog(
                     Check(file: "tests/state_machine.rs", test: "skeleton_flow_publishes_done_inline_on_your_cards"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.publish-recovery", intent: "Retry saving complete cards after a publication error"),
+            Scenario(head: Head(id: "cards.publish-recovery", intent: "Retrying a failed save writes the existing cards again without regenerating any, so a saving error costs no paid work"),
                 route: ["cards.publish-deck", "cards.publish-error", "cards.publish-deck", "cards.publish-report", "cards.published"],
                 expectations: [
                     "Retry saves existing artifacts and does not regenerate them",
@@ -4887,7 +4998,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "retrying_a_failed_publication_cannot_regenerate_completed_cards"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.new-batch", intent: "Leave a settled live result after confirmation"),
+            Scenario(head: Head(id: "cards.new-batch", intent: "Leaving a settled result for fresh words is deliberate and keeps preferences and the output folder while the session starts anew"),
                 route: ["cards.published", "cards.new-batch-armed", "words.empty"],
                 expectations: [
                     "Preferences/output survive while persistent session and cost scope rotate",
@@ -4897,7 +5008,7 @@ Catalog(
                     Check(file: "src/cli/bridge.rs", test: "a_completed_tui_session_rotates_identity_and_cost_scope_for_the_next_batch"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.total-failure-reset", intent: "Start again when no card survived"),
+            Scenario(head: Head(id: "cards.total-failure-reset", intent: "Even after every card failed, the outcome stays on screen until a deliberate double press starts over with fresh words"),
                 route: ["cards.generating", "cards.publish-deck", "cards.publish-error", "cards.all-failed", "cards.new-batch-armed", "words.empty"],
                 expectations: [
                     "The outcome remains visible without outputs and reset needs confirmation",
@@ -4907,14 +5018,14 @@ Catalog(
                     Check(file: "tests/your_cards.rs", test: "a_batch_that_published_nothing_still_states_what_it_lost"),
                 ],
             ),
-            Scenario(head: Head(id: "cards.resume-reopened", intent: "Finish a stored partial session after reopening it"),
+            Scenario(head: Head(id: "cards.resume-reopened", intent: "A reopened unfinished session is completed from the cache, producing only what is still missing before the deck is saved again"),
                 route: ["cards.reopened", "cards.generating", "cards.publish-deck", "cards.publish-report", "cards.published"],
                 expectations: [
                     "Ctrl+G reruns the engine from cache, produces only what is still missing and republishes the batch",
                 ],
                 tests: [],
             ),
-            Scenario(head: Head(id: "done.new-batch", intent: "Start fresh from a reopened published session"),
+            Scenario(head: Head(id: "done.new-batch", intent: "Starting fresh from a reopened published session works exactly like starting fresh after a live run, with the same confirmation and reset"),
                 route: ["done.published", "done.new-batch-armed", "words.empty"],
                 expectations: [
                     "Reopened and live final confirmation have the same persistent reset behavior",
@@ -4924,14 +5035,14 @@ Catalog(
                     Check(file: "src/cli/bridge.rs", test: "a_completed_tui_session_rotates_identity_and_cost_scope_for_the_next_batch"),
                 ],
             ),
-            Scenario(head: Head(id: "quit.disarmed", intent: "Keep quit confirmation independent of destructive Escape"),
+            Scenario(head: Head(id: "quit.disarmed", intent: "An armed quit that is never confirmed lapses without touching the words, and it never interferes with an Escape confirmation"),
                 route: ["words.editing", "words.quit-armed", "words.editing"],
                 expectations: [
                     "Other action or timeout disarms quit without altering the input",
                 ],
                 tests: [],
             ),
-            Scenario(head: Head(id: "cards.stopped-publish-failure", intent: "Cancel the stopped run when publishing its complete subset fails"),
+            Scenario(head: Head(id: "cards.stopped-publish-failure", intent: "If saving a stopped subset fails, the old run is closed for good before fresh words appear, and no paid work restarts on its own"),
                 route: ["cards.generating", "cards.stop-armed", "cards.stopping", "cards.publish-deck", "words.stopped-publish-error", "words.empty"],
                 expectations: [
                     "Durable cancellation and scope rotation finish before fresh input appears; no provider work restarts",

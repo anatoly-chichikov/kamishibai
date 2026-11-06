@@ -22,13 +22,23 @@ fn fixture_names(gallery: &Example) -> Vec<String> {
         .collect()
 }
 
+fn document() -> String {
+    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/tui-states/catalog.ron"))
+        .expect("invariant: TUI catalog must be readable")
+}
+
 fn catalog() -> Catalog {
-    let document = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/tui-states/catalog.ron"),
-    )
-    .expect("invariant: TUI catalog must be readable");
-    Catalog::try_from_document(&document)
+    Catalog::try_from_document(&document())
         .expect("invariant: TUI catalog must match its typed schema")
+}
+
+#[test]
+fn every_catalog_head_stays_on_one_grep_line() {
+    let faults = catalog().inspect_layout(&document());
+    assert!(
+        faults.is_empty(),
+        "catalog heads left the single line the grep recipes read: {faults:#?}"
+    );
 }
 
 #[test]
