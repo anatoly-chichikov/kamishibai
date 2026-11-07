@@ -831,10 +831,10 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "escape.lifecycle", intent: "Words, a running build or a settled result are never lost to one stray key; each loss takes a second press within a second, and Escape peels the nearest layer first"),
+        Rule(head: Head(id: "escape.lifecycle", intent: "Words, a running build or a settled result are never lost to one stray key; each loss takes a second press within two seconds, and Escape peels the nearest layer first"),
             scope: Everywhere,
             expectations: [
-                "Clear words, stop generation, start new cards and quit each use independent one-second confirmation windows",
+                "Clear words, stop generation, start new cards and quit each use independent two-second confirmation windows",
                 "The first destructive key names the consequence and then changes to a bright bold again; any other key, mapped or not, a click, a drag, the wheel or the timeout disarms an Escape confirmation, while an armed quit survives mouse input and unmapped keys",
                 "Escape peels the focused layer before a screen action: error, modal, live editor, expanded card or sense list",
                 "Open blocks on other rows do not intercept Escape; C closes them all",
@@ -857,21 +857,13 @@ Catalog(
                 ],
                 tests: [
                     Check(file: "src/cli/shell.rs", test: "words_clear_confirmation_expires_after_the_confirmation_window"),
+                    Check(file: "src/cli/shell.rs", test: "escape_confirmation_accepts_a_second_press_after_one_second"),
+                    Check(file: "src/cli/shell.rs", test: "quit_confirmation_accepts_a_second_press_after_one_second"),
                     Check(file: "src/cli/shell.rs", test: "escape_closes_an_open_sentence_editor_before_arming_a_new_batch"),
                     Check(file: "src/cli/shell.rs", test: "review_back_resets_the_words_double_escape_confirmation"),
                     Check(file: "src/cli/shell.rs", test: "stop_applies_the_inflight_outcome_then_publishes_only_ready_cards"),
                     Check(file: "src/cli/shell.rs", test: "second_escape_on_reopened_done_starts_clean_words_in_place"),
-                    Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_starts_clean_without_resuming"),
-                ],
-                gaps: [
-                    Gap(
-                        summary: "Today a failed save of a stopped subset durably cancels the session, rotates identity and cost scope and shows the saving error over clean words, so the finished cards cannot be saved again; failed_publish_after_stop_starts_clean_without_resuming locks that behavior",
-                        sources: [
-                            Source(file: "src/cli/shell.rs", symbol: "publish_failed"),
-                            Source(file: "src/cli/shell.rs", symbol: "cancel_stopped_generation"),
-                            Source(file: "src/cli/shell.rs", symbol: "failed_publish_after_stop_starts_clean_without_resuming"),
-                        ],
-                    ),
+                    Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_keeps_the_session_and_paid_cards"),
                 ],
             ),
         ),
@@ -882,7 +874,7 @@ Catalog(
                 "welcome.key-recovery",
                 "words.understanding",
                 "words.error",
-                "words.stopped-publish-error",
+                "cards.stopped-publish-error",
                 "review.understanding",
                 "review.correcting",
                 "review.correction-error",
@@ -896,7 +888,7 @@ Catalog(
                 "An error panel titled could not complete request or could not save your cards offers [Ctrl+G] retry and [Esc] dismiss; Ctrl+G dismisses and then runs the screen's own Ctrl+G action, and Escape only dismisses",
                 "Other mapped non-redraw app events dismiss errors, but global quit/scroll/unmapped keys are not promised as dismissal",
                 "Invalid key checking shows an inline Welcome notice; a rejected saved key returns to Welcome's key stage, and a successful replacement resumes a committed plan or otherwise returns to the retained words without resuming the interrupted understanding or correction",
-                "Publication errors stay saving failures; Ctrl+G republishes directly when every card is ready, but first regenerates failed cards, which is paid provider work, when any card failed",
+                "Publication errors stay saving failures; a stopped batch only republishes its ready subset, while an ordinary batch first regenerates failed cards when any card failed",
                 "Intended error recovery retries the failed operation with Ctrl+G",
             ],
             grounds: Grounds(
@@ -1474,7 +1466,7 @@ Catalog(
                             event: "Ctrl+C",
                             target: "words.quit-armed",
                             condition: "always",
-                            expectation: "Arm the independent one-second quit confirmation",
+                            expectation: "Arm the independent two-second quit confirmation",
                         ),
                     ],
                 ),
@@ -1554,17 +1546,17 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "words.clear-armed", intent: "The learner's typed words survive a stray Esc: only a second Esc within one second discards them, and any other key, click or the timeout keeps them"),
+            State(head: Head(id: "words.clear-armed", intent: "The learner's typed words survive a stray Esc: only a second Esc within two seconds discards them, and any other key, click or the timeout keeps them"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Clear),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Esc] again", "[Ctrl+C] quit"]),
                     expectations: [
-                        "Words remain intact until a second Escape within one second",
+                        "Words remain intact until a second Escape within two seconds",
                         "The footer's only armed action reads bright bold Esc again",
                     ],
                     actions: [
                         Action(
-                            event: "Esc within one second",
+                            event: "Esc within two seconds",
                             target: "words.empty",
                             condition: "always",
                             expectation: "Clear input and hidden review state",
@@ -1866,61 +1858,17 @@ Catalog(
                 ),
                 evidence: Missing("No understanding-error screenshot exists"),
             ),
-            State(head: Head(id: "words.stopped-publish-error", intent: "A stopped batch whose save failed can be saved again once the reason is clear, and neither its session nor its finished cards are lost to the failure"),
-                contract: Contract(
-                    surface: Surface(screen: "YourWords", overlay: Error),
-                    chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+L] languages", "[Ctrl+C] quit"]),
-                    expectations: [
-                        "The error names the saving failure and offers to save the stopped subset again; the stopped session, its finished cards and their costs remain",
-                        "No stopped provider pipeline resumes while the save is retried",
-                    ],
-                    actions: [
-                        Action(
-                            event: "Esc or Ctrl+G",
-                            target: "words.empty",
-                            condition: "always",
-                            expectation: "Dismiss the saving diagnostic; fresh empty input starts no provider work",
-                        ),
-                    ],
-                ),
-                grounds: Grounds(
-                    sources: [
-                        Source(file: "src/cli/shell.rs", symbol: "publish_failed"),
-                        Source(file: "src/cli/shell.rs", symbol: "cancel_stopped_generation"),
-                    ],
-                    tests: [
-                        Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_starts_clean_without_resuming"),
-                    ],
-                    gaps: [
-                        Gap(
-                            summary: "The panel offers [Ctrl+G] retry although Ctrl+G only dismisses the saving diagnostic on the clean words screen",
-                            sources: [
-                                Source(file: "src/tui/screens/error.rs", symbol: "draw"),
-                            ],
-                        ),
-                        Gap(
-                            summary: "Today a failed save of a stopped subset durably cancels the session, rotates identity and cost scope and shows the saving error over clean words, so the finished cards cannot be saved again; failed_publish_after_stop_starts_clean_without_resuming locks that behavior",
-                            sources: [
-                                Source(file: "src/cli/shell.rs", symbol: "publish_failed"),
-                                Source(file: "src/cli/shell.rs", symbol: "cancel_stopped_generation"),
-                                Source(file: "src/cli/shell.rs", symbol: "failed_publish_after_stop_starts_clean_without_resuming"),
-                            ],
-                        ),
-                    ],
-                ),
-                evidence: Missing("No stopped-publication failure screenshot exists"),
-            ),
-            State(head: Head(id: "words.quit-armed", intent: "Leaving takes a deliberate double Ctrl+C in any terminal: the first press arms a short window that resets on its own, and only a second press inside it quits"),
+            State(head: Head(id: "words.quit-armed", intent: "Leaving takes a deliberate double Ctrl+C in any terminal: the first press arms a two-second window that resets on its own, and only a second press inside it quits"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Clear),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+G] understand", "[Esc] clear", "[Ctrl+L] languages", "[Ctrl+C] again"]),
                     expectations: [
-                        "The first Ctrl+C arms an independent one-second quit confirmation and the footer's quit becomes a bright bold [Ctrl+C] again",
+                        "The first Ctrl+C arms an independent two-second quit confirmation and the footer's quit becomes a bright bold [Ctrl+C] again",
                         "An armed Ctrl+C again hint is bright and bold; Escape confirmations are independent",
                     ],
                     actions: [
                         Action(
-                            event: "Ctrl+C within one second",
+                            event: "Ctrl+C within two seconds",
                             target: "words.quit-armed",
                             condition: "always",
                             expectation: "Exit the process; this terminal action has no next UI state",
@@ -1941,8 +1889,30 @@ Catalog(
                     tests: [
                         Check(file: "src/tui/screens/common.rs", test: "an_armed_confirmation_is_the_one_hint_the_bar_draws_with_weight"),
                     ],
+                    gaps: [
+                        Gap(
+                            summary: "At the captured 1200px width, the existing footer drops armed Ctrl+C again before the primary Ctrl+G understand because quit_hint keeps Exit rank; the keyboard confirmation still works",
+                            sources: [
+                                Source(file: "src/tui/screens/common.rs", symbol: "quit_hint"),
+                                Source(file: "src/tui/screens/common.rs", symbol: "footer_spans"),
+                            ],
+                        ),
+                    ],
                 ),
-                evidence: Missing("No global-quit confirmation screenshot exists"),
+                evidence: Captured([
+                    Shot(
+                        file: "docs/tui-states/live/34-quit-armed.png",
+                        origin: Synthetic,
+                        revision: Some("af5d525"),
+                        note: "Recaptured from the prepared af5d525 release scene on 2026-11-07 and visually inspected at this width; synthetic layout evidence only",
+                    ),
+                    Shot(
+                        file: "docs/tui-states/live/34-quit-armed-narrow.png",
+                        origin: Synthetic,
+                        revision: Some("af5d525"),
+                        note: "Recaptured from the prepared af5d525 release scene on 2026-11-07 and visually inspected at this width; synthetic layout evidence only",
+                    ),
+                ]),
             ),
             State(head: Head(id: "review.understanding", intent: "After the reading language changes, the same original lines are read again instead of relabeling old meanings, with the review kept in view"),
                 contract: Contract(
@@ -3948,17 +3918,17 @@ Catalog(
                 ),
                 evidence: Missing("No all-cards-failed final screenshot exists"),
             ),
-            State(head: Head(id: "cards.stop-armed", intent: "A build can be stopped without a slip ending it: the first Esc only arms, the running request carries on, and only a second Esc within one second stops"),
+            State(head: Head(id: "cards.stop-armed", intent: "A build can be stopped without a slip ending it: the first Esc only arms, the running request carries on, and only a second Esc within two seconds stops"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "browse the ready cards while the rest are being made", footer: ["[Esc] again", "[Ctrl+C] quit"]),
                     expectations: [
-                        "The first Escape keeps the active artifact alive and shows bright bold Esc again for one second",
+                        "The first Escape keeps the active artifact alive and shows bright bold Esc again for two seconds",
                         "Stop/regenerate/tune ownership reflects the armed confirmation instead of promising competing actions",
                     ],
                     actions: [
                         Action(
-                            event: "Esc within one second",
+                            event: "Esc within two seconds",
                             target: "cards.stopping",
                             condition: "always",
                             expectation: "Confirm draining the current request without starting another",
@@ -4100,6 +4070,114 @@ Catalog(
                     ),
                 ]),
             ),
+            State(head: Head(id: "cards.stopped-publish-error", intent: "A stopped batch whose save failed can be saved again once the reason is clear, and neither its session nor its finished cards are lost to the failure"),
+                contract: Contract(
+                    surface: Surface(screen: "YourCards", overlay: Error),
+                    chrome: Chrome(title: "your cards", hint: "save the ready cards so you can start learning", footer: ["[Ctrl+G] save", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Ctrl+C] quit"]),
+                    expectations: [
+                        "The error names the saving failure and offers Ctrl+G to save the same stopped subset again; the session, its finished cards and their costs remain",
+                        "Escape closes only the error and no provider pipeline resumes while the save is retried",
+                    ],
+                    actions: [
+                        Action(event: "Ctrl+G", target: "cards.publish-deck", condition: "session claim succeeds", expectation: "Retry publication of only ready cards without provider work"),
+                        Action(event: "Esc", target: "cards.stopped", condition: "always", expectation: "Dismiss only the saving diagnostic and retain the stopped subset"),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/shell.rs", symbol: "publish_failed"),
+                        Source(file: "src/cli/shell.rs", symbol: "regenerate_cards"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_keeps_the_session_and_paid_cards"),
+                        Check(file: "src/cli/shell.rs", test: "retrying_a_stopped_save_publishes_only_the_ready_subset"),
+                        Check(file: "src/cli/shell.rs", test: "repeated_stopped_save_failure_and_quit_cannot_cancel_the_session"),
+                    ],
+                ),
+                evidence: Captured([
+                    Shot(
+                        file: "docs/tui-states/live/32-stopped-publish-error.png",
+                        origin: Synthetic,
+                        revision: Some("af5d525"),
+                        note: "Recaptured from the prepared af5d525 release scene on 2026-11-07 and visually inspected at this width; synthetic layout evidence only",
+                    ),
+                    Shot(
+                        file: "docs/tui-states/live/32-stopped-publish-error-narrow.png",
+                        origin: Synthetic,
+                        revision: Some("af5d525"),
+                        note: "Recaptured from the prepared af5d525 release scene on 2026-11-07 and visually inspected at this width; synthetic layout evidence only",
+                    ),
+                ]),
+            ),
+            State(head: Head(id: "cards.stopped", intent: "The ready subset of a stopped batch remains available to save after its error is closed, and unfinished cards cause no further paid work"),
+                contract: Contract(
+                    surface: Surface(screen: "YourCards", overlay: Clear),
+                    chrome: Chrome(title: "your cards", hint: "save the ready cards so you can start learning", footer: ["[Ctrl+G] save", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] new cards", "[Ctrl+C] quit"]),
+                    expectations: [
+                        "Closing the error leaves the stopped cards and session intact without automatically retrying publication or generation",
+                        "Ctrl+G saves only complete cards and leaves unfinished cards untouched",
+                    ],
+                    actions: [
+                        Action(event: "Ctrl+G", target: "cards.publish-deck", condition: "session claim succeeds", expectation: "Publish the same ready subset without starting providers"),
+                        Action(event: "Esc", target: "cards.stopped-new-batch-armed", condition: "focused card is collapsed and no editor is live", expectation: "Arm the existing explicit new-batch confirmation"),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/shell.rs", symbol: "regenerate_cards"),
+                        Source(file: "src/tui/app.rs", symbol: "publication_failed"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/shell.rs", test: "dismissing_a_stopped_save_error_keeps_the_subset_for_ctrl_g"),
+                    ],
+                ),
+                evidence: Captured([
+                    Shot(
+                        file: "docs/tui-states/live/33-stopped-unsaved.png",
+                        origin: Synthetic,
+                        revision: Some("af5d525"),
+                        note: "Recaptured from the prepared af5d525 release scene on 2026-11-07 and visually inspected at this width; synthetic layout evidence only",
+                    ),
+                    Shot(
+                        file: "docs/tui-states/live/33-stopped-unsaved-narrow.png",
+                        origin: Synthetic,
+                        revision: Some("af5d525"),
+                        note: "Recaptured from the prepared af5d525 release scene on 2026-11-07 and visually inspected at this width; synthetic layout evidence only",
+                    ),
+                ]),
+            ),
+            State(head: Head(id: "cards.stopped-new-batch-armed", intent: "A stopped batch stays available to save until a second Escape deliberately starts fresh, so one stray key cannot discard the unsaved ready subset"),
+                contract: Contract(
+                    surface: Surface(screen: "YourCards", overlay: Clear),
+                    chrome: Chrome(title: "your cards", hint: "save the ready cards so you can start learning", footer: ["[Esc] again", "[Ctrl+C] quit"]),
+                    expectations: [
+                        "The unsaved stopped cards remain visible throughout the independent two-second new-batch confirmation",
+                        "Only the second Escape leaves the batch; another action or timeout disarms the confirmation",
+                    ],
+                    actions: [
+                        Action(event: "Esc within two seconds", target: "words.empty", condition: "always", expectation: "Start fresh through the existing explicit path while retaining the old session on disk"),
+                        Action(event: "timeout", target: "cards.stopped", condition: "two seconds elapse", expectation: "Retain the stopped ready subset and its save action"),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [Source(file: "src/cli/shell.rs", symbol: "handle_new_batch_escape")],
+                    tests: [Check(file: "src/cli/shell.rs", test: "leaving_a_stopped_unsaved_batch_requires_the_existing_double_escape")],
+                ),
+                evidence: Captured([
+                    Shot(
+                        file: "docs/tui-states/live/35-stopped-new-batch-armed.png",
+                        origin: Synthetic,
+                        revision: Some("af5d525"),
+                        note: "Recaptured from the prepared af5d525 release scene on 2026-11-07 and visually inspected at this width; synthetic layout evidence only",
+                    ),
+                    Shot(
+                        file: "docs/tui-states/live/35-stopped-new-batch-armed-narrow.png",
+                        origin: Synthetic,
+                        revision: Some("af5d525"),
+                        note: "Recaptured from the prepared af5d525 release scene on 2026-11-07 and visually inspected at this width; synthetic layout evidence only",
+                    ),
+                ]),
+            ),
             State(head: Head(id: "cards.publish-deck", intent: "The Anki deck is visibly being packaged rather than a last card looking stuck, and a saving failure keeps every complete card for another try"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Busy("PublishingDeck")),
@@ -4123,9 +4201,9 @@ Catalog(
                         ),
                         Action(
                             event: "stopped publication fails",
-                            target: "words.stopped-publish-error",
-                            condition: "durable session cancellation succeeds",
-                            expectation: "Cancel the old stopped session, rotate identity/cost scope and retain a saving diagnostic",
+                            target: "cards.stopped-publish-error",
+                            condition: "publication is a confirmed-stop subset",
+                            expectation: "Keep the stopped session, ready cards and costs and offer another save",
                         ),
                     ],
                 ),
@@ -4139,7 +4217,7 @@ Catalog(
                         Check(file: "src/cli/shell.rs", test: "staged_app_cannot_publish_an_all_ready_baseline_engine_before_ctrl_g"),
                         Check(file: "src/cli/shell.rs", test: "busy_kind_swapped_preserves_elapsed_time"),
                         Check(file: "src/cli/shell.rs", test: "a_failed_publication_cannot_render_as_a_gemini_connection_failure"),
-                        Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_starts_clean_without_resuming"),
+                        Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_keeps_the_session_and_paid_cards"),
                     ],
                 ),
                 evidence: Missing("No deck-publication busy screenshot exists"),
@@ -4173,9 +4251,9 @@ Catalog(
                         ),
                         Action(
                             event: "stopped publication fails",
-                            target: "words.stopped-publish-error",
-                            condition: "durable session cancellation succeeds",
-                            expectation: "Cancel the old stopped session, rotate identity/cost scope and retain a saving diagnostic",
+                            target: "cards.stopped-publish-error",
+                            condition: "publication is a confirmed-stop subset",
+                            expectation: "Keep the stopped session, ready cards and costs and offer another save",
                         ),
                     ],
                 ),
@@ -4315,17 +4393,17 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.new-batch-armed", intent: "A fresh batch can start without restarting the app, yet the settled result stays until a second Esc within one second, and preferences carry over"),
+            State(head: Head(id: "cards.new-batch-armed", intent: "A fresh batch can start without restarting the app, yet the settled result stays until a second Esc within two seconds, and preferences carry over"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "your files are ready", footer: ["[Esc] again", "[Ctrl+C] quit"]),
                     expectations: [
-                        "The old result remains visible until a second Escape within one second",
+                        "The old result remains visible until a second Escape within two seconds",
                         "The armed action outranks ordinary keys and quit",
                     ],
                     actions: [
                         Action(
-                            event: "Esc within one second",
+                            event: "Esc within two seconds",
                             target: "words.empty",
                             condition: "always",
                             expectation: "Rotate session/cost scope and preserve preferences/output directory",
@@ -4514,17 +4592,17 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "done.new-batch-armed", intent: "A fresh start from a reopened session stays in the same window, while the saved result remains until a second Esc within one second confirms"),
+            State(head: Head(id: "done.new-batch-armed", intent: "A fresh start from a reopened session stays in the same window, while the saved result remains until a second Esc within two seconds confirms"),
                 contract: Contract(
                     surface: Surface(screen: "Done", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "your files are ready", footer: ["[Esc] again", "[Ctrl+C] quit"]),
                     expectations: [
-                        "The current published output stays visible during the one-second confirmation",
+                        "The current published output stays visible during the two-second confirmation",
                         "Independent quit confirmation remains available",
                     ],
                     actions: [
                         Action(
-                            event: "Esc within one second",
+                            event: "Esc within two seconds",
                             target: "words.empty",
                             condition: "always",
                             expectation: "Rotate identity/cost scope while preserving preferences and output",
@@ -4640,7 +4718,7 @@ Catalog(
             Scenario(head: Head(id: "words.clear", intent: "Wiping the batch is always deliberate, taking a second press, and the wipe also forgets the hidden review behind the words"),
                 route: ["words.editing", "words.clear-armed", "words.empty"],
                 expectations: [
-                    "First Escape only arms; the second within one second clears input and hidden review",
+                    "First Escape only arms; the second within two seconds clears input and hidden review",
                 ],
                 tests: [
                     Check(file: "src/cli/shell.rs", test: "first_escape_on_words_only_arms_the_clear"),
@@ -5050,20 +5128,29 @@ Catalog(
                     Check(file: "src/cli/bridge.rs", test: "a_completed_tui_session_rotates_identity_and_cost_scope_for_the_next_batch"),
                 ],
             ),
-            Scenario(head: Head(id: "quit.disarmed", intent: "An armed quit that is not repeated lapses on its own after its short window and leaves the words in place, so the app closes only on purpose"),
+            Scenario(head: Head(id: "quit.disarmed", intent: "An armed quit that is not repeated lapses after two seconds and leaves the words in place, so the app closes only on purpose"),
                 route: ["words.editing", "words.quit-armed", "words.editing"],
                 expectations: [
-                    "Other action or timeout disarms quit without altering the input",
-                ],
-                tests: [],
-            ),
-            Scenario(head: Head(id: "cards.stopped-publish-failure", intent: "If saving a stopped subset fails, the finished cards and the session wait for another save with the reason shown, and no paid work restarts on its own"),
-                route: ["cards.generating", "cards.stop-armed", "cards.stopping", "cards.publish-deck", "words.stopped-publish-error", "words.empty"],
-                expectations: [
-                    "The stopped session and its finished cards survive a failed save and the save can be retried without restarting provider work; today the run is cancelled into clean words instead, recorded as a gap on words.stopped-publish-error",
+                    "Another mapped action or a timeout after two seconds disarms quit without altering the input",
                 ],
                 tests: [
-                    Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_starts_clean_without_resuming"),
+                    Check(file: "src/cli/shell.rs", test: "quit_confirmation_accepts_a_second_press_after_one_second"),
+                ],
+            ),
+            Scenario(head: Head(id: "cards.leave-stopped", intent: "A learner can deliberately leave an unsaved stopped batch and start fresh, while a stray Escape only closes the error or arms confirmation"),
+                route: ["cards.stopped-publish-error", "cards.stopped", "cards.stopped-new-batch-armed", "words.empty"],
+                expectations: ["Escape first dismisses the saving diagnostic; two fresh Escape presses within two seconds start a new batch without deleting the stopped session"],
+                tests: [Check(file: "src/cli/shell.rs", test: "leaving_a_stopped_unsaved_batch_requires_the_existing_double_escape")],
+            ),
+            Scenario(head: Head(id: "cards.stopped-publish-failure", intent: "If saving a stopped subset fails, the finished cards and the session wait for another save with the reason shown, and no paid work restarts on its own"),
+                route: ["cards.generating", "cards.stop-armed", "cards.stopping", "cards.publish-deck", "cards.stopped-publish-error", "cards.stopped", "cards.publish-deck", "cards.publish-report", "cards.partial"],
+                expectations: [
+                    "The stopped session and its finished cards survive each failed save; Escape only dismisses the error, Ctrl+G retries the same subset and double Ctrl+C exits without cancelling it",
+                ],
+                tests: [
+                    Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_keeps_the_session_and_paid_cards"),
+                    Check(file: "src/cli/shell.rs", test: "dismissing_a_stopped_save_error_keeps_the_subset_for_ctrl_g"),
+                    Check(file: "src/cli/shell.rs", test: "repeated_stopped_save_failure_and_quit_cannot_cancel_the_session"),
                 ],
             ),
         ],

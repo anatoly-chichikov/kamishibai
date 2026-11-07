@@ -361,3 +361,47 @@ Screenshot "live/37-done-published.png"
 Sleep 2500ms
 Type "q"
 Sleep 500ms
+
+# cards.stopped-publish-error — stopped-save recovery and deliberate quit
+Type "./target/release/examples/tui_states --state cards.stopped-publish-error"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/32-stopped-publish-error.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.stopped — stopped-save recovery and deliberate quit
+Type "./target/release/examples/tui_states --state cards.stopped"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/33-stopped-unsaved.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# words.quit-armed — stopped-save recovery and deliberate quit
+Type "./target/release/examples/tui_states --state words.quit-armed"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/34-quit-armed.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms
+
+# cards.stopped-new-batch-armed — deliberate departure retains the unsaved subset
+Type "./target/release/examples/tui_states --state cards.stopped-new-batch-armed"
+Enter
+Wait+Screen /please verify results/
+Ctrl+L
+Sleep 2500ms
+Screenshot "live/35-stopped-new-batch-armed.png"
+Sleep 2500ms
+Type "q"
+Sleep 500ms

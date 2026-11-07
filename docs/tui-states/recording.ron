@@ -11,7 +11,7 @@ Recording(
             Tape(
                 file: "docs/tui-states/states-narrow.tape",
                 drives: Scenes,
-                purpose: "Capture the intentionally narrow card-tag and generation-guidance layouts from the same prepared scenes",
+                purpose: "Capture narrow card tags, generation guidance, stopped-save recovery and deliberate quit from the same prepared scenes",
                 geometry: "1200x1688 px at FontSize 36; VHS accepts geometry only at the top of a tape, so narrow captures need their own tape",
             ),
             Tape(
@@ -45,6 +45,8 @@ Recording(
                     "No Gemini call happens; every capture starts its own gallery process with --state <id>, waits until the AI reminder every scene draws is on screen, repaints with Ctrl+L, and holds the scene 2.5 s on each side of the Screenshot before quitting",
                     "Inserting or reordering scenes in examples/tui_states.rs cannot redirect a capture, because tapes name scenes by stable ID",
                     "The two Welcome key shots are the same EnterKey stage: 00-welcome has no environment key and offers only submit, while 00b-welcome-env fakes an available GEMINI_API_KEY and adds the focused load from env chip; the tape exports no key",
+                    "For a focused recapture, copy a synthetic tape header and the affected complete scene blocks into a temporary tape; keep its stable IDs, waits and Screenshot destinations, point its executable at the same freshly built gallery, and write the temporary video outside the repository; MP4 avoids encoding an unused GIF while the PNG shots keep the original geometry",
+                    "Stopped-save recovery and quit confirmation have prepared scenes in both synthetic tapes; inspect all eight wide and narrow PNGs after recapture",
                     "Inspect every rewritten PNG at each width before treating it as current evidence, then update the capture notes in catalog.ron",
                 ],
             ),
