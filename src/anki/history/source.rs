@@ -144,18 +144,7 @@ pub fn read(
     let path = path.canonicalize()?;
     closed(&path, process)?;
     let before = media::digest(&mut File::open(&path)?)?;
-    let connection = Connection::open_with_flags(
-        uri(&path)?,
-        OpenFlags::SQLITE_OPEN_READ_ONLY
-            | OpenFlags::SQLITE_OPEN_URI
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    connection.create_collation("unicase", |left: &str, right: &str| {
-        left.to_lowercase().cmp(&right.to_lowercase())
-    })?;
-    connection.pragma_update(None, "query_only", "ON")?;
-    let mut manifest = rows(&connection, application)?;
-    drop(connection);
+    let mut manifest = database(&path, application)?;
     let selected = selection(&manifest, names)?;
     let decks = manifest
         .decks
@@ -202,7 +191,53 @@ pub fn read(
     Ok(snapshot)
 }
 
-fn closed(path: &Path, process: &dyn AnkiProcess) -> Result<(), HistoryError> {
+/// Inspect all decks, even when none belongs to the default Kamishibai selection.
+pub fn inspect(
+    path: &Path,
+    names: &[String],
+    process: &dyn AnkiProcess,
+    application: &str,
+) -> Result<Vec<DeckSummary>, HistoryError> {
+    let path = path.canonicalize()?;
+    closed(&path, process)?;
+    let before = media::digest(&mut File::open(&path)?)?;
+    let manifest = database(&path, application)?;
+    let selected = selected(&manifest, names)?;
+    let decks = manifest
+        .decks
+        .iter()
+        .map(|deck| {
+            DeckSummary::from_rows(
+                deck,
+                selected.contains(&deck.id),
+                &manifest.cards,
+                &manifest.revlog,
+            )
+        })
+        .collect();
+    closed(&path, process)?;
+    if media::digest(&mut File::open(&path)?)? != before {
+        return Err(HistoryError::Changed);
+    }
+    Ok(decks)
+}
+
+fn database(path: &Path, application: &str) -> Result<Manifest, HistoryError> {
+    let connection = Connection::open_with_flags(
+        uri(path)?,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    connection.create_collation("unicase", |left: &str, right: &str| {
+        left.to_lowercase().cmp(&right.to_lowercase())
+    })?;
+    connection.pragma_update(None, "query_only", "ON")?;
+    rows(&connection, application)
+}
+
+/// Refuse an open collection or leftover WAL without reading or writing its rows.
+pub fn closed(path: &Path, process: &dyn AnkiProcess) -> Result<(), HistoryError> {
     let mut wal = path.as_os_str().to_os_string();
     wal.push("-wal");
     if Path::new(&wal).try_exists()? || process.running(path)? {
@@ -228,6 +263,16 @@ fn uri(path: &Path) -> Result<String, HistoryError> {
 }
 
 fn selection(manifest: &Manifest, names: &[String]) -> Result<BTreeSet<i64>, HistoryError> {
+    let selected = selected(manifest, names)?;
+    if selected.is_empty() {
+        return Err(HistoryError::Selection(
+            "no Anki decks selected; pass --deck NAME".into(),
+        ));
+    }
+    Ok(selected)
+}
+
+fn selected(manifest: &Manifest, names: &[String]) -> Result<BTreeSet<i64>, HistoryError> {
     let selected: BTreeSet<i64> = if names.is_empty() {
         let types: BTreeSet<_> = manifest
             .notetypes
@@ -260,11 +305,6 @@ fn selection(manifest: &Manifest, names: &[String]) -> Result<BTreeSet<i64>, His
             })
             .collect::<Result<_, _>>()?
     };
-    if selected.is_empty() {
-        return Err(HistoryError::Selection(
-            "no Anki decks selected; pass --deck NAME".into(),
-        ));
-    }
     Ok(selected)
 }
 

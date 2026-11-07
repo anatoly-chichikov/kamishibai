@@ -17,8 +17,10 @@ use manifest::Manifest;
 use time::OffsetDateTime;
 
 pub use archive::validate;
-pub use source::{AnkiProcess, SystemAnkiProcess, application_version, discover, read, roots};
-pub use summary::Preview;
+pub use source::{
+    AnkiProcess, SystemAnkiProcess, application_version, closed, discover, inspect, read, roots,
+};
+pub use summary::{DeckSummary, Preview};
 
 /// A typed import failure; delivery surfaces decide how to present recovery.
 #[derive(Debug, thiserror::Error)]
@@ -56,6 +58,20 @@ pub enum HistoryError {
     /// ZIP reading or writing failed.
     #[error("cannot read or write the Anki history archive: {0}")]
     Zip(#[from] zip::result::ZipError),
+}
+
+/// A publication gate checked before creating output and immediately before publishing.
+pub trait SaveGate {
+    /// Refuse publication when the caller's source or cancellation condition changed.
+    fn verify(&self) -> Result<(), HistoryError>;
+}
+
+struct Confirmed;
+
+impl SaveGate for Confirmed {
+    fn verify(&self) -> Result<(), HistoryError> {
+        Ok(())
+    }
 }
 
 /// Selected raw rows and content-addressed media; source paths never serialize.
@@ -112,6 +128,17 @@ impl Snapshot {
         written: OffsetDateTime,
         writer: &str,
     ) -> Result<PathBuf, HistoryError> {
-        archive::save(self, directory, written, writer)
+        self.save_guarded(directory, written, writer, &Confirmed)
+    }
+
+    /// Save the same v1 archive while checking a caller-owned publication gate.
+    pub fn save_guarded(
+        &self,
+        directory: &Path,
+        written: OffsetDateTime,
+        writer: &str,
+        gate: &dyn SaveGate,
+    ) -> Result<PathBuf, HistoryError> {
+        archive::save(self, directory, written, writer, gate)
     }
 }

@@ -2071,7 +2071,7 @@ dependencies = [
 
 [[package]]
 name = "kamishibai"
-version = "1.14.0"
+version = "1.14.1"
 dependencies = [
  "allsorts",
  "anyhow",
@@ -2103,6 +2103,7 @@ dependencies = [
  "sha2 0.11.0",
  "shlex",
  "tempfile",
+ "termwiz",
  "thiserror 2.0.18",
  "time",
  "unicode-bidi",

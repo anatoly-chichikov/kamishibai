@@ -1,0 +1,35 @@
+---
+source: src/cli/export/screen.rs
+expression: rendered
+---
+                                          
+  export from Anki   4 / 5 · confirm      
+                                          
+ save this file?                          
+                                          
+ Your selected cards, review history and  
+ referenced media                         
+ will be saved to:                        
+                                          
+ /Users/learner/Downloads                 
+                                          
+ Anki stays unchanged.                    
+ ──────────────────────────────────────── 
+ [Enter] save   [Esc] back                
+                                          
+                                          
+
+                                          
+  export from Anki   5 / 5 · file         
+                                          
+ export saved                             
+                                          
+ /Users/learner/Downloads/kamishibai-anki 
+ -2026-11-07.zip                          
+                                          
+ in the web: import from kamishibai cli   
+                                          
+                                          
+                                          
+ ──────────────────────────────────────── 
+ [↑↓] scroll   [Enter / Esc] exit

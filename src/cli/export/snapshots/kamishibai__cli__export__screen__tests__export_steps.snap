@@ -1,0 +1,266 @@
+---
+source: src/cli/export/screen.rs
+assertion_line: 485
+expression: rendered
+---
+STEP 1
+                                                                                
+     export from Anki   1 / 5 · check                                           
+                                                                                
+    ⠋ checking Anki…                                                            
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [Esc] exit without saving                                                   
+                                                                                
+                                                                                
+
+STEP 2
+                                                                                
+     export from Anki   1 / 5 · close Anki                                      
+                                                                                
+    close Anki                                                                  
+                                                                                
+    Sync on your devices, then quit desktop Anki normally.                      
+    When it is closed, press Enter to check again.                              
+                                                                                
+    Anki is open or did not close properly                                      
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [Enter] ready · check again   [Esc] exit                                    
+                                                                                
+                                                                                
+
+STEP 3
+                                                                                
+     export from Anki   1 / 5 · profile                                         
+                                                                                
+    Anki is closed · choose your profile                                        
+                                                                                
+    › User 1                                                                    
+      User 2                                                                    
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [↑↓] profile   [Enter] next   [Esc] exit                                    
+                                                                                
+                                                                                
+
+STEP 4
+                                                                                
+     export from Anki   2 / 5 · decks                                           
+                                                                                
+    ⠋ reading decks and review counts…                                          
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [Esc] exit without saving                                                   
+                                                                                
+                                                                                
+
+STEP 5
+                                                                                
+     export from Anki   2 / 5 · decks                                           
+                                                                                
+    choose decks · Space marks each exact deck                                  
+                                                                                
+    › [✓] French · 1 card · 1 review                                            
+      [ ] French::Daily · 0 cards · 0 reviews                                   
+      [ ] Other · 0 cards · 0 reviews                                           
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [↑↓] deck   [Space] mark   [Enter] review   [Esc] back                      
+                                                                                
+                                                                                
+
+STEP 6
+                                                                                
+     export from Anki   3 / 5 · review                                          
+                                                                                
+    ⠋ preparing your export summary…                                            
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [Esc] exit without saving                                                   
+                                                                                
+                                                                                
+
+STEP 7
+                                                                                
+     export from Anki   3 / 5 · review                                          
+                                                                                
+    review your export                                                          
+                                                                                
+    in the file: 2 notes · 2 cards · 3 reviews · 1 mistake                      
+    media: 3 references · 2 files · 140 bytes                                   
+    estimated file size: 2 KiB                                                  
+    skipped: 0 decks · 0 cards · 0 reviews                                      
+                                                                                
+    Save to: /Users/learner/Downloads                                           
+                                                                                
+    Nothing is written until you confirm.                                       
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [↑↓] scroll   [Enter] next   [Esc] back                                     
+                                                                                
+                                                                                
+
+STEP 8
+                                                                                
+     export from Anki   4 / 5 · confirm                                         
+                                                                                
+    save this file?                                                             
+                                                                                
+    Your selected cards, review history and referenced media                    
+    will be saved to:                                                           
+                                                                                
+    /Users/learner/Downloads                                                    
+                                                                                
+    Anki stays unchanged.                                                       
+    Press Enter to save.                                                        
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [Enter] save   [Esc] back                                                   
+                                                                                
+                                                                                
+
+STEP 9
+                                                                                
+     export from Anki   5 / 5 · file                                            
+                                                                                
+    ⠋ saving and verifying your export…                                         
+                                                                                
+    /Users/learner/Downloads                                                    
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [Esc] cancel before the file is published                                   
+                                                                                
+                                                                                
+
+STEP 10
+                                                                                
+     export from Anki   5 / 5 · file                                            
+                                                                                
+    ⠋ cancelling the export…                                                    
+                                                                                
+    Removing the temporary file before exiting.                                 
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    waiting for temporary-file cleanup                                          
+                                                                                
+                                                                                
+
+STEP 11
+                                                                                
+     export from Anki   5 / 5 · file                                            
+                                                                                
+    export saved                                                                
+                                                                                
+    /Users/learner/Downloads/kamishibai-anki-2026-11-07.zip                     
+                                                                                
+    in the web: import from kamishibai cli                                      
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [↑↓] scroll   [Enter / Esc] exit                                            
+                                                                                
+                                                                                
+
+STEP 12
+                                                                                
+     export from Anki   export paused                                           
+                                                                                
+    could not export                                                            
+                                                                                
+    cannot save Anki history inside the Anki profile or Anki2 folder            
+                                                                                
+    Press Enter to check again, or Esc to exit.                                 
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+    ────────────────────────────────────────────────────────────────────────    
+    [Enter] retry   [Esc] exit

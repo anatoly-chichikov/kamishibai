@@ -37,34 +37,58 @@ impl Preview {
         for deck in &self.decks {
             writeln!(
                 output,
-                "  {} {} · {} notes · {} cards · {} reviews · {} mistakes",
+                "  {} {} · {} · {} · {} · {}",
                 if deck.selected { "✓" } else { "·" },
                 deck.name,
-                deck.counts.notes,
-                deck.counts.cards,
-                deck.counts.reviews,
-                deck.counts.mistakes
+                quantity(deck.counts.notes, "note"),
+                quantity(deck.counts.cards, "card"),
+                quantity(deck.counts.reviews, "review"),
+                quantity(deck.counts.mistakes, "mistake")
             )?;
         }
+        self.summarize(output)
+    }
+
+    /// Write selected totals and omissions without repeating the whole deck checklist.
+    pub fn summarize(&self, output: &mut impl Write) -> io::Result<()> {
         writeln!(
             output,
-            "in the file: {} notes · {} cards · {} reviews · {} mistakes",
-            self.counts.rows.notes,
-            self.counts.rows.cards,
-            self.counts.rows.reviews,
-            self.counts.rows.mistakes
+            "in the file: {} · {} · {} · {}",
+            quantity(self.counts.rows.notes, "note"),
+            quantity(self.counts.rows.cards, "card"),
+            quantity(self.counts.rows.reviews, "review"),
+            quantity(self.counts.rows.mistakes, "mistake")
         )?;
         writeln!(
             output,
-            "media: {} references · {} files · {} bytes",
-            self.counts.media, self.counts.files, self.counts.bytes
-        )?;
-        writeln!(
-            output,
-            "snapshot: {} bytes; about {} bytes plus ZIP headers in total",
-            self.snapshot_size,
+            "media: {} · {} · {} bytes",
+            quantity(self.counts.media, "reference"),
+            quantity(self.counts.files, "file"),
             self.counts.bytes
-                + u64::try_from(self.snapshot_size).expect("invariant: snapshot size fits in u64")
+        )?;
+        writeln!(
+            output,
+            "estimated file size: {}",
+            size(
+                self.counts.bytes
+                    + u64::try_from(self.snapshot_size)
+                        .expect("invariant: snapshot size fits in u64")
+            )
+        )?;
+        let skipped = self
+            .decks
+            .iter()
+            .filter(|deck| !deck.selected)
+            .collect::<Vec<_>>();
+        writeln!(
+            output,
+            "skipped: {} · {} · {}",
+            quantity(skipped.len(), "deck"),
+            quantity(skipped.iter().map(|deck| deck.counts.cards).sum(), "card"),
+            quantity(
+                skipped.iter().map(|deck| deck.counts.reviews).sum(),
+                "review"
+            )
         )?;
         if !self.missing_media.is_empty() {
             writeln!(
@@ -82,7 +106,7 @@ impl Preview {
 
 /// A checklist row for one home deck, including selected and unselected decks.
 #[derive(Clone, Debug, Serialize)]
-pub(super) struct DeckSummary {
+pub struct DeckSummary {
     id: i64,
     name: String,
     selected: bool,
@@ -91,6 +115,30 @@ pub(super) struct DeckSummary {
 }
 
 impl DeckSummary {
+    /// Toggle this exact home deck without implicitly choosing descendants.
+    pub fn toggle(&mut self) {
+        self.selected = !self.selected;
+    }
+
+    /// Append this deck's exact name only when selected for export.
+    pub fn include(&self, names: &mut Vec<String>) {
+        if self.selected {
+            names.push(self.name.clone());
+        }
+    }
+
+    /// Write a selectable checklist row with the actual card and review counts.
+    pub fn write(&self, output: &mut impl Write) -> io::Result<()> {
+        write!(
+            output,
+            "{} {} · {} · {}",
+            if self.selected { "[✓]" } else { "[ ]" },
+            self.name,
+            quantity(self.counts.cards, "card"),
+            quantity(self.counts.reviews, "review")
+        )
+    }
+
     /// Count a home deck's notes, cards and surviving review rows.
     pub(super) fn from_rows(
         deck: &Deck,
@@ -158,5 +206,19 @@ impl Rows {
             reviews: reviews.len(),
             mistakes: reviews.iter().filter(|review| review.ease == 1).count(),
         }
+    }
+}
+
+fn quantity(count: usize, noun: &str) -> String {
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+}
+
+fn size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} bytes")
+    } else if bytes < 1024 * 1024 {
+        format!("{} KiB", bytes.div_ceil(1024))
+    } else {
+        format!("{} MiB", bytes.div_ceil(1024 * 1024))
     }
 }

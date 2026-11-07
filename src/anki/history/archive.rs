@@ -14,7 +14,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use super::manifest::Manifest;
 use super::summary::DeckSummary;
-use super::{HistoryError, Preview, Snapshot, media};
+use super::{HistoryError, Preview, SaveGate, Snapshot, media};
 
 const SNAPSHOT_LIMIT: u64 = 64 * 1024 * 1024;
 
@@ -81,6 +81,7 @@ pub(super) fn save(
     directory: &Path,
     written: OffsetDateTime,
     writer: &str,
+    gate: &dyn SaveGate,
 ) -> Result<PathBuf, HistoryError> {
     let directory = destination(snapshot, directory)?;
     let bytes = encode(&snapshot.manifest)?;
@@ -97,6 +98,7 @@ pub(super) fn save(
             size: u64::try_from(bytes.len()).expect("invariant: bounded snapshot size fits in u64"),
         },
     };
+    gate.verify()?;
     fs::create_dir_all(&directory)?;
     let directory = directory.canonicalize()?;
     let mut temporary = tempfile::Builder::new()
@@ -125,6 +127,7 @@ pub(super) fn save(
             format!("{stem}-{number}.zip")
         };
         let path = directory.join(name);
+        gate.verify()?;
         match temporary.persist_noclobber(&path) {
             Ok(_) => return Ok(path),
             Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {

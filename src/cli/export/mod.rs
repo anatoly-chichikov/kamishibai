@@ -1,7 +1,9 @@
-//! Thin console delivery for the library's read-only Anki history workflow.
+//! Standalone guided and console delivery for read-only Anki history export.
 
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
+
+use clap::Args;
 
 use anyhow::Result;
 use serde_json::json;
@@ -10,24 +12,56 @@ use time::OffsetDateTime;
 use crate::anki::history::{self, HistoryError, SystemAnkiProcess};
 use crate::cli::error;
 
-use super::Render;
-use super::args::{AnkiArgs, ImportCommand};
+use super::session::Render;
 
-/// Route a parsed import source without constructing a generation session.
-pub(super) fn import(command: &ImportCommand, render: Render) -> Result<()> {
-    match command {
-        ImportCommand::Anki(args) => anki(args, render),
+mod screen;
+mod terminal;
+
+/// Exact source, deck and output choices for Anki history preparation.
+#[derive(Clone, Debug, Args)]
+pub(super) struct ExportArgs {
+    /// Exact profile folder name; otherwise the screen offers a choice.
+    #[arg(long, value_name = "NAME", conflicts_with = "collection")]
+    pub(super) profile: Option<String>,
+    /// Explicit collection.anki2 path instead of profile discovery.
+    #[arg(long, value_name = "PATH")]
+    pub(super) collection: Option<PathBuf>,
+    /// Exact full deck name, repeatable; defaults to Kamishibai model decks.
+    #[arg(long = "deck", value_name = "NAME")]
+    pub(super) decks: Vec<String>,
+    /// Output directory; defaults to Downloads and is untouched during preview.
+    #[arg(long, value_name = "DIR")]
+    pub(super) out: Option<PathBuf>,
+    /// Save without opening the guided screen; suitable for scripts.
+    #[arg(long)]
+    pub(super) save: bool,
+}
+
+/// Run the separate export screen in a terminal, or the explicit console workflow.
+pub(super) fn run(args: &ExportArgs, render: Render) -> Result<()> {
+    if render == Render::Text
+        && !args.save
+        && io::stdin().is_terminal()
+        && io::stdout().is_terminal()
+    {
+        terminal::run(args, directory(args)?)
+    } else {
+        anki(args, render)
     }
 }
 
-fn anki(args: &AnkiArgs, render: Render) -> Result<()> {
-    let path = collection(args)?;
+fn directory(args: &ExportArgs) -> Result<PathBuf> {
     let directory = args
         .out
         .clone()
         .or_else(dirs::download_dir)
         .ok_or_else(|| error::usage_hint("Downloads directory is unavailable", "pass --out DIR"))?;
-    let directory = std::env::current_dir()?.join(directory);
+    Ok(std::env::current_dir()?.join(directory))
+}
+
+fn anki(args: &ExportArgs, render: Render) -> Result<()> {
+    let path = collection(args)?;
+    let directory = directory(args)?;
     let snapshot = history::read(
         &path,
         &args.decks,
@@ -55,7 +89,7 @@ fn anki(args: &AnkiArgs, render: Render) -> Result<()> {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     let command = save_command(&path, &directory, &args.decks);
-    let next = "Kamishibai web → your account → import from anki";
+    let next = "in the web: import from kamishibai cli";
     match render {
         Render::Json => println!(
             "{}",
@@ -82,11 +116,35 @@ fn anki(args: &AnkiArgs, render: Render) -> Result<()> {
     Ok(())
 }
 
-fn collection(args: &AnkiArgs) -> Result<PathBuf> {
+fn profiles(args: &ExportArgs) -> Result<Vec<PathBuf>> {
     if let Some(path) = &args.collection {
+        return Ok(vec![std::env::current_dir()?.join(path)]);
+    }
+    let profiles = history::discover(&history::roots())
+        .map_err(refusal)?
+        .into_iter()
+        .filter(|path| {
+            args.profile.as_ref().is_none_or(|name| {
+                path.parent()
+                    .and_then(Path::file_name)
+                    .is_some_and(|folder| folder == std::ffi::OsStr::new(name))
+            })
+        })
+        .collect::<Vec<_>>();
+    if profiles.is_empty() {
+        return Err(error::usage_hint(
+            "Anki profile not found",
+            "pass --collection PATH to a closed collection.anki2 file",
+        ));
+    }
+    Ok(profiles)
+}
+
+fn collection(args: &ExportArgs) -> Result<PathBuf> {
+    let profiles = profiles(args)?;
+    if let [path] = profiles.as_slice() {
         return Ok(std::env::current_dir()?.join(path));
     }
-    let profiles = history::discover(&history::roots()).map_err(refusal)?;
     let choices = profiles
         .iter()
         .map(|path| {
@@ -97,27 +155,10 @@ fn collection(args: &AnkiArgs) -> Result<PathBuf> {
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let candidates = profiles
-        .iter()
-        .filter(|path| {
-            args.profile.as_ref().is_none_or(|name| {
-                path.parent()
-                    .and_then(Path::file_name)
-                    .is_some_and(|folder| folder == std::ffi::OsStr::new(name))
-            })
-        })
-        .collect::<Vec<_>>();
-    match candidates.as_slice() {
-        [path] => Ok(std::env::current_dir()?.join(path)),
-        [] => Err(error::usage_hint(
-            "Anki profile not found",
-            "pass --collection PATH to a closed collection.anki2 file",
-        )),
-        _ => Err(error::usage_hint(
-            "several Anki profiles found",
-            format!("choose --profile NAME ({choices}) or --collection PATH"),
-        )),
-    }
+    Err(error::usage_hint(
+        "several Anki profiles found",
+        format!("choose --profile NAME ({choices}) or --collection PATH"),
+    ))
 }
 
 fn refusal(failure: HistoryError) -> anyhow::Error {
@@ -150,7 +191,7 @@ fn refusal(failure: HistoryError) -> anyhow::Error {
 
 fn save_command(path: &Path, directory: &Path, decks: &[String]) -> String {
     let mut command = format!(
-        "kamishibai import anki --collection {} --out {}",
+        "kamishibai export --collection {} --out {}",
         quote(&path.to_string_lossy()),
         quote(&directory.to_string_lossy())
     );

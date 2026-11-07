@@ -83,7 +83,7 @@ fn command(root: &Path, out: &Path) -> Command {
     command
         .env("KAMISHIBAI_ANKI", root)
         .env("PATH", root.join("no-system-probes"))
-        .args(["import", "anki", "--out"])
+        .args(["export", "--out"])
         .arg(out)
         .arg("--json");
     command.timeout(std::time::Duration::from_secs(30));
@@ -1007,5 +1007,387 @@ fn a_similarly_named_sibling_remains_a_valid_output_directory() {
     assert!(
         result.is_ok() && before == inventory(profile),
         "saving refused a safe sibling or changed the profile"
+    );
+}
+
+/// Open only the export terminal with isolated preferences and synthetic Anki files.
+#[cfg(unix)]
+fn terminal_command(root: &Path, out: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_kamishibai"));
+    command
+        .env_remove("GEMINI_API_KEY")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("OPENROUTER_API_KEY")
+        .env("KAMISHIBAI_ANKI", root)
+        .env("KAMISHIBAI_DATA", root.join("preferences"))
+        .env("KAMISHIBAI_CACHE", root.join("cache"))
+        .env("KAMISHIBAI_OUTPUT", root.join("packages"))
+        .env("PATH", root.join("no-system-probes"))
+        .args(["export", "--out"])
+        .arg(out);
+    command
+}
+
+/// Read painted terminal cells rather than matching fragments of ANSI repaint output.
+#[cfg(unix)]
+struct ExportTerminal {
+    terminal: expectrl::session::OsSession,
+    parser: termwiz::escape::parser::Parser,
+    surface: termwiz::surface::Surface,
+}
+
+#[cfg(unix)]
+impl ExportTerminal {
+    /// Forward a physical key sequence to the export process.
+    fn send(&mut self, keys: &str) -> Result<(), expectrl::Error> {
+        use expectrl::Expect;
+        self.terminal.send(keys)
+    }
+
+    /// Wait for a visible phrase with a deadline, reconstructing incremental repaints.
+    fn expect(&mut self, phrase: &str) -> std::io::Result<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let mut bytes = [0_u8; 16384];
+        loop {
+            match self.terminal.try_read(&mut bytes) {
+                Ok(0) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        self.surface.screen_chars_to_string(),
+                    ));
+                }
+                Ok(count) => {
+                    for action in self.parser.parse_as_vec(&bytes[..count]) {
+                        if let Some(change) = painted(action) {
+                            self.surface.add_change(change);
+                        }
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => return Err(error),
+            }
+            let screen = self.surface.screen_chars_to_string();
+            if screen.contains(phrase) {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("missing {phrase:?} in painted screen:\n{screen}"),
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// Wait for the process to release its terminal after exit or cancellation.
+    fn finish(&mut self) -> Result<expectrl::Captures, expectrl::Error> {
+        use expectrl::Expect;
+        self.terminal.expect(expectrl::Eof)
+    }
+}
+
+/// Apply the text, cursor and erase operations emitted by the Crossterm backend.
+#[cfg(unix)]
+fn painted(action: termwiz::escape::Action) -> Option<termwiz::surface::Change> {
+    use termwiz::color::ColorAttribute;
+    use termwiz::escape::csi::{Cursor, Edit, EraseInDisplay, EraseInLine};
+    use termwiz::escape::{Action, CSI, ControlCode};
+    use termwiz::surface::{Change, Position};
+    match action {
+        Action::Print(character) => Some(Change::Text(character.to_string())),
+        Action::PrintString(text) => Some(Change::Text(text)),
+        Action::Control(ControlCode::CarriageReturn) => Some(Change::Text("\r".into())),
+        Action::Control(ControlCode::LineFeed) => Some(Change::Text("\n".into())),
+        Action::CSI(CSI::Cursor(Cursor::Position { line, col })) => Some(Change::CursorPosition {
+            x: Position::Absolute(usize::try_from(col.as_zero_based()).unwrap()),
+            y: Position::Absolute(usize::try_from(line.as_zero_based()).unwrap()),
+        }),
+        Action::CSI(CSI::Edit(Edit::EraseInDisplay(EraseInDisplay::EraseDisplay))) => {
+            Some(Change::ClearScreen(ColorAttribute::Default))
+        }
+        Action::CSI(CSI::Edit(Edit::EraseInDisplay(EraseInDisplay::EraseToEndOfDisplay))) => {
+            Some(Change::ClearToEndOfScreen(ColorAttribute::Default))
+        }
+        Action::CSI(CSI::Edit(Edit::EraseInLine(EraseInLine::EraseToEndOfLine))) => {
+            Some(Change::ClearToEndOfLine(ColorAttribute::Default))
+        }
+        _ => None,
+    }
+}
+
+/// Start the isolated terminal with a bounded expectation timeout.
+#[cfg(unix)]
+fn export_terminal(root: &Path, out: &Path) -> ExportTerminal {
+    let mut terminal = expectrl::Session::spawn(terminal_command(root, out)).unwrap();
+    terminal.set_expect_timeout(Some(std::time::Duration::from_secs(15)));
+    ExportTerminal {
+        terminal,
+        parser: termwiz::escape::parser::Parser::new(),
+        surface: termwiz::surface::Surface::new(80, 24),
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn export_terminal_cannot_write_before_confirmation() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let before = inventory(path.parent().unwrap());
+    let out = root.path().join("not-created");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("Anki is closed").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("choose decks").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("review your export").unwrap();
+    terminal.send("\x1b").unwrap();
+    terminal.expect("choose decks").unwrap();
+    terminal.send("\x1b").unwrap();
+    terminal.expect("Anki is closed").unwrap();
+    terminal.send("\x1b").unwrap();
+    terminal.finish().unwrap();
+    assert!(
+        !out.exists() && before == inventory(path.parent().unwrap()),
+        "back or exit wrote an export or changed the profile"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn export_terminal_saves_the_reviewed_decks_after_confirmation() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let before = inventory(path.parent().unwrap());
+    let out = root.path().join("export");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("Anki is closed").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("choose decks").unwrap();
+    terminal.send(" ").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("review your export").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("save this file?").unwrap();
+    let absent = !out.exists();
+    terminal.send("\r").unwrap();
+    terminal.expect("export saved").unwrap();
+    terminal.expect("import from kamishibai cli").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.finish().unwrap();
+    let file = fs::read_dir(&out).unwrap().next().unwrap().unwrap().path();
+    let preview = kamishibai::anki::history::validate(&file).unwrap();
+    let preview = serde_json::to_value(preview).unwrap();
+    assert!(
+        absent && preview["counts"]["cards"] == 1 && before == inventory(path.parent().unwrap()),
+        "confirmed export ignored deck selection, saved early or changed Anki"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn export_terminal_rechecks_anki_after_the_user_closes_it() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let wal = path.with_file_name("collection.anki2-wal");
+    fs::write(&wal, []).unwrap();
+    let out = root.path().join("export");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("close Anki").unwrap();
+    fs::remove_file(wal).unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("Anki is closed").unwrap();
+    terminal.send("\x1b").unwrap();
+    terminal.finish().unwrap();
+    assert!(!out.exists(), "rechecking closed Anki wrote an export");
+}
+
+#[test]
+fn deck_inspection_cannot_hide_non_kamishibai_decks() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE notetypes SET name='Unrelated model'", [])
+        .unwrap();
+    let before = inventory(root.path());
+    let decks = kamishibai::anki::history::inspect(&path, &[], &Closed, "unknown").unwrap();
+    let decks = serde_json::to_value(decks).unwrap();
+    assert!(
+        decks.as_array().unwrap().len() == 4
+            && decks
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|deck| deck["selected"] == false)
+            && before == inventory(root.path()),
+        "inspection refused an empty default selection, hid available decks or wrote to Anki"
+    );
+}
+
+#[test]
+fn a_refused_save_gate_cannot_create_the_output_directory() {
+    struct Refused;
+    impl kamishibai::anki::history::SaveGate for Refused {
+        fn verify(&self) -> Result<(), kamishibai::anki::history::HistoryError> {
+            Err(kamishibai::anki::history::HistoryError::Open)
+        }
+    }
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let out = root.path().join("absent-output");
+    let result = kamishibai::anki::history::read(&path, &[], &Closed, "unknown")
+        .unwrap()
+        .save_guarded(&out, time::OffsetDateTime::UNIX_EPOCH, "test", &Refused);
+    assert!(
+        matches!(result, Err(kamishibai::anki::history::HistoryError::Open)) && !out.exists(),
+        "a failed source check created an output directory"
+    );
+}
+
+#[test]
+fn a_late_refusal_cannot_publish_or_leave_a_partial_file() {
+    struct Changed(std::cell::Cell<bool>);
+    impl kamishibai::anki::history::SaveGate for Changed {
+        fn verify(&self) -> Result<(), kamishibai::anki::history::HistoryError> {
+            if self.0.replace(true) {
+                Err(kamishibai::anki::history::HistoryError::Changed)
+            } else {
+                Ok(())
+            }
+        }
+    }
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let out = root.path().join("export");
+    let result = kamishibai::anki::history::read(&path, &[], &Closed, "unknown")
+        .unwrap()
+        .save_guarded(
+            &out,
+            time::OffsetDateTime::UNIX_EPOCH,
+            "test",
+            &Changed(std::cell::Cell::new(false)),
+        );
+    assert!(
+        matches!(
+            result,
+            Err(kamishibai::anki::history::HistoryError::Changed)
+        ) && fs::read_dir(out).unwrap().next().is_none(),
+        "a source change before publication left a ZIP or partial file"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn export_terminal_cannot_save_if_anki_reopens_after_review() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let out = root.path().join("absent-output");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("Anki is closed").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("choose decks").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("review your export").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("save this file?").unwrap();
+    fs::write(path.with_file_name("collection.anki2-wal"), []).unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("close Anki").unwrap();
+    terminal.send("\x1b").unwrap();
+    terminal.finish().unwrap();
+    assert!(
+        !out.exists(),
+        "reopened Anki did not prevent export publication"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn export_terminal_cannot_save_a_changed_closed_collection() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let out = root.path().join("absent-output");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("Anki is closed").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("choose decks").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("review your export").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("save this file?").unwrap();
+    Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE cards SET ivl=47 WHERE id=211", [])
+        .unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("close Anki").unwrap();
+    terminal.send("\x1b").unwrap();
+    terminal.finish().unwrap();
+    assert!(
+        !out.exists(),
+        "a changed collection published a snapshot the user had not reviewed"
+    );
+}
+
+#[test]
+fn export_help_explains_the_screen_and_script_save() {
+    let root = TempDir::new().unwrap();
+    let output = command(root.path(), root.path())
+        .arg("--help")
+        .output()
+        .unwrap();
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        output.status.success()
+            && help.contains("guided screen")
+            && help.contains("--save")
+            && help.contains("--collection"),
+        "export help omitted the screen or its script interface"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn export_terminal_cannot_be_blocked_by_an_unselected_stale_profile() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let other = root.path().join("Second-profile");
+    fs::create_dir(&other).unwrap();
+    fs::copy(path, other.join("collection.anki2")).unwrap();
+    fs::write(other.join("collection.anki2-wal"), []).unwrap();
+    let out = root.path().join("absent-output");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("Anki is closed").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("choose decks").unwrap();
+    terminal.send("\x1b").unwrap();
+    terminal.expect("Anki is closed").unwrap();
+    terminal.send("\x1b").unwrap();
+    terminal.finish().unwrap();
+    assert!(
+        !out.exists(),
+        "profile selection created output before confirmation"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn save_alone_bypasses_the_screen_even_inside_a_terminal() {
+    use expectrl::Expect;
+    let root = TempDir::new().unwrap();
+    collection(root.path());
+    let out = root.path().join("export");
+    let mut command = terminal_command(root.path(), &out);
+    command.arg("--save");
+    let mut terminal = expectrl::Session::spawn(command).unwrap();
+    terminal.set_expect_timeout(Some(std::time::Duration::from_secs(15)));
+    terminal.expect("import from kamishibai cli").unwrap();
+    terminal.expect(expectrl::Eof).unwrap();
+    assert_eq!(
+        fs::read_dir(out).unwrap().count(),
+        1,
+        "--save did not directly publish one archive in a terminal"
     );
 }

@@ -37,6 +37,7 @@ pub use pointer::{
 };
 pub use render::draw;
 pub use screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
+pub(crate) use screens::common::wrap_words;
 pub use screens::common::{scroll_body_width, scroll_viewport};
 pub use screens::modals::picker_geometry;
 pub use screens::modals::translation_geometry;
