@@ -158,7 +158,7 @@ Homebrew is a separate, manual follow-up in the tap repository **`anatoly-chichi
 
 Interface knowledge lives in typed RON beside the code, not in Markdown. [docs/tui-states/catalog.ron](docs/tui-states/catalog.ron) maps the interface and [docs/tui-states/recording.ron](docs/tui-states/recording.ron) holds the VHS capture procedure. Their schemas are `tests/common/tui_catalog.rs` and `tests/common/tui_recording.rs`, and `cargo test --test all -- ui_catalog:: ui_recording::` checks their links against the code, the header and footer of every prepared scene against the real renderer, and each capture against the tape that wrote it; it never compares a capture's pixels with today's renderer.
 
-The catalog reads top-down: rules, screens, states, scenarios. A rule is a cross-screen law whose `scope` is `Everywhere`, whole screens or named states. A screen's ID is the prefix of every state on it: `welcome`, `words`, `review`, `cards`, `done`. A state holds its surface, chrome, expectations and actions, the grounds it rests on and its captures; a scenario is a route through states. Every entry opens with one head line, `Kind(head: Head(id: "…", intent: "…"),`, whose intent says what the entry gives the learner and what it protects. Build on that intent: change it only when a request changes what the learner gets, and record code that contradicts an expectation as a `Gap` instead of rewriting either.
+The catalog reads top-down: rules, screens, states, scenarios. A rule is a cross-screen law whose `scope` is `Everywhere`, whole screens or named states. A screen's ID is the prefix of every state on it: `welcome`, `words`, `review`, `cards`, `done`. A state holds its surface, chrome, expectations and actions, the grounds it rests on and its captures; a fixture has the same shape but is a prepared scene that only checks layout, so no learner action leads into it; a scenario is a route through states. Every entry opens with one head line, `Kind(head: Head(id: "…", intent: "…"),`, whose intent says what the entry gives the learner and what it protects. Build on that intent: change it only when a request changes what the learner gets, and record code that contradicts an expectation as a `Gap` instead of rewriting either.
 
 Navigate with grep from the repository root:
 
@@ -166,6 +166,7 @@ Navigate with grep from the repository root:
 grep -n -A1 'Rule(head' docs/tui-states/catalog.ron                  # rules with intent and scope
 grep -n 'Screen(head' docs/tui-states/catalog.ron                    # screens; the ID prefixes their states
 grep -n 'State(head: Head(id: "cards\.' docs/tui-states/catalog.ron  # one screen's states with intents
+grep -n 'Fixture(head' docs/tui-states/catalog.ron                   # layout fixtures, never learner states
 grep -n 'Scenario(head' docs/tui-states/catalog.ron                  # scenarios with intents
 grep -n '"cards.pending"' docs/tui-states/catalog.ron                # an entry, moves into it, routes and scopes
 grep -n 'src/tui/screens/your_cards.rs' docs/tui-states/catalog.ron  # from code to the entries citing it

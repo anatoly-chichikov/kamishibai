@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result};
 use kamishibai::tui::{self, BusyKind, ModalKind};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 /// Authored interface intent; load with `try_from_document` and inspect its links and copy.
 #[derive(Deserialize)]
@@ -27,13 +27,41 @@ struct Verification {
     limits: String,
 }
 
-/// The state map: the screens, every runtime state on them and the scenarios that route through them.
+/// The state map: the screens, the learner's states on them, the fixtures that only check layout and the scenarios through them.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Map {
     screens: Vec<Screen>,
     states: Vec<State>,
+    #[serde(deserialize_with = "fixtures")]
+    fixtures: Vec<State>,
     scenarios: Vec<Scenario>,
+}
+
+/// A prepared scene that exists only to check layout: no learner action leads into it and its intent speaks to developers.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Fixture {
+    head: Head,
+    contract: Contract,
+    grounds: Grounds,
+    evidence: Evidence,
+}
+
+impl From<Fixture> for State {
+    fn from(fixture: Fixture) -> Self {
+        Self {
+            head: fixture.head,
+            contract: fixture.contract,
+            grounds: fixture.grounds,
+            evidence: fixture.evidence,
+        }
+    }
+}
+
+fn fixtures<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<State>, D::Error> {
+    Vec::<Fixture>::deserialize(deserializer)
+        .map(|fixtures| fixtures.into_iter().map(State::from).collect())
 }
 
 /// One runtime screen: its head, whose ID prefixes every state on it, and the runtime screen it names.
@@ -215,6 +243,7 @@ pub(super) enum Violation {
     Layout(String),
     Scope(String),
     Misplaced(String),
+    Fixture(String),
 }
 
 const PLACEHOLDERS: [&str; 6] = ["todo", "tbd", "fixme", "xxx", "placeholder", "lorem"];
@@ -229,12 +258,13 @@ impl Catalog {
         ron::from_str(document).context("Cannot decode TUI intent catalog")
     }
 
-    /// Check that every real capture fixture has an authored inventory state.
+    /// Check that every prepared gallery scene is an authored state or fixture.
     #[must_use]
     pub(super) fn inspect_scenes(&self, names: &[String]) -> Vec<Violation> {
+        let scenes = self.scenes();
         names
             .iter()
-            .filter(|name| !self.map.states.iter().any(|state| &state.head.id == *name))
+            .filter(|name| !scenes.iter().any(|scene| &scene.head.id == *name))
             .map(|name| Violation::UnknownState(name.clone()))
             .collect()
     }
@@ -245,8 +275,9 @@ impl Catalog {
     #[must_use]
     pub(super) fn inspect_renders(&self, renders: &[(String, String)]) -> Vec<Violation> {
         let mut faults = Vec::new();
+        let scenes = self.scenes();
         for (id, screen) in renders {
-            let Some(state) = self.map.states.iter().find(|state| &state.head.id == id) else {
+            let Some(state) = scenes.iter().find(|scene| &scene.head.id == id) else {
                 faults.push(Violation::UnknownState(id.clone()));
                 continue;
             };
@@ -278,6 +309,7 @@ impl Catalog {
         }
         verifications(&self.verifications, root, &mut faults);
         let states = &self.map.states;
+        let scenes = self.scenes();
         identifiers(&self.rules, |rule| &rule.head.id, "rules", &mut faults);
         identifiers(
             &self.map.screens,
@@ -286,6 +318,14 @@ impl Catalog {
             &mut faults,
         );
         identifiers(states, |state| &state.head.id, "states", &mut faults);
+        if !self.map.fixtures.is_empty() {
+            identifiers(
+                &self.map.fixtures,
+                |fixture| &fixture.head.id,
+                "fixtures",
+                &mut faults,
+            );
+        }
         identifiers(
             &self.map.scenarios,
             |scenario| &scenario.head.id,
@@ -293,9 +333,13 @@ impl Catalog {
             &mut faults,
         );
         heads(&self.heads(), &mut faults);
-        let ids = states
+        let learner = states
             .iter()
             .map(|state| state.head.id.as_str())
+            .collect::<HashSet<_>>();
+        let ids = scenes
+            .iter()
+            .map(|scene| scene.head.id.as_str())
             .collect::<HashSet<_>>();
         let places = self
             .map
@@ -306,10 +350,11 @@ impl Catalog {
         for rule in &self.rules {
             expectations(&rule.expectations, &rule.head.id, &mut faults);
             grounds(&rule.grounds, root, &rule.head.id, &mut faults);
-            scope(&rule.scope, &places, &ids, &rule.head.id, &mut faults);
+            scope(&rule.scope, &places, &learner, &rule.head.id, &mut faults);
         }
-        screens_of(&self.map.screens, states, &mut faults);
-        for state in states {
+        screens_of(&self.map.screens, &scenes, &mut faults);
+        prepared(states, &self.map.fixtures, &mut faults);
+        for state in &scenes {
             let owner = &state.head.id;
             let contract = &state.contract;
             surface(&contract.surface, owner, &mut faults);
@@ -346,7 +391,7 @@ impl Catalog {
                 }
             }
             for pair in scenario.route.windows(2) {
-                let linked = states.iter().any(|state| {
+                let linked = scenes.iter().any(|state| {
                     state.head.id == pair[0]
                         && state
                             .contract
@@ -363,8 +408,8 @@ impl Catalog {
             }
         }
         coverage(states, &mut faults);
-        inventory_captures(states, root, &mut faults);
-        provenance(states, root, &mut faults);
+        inventory_captures(&scenes, root, &mut faults);
+        provenance(&scenes, root, &mut faults);
         faults
     }
 
@@ -401,11 +446,41 @@ impl Catalog {
             .chain(self.map.states.iter().map(|state| ("State", &state.head)))
             .chain(
                 self.map
+                    .fixtures
+                    .iter()
+                    .map(|fixture| ("Fixture", &fixture.head)),
+            )
+            .chain(
+                self.map
                     .scenarios
                     .iter()
                     .map(|scenario| ("Scenario", &scenario.head)),
             )
             .collect()
+    }
+
+    fn scenes(&self) -> Vec<&State> {
+        self.map
+            .states
+            .iter()
+            .chain(self.map.fixtures.iter())
+            .collect()
+    }
+}
+
+fn prepared(states: &[State], fixtures: &[State], faults: &mut Vec<Violation>) {
+    for state in states {
+        for action in &state.contract.actions {
+            if fixtures
+                .iter()
+                .any(|fixture| fixture.head.id == action.target)
+            {
+                faults.push(Violation::Fixture(format!(
+                    "{} -> {} leads a learner into a prepared fixture",
+                    state.head.id, action.target
+                )));
+            }
+        }
     }
 }
 
@@ -483,7 +558,7 @@ fn scope(
     }
 }
 
-fn screens_of(screens: &[Screen], states: &[State], faults: &mut Vec<Violation>) {
+fn screens_of(screens: &[Screen], states: &[&State], faults: &mut Vec<Violation>) {
     for screen in screens {
         if !runtime_screens()
             .iter()
@@ -765,7 +840,7 @@ fn coverage(states: &[State], faults: &mut Vec<Violation>) {
     }
 }
 
-fn inventory_captures(states: &[State], root: &Path, faults: &mut Vec<Violation>) {
+fn inventory_captures(states: &[&State], root: &Path, faults: &mut Vec<Violation>) {
     let directory = root.join("docs/tui-states/live");
     let Ok(entries) = fs::read_dir(directory) else {
         return;
@@ -793,7 +868,7 @@ fn inventory_captures(states: &[State], root: &Path, faults: &mut Vec<Violation>
     }
 }
 
-fn provenance(states: &[State], root: &Path, faults: &mut Vec<Violation>) {
+fn provenance(states: &[&State], root: &Path, faults: &mut Vec<Violation>) {
     let synthetic = ["states.tape", "states-narrow.tape"]
         .into_iter()
         .flat_map(|tape| screenshots(root, tape, faults))
@@ -1012,6 +1087,7 @@ mod tests {
                     screen: String::from("YourCards"),
                 }],
                 states,
+                fixtures: Vec::new(),
                 scenarios,
             },
         }
@@ -1501,6 +1577,56 @@ mod tests {
                 |fault| matches!(fault, Violation::UnknownSurface(name) if name.contains("Phantom"))
             ),
             "catalog described a screen the runtime does not have"
+        );
+    }
+
+    #[test]
+    fn a_learner_action_cannot_lead_into_a_fixture() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        let mut entry = state("cards.closed");
+        entry.contract.actions.push(Action {
+            event: String::from("several attempts fail at once"),
+            target: String::from("cards.stress"),
+            condition: String::from("always"),
+            expectation: String::from("Show the stress layout"),
+        });
+        let mut inventory = catalog(vec![entry], Vec::new());
+        inventory.map.fixtures.push(state("cards.stress"));
+        assert!(
+            inventory
+                .inspect(directory.path())
+                .iter()
+                .any(|fault| matches!(fault, Violation::Fixture(_))),
+            "a learner action led into a prepared fixture unnoticed"
+        );
+    }
+
+    #[test]
+    fn a_prepared_fixture_scene_cannot_be_reported_as_uncatalogued() {
+        let mut inventory = catalog(vec![state("cards.open")], Vec::new());
+        inventory.map.fixtures.push(state("cards.stress"));
+        assert!(
+            inventory
+                .inspect_scenes(&[String::from("cards.stress")])
+                .is_empty(),
+            "a gallery scene catalogued as a fixture was reported as unknown"
+        );
+    }
+
+    #[test]
+    fn a_fixture_head_cannot_pass_as_a_state_head() {
+        let document = format!(
+            "        Screen(head: Head(id: \"cards\", intent: \"One committed batch is followed from its first card to the saved files\"),\n        State(head: Head(id: \"cards.stress\", intent: \"{}\"),\n",
+            purpose("cards.stress")
+        );
+        let mut inventory = catalog(Vec::new(), Vec::new());
+        inventory.map.fixtures.push(state("cards.stress"));
+        assert!(
+            inventory
+                .inspect_layout(&document)
+                .iter()
+                .any(|fault| matches!(fault, Violation::Layout(_))),
+            "a fixture laid out as a state head escaped the grep layout check"
         );
     }
 

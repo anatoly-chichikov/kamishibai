@@ -3,7 +3,7 @@ Catalog(
     verifications: [
         Verification(
             command: "cargo test --test all ui_catalog::",
-            establishes: "The catalog decodes into its typed schema; every entry's head sits on one line and its ID is unique across kinds; each intent has at least 8 words and at most 180 characters and is neither a placeholder, a duplicate nor a retelling of the screen; every screen entry names a runtime screen, state IDs carry their screen's prefix and scopes name real screens and states; actions, routes, sources, tests and gaps point at real states, symbols and test functions; every capture decodes, is cataloged and is written by the tape its origin names; every prepared scene is a catalog state whose header and footer equal what the real renderer draws",
+            establishes: "The catalog decodes into its typed schema; every entry's head sits on one line and its ID is unique across kinds; each intent has at least 8 words and at most 180 characters and is neither a placeholder, a duplicate nor a retelling of the screen; every screen entry names a runtime screen, state IDs carry their screen's prefix and scopes name real screens and states; actions, routes, sources, tests and gaps point at real states, symbols and test functions and no learner action leads into a fixture; every capture decodes, is cataloged and is written by the tape its origin names; every prepared scene is a catalog state or fixture whose header and footer equal what the real renderer draws",
             limits: "It never executes a described transition, judges whether an intent is true to the product, or compares a PNG with today's renderer; the chrome of states without a prepared scene stays unverified",
         ),
         Verification(
@@ -56,7 +56,8 @@ Catalog(
                 "An intent names a key only when that key is itself what is protected, and it is derived from code, tests, rules and history; an intent the sources cannot settle stays partial and its question goes to the owner",
                 "An intent changes only when a request changes what the learner gets; code that contradicts an expectation becomes a gap instead",
                 "A rule's scope names where it applies: Everywhere, whole screens by their ID, or individual states",
-                "A screen's ID is the prefix of every state on it: welcome, words, review, cards and done",
+                "A screen's ID is the prefix of every state and fixture on it: welcome, words, review, cards and done",
+                "A fixture is a prepared scene that exists only to check layout; no learner action leads into it and its intent speaks to developers",
             ],
             grounds: Grounds(
                 rationale: [
@@ -628,7 +629,7 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "cards.rewrite-transaction", intent: "Changes staged on any number of cards leave the current sentences, files and deck usable, and nothing is regenerated until one Ctrl+G applies them all"),
+        Rule(head: Head(id: "cards.rewrite-transaction", intent: "Tuning several cards stays calm because changes wait as one visible batch: nothing re-renders or jumps until one Ctrl+G applies them all, and current files stay usable"),
             scope: States([
                 "cards.tuning",
                 "cards.mouse-tuning",
@@ -842,7 +843,7 @@ Catalog(
                 "If complete cards remain, stop publishes only that subset as partial; with no complete card it cancels the old session, rotates identity/cost scope and opens clean words",
                 "Settled live and reopened final views offer muted [Esc] new cards immediately before quit whenever the focused card is collapsed and no editor is live; double Escape preserves preferences and output while rotating session and cost scope",
                 "Total failure permits the same reset after dismissing any publication error",
-                "Confirmed stop keeps its session ownership and stop intent through draining and subset publication; a failed stopped publication durably cancels and rotates into clean input with a saving diagnostic instead of restarting provider work",
+                "Confirmed stop keeps its session ownership and stop intent through draining and subset publication; a failed stopped publication keeps the session and its finished cards, names the saving failure and lets the learner save again without restarting provider work",
             ],
             grounds: Grounds(
                 rationale: [
@@ -861,6 +862,16 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "stop_applies_the_inflight_outcome_then_publishes_only_ready_cards"),
                     Check(file: "src/cli/shell.rs", test: "second_escape_on_reopened_done_starts_clean_words_in_place"),
                     Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_starts_clean_without_resuming"),
+                ],
+                gaps: [
+                    Gap(
+                        summary: "Today a failed save of a stopped subset durably cancels the session, rotates identity and cost scope and shows the saving error over clean words, so the finished cards cannot be saved again; failed_publish_after_stop_starts_clean_without_resuming locks that behavior",
+                        sources: [
+                            Source(file: "src/cli/shell.rs", symbol: "publish_failed"),
+                            Source(file: "src/cli/shell.rs", symbol: "cancel_stopped_generation"),
+                            Source(file: "src/cli/shell.rs", symbol: "failed_publish_after_stop_starts_clean_without_resuming"),
+                        ],
+                    ),
                 ],
             ),
         ),
@@ -1171,7 +1182,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "welcome.key-env", intent: "An exported GEMINI_API_KEY can be loaded with one action instead of retyped, yet it is checked and saved like a typed key and never loaded silently"),
+            State(head: Head(id: "welcome.key-env", intent: "An exported GEMINI_API_KEY can be used with one explicit action, so a key kept for something else is never pulled in silently, and it is checked and saved like a typed one"),
                 contract: Contract(
                     surface: Surface(screen: "Welcome", overlay: Clear),
                     chrome: Chrome(title: "setup", hint: "choose your language and add a gemini key", footer: ["[Enter] load from env", "[←→] move", "[Esc] back", "[Ctrl+C] quit"]),
@@ -1855,13 +1866,13 @@ Catalog(
                 ),
                 evidence: Missing("No understanding-error screenshot exists"),
             ),
-            State(head: Head(id: "words.stopped-publish-error", intent: "A stopped run that could not be saved ends in a clean start with the saving reason shown, and the old run is closed for good rather than resumed"),
+            State(head: Head(id: "words.stopped-publish-error", intent: "A stopped batch whose save failed can be saved again once the reason is clear, and neither its session nor its finished cards are lost to the failure"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Error),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+L] languages", "[Ctrl+C] quit"]),
                     expectations: [
-                        "The stopped old session has been durably cancelled and the input belongs to a fresh identity and cost scope",
-                        "The error identifies saving failure and no stopped provider pipeline resumes",
+                        "The error names the saving failure and offers to save the stopped subset again; the stopped session, its finished cards and their costs remain",
+                        "No stopped provider pipeline resumes while the save is retried",
                     ],
                     actions: [
                         Action(
@@ -1887,11 +1898,19 @@ Catalog(
                                 Source(file: "src/tui/screens/error.rs", symbol: "draw"),
                             ],
                         ),
+                        Gap(
+                            summary: "Today a failed save of a stopped subset durably cancels the session, rotates identity and cost scope and shows the saving error over clean words, so the finished cards cannot be saved again; failed_publish_after_stop_starts_clean_without_resuming locks that behavior",
+                            sources: [
+                                Source(file: "src/cli/shell.rs", symbol: "publish_failed"),
+                                Source(file: "src/cli/shell.rs", symbol: "cancel_stopped_generation"),
+                                Source(file: "src/cli/shell.rs", symbol: "failed_publish_after_stop_starts_clean_without_resuming"),
+                            ],
+                        ),
                     ],
                 ),
                 evidence: Missing("No stopped-publication failure screenshot exists"),
             ),
-            State(head: Head(id: "words.quit-armed", intent: "An accidental Ctrl+C never closes the app: quitting takes a second press within a second, and this confirmation leaves the words and any armed Escape alone"),
+            State(head: Head(id: "words.quit-armed", intent: "Leaving takes a deliberate double Ctrl+C in any terminal: the first press arms a short window that resets on its own, and only a second press inside it quits"),
                 contract: Contract(
                     surface: Surface(screen: "YourWords", overlay: Clear),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+G] understand", "[Esc] clear", "[Ctrl+L] languages", "[Ctrl+C] again"]),
@@ -2804,12 +2823,6 @@ Catalog(
                             condition: "always",
                             expectation: "Keep the committed plan and costs for key recovery",
                         ),
-                        Action(
-                            event: "several artifacts retry, recover or fail at once",
-                            target: "cards.retry-stress",
-                            condition: "a long batch accumulates attempt history",
-                            expectation: "Keep every row's grammar intact while attempts pile up",
-                        ),
                     ],
                 ),
                 grounds: Grounds(
@@ -3340,7 +3353,7 @@ Catalog(
                     ),
                 ]),
             ),
-            State(head: Head(id: "cards.multiple-pending", intent: "Requests lined up on several cards are applied in one go, and every card left untouched stays ready as it is"),
+            State(head: Head(id: "cards.multiple-pending", intent: "Requests lined up on several cards wait as one visible batch, so nothing jumps while tuning, then apply in one go while every untouched card stays ready"),
                 contract: Contract(
                     surface: Surface(screen: "YourCards", overlay: Clear),
                     chrome: Chrome(title: "your cards", hint: "apply your changes when you're ready", footer: ["[Ctrl+G] regenerate", "[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
@@ -3819,43 +3832,6 @@ Catalog(
                 evidence: Captured([
                     Shot(
                         file: "docs/tui-states/live/06-your-cards-retrying.png",
-                        origin: Synthetic,
-                        revision: Some("b0ed72c"),
-                        note: "Recaptured from the prepared scene on 2026-10-01 over renderer commit b0ed72c and inspected",
-                    ),
-                ]),
-            ),
-            State(head: Head(id: "cards.retry-stress", intent: "When attempts pile up on several cards at once, every row keeps its form and aligned costs; this prepared scene samples the forms without claiming a route"),
-                contract: Contract(
-                    surface: Surface(screen: "YourCards", overlay: Clear),
-                    chrome: Chrome(title: "your cards", hint: "browse the ready cards while the rest are being made", footer: ["[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
-                    expectations: [
-                        "This synthetic render fixture juxtaposes active first attempt, active retry, inactive retry, recovered artifact and terminal artifact",
-                        "All cards retain legal meta/audio/scene/picture ordering; history remains on heads as ↻1, ↻2 or ↻3",
-                        "The fixture is appearance evidence, not proof of a single live route producing this exact batch",
-                    ],
-                    actions: [
-                        Action(
-                            event: "Enter or Right",
-                            target: "cards.open",
-                            condition: "always",
-                            expectation: "Inspect the focused card's attempt evidence",
-                        ),
-                    ],
-                ),
-                grounds: Grounds(
-                    sources: [
-                        Source(file: "src/tui/screens/your_cards.rs", symbol: "YourCards"),
-                    ],
-                    tests: [
-                        Check(file: "examples/tui_states.rs", test: "retry_layout_stress_state_keeps_attempt_history_on_card_heads"),
-                        Check(file: "tests/your_cards.rs", test: "retry_rows_keep_only_current_work_while_card_heads_keep_the_history"),
-                        Check(file: "tests/ui_catalog.rs", test: "catalog_copy_cannot_drift_from_the_rendered_scenes"),
-                    ],
-                ),
-                evidence: Captured([
-                    Shot(
-                        file: "docs/tui-states/live/06b-your-cards-retry-stress.png",
                         origin: Synthetic,
                         revision: Some("b0ed72c"),
                         note: "Recaptured from the prepared scene on 2026-10-01 over renderer commit b0ed72c and inspected",
@@ -4576,6 +4552,45 @@ Catalog(
                 evidence: Missing("No reopened-final new-batch confirmation screenshot exists"),
             ),
         ],
+        fixtures: [
+            Fixture(head: Head(id: "cards.retry-stress", intent: "Developers see every attempt-row form side by side on prepared cards, so a layout change that breaks row alignment or the head's retry history shows at once"),
+                contract: Contract(
+                    surface: Surface(screen: "YourCards", overlay: Clear),
+                    chrome: Chrome(title: "your cards", hint: "browse the ready cards while the rest are being made", footer: ["[Enter/→] open", "[C] expand", "[↑↓] nav", "[Esc] stop", "[Ctrl+C] quit"]),
+                    expectations: [
+                        "This synthetic render fixture juxtaposes active first attempt, active retry, inactive retry, recovered artifact and terminal artifact",
+                        "All cards retain legal meta/audio/scene/picture ordering; history remains on heads as ↻1, ↻2 or ↻3",
+                        "The fixture is appearance evidence, not proof of a single live route producing this exact batch",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter or Right",
+                            target: "cards.open",
+                            condition: "always",
+                            expectation: "Inspect the focused card's attempt evidence",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/tui/screens/your_cards.rs", symbol: "YourCards"),
+                    ],
+                    tests: [
+                        Check(file: "examples/tui_states.rs", test: "retry_layout_stress_state_keeps_attempt_history_on_card_heads"),
+                        Check(file: "tests/your_cards.rs", test: "retry_rows_keep_only_current_work_while_card_heads_keep_the_history"),
+                        Check(file: "tests/ui_catalog.rs", test: "catalog_copy_cannot_drift_from_the_rendered_scenes"),
+                    ],
+                ),
+                evidence: Captured([
+                    Shot(
+                        file: "docs/tui-states/live/06b-your-cards-retry-stress.png",
+                        origin: Synthetic,
+                        revision: Some("b0ed72c"),
+                        note: "Recaptured from the prepared scene on 2026-10-01 over renderer commit b0ed72c and inspected",
+                    ),
+                ]),
+            ),
+        ],
         scenarios: [
             Scenario(head: Head(id: "setup.new-learner", intent: "A first launch reaches the words through two questions only, the learner's own language and then a key Gemini accepts, in that order"),
                 route: ["welcome.language", "welcome.key", "welcome.checking-key", "words.empty", "words.editing"],
@@ -4589,7 +4604,7 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "successful_precommit_key_check_returns_to_words_without_an_engine"),
                 ],
             ),
-            Scenario(head: Head(id: "setup.environment-key", intent: "An exported GEMINI_API_KEY still leaves the language question in place, and the exported key is checked before it is saved"),
+            Scenario(head: Head(id: "setup.environment-key", intent: "An exported GEMINI_API_KEY leaves the language question in place and enters setup only when the learner loads it on purpose, checked before it is saved"),
                 route: ["welcome.language", "welcome.key-env", "welcome.key", "welcome.checking-key", "words.empty"],
                 expectations: [
                     "Explicit language choice and validation still happen when the environment supplies a key",
@@ -5035,17 +5050,17 @@ Catalog(
                     Check(file: "src/cli/bridge.rs", test: "a_completed_tui_session_rotates_identity_and_cost_scope_for_the_next_batch"),
                 ],
             ),
-            Scenario(head: Head(id: "quit.disarmed", intent: "An armed quit that is never confirmed lapses without touching the words, and it never interferes with an Escape confirmation"),
+            Scenario(head: Head(id: "quit.disarmed", intent: "An armed quit that is not repeated lapses on its own after its short window and leaves the words in place, so the app closes only on purpose"),
                 route: ["words.editing", "words.quit-armed", "words.editing"],
                 expectations: [
                     "Other action or timeout disarms quit without altering the input",
                 ],
                 tests: [],
             ),
-            Scenario(head: Head(id: "cards.stopped-publish-failure", intent: "If saving a stopped subset fails, the old run is closed for good before fresh words appear, and no paid work restarts on its own"),
+            Scenario(head: Head(id: "cards.stopped-publish-failure", intent: "If saving a stopped subset fails, the finished cards and the session wait for another save with the reason shown, and no paid work restarts on its own"),
                 route: ["cards.generating", "cards.stop-armed", "cards.stopping", "cards.publish-deck", "words.stopped-publish-error", "words.empty"],
                 expectations: [
-                    "Durable cancellation and scope rotation finish before fresh input appears; no provider work restarts",
+                    "The stopped session and its finished cards survive a failed save and the save can be retried without restarting provider work; today the run is cancelled into clean words instead, recorded as a gap on words.stopped-publish-error",
                 ],
                 tests: [
                     Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_starts_clean_without_resuming"),
