@@ -1626,6 +1626,131 @@ fn terminal_sighup_cannot_leave_an_archive_during_save() {
     );
 }
 
+/// Keep output as the controlling PTY while stdin belongs to a second PTY.
+#[cfg(unix)]
+fn split_terminal(root: &Path, out: &Path) -> (fs::File, ExportTerminal) {
+    use rustix::fs::{Mode, OFlags, open};
+    use rustix::pty::{grantpt, ptsname, unlockpt};
+    let input = open(
+        "/dev/ptmx",
+        OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .unwrap();
+    grantpt(&input).unwrap();
+    unlockpt(&input).unwrap();
+    let path = ptsname(&input, Vec::new()).unwrap();
+    let template = terminal_command(root, out);
+    let mut command = std::process::Command::new("/bin/sh");
+    command
+        .args([
+            "-c",
+            "exec \"$@\" < \"$KAMISHIBAI_TEST_INPUT\"",
+            "export-input",
+        ])
+        .arg(template.get_program())
+        .args(template.get_args());
+    for (name, value) in template.get_envs() {
+        match value {
+            Some(value) => command.env(name, value),
+            None => command.env_remove(name),
+        };
+    }
+    command.env("KAMISHIBAI_TEST_INPUT", path.to_str().unwrap());
+    let mut terminal = expectrl::Session::spawn(command).unwrap();
+    terminal.set_expect_timeout(Some(std::time::Duration::from_secs(3)));
+    (
+        input.into(),
+        ExportTerminal {
+            terminal,
+            parser: termwiz::escape::parser::Parser::new(),
+            surface: termwiz::surface::Surface::new(80, 24),
+        },
+    )
+}
+
+/// Walk the real screen using only the separate input terminal.
+#[cfg(unix)]
+fn split_save(input: &mut fs::File, terminal: &mut ExportTerminal) {
+    use std::io::Write;
+    for phrase in [
+        "Anki is closed",
+        "choose decks",
+        "review your export",
+        "save this file?",
+    ] {
+        terminal.expect(phrase).unwrap();
+        input.write_all(b"\r").unwrap();
+    }
+}
+
+/// Confirm process death within the same EOF deadline instead of relying on PTY EOF.
+#[cfg(unix)]
+fn exited(
+    terminal: &ExportTerminal,
+    deadline: std::time::Instant,
+) -> expectrl::process::unix::WaitStatus {
+    loop {
+        let status = terminal.terminal.get_process().status().unwrap();
+        if !matches!(status, expectrl::process::unix::WaitStatus::StillAlive)
+            || std::time::Instant::now() >= deadline
+        {
+            return status;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn input_eof_cannot_publish_or_keep_the_export_alive_during_save() {
+    let root = TempDir::new().unwrap();
+    let path = slow_collection(root.path());
+    let before = fs::read(&path).unwrap();
+    let out = root.path().join("export");
+    let (mut input, mut terminal) = split_terminal(root.path(), &out);
+    split_save(&mut input, &mut terminal);
+    staged(&out);
+    let started = std::time::Instant::now();
+    drop(input);
+    let ended = terminal.finish().is_ok();
+    let status = exited(&terminal, started + std::time::Duration::from_secs(3));
+    assert!(
+        ended
+            && started.elapsed() < std::time::Duration::from_secs(3)
+            && matches!(status, expectrl::process::unix::WaitStatus::Exited(_, code) if code != 0)
+            && fs::read_dir(out).unwrap().next().is_none()
+            && fs::read(path).unwrap() == before,
+        "input EOF left a live export, reported success, published an archive or changed Anki: {status:?}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn input_eof_cannot_remove_an_already_published_export() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let before = inventory(path.parent().unwrap());
+    let out = root.path().join("export");
+    let (mut input, mut terminal) = split_terminal(root.path(), &out);
+    split_save(&mut input, &mut terminal);
+    terminal.expect("export saved").unwrap();
+    let archive = fs::read_dir(&out).unwrap().next().unwrap().unwrap().path();
+    let bytes = fs::read(&archive).unwrap();
+    let started = std::time::Instant::now();
+    drop(input);
+    let ended = terminal.finish().is_ok();
+    let status = exited(&terminal, started + std::time::Duration::from_secs(3));
+    assert!(
+        ended
+            && matches!(status, expectrl::process::unix::WaitStatus::Exited(_, code) if code != 0)
+            && fs::read(archive).unwrap() == bytes
+            && fs::read_dir(out).unwrap().count() == 1
+            && inventory(path.parent().unwrap()) == before,
+        "input EOF kept the saved screen alive, reported success or changed the published export or Anki: {status:?}"
+    );
+}
+
 #[test]
 fn a_changed_snapshot_cannot_create_output_with_the_default_writer() {
     let root = TempDir::new().unwrap();

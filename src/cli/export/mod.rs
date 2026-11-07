@@ -49,10 +49,10 @@ pub(super) fn run(args: &ExportArgs, render: Render) -> Result<()> {
         && io::stdout().is_terminal()
     {
         let result = terminal::run(args, directory(args)?, cancelled.clone());
-        if cancelled.verify().is_err() {
-            Ok(())
-        } else {
-            result
+        match result {
+            Ok(terminal::Exit::InputEnded(error)) => Err(error.into()),
+            _ if cancelled.verify().is_err() => Ok(()),
+            result => result.map(|_| ()),
         }
     } else {
         anki(args, render, &cancelled)

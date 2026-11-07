@@ -115,6 +115,14 @@ enum Failure {
     Delivery(anyhow::Error),
 }
 
+/// Distinguish normal dismissal from lost input after all archive work is drained.
+pub(super) enum Exit {
+    /// Return normally after a key or signal dismissed the screen.
+    Dismissed,
+    /// Preserve the input failure even when draining the writer requested cancellation.
+    InputEnded(io::Error),
+}
+
 impl From<HistoryError> for Failure {
     fn from(error: HistoryError) -> Self {
         Self::History(error)
@@ -134,7 +142,7 @@ impl From<io::Error> for Failure {
 }
 
 /// Own the alternate terminal until success, cancellation or an unrecoverable I/O error.
-pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation) -> Result<()> {
+pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation) -> Result<Exit> {
     enable_raw_mode()?;
     let _lease = TerminalLease;
     execute!(io::stdout(), EnterAlternateScreen)?;
@@ -154,7 +162,7 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
     let mut tick = 0;
     loop {
         if cancelled.verify().is_err() {
-            return Ok(());
+            return Ok(Exit::Dismissed);
         }
         terminal.draw(|frame| screen.draw(frame, tick))?;
         if let Some(worker) = &mut job {
@@ -171,7 +179,7 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
                         Ok(Reply::Saved(path)) => {
                             screen.saved(path);
                         }
-                        Err(_) if cancelled.verify().is_err() => return Ok(()),
+                        Err(_) if cancelled.verify().is_err() => return Ok(Exit::Dismissed),
                         Err(error) => {
                             let open = matches!(
                                 error,
@@ -195,7 +203,17 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
                 Err(TryRecvError::Empty) => {}
             }
         }
-        if let Some(Event::Key(key)) = input.poll(Duration::from_millis(80))?
+        let event = input.poll(Duration::from_millis(80));
+        if cancelled.verify().is_err() {
+            return Ok(Exit::Dismissed);
+        }
+        let event = match event {
+            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+                return Ok(Exit::InputEnded(error));
+            }
+            result => result?,
+        };
+        if let Some(Event::Key(key)) = event
             && key.kind != KeyEventKind::Release
         {
             let key = if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -207,7 +225,7 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
             };
             let intent = screen.key(key);
             match intent {
-                Intent::Exit => return Ok(()),
+                Intent::Exit => return Ok(Exit::Dismissed),
                 Intent::Cancel => cancelled.cancel(),
                 Intent::Wait => {}
                 _ if job.is_none() => {
