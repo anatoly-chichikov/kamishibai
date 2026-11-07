@@ -9,11 +9,13 @@ use anyhow::Result;
 use serde_json::json;
 use time::OffsetDateTime;
 
-use crate::anki::history::{self, HistoryError, SystemAnkiProcess};
+use crate::anki::history::{self, HistoryError, SaveGate, SystemAnkiProcess};
 use crate::cli::error;
 
 use super::session::Render;
 
+mod input;
+mod interrupt;
 mod screen;
 mod terminal;
 
@@ -39,14 +41,21 @@ pub(super) struct ExportArgs {
 
 /// Run the separate export screen in a terminal, or the explicit console workflow.
 pub(super) fn run(args: &ExportArgs, render: Render) -> Result<()> {
+    let cancelled = interrupt::Cancellation::new();
+    let _signals = interrupt::Signals::from_cancellation(&cancelled)?;
     if render == Render::Text
         && !args.save
         && io::stdin().is_terminal()
         && io::stdout().is_terminal()
     {
-        terminal::run(args, directory(args)?)
+        let result = terminal::run(args, directory(args)?, cancelled.clone());
+        if cancelled.verify().is_err() {
+            Ok(())
+        } else {
+            result
+        }
     } else {
-        anki(args, render)
+        anki(args, render, &cancelled)
     }
 }
 
@@ -59,7 +68,7 @@ fn directory(args: &ExportArgs) -> Result<PathBuf> {
     Ok(std::env::current_dir()?.join(directory))
 }
 
-fn anki(args: &ExportArgs, render: Render) -> Result<()> {
+fn anki(args: &ExportArgs, render: Render, cancelled: &interrupt::Cancellation) -> Result<()> {
     let path = collection(args)?;
     let directory = directory(args)?;
     let snapshot = history::read(
@@ -73,10 +82,11 @@ fn anki(args: &ExportArgs, render: Render) -> Result<()> {
     let file = if args.save {
         Some(
             snapshot
-                .save(
+                .save_guarded(
                     &directory,
                     OffsetDateTime::now_utc(),
                     env!("CARGO_PKG_VERSION"),
+                    cancelled,
                 )
                 .map_err(refusal)?,
         )

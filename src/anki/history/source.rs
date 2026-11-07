@@ -10,7 +10,29 @@ use rusqlite::{Connection, OpenFlags};
 
 use super::manifest::{Card, Collection, Deck, Manifest, Note, Notetype, Revlog};
 use super::summary::DeckSummary;
-use super::{ArchiveSource, HistoryError, Snapshot, media};
+use super::{ArchiveSource, HistoryError, SaveGate, Snapshot, media};
+
+/// Revalidate the closed collection against the exact bytes used for its snapshot.
+pub(super) struct SourceGate {
+    collection: PathBuf,
+    digest: (String, u64),
+}
+
+impl SourceGate {
+    fn new(collection: PathBuf, digest: (String, u64)) -> Self {
+        Self { collection, digest }
+    }
+}
+
+impl SaveGate for SourceGate {
+    fn verify(&self) -> Result<(), HistoryError> {
+        closed(&self.collection, &SystemAnkiProcess)?;
+        if media::digest(&mut File::open(&self.collection)?)? != self.digest {
+            return Err(HistoryError::Changed);
+        }
+        Ok(())
+    }
+}
 
 /// Process-inspection port; tests can model running Anki and changes during a read.
 pub trait AnkiProcess {
@@ -19,16 +41,17 @@ pub trait AnkiProcess {
 }
 
 /// Optional OS probes supplement the mandatory collection WAL check.
+/// The process pattern cannot match a concurrent probe's own command text.
 pub struct SystemAnkiProcess;
 
 impl AnkiProcess for SystemAnkiProcess {
     fn running(&self, collection: &Path) -> io::Result<bool> {
         #[cfg(unix)]
         {
-            let running = probe(
-                Command::new("pgrep")
-                    .args(["-if", "(^|/)(anki|anki-bin)( |$)|Anki.app/Contents/MacOS/"]),
-            )?;
+            let running = probe(Command::new("pgrep").args([
+                "-if",
+                "(^|/)(anki|anki-bin)( |$)|[A]nki.app/Contents/MacOS/",
+            ]))?;
             let open = probe(Command::new("lsof").arg("-t").arg(collection))?;
             Ok(running || open)
         }
@@ -185,6 +208,7 @@ pub fn read(
             .expect("invariant: canonical collection has a parent")
             .to_path_buf(),
         media.files,
+        SourceGate::new(path, before),
     );
     let snapshot = Snapshot::new(manifest, source, decks, media.missing);
     snapshot.preview()?;

@@ -82,6 +82,9 @@ fn command(root: &Path, out: &Path) -> Command {
         .env_remove("OPENROUTER_API_KEY");
     command
         .env("KAMISHIBAI_ANKI", root)
+        .env("KAMISHIBAI_DATA", root.join("preferences"))
+        .env("KAMISHIBAI_CACHE", root.join("cache"))
+        .env("KAMISHIBAI_OUTPUT", root.join("packages"))
         .env("PATH", root.join("no-system-probes"))
         .args(["export", "--out"])
         .arg(out)
@@ -1389,5 +1392,270 @@ fn save_alone_bypasses_the_screen_even_inside_a_terminal() {
         fs::read_dir(out).unwrap().count(),
         1,
         "--save did not directly publish one archive in a terminal"
+    );
+}
+
+/// Keep a synthetic console child owned until a bounded exit or test teardown.
+#[cfg(unix)]
+struct SavingExport(std::process::Child);
+
+#[cfg(unix)]
+impl Drop for SavingExport {
+    fn drop(&mut self) {
+        if self.0.try_wait().unwrap().is_none() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
+#[cfg(unix)]
+impl SavingExport {
+    /// Wait for cleanup before inspecting output; kill only this child on timeout.
+    fn finish(&mut self) -> (std::process::ExitStatus, Vec<u8>) {
+        use std::io::Read;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            if let Some(status) = self.0.try_wait().unwrap() {
+                let mut bytes = Vec::new();
+                self.0
+                    .stdout
+                    .take()
+                    .unwrap()
+                    .read_to_end(&mut bytes)
+                    .unwrap();
+                return (status, bytes);
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("export failed to exit before the cleanup deadline");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+}
+
+/// Stretch actual archive copying so an observed part precedes publication.
+#[cfg(unix)]
+fn slow_collection(root: &Path) -> PathBuf {
+    let path = collection(root);
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path.parent().unwrap().join("collection.media/voice.wav"))
+        .unwrap()
+        .set_len(128 * 1024 * 1024)
+        .unwrap();
+    Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE notes SET flds=replace(flds,'alias.wav','voice.wav')",
+            [],
+        )
+        .unwrap();
+    path
+}
+
+/// Wait for a real writer stage rather than delaying a presumed save window.
+#[cfg(unix)]
+fn staged(out: &Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        if fs::read_dir(out).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|entry| entry.path().extension().is_some_and(|ext| ext == "part"))
+        }) {
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("export never staged its private archive");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+/// Start the console writer with every storage root isolated and no provider key.
+#[cfg(unix)]
+fn saving(root: &Path, out: &Path, json: bool) -> SavingExport {
+    let mut command = terminal_command(root, out);
+    command.arg("--save");
+    if json {
+        command.arg("--json");
+    }
+    SavingExport(
+        command
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    )
+}
+
+/// Change a collection only after its snapshot has reached the archive writer.
+#[cfg(unix)]
+fn changed_save(json: bool) -> (bool, Value, bool) {
+    let root = TempDir::new().unwrap();
+    let path = slow_collection(root.path());
+    let out = root.path().join("export");
+    let mut child = saving(root.path(), &out, json);
+    staged(&out);
+    Connection::open(path)
+        .unwrap()
+        .execute(
+            "INSERT INTO revlog VALUES(1700100000999,211,1,1,1,2500,1000,1)",
+            [],
+        )
+        .unwrap();
+    let (status, bytes) = child.finish();
+    let document = if json {
+        serde_json::from_slice(&bytes).unwrap()
+    } else {
+        Value::Null
+    };
+    (
+        status.success(),
+        document,
+        fs::read_dir(out).unwrap().next().is_none(),
+    )
+}
+
+#[test]
+#[cfg(unix)]
+fn console_json_cannot_publish_a_collection_changed_during_save() {
+    let (success, document, empty) = changed_save(true);
+    assert!(
+        !success
+            && document["ok"] == false
+            && document["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("changed")
+            && empty,
+        "console JSON published stale history or left a private part: {document}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn console_text_cannot_publish_a_collection_changed_during_save() {
+    let (success, _, empty) = changed_save(false);
+    assert!(
+        !success && empty,
+        "console text published stale history or left a private part"
+    );
+}
+
+/// Deliver one catchable signal after staging and inspect files only after exit.
+#[cfg(unix)]
+fn interrupted_save(signal: rustix::process::Signal) -> (bool, bool, bool) {
+    let root = TempDir::new().unwrap();
+    let path = slow_collection(root.path());
+    let before = fs::read(&path).unwrap();
+    let out = root.path().join("export");
+    let mut child = saving(root.path(), &out, true);
+    staged(&out);
+    rustix::process::kill_process(
+        rustix::process::Pid::from_raw(i32::try_from(child.0.id()).unwrap()).unwrap(),
+        signal,
+    )
+    .unwrap();
+    let (status, bytes) = child.finish();
+    let refused = serde_json::from_slice::<Value>(&bytes).is_ok_and(|doc| doc["ok"] == false);
+    (
+        !status.success() && refused,
+        fs::read_dir(out).unwrap().next().is_none(),
+        fs::read(path).unwrap() == before,
+    )
+}
+
+#[test]
+#[cfg(unix)]
+fn sigint_cannot_leave_an_archive_during_save() {
+    assert_eq!(
+        interrupted_save(rustix::process::Signal::INT),
+        (true, true, true),
+        "SIGINT left an archive, reported success or changed Anki"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn sigterm_cannot_leave_an_archive_during_save() {
+    assert_eq!(
+        interrupted_save(rustix::process::Signal::TERM),
+        (true, true, true),
+        "SIGTERM left an archive, reported success or changed Anki"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn sighup_cannot_leave_an_archive_during_save() {
+    assert_eq!(
+        interrupted_save(rustix::process::Signal::HUP),
+        (true, true, true),
+        "SIGHUP left an archive, reported success or changed Anki"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn terminal_sighup_cannot_leave_an_archive_during_save() {
+    let root = TempDir::new().unwrap();
+    let path = slow_collection(root.path());
+    let before = fs::read(&path).unwrap();
+    let out = root.path().join("export");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("Anki is closed").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("choose decks").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("review your export").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("save this file?").unwrap();
+    terminal.send("\r").unwrap();
+    staged(&out);
+    terminal
+        .terminal
+        .get_process_mut()
+        .signal(expectrl::process::unix::Signal::SIGHUP)
+        .unwrap();
+    terminal.finish().unwrap();
+    assert!(
+        fs::read_dir(out).unwrap().next().is_none() && fs::read(path).unwrap() == before,
+        "terminal SIGHUP exited before removing the private archive or changed Anki"
+    );
+}
+
+#[test]
+fn a_changed_snapshot_cannot_create_output_with_the_default_writer() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let snapshot = kamishibai::anki::history::read(&path, &[], &Closed, "unknown").unwrap();
+    Connection::open(path)
+        .unwrap()
+        .execute("UPDATE cards SET ivl=47 WHERE id=211", [])
+        .unwrap();
+    let out = root.path().join("absent-output");
+    let result = snapshot.save(&out, time::OffsetDateTime::UNIX_EPOCH, "test");
+    assert!(
+        matches!(
+            result,
+            Err(kamishibai::anki::history::HistoryError::Changed)
+        ) && !out.exists(),
+        "the default writer bypassed source verification or created output"
+    );
+}
+
+#[test]
+fn a_reopened_snapshot_cannot_create_output_with_the_default_writer() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let snapshot = kamishibai::anki::history::read(&path, &[], &Closed, "unknown").unwrap();
+    fs::write(path.with_file_name("collection.anki2-wal"), []).unwrap();
+    let out = root.path().join("absent-output");
+    let result = snapshot.save(&out, time::OffsetDateTime::UNIX_EPOCH, "test");
+    assert!(
+        matches!(result, Err(kamishibai::anki::history::HistoryError::Open)) && !out.exists(),
+        "the default writer bypassed the closed-Anki check or created output"
     );
 }

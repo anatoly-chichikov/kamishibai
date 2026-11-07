@@ -66,11 +66,15 @@ pub trait SaveGate {
     fn verify(&self) -> Result<(), HistoryError>;
 }
 
-struct Confirmed;
+struct Publication<'a> {
+    source: &'a dyn SaveGate,
+    caller: &'a dyn SaveGate,
+}
 
-impl SaveGate for Confirmed {
+impl SaveGate for Publication<'_> {
     fn verify(&self) -> Result<(), HistoryError> {
-        Ok(())
+        self.source.verify()?;
+        self.caller.verify()
     }
 }
 
@@ -85,11 +89,16 @@ pub struct Snapshot {
 struct ArchiveSource {
     profile: PathBuf,
     files: BTreeMap<String, PathBuf>,
+    gate: source::SourceGate,
 }
 
 impl ArchiveSource {
-    fn new(profile: PathBuf, files: BTreeMap<String, PathBuf>) -> Self {
-        Self { profile, files }
+    fn new(profile: PathBuf, files: BTreeMap<String, PathBuf>, gate: source::SourceGate) -> Self {
+        Self {
+            profile,
+            files,
+            gate,
+        }
     }
 }
 
@@ -122,16 +131,17 @@ impl Snapshot {
     /// Write and verify a private, uncompressed archive without replacing any file.
     /// Pass UTC time and the writer version explicitly for reproducible exports.
     /// Refuse destinations inside the source profile or its Anki2 root before writing.
+    /// Recheck that Anki is closed and the reviewed collection is unchanged at both gates.
     pub fn save(
         &self,
         directory: &Path,
         written: OffsetDateTime,
         writer: &str,
     ) -> Result<PathBuf, HistoryError> {
-        self.save_guarded(directory, written, writer, &Confirmed)
+        archive::save(self, directory, written, writer, &self.source.gate)
     }
 
-    /// Save the same v1 archive while checking a caller-owned publication gate.
+    /// Recheck the reviewed collection and a caller-owned gate at both publication checks.
     pub fn save_guarded(
         &self,
         directory: &Path,
@@ -139,6 +149,15 @@ impl Snapshot {
         writer: &str,
         gate: &dyn SaveGate,
     ) -> Result<PathBuf, HistoryError> {
-        archive::save(self, directory, written, writer, gate)
+        archive::save(
+            self,
+            directory,
+            written,
+            writer,
+            &Publication {
+                source: &self.source.gate,
+                caller: gate,
+            },
+        )
     }
 }
