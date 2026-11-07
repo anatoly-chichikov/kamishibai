@@ -3,33 +3,188 @@ source: src/cli/export/screen.rs
 expression: rendered
 ---
                                           
-  export from Anki   4 / 5 · confirm      
+  export from Anki   reading Anki         
                                           
- save this file?                          
+ ⠋ checking Anki…                         
                                           
- Your selected cards, review history and  
- referenced media                         
- will be saved to:                        
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                     Anki stays unchanged 
+                                          
+ reading                       [Esc] exit 
+
+                                          
+  export from Anki   close Anki first     
+                                          
+ 01 close Anki                            
+                                          
+ Sync, then quit desktop Anki.            
+ Press Enter to check again.              
+                                          
+ Anki is open or did not close properly   
+                                          
+                                          
+                                          
+                                          
+                     Anki stays unchanged 
+                                          
+ paused   [Enter] check again  [Esc] exit 
+
+                                          
+  export from Anki   choose your profile  
+                                          
+ 01 which profile?                        
+ Anki is closed                           
+                                          
+ › User 1                                 
+   User 2                                 
+                                          
+                                          
+                                          
+                                          
+                                          
+                     Anki stays unchanged 
+                                          
+         [Enter] choose decks  [Esc] exit 
+
+                                          
+  export from Anki   reading Anki         
+                                          
+ ⠋ reading your decks…                    
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                     Anki stays unchanged 
+                                          
+ reading                       [Esc] exit 
+
+                                          
+  export from Anki   choose what to take  
+                                          
+ 02 choose decks                          
+ Space selects each deck separately       
+                                          
+ › [✓] French · 1 card · 1 review         
+   [ ] French::Daily · 0 cards · 0        
+   reviews                                
+   [ ] Other · 0 cards · 0 reviews        
+                                          
+                                          
+                                          
+                     Anki stays unchanged 
+                                          
+        [Enter] review export  [Esc] back 
+
+                                          
+  export from Anki   reading Anki         
+                                          
+ ⠋ counting cards and reviews…            
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                     Anki stays unchanged 
+                                          
+ reading                       [Esc] exit 
+
+                                          
+  export from Anki   review, then save    
+                                          
+ 03 review your export                    
+                                          
+ 2 words · 2 cards                        
+ 3 reviews                                
+ from French, French::Daily               
+ ZIP · about 2 KiB                        
+ to /Users/learner/Downloads              
+ not saved yet                            
+                                          
+                                          
+                     Anki stays unchanged 
+                                          
+    [Enter] save to Downloads  [Esc] back 
+
+                                          
+  export from Anki   writing your file    
+                                          
+ ⠋ saving and verifying your export…      
                                           
  /Users/learner/Downloads                 
                                           
- Anki stays unchanged.                    
- ──────────────────────────────────────── 
- [Enter] save   [Esc] back                
                                           
                                           
+                                          
+                                          
+                                          
+                                          
+                     Anki stays unchanged 
+                                          
+ saving                      [Esc] cancel 
 
                                           
-  export from Anki   5 / 5 · file         
+  export from Anki   cleaning up          
                                           
- export saved                             
+ ⠋ cancelling the export…                 
+                                          
+ Removing the temporary file.             
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                     Anki stays unchanged 
+                                          
+ cancelling                               
+
+                                          
+  export from Anki   your file is ready   
+                                          
+ ✓ export saved                           
                                           
  /Users/learner/Downloads/kamishibai-anki 
  -2026-11-07.zip                          
                                           
- in the web: import from kamishibai cli   
+ In Kamishibai web → your account:        
+ import from kamishibai cli               
                                           
                                           
                                           
- ──────────────────────────────────────── 
- [↑↓] scroll   [Enter / Esc] exit
+                     Anki stays unchanged 
+                                          
+ saved    [Enter / Esc] exit  [↑↓] scroll 
+
+                                          
+  export from Anki   try again when ready 
+                                          
+ could not export                         
+                                          
+ cannot save Anki history inside the Anki 
+ profile or Anki2 folder                  
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                     Anki stays unchanged 
+                                          
+ paused   [Enter] check again  [Esc] exit

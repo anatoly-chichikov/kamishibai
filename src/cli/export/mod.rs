@@ -16,6 +16,7 @@ use super::session::Render;
 
 mod input;
 mod interrupt;
+mod overview;
 mod screen;
 mod terminal;
 

@@ -1142,17 +1142,18 @@ fn export_terminal_cannot_write_before_confirmation() {
     let mut terminal = export_terminal(root.path(), &out);
     terminal.expect("Anki is closed").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("choose decks").unwrap();
+    terminal.expect("02 choose decks").unwrap();
     terminal.send("\r").unwrap();
     terminal.expect("review your export").unwrap();
+    let absent = !out.exists();
     terminal.send("\x1b").unwrap();
-    terminal.expect("choose decks").unwrap();
+    terminal.expect("02 choose decks").unwrap();
     terminal.send("\x1b").unwrap();
     terminal.expect("Anki is closed").unwrap();
     terminal.send("\x1b").unwrap();
     terminal.finish().unwrap();
     assert!(
-        !out.exists() && before == inventory(path.parent().unwrap()),
+        absent && !out.exists() && before == inventory(path.parent().unwrap()),
         "back or exit wrote an export or changed the profile"
     );
 }
@@ -1167,12 +1168,10 @@ fn export_terminal_saves_the_reviewed_decks_after_confirmation() {
     let mut terminal = export_terminal(root.path(), &out);
     terminal.expect("Anki is closed").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("choose decks").unwrap();
+    terminal.expect("02 choose decks").unwrap();
     terminal.send(" ").unwrap();
     terminal.send("\r").unwrap();
     terminal.expect("review your export").unwrap();
-    terminal.send("\r").unwrap();
-    terminal.expect("save this file?").unwrap();
     let absent = !out.exists();
     terminal.send("\r").unwrap();
     terminal.expect("export saved").unwrap();
@@ -1290,11 +1289,9 @@ fn export_terminal_cannot_save_if_anki_reopens_after_review() {
     let mut terminal = export_terminal(root.path(), &out);
     terminal.expect("Anki is closed").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("choose decks").unwrap();
+    terminal.expect("02 choose decks").unwrap();
     terminal.send("\r").unwrap();
     terminal.expect("review your export").unwrap();
-    terminal.send("\r").unwrap();
-    terminal.expect("save this file?").unwrap();
     fs::write(path.with_file_name("collection.anki2-wal"), []).unwrap();
     terminal.send("\r").unwrap();
     terminal.expect("close Anki").unwrap();
@@ -1315,11 +1312,9 @@ fn export_terminal_cannot_save_a_changed_closed_collection() {
     let mut terminal = export_terminal(root.path(), &out);
     terminal.expect("Anki is closed").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("choose decks").unwrap();
+    terminal.expect("02 choose decks").unwrap();
     terminal.send("\r").unwrap();
     terminal.expect("review your export").unwrap();
-    terminal.send("\r").unwrap();
-    terminal.expect("save this file?").unwrap();
     Connection::open(&path)
         .unwrap()
         .execute("UPDATE cards SET ivl=47 WHERE id=211", [])
@@ -1364,7 +1359,7 @@ fn export_terminal_cannot_be_blocked_by_an_unselected_stale_profile() {
     let mut terminal = export_terminal(root.path(), &out);
     terminal.expect("Anki is closed").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("choose decks").unwrap();
+    terminal.expect("02 choose decks").unwrap();
     terminal.send("\x1b").unwrap();
     terminal.expect("Anki is closed").unwrap();
     terminal.send("\x1b").unwrap();
@@ -1607,11 +1602,9 @@ fn terminal_sighup_cannot_leave_an_archive_during_save() {
     let mut terminal = export_terminal(root.path(), &out);
     terminal.expect("Anki is closed").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("choose decks").unwrap();
+    terminal.expect("02 choose decks").unwrap();
     terminal.send("\r").unwrap();
     terminal.expect("review your export").unwrap();
-    terminal.send("\r").unwrap();
-    terminal.expect("save this file?").unwrap();
     terminal.send("\r").unwrap();
     staged(&out);
     terminal
@@ -1673,12 +1666,7 @@ fn split_terminal(root: &Path, out: &Path) -> (fs::File, ExportTerminal) {
 #[cfg(unix)]
 fn split_save(input: &mut fs::File, terminal: &mut ExportTerminal) {
     use std::io::Write;
-    for phrase in [
-        "Anki is closed",
-        "choose decks",
-        "review your export",
-        "save this file?",
-    ] {
+    for phrase in ["Anki is closed", "02 choose decks", "review your export"] {
         terminal.expect(phrase).unwrap();
         input.write_all(b"\r").unwrap();
     }

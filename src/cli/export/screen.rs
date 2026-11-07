@@ -5,10 +5,12 @@ use std::path::PathBuf;
 
 use crossterm::event::KeyCode;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Margin};
+use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph};
 
+use super::overview::Overview;
 use crate::anki::history::{DeckSummary, Preview};
 use crate::tui::palette::{self, Ink};
 use crate::tui::wrap_words;
@@ -22,7 +24,7 @@ pub(super) enum Intent {
     Inspect,
     /// Prepare the selected snapshot without writing output.
     Review,
-    /// Write the snapshot after its separate confirmation.
+    /// Write the snapshot after confirmation on the summary.
     Save,
     /// Cancel a pending publication and await cleanup.
     Cancel,
@@ -32,7 +34,6 @@ pub(super) enum Intent {
     Wait,
 }
 
-#[derive(Clone)]
 enum Page {
     Checking,
     Close(String),
@@ -40,8 +41,7 @@ enum Page {
     Loading,
     Decks,
     Reading,
-    Summary(Preview),
-    Confirm(Preview),
+    Summary(Overview),
     Saving,
     Cancelling,
     Saved(PathBuf),
@@ -104,7 +104,7 @@ impl Screen {
 
     /// Present the summary of the snapshot held by the terminal driver.
     pub(super) fn reviewed(&mut self, preview: Preview) {
-        self.page = Page::Summary(preview);
+        self.page = Page::Summary(Overview::from_preview(&preview));
         self.scroll = 0;
     }
 
@@ -153,7 +153,6 @@ impl Screen {
         self.scroll = 0;
         self.page = match &self.page {
             Page::Summary(_) => Page::Decks,
-            Page::Confirm(preview) => Page::Summary(preview.clone()),
             Page::Decks => Page::Profile,
             Page::Saving => {
                 self.page = Page::Cancelling;
@@ -171,8 +170,7 @@ impl Screen {
             Page::Close(_) | Page::Error(_) => (Page::Checking, Intent::Check),
             Page::Profile => (Page::Loading, Intent::Inspect),
             Page::Decks if !self.select().1.is_empty() => (Page::Reading, Intent::Review),
-            Page::Summary(preview) => (Page::Confirm(preview.clone()), Intent::Wait),
-            Page::Confirm(_) => (Page::Saving, Intent::Save),
+            Page::Summary(_) => (Page::Saving, Intent::Save),
             Page::Saved(_) => return Intent::Exit,
             _ => return Intent::Wait,
         };
@@ -200,119 +198,145 @@ impl Screen {
         };
     }
 
-    /// Paint the current step using the main TUI's ink, focus and title styles.
+    /// Paint the conversation with the main TUI's title, ink and status-bar grammar.
     pub(super) fn draw(&mut self, frame: &mut Frame, tick: usize) {
         let area = frame.area();
         frame.render_widget(Block::default().style(palette::base()), area);
-        let area = area.inner(Margin::new(if area.width >= 60 { 4 } else { 1 }, 1));
-        let [header, body, footer] = Layout::vertical([
-            Constraint::Length(2),
+        let gutter = if area.width >= 60 { 4 } else { 1 };
+        let [_, header, _, body, reminder, rule, footer] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Min(1),
-            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
         ])
         .areas(area);
+        let header = header.inner(Margin::new(gutter, 0));
+        let body = body.inner(Margin::new(gutter, 0));
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(" export from Anki ", palette::invert()),
-                Span::styled(format!("  {}", self.title()), Ink::Detail.on(false)),
+                Span::styled(format!("  {}", self.hint()), Ink::Detail.on(false)),
             ])),
             header,
         );
         if matches!(self.page, Page::Profile | Page::Decks) {
-            let (items, cursor) = if matches!(self.page, Page::Profile) {
-                (
-                    self.choices
-                        .profiles
-                        .iter()
-                        .map(|path| {
-                            ListItem::new(
-                                path.parent()
-                                    .and_then(|path| path.file_name())
-                                    .unwrap_or_default()
-                                    .to_string_lossy()
-                                    .into_owned(),
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                    self.choices.profile,
-                )
-            } else {
-                (
-                    self.choices
-                        .decks
-                        .iter()
-                        .map(|deck| {
-                            ListItem::new(
-                                wrapped(
-                                    &written(|out| deck.write(out)),
-                                    body.width.saturating_sub(2),
-                                )
-                                .join("\n"),
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                    self.choices.cursor,
-                )
-            };
-            let [label, list] =
-                Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(body);
-            let text = if matches!(self.page, Page::Profile) {
-                "Anki is closed · choose your profile"
-            } else if self.select().1.is_empty() {
-                "choose decks · mark at least one deck with Space"
-            } else {
-                "choose decks · Space marks each exact deck"
-            };
-            frame.render_widget(
-                Paragraph::new(text)
-                    .wrap(Wrap { trim: false })
-                    .style(Ink::Detail.on(false)),
-                label,
-            );
-            let mut state = ListState::default()
-                .with_offset(usize::from(self.scroll))
-                .with_selected(Some(cursor));
-            frame.render_stateful_widget(
-                List::new(items)
-                    .style(Ink::Subject.on(false))
-                    .highlight_style(Ink::Subject.on(true))
-                    .highlight_symbol("› "),
-                list,
-                &mut state,
-            );
-            self.scroll = u16::try_from(state.offset()).unwrap_or(u16::MAX);
+            self.list(frame, body);
         } else {
-            let text = wrapped(&self.text(tick), body.width);
-            let lines = text.len();
-            let paragraph = Paragraph::new(text.join("\n")).style(Ink::Detail.on(false));
-            let maximum =
-                u16::try_from(lines.saturating_sub(usize::from(body.height))).unwrap_or(u16::MAX);
+            let rows = wrapped(&self.text(tick), body.width);
+            let maximum = u16::try_from(rows.len().saturating_sub(usize::from(body.height)))
+                .unwrap_or(u16::MAX);
             self.scroll = self.scroll.min(maximum);
-            frame.render_widget(paragraph.scroll((self.scroll, 0)), body);
+            let lines = rows
+                .into_iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    Line::styled(
+                        row,
+                        if index == 0 {
+                            Ink::Subject.on(false)
+                        } else {
+                            Ink::Detail.on(false)
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            frame.render_widget(Paragraph::new(lines).scroll((self.scroll, 0)), body);
         }
         frame.render_widget(
-            Paragraph::new(format!(
-                "{}\n{}",
-                "─".repeat(usize::from(footer.width)),
-                self.hint()
-            ))
-            .style(Ink::Detail.on(false))
-            .wrap(Wrap { trim: false }),
-            footer,
+            Paragraph::new("Anki stays unchanged")
+                .alignment(Alignment::Right)
+                .style(Ink::Aside.on(false)),
+            reminder.inner(Margin::new(gutter, 0)),
         );
+        frame.render_widget(
+            Paragraph::new(Line::from(
+                (0..rule.width)
+                    .map(|column| {
+                        Span::styled(
+                            " ",
+                            if column % 2 == 0 {
+                                palette::rule().add_modifier(Modifier::CROSSED_OUT)
+                            } else {
+                                palette::base()
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )),
+            rule,
+        );
+        let footer = footer.inner(Margin::new(gutter, 0));
+        frame.render_widget(Paragraph::new(self.footer(footer.width)), footer);
     }
 
-    fn title(&self) -> &str {
-        match self.page {
-            Page::Checking => "1 / 5 · check",
-            Page::Close(_) => "1 / 5 · close Anki",
-            Page::Profile => "1 / 5 · profile",
-            Page::Loading | Page::Decks => "2 / 5 · decks",
-            Page::Reading | Page::Summary(_) => "3 / 5 · review",
-            Page::Confirm(_) => "4 / 5 · confirm",
-            Page::Saving | Page::Cancelling | Page::Saved(_) => "5 / 5 · file",
-            Page::Error(_) => "export paused",
-        }
+    fn list(&mut self, frame: &mut Frame, area: Rect) {
+        let profile = matches!(self.page, Page::Profile);
+        let (title, instruction) = if profile {
+            ("01 which profile?", "Anki is closed")
+        } else if self.select().1.is_empty() {
+            ("02 choose decks", "mark at least one deck with Space")
+        } else {
+            ("02 choose decks", "Space selects each deck separately")
+        };
+        let [label, list] =
+            Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(area);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::styled(title, Ink::Subject.on(false)),
+                Line::styled(instruction, Ink::Detail.on(false)),
+            ]),
+            label,
+        );
+        let (items, cursor) = if profile {
+            (
+                self.choices
+                    .profiles
+                    .iter()
+                    .map(|path| {
+                        ListItem::new(
+                            path.parent()
+                                .and_then(|path| path.file_name())
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned(),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                self.choices.profile,
+            )
+        } else {
+            (
+                self.choices
+                    .decks
+                    .iter()
+                    .map(|deck| {
+                        ListItem::new(
+                            wrapped(
+                                &written(|out| deck.write(out)),
+                                list.width.saturating_sub(2),
+                            )
+                            .join("\n"),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                self.choices.cursor,
+            )
+        };
+        let mut state = ListState::default()
+            .with_offset(usize::from(self.scroll))
+            .with_selected(Some(cursor));
+        frame.render_stateful_widget(
+            List::new(items)
+                .style(Ink::Subject.on(false))
+                .highlight_style(Ink::Subject.on(true))
+                .highlight_symbol("› "),
+            list,
+            &mut state,
+        );
+        self.scroll = u16::try_from(state.offset()).unwrap_or(u16::MAX);
     }
 
     fn text(&self, tick: usize) -> String {
@@ -320,50 +344,125 @@ impl Screen {
         match &self.page {
             Page::Checking => format!("{spinner} checking Anki…"),
             Page::Close(reason) => format!(
-                "close Anki\n\nSync on your devices, then quit desktop Anki normally.\nWhen it is closed, press Enter to check again.\n\n{reason}"
+                "01  close Anki\n\nSync, then quit desktop Anki.\nPress Enter to check again.\n\n{reason}"
             ),
-            Page::Loading => format!("{spinner} reading decks and review counts…"),
-            Page::Reading => format!("{spinner} preparing your export summary…"),
+            Page::Loading => format!("{spinner} reading your decks…"),
+            Page::Reading => format!("{spinner} counting cards and reviews…"),
             Page::Summary(preview) => format!(
-                "review your export\n\n{}\nSave to: {}\n\nNothing is written until you confirm.",
-                written(|out| preview.summarize(out)),
-                self.directory.display()
-            ),
-            Page::Confirm(_) => format!(
-                "save this file?\n\nYour selected cards, review history and referenced media\nwill be saved to:\n\n{}\n\nAnki stays unchanged.\nPress Enter to save.",
+                "03  review your export\n\n{}\nto {}\nnot saved yet",
+                preview.describe(),
                 self.directory.display()
             ),
             Page::Saving => format!(
                 "{spinner} saving and verifying your export…\n\n{}",
                 self.directory.display()
             ),
-            Page::Cancelling => format!(
-                "{spinner} cancelling the export…\n\nRemoving the temporary file before exiting."
-            ),
+            Page::Cancelling => {
+                format!("{spinner} cancelling the export…\n\nRemoving the temporary file.")
+            }
             Page::Saved(path) => format!(
-                "export saved\n\n{}\n\nin the web: import from kamishibai cli",
+                "✓  export saved\n\n{}\n\nIn Kamishibai web → your account:\nimport from kamishibai cli",
                 path.display()
             ),
-            Page::Error(reason) => format!(
-                "could not export\n\n{reason}\n\nPress Enter to check again, or Esc to exit."
-            ),
+            Page::Error(reason) => format!("could not export\n\n{reason}"),
             Page::Profile | Page::Decks => String::new(),
         }
     }
 
     fn hint(&self) -> &str {
         match self.page {
-            Page::Profile => "[↑↓] profile   [Enter] next   [Esc] exit",
-            Page::Decks => "[↑↓] deck   [Space] mark   [Enter] review   [Esc] back",
-            Page::Summary(_) => "[↑↓] scroll   [Enter] next   [Esc] back",
-            Page::Confirm(_) => "[Enter] save   [Esc] back",
-            Page::Close(_) => "[Enter] ready · check again   [Esc] exit",
-            Page::Saved(_) => "[↑↓] scroll   [Enter / Esc] exit",
-            Page::Saving => "[Esc] cancel before the file is published",
-            Page::Cancelling => "waiting for temporary-file cleanup",
-            Page::Error(_) => "[Enter] retry   [Esc] exit",
-            _ => "[Esc] exit without saving",
+            Page::Checking | Page::Loading | Page::Reading => "reading Anki",
+            Page::Close(_) => "close Anki first",
+            Page::Profile => "choose your profile",
+            Page::Decks => "choose what to take",
+            Page::Summary(_) => "review, then save",
+            Page::Saving => "writing your file",
+            Page::Cancelling => "cleaning up",
+            Page::Saved(_) => "your file is ready",
+            Page::Error(_) => "try again when ready",
         }
+    }
+
+    fn action(&self) -> String {
+        match self.page {
+            Page::Profile => String::from("[Enter] choose decks"),
+            Page::Decks if !self.select().1.is_empty() => String::from("[Enter] review export"),
+            Page::Decks => String::from("[Space] select deck"),
+            Page::Summary(_) => {
+                if self
+                    .directory
+                    .file_name()
+                    .is_some_and(|name| name == "Downloads")
+                {
+                    String::from("[Enter] save to Downloads")
+                } else {
+                    String::from("[Enter] save ZIP")
+                }
+            }
+            Page::Close(_) | Page::Error(_) => String::from("[Enter] check again"),
+            Page::Saved(_) => String::from("[Enter / Esc] exit"),
+            _ => String::new(),
+        }
+    }
+
+    fn footer(&self, width: u16) -> Line<'static> {
+        let action = self.action();
+        let escape = match self.page {
+            Page::Summary(_) | Page::Decks => "[Esc] back",
+            Page::Saving => "[Esc] cancel",
+            Page::Cancelling | Page::Saved(_) => "",
+            _ => "[Esc] exit",
+        };
+        let navigation = match self.page {
+            Page::Profile => "[↑↓] profile",
+            Page::Decks => "[↑↓] deck  [Space] select",
+            Page::Summary(_) | Page::Saved(_) | Page::Close(_) | Page::Error(_) => "[↑↓] scroll",
+            _ => "",
+        };
+        let status = match self.page {
+            Page::Checking | Page::Loading | Page::Reading => "reading",
+            Page::Saving => "saving",
+            Page::Cancelling => "cancelling",
+            Page::Saved(_) => "saved",
+            Page::Error(_) | Page::Close(_) => "paused",
+            _ => "not saved yet",
+        };
+        let mut hints = vec![
+            (action, Ink::Subject),
+            (navigation.to_string(), Ink::Aside),
+            (escape.to_string(), Ink::Aside),
+        ];
+        hints.retain(|(text, _)| !text.is_empty());
+        let measure = |hints: &[(String, Ink)]| {
+            hints
+                .iter()
+                .map(|(text, _)| unicode_width::UnicodeWidthStr::width(text.as_str()))
+                .sum::<usize>()
+                + hints.len().saturating_sub(1) * 2
+        };
+        if measure(&hints) > usize::from(width) {
+            hints.retain(|(text, _)| text != navigation);
+        }
+        if measure(&hints) > usize::from(width) {
+            hints.retain(|(text, _)| text != escape);
+        }
+        let used = measure(&hints);
+        let mut spans = Vec::new();
+        if used + status.len() + 2 <= usize::from(width) {
+            spans.push(Span::styled(status.to_string(), Ink::Aside.on(false)));
+            spans.push(Span::raw(
+                " ".repeat(usize::from(width) - used - status.len()),
+            ));
+        } else if used < usize::from(width) {
+            spans.push(Span::raw(" ".repeat(usize::from(width) - used)));
+        }
+        for (index, (text, ink)) in hints.into_iter().enumerate() {
+            if index > 0 {
+                spans.push(Span::raw("  "));
+            }
+            spans.push(Span::styled(text, ink.on(false)));
+        }
+        Line::from(spans)
     }
 }
 
@@ -418,11 +517,14 @@ mod tests {
         history::inspect(&path, &[], &Closed, "unknown").unwrap()
     }
 
-    fn preview() -> Preview {
-        history::validate(
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/anki-history/v1.zip"),
+    fn preview() -> Overview {
+        Overview::from_preview(
+            &history::validate(
+                &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/anki-history/v1.zip"),
+            )
+            .unwrap(),
         )
-        .unwrap()
     }
 
     fn screen(page: Page) -> Screen {
@@ -456,9 +558,8 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn export_steps_keep_their_reviewed_rendering() {
-        let pages = [
+    fn pages() -> Vec<Page> {
+        vec![
             Page::Checking,
             Page::Close("Anki is open or did not close properly".into()),
             Page::Profile,
@@ -466,19 +567,22 @@ mod tests {
             Page::Decks,
             Page::Reading,
             Page::Summary(preview()),
-            Page::Confirm(preview()),
             Page::Saving,
             Page::Cancelling,
             Page::Saved(PathBuf::from(
                 "/Users/learner/Downloads/kamishibai-anki-2026-11-07.zip",
             )),
             Page::Error("cannot save Anki history inside the Anki profile or Anki2 folder".into()),
-        ];
-        let rendered = pages
+        ]
+    }
+
+    #[test]
+    fn export_steps_keep_their_reviewed_rendering() {
+        let rendered = pages()
             .into_iter()
             .enumerate()
             .map(|(index, page)| {
-                format!("STEP {}\n{}", index + 1, render(&mut screen(page), 80, 20))
+                format!("STEP {}\n{}", index + 1, render(&mut screen(page), 120, 36))
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -487,13 +591,7 @@ mod tests {
 
     #[test]
     fn narrow_export_keeps_the_confirmation_and_next_step_readable() {
-        let pages = [
-            Page::Confirm(preview()),
-            Page::Saved(PathBuf::from(
-                "/Users/learner/Downloads/kamishibai-anki-2026-11-07.zip",
-            )),
-        ];
-        let rendered = pages
+        let rendered = pages()
             .into_iter()
             .map(|page| render(&mut screen(page), 42, 16))
             .collect::<Vec<_>>()
@@ -502,24 +600,54 @@ mod tests {
     }
 
     #[test]
-    fn summary_cannot_start_saving_without_a_second_confirmation() {
+    fn summary_confirmation_cannot_require_another_enter() {
         let mut screen = screen(Page::Summary(preview()));
         let first = screen.key(KeyCode::Enter);
         let second = screen.key(KeyCode::Enter);
         assert_eq!(
             (first, second),
-            (Intent::Wait, Intent::Save),
-            "review skipped the separate save confirmation"
+            (Intent::Save, Intent::Wait),
+            "the explicit save action required another confirmation or started twice"
         );
     }
 
     #[test]
-    fn back_from_confirmation_cannot_request_a_write() {
-        let mut screen = screen(Page::Confirm(preview()));
-        let intent = screen.key(KeyCode::Esc);
+    fn back_from_summary_cannot_request_a_write() {
+        let results = [KeyCode::Esc, KeyCode::Left].map(|key| {
+            let mut screen = screen(Page::Summary(preview()));
+            (screen.key(key), matches!(screen.page, Page::Decks))
+        });
+        assert_eq!(
+            results,
+            [(Intent::Wait, true), (Intent::Wait, true)],
+            "back from the summary wrote or discarded the deck choices"
+        );
+    }
+
+    #[test]
+    fn narrow_summary_cannot_hide_the_save_action_or_destination() {
+        let rendered = render(&mut screen(Page::Summary(preview())), 42, 16);
         assert!(
-            intent == Intent::Wait && matches!(screen.page, Page::Summary(_)),
-            "back from confirmation wrote or discarded the review"
+            rendered.contains("[Enter] save to Downloads")
+                && rendered.contains("/Users/learner/Downloads")
+                && rendered.contains("not saved yet")
+                && !rendered.contains("references")
+                && !rendered.contains("mistakes"),
+            "the narrow summary hid the decision behind technical counts or navigation"
+        );
+    }
+
+    #[test]
+    fn an_empty_checklist_cannot_offer_an_inert_enter() {
+        let visible = [42, 120].into_iter().all(|width| {
+            let mut screen = screen(Page::Decks);
+            screen.key(KeyCode::Char(' '));
+            let rendered = render(&mut screen, width, 16);
+            rendered.contains("[Space] select deck") && !rendered.contains("[Enter]")
+        });
+        assert!(
+            visible,
+            "an empty checklist advertised an Enter action that cannot run"
         );
     }
 
@@ -578,7 +706,7 @@ mod tests {
         }
         let rendered = render(&mut screen, 42, 12);
         assert!(
-            rendered.contains("until you confirm"),
+            rendered.contains("not saved yet"),
             "scrolling moved beyond the last summary line"
         );
     }

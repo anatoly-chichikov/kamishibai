@@ -92,8 +92,10 @@ kamishibai export
 ```
 
 A separate guided screen checks that Anki is closed, lets you choose a profile
-and exact decks, and shows the cards, reviews, mistakes, media and skipped items.
-Review the summary and confirm to save a verified history ZIP in Downloads.
+and exact decks, then shows the selected words, cards, reviews, destination and
+estimated ZIP size. Press Enter on this summary to save in Downloads; nothing is
+written before that confirmation. Missing media and excluded history appear only
+when they affect the export.
 The last screen gives the file path and the next step in the web:
 **import from kamishibai cli**. No Gemini key is needed and Anki stays unchanged.
 
