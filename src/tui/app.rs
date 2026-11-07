@@ -258,6 +258,7 @@ enum GenerationStopState {
     Inactive,
     Pending,
     Stopping,
+    Stopped,
     Cancelling,
 }
 
@@ -499,6 +500,12 @@ impl App {
         )
     }
 
+    /// Return whether a confirmed stop retains an unsaved subset for publication only.
+    #[must_use]
+    pub fn generation_stopped(&self) -> bool {
+        self.cards.stop == GenerationStopState::Stopped
+    }
+
     /// Return whether a stopped run is waiting for durable cancellation.
     pub fn generation_cancelling(&self) -> bool {
         self.cards.stop == GenerationStopState::Cancelling
@@ -545,7 +552,8 @@ impl App {
 
     /// Return whether generation has reached a terminal or published view.
     pub fn batch_settled(&self) -> bool {
-        !self.done.deck.is_empty()
+        self.generation_stopped()
+            || !self.done.deck.is_empty()
             || (!self.cards.drafts.is_empty()
                 && self
                     .cards
@@ -1119,6 +1127,9 @@ impl App {
     /// Keep completed cards intact while showing that saving their package failed.
     #[must_use]
     pub fn publication_failed(mut self, message: impl Into<String>) -> Self {
+        if self.cards.stop == GenerationStopState::Stopping {
+            self.cards.stop = GenerationStopState::Stopped;
+        }
         self.error = Some(AppError::Publication(message.into()));
         self
     }

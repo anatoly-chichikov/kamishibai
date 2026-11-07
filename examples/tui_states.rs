@@ -910,6 +910,13 @@ fn build_states() -> Vec<(&'static str, App)> {
 
     let words_clear = base_words.clone().with_word_clear_pending(true);
     let review_back = transit(review.clone(), AppEvent::Cancel).0;
+    let quit_armed = base_words.clone().with_quit_pending(true);
+    let stopped_error = cards_seed
+        .clone()
+        .cards_running(None)
+        .generation_stop_started()
+        .publication_failed("could not write the Anki deck: output directory is read-only");
+    let stopped = transit(stopped_error.clone(), AppEvent::Cancel).0;
     let stop_armed = cards_seed
         .clone()
         .cards_running(Some((2, Artifact::Picture)))
@@ -997,6 +1004,13 @@ fn build_states() -> Vec<(&'static str, App)> {
         ("cards.legacy-tuning", legacy),
         ("cards.retry-stress", retry_stress),
         ("words.clear-armed", words_clear),
+        ("words.quit-armed", quit_armed),
+        ("cards.stopped-publish-error", stopped_error),
+        (
+            "cards.stopped-new-batch-armed",
+            stopped.clone().with_new_batch_pending(true),
+        ),
+        ("cards.stopped", stopped),
         ("words.returned", review_back),
         ("cards.stop-armed", stop_armed),
         ("cards.stopping", stopping),
