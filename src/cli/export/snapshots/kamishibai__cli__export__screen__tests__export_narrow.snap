@@ -84,8 +84,8 @@ expression: rendered
                                           
                                           
                                           
-                                          
- step 2/3  1 card            [Enter] next 
+ step 2/3  1 card                         
+ [Enter] next  [Space] select  [Esc] back 
 
                                           
   export from anki   choose decks to expo 
@@ -187,4 +187,4 @@ expression: rendered
                                           
                                           
                                           
- step 3/3                      [Esc] exit
+ step 3/3                      [Esc] back

@@ -390,7 +390,9 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            text.contains("1 picture or sound is missing") && text.contains("Tools → Check Media"),
+            text.contains("1 picture or sound is missing")
+                && text.contains("kamishibai web won't import this file")
+                && text.contains("Tools → Check Media"),
             "the summary hid the import blocker or its repair action"
         );
     }

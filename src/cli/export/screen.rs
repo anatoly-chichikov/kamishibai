@@ -9,6 +9,7 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use super::overview::{DeckRow, Overview, deck_lines, quantity, wrapped};
 use crate::anki::history::{DeckSummary, Preview};
@@ -18,6 +19,9 @@ use crate::tui::{
     FooterHint, artifact_rows, back_hint, dashed_line, exit_hint, footer_bar, header, loader,
     status_sep,
 };
+
+const IMPORT_PREFIX: &str = "import at ";
+const IMPORT_DOMAIN: &str = "app.kamishibai.io";
 
 /// One requested operation; only the terminal driver performs I/O.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -220,7 +224,7 @@ impl Screen {
 
     fn back(&mut self) -> Intent {
         match self.page {
-            Page::Summary(_) => self.show(Page::Decks),
+            Page::Summary(_) | Page::Stopped(Stop { step: 3, .. }) => self.show(Page::Decks),
             Page::Decks => self.show(Page::Profile),
             Page::Saving(_) | Page::Cancelling(_) => return self.interrupt(),
             _ => return Intent::Exit,
@@ -234,6 +238,10 @@ impl Screen {
                 refusal: Refusal::Oversized { .. },
                 ..
             }) => (Page::Decks, Intent::Wait),
+            Page::Stopped(Stop {
+                refusal: Refusal::Other(_),
+                step: 3,
+            }) => (Page::Reading, Intent::Review),
             Page::Stopped(stop) if stop.refusal.retry() => (Page::Checking, Intent::Check),
             Page::Profile => (Page::Loading, Intent::Inspect),
             Page::Decks if !self.select().1.is_empty() => (Page::Reading, Intent::Review),
@@ -275,12 +283,17 @@ impl Screen {
         }
         let row = row.checked_add(self.viewport.scroll)?;
         let start = gutter(width) + 4;
+        let domain = gutter(width)
+            + u16::try_from(IMPORT_PREFIX.width())
+                .expect("invariant: the import prefix fits terminal coordinates");
+        let length = u16::try_from(IMPORT_DOMAIN.width())
+            .expect("invariant: the import domain fits terminal coordinates");
         match row {
             3 if (start..start + 6).contains(&column) => {
                 Some((outcome.path.parent()?.to_path_buf(), false))
             }
             4 if (start..start + 4).contains(&column) => Some((outcome.path.clone(), true)),
-            9 if (start + 6..start + 22).contains(&column) => {
+            9 if (domain..domain + length).contains(&column) => {
                 Some((PathBuf::from(super::IMPORT_URL), false))
             }
             _ => None,
@@ -290,6 +303,21 @@ impl Screen {
     /// Paint with the main TUI's existing title, loader, artifact strip and footer.
     pub(super) fn draw(&mut self, frame: &mut Frame, _tick: usize) {
         let area = frame.area();
+        let actions = if matches!(self.page, Page::Decks) {
+            let mut spans = Vec::new();
+            for hint in self.deck_hints() {
+                if !spans.is_empty() {
+                    spans.push(status_sep());
+                }
+                spans.extend(hint.spans());
+            }
+            Line::from(spans)
+        } else {
+            Line::default()
+        };
+        let stacked = matches!(self.page, Page::Decks)
+            && Line::from(self.status()).width() + 2 + actions.width()
+                > usize::from(area.width.saturating_sub(2 * gutter(area.width)));
         frame.render_widget(Block::default().style(palette::base()), area);
         let [_, top, _, body, _, rule, footer] = Layout::vertical([
             Constraint::Length(1),
@@ -298,7 +326,7 @@ impl Screen {
             Constraint::Min(1),
             Constraint::Length(1),
             Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(1 + u16::from(stacked)),
         ])
         .areas(area);
         let margin = Margin::new(gutter(area.width), 0);
@@ -336,8 +364,8 @@ impl Screen {
                     outcome.overview.receipt(),
                     Line::default(),
                     Line::from(vec![
-                        Span::styled("import at ", Ink::Detail.on(false)),
-                        Span::styled("app.kamishibai.io", Ink::Subject.link(false)),
+                        Span::styled(IMPORT_PREFIX, Ink::Detail.on(false)),
+                        Span::styled(IMPORT_DOMAIN, Ink::Subject.link(false)),
                     ]),
                 ]);
                 self.paragraph(frame, body, lines);
@@ -359,10 +387,16 @@ impl Screen {
             rule,
         );
         let footer = footer.inner(margin);
-        frame.render_widget(
-            footer_bar(self.status(), self.hints(overflow), footer.width),
-            footer,
-        );
+        if stacked {
+            let [status, keys] = Layout::vertical([Constraint::Length(1); 2]).areas(footer);
+            frame.render_widget(Paragraph::new(Line::from(self.status())), status);
+            frame.render_widget(Paragraph::new(actions).right_aligned(), keys);
+        } else {
+            frame.render_widget(
+                footer_bar(self.status(), self.hints(overflow), footer.width),
+                footer,
+            );
+        }
         if let Some((title, label)) = self.busy() {
             loader(frame, area, title, label, self.viewport.entered.elapsed());
         }
@@ -446,7 +480,7 @@ impl Screen {
         if matches!(self.page, Page::Decks | Page::Reading) {
             spans.push(status_sep());
             if self.select().1.is_empty() {
-                spans.push(Span::styled("nothing chosen", Ink::Aside.on(false)));
+                spans.push(Span::styled("no decks chosen", Ink::Aside.on(false)));
             } else {
                 let count = self
                     .choices
@@ -482,23 +516,36 @@ impl Screen {
         }
     }
 
+    fn deck_hints(&self) -> Vec<FooterHint> {
+        let mut hints = if self.select().1.is_empty() {
+            vec![FooterHint::primary("Space", "select")]
+        } else {
+            vec![
+                FooterHint::primary("Enter", "next"),
+                FooterHint::secondary("Space", "select"),
+            ]
+        };
+        hints.push(exit_hint("Esc", "back"));
+        hints
+    }
+
     fn hints(&self, overflow: bool) -> Vec<FooterHint> {
         let primary = FooterHint::primary;
         let navigation = || FooterHint::ghost("↑↓", "nav");
         let exit = || exit_hint("Esc", "exit");
+        let back = || {
+            if self.step() == 3 {
+                back_hint()
+            } else {
+                exit()
+            }
+        };
         match &self.page {
             Page::Checking | Page::Loading | Page::Reading => vec![exit()],
             Page::Profile => vec![primary("Enter", "choose decks"), navigation(), exit()],
             Page::Decks => {
-                let mut hints = if self.select().1.is_empty() {
-                    vec![primary("Space", "select")]
-                } else {
-                    vec![
-                        primary("Enter", "next"),
-                        FooterHint::secondary("Space", "select"),
-                    ]
-                };
-                hints.extend([navigation(), back_hint()]);
+                let mut hints = self.deck_hints();
+                hints.insert(hints.len() - 1, navigation());
                 hints
             }
             Page::Summary(_) => {
@@ -515,11 +562,11 @@ impl Screen {
             Page::Stopped(Stop {
                 refusal: Refusal::Oversized { .. },
                 ..
-            }) => vec![primary("Enter", "choose decks"), exit()],
+            }) => vec![primary("Enter", "choose decks"), back()],
             Page::Stopped(stop) if stop.refusal.retry() => {
-                vec![primary("Enter", "check again"), exit()]
+                vec![primary("Enter", "check again"), back()]
             }
-            Page::Stopped(_) => vec![exit()],
+            Page::Stopped(_) => vec![back()],
         }
     }
 
@@ -794,10 +841,14 @@ mod tests {
                 let start = gutter(width) + 10;
                 screen.link(start, 9, width)
                     == Some((PathBuf::from("https://app.kamishibai.io/import"), false))
-                    && screen.link(start + 15, 9, width).is_some()
+                    && (0..17).all(|offset| {
+                        screen.link(start + offset, 9, width)
+                            == Some((PathBuf::from("https://app.kamishibai.io/import"), false))
+                    })
                     && screen.link(start - 1, 9, width).is_none()
-                    && screen.link(start + 16, 9, width).is_none()
+                    && screen.link(start + 17, 9, width).is_none()
                     && screen.link(start, 8, width).is_none()
+                    && screen.link(start, 10, width).is_none()
             }),
             "the import URL was missing or captured cells outside its underlined domain"
         );
@@ -815,6 +866,66 @@ mod tests {
                 && buffer[(14, 9)].fg == Ink::Subject.on(false).fg.unwrap()
                 && buffer[(14, 9)].modifier.contains(Modifier::UNDERLINED),
             "the import prefix lost its detail rank or the domain lost the file-link style"
+        );
+    }
+
+    #[test]
+    fn an_output_refusal_cannot_exit_instead_of_returning_to_chosen_decks() {
+        assert!(
+            [KeyCode::Esc, KeyCode::Left].into_iter().all(|key| {
+                let mut screen = screen(Page::Decks);
+                screen.key(KeyCode::Char(' '));
+                screen.key(KeyCode::Down);
+                screen.key(KeyCode::Char(' '));
+                let selection = screen.select();
+                screen.page = Page::Reading;
+                screen.failed(Refusal::Destination);
+                screen.key(key) == Intent::Wait
+                    && matches!(screen.page, Page::Decks)
+                    && screen.select() == selection
+            }),
+            "an output-folder refusal exited or discarded the chosen decks"
+        );
+    }
+
+    #[test]
+    fn checking_again_after_a_write_failure_cannot_reload_the_default_decks() {
+        let mut screen = screen(Page::Decks);
+        screen.key(KeyCode::Char(' '));
+        screen.key(KeyCode::Down);
+        screen.key(KeyCode::Char(' '));
+        let selection = screen.select();
+        screen.page = Page::Saving(preview());
+        screen.failed(Refusal::Other(String::from("output path is a file")));
+        let intent = screen.key(KeyCode::Enter);
+        assert!(
+            intent == Intent::Review
+                && matches!(screen.page, Page::Reading)
+                && screen.select() == selection
+                && selection.1 == [String::from("French::Daily")],
+            "checking again reloaded the default decks instead of reviewing the chosen deck"
+        );
+    }
+
+    #[test]
+    fn a_narrow_deck_page_cannot_hide_selection_or_back_keys() {
+        let rendered = render(&mut screen(Page::Decks), 42, 16);
+        assert!(
+            rendered.contains("[Space] select") && rendered.contains("[Esc] back"),
+            "a nonempty deck selection hid Space or Escape at 42 by 16"
+        );
+    }
+
+    #[test]
+    fn an_empty_deck_selection_cannot_lose_its_reviewed_copy_or_keys() {
+        let mut screen = screen(Page::Decks);
+        screen.key(KeyCode::Char(' '));
+        let rendered = render(&mut screen, 42, 16);
+        assert!(
+            rendered.contains("no decks chosen")
+                && rendered.contains("[Space] select")
+                && rendered.contains("[Esc] back"),
+            "an empty deck selection lost its reviewed copy, Space or Escape"
         );
     }
 
@@ -973,7 +1084,7 @@ mod tests {
                     .lines()
                     .last()
                     .unwrap()
-                    .contains("step 2/3  nothing chosen"),
+                    .contains("step 2/3  no decks chosen"),
             "selection did not update the footer's own-card census"
         );
     }
