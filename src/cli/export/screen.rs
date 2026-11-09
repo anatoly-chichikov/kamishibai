@@ -95,6 +95,12 @@ struct Viewport {
     entered: Instant,
 }
 
+impl Viewport {
+    fn new(scroll: u16, entered: Instant) -> Self {
+        Self { scroll, entered }
+    }
+}
+
 /// A small independent state machine; it never touches the generation App.
 pub(super) struct Screen {
     page: Page,
@@ -104,15 +110,12 @@ pub(super) struct Screen {
 }
 
 impl Screen {
-    fn new(page: Page, choices: Choices, folder: String, scroll: u16) -> Self {
+    fn new(page: Page, choices: Choices, folder: String, viewport: Viewport) -> Self {
         Self {
             page,
             choices,
             folder,
-            viewport: Viewport {
-                scroll,
-                entered: Instant::now(),
-            },
+            viewport,
         }
     }
 
@@ -127,7 +130,7 @@ impl Screen {
                 cursor: 0,
             },
             compact_path(&directory),
-            0,
+            Viewport::new(0, Instant::now()),
         )
     }
 
@@ -168,7 +171,11 @@ impl Screen {
 
     /// Keep the refusal at the step where it happened.
     pub(super) fn failed(&mut self, refusal: Refusal) {
-        let step = self.step();
+        let step = if matches!(&refusal, Refusal::Destination) {
+            3
+        } else {
+            self.step()
+        };
         self.show(Page::Stopped(Stop { refusal, step }));
     }
 
@@ -658,7 +665,7 @@ mod tests {
                 cursor: 0,
             },
             String::from("/Users/learner/Downloads"),
-            0,
+            Viewport::new(0, Instant::now()),
         )
     }
 
@@ -991,6 +998,20 @@ mod tests {
                 .unwrap()
                 .contains("step 3/3"),
             "a publication refusal returned to the profile step"
+        );
+    }
+
+    #[test]
+    fn an_unsafe_folder_cannot_refuse_at_the_deck_step() {
+        let mut screen = screen(Page::Reading);
+        screen.failed(Refusal::Destination);
+        assert!(
+            render(&mut screen, 60, 24)
+                .lines()
+                .last()
+                .unwrap()
+                .contains("step 3/3"),
+            "the output-folder refusal was attributed to choosing decks"
         );
     }
 
