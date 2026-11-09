@@ -100,7 +100,7 @@ fn wait(timeout: Duration) -> io::Result<()> {
     {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
-            "export terminal input reached EOF",
+            "export stopped because the terminal input closed",
         ));
     }
     Ok(())

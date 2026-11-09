@@ -92,15 +92,15 @@ kamishibai export
 ```
 
 A separate guided screen checks that Anki is closed, lets you choose a profile
-and exact decks, then shows the selected words, cards, reviews, destination and
-estimated ZIP size. Press Enter on this summary to save in Downloads; nothing is
-written before that confirmation. Missing media and excluded history appear only
-when they affect the export.
-The last screen gives the file path and the next step in the web:
-**import from kamishibai cli**. No Gemini key is needed and Anki stays unchanged.
+and exact decks, then shows the cards, reviews, destination folder and any missing
+media. Press Enter on this summary to save in Downloads; nothing is written
+before that confirmation. The last screen links the folder and file, then asks
+you to choose the language pair in Kamishibai web and open your account →
+**import from kamishibai cli**. No Gemini key is needed.
 
 Use `--out DIR` for another destination. `Esc` goes back or exits before saving;
-during saving it cancels before the verified file is published.
+during saving it cancels before the verified file is published. Ctrl+C exits from
+any selection page; during saving it shows cleanup and the cancellation outcome.
 For scripts, `--json` previews without writing and `--save` saves without opening
 the screen:
 

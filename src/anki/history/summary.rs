@@ -1,13 +1,12 @@
 //! Counts derived from raw selected rows, shared by preview and validation.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{self, Write};
 
 use serde::Serialize;
 
 use super::manifest::{Card, Deck, Manifest, Revlog};
 
-/// A serializable overview; use `write` for a human-readable deck checklist.
+/// A serializable overview of selected rows and the exact-deck checklist.
 #[derive(Clone, Debug, Serialize)]
 pub struct Preview {
     decks: Vec<DeckSummary>,
@@ -30,77 +29,6 @@ impl Preview {
             missing_media,
             snapshot_size,
         }
-    }
-
-    /// Write selected decks, totals and missing-media guidance to a delivery stream.
-    pub fn write(&self, output: &mut impl Write) -> io::Result<()> {
-        for deck in &self.decks {
-            writeln!(
-                output,
-                "  {} {} · {} · {} · {} · {}",
-                if deck.selected { "✓" } else { "·" },
-                deck.name,
-                quantity(deck.counts.notes, "note"),
-                quantity(deck.counts.cards, "card"),
-                quantity(deck.counts.reviews, "review"),
-                quantity(deck.counts.mistakes, "mistake")
-            )?;
-        }
-        self.summarize(output)
-    }
-
-    /// Write selected totals and omissions without repeating the whole deck checklist.
-    pub fn summarize(&self, output: &mut impl Write) -> io::Result<()> {
-        writeln!(
-            output,
-            "in the file: {} · {} · {} · {}",
-            quantity(self.counts.rows.notes, "note"),
-            quantity(self.counts.rows.cards, "card"),
-            quantity(self.counts.rows.reviews, "review"),
-            quantity(self.counts.rows.mistakes, "mistake")
-        )?;
-        writeln!(
-            output,
-            "media: {} · {} · {} bytes",
-            quantity(self.counts.media, "reference"),
-            quantity(self.counts.files, "file"),
-            self.counts.bytes
-        )?;
-        writeln!(
-            output,
-            "estimated file size: {}",
-            size(
-                self.counts.bytes
-                    + u64::try_from(self.snapshot_size)
-                        .expect("invariant: snapshot size fits in u64")
-            )
-        )?;
-        let skipped = self
-            .decks
-            .iter()
-            .filter(|deck| !deck.selected)
-            .collect::<Vec<_>>();
-        writeln!(
-            output,
-            "skipped: {} · {} · {}",
-            quantity(skipped.len(), "deck"),
-            quantity(skipped.iter().map(|deck| deck.counts.cards).sum(), "card"),
-            quantity(
-                skipped.iter().map(|deck| deck.counts.reviews).sum(),
-                "review"
-            )
-        )?;
-        if !self.missing_media.is_empty() {
-            writeln!(
-                output,
-                "{} pictures or sounds are missing in Anki — Kamishibai web cannot import until they are back (Anki: Tools → Check Media)",
-                self.missing_media.len()
-            )?;
-            for name in &self.missing_media {
-                writeln!(output, "  missing: {name}")?;
-            }
-        }
-        Ok(())
     }
 }
 
@@ -125,18 +53,6 @@ impl DeckSummary {
         if self.selected {
             names.push(self.name.clone());
         }
-    }
-
-    /// Write a selectable checklist row with the actual card and review counts.
-    pub fn write(&self, output: &mut impl Write) -> io::Result<()> {
-        write!(
-            output,
-            "{} {} · {} · {}",
-            if self.selected { "[✓]" } else { "[ ]" },
-            self.name,
-            quantity(self.counts.cards, "card"),
-            quantity(self.counts.reviews, "review")
-        )
     }
 
     /// Count a home deck's notes, cards and surviving review rows.
@@ -206,19 +122,5 @@ impl Rows {
             reviews: reviews.len(),
             mistakes: reviews.iter().filter(|review| review.ease == 1).count(),
         }
-    }
-}
-
-fn quantity(count: usize, noun: &str) -> String {
-    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
-}
-
-fn size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{bytes} bytes")
-    } else if bytes < 1024 * 1024 {
-        format!("{} KiB", bytes.div_ceil(1024))
-    } else {
-        format!("{} MiB", bytes.div_ceil(1024 * 1024))
     }
 }

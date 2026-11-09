@@ -169,34 +169,41 @@ pub fn widget(app: &App, width: u16) -> Paragraph<'static> {
     let entries = entries(app);
     let width = usize::from(width);
     let tag = tag(app);
-    let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries.len().max(1));
-    for (index, (label, path)) in entries.iter().enumerate() {
-        let padding = LABEL_PAD.saturating_sub(super::common::display_width(label)) + PATH_GAP;
-        let display = display(label, path);
-        let mut spans: Vec<Span<'static>> = vec![
-            Span::styled("│ ", palette::base()),
-            Span::styled(GLYPH, palette::Ink::Detail.on(false)),
-            Span::styled(String::from(*label), palette::Ink::Subject.link(false)),
-            Span::styled(" ".repeat(padding), palette::base()),
-            Span::styled(display, palette::Ink::Detail.on(false)),
-        ];
-        if index == 0
-            && let Some(tag) = tag.as_deref()
-        {
-            push_tag(&mut spans, tag, width);
-        }
-        lines.push(Line::from(spans));
+    let entries = entries
+        .iter()
+        .map(|(label, path)| (*label, display(label, path)))
+        .collect::<Vec<_>>();
+    let mut lines = rows(&entries);
+    if let Some(line) = lines.first_mut()
+        && let Some(tag) = tag.as_deref()
+    {
+        push_tag(&mut line.spans, tag, width);
     }
     if entries.is_empty()
         && let Some(tag) = tag.as_deref()
     {
-        // No gutter bar here: it exists to bind the file rows into one block,
-        // and with no files beside it a lone tick would be marking nothing.
         let mut spans = Vec::new();
         push_tag(&mut spans, tag, width);
         lines.push(Line::from(spans));
     }
     Paragraph::new(lines).style(palette::base())
+}
+
+/// Render linked artifact labels beside their already formatted display paths.
+pub(crate) fn rows(entries: &[(&'static str, String)]) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(entries.len().max(1));
+    for (label, display) in entries {
+        let padding = LABEL_PAD.saturating_sub(super::common::display_width(label)) + PATH_GAP;
+        let spans: Vec<Span<'static>> = vec![
+            Span::styled("│ ", palette::base()),
+            Span::styled(GLYPH, palette::Ink::Detail.on(false)),
+            Span::styled(String::from(*label), palette::Ink::Subject.link(false)),
+            Span::styled(" ".repeat(padding), palette::base()),
+            Span::styled(display.clone(), palette::Ink::Detail.on(false)),
+        ];
+        lines.push(Line::from(spans));
+    }
+    lines
 }
 
 /// Push the right-aligned loss tag onto one already-built row.

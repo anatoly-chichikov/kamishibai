@@ -127,8 +127,7 @@ struct Cli {
     /// A prebuilt cards JSON path opens the interactive TUI on those cards.
     #[arg(value_name = "WORDS")]
     input: Option<String>,
-    /// Print one JSON document on stdout instead of plain text (place it after
-    /// the session verb; interactive runs refuse it).
+    /// Print the result as JSON.
     #[arg(long, global = true)]
     json: bool,
     #[command(subcommand)]

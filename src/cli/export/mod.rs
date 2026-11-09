@@ -23,19 +23,19 @@ mod terminal;
 /// Exact source, deck and output choices for Anki history preparation.
 #[derive(Clone, Debug, Args)]
 pub(super) struct ExportArgs {
-    /// Exact profile folder name; otherwise the screen offers a choice.
+    /// Anki profile to read.
     #[arg(long, value_name = "NAME", conflicts_with = "collection")]
     pub(super) profile: Option<String>,
-    /// Explicit collection.anki2 path instead of profile discovery.
+    /// Path to a collection.anki2 file.
     #[arg(long, value_name = "PATH")]
     pub(super) collection: Option<PathBuf>,
-    /// Exact full deck name, repeatable; defaults to Kamishibai model decks.
+    /// Exact deck name; repeat for more.
     #[arg(long = "deck", value_name = "NAME")]
     pub(super) decks: Vec<String>,
-    /// Output directory; defaults to Downloads and is untouched during preview.
+    /// Folder for the file.
     #[arg(long, value_name = "DIR")]
     pub(super) out: Option<PathBuf>,
-    /// Save without opening the guided screen; suitable for scripts.
+    /// Save without the guided screen.
     #[arg(long)]
     pub(super) save: bool,
 }
@@ -52,6 +52,10 @@ pub(super) fn run(args: &ExportArgs, render: Render) -> Result<()> {
         let result = terminal::run(args, directory(args)?, cancelled.clone());
         match result {
             Ok(terminal::Exit::InputEnded(error)) => Err(error.into()),
+            Ok(terminal::Exit::Cancelled) => {
+                println!("export cancelled, nothing saved");
+                Ok(())
+            }
             _ if cancelled.verify().is_err() => Ok(()),
             result => result.map(|_| ()),
         }
@@ -65,7 +69,12 @@ fn directory(args: &ExportArgs) -> Result<PathBuf> {
         .out
         .clone()
         .or_else(dirs::download_dir)
-        .ok_or_else(|| error::usage_hint("Downloads directory is unavailable", "pass --out DIR"))?;
+        .ok_or_else(|| {
+            error::usage_hint(
+                "Downloads directory is unavailable",
+                "choose a folder with --out DIR",
+            )
+        })?;
     Ok(std::env::current_dir()?.join(directory))
 }
 
@@ -110,16 +119,26 @@ fn anki(args: &ExportArgs, render: Render, cancelled: &interrupt::Cancellation) 
         ),
         Render::Text => {
             let mut output = io::stdout().lock();
-            writeln!(output, "your Anki history · {profile} · Anki closed")?;
-            preview.write(&mut output)?;
+            let overview = overview::Overview::from_preview(&preview);
+            writeln!(
+                output,
+                "your Anki history · {profile} · {}",
+                if file.is_some() {
+                    "saved"
+                } else {
+                    "not saved yet"
+                }
+            )?;
             match file {
                 Some(file) => {
-                    writeln!(output, "file: {}", file.display())?;
-                    writeln!(output, "next: {next}")?;
+                    overview.write(&mut output, "file", &file.to_string_lossy())?;
+                    writeln!(output, "next, in Kamishibai web:")?;
+                    writeln!(output, "  choose the language pair of these cards")?;
+                    writeln!(output, "  open your account → import from kamishibai cli")?;
                 }
                 None => {
-                    writeln!(output, "save to: {}", directory.display())?;
-                    writeln!(output, "after reviewing and agreeing, run: {command}")?;
+                    overview.write(&mut output, "folder", &directory.to_string_lossy())?;
+                    writeln!(output, "to save, run: {}", invocation(args))?;
                 }
             }
         }
@@ -131,32 +150,40 @@ fn profiles(args: &ExportArgs) -> Result<Vec<PathBuf>> {
     if let Some(path) = &args.collection {
         return Ok(vec![std::env::current_dir()?.join(path)]);
     }
-    let profiles = history::discover(&history::roots())
-        .map_err(refusal)?
-        .into_iter()
-        .filter(|path| {
-            args.profile.as_ref().is_none_or(|name| {
-                path.parent()
-                    .and_then(Path::file_name)
-                    .is_some_and(|folder| folder == std::ffi::OsStr::new(name))
-            })
-        })
-        .collect::<Vec<_>>();
-    if profiles.is_empty() {
+    let roots = history::roots();
+    let mut paths = history::discover(&roots).map_err(refusal)?;
+    if paths.is_empty() {
         return Err(error::usage_hint(
-            "Anki profile not found",
-            "pass --collection PATH to a closed collection.anki2 file",
+            format!(
+                "no Anki profiles found in {}",
+                roots
+                    .iter()
+                    .map(|root| root.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            "pass --collection PATH to a collection.anki2 file",
         ));
     }
-    Ok(profiles)
+    if let Some(name) = &args.profile {
+        let available = profile_names(&paths);
+        paths.retain(|path| {
+            path.parent()
+                .and_then(Path::file_name)
+                .is_some_and(|folder| folder == std::ffi::OsStr::new(name))
+        });
+        if paths.is_empty() {
+            return Err(error::usage_hint(
+                format!("Anki profile not found: {name}"),
+                format!("choose one with --profile NAME: {available}"),
+            ));
+        }
+    }
+    Ok(paths)
 }
 
-fn collection(args: &ExportArgs) -> Result<PathBuf> {
-    let profiles = profiles(args)?;
-    if let [path] = profiles.as_slice() {
-        return Ok(std::env::current_dir()?.join(path));
-    }
-    let choices = profiles
+fn profile_names(paths: &[PathBuf]) -> String {
+    paths
         .iter()
         .map(|path| {
             path.parent()
@@ -165,33 +192,45 @@ fn collection(args: &ExportArgs) -> Result<PathBuf> {
                 .to_string_lossy()
         })
         .collect::<Vec<_>>()
-        .join(", ");
+        .join(", ")
+}
+
+fn collection(args: &ExportArgs) -> Result<PathBuf> {
+    let profiles = profiles(args)?;
+    if let [path] = profiles.as_slice() {
+        return Ok(std::env::current_dir()?.join(path));
+    }
     Err(error::usage_hint(
         "several Anki profiles found",
-        format!("choose --profile NAME ({choices}) or --collection PATH"),
+        format!(
+            "choose one with --profile NAME: {}",
+            profile_names(&profiles)
+        ),
     ))
 }
 
 fn refusal(failure: HistoryError) -> anyhow::Error {
     match failure {
-        HistoryError::Open | HistoryError::Changed => error::not_ready_hint(
+        HistoryError::Open => error::not_ready_hint(failure.to_string(), "quit Anki first"),
+        HistoryError::Changed => error::not_ready_hint(
             failure.to_string(),
-            "sync, quit Anki, run again; if WAL remains, open Anki and quit it normally",
+            "keep Anki closed until the export finishes",
         ),
         HistoryError::Selection(_) => error::usage_hint(
             failure.to_string(),
-            "choose --profile NAME, --collection PATH or an exact --deck NAME",
+            "pass an exact full deck name with --deck NAME",
         ),
-        HistoryError::Destination => error::usage_hint(
-            failure.to_string(),
-            "pass --out DIR outside the Anki profile and Anki2 folder",
-        ),
-        HistoryError::Schema(_) => error::operational_hint(
-            failure.to_string(),
-            "update kamishibai before reading this Anki schema",
-        ),
+        HistoryError::Destination => {
+            error::usage_hint(failure.to_string(), "choose another folder with --out DIR")
+        }
+        HistoryError::Schema(_) => {
+            error::operational_hint(failure.to_string(), "update kamishibai")
+        }
         HistoryError::Oversized => {
-            error::operational_hint(failure.to_string(), "select fewer decks with --deck NAME")
+            error::operational_hint(failure.to_string(), "choose fewer decks with --deck NAME")
+        }
+        HistoryError::Io(error) if error.kind() == io::ErrorKind::Interrupted => {
+            anyhow::anyhow!("export cancelled, nothing saved")
         }
         _ => error::operational_hint(
             failure.to_string(),
@@ -215,4 +254,37 @@ fn save_command(path: &Path, directory: &Path, decks: &[String]) -> String {
 
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn invocation(args: &ExportArgs) -> String {
+    let mut command = String::from("kamishibai export");
+    if let Some(profile) = &args.profile {
+        command.push_str(&format!(" --profile {}", argument(profile)));
+    }
+    if let Some(collection) = &args.collection {
+        command.push_str(&format!(
+            " --collection {}",
+            argument(&collection.to_string_lossy())
+        ));
+    }
+    for deck in &args.decks {
+        command.push_str(&format!(" --deck {}", argument(deck)));
+    }
+    if let Some(out) = &args.out {
+        command.push_str(&format!(" --out {}", argument(&out.to_string_lossy())));
+    }
+    command.push_str(" --save");
+    command
+}
+
+fn argument(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "_./:@%+=,-".contains(character))
+    {
+        value.to_owned()
+    } else {
+        quote(value)
+    }
 }

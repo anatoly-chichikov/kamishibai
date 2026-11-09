@@ -141,7 +141,7 @@ pub(super) fn save(
     }
 }
 
-fn destination(snapshot: &Snapshot, directory: &Path) -> Result<PathBuf, HistoryError> {
+pub(super) fn destination(snapshot: &Snapshot, directory: &Path) -> Result<PathBuf, HistoryError> {
     let directory = resolve(directory)?;
     let profile = &snapshot.source.profile;
     let root = profile

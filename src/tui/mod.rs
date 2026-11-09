@@ -37,7 +37,12 @@ pub use pointer::{
 };
 pub use render::draw;
 pub use screen::{KeySource, ModalKind, Screen, WelcomeFocus, WelcomeStage};
+pub(crate) use screens::banner::rows as artifact_rows;
+pub(crate) use screens::busy::loader;
 pub(crate) use screens::common::wrap_words;
+pub(crate) use screens::common::{
+    FooterHint, back_hint, dashed_line, exit_hint, footer_bar, header, status_sep,
+};
 pub use screens::common::{scroll_body_width, scroll_viewport};
 pub use screens::modals::picker_geometry;
 pub use screens::modals::translation_geometry;

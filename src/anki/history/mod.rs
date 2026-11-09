@@ -38,10 +38,10 @@ pub enum HistoryError {
     #[error("{0}")]
     Selection(String),
     /// Saving must leave the source profile and its Anki root untouched.
-    #[error("cannot save Anki history inside the Anki profile or Anki2 folder")]
+    #[error("cannot save inside the Anki folder")]
     Destination,
     /// The snapshot exceeds the web API limit; select fewer decks.
-    #[error("the Anki snapshot exceeds 64 MiB; select fewer decks")]
+    #[error("too much history for one file")]
     Oversized,
     /// An archive violated the versioned file contract.
     #[error("invalid Anki history file: {0}")]
@@ -103,6 +103,10 @@ impl ArchiveSource {
 }
 
 impl Snapshot {
+    /// Check a proposed output folder without creating directories or staging files.
+    pub fn check_destination(&self, directory: &Path) -> Result<(), HistoryError> {
+        archive::destination(self, directory).map(|_| ())
+    }
     fn new(
         manifest: Manifest,
         source: ArchiveSource,

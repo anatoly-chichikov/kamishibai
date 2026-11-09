@@ -45,7 +45,10 @@ pub(in crate::cli) enum Command {
     CachePath,
     /// Save or show persisted preferences: known language and Gemini API key.
     Config(ConfigArgs),
-    /// Export Anki history with a guided screen, or use --save for scripts.
+    /// Save your Anki cards and reviews for Kamishibai web.
+    #[command(
+        after_help = "By default the guided screen takes the decks with\nKamishibai cards and saves the file to Downloads.\n--json alone previews and saves nothing."
+    )]
     Export(super::super::export::ExportArgs),
     /// Internal: run the detached generation worker for a session.
     #[command(name = "__run", hide = true)]

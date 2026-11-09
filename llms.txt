@@ -901,12 +901,13 @@ kamishibai export --collection /tmp/anki/collection.anki2 --deck French --out /t
 In a terminal, without --save or --json, export opens its own guided screen:
 closed-Anki check (Enter retries after quitting Anki), profile selection, exact
 deck checklist (Up/Down and Space), summary with one explicit save action, saving
-progress, and the verified path with the next step: `import from kamishibai cli`
-in your Kamishibai web account.
+progress, and links to the verified folder and file. Next, choose the language
+pair in Kamishibai web, then open your account → `import from kamishibai cli`.
 Enter moves forward; Esc/Left goes back or exits without saving. During saving,
 Esc requests cancellation before publication and waits for temporary-file cleanup.
-The summary includes selected words, cards, reviews, deck names, destination and
-estimated ZIP size. Excluded history and missing media appear when relevant.
+The summary includes cards, reviews, the destination folder and any missing media.
+Ctrl+C exits from selection pages; during saving it shows cleanup and reports
+`export cancelled, nothing saved` after cancellation has drained.
 Enter on the summary is the only save confirmation; before it no output folder
 or temporary file is created.
 An empty checklist cannot advance. No generation session or preferences are used.

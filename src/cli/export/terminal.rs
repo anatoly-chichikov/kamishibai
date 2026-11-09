@@ -7,7 +7,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -19,11 +19,12 @@ use time::OffsetDateTime;
 use crate::anki::history::{
     self, AnkiProcess, DeckSummary, HistoryError, SaveGate, Snapshot, SystemAnkiProcess,
 };
+use crate::runtime::locations::compact_path;
 use crate::tui::latin_key;
 
 use super::input::{Input, TerminalInput};
 use super::interrupt::Cancellation;
-use super::screen::{Intent, Screen};
+use super::screen::{Intent, Refusal, Screen};
 use super::{ExportArgs, profiles, refusal};
 
 struct TerminalLease;
@@ -58,6 +59,7 @@ impl<W: Write> Write for ScreenWriter<W> {
 impl Drop for TerminalLease {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
+        let _ = write!(io::stdout(), "\x1b[?1000l\x1b[?1006l");
         let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
     }
 }
@@ -113,12 +115,15 @@ enum Reply {
 enum Failure {
     History(HistoryError),
     Delivery(anyhow::Error),
+    Refusal(Refusal),
 }
 
 /// Distinguish normal dismissal from lost input after all archive work is drained.
 pub(super) enum Exit {
     /// Return normally after a key or signal dismissed the screen.
     Dismissed,
+    /// Report cancellation only after the writer refused publication and drained.
+    Cancelled,
     /// Preserve the input failure even when draining the writer requested cancellation.
     InputEnded(io::Error),
 }
@@ -161,7 +166,7 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
     ));
     let mut tick = 0;
     loop {
-        if cancelled.verify().is_err() {
+        if cancelled.verify().is_err() && screen.interrupt() == Intent::Exit {
             return Ok(Exit::Dismissed);
         }
         terminal.draw(|frame| screen.draw(frame, tick))?;
@@ -178,21 +183,27 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
                         }
                         Ok(Reply::Saved(path)) => {
                             screen.saved(path);
+                            write!(terminal.backend_mut(), "\x1b[?1000h\x1b[?1006h")?;
+                            terminal.backend_mut().flush()?;
                         }
-                        Err(_) if cancelled.verify().is_err() => return Ok(Exit::Dismissed),
+                        Err(_) if cancelled.verify().is_err() => return Ok(Exit::Cancelled),
                         Err(error) => {
-                            let open = matches!(
-                                error,
-                                Failure::History(HistoryError::Open | HistoryError::Changed)
-                            );
-                            let error = match error {
-                                Failure::History(error) => refusal(error),
-                                Failure::Delivery(error) => error,
+                            let refusal = match error {
+                                Failure::History(error) => match error {
+                                    HistoryError::Open => Refusal::Open,
+                                    HistoryError::Changed => Refusal::Changed,
+                                    HistoryError::Destination => Refusal::Destination,
+                                    HistoryError::Oversized => Refusal::Oversized {
+                                        decks: screen.select().1.len(),
+                                    },
+                                    HistoryError::Schema(_) => Refusal::Schema,
+                                    HistoryError::Selection(text) => Refusal::Deck(text),
+                                    error => Refusal::Other(format!("{error:#}")),
+                                },
+                                Failure::Delivery(error) => Refusal::Other(format!("{error:#}")),
+                                Failure::Refusal(refusal) => refusal,
                             };
-                            let hint = crate::cli::error::hint_of(&error)
-                                .map(|hint| format!("\n\n{hint}"))
-                                .unwrap_or_default();
-                            screen.failed(format!("{error:#}{hint}"), open);
+                            screen.failed(refusal);
                         }
                     }
                     continue;
@@ -205,7 +216,7 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
         }
         let event = input.poll(Duration::from_millis(80));
         if cancelled.verify().is_err() {
-            return Ok(Exit::Dismissed);
+            continue;
         }
         let event = match event {
             Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
@@ -213,17 +224,28 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
             }
             result => result?,
         };
+        if let Some(Event::Mouse(mouse)) = &event
+            && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && let Some((path, reveal)) =
+                screen.link(mouse.column, mouse.row, terminal.size()?.width)
+        {
+            let path = path.to_string_lossy();
+            if reveal {
+                crate::cli::host::reveal_path(&path)?;
+            } else {
+                crate::cli::host::open_path(&path)?;
+            }
+        }
         if let Some(Event::Key(key)) = event
             && key.kind != KeyEventKind::Release
         {
-            let key = if key.modifiers.contains(KeyModifiers::CONTROL)
+            let intent = if key.modifiers.contains(KeyModifiers::CONTROL)
                 && matches!(key.code, KeyCode::Char(c) if latin_key(c) == 'c')
             {
-                KeyCode::Esc
+                screen.interrupt()
             } else {
-                key.code
+                screen.key(key.code)
             };
-            let intent = screen.key(key);
             match intent {
                 Intent::Exit => return Ok(Exit::Dismissed),
                 Intent::Cancel => cancelled.cancel(),
@@ -277,6 +299,31 @@ fn perform(
     cancelled: Cancellation,
 ) -> Result<Reply, Failure> {
     if intent == Intent::Check {
+        if args.collection.is_none() {
+            let roots = history::roots();
+            let paths = history::discover(&roots)?;
+            if paths.is_empty() {
+                return Err(Failure::Refusal(Refusal::NoProfiles {
+                    roots: roots
+                        .iter()
+                        .map(|root| compact_path(root))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                }));
+            }
+            if let Some(name) = &args.profile
+                && !paths.iter().any(|path| {
+                    path.parent()
+                        .and_then(Path::file_name)
+                        .is_some_and(|folder| folder == std::ffi::OsStr::new(name))
+                })
+            {
+                return Err(Failure::Refusal(Refusal::NoProfile {
+                    name: name.clone(),
+                    available: super::profile_names(&paths),
+                }));
+            }
+        }
         let paths = profiles(args)?;
         if paths.len() == 1 {
             history::closed(&paths[0], &SystemAnkiProcess)?;
@@ -303,6 +350,7 @@ fn perform(
                 &history::application_version(),
             )?;
             cancelled.verify()?;
+            snapshot.check_destination(directory)?;
             Ok(Reply::Reviewed(Box::new(Prepared { snapshot })))
         }
         Intent::Save => {

@@ -1084,6 +1084,25 @@ impl ExportTerminal {
         }
     }
 
+    /// Walk to a named visible deck instead of assuming its sorted position.
+    fn focus(&mut self, name: &str) {
+        let screen = self.surface.screen_chars_to_string();
+        let index = screen
+            .lines()
+            .skip(3)
+            .take(18)
+            .filter(|line| line.contains(" card"))
+            .position(|line| {
+                line.trim_start_matches([' ', '✓'])
+                    .strip_prefix(name)
+                    .is_some_and(|tail| tail.starts_with(' '))
+            })
+            .expect("invariant: the requested deck is visible");
+        for _ in 0..index {
+            self.send("\x1b[B").unwrap();
+        }
+    }
+
     /// Wait for the process to release its terminal after exit or cancellation.
     fn finish(&mut self) -> Result<expectrl::Captures, expectrl::Error> {
         use expectrl::Expect;
@@ -1140,21 +1159,154 @@ fn export_terminal_cannot_write_before_confirmation() {
     let before = inventory(path.parent().unwrap());
     let out = root.path().join("not-created");
     let mut terminal = export_terminal(root.path(), &out);
-    terminal.expect("Anki is closed").unwrap();
+    terminal.expect("[Enter] choose decks").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("02 choose decks").unwrap();
+    terminal.expect("[Space] select").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("review your export").unwrap();
+    terminal.expect("check what goes into the file").unwrap();
     let absent = !out.exists();
     terminal.send("\x1b").unwrap();
-    terminal.expect("02 choose decks").unwrap();
+    terminal.expect("[Space] select").unwrap();
     terminal.send("\x1b").unwrap();
-    terminal.expect("Anki is closed").unwrap();
+    terminal.expect("[Enter] choose decks").unwrap();
     terminal.send("\x1b").unwrap();
     terminal.finish().unwrap();
     assert!(
         absent && !out.exists() && before == inventory(path.parent().unwrap()),
         "back or exit wrote an export or changed the profile"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn control_c_cannot_return_from_decks_to_profiles() {
+    let root = TempDir::new().unwrap();
+    collection(root.path());
+    let out = root.path().join("not-created");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("[Enter] choose decks").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("[Space] select").unwrap();
+    terminal.send("\x03").unwrap();
+    assert!(
+        terminal.finish().is_ok() && !out.exists(),
+        "Ctrl+C returned to profiles or wrote output"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn control_c_cannot_return_from_summary_to_decks() {
+    let root = TempDir::new().unwrap();
+    collection(root.path());
+    let out = root.path().join("not-created");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("[Enter] choose decks").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("[Space] select").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("[Enter] save").unwrap();
+    terminal.send("\x03").unwrap();
+    assert!(
+        terminal.finish().is_ok() && !out.exists(),
+        "Ctrl+C returned to decks or wrote output"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn a_profile_destination_cannot_offer_save_on_the_summary() {
+    let root = TempDir::new().unwrap();
+    let path = collection(root.path());
+    let profile = path.parent().unwrap();
+    let before = inventory(profile);
+    let mut terminal = export_terminal(root.path(), profile);
+    terminal.expect("[Enter] choose decks").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("[Space] select").unwrap();
+    terminal.send("\r").unwrap();
+    let refused = terminal.expect("can't save inside the anki folder").is_ok();
+    terminal.send("\x03").unwrap();
+    terminal.finish().unwrap();
+    assert!(
+        refused && before == inventory(profile),
+        "the summary offered saving inside the profile or changed Anki"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn cancelling_a_save_cannot_hide_cleanup_or_its_outcome() {
+    let root = TempDir::new().unwrap();
+    slow_collection(root.path());
+    let out = root.path().join("export");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("[Enter] choose decks").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("[Space] select").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("[Enter] save").unwrap();
+    terminal.send("\r").unwrap();
+    staged(&out);
+    terminal.send("\x03").unwrap();
+    let cleanup = terminal.expect("removing the unfinished file").is_ok();
+    let outcome = terminal.expect("export cancelled, nothing saved").is_ok();
+    terminal.finish().unwrap();
+    assert!(
+        cleanup && outcome && fs::read_dir(out).unwrap().next().is_none(),
+        "cancellation hid cleanup, lost the outcome or left an archive"
+    );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn saved_file_links_cannot_unpack_the_archive() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = TempDir::new().unwrap();
+    collection(root.path());
+    let probes = root.path().join("no-system-probes");
+    fs::create_dir(&probes).unwrap();
+    let log = root.path().join("opened");
+    let executable = probes.join("open");
+    fs::write(
+        &executable,
+        format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n", log.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    let out = root.path().join("export");
+    let mut terminal = export_terminal(root.path(), &out);
+    terminal.expect("[Enter] choose decks").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("[Space] select").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("[Enter] save").unwrap();
+    terminal.send("\r").unwrap();
+    terminal.expect("import from kamishibai cli").unwrap();
+    for (keys, count) in [
+        ("\x1b[<0;9;4M\x1b[<0;9;4m", 1),
+        ("\x1b[<0;9;5M\x1b[<0;9;5m", 2),
+    ] {
+        terminal.send(keys).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while std::time::Instant::now() < deadline
+            && !fs::read_to_string(&log).is_ok_and(|text| text.lines().count() == count)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    terminal.send("\r").unwrap();
+    terminal.finish().unwrap();
+    let opened = fs::read_to_string(&log).unwrap_or_default();
+    let archive = fs::read_dir(&out).unwrap().next().unwrap().unwrap().path();
+    assert_eq!(
+        opened,
+        format!(
+            "{}\n-R {}\n",
+            out.canonicalize().unwrap().display(),
+            archive.canonicalize().unwrap().display()
+        ),
+        "saved links ignored the labels or opened the ZIP instead of revealing it"
     );
 }
 
@@ -1166,15 +1318,16 @@ fn export_terminal_saves_the_reviewed_decks_after_confirmation() {
     let before = inventory(path.parent().unwrap());
     let out = root.path().join("export");
     let mut terminal = export_terminal(root.path(), &out);
-    terminal.expect("Anki is closed").unwrap();
+    terminal.expect("[Enter] choose decks").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("02 choose decks").unwrap();
+    terminal.expect("[Space] select").unwrap();
+    terminal.focus("French");
     terminal.send(" ").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("review your export").unwrap();
+    terminal.expect("check what goes into the file").unwrap();
     let absent = !out.exists();
     terminal.send("\r").unwrap();
-    terminal.expect("export saved").unwrap();
+    terminal.expect("your file is ready").unwrap();
     terminal.expect("import from kamishibai cli").unwrap();
     terminal.send("\r").unwrap();
     terminal.finish().unwrap();
@@ -1196,10 +1349,10 @@ fn export_terminal_rechecks_anki_after_the_user_closes_it() {
     fs::write(&wal, []).unwrap();
     let out = root.path().join("export");
     let mut terminal = export_terminal(root.path(), &out);
-    terminal.expect("close Anki").unwrap();
+    terminal.expect("close anki first").unwrap();
     fs::remove_file(wal).unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("Anki is closed").unwrap();
+    terminal.expect("[Enter] choose decks").unwrap();
     terminal.send("\x1b").unwrap();
     terminal.finish().unwrap();
     assert!(!out.exists(), "rechecking closed Anki wrote an export");
@@ -1287,14 +1440,14 @@ fn export_terminal_cannot_save_if_anki_reopens_after_review() {
     let path = collection(root.path());
     let out = root.path().join("absent-output");
     let mut terminal = export_terminal(root.path(), &out);
-    terminal.expect("Anki is closed").unwrap();
+    terminal.expect("[Enter] choose decks").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("02 choose decks").unwrap();
+    terminal.expect("[Space] select").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("review your export").unwrap();
+    terminal.expect("check what goes into the file").unwrap();
     fs::write(path.with_file_name("collection.anki2-wal"), []).unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("close Anki").unwrap();
+    terminal.expect("close anki first").unwrap();
     terminal.send("\x1b").unwrap();
     terminal.finish().unwrap();
     assert!(
@@ -1310,17 +1463,17 @@ fn export_terminal_cannot_save_a_changed_closed_collection() {
     let path = collection(root.path());
     let out = root.path().join("absent-output");
     let mut terminal = export_terminal(root.path(), &out);
-    terminal.expect("Anki is closed").unwrap();
+    terminal.expect("[Enter] choose decks").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("02 choose decks").unwrap();
+    terminal.expect("[Space] select").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("review your export").unwrap();
+    terminal.expect("check what goes into the file").unwrap();
     Connection::open(&path)
         .unwrap()
         .execute("UPDATE cards SET ivl=47 WHERE id=211", [])
         .unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("close Anki").unwrap();
+    terminal.expect("close anki first").unwrap();
     terminal.send("\x1b").unwrap();
     terminal.finish().unwrap();
     assert!(
@@ -1348,6 +1501,39 @@ fn export_help_explains_the_screen_and_script_save() {
 
 #[test]
 #[cfg(unix)]
+fn a_console_preview_cannot_hide_the_save_decision_in_technical_counts() {
+    let root = TempDir::new().unwrap();
+    collection(root.path());
+    let out = root.path().join("not-created");
+    let output = terminal_command(root.path(), &out).output().unwrap();
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        output.status.success()
+            && text.contains("cards     2\nreviews   3\nfolder    ")
+            && text.contains("to save, run: kamishibai export --out ")
+            && !text.contains("references")
+            && !text.contains("mistakes")
+            && !out.exists(),
+        "the preview hid the save decision in technical counts or wrote output"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn a_saved_console_file_cannot_omit_the_web_language_choice() {
+    let root = TempDir::new().unwrap();
+    collection(root.path());
+    let out = root.path().join("export");
+    let output = terminal_command(root.path(), &out)
+        .arg("--save")
+        .output()
+        .unwrap();
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(output.status.success() && text.contains(" · saved\n") && text.contains("file      ") && text.contains("choose the language pair of these cards\n  open your account → import from kamishibai cli"), "the console receipt lost its file or language-pair step");
+}
+
+#[test]
+#[cfg(unix)]
 fn export_terminal_cannot_be_blocked_by_an_unselected_stale_profile() {
     let root = TempDir::new().unwrap();
     let path = collection(root.path());
@@ -1357,11 +1543,11 @@ fn export_terminal_cannot_be_blocked_by_an_unselected_stale_profile() {
     fs::write(other.join("collection.anki2-wal"), []).unwrap();
     let out = root.path().join("absent-output");
     let mut terminal = export_terminal(root.path(), &out);
-    terminal.expect("Anki is closed").unwrap();
+    terminal.expect("[Enter] choose decks").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("02 choose decks").unwrap();
+    terminal.expect("[Space] select").unwrap();
     terminal.send("\x1b").unwrap();
-    terminal.expect("Anki is closed").unwrap();
+    terminal.expect("[Enter] choose decks").unwrap();
     terminal.send("\x1b").unwrap();
     terminal.finish().unwrap();
     assert!(
@@ -1600,11 +1786,11 @@ fn terminal_sighup_cannot_leave_an_archive_during_save() {
     let before = fs::read(&path).unwrap();
     let out = root.path().join("export");
     let mut terminal = export_terminal(root.path(), &out);
-    terminal.expect("Anki is closed").unwrap();
+    terminal.expect("[Enter] choose decks").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("02 choose decks").unwrap();
+    terminal.expect("[Space] select").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("review your export").unwrap();
+    terminal.expect("check what goes into the file").unwrap();
     terminal.send("\r").unwrap();
     staged(&out);
     terminal
@@ -1666,7 +1852,11 @@ fn split_terminal(root: &Path, out: &Path) -> (fs::File, ExportTerminal) {
 #[cfg(unix)]
 fn split_save(input: &mut fs::File, terminal: &mut ExportTerminal) {
     use std::io::Write;
-    for phrase in ["Anki is closed", "02 choose decks", "review your export"] {
+    for phrase in [
+        "[Enter] choose decks",
+        "[Space] select",
+        "check what goes into the file",
+    ] {
         terminal.expect(phrase).unwrap();
         input.write_all(b"\r").unwrap();
     }
@@ -1722,7 +1912,7 @@ fn input_eof_cannot_remove_an_already_published_export() {
     let out = root.path().join("export");
     let (mut input, mut terminal) = split_terminal(root.path(), &out);
     split_save(&mut input, &mut terminal);
-    terminal.expect("export saved").unwrap();
+    terminal.expect("your file is ready").unwrap();
     let archive = fs::read_dir(&out).unwrap().next().unwrap().unwrap().path();
     let bytes = fs::read(&archive).unwrap();
     let started = std::time::Instant::now();
