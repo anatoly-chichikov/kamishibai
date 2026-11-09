@@ -224,7 +224,11 @@ impl Screen {
 
     fn back(&mut self) -> Intent {
         match self.page {
-            Page::Summary(_) | Page::Stopped(Stop { step: 3, .. }) => self.show(Page::Decks),
+            Page::Summary(_)
+            | Page::Stopped(Stop {
+                refusal: Refusal::Destination | Refusal::Other(_),
+                step: 3,
+            }) => self.show(Page::Decks),
             Page::Decks => self.show(Page::Profile),
             Page::Saving(_) | Page::Cancelling(_) => return self.interrupt(),
             _ => return Intent::Exit,
@@ -534,7 +538,13 @@ impl Screen {
         let navigation = || FooterHint::ghost("↑↓", "nav");
         let exit = || exit_hint("Esc", "exit");
         let back = || {
-            if self.step() == 3 {
+            if matches!(
+                self.page,
+                Page::Stopped(Stop {
+                    refusal: Refusal::Destination | Refusal::Other(_),
+                    step: 3,
+                })
+            ) {
                 back_hint()
             } else {
                 exit()
