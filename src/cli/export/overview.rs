@@ -44,21 +44,21 @@ impl Overview {
 
     /// Render the facts needed for the explicit save decision.
     pub(super) fn summary(&self, folder: &str, width: u16) -> Vec<Line<'static>> {
-        let mut lines = wrapped(
-            "saves these cards with their review history into one file for kamishibai web",
-            width,
-            Ink::Detail,
-        );
-        lines.push(Line::default());
-        lines.push(fact("cards", number(self.counts.cards)));
-        lines.push(fact("reviews", number(self.counts.reviews)));
+        let mut lines = vec![
+            fact("cards", number(self.counts.cards)),
+            fact("reviews", number(self.counts.reviews)),
+        ];
         let paths = path_rows(folder, usize::from(width.saturating_sub(10)));
         for (index, path) in paths.into_iter().enumerate() {
             lines.push(fact(if index == 0 { "folder" } else { "" }, path));
         }
         if !self.missing_media.is_empty() {
             lines.push(Line::default());
-            for (index, line) in self.missing("anki").into_iter().enumerate() {
+            for (index, line) in self
+                .missing("anki", "kamishibai web")
+                .into_iter()
+                .enumerate()
+            {
                 lines.extend(wrapped(
                     &line,
                     width,
@@ -137,7 +137,7 @@ impl Overview {
         writeln!(output, "reviews   {}", number(self.counts.reviews))?;
         writeln!(output, "{location:<10}{path}")?;
         if !self.missing_media.is_empty() {
-            let lines = self.missing("Anki");
+            let lines = self.missing("Anki", "Kamishibai web");
             writeln!(output, "{}", lines[0])?;
             for name in &self.missing_media {
                 writeln!(output, "    {name}")?;
@@ -149,23 +149,17 @@ impl Overview {
         Ok(())
     }
 
-    fn missing(&self, anki: &str) -> Vec<String> {
+    fn missing(&self, anki: &str, web: &str) -> Vec<String> {
         let count = self.missing_media.len();
-        let (noun, verb, pronoun) = if count == 1 {
-            ("sound or picture", "is", "it")
+        let (noun, verb) = if count == 1 {
+            ("picture or sound", "is")
         } else {
-            ("sounds or pictures", "are", "they")
+            ("pictures or sounds", "are")
         };
         vec![
-            format!("✗ {} {noun} {verb} missing in {anki}", number(count)),
-            format!(
-                "  the web import stops until {pronoun} {} back",
-                if count == 1 { "is" } else { "are" }
-            ),
-            format!(
-                "  check {} in {anki}: Tools → Check Media",
-                if count == 1 { "it" } else { "them" }
-            ),
+            format!("✗ {} {noun} {verb} missing", number(count)),
+            format!("  {web} won't import this file"),
+            format!("  in {anki}: Tools → Check Media"),
         ]
     }
 }
@@ -382,8 +376,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert_eq!(
-            text,
-            "saves these cards with their review history into one file for kamishibai web\n\ncards     1,216\nreviews   11,854\nfolder    ~/Downloads",
+            text, "cards     1,216\nreviews   11,854\nfolder    ~/Downloads",
             "the decision summary lost its facts or added empty bookkeeping"
         );
     }
@@ -397,8 +390,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            text.contains("1 sound or picture is missing in anki")
-                && text.contains("Tools → Check Media"),
+            text.contains("1 picture or sound is missing") && text.contains("Tools → Check Media"),
             "the summary hid the import blocker or its repair action"
         );
     }

@@ -47,7 +47,7 @@ pub(in crate::cli) enum Command {
     Config(ConfigArgs),
     /// Save your Anki cards and reviews for Kamishibai web.
     #[command(
-        after_help = "By default the guided screen takes the decks with\nKamishibai cards and saves the file to Downloads.\n--json alone previews and saves nothing."
+        after_help = "Without --deck: decks with Kamishibai cards.\nWithout --out: your Downloads folder.\n--json without --save saves nothing."
     )]
     Export(super::super::export::ExportArgs),
     /// Internal: run the detached generation worker for a session.

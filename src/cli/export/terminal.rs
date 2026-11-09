@@ -188,28 +188,14 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
                         }
                         Err(_) if cancelled.verify().is_err() => return Ok(Exit::Cancelled),
                         Err(error) => {
-                            let refusal = match error {
-                                Failure::History(error) => match error {
-                                    HistoryError::Open => Refusal::Open,
-                                    HistoryError::Changed => Refusal::Changed,
-                                    HistoryError::Destination => Refusal::Destination,
-                                    HistoryError::Oversized => Refusal::Oversized {
-                                        decks: screen.select().1.len(),
-                                    },
-                                    HistoryError::Schema(_) => Refusal::Schema,
-                                    HistoryError::Selection(text) => Refusal::Deck(text),
-                                    error => Refusal::Other(format!("{error:#}")),
-                                },
-                                Failure::Delivery(error) => Refusal::Other(format!("{error:#}")),
-                                Failure::Refusal(refusal) => refusal,
-                            };
+                            let refusal = stopped(error, &screen);
                             screen.failed(refusal);
                         }
                     }
                     continue;
                 }
                 Err(TryRecvError::Disconnected) => {
-                    return Err(anyhow!("export worker ended without a result"));
+                    return Err(anyhow!("export stopped unexpectedly"));
                 }
                 Err(TryRecvError::Empty) => {}
             }
@@ -288,6 +274,25 @@ fn start(
         let _ = sender.send(result);
     });
     Job::new(receiver, Some(worker), cancelled)
+}
+
+fn stopped(error: Failure, screen: &Screen) -> Refusal {
+    match error {
+        Failure::History(error) => match error {
+            HistoryError::Open => Refusal::Open,
+            HistoryError::Changed => Refusal::Changed,
+            HistoryError::Destination => Refusal::Destination,
+            HistoryError::Oversized => Refusal::Oversized {
+                decks: screen.select().1.len(),
+            },
+            HistoryError::Schema(_) => Refusal::Schema,
+            HistoryError::Selection(text) => Refusal::Deck(text),
+            HistoryError::Collection(text) => Refusal::Collection(text),
+            error => Refusal::Other(format!("{error:#}")),
+        },
+        Failure::Delivery(error) => Refusal::Other(format!("{error:#}")),
+        Failure::Refusal(refusal) => refusal,
+    }
 }
 
 fn perform(
@@ -370,6 +375,34 @@ fn perform(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_collection_cannot_suggest_decks_on_screen() {
+        let root = tempfile::tempdir().unwrap();
+        let failure = history::read(
+            &root.path().join("absent-973.anki2"),
+            &[],
+            &SystemAnkiProcess,
+            "test",
+        )
+        .err()
+        .unwrap();
+        let mut screen = Screen::from_directory(root.path().join("output"));
+        screen.failed(stopped(Failure::History(failure), &screen));
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| screen.draw(frame, 0)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(
+            rendered.contains("Anki collection not found") && !rendered.contains("--deck"),
+            "a missing collection incorrectly suggested decks on screen: {rendered}"
+        );
+    }
 
     struct ClosedDisplay;
 

@@ -1,6 +1,5 @@
 ---
 source: src/cli/export/screen.rs
-assertion_line: 756
 expression: rendered
 ---
 STEP 1
@@ -45,10 +44,10 @@ STEP 2
                                                                                                                         
      export from anki   close anki first                                                                                
                                                                                                                         
-    anki is open or did not close properly                                                                              
+    anki is open or has crashed                                                                                         
                                                                                                                         
-    sync in anki                                                                                                        
-    then quit anki                                                                                                      
+    1. sync in anki                                                                                                     
+    2. close anki                                                                                                       
                                                                                                                         
                                                                                                                         
                                                                                                                         
@@ -157,7 +156,7 @@ STEP 4
 
 STEP 5
                                                                                                                         
-     export from anki   choose the decks to take                                                                        
+     export from anki   choose decks to export                                                                          
                                                                                                                         
     ✓ French     1 card                                                                                                 
         Daily   0 cards                                                                                                 
@@ -191,11 +190,11 @@ STEP 5
                                                                                                                         
                                                                                                                         
                                                                                                                         
-    step 2/3  1 card                                              [Enter] take  [Space] select  [↑↓] nav  [Esc] back    
+    step 2/3  1 card                                              [Enter] next  [Space] select  [↑↓] nav  [Esc] back    
 
 STEP 6
                                                                                                                         
-     export from anki   choose the decks to take                                                                        
+     export from anki   choose decks to export                                                                          
                                                                                                                         
     ✓ French     1 card                                                                                                 
         Daily   0 cards                                                                                                 
@@ -233,13 +232,13 @@ STEP 6
 
 STEP 7
                                                                                                                         
-     export from anki   check what goes into the file                                                                   
-                                                                                                                        
-    saves these cards with their review history into one file for kamishibai web                                        
+     export from anki   save for kamishibai web                                                                         
                                                                                                                         
     cards     2                                                                                                         
     reviews   3                                                                                                         
     folder    /Users/learner/Downloads                                                                                  
+                                                                                                                        
+                                                                                                                        
                                                                                                                         
                                                                                                                         
                                                                                                                         
@@ -273,11 +272,11 @@ STEP 8
                                                                                                                         
      export from anki   saving your file                                                                                
                                                                                                                         
-    saves these cards with their review history into one file for kamishibai web                                        
-                                                                                                                        
     cards     2                                                                                                         
     reviews   3                                                                                                         
     folder    /Users/learner/Downloads                                                                                  
+                                                                                                                        
+                                                                                                                        
                                                                                                                         
                                                                                                                         
                                                                                                                         
@@ -309,9 +308,7 @@ STEP 8
 
 STEP 9
                                                                                                                         
-     export from anki   cleaning up                                                                                     
-                                                                                                                        
-    saves these cards with their review history into one file for kamishibai web                                        
+     export from anki   cancelling the save                                                                             
                                                                                                                         
     cards     2                                                                                                         
     reviews   3                                                                                                         
@@ -323,7 +320,9 @@ STEP 9
                                                                                                                         
                                                                                                                         
                                                                                                                         
-                                   ┌─ saving ───────────────────────────────────────┐                                   
+                                                                                                                        
+                                                                                                                        
+                                   ┌─ cancelling ───────────────────────────────────┐                                   
                                    │                                                │                                   
                                    │  ◐  removing the unfinished file               │                                   
                                    │                                                │                                   
@@ -356,9 +355,9 @@ STEP 10
     ✓ saved 2 cards and 3 reviews                                                                                       
                                                                                                                         
     next, in kamishibai web                                                                                             
-      choose the language pair of these cards                                                                           
-      open your account → import from kamishibai cli                                                                    
-                                                                                                                        
+      1. choose your language pair                                                                                      
+      2. open your account                                                                                              
+      3. import from kamishibai cli                                                                                     
                                                                                                                         
                                                                                                                         
                                                                                                                         

@@ -159,7 +159,7 @@ pub fn read(
     application: &str,
 ) -> Result<Snapshot, HistoryError> {
     if !path.is_file() {
-        return Err(HistoryError::Selection(format!(
+        return Err(HistoryError::Collection(format!(
             "Anki collection not found at {}",
             path.display()
         )));
@@ -271,9 +271,9 @@ pub fn closed(path: &Path, process: &dyn AnkiProcess) -> Result<(), HistoryError
 }
 
 fn uri(path: &Path) -> Result<String, HistoryError> {
-    let name = path
-        .to_str()
-        .ok_or_else(|| HistoryError::Selection("collection path must be valid UTF-8".into()))?;
+    let name = path.to_str().ok_or_else(|| {
+        HistoryError::Collection("the collection path has unsupported characters".into())
+    })?;
     let encoded: String = name
         .bytes()
         .map(|byte| match byte {
@@ -290,7 +290,7 @@ fn selection(manifest: &Manifest, names: &[String]) -> Result<BTreeSet<i64>, His
     let selected = selected(manifest, names)?;
     if selected.is_empty() {
         return Err(HistoryError::Selection(
-            "no Anki decks selected; pass --deck NAME".into(),
+            "no decks with Kamishibai cards".into(),
         ));
     }
     Ok(selected)

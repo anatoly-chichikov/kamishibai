@@ -26,37 +26,40 @@ pub use summary::{DeckSummary, Preview};
 #[derive(Debug, thiserror::Error)]
 pub enum HistoryError {
     /// Anki or its WAL still owns the collection; sync and quit before retrying.
-    #[error("Anki is open or did not close properly")]
+    #[error("Anki is open or has crashed")]
     Open,
     /// Collection bytes changed during the read; repeat after quitting Anki.
-    #[error("the Anki collection changed while it was being read")]
+    #[error("the Anki collection changed during the export")]
     Changed,
     /// The wire reader supports schema 18 only; update the application.
-    #[error("Anki collection schema {0} is not supported")]
+    #[error("kamishibai can't read Anki format {0} yet")]
     Schema(i64),
-    /// A source or deck selection needs to be made explicitly.
+    /// A collection path cannot be read as selected.
+    #[error("{0}")]
+    Collection(String),
+    /// A deck selection needs to be made explicitly.
     #[error("{0}")]
     Selection(String),
     /// Saving must leave the source profile and its Anki root untouched.
     #[error("cannot save inside the Anki folder")]
     Destination,
     /// The snapshot exceeds the web API limit; select fewer decks.
-    #[error("too much history for one file")]
+    #[error("too much to export at once")]
     Oversized,
     /// An archive violated the versioned file contract.
-    #[error("invalid Anki history file: {0}")]
+    #[error("the file failed its check: {0}")]
     Invalid(String),
     /// Filesystem or process inspection failed.
-    #[error("Anki history I/O failed: {0}")]
+    #[error(transparent)]
     Io(#[from] std::io::Error),
     /// SQLite could not read the collection.
     #[error("cannot read the Anki collection: {0}")]
     Sql(#[from] rusqlite::Error),
     /// JSON did not match the frozen snapshot shape.
-    #[error("invalid Anki history JSON: {0}")]
+    #[error("invalid file data: {0}")]
     Json(#[from] serde_json::Error),
     /// ZIP reading or writing failed.
-    #[error("cannot read or write the Anki history archive: {0}")]
+    #[error("cannot read or write the file: {0}")]
     Zip(#[from] zip::result::ZipError),
 }
 

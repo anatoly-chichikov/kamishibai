@@ -49,7 +49,7 @@ FIRST-TIME HEADLESS SETUP:
 
 EXAMPLES:
   kamishibai                                       open the interactive TUI
-  kamishibai export                                export Anki history in a guided screen
+  kamishibai export                                Save your Anki cards and reviews for Kamishibai web
   kamishibai export --save --json                  save Anki history without the screen
   kamishibai agent-contract                        print this binary's agent contract
   kamishibai new --word bank --learning EN --json  understand words, create a session
@@ -127,7 +127,7 @@ struct Cli {
     /// A prebuilt cards JSON path opens the interactive TUI on those cards.
     #[arg(value_name = "WORDS")]
     input: Option<String>,
-    /// Print the result as JSON.
+    /// Print JSON for scripts and agents.
     #[arg(long, global = true)]
     json: bool,
     #[command(subcommand)]

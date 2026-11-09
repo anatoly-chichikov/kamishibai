@@ -1,6 +1,5 @@
 ---
 source: src/cli/export/screen.rs
-assertion_line: 766
 expression: rendered
 ---
                                           
@@ -23,10 +22,10 @@ expression: rendered
                                           
   export from anki   close anki first     
                                           
- anki is open or did not close properly   
+ anki is open or has crashed              
                                           
- sync in anki                             
- then quit anki                           
+ 1. sync in anki                          
+ 2. close anki                            
                                           
                                           
                                           
@@ -72,7 +71,7 @@ expression: rendered
  step 1/3                      [Esc] exit 
 
                                           
-  export from anki   choose the decks to  
+  export from anki   choose decks to expo 
                                           
  ✓ French     1 card                      
      Daily   0 cards                      
@@ -86,10 +85,10 @@ expression: rendered
                                           
                                           
                                           
- step 2/3  1 card            [Enter] take 
+ step 2/3  1 card            [Enter] next 
 
                                           
-  export from anki   choose the decks to  
+  export from anki   choose decks to expo 
                                           
  ✓ French     1 card                      
      Daily   0 cards                      
@@ -106,14 +105,14 @@ expression: rendered
  step 2/3  1 card              [Esc] exit 
 
                                           
-  export from anki   check what goes into 
-                                          
- saves these cards with their review      
- history into one file for kamishibai web 
+  export from anki   save for kamishibai  
                                           
  cards     2                              
  reviews   3                              
  folder    /Users/learner/Downloads       
+                                          
+                                          
+                                          
                                           
                                           
                                           
@@ -125,8 +124,8 @@ expression: rendered
                                           
   export from anki   saving your file     
                                           
- saves these cards with their review      
- history into one file for kamishibai web 
+ cards     2                              
+ reviews   3                              
 ┌─ saving ───────────────────────────────┐
 │                                        │
 │  ◐  writing and checking your file     │
@@ -140,11 +139,11 @@ expression: rendered
  step 3/3                    [Esc] cancel 
 
                                           
-  export from anki   cleaning up          
+  export from anki   cancelling the save  
                                           
- saves these cards with their review      
- history into one file for kamishibai web 
-┌─ saving ───────────────────────────────┐
+ cards     2                              
+ reviews   3                              
+┌─ cancelling ───────────────────────────┐
 │                                        │
 │  ◐  removing the unfinished file       │
 │                                        │
@@ -166,9 +165,9 @@ expression: rendered
  ✓ saved 2 cards and 3 reviews            
                                           
  next, in kamishibai web                  
-   choose the language pair of these      
-   cards                                  
-   open your account → import from        
+   1. choose your language pair           
+   2. open your account                   
+   3. import from kamishibai cli          
                                           
                                           
  step 3/3                    [Enter] exit 

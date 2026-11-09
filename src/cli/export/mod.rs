@@ -29,7 +29,7 @@ pub(super) struct ExportArgs {
     /// Path to a collection.anki2 file.
     #[arg(long, value_name = "PATH")]
     pub(super) collection: Option<PathBuf>,
-    /// Exact deck name; repeat for more.
+    /// Full deck name (repeatable).
     #[arg(long = "deck", value_name = "NAME")]
     pub(super) decks: Vec<String>,
     /// Folder for the file.
@@ -71,7 +71,7 @@ fn directory(args: &ExportArgs) -> Result<PathBuf> {
         .or_else(dirs::download_dir)
         .ok_or_else(|| {
             error::usage_hint(
-                "Downloads directory is unavailable",
+                "no Downloads folder found",
                 "choose a folder with --out DIR",
             )
         })?;
@@ -109,7 +109,7 @@ fn anki(args: &ExportArgs, render: Render, cancelled: &interrupt::Cancellation) 
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     let command = save_command(&path, &directory, &args.decks);
-    let next = "in the web: import from kamishibai cli";
+    let next = "in Kamishibai web: choose your language pair → open your account → import from kamishibai cli";
     match render {
         Render::Json => println!(
             "{}",
@@ -122,19 +122,16 @@ fn anki(args: &ExportArgs, render: Render, cancelled: &interrupt::Cancellation) 
             let overview = overview::Overview::from_preview(&preview);
             writeln!(
                 output,
-                "your Anki history · {profile} · {}",
-                if file.is_some() {
-                    "saved"
-                } else {
-                    "not saved yet"
-                }
+                "export from Anki · {profile} · {}",
+                if file.is_some() { "saved" } else { "not saved" }
             )?;
             match file {
                 Some(file) => {
                     overview.write(&mut output, "file", &file.to_string_lossy())?;
-                    writeln!(output, "next, in Kamishibai web:")?;
-                    writeln!(output, "  choose the language pair of these cards")?;
-                    writeln!(output, "  open your account → import from kamishibai cli")?;
+                    writeln!(output, "next, in Kamishibai web")?;
+                    writeln!(output, "  1. choose your language pair")?;
+                    writeln!(output, "  2. open your account")?;
+                    writeln!(output, "  3. import from kamishibai cli")?;
                 }
                 None => {
                     overview.write(&mut output, "folder", &directory.to_string_lossy())?;
@@ -162,7 +159,7 @@ fn profiles(args: &ExportArgs) -> Result<Vec<PathBuf>> {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            "pass --collection PATH to a collection.anki2 file",
+            "choose your collection.anki2 with --collection PATH",
         ));
     }
     if let Some(name) = &args.profile {
@@ -211,15 +208,14 @@ fn collection(args: &ExportArgs) -> Result<PathBuf> {
 
 fn refusal(failure: HistoryError) -> anyhow::Error {
     match failure {
-        HistoryError::Open => error::not_ready_hint(failure.to_string(), "quit Anki first"),
-        HistoryError::Changed => error::not_ready_hint(
-            failure.to_string(),
-            "keep Anki closed until the export finishes",
-        ),
-        HistoryError::Selection(_) => error::usage_hint(
-            failure.to_string(),
-            "pass an exact full deck name with --deck NAME",
-        ),
+        HistoryError::Open => error::not_ready_hint(failure.to_string(), "close Anki first"),
+        HistoryError::Changed => {
+            error::not_ready_hint(failure.to_string(), "keep Anki closed while exporting")
+        }
+        HistoryError::Selection(_) => {
+            error::usage_hint(failure.to_string(), "use the full deck name with --deck")
+        }
+        HistoryError::Collection(_) => error::usage(failure.to_string()),
         HistoryError::Destination => {
             error::usage_hint(failure.to_string(), "choose another folder with --out DIR")
         }
@@ -232,10 +228,7 @@ fn refusal(failure: HistoryError) -> anyhow::Error {
         HistoryError::Io(error) if error.kind() == io::ErrorKind::Interrupted => {
             anyhow::anyhow!("export cancelled, nothing saved")
         }
-        _ => error::operational_hint(
-            failure.to_string(),
-            "check the collection and output directory, then run again",
-        ),
+        _ => error::operational_hint(failure.to_string(), "check the Anki and output folders"),
     }
 }
 

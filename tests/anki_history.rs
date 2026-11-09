@@ -94,6 +94,29 @@ fn command(root: &Path, out: &Path) -> Command {
 }
 
 #[test]
+fn a_missing_collection_cannot_suggest_choosing_decks() {
+    let root = TempDir::new().unwrap();
+    let output = command(root.path(), &root.path().join("output"))
+        .arg("--collection")
+        .arg(root.path().join("absent-739.anki2"))
+        .output()
+        .unwrap();
+    let doc: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        output.status.code() == Some(2)
+            && doc["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Anki collection not found")
+            && !doc["error"]["hint"]
+                .as_str()
+                .unwrap_or("")
+                .contains("--deck"),
+        "a missing collection incorrectly suggested choosing decks: {doc}"
+    );
+}
+
+#[test]
 fn preview_cannot_write_or_change_the_profile() {
     let root = TempDir::new().unwrap();
     collection(root.path());
@@ -1163,7 +1186,7 @@ fn export_terminal_cannot_write_before_confirmation() {
     terminal.send("\r").unwrap();
     terminal.expect("[Space] select").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("check what goes into the file").unwrap();
+    terminal.expect("save for kamishibai web").unwrap();
     let absent = !out.exists();
     terminal.send("\x1b").unwrap();
     terminal.expect("[Space] select").unwrap();
@@ -1324,7 +1347,7 @@ fn export_terminal_saves_the_reviewed_decks_after_confirmation() {
     terminal.focus("French");
     terminal.send(" ").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("check what goes into the file").unwrap();
+    terminal.expect("save for kamishibai web").unwrap();
     let absent = !out.exists();
     terminal.send("\r").unwrap();
     terminal.expect("your file is ready").unwrap();
@@ -1444,7 +1467,7 @@ fn export_terminal_cannot_save_if_anki_reopens_after_review() {
     terminal.send("\r").unwrap();
     terminal.expect("[Space] select").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("check what goes into the file").unwrap();
+    terminal.expect("save for kamishibai web").unwrap();
     fs::write(path.with_file_name("collection.anki2-wal"), []).unwrap();
     terminal.send("\r").unwrap();
     terminal.expect("close anki first").unwrap();
@@ -1467,7 +1490,7 @@ fn export_terminal_cannot_save_a_changed_closed_collection() {
     terminal.send("\r").unwrap();
     terminal.expect("[Space] select").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("check what goes into the file").unwrap();
+    terminal.expect("save for kamishibai web").unwrap();
     Connection::open(&path)
         .unwrap()
         .execute("UPDATE cards SET ivl=47 WHERE id=211", [])
@@ -1529,7 +1552,7 @@ fn a_saved_console_file_cannot_omit_the_web_language_choice() {
         .output()
         .unwrap();
     let text = String::from_utf8(output.stdout).unwrap();
-    assert!(output.status.success() && text.contains(" · saved\n") && text.contains("file      ") && text.contains("choose the language pair of these cards\n  open your account → import from kamishibai cli"), "the console receipt lost its file or language-pair step");
+    assert!(output.status.success() && text.contains(" · saved\n") && text.contains("file      ") && text.contains("1. choose your language pair\n  2. open your account\n  3. import from kamishibai cli"), "the console receipt lost its file or language-pair step");
 }
 
 #[test]
@@ -1790,7 +1813,7 @@ fn terminal_sighup_cannot_leave_an_archive_during_save() {
     terminal.send("\r").unwrap();
     terminal.expect("[Space] select").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("check what goes into the file").unwrap();
+    terminal.expect("save for kamishibai web").unwrap();
     terminal.send("\r").unwrap();
     staged(&out);
     terminal
@@ -1855,7 +1878,7 @@ fn split_save(input: &mut fs::File, terminal: &mut ExportTerminal) {
     for phrase in [
         "[Enter] choose decks",
         "[Space] select",
-        "check what goes into the file",
+        "save for kamishibai web",
     ] {
         terminal.expect(phrase).unwrap();
         input.write_all(b"\r").unwrap();

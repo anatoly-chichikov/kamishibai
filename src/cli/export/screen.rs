@@ -50,6 +50,8 @@ pub(super) enum Refusal {
     NoProfile { name: String, available: String },
     /// An exact deck name was absent.
     Deck(String),
+    /// A selected collection path cannot be read.
+    Collection(String),
     /// Output is inside a protected Anki directory.
     Destination,
     /// The selected snapshot exceeds the file limit.
@@ -333,12 +335,13 @@ impl Screen {
                     Line::styled("next, in kamishibai web", Ink::Aside.on(false)),
                 ]);
                 lines.extend(wrapped(
-                    "  choose the language pair of these cards",
+                    "  1. choose your language pair",
                     body.width,
                     Ink::Detail,
                 ));
+                lines.extend(wrapped("  2. open your account", body.width, Ink::Detail));
                 lines.extend(wrapped(
-                    "  open your account → import from kamishibai cli",
+                    "  3. import from kamishibai cli",
                     body.width,
                     Ink::Detail,
                 ));
@@ -471,10 +474,10 @@ impl Screen {
     fn hint(&self) -> &str {
         match &self.page {
             Page::Checking | Page::Profile | Page::Loading => "choose your anki profile",
-            Page::Decks | Page::Reading => "choose the decks to take",
-            Page::Summary(_) => "check what goes into the file",
+            Page::Decks | Page::Reading => "choose decks to export",
+            Page::Summary(_) => "save for kamishibai web",
             Page::Saving(_) => "saving your file",
-            Page::Cancelling(_) => "cleaning up",
+            Page::Cancelling(_) => "cancelling the save",
             Page::Saved(_) => "your file is ready",
             Page::Stopped(Stop {
                 refusal: Refusal::Open | Refusal::Changed,
@@ -496,7 +499,7 @@ impl Screen {
                     vec![primary("Space", "select")]
                 } else {
                     vec![
-                        primary("Enter", "take"),
+                        primary("Enter", "next"),
                         FooterHint::secondary("Space", "select"),
                     ]
                 };
@@ -531,7 +534,7 @@ impl Screen {
             Page::Loading => Some((" reading anki ", "finding your decks")),
             Page::Reading => Some((" reading anki ", "counting cards and reviews")),
             Page::Saving(_) => Some((" saving ", "writing and checking your file")),
-            Page::Cancelling(_) => Some((" saving ", "removing the unfinished file")),
+            Page::Cancelling(_) => Some((" cancelling ", "removing the unfinished file")),
             _ => None,
         }
     }
@@ -548,38 +551,41 @@ impl Refusal {
     fn lines(&self, width: u16) -> Vec<Line<'static>> {
         let (reason, actions) = match self {
             Self::Open => (
-                String::from("anki is open or did not close properly"),
-                vec![String::from("sync in anki"), String::from("then quit anki")],
+                String::from("anki is open or has crashed"),
+                vec![
+                    String::from("1. sync in anki"),
+                    String::from("2. close anki"),
+                ],
             ),
             Self::Changed => (
-                String::from("the anki collection changed during the export"),
-                vec![String::from("keep anki closed until the file is saved")],
+                String::from("the collection changed during the export"),
+                vec![String::from("keep anki closed while exporting")],
             ),
             Self::NoProfiles { roots } => (
                 String::from("no anki profiles found"),
                 vec![
                     format!("looked in {roots}"),
-                    String::from("point to a collection with --collection PATH"),
+                    String::from("choose your collection file with --collection"),
                 ],
             ),
             Self::NoProfile { name, available } => (
                 format!("no anki profile named {name}"),
-                vec![format!("profiles here: {available}")],
+                vec![format!("profiles found: {available}")],
             ),
             Self::Deck(reason) => (
                 reason.clone(),
-                vec![String::from("check the names given to --deck")],
+                vec![String::from("use the full deck name with --deck")],
             ),
+            Self::Collection(reason) => (reason.clone(), Vec::new()),
             Self::Destination => (
                 String::from("can't save inside the anki folder"),
                 vec![String::from("choose another folder with --out")],
             ),
-            Self::Oversized { decks: 1 } => (
-                String::from("this deck is too big for one file"),
-                Vec::new(),
-            ),
+            Self::Oversized { decks: 1 } => {
+                (String::from("this deck is too big to export"), Vec::new())
+            }
             Self::Oversized { .. } => (
-                String::from("these decks are too big for one file"),
+                String::from("too much to export at once"),
                 vec![String::from("choose fewer decks")],
             ),
             Self::Schema => (
@@ -982,7 +988,7 @@ mod tests {
             rendered.contains("FOLDER  /exports")
                 && rendered.contains("FILE    history.zip")
                 && rendered.contains("✓ saved")
-                && rendered.contains("choose the language pair"),
+                && rendered.contains("choose your language pair"),
             "the verified outcome lost its artifact strip, receipt or web destination"
         );
     }

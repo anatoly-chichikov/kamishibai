@@ -889,8 +889,8 @@ Agent consent protocol:
 2. Preview the collection. Show the selected decks, notes/cards, reviews,
    mistakes, media, missing files and estimated size to the user.
 3. Only after the user agrees, run the same selection with --save.
-4. Give the verified file path and the next step: Kamishibai web → your account
-   → import from kamishibai cli. The web report and its apply button are a separate consent.
+4. Give the verified file path and the next steps in Kamishibai web: choose your
+   language pair → open your account → import from kamishibai cli. The web report and its apply button are a separate consent.
 
 ```bash
 kamishibai export --json
