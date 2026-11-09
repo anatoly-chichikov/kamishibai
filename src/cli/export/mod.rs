@@ -20,6 +20,8 @@ mod overview;
 mod screen;
 mod terminal;
 
+const IMPORT_URL: &str = "https://app.kamishibai.io/import";
+
 /// Exact source, deck and output choices for Anki history preparation.
 #[derive(Clone, Debug, Args)]
 pub(super) struct ExportArgs {
@@ -109,12 +111,12 @@ fn anki(args: &ExportArgs, render: Render, cancelled: &interrupt::Cancellation) 
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     let command = save_command(&path, &directory, &args.decks);
-    let next = "in Kamishibai web: choose your language pair → open your account → import from kamishibai cli";
+    let next = format!("import at {IMPORT_URL}");
     match render {
         Render::Json => println!(
             "{}",
             serde_json::to_string(
-                &json!({ "ok": true, "profile": profile, "anki": "closed", "preview": preview, "save_to": directory, "save_command": command, "file": file, "next": if args.save { next } else { "show this preview to the user; save only after consent" } })
+                &json!({ "ok": true, "profile": profile, "anki": "closed", "preview": preview, "save_to": directory, "save_command": command, "file": file, "next": if args.save { next.as_str() } else { "show this preview to the user; save only after consent" } })
             )?
         ),
         Render::Text => {
@@ -128,10 +130,8 @@ fn anki(args: &ExportArgs, render: Render, cancelled: &interrupt::Cancellation) 
             match file {
                 Some(file) => {
                     overview.write(&mut output, "file", &file.to_string_lossy())?;
-                    writeln!(output, "next, in Kamishibai web")?;
-                    writeln!(output, "  1. choose your language pair")?;
-                    writeln!(output, "  2. open your account")?;
-                    writeln!(output, "  3. import from kamishibai cli")?;
+                    writeln!(output)?;
+                    writeln!(output, "{next}")?;
                 }
                 None => {
                     overview.write(&mut output, "folder", &directory.to_string_lossy())?;

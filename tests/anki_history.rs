@@ -1305,10 +1305,11 @@ fn saved_file_links_cannot_unpack_the_archive() {
     terminal.send("\r").unwrap();
     terminal.expect("[Enter] save").unwrap();
     terminal.send("\r").unwrap();
-    terminal.expect("import from kamishibai cli").unwrap();
+    terminal.expect("your file is ready").unwrap();
     for (keys, count) in [
         ("\x1b[<0;9;4M\x1b[<0;9;4m", 1),
         ("\x1b[<0;9;5M\x1b[<0;9;5m", 2),
+        ("\x1b[<0;15;10M\x1b[<0;15;10m", 3),
     ] {
         terminal.send(keys).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
@@ -1325,11 +1326,11 @@ fn saved_file_links_cannot_unpack_the_archive() {
     assert_eq!(
         opened,
         format!(
-            "{}\n-R {}\n",
+            "{}\n-R {}\nhttps://app.kamishibai.io/import\n",
             out.canonicalize().unwrap().display(),
             archive.canonicalize().unwrap().display()
         ),
-        "saved links ignored the labels or opened the ZIP instead of revealing it"
+        "saved links opened the wrong target or unpacked the ZIP instead of revealing it"
     );
 }
 
@@ -1351,7 +1352,7 @@ fn export_terminal_saves_the_reviewed_decks_after_confirmation() {
     let absent = !out.exists();
     terminal.send("\r").unwrap();
     terminal.expect("your file is ready").unwrap();
-    terminal.expect("import from kamishibai cli").unwrap();
+    terminal.expect("import at app.kamishibai.io").unwrap();
     terminal.send("\r").unwrap();
     terminal.finish().unwrap();
     let file = fs::read_dir(&out).unwrap().next().unwrap().unwrap().path();
@@ -1543,7 +1544,7 @@ fn a_console_preview_cannot_hide_the_save_decision_in_technical_counts() {
 
 #[test]
 #[cfg(unix)]
-fn a_saved_console_file_cannot_omit_the_web_language_choice() {
+fn a_saved_console_file_cannot_omit_the_web_import_url() {
     let root = TempDir::new().unwrap();
     collection(root.path());
     let out = root.path().join("export");
@@ -1552,7 +1553,14 @@ fn a_saved_console_file_cannot_omit_the_web_language_choice() {
         .output()
         .unwrap();
     let text = String::from_utf8(output.stdout).unwrap();
-    assert!(output.status.success() && text.contains(" · saved\n") && text.contains("file      ") && text.contains("1. choose your language pair\n  2. open your account\n  3. import from kamishibai cli"), "the console receipt lost its file or language-pair step");
+    assert!(
+        output.status.success()
+            && text.contains(" · saved\n")
+            && text.contains("file      ")
+            && text.contains("\n\nimport at https://app.kamishibai.io/import\n")
+            && !text.contains("choose your language pair"),
+        "the console receipt lost its file or direct web import URL"
+    );
 }
 
 #[test]
@@ -1590,7 +1598,9 @@ fn save_alone_bypasses_the_screen_even_inside_a_terminal() {
     command.arg("--save");
     let mut terminal = expectrl::Session::spawn(command).unwrap();
     terminal.set_expect_timeout(Some(std::time::Duration::from_secs(15)));
-    terminal.expect("import from kamishibai cli").unwrap();
+    terminal
+        .expect("import at https://app.kamishibai.io/import")
+        .unwrap();
     terminal.expect(expectrl::Eof).unwrap();
     assert_eq!(
         fs::read_dir(out).unwrap().count(),
@@ -1983,5 +1993,20 @@ fn a_reopened_snapshot_cannot_create_output_with_the_default_writer() {
     assert!(
         matches!(result, Err(kamishibai::anki::history::HistoryError::Open)) && !out.exists(),
         "the default writer bypassed the closed-Anki check or created output"
+    );
+}
+
+#[test]
+fn a_saved_json_file_cannot_omit_the_web_import_url() {
+    let root = TempDir::new().unwrap();
+    collection(root.path());
+    let output = command(root.path(), &root.path().join("export"))
+        .arg("--save")
+        .output()
+        .unwrap();
+    let doc: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        output.status.success() && doc["next"] == "import at https://app.kamishibai.io/import",
+        "the JSON receipt lost its direct web import URL"
     );
 }

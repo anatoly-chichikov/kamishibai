@@ -280,6 +280,9 @@ impl Screen {
                 Some((outcome.path.parent()?.to_path_buf(), false))
             }
             4 if (start..start + 4).contains(&column) => Some((outcome.path.clone(), true)),
+            9 if (start + 6..start + 22).contains(&column) => {
+                Some((PathBuf::from(super::IMPORT_URL), false))
+            }
             _ => None,
         }
     }
@@ -332,19 +335,11 @@ impl Screen {
                     Line::default(),
                     outcome.overview.receipt(),
                     Line::default(),
-                    Line::styled("next, in kamishibai web", Ink::Aside.on(false)),
+                    Line::from(vec![
+                        Span::styled("import at ", Ink::Detail.on(false)),
+                        Span::styled("app.kamishibai.io", Ink::Subject.link(false)),
+                    ]),
                 ]);
-                lines.extend(wrapped(
-                    "  1. choose your language pair",
-                    body.width,
-                    Ink::Detail,
-                ));
-                lines.extend(wrapped("  2. open your account", body.width, Ink::Detail));
-                lines.extend(wrapped(
-                    "  3. import from kamishibai cli",
-                    body.width,
-                    Ink::Detail,
-                ));
                 self.paragraph(frame, body, lines);
                 if self.viewport.scroll <= 3 && body.height > 3 - self.viewport.scroll {
                     frame.render_widget(
@@ -784,6 +779,46 @@ mod tests {
     }
 
     #[test]
+    fn the_saved_page_keeps_its_reviewed_rendering() {
+        insta::assert_snapshot!(
+            "export_saved",
+            render(&mut screen(pages().remove(9)), 100, 30)
+        );
+    }
+
+    #[test]
+    fn the_import_link_cannot_capture_the_prefix_or_surrounding_cells() {
+        let screen = screen(pages().remove(9));
+        assert!(
+            [100, 60, 42].into_iter().all(|width| {
+                let start = gutter(width) + 10;
+                screen.link(start, 9, width)
+                    == Some((PathBuf::from("https://app.kamishibai.io/import"), false))
+                    && screen.link(start + 15, 9, width).is_some()
+                    && screen.link(start - 1, 9, width).is_none()
+                    && screen.link(start + 16, 9, width).is_none()
+                    && screen.link(start, 8, width).is_none()
+            }),
+            "the import URL was missing or captured cells outside its underlined domain"
+        );
+    }
+
+    #[test]
+    fn the_import_line_cannot_lose_its_detail_ink_or_underlined_subject() {
+        let mut screen = screen(pages().remove(9));
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| screen.draw(frame, 0)).unwrap();
+        let buffer = terminal.backend().buffer();
+        assert!(
+            buffer[(4, 9)].fg == Ink::Detail.on(false).fg.unwrap()
+                && !buffer[(4, 9)].modifier.contains(Modifier::UNDERLINED)
+                && buffer[(14, 9)].fg == Ink::Subject.on(false).fg.unwrap()
+                && buffer[(14, 9)].modifier.contains(Modifier::UNDERLINED),
+            "the import prefix lost its detail rank or the domain lost the file-link style"
+        );
+    }
+
+    #[test]
     fn summary_confirmation_cannot_require_another_enter() {
         let mut screen = screen(Page::Summary(preview()));
         let first = screen.key(KeyCode::Enter);
@@ -988,7 +1023,10 @@ mod tests {
             rendered.contains("FOLDER  /exports")
                 && rendered.contains("FILE    history.zip")
                 && rendered.contains("✓ saved")
-                && rendered.contains("choose your language pair"),
+                && rendered
+                    .lines()
+                    .any(|line| line.trim() == "import at app.kamishibai.io")
+                && rendered.lines().nth(8).unwrap().trim().is_empty(),
             "the verified outcome lost its artifact strip, receipt or web destination"
         );
     }
@@ -1082,7 +1120,7 @@ mod tests {
             screen.key(KeyCode::Down);
         }
         assert!(
-            render(&mut screen, 42, 16).contains("kamishibai cli"),
+            render(&mut screen, 42, 16).contains("import at app.kamishibai.io"),
             "a short saved page could not scroll to the final web instruction"
         );
     }

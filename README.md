@@ -94,9 +94,9 @@ kamishibai export
 A separate guided screen checks that Anki is closed, lets you choose a profile
 and exact decks, then shows the cards, reviews, destination folder and any missing
 media. Press Enter on this summary to save in Downloads; nothing is written
-before that confirmation. The last screen links the folder and file, then asks
-you to choose the language pair in Kamishibai web and open your account →
-**import from kamishibai cli**. No Gemini key is needed.
+before that confirmation. The last screen links the folder and file, then points
+to [app.kamishibai.io](https://app.kamishibai.io/import), where the import sheet
+suggests the language pair. No Gemini key is needed.
 
 Use `--out DIR` for another destination. `Esc` goes back or exits before saving;
 during saving it cancels before the verified file is published. Ctrl+C exits from
