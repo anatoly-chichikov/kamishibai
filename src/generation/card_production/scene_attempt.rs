@@ -7,7 +7,45 @@ use anyhow::{Result, anyhow, bail};
 use crate::generation::artifact_cache::{
     Cache, ILLUSTRATION_FILE, IMAGE_ATTEMPTS_DIRECTORY, SCENE_ATTEMPT_FILE, SCENE_FILE,
 };
+use crate::generation::manga::Translator;
+use crate::generation::{VisualFailure, VisualResult};
 use crate::session::Artifact;
+
+/// Returns a reservation only when composition confirms its request was not sent.
+pub(super) struct ReservedScene<T> {
+    composer: T,
+    cache: Cache,
+    previous: Option<u8>,
+}
+
+impl<T> ReservedScene<T> {
+    /// Bind a composer to the cursor held before its caller reserved the attempt.
+    pub(super) fn new(composer: T, cache: Cache, previous: Option<u8>) -> Self {
+        Self {
+            composer,
+            cache,
+            previous,
+        }
+    }
+}
+
+impl<T: Translator> Translator for ReservedScene<T> {
+    fn translate(&self, sentence: &str, target: &str) -> Result<serde_json::Value> {
+        self.translate_observed(sentence, target)
+            .map_err(VisualFailure::into_error)
+    }
+
+    fn translate_observed(&self, sentence: &str, target: &str) -> VisualResult<serde_json::Value> {
+        let result = self.composer.translate_observed(sentence, target);
+        if matches!(result, Err(VisualFailure::NotSent)) {
+            match self.previous {
+                Some(attempt) => write_scene_attempt(&self.cache, attempt)?,
+                None => fs::remove_file(self.cache.path().join(SCENE_ATTEMPT_FILE))?,
+            }
+        }
+        result
+    }
+}
 
 /// Reconciles committed, archived, and durably reserved scene attempts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -150,6 +188,10 @@ fn store_scene_attempt(cache: &Cache, attempt: u8) -> Result<()> {
             return Ok(());
         }
     }
+    write_scene_attempt(cache, attempt)
+}
+
+fn write_scene_attempt(cache: &Cache, attempt: u8) -> Result<()> {
     let staged = cache.stage(".scene-attempt.json")?;
     let result = serde_json::to_vec_pretty(&serde_json::json!({
         "scene_attempt_index": attempt

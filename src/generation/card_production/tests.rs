@@ -549,9 +549,9 @@ impl FailingImageSource {
 }
 
 impl ImageSource for FailingImageSource {
-    fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
+    fn image(&self, _prompt: &str) -> crate::generation::VisualResult<Vec<u8>> {
         self.calls.set(self.calls.get() + 1);
-        bail!(self.error)
+        Err(anyhow!(self.error).into())
     }
 }
 
@@ -568,7 +568,7 @@ impl UsageFreeImageSource {
 }
 
 impl ImageSource for UsageFreeImageSource {
-    fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
+    fn image(&self, _prompt: &str) -> crate::generation::VisualResult<Vec<u8>> {
         self.costs.push(CostRecord::new(
             "gemini-3.1-flash-image",
             0,
@@ -588,7 +588,7 @@ struct PaidImageSource {
 }
 
 impl ImageSource for PaidImageSource {
-    fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
+    fn image(&self, _prompt: &str) -> crate::generation::VisualResult<Vec<u8>> {
         self.costs.push(CostRecord::new(
             "gemini-3.1-flash-image",
             1,
@@ -602,7 +602,7 @@ impl ImageSource for PaidImageSource {
 }
 
 impl ImageSource for CountingImageSource {
-    fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
+    fn image(&self, _prompt: &str) -> crate::generation::VisualResult<Vec<u8>> {
         self.calls.set(self.calls.get() + 1);
         Ok(self.image.clone())
     }

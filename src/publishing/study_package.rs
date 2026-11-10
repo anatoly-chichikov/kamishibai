@@ -20,17 +20,21 @@ use crate::report::{CardSheet, Thumbnail};
 use crate::session::{ArtifactSlot, CardCell, CardDraft, to_entry};
 use crate::vocabulary::VocabularyEntry;
 
-const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
+/// Shared image styling for published learner-facing cards.
+/// Experimental embedding API; compatibility is not guaranteed.
+pub const IMAGE_STYLE: &str = "max-width: 100%; height: auto; border-radius: 10px";
 
 /// Supplies the timestamp embedded in learner-facing package filenames.
-pub(crate) trait PublicationClock: Clone + Send + 'static {
+/// Experimental embedding API; compatibility is not guaranteed.
+pub trait PublicationClock: Clone + Send + 'static {
     /// Return one filename-safe UTC publication stamp.
     fn stamp(&self) -> Result<String>;
 }
 
 /// Reads publication timestamps from the system UTC clock.
+/// Experimental embedding API; compatibility is not guaranteed.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SystemPublicationClock;
+pub struct SystemPublicationClock;
 
 impl PublicationClock for SystemPublicationClock {
     fn stamp(&self) -> Result<String> {
@@ -41,8 +45,9 @@ impl PublicationClock for SystemPublicationClock {
 
 /// Writes completed cards using their producers' audio and picture paths.
 /// Producers must keep those WAV and JPEG files stable throughout publication.
+/// Experimental embedding API; compatibility is not guaranteed.
 #[derive(Clone, Debug)]
-pub(crate) struct StudyPackagePublisher<C = SystemPublicationClock> {
+pub struct StudyPackagePublisher<C = SystemPublicationClock> {
     cache: PathBuf,
     output: PathBuf,
     clock: C,
@@ -50,8 +55,9 @@ pub(crate) struct StudyPackagePublisher<C = SystemPublicationClock> {
 
 impl<C> StudyPackagePublisher<C> {
     /// Bind publication to the shared cache, output directory, and clock.
+    /// Experimental embedding API; compatibility is not guaranteed.
     #[must_use]
-    pub(crate) fn new(cache: PathBuf, output: PathBuf, clock: C) -> Self {
+    pub fn new(cache: PathBuf, output: PathBuf, clock: C) -> Self {
         Self {
             cache,
             output,

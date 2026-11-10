@@ -659,7 +659,9 @@ fn cff_fonts_are_compatible(path: &Path) -> Result<bool> {
                 if !mapping.contains(&format!("<{glyph:04X}> {cid}\n"))
                     || glyph != 0
                         && !widths
-                            .chunks_exact(2)
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
                             .any(|pair| pair[0].as_i64().is_ok_and(|value| value == i64::from(cid)))
                 {
                     return Ok(false);

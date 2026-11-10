@@ -131,7 +131,7 @@ impl<T> ArtifactAttempt<T> {
 }
 
 /// File metadata attached to one completed artifact.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct ArtifactFile {
     name: String,
     path: std::path::PathBuf,
@@ -191,7 +191,7 @@ impl ArtifactFile {
 }
 
 /// Per-artifact state for one card.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct ArtifactSlot {
     kind: Artifact,
     ready: bool,
@@ -307,7 +307,8 @@ impl ArtifactSlot {
     }
 
     /// Return the slot with its latest cumulative known spend.
-    pub(crate) fn accounted(mut self, cost: GenerationCost) -> Self {
+    /// Experimental embedding API; compatibility is not guaranteed.
+    pub fn accounted(mut self, cost: GenerationCost) -> Self {
         self.cost = Some(cost);
         self
     }
@@ -329,7 +330,7 @@ impl ArtifactSlot {
 }
 
 /// The four per-card artifact slots bundled together.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct CardArtifacts {
     meta: ArtifactSlot,
     scene: ArtifactSlot,
@@ -712,7 +713,7 @@ fn rewrite_started() -> bool {
 /// be re-rolled, and testing it first is what keeps an adjusted card from
 /// reporting as ready. `Working` then covers both the queue and the single
 /// card the engine currently runs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum CardPhase {
     /// Carries a staged rewrite that no generation run has activated yet.
     Adjusted,
@@ -728,7 +729,7 @@ pub enum CardPhase {
 ///
 /// `meta` starts as `None` and is filled by the Gemini meta pass that runs
 /// before scene/picture/sound. The bridge to `VocabularyEntry` requires a meta.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct CardDraft {
     term: String,
     reviewed_senses: Vec<Sense>,

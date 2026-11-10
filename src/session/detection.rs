@@ -1,9 +1,11 @@
+use serde::{Deserialize, Serialize};
+
 use crate::languages::LanguageCatalog;
 use anyhow::Result;
 
 /// One guessed learning language with a confidence flag and the languages the
 /// same input would equally have read as.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct LearningGuess {
     code: String,
     confident: bool,

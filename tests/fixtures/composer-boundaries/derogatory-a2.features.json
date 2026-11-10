@@ -1,0 +1,106 @@
+{
+  "camera_arc": {
+    "continuity": {
+      "axis": "the line of confrontation between the male speaker and the female creator across the workspace table",
+      "axis_mode": "preserve",
+      "eyeline_policy": "matched",
+      "screen_direction": "left_to_right"
+    },
+    "motivation": "The visual progression begins with the shared social context of the spoken dismissal, tightens into the physical evidence of his disdainful handling of her work, and closes on her immediate reaction to the derogatory comments, preserving the confrontation axis throughout.",
+    "progression": "medium two_shot eye_level to close insert high angle to medium_close single eye_level",
+    "strategy": "wide_detail_return"
+  },
+  "coverage_audit": [
+    {
+      "added_view": "A medium two-shot showing the man speaking dismissively while gesturing toward architectural drawings on a desk before a woman.",
+      "panel_count": 1,
+      "reason": "A single shot establishes the scene but compresses the spoken disparagement, the physical work being belittled, and her emotional impact into one distance where neither the disparaging physical handling nor her reaction carries clear weight.",
+      "source_support": "He made derogatory comments about her work.",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "A close insert of his hand tapping and pushing aside her detailed architectural drafting sheet with a dismissive gesture.",
+      "panel_count": 2,
+      "reason": "Adding the close detail grounds 'about her work' through physical disdain, but misses the entailed personal target 'her' who receives the derogatory remarks.",
+      "source_support": "about her work",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "A medium-close reaction shot of the woman standing rigid, enduring his verbal belittling beside her blueprints.",
+      "panel_count": 3,
+      "reason": "This three-panel arc fully satisfies context (the critical delivery), concrete focus (disdainful treatment of her work), and direct interpersonal impact (her reception of the derogatory comment) without inventing events.",
+      "source_support": "her work / He made derogatory comments about her",
+      "verdict": "selected"
+    },
+    {
+      "added_view": "A separate fourth shot showing an office colleague reacting or the man walking away.",
+      "panel_count": 4,
+      "reason": "The sentence specifies only him, his comments, and her work; introducing bystanders or post-conversation departure adds unmentioned narrative beats.",
+      "source_support": "None; bystanders or departure are not in the source sentence.",
+      "verdict": "redundant_or_unsupported"
+    }
+  ],
+  "decomposition_mode": "cause_reaction_detail",
+  "intensity": "medium",
+  "literal_anchor": "a man delivering harsh critical remarks while gesturing dismissively at a woman's drafted plans in front of her",
+  "motion_vector": "horizontal",
+  "panel_count": 3,
+  "panel_emphasis": "rising",
+  "panel_relation": "sequence",
+  "reading_direction": "left_to_right_top_to_bottom",
+  "selection_logic": "The sentence entails three core components: the act of delivering belittling comments, the physical target of criticism ('her work'), and the affected recipient ('her'). Shot 1 serves as compact relational context where his posture and mouth convey the utterance. Shot 2 carries heavier physical evidence by tightening onto his hand roughly brushing aside her drafted model drawings. Shot 3 culminates as the dominant emotional payoff, showing her tense posture and tightly clasped hands as the derogatory words land. A fourth shot was rejected because bystander reactions or subsequent actions are wholly unsupported by the sentence text.",
+  "semantic_beat_count": 2,
+  "semantic_relation": "sequence",
+  "shots": [
+    {
+      "angle": "eye_level",
+      "camera_motivation": "Establish the interpersonal friction and spatial relationship as the man delivers critical remarks across the workspace.",
+      "depth_plan": "layered",
+      "framing": "two_shot",
+      "id": "s1",
+      "information_gain": "The physical workplace setting and the man leaning forward with an assertive, dismissive posture toward the woman.",
+      "role": "establishing",
+      "semantic_beat_index": 1,
+      "shot_scale": "medium",
+      "source_support": "He made derogatory comments",
+      "transition_trigger": "scene_open",
+      "viewpoint": "objective",
+      "viewpoint_anchor": "",
+      "visible_anchor": "man standing over drafting table speaking sharply toward a seated woman"
+    },
+    {
+      "angle": "high",
+      "camera_motivation": "Isolate the tactile disrespect directed specifically at the physical object of her labor.",
+      "depth_plan": "shallow",
+      "framing": "insert",
+      "id": "s2",
+      "information_gain": "His fingers flicking and crumpling the edge of a detailed drafted architectural blueprint without care.",
+      "role": "detail",
+      "semantic_beat_index": 1,
+      "shot_scale": "close",
+      "source_support": "about her work",
+      "transition_trigger": "attention_shift",
+      "viewpoint": "point_of_view",
+      "viewpoint_anchor": "the woman seated opposite him",
+      "visible_anchor": "man's hand flicking the corner of a detailed hand-drafted blueprint"
+    },
+    {
+      "angle": "eye_level",
+      "camera_motivation": "Capture the direct emotional impact of the derogatory comments landing on the creator.",
+      "depth_plan": "shallow",
+      "framing": "single",
+      "id": "s3",
+      "information_gain": "Her tightened jaw, clenched knuckles resting on the edge of the table, and defensive stillness.",
+      "role": "reaction",
+      "semantic_beat_index": 2,
+      "shot_scale": "medium_close",
+      "source_support": "her work (affecting her as the creator)",
+      "transition_trigger": "emotion_change",
+      "viewpoint": "objective",
+      "viewpoint_anchor": "",
+      "visible_anchor": "the woman's constrained, hurt, and rigid posture as she listens"
+    }
+  ],
+  "spatial_relation": "same_space",
+  "transition_type": "action_to_action"
+}

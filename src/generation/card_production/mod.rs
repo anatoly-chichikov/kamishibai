@@ -8,6 +8,7 @@ mod metadata;
 mod picture_recovery;
 mod picture_requests;
 mod scene_attempt;
+mod soft;
 mod sound;
 mod visual;
 
@@ -169,7 +170,7 @@ impl CardProduction for GeminiCardProduction {
 
 #[cfg(test)]
 pub(crate) use picture_requests::reserve_picture_request;
-pub(crate) use picture_requests::restart_picture_request_series;
+pub use picture_requests::restart_picture_request_series;
 
 fn format_size(bytes: u64) -> String {
     if bytes < 1024 {

@@ -9,6 +9,38 @@ use crate::session::{
     Artifact, ArtifactAttempt, ArtifactFile, CardDraft, CardRevision, EngineEvent, SessionEngine,
 };
 
+/// Delivery-owned selection and cooperative refusal of new paid work within one artifact.
+///
+/// A pause reported before `GenerationRun::advance_in` starts prevents all provider
+/// requests and leaves attempts, request budgets, and scene indices unchanged,
+/// however many times the caller advances while paused.
+///
+/// A request refused after a step starts may raise the pause without spending an
+/// artifact attempt. Costs already incurred remain recorded, but unfinished work
+/// is discarded and bought again on resume: one such pause loses at most one
+/// composed scene. An index for a possibly sent scene stays reserved; a scene
+/// request confirmed not sent returns its index. A not-sent refusal without a
+/// reported pause is a failed attempt, bounded by the usual attempt ceiling.
+///
+/// Experimental embedding API; compatibility is not guaranteed.
+pub trait GenerationControl {
+    /// Whether this stable card position may start its next artifact.
+    fn allows(&self, card: usize) -> bool;
+    /// Whether work must stay paused, including after a request was refused mid-step.
+    /// Keep this true until work is explicitly resumed.
+    fn paused(&self) -> bool;
+}
+
+struct Unrestricted;
+impl GenerationControl for Unrestricted {
+    fn allows(&self, _card: usize) -> bool {
+        true
+    }
+    fn paused(&self) -> bool {
+        false
+    }
+}
+
 /// Drives one batch through the same artifact queue used by the terminal.
 ///
 /// Call `advance` from a worker thread for blocking providers and inspect the
@@ -52,14 +84,38 @@ impl GenerationRun {
         &mut self,
         production: &P,
     ) -> Result<Option<GenerationStep>> {
-        if self.cancelled {
+        self.advance_in(production, &Unrestricted)
+    }
+
+    /// Advance one allowed position unless control already reports a pause.
+    ///
+    /// While paused at entry, repeated calls return `None` without any provider
+    /// request or change to attempts, request budgets, or scene indices.
+    /// If a request is refused and raises the pause during this step, return `None`
+    /// and retain its costs without spending an artifact attempt. Unfinished work
+    /// is discarded and repeated on resume, losing at most one composed scene per
+    /// such pause. A possibly sent scene keeps its index; a scene request confirmed
+    /// not sent returns its index. A not-sent refusal without a reported pause
+    /// spends an attempt and remains bounded by the usual attempt ceiling.
+    ///
+    /// Experimental embedding API; compatibility is not guaranteed.
+    pub fn advance_in<P: CardProduction + ?Sized>(
+        &mut self,
+        production: &P,
+        control: &dyn GenerationControl,
+    ) -> Result<Option<GenerationStep>> {
+        if self.cancelled || control.paused() {
             return Ok(None);
         }
         validate_ready(self.engine.drafts())?;
-        let Some((card, artifact)) = self.next() else {
+        let Some((card, artifact)) = self.engine.next_allowed(|card| control.allows(card)) else {
             return Ok(None);
         };
         let outcome = produce_artifact(production, card, artifact, &self.engine.drafts()[card]);
+        if outcome.error().is_some() && control.paused() {
+            outcome.pause(&mut self.engine, card, artifact);
+            return Ok(None);
+        }
         let error = outcome.error().map(|error| format!("{error:#}"));
         let event = outcome.apply(&mut self.engine, card, artifact);
         validate_ready(self.engine.drafts())?;
@@ -177,6 +233,14 @@ impl ArtifactOutcome {
         match self {
             Self::Meta(attempt) => attempt.error(),
             Self::Media(attempt) => attempt.error(),
+        }
+    }
+
+    /// Account a cooperative refusal without recording a failed artifact attempt.
+    fn pause(self, engine: &mut SessionEngine, card: usize, artifact: Artifact) {
+        match self {
+            Self::Meta(attempt) => engine.paused(card, artifact, *attempt),
+            Self::Media(attempt) => engine.paused(card, artifact, *attempt),
         }
     }
 

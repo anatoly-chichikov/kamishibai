@@ -1,5 +1,6 @@
 use std::env;
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -17,7 +18,7 @@ use crate::generation::manga::{
     FidelityCheck, FidelityReview, LiteralZoomCheck, LiteralZoomReview, RecallCard, RecallReview,
     TextCheck, TextReview,
 };
-use crate::generation::prompts::layout_scene_prompt;
+use crate::generation::prompts::{layout_scene_prompt, layout_scene_schema};
 use crate::languages::{LanguageCatalog, LanguageCode, catalog};
 use crate::session::{
     ARTIFACT_ATTEMPT_CEILING, AxisSet, CardDraft, CardMeta, CardRevision, CostRecord, LanguagePair,
@@ -34,9 +35,11 @@ use super::prompts::{
 };
 use super::protocol::{
     GeminiApiError, GenerationConfig, RejectedReply, Request, Response, ThinkingLevel, api_error,
-    diagnosis, unfence,
+    diagnosis as gemini_diagnosis, unfence,
 };
 use super::scene::compose;
+use crate::generation::{SceneMode, VisualFailure, VisualResult};
+use crate::models::{ModelOutput, ModelProvider};
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(300);
@@ -283,9 +286,15 @@ struct CredentialErrorDetail {
 /// Direct Gemini client with a pluggable transport.
 #[derive(Clone)]
 pub struct GeminiClient<T> {
-    key: String,
-    transport: T,
+    backend: ModelBackend<T>,
     profile: GeminiProfile,
+    look: crate::models::Look,
+}
+
+#[derive(Clone)]
+enum ModelBackend<T> {
+    Gemini { key: String, transport: T },
+    External(Arc<dyn ModelProvider>),
 }
 
 impl<T> fmt::Debug for GeminiClient<T>
@@ -296,13 +305,32 @@ where
         formatter
             .debug_struct("GeminiClient")
             .field("key", &"[REDACTED]")
-            .field("transport", &self.transport)
+            .field(
+                "backend",
+                &match self.backend {
+                    ModelBackend::Gemini { .. } => "Gemini",
+                    ModelBackend::External(_) => "External",
+                },
+            )
             .field("profile", &self.profile)
             .finish()
     }
 }
 
 impl GeminiClient<HttpTransport> {
+    /// Reuse canonical generation operations with a provider-neutral backend and plugged picture parts.
+    pub(crate) fn from_provider(
+        provider: Arc<dyn ModelProvider>,
+        profile: GeminiProfile,
+        look: crate::models::Look,
+    ) -> Self {
+        Self {
+            backend: ModelBackend::External(provider),
+            profile,
+            look,
+        }
+    }
+
     /// Build the live Gemini client from a saved key.
     pub fn from_saved(saved: Option<&str>) -> Result<Self> {
         let key = saved
@@ -352,10 +380,28 @@ where
     /// Create an isolated client using explicit endpoint, models, and prompt policy.
     pub fn from_profile(key: impl Into<String>, transport: T, profile: GeminiProfile) -> Self {
         Self {
-            key: key.into(),
-            transport,
+            backend: ModelBackend::Gemini {
+                key: key.into(),
+                transport,
+            },
             profile,
+            look: crate::models::Look::default(),
         }
+    }
+
+    /// Experimental embedding API; compatibility is not guaranteed.
+    /// Plug the application's picture style, gentle world, and resend rule into this client.
+    #[must_use]
+    pub fn with_look(mut self, look: crate::models::Look) -> Self {
+        self.look = look;
+        self
+    }
+
+    /// Experimental embedding API; compatibility is not guaranteed.
+    /// Read the plugged picture parts shared by scene composition and rendering.
+    #[must_use]
+    pub fn look(&self) -> &crate::models::Look {
+        &self.look
     }
 
     /// Return the non-secret cache namespace for this client's generation policy.
@@ -371,7 +417,15 @@ where
 
     /// Translate one term and sentence through the production registry scene pipeline.
     pub fn scene(&self, language: &str, term: &str, sentence: &str, target: &str) -> Result<Value> {
-        self.scene_observed(language, term, sentence, target, 0, |_| Ok(()))
+        self.scene_observed(
+            language,
+            term,
+            sentence,
+            target,
+            (0, SceneMode::Stock),
+            |_| Ok(()),
+        )
+        .map_err(VisualFailure::into_error)
     }
 
     /// Compose one registry-selected scene and report every structured request cost.
@@ -381,17 +435,20 @@ where
         term: &str,
         sentence: &str,
         target: &str,
-        attempt: u8,
+        selection: (u8, SceneMode),
         mut observe: F,
-    ) -> Result<Value>
+    ) -> VisualResult<Value>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
+        let (attempt, mode) = selection;
         let registry = LayoutRegistry::embedded()?;
         let feature_data = feature_prompt_data(language, term, sentence)?;
-        let feature_prompt = render_feature_prompt(&feature_data)?;
+        let feature_prompt = self
+            .look
+            .worded(mode, render_feature_prompt(&feature_data)?)?;
         let feature_schema = registry.feature_schema()?;
-        let feature_raw = self
+        let (feature_raw, _) = self
             .structured_text_observed(
                 GenerationStage::Features,
                 feature_prompt,
@@ -400,7 +457,7 @@ where
                 FEATURE_MAX_OUTPUT_TOKENS,
                 &mut observe,
             )
-            .context("scene feature extraction request failed")?;
+            .map_err(|error| error.context("scene feature extraction request failed"))?;
         let lenient = attempt.saturating_add(1) >= ARTIFACT_ATTEMPT_CEILING;
         let features = registry.decode_features_lenient(unfence(feature_raw.trim()), lenient)?;
         let selection = registry
@@ -410,17 +467,35 @@ where
         let composer_card = selection.composer_card()?;
         let composer =
             render_layout_scene(language, term, sentence, selection.json(), &composer_card)?;
-        let composer_raw = self
-            .json_text_observed(
+        let mut composer_schema: Value = serde_json::from_str(layout_scene_schema())?;
+        composer_schema
+            .pointer_mut("/properties/panels")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| anyhow!("composer schema must contain panel constraints"))?
+            .remove("maxItems");
+        let composer = self.look.worded(mode, composer)?;
+        let (composer_raw, finish) = self
+            .structured_text_observed(
                 GenerationStage::Scene,
                 composer,
+                &composer_schema,
                 ThinkingLevel::Low,
                 COMPOSER_MAX_OUTPUT_TOKENS,
                 &mut observe,
             )
-            .context("scene composition request failed")?;
-        compose(composer_raw.as_str(), sentence, target, &selection, lenient)
-            .map_err(|error| error.context(RejectedReply::new("scene composer", composer_raw)))
+            .map_err(|error| error.context("scene composition request failed"))?;
+        let mut scene = compose(composer_raw.as_str(), sentence, target, &selection, lenient)
+            .map_err(|error| {
+                error
+                    .context(format!("scene composer rejected {finish} output"))
+                    .context(RejectedReply::new("scene composer", composer_raw))
+            })?;
+        if mode == SceneMode::Soft {
+            scene["manga_panel"]["meta"]["layout_selection"]["scene_mode"] =
+                serde_json::json!("soft");
+            self.look.admit(&scene)?;
+        }
+        Ok(scene)
     }
 
     /// Send one free-form prompt to a text model and return the raw textual response.
@@ -464,18 +539,20 @@ where
 
     /// Probe credentials without billable generation and classify every failure.
     pub fn probe_key(&self) -> std::result::Result<(), CredentialProbeError> {
-        if self.key.trim().is_empty() || HeaderValue::from_str(self.key.as_str()).is_err() {
+        let ModelBackend::Gemini { key, transport } = &self.backend else {
+            return Err(CredentialProbeError::new(
+                CredentialFailure::Operational,
+                "external provider credential validation belongs to its adapter",
+            ));
+        };
+        if key.trim().is_empty() || HeaderValue::from_str(key.as_str()).is_err() {
             return Err(CredentialProbeError::new(
                 CredentialFailure::Invalid,
                 "the supplied Gemini API key has an invalid format",
             ));
         }
-        let response = self
-            .transport
-            .get(
-                catalog_url(self.profile.endpoint()).as_str(),
-                self.key.as_str(),
-            )
+        let response = transport
+            .get(catalog_url(self.profile.endpoint()).as_str(), key.as_str())
             .map_err(|_| {
                 CredentialProbeError::new(
                     CredentialFailure::Retryable,
@@ -790,11 +867,11 @@ where
     }
 
     /// Render one compiled prose prompt and report usage before local image decoding.
-    pub(crate) fn image_observed<F>(&self, prompt: &str, mut observe: F) -> Result<Vec<u8>>
+    pub(crate) fn image_observed<F>(&self, prompt: &str, mut observe: F) -> VisualResult<Vec<u8>>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let metered = self.request_stage(
+        let metered = self.request_visual(
             GenerationStage::Picture,
             &Request::text(
                 String::from(prompt),
@@ -803,7 +880,15 @@ where
             ),
         )?;
         observe(metered.cost.clone())?;
-        image_from_response(&metered.response)
+        if matches!(
+            metered.response,
+            GeneratedResponse::External(ModelOutput::Refused)
+        ) {
+            return Err(VisualFailure::Refused {
+                stage: GenerationStage::Picture,
+            });
+        }
+        image_from_response(&metered.response).map_err(Into::into)
     }
 
     /// Review one candidate illustration for answer-bearing visible writing.
@@ -1026,7 +1111,7 @@ where
         let metered =
             self.request_stage(GenerationStage::Speech, &self.speech_request(prompt, text))?;
         Ok((
-            speech_from_response(&metered.response, text, self.profile.structured_speech())?,
+            speech_from_response(&metered.response, text, self.structured_speech())?,
             metered.cost,
         ))
     }
@@ -1044,11 +1129,15 @@ where
         let metered =
             self.request_stage(GenerationStage::Speech, &self.speech_request(prompt, text))?;
         observe(metered.cost.clone())?;
-        speech_from_response(&metered.response, text, self.profile.structured_speech())
+        speech_from_response(&metered.response, text, self.structured_speech())
+    }
+
+    fn structured_speech(&self) -> bool {
+        matches!(self.backend, ModelBackend::Gemini { .. }) && self.profile.structured_speech()
     }
 
     fn speech_request(&self, prompt: &str, text: &str) -> Request {
-        if self.profile.structured_speech() {
+        if self.structured_speech() {
             return Request::speech(
                 String::from(text),
                 String::from(speech_style(prompt, text)),
@@ -1060,28 +1149,63 @@ where
             Some(GenerationConfig::audio(voice())),
             None,
         )
+        .with_speech_text(text)
     }
 
     fn request_metered(&self, model: &str, request: &Request) -> Result<MeteredResponse> {
+        let ModelBackend::Gemini { key, transport } = &self.backend else {
+            bail!("external providers require a canonical generation stage");
+        };
         let url = format!("{}/{model}:generateContent", self.profile.endpoint());
         let body = serde_json::to_string(request)?;
-        let response = self
-            .transport
-            .post(url.as_str(), self.key.as_str(), body.as_str())?;
+        let response = transport.post(url.as_str(), key.as_str(), body.as_str())?;
         if !(200..300).contains(&response.status) {
             return Err(api_error(response.status, response.body.as_str()));
         }
         let parsed: Response = serde_json::from_str(&response.body)?;
         let cost = priced(model, parsed.usage_metadata.as_ref());
         Ok(MeteredResponse {
-            response: parsed,
+            response: GeneratedResponse::Gemini(parsed),
             cost,
         })
     }
 
     fn request_stage(&self, stage: GenerationStage, request: &Request) -> Result<MeteredResponse> {
         let request = request.with_prompt(|prompt| self.profile.render(stage, prompt))?;
-        self.request_metered(self.profile.model(stage), &request)
+        match &self.backend {
+            ModelBackend::Gemini { .. } => {
+                self.request_metered(self.profile.model(stage), &request)
+            }
+            ModelBackend::External(provider) => {
+                let (output, cost) = provider.generate(request.external(stage)?)?.into_parts();
+                Ok(MeteredResponse {
+                    response: GeneratedResponse::External(output),
+                    cost,
+                })
+            }
+        }
+    }
+
+    fn request_visual(
+        &self,
+        stage: GenerationStage,
+        request: &Request,
+    ) -> VisualResult<MeteredResponse> {
+        let request = request.with_prompt(|prompt| self.profile.render(stage, prompt))?;
+        match &self.backend {
+            ModelBackend::Gemini { .. } => self
+                .request_metered(self.profile.model(stage), &request)
+                .map_err(Into::into),
+            ModelBackend::External(provider) => {
+                let (output, cost) = provider
+                    .generate_visual(request.external(stage)?)?
+                    .into_parts();
+                Ok(MeteredResponse {
+                    response: GeneratedResponse::External(output),
+                    cost,
+                })
+            }
+        }
     }
 
     fn text(&self, model: &str, prompt: String) -> Result<String> {
@@ -1186,67 +1310,69 @@ where
         thinking: ThinkingLevel,
         max_output_tokens: u32,
         observe: &mut F,
-    ) -> Result<String>
+    ) -> VisualResult<(String, String)>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let config = GenerationConfig::json(schema.clone())?
-            .with_thinking_level(thinking)
-            .with_max_output_tokens(max_output_tokens);
+        let config = match (&self.backend, stage) {
+            (ModelBackend::Gemini { .. }, GenerationStage::Scene) => GenerationConfig::json_mode(),
+            (ModelBackend::External(_), GenerationStage::Scene) => {
+                GenerationConfig::from_schema(schema.clone())
+            }
+            _ => GenerationConfig::json(schema.clone())?,
+        }
+        .with_thinking_level(thinking)
+        .with_max_output_tokens(max_output_tokens);
         let request = Request::text(prompt.clone(), Some(config), None);
-        let metered = match self.request_stage(stage, &request) {
+        let metered = match self.request_visual(stage, &request) {
             Ok(metered) => metered,
-            Err(error) if schema_rejected(&error) => self.request_stage(
-                stage,
-                &Request::text(
-                    prompt,
-                    Some(
-                        GenerationConfig::json_mode()
-                            .with_thinking_level(thinking)
-                            .with_max_output_tokens(max_output_tokens),
+            Err(VisualFailure::Failed(error))
+                if stage != GenerationStage::Scene && schema_rejected(&error) =>
+            {
+                self.request_visual(
+                    stage,
+                    &Request::text(
+                        prompt,
+                        Some(
+                            GenerationConfig::json_mode()
+                                .with_thinking_level(thinking)
+                                .with_max_output_tokens(max_output_tokens),
+                        ),
+                        None,
                     ),
-                    None,
-                ),
-            )?,
+                )?
+            }
             Err(error) => return Err(error),
         };
         observe(metered.cost.clone())?;
-        let raw = response_text(&metered.response);
-        if raw.trim().is_empty() {
-            bail!("No text content in Gemini response");
+        if matches!(
+            metered.response,
+            GeneratedResponse::External(ModelOutput::Refused)
+        ) {
+            return Err(VisualFailure::Refused { stage });
         }
-        Ok(raw)
-    }
-
-    fn json_text_observed<F>(
-        &self,
-        stage: GenerationStage,
-        prompt: String,
-        thinking: ThinkingLevel,
-        max_output_tokens: u32,
-        observe: &mut F,
-    ) -> Result<String>
-    where
-        F: FnMut(CostRecord) -> Result<()>,
-    {
-        let metered = self.request_stage(
-            stage,
-            &Request::text(
-                prompt,
-                Some(
-                    GenerationConfig::json_mode()
-                        .with_thinking_level(thinking)
-                        .with_max_output_tokens(max_output_tokens),
-                ),
-                None,
-            ),
-        )?;
-        observe(metered.cost.clone())?;
+        let finish = metered
+            .response
+            .finish_reason()
+            .unwrap_or("UNKNOWN")
+            .to_owned();
         let raw = response_text(&metered.response);
-        if raw.trim().is_empty() {
-            bail!("No text content in Gemini response");
+        if stage == GenerationStage::Scene && !matches!(finish.as_str(), "STOP" | "UNKNOWN") {
+            return Err(anyhow!(
+                "scene composer finished with {finish}: {}",
+                diagnosis(&metered.response)
+            )
+            .context(RejectedReply::new("scene composer", raw))
+            .into());
         }
-        Ok(raw)
+        if raw.trim().is_empty() {
+            return Err(anyhow!(
+                "No text content in Gemini response after {finish}: {}",
+                diagnosis(&metered.response)
+            )
+            .into());
+        }
+        Ok((raw, finish))
     }
 }
 
@@ -1326,12 +1452,46 @@ fn render_layout_scene(
         .replace("{selected_layout}", &serde_json::to_string_pretty(layout)?))
 }
 
+enum GeneratedResponse {
+    Gemini(Response),
+    External(ModelOutput),
+}
+
+impl GeneratedResponse {
+    fn finish_reason(&self) -> Option<&str> {
+        match self {
+            Self::Gemini(response) => response.finish_reason(),
+            Self::External(ModelOutput::Text {
+                truncated: true, ..
+            }) => Some("MAX_TOKENS"),
+            Self::External(ModelOutput::Text {
+                truncated: false, ..
+            }) => Some("STOP"),
+            Self::External(_) => None,
+        }
+    }
+}
+
+fn diagnosis(response: &GeneratedResponse) -> String {
+    match response {
+        GeneratedResponse::Gemini(response) => gemini_diagnosis(response),
+        GeneratedResponse::External(_) => {
+            String::from("external provider returned no usable output")
+        }
+    }
+}
+
 struct MeteredResponse {
-    response: Response,
+    response: GeneratedResponse,
     cost: CostRecord,
 }
 
-fn response_text(response: &Response) -> String {
+fn response_text(response: &GeneratedResponse) -> String {
+    let response = match response {
+        GeneratedResponse::Gemini(response) => response,
+        GeneratedResponse::External(ModelOutput::Text { text, .. }) => return text.clone(),
+        GeneratedResponse::External(_) => return String::new(),
+    };
     response
         .candidates
         .iter()
@@ -1495,9 +1655,21 @@ fn label_selection(draft: &CardDraft) -> SentenceLabelSelection {
         .unwrap_or_default()
 }
 
-fn image_from_response(response: &Response) -> Result<Vec<u8>> {
+fn image_from_response(response: &GeneratedResponse) -> Result<Vec<u8>> {
+    let response = match response {
+        GeneratedResponse::Gemini(response) => response,
+        GeneratedResponse::External(ModelOutput::Image(bytes)) if !bytes.is_empty() => {
+            return Ok(bytes.clone());
+        }
+        GeneratedResponse::External(_) => {
+            bail!("external provider did not return a nonempty image")
+        }
+    };
     if response.candidates.is_empty() {
-        bail!("No candidates in image response: {}", diagnosis(response));
+        bail!(
+            "No candidates in image response: {}",
+            gemini_diagnosis(response)
+        );
     }
     let Some(content) = response.candidates[0].content.as_ref() else {
         bail!("No content in image response");
@@ -1521,7 +1693,22 @@ fn speech_style<'a>(prompt: &'a str, text: &str) -> &'a str {
         .trim()
 }
 
-fn speech_from_response(response: &Response, text: &str, structured: bool) -> Result<Vec<u8>> {
+fn speech_from_response(
+    response: &GeneratedResponse,
+    text: &str,
+    structured: bool,
+) -> Result<Vec<u8>> {
+    let response = match response {
+        GeneratedResponse::Gemini(response) => response,
+        GeneratedResponse::External(ModelOutput::Speech(bytes))
+            if !bytes.is_empty() && bytes.len().is_multiple_of(2) =>
+        {
+            return Ok(bytes.clone());
+        }
+        GeneratedResponse::External(_) => {
+            bail!("external provider did not return signed 16-bit PCM audio")
+        }
+    };
     if response.candidates.is_empty() {
         bail!("No candidates in audio response for '{}'", text);
     }
@@ -5214,7 +5401,7 @@ mod tests {
         let urls = transport.urls.clone();
         let client = GeminiClient::new("key", transport);
         let mut costs = Vec::new();
-        let raw = client
+        let (raw, _) = client
             .structured_text_observed(
                 GenerationStage::Features,
                 String::from("same prompt"),
@@ -5307,7 +5494,7 @@ mod tests {
                 "reliability",
                 "The reliability of this system is very high",
                 "en",
-                0,
+                (0, SceneMode::Stock),
                 |cost| {
                     costs.push(cost);
                     Ok(())
@@ -5479,7 +5666,7 @@ mod tests {
                         "reliability",
                         "The reliability of this system is very high",
                         "en",
-                        0,
+                        (0, SceneMode::Stock),
                         |cost| {
                             costs.push(cost);
                             Ok(())
@@ -5506,7 +5693,7 @@ mod tests {
             "reliability",
             "The reliability of this system is very high",
             "en",
-            0,
+            (0, SceneMode::Stock),
             |_| Err(anyhow::anyhow!("cost persistence failed")),
         );
         assert_eq!(
@@ -5514,5 +5701,308 @@ mod tests {
             (true, 1),
             "a failed usage write allowed later scene stages to spend more"
         );
+    }
+
+    struct PaperCranes;
+
+    impl crate::models::SoftWorld for PaperCranes {
+        fn name(&self) -> &str {
+            "paper-cranes"
+        }
+
+        fn brief(&self) -> &str {
+            "SOFT WORLD\nRetell this sentence with folded paper cranes only."
+        }
+
+        fn admit(&self, _scene: &Value, _prompt: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn soft_world_cannot_change_stock_request_bytes_or_layout_selection() {
+        let features = json!({
+            "semantic_beat_count": 1,
+            "semantic_relation": "single_moment",
+            "coverage_audit": coverage_audit(1),
+            "panel_count": 1,
+            "panel_relation": "single_moment",
+            "panel_emphasis": "equal",
+            "decomposition_mode": "single_tableau",
+            "motion_vector": "still",
+            "intensity": "quiet",
+            "spatial_relation": "same_space",
+            "transition_type": "none",
+            "reading_direction": "left_to_right_top_to_bottom",
+            "literal_anchor": "one stable machine",
+            "camera_arc": camera_arc(),
+            "shots": [planned_shot("s1", 1, "one stable machine in its complete room", "the system has high reliability")],
+            "selection_logic": "one indivisible state carries the sentence"
+        });
+        let render = |mode| {
+            let transport =
+                FakeTransport::new(vec![text_body(&features), text_body(&semantic_scene())]);
+            let requests = transport.requests.clone();
+            let client =
+                GeminiClient::new("offline", transport).with_look(crate::models::Look::new(
+                    std::sync::Arc::new(crate::models::MangaInk),
+                    Some(std::sync::Arc::new(PaperCranes)),
+                    crate::models::Resend::Automatic,
+                ));
+            let scene = client
+                .scene_observed(
+                    "English",
+                    "reliability",
+                    "The reliability of this system is very high",
+                    "en",
+                    (0, mode),
+                    |_| Ok(()),
+                )
+                .unwrap();
+            let bodies: Vec<Value> = requests
+                .borrow()
+                .iter()
+                .map(|body| serde_json::from_str(body).unwrap())
+                .collect();
+            (scene, bodies)
+        };
+        let (stock_scene, stock) = render(SceneMode::Stock);
+        let (mut soft_scene, mut soft) = render(SceneMode::Soft);
+        let suffix = format!("\n\n{}", crate::models::SoftWorld::brief(&PaperCranes));
+        let suffixes: Vec<_> = soft
+            .iter_mut()
+            .map(|body| {
+                let text = body["contents"][0]["parts"][0]["text"].as_str().unwrap();
+                let occurrences = text.matches("SOFT WORLD").count();
+                let prefix = text.strip_suffix(&suffix).unwrap().to_owned();
+                body["contents"][0]["parts"][0]["text"] = json!(prefix);
+                occurrences
+            })
+            .collect();
+        let marker = soft_scene["manga_panel"]["meta"]["layout_selection"]
+            .as_object_mut()
+            .unwrap()
+            .remove("scene_mode");
+        assert_eq!(
+            (suffixes, soft, soft_scene, marker),
+            (vec![1, 1], stock, stock_scene, Some(json!("soft"))),
+            "soft world changed stock bytes, selection, schema or more than the two prompt suffixes"
+        );
+    }
+
+    mod archived_composer {
+        //! Archived composer failures exercised through the public scene pipeline.
+
+        use std::{cell::RefCell, fs, path::PathBuf};
+
+        use crate::{
+            gemini::{GeminiClient, Transport, TransportResponse},
+            generation::SceneSource,
+        };
+        use anyhow::Result;
+        use serde::Deserialize;
+        use serde_json::{Value, json};
+
+        #[derive(Deserialize)]
+        struct Case {
+            name: String,
+            sentence: String,
+            attempt: u8,
+            valid: bool,
+        }
+
+        struct Archive {
+            replies: RefCell<Vec<String>>,
+            requests: RefCell<Vec<Value>>,
+        }
+
+        struct Terminated {
+            features: RefCell<Option<String>>,
+            reason: &'static str,
+        }
+
+        impl Transport for Terminated {
+            fn post(&self, _url: &str, _key: &str, _body: &str) -> Result<TransportResponse> {
+                let features = self.features.borrow_mut().take();
+                Ok(TransportResponse { status: 200, body: json!({"candidates":[{"content":{"parts":[{"text":features.as_deref().unwrap_or("invalid JSON")}]},"finishReason":if features.is_some() {"STOP"} else {self.reason}}]}).to_string() })
+            }
+        }
+
+        impl Transport for &Archive {
+            fn post(&self, _url: &str, _key: &str, body: &str) -> Result<TransportResponse> {
+                self.requests.borrow_mut().push(serde_json::from_str(body)?);
+                Ok(TransportResponse {
+                    status: 200,
+                    body: json!({"candidates":[{"content":{"parts":[{"text":self.replies.borrow_mut().remove(0)}]},"finishReason":"STOP"}]}).to_string(),
+                })
+            }
+        }
+
+        fn fixtures() -> PathBuf {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/composer-boundaries")
+        }
+
+        #[test]
+        fn archived_boundaries_cannot_lose_valid_scenes_or_bypass_semantic_checks() {
+            let cases: Vec<Case> =
+                serde_json::from_str(&fs::read_to_string(fixtures().join("cases.json")).unwrap())
+                    .unwrap();
+            let outcomes = cases
+                .iter()
+                .map(|case| {
+                    let archive = Archive {
+                        replies: RefCell::new(vec![
+                            fs::read_to_string(
+                                fixtures().join(format!("{}.features.json", case.name)),
+                            )
+                            .unwrap(),
+                            fs::read_to_string(fixtures().join(format!("{}.raw.txt", case.name)))
+                                .unwrap(),
+                        ]),
+                        requests: RefCell::new(Vec::new()),
+                    };
+                    let client = GeminiClient::new("offline", &archive);
+                    SceneSource::scene(
+                        &client,
+                        "English",
+                        case.name.rsplit_once("-a").unwrap().0,
+                        &case.sentence,
+                        "en",
+                        case.attempt,
+                        crate::generation::SceneMode::Stock,
+                    )
+                    .is_ok()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                outcomes,
+                cases.iter().map(|case| case.valid).collect::<Vec<_>>(),
+                "panel repair lost a valid archived scene or bypassed an existing semantic rejection"
+            );
+        }
+
+        struct Composer {
+            replies: std::sync::Mutex<Vec<String>>,
+            formats: std::sync::Mutex<Vec<crate::models::TextFormat>>,
+        }
+
+        impl crate::models::ModelProvider for Composer {
+            fn generate(
+                &self,
+                request: crate::models::ModelRequest,
+            ) -> Result<crate::models::ModelReply> {
+                let crate::models::ModelRequest::Text { options, .. } = request else {
+                    anyhow::bail!("unexpected non-text request");
+                };
+                self.formats.lock().unwrap().push(options.into_parts().0);
+                Ok(crate::models::ModelReply::new(
+                    crate::models::ModelOutput::Text {
+                        text: self.replies.lock().unwrap().remove(0),
+                        truncated: false,
+                    },
+                    crate::session::CostRecord::unreported("composer"),
+                ))
+            }
+        }
+
+        #[test]
+        fn composer_cannot_drop_its_embedded_schema() {
+            let composer = std::sync::Arc::new(Composer {
+                replies: std::sync::Mutex::new(vec![
+                    fs::read_to_string(fixtures().join("revive-a0.features.json")).unwrap(),
+                    fs::read_to_string(fixtures().join("revive-a0.expected.json")).unwrap(),
+                ]),
+                formats: std::sync::Mutex::new(Vec::new()),
+            });
+            GeminiClient::<crate::gemini::HttpTransport>::from_provider(
+                composer.clone(),
+                crate::gemini::GeminiProfile::external(
+                    "composer-v1",
+                    std::sync::Arc::new(crate::gemini::EmbeddedPrompts),
+                ),
+                crate::models::Look::default(),
+            )
+            .scene(
+                "English",
+                "revive",
+                "The paramedics managed to revive the drowning swimmer.",
+                "en",
+            )
+            .unwrap();
+            let mut schema: Value =
+                serde_json::from_str(include_str!("../../assets/layout_scene_schema.json"))
+                    .unwrap();
+            let bound = schema
+                .pointer_mut("/properties/panels")
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove("maxItems");
+            let formats = composer.formats.lock().unwrap();
+            let actual = match &formats[1] {
+                crate::models::TextFormat::Schema(value) => Some(value),
+                _ => None,
+            };
+            assert_eq!(
+                (actual, bound),
+                (Some(&schema), Some(json!(4))),
+                "external composer lost its schema or the local panel count constraint"
+            );
+        }
+
+        #[test]
+        fn panel_repair_cannot_accept_a_corrupted_semantic_spine() {
+            let raw = fs::read_to_string(fixtures().join("revive-a0.expected.json"))
+                .unwrap()
+                .replacen("  },\n  \"page_design\"", "  ],\n  \"page_design\"", 1);
+            let archive = Archive {
+                replies: RefCell::new(vec![
+                    fs::read_to_string(fixtures().join("revive-a0.features.json")).unwrap(),
+                    raw,
+                ]),
+                requests: RefCell::new(Vec::new()),
+            };
+            assert!(
+                GeminiClient::new("offline", &archive)
+                    .scene(
+                        "English",
+                        "revive",
+                        "The paramedics managed to revive the drowning swimmer.",
+                        "en"
+                    )
+                    .is_err(),
+                "panel boundary repair accepted a corrupted semantic spine"
+            );
+        }
+
+        #[test]
+        fn composer_failures_cannot_conflate_stop_truncation_and_safety() {
+            let reasons = ["STOP", "MAX_TOKENS", "SAFETY"];
+            let diagnoses = reasons
+                .iter()
+                .map(|reason| {
+                    let transport = Terminated {
+                        features: RefCell::new(Some(
+                            fs::read_to_string(fixtures().join("revive-a0.features.json")).unwrap(),
+                        )),
+                        reason,
+                    };
+                    let error = GeminiClient::new("offline", transport)
+                        .scene(
+                            "English",
+                            "revive",
+                            "The paramedics managed to revive the drowning swimmer.",
+                            "en",
+                        )
+                        .unwrap_err();
+                    format!("{error:#}").contains(reason)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                diagnoses,
+                vec![true, true, true],
+                "composer failures conflated STOP, MAX_TOKENS, and a safety refusal"
+            );
+        }
     }
 }

@@ -241,19 +241,7 @@ fn slot_for(artifacts: &CardArtifacts, artifact: Artifact) -> &ArtifactSlot {
 /// dropping the rows the model marked not-ok. The `--senses` policy is applied
 /// once at `new`-time as the initial selection; this only reads the selection.
 pub(super) fn drafts_for(candidates: &[WordCandidate], pair: &LanguagePair) -> Vec<CardDraft> {
-    candidates
-        .iter()
-        .filter(|candidate| candidate.ok())
-        .flat_map(|candidate| {
-            let indices: Vec<usize> = candidate.selected_senses().to_vec();
-            indices.into_iter().filter_map(move |index| {
-                candidate
-                    .senses()
-                    .get(index)
-                    .map(|_| CardDraft::from_candidate(candidate, index, pair.clone()))
-            })
-        })
-        .collect()
+    crate::application::drafts_for(candidates, pair)
 }
 
 /// Reporter that narrates progress to stderr and prints final paths to stdout.

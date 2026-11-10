@@ -51,7 +51,7 @@ pub(super) fn latest_verdict(cache: &Cache) -> Option<ArchivedVerdict> {
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())?;
     let status = member(&value, "status")?;
-    if status == "accepted" {
+    if status == "accepted" || status == "not_sent" {
         return None;
     }
     let category = if status == "rejected" {

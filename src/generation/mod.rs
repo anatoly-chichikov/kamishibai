@@ -11,12 +11,11 @@ pub mod speech;
 pub mod manga;
 
 pub use artifact_cache::Cache;
-pub(crate) use card_production::{
-    GeminiCardProduction, invalidate_draft, restart_picture_request_series,
-};
+pub use card_production::restart_picture_request_series;
+pub(crate) use card_production::{GeminiCardProduction, invalidate_draft};
 #[cfg(test)]
 pub(crate) use card_production::{invalidate_card, reserve_picture_request};
 pub use catalog::SceneComposer;
-pub use contracts::SceneSource;
+pub use contracts::{SceneMode, SceneSource, VisualFailure, VisualResult};
 pub use prompts::{audio_prompt, manga_template, render_audio_prompt, visual_revision};
 pub use speech::{Audio, Speaker};

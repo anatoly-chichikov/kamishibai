@@ -153,7 +153,7 @@ fn recorded_phonetic_input(requests: &Rc<RefCell<Vec<(String, String)>>>) -> Res
 }
 
 /// Return one production feature plan for a single motivated camera view.
-fn scene_features() -> Value {
+pub(super) fn scene_features() -> Value {
     json!({
         "semantic_beat_count": 1,
         "semantic_relation": "single_moment",
@@ -200,7 +200,7 @@ fn scene_features() -> Value {
 }
 
 /// Return one geometry-free production scene response with no special device.
-fn dynamic_scene() -> Value {
+pub(super) fn dynamic_scene() -> Value {
     json!({
         "semantic_spine": {
             "literal_event": "A cat sleeps on the windowsill",

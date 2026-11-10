@@ -1,0 +1,109 @@
+{
+  "camera_arc": {
+    "continuity": {
+      "axis": "interaction line between speaker and recipient across the desk",
+      "axis_mode": "preserve",
+      "eyeline_policy": "matched",
+      "screen_direction": "left_to_right"
+    },
+    "motivation": "The sequence moves from the social context of the delivery across the workspace directly into the focal object of critique, and concludes on the recipient's immediate physical reception of the disparagement.",
+    "progression": "medium two_shot -> close insert -> medium_close single",
+    "strategy": "wide_detail_return"
+  },
+  "coverage_audit": [
+    {
+      "added_view": "A medium two-shot showing the man speaking dismissively toward the woman while pointing at the work documents between them.",
+      "panel_count": 1,
+      "reason": "Condenses the event into a single glance, losing the specific physical manifestation of 'her work' and the distinct interpersonal impact of 'derogatory'.",
+      "source_support": "He made derogatory comments about her work.",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "A reaction close-up of the woman taking in the sharp verbal critique.",
+      "panel_count": 2,
+      "reason": "Leaves 'her work' entirely abstract in the background rather than showing the concrete target of the disparaging remarks.",
+      "source_support": "about her work",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "An insert detail of her work documents spread out on the desk, marked by his dismissive gesture or pen strike.",
+      "panel_count": 3,
+      "reason": "Captures the full triad of the sentence: the verbal belittling delivery, the specific work receiving the comments, and the target's strained reaction.",
+      "source_support": "He made derogatory comments about her work.",
+      "verdict": "selected"
+    },
+    {
+      "added_view": "A wider room shot of bystanders or colleagues witnessing the conversation.",
+      "panel_count": 4,
+      "reason": "The source sentence specifies only 'he', 'her work', and the comments made; external witnesses or room dynamics are unsupported additions.",
+      "source_support": "None; bystanders or office spectators are not mentioned.",
+      "verdict": "redundant_or_unsupported"
+    }
+  ],
+  "decomposition_mode": "cause_reaction_detail",
+  "intensity": "medium",
+  "literal_anchor": "a man speaking dismissively toward a woman across her desk while gesturing toward her work documents",
+  "motion_vector": "horizontal",
+  "panel_count": 3,
+  "panel_emphasis": "dominant_end",
+  "panel_relation": "sequence",
+  "reading_direction": "left_to_right_top_to_bottom",
+  "selection_logic": "The sentence grounds three interlocking narrative elements: the male actor delivering derogatory remarks, the physical work being belittled, and the female colleague whose work is targeted. A three-panel progression cleanly establishes the interaction in s1, isolates the physical target of criticism in s2 without relying on textual markings or labels, and resolves in s3 on her emotional containment, giving final visual weight to the impact of the disparagement. A fourth shot showing outside observers was rejected as completely unsupported by the text.",
+  "semantic_beat_count": 2,
+  "semantic_relation": "sequence",
+  "shots": [
+    {
+      "angle": "eye_level",
+      "camera_motivation": "Establish the interpersonal friction and physical arrangement across the desk as he delivers the critique.",
+      "depth_plan": "layered",
+      "framing": "two_shot",
+      "id": "s1",
+      "information_gain": "The physical posture of the man leaning forward with a disparaging sneer while the woman sits opposite him.",
+      "role": "action",
+      "semantic_beat_index": 1,
+      "shot_scale": "medium",
+      "source_support": "He made derogatory comments",
+      "transition_trigger": "scene_open",
+      "viewpoint": "objective",
+      "viewpoint_anchor": ""
+    ,
+      "visible_anchor": "man standing over desk leaning down toward woman with a scoffing facial expression and dismissive hand gesture"
+    },
+    {
+      "angle": "high",
+      "camera_motivation": "Focus on the literal target of his remarks, showing his hand disdainfully pushing or tapping the work materials.",
+      "depth_plan": "shallow",
+      "framing": "insert",
+      "id": "s2",
+      "information_gain": "The specific physical papers and schematics forming 'her work' being dismissed under his hand.",
+      "role": "detail",
+      "semantic_beat_index": 1,
+      "shot_scale": "close",
+      "source_support": "about her work",
+      "transition_trigger": "attention_shift",
+      "viewpoint": "point_of_view",
+      "viewpoint_anchor": "man's line of sight"
+    ,
+      "visible_anchor": "hand carelessly flicking aside a drafted design binder on the tabletop"
+    },
+    {
+      "angle": "eye_level",
+      "camera_motivation": "Capture the direct psychological and physical toll of receiving derogatory remarks on her face and posture.",
+      "depth_plan": "shallow",
+      "framing": "single",
+      "id": "s3",
+      "information_gain": "The woman's tightened jaw, averted gaze, and clenched hands holding back a response.",
+      "role": "reaction",
+      "semantic_beat_index": 2,
+      "shot_scale": "medium_close",
+      "source_support": "her work (implied recipient of derogatory comments)",
+      "transition_trigger": "emotion_change",
+      "viewpoint": "over_the_shoulder",
+      "viewpoint_anchor": "man's shoulder"
+    ,
+      "visible_anchor": "woman's face with tense, restrained expression and white-knuckled grip on the edge of the desk"
+    }
+  ],
+  "spatial_relation": "same_space",
+  "transition_type": "action_to_action"
+}
