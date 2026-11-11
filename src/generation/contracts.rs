@@ -49,6 +49,12 @@ impl VisualFailure {
     }
 }
 
+impl From<crate::session::StateFailure> for VisualFailure {
+    fn from(error: crate::session::StateFailure) -> Self {
+        Self::Failed(error.into())
+    }
+}
+
 impl From<std::io::Error> for VisualFailure {
     fn from(error: std::io::Error) -> Self {
         Self::Failed(error.into())

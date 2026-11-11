@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow, bail};
 use tempfile::Builder;
 
+use crate::session::StateFailure;
+
 /// Canonical filename of the card-meta JSON inside one card's cache folder.
 pub const META_FILE: &str = "meta.json";
 /// Canonical filename of the manga scene JSON inside one card's cache folder.
@@ -151,29 +153,32 @@ impl Cache {
 
     /// Return the absolute path for one cached filename.
     pub fn filepath(&self, filename: &str) -> Result<PathBuf> {
-        fs::create_dir_all(&self.path)?;
+        fs::create_dir_all(&self.path).map_err(StateFailure::new)?;
         Ok(self.path.join(filename))
     }
 
     /// Return one staged temporary file path.
     pub fn stage(&self, suffix: &str) -> Result<PathBuf> {
-        fs::create_dir_all(&self.path)?;
-        let file = Builder::new().suffix(suffix).tempfile_in(&self.path)?;
-        let (_handle, path) = file.keep()?;
+        fs::create_dir_all(&self.path).map_err(StateFailure::new)?;
+        let file = Builder::new()
+            .suffix(suffix)
+            .tempfile_in(&self.path)
+            .map_err(StateFailure::new)?;
+        let (_handle, path) = file.keep().map_err(StateFailure::new)?;
         Ok(path)
     }
 
     /// Atomically replace the final filename with the staged file.
     pub fn commit(&self, staged: &Path, filename: &str) -> Result<()> {
-        fs::create_dir_all(&self.path)?;
+        fs::create_dir_all(&self.path).map_err(StateFailure::new)?;
         if let CommitPlan::Failing { count, index } = &self.plan {
             let current = *count.borrow();
             *count.borrow_mut() += 1;
             if current == *index {
-                return Err(anyhow!("commit failed"));
+                return Err(StateFailure::new(anyhow!("commit failed")).into());
             }
         }
-        fs::rename(staged, self.path.join(filename))?;
+        fs::rename(staged, self.path.join(filename)).map_err(StateFailure::new)?;
         Ok(())
     }
 
@@ -206,13 +211,14 @@ impl Cache {
         let parent = path
             .parent()
             .ok_or_else(|| anyhow!("cache lock path has no parent"))?;
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).map_err(StateFailure::new)?;
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(&path)?;
+            .open(&path)
+            .map_err(StateFailure::new)?;
         let started = Instant::now();
         loop {
             if try_exclusive_lock(&file)? {

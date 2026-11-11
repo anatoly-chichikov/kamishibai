@@ -13,7 +13,7 @@ use crate::generation::artifact_cache::{Cache, META_FILE, ROOT_STAGE_LOCK_TIMEOU
 use crate::generation::visual_revision;
 use crate::session::{
     Artifact, ArtifactAttempt, ArtifactFile, AxisSet, CardCell, CardDraft, CardMeta, CardMetaCache,
-    CardRevision, LanguagePair, SentenceLabelSelection,
+    CardRevision, LanguagePair, SentenceLabelSelection, StateFailure,
 };
 
 /// Produces and stores the metadata that identifies one card.
@@ -65,7 +65,11 @@ impl MetadataProduction {
             Ok(meta) => meta,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        match self.meta_cache().load_current_at(&cell) {
+        match self
+            .meta_cache()
+            .load_current_at(&cell)
+            .map_err(|error| StateFailure::new(error).into())
+        {
             Ok(Some(meta)) if request.is_none_or(|request| request.pinned().is_empty()) => {
                 let result = match meta.sentence_labels().cloned() {
                     Some(labels) if !labels.pinned().is_empty() || !labels.approx().is_empty() => {
@@ -250,9 +254,10 @@ impl MetadataProduction {
         meta: &CardMeta,
         cached: bool,
     ) -> Result<ArtifactFile> {
-        let (filename, path) =
-            self.meta_cache()
-                .replace_at(cell, term, understanding, pair, meta)?;
+        let (filename, path) = self
+            .meta_cache()
+            .replace_at(cell, term, understanding, pair, meta)
+            .map_err(StateFailure::new)?;
         Ok(artifact_file(filename, path, cached, None))
     }
 

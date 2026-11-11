@@ -9,7 +9,7 @@ use crate::generation::artifact_cache::{
 };
 use crate::generation::manga::Translator;
 use crate::generation::{VisualFailure, VisualResult};
-use crate::session::Artifact;
+use crate::session::{Artifact, StateFailure};
 
 /// Returns a reservation only when composition confirms its request was not sent.
 pub(super) struct ReservedScene<T> {
@@ -40,7 +40,13 @@ impl<T: Translator> Translator for ReservedScene<T> {
         if matches!(result, Err(VisualFailure::NotSent)) {
             match self.previous {
                 Some(attempt) => write_scene_attempt(&self.cache, attempt)?,
-                None => fs::remove_file(self.cache.path().join(SCENE_ATTEMPT_FILE))?,
+                None => {
+                    if let Err(error) = fs::remove_file(self.cache.path().join(SCENE_ATTEMPT_FILE))
+                        && error.kind() != std::io::ErrorKind::NotFound
+                    {
+                        return Err(StateFailure::new(error).into());
+                    }
+                }
             }
         }
         result
@@ -139,7 +145,7 @@ pub(super) fn reserve_scene_attempt(
     fallback: u8,
     recompose: bool,
 ) -> Result<u8> {
-    let cursor = scene_attempt_cursor(cache, fallback)?;
+    let cursor = scene_attempt_cursor(cache, fallback).map_err(StateFailure::new)?;
     let advance = match artifact {
         Artifact::Scene => !cache.exists(SCENE_FILE),
         Artifact::Picture => recompose && !cache.exists(ILLUSTRATION_FILE),
@@ -180,7 +186,7 @@ pub(super) fn load_scene_attempt(cache: &Cache) -> Result<Option<u8>> {
 }
 
 fn store_scene_attempt(cache: &Cache, attempt: u8) -> Result<()> {
-    if let Some(current) = load_scene_attempt(cache)? {
+    if let Some(current) = load_scene_attempt(cache).map_err(StateFailure::new)? {
         if current > attempt {
             bail!("scene attempt cursor cannot move backwards from {current} to {attempt}");
         }
@@ -202,7 +208,7 @@ fn write_scene_attempt(cache: &Cache, attempt: u8) -> Result<()> {
     if result.is_err() {
         let _ = fs::remove_file(&staged);
     }
-    result
+    result.map_err(|error| StateFailure::new(error).into())
 }
 
 fn scene_attempt_index(scene: &serde_json::Value) -> Result<Option<u8>> {

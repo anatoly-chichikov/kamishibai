@@ -12,7 +12,7 @@ use crate::generation::artifact_cache::{
     Cache, ILLUSTRATION_COST_FILE, META_COST_FILE, ROOT_STAGE_LOCK_TIMEOUT, RootStage,
     SCENE_COST_FILE, VOICE_COST_FILE,
 };
-use crate::session::{Artifact, ArtifactAttempt, CostRecord, GenerationCost};
+use crate::session::{Artifact, ArtifactAttempt, CostRecord, GenerationCost, StateFailure};
 
 /// Opens cost recorders with optional stable-slot attribution.
 #[derive(Clone)]
@@ -174,7 +174,9 @@ impl CostRecorder {
         let result = self
             .observe(&record)
             .and_then(|()| store_cost(&self.cache, self.artifact, &record).map(|_| ()));
-        self.state.accounting.record(result)
+        self.state
+            .accounting
+            .record(result.map_err(|error| StateFailure::new(error).into()))
     }
 
     /// Persist usage observed for a metadata correction.
@@ -185,13 +187,12 @@ impl CostRecorder {
         let result = self
             .observe(&record)
             .and_then(|()| persist_correction_cost(&self.cache, &record));
-        self.state.accounting.record(result)
+        self.state
+            .accounting
+            .record(result.map_err(|error| StateFailure::new(error).into()))
     }
 
     fn observe(&self, record: &CostRecord) -> Result<()> {
-        if let Some(attribution) = self.attribution.as_ref() {
-            attribution.record(self.artifact, record)?;
-        }
         let aggregate = self
             .state
             .observed
@@ -200,6 +201,9 @@ impl CostRecorder {
             .map(|current| current.merged(record))
             .unwrap_or_else(|| record.clone());
         *self.state.observed.borrow_mut() = Some(aggregate);
+        if let Some(attribution) = self.attribution.as_ref() {
+            attribution.record(self.artifact, record)?;
+        }
         Ok(())
     }
 

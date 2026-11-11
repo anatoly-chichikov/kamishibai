@@ -400,7 +400,7 @@ where
     /// Experimental embedding API; compatibility is not guaranteed.
     /// Read the plugged picture parts shared by scene composition and rendering.
     #[must_use]
-    pub fn look(&self) -> &crate::models::Look {
+    pub(crate) fn look(&self) -> &crate::models::Look {
         &self.look
     }
 

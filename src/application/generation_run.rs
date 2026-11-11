@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use super::CardProduction;
 use crate::session::{
     Artifact, ArtifactAttempt, ArtifactFile, CardDraft, CardRevision, EngineEvent, SessionEngine,
+    StateFailure,
 };
 
 /// Delivery-owned selection and cooperative refusal of new paid work within one artifact.
@@ -21,6 +22,12 @@ use crate::session::{
 /// composed scene. An index for a possibly sent scene stays reserved; a scene
 /// request confirmed not sent returns its index. A not-sent refusal without a
 /// reported pause is a failed attempt, bounded by the usual attempt ceiling.
+///
+/// Errors writing or rolling back the core's own state, or recording costs,
+/// including in the caller's cost ledger, still reach the caller during a pause.
+/// They do not spend an artifact attempt; incurred costs remain in the drafts.
+/// This guarantee does not cover state reads: a failed read may return an error
+/// or remain a pause and be retried on resume.
 ///
 /// Experimental embedding API; compatibility is not guaranteed.
 pub trait GenerationControl {
@@ -97,6 +104,11 @@ impl GenerationRun {
     /// such pause. A possibly sent scene keeps its index; a scene request confirmed
     /// not sent returns its index. A not-sent refusal without a reported pause
     /// spends an attempt and remains bounded by the usual attempt ceiling.
+    /// Errors writing or rolling back the core's own state, or recording costs,
+    /// including in the caller's cost ledger, still reach the caller during a pause.
+    /// They do not spend an artifact attempt; incurred costs remain in the drafts.
+    /// This guarantee does not cover state reads: a failed read may return an error
+    /// or remain a pause and be retried on resume.
     ///
     /// Experimental embedding API; compatibility is not guaranteed.
     pub fn advance_in<P: CardProduction + ?Sized>(
@@ -112,8 +124,14 @@ impl GenerationRun {
             return Ok(None);
         };
         let outcome = produce_artifact(production, card, artifact, &self.engine.drafts()[card]);
-        if outcome.error().is_some() && control.paused() {
-            outcome.pause(&mut self.engine, card, artifact);
+        if let Some(error) = outcome.error()
+            && control.paused()
+        {
+            let storage = error.is::<StateFailure>();
+            let result = outcome.pause(&mut self.engine, card, artifact);
+            if storage {
+                result?;
+            }
             return Ok(None);
         }
         let error = outcome.error().map(|error| format!("{error:#}"));
@@ -237,7 +255,7 @@ impl ArtifactOutcome {
     }
 
     /// Account a cooperative refusal without recording a failed artifact attempt.
-    fn pause(self, engine: &mut SessionEngine, card: usize, artifact: Artifact) {
+    fn pause(self, engine: &mut SessionEngine, card: usize, artifact: Artifact) -> Result<()> {
         match self {
             Self::Meta(attempt) => engine.paused(card, artifact, *attempt),
             Self::Media(attempt) => engine.paused(card, artifact, *attempt),

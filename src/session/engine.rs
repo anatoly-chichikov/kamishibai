@@ -87,20 +87,21 @@ impl SessionEngine {
         None
     }
 
-    /// Retain billed spend from a paused operation without consuming an artifact attempt.
+    /// Retain billed spend without consuming an attempt, then return the operation's error.
     pub(crate) fn paused<T>(
         &mut self,
         card: usize,
         artifact: Artifact,
         attempt: ArtifactAttempt<T>,
-    ) {
-        let (_result, cost, related, _fault) = attempt.into_accounted_parts();
+    ) -> Result<()> {
+        let (result, cost, related, _fault) = attempt.into_accounted_parts();
         let draft = self.drafts[card].clone();
         let artifacts = mark_related_costs(
             mark_cost(draft.artifacts().clone(), artifact, cost),
             related,
         );
         self.drafts[card] = draft.with_artifacts(artifacts);
+        result.map(|_| ())
     }
 
     /// Apply the outcome of a meta-generation pass for one card.

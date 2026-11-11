@@ -94,6 +94,7 @@ fn pre_provider_recomposition_failure_falls_back_once_to_the_committed_scene() {
             Ok("committed")
         },
         |_| true,
+        |_| false,
     );
     assert_eq!(
         (result.ok(), fallback.get(), picture_requests(&cache)),
@@ -122,6 +123,7 @@ fn recomposition_image_failure_never_falls_back_to_the_committed_scene() {
             Ok("committed")
         },
         |_| true,
+        |_| false,
     );
     assert_eq!(
         (result.err(), fallback.get(), picture_requests(&cache),),
@@ -147,6 +149,7 @@ fn fallback_failure_before_the_provider_returns_the_recomposition_error() {
             Err(RecoveryFailure::Fallback)
         },
         |_| true,
+        |_| false,
     );
     assert_eq!(
         (result.err(), fallback.get(), picture_requests(&cache)),
@@ -171,6 +174,7 @@ fn fallback_image_failure_returns_the_fallback_provider_error() {
             Err(RecoveryFailure::Provider)
         },
         |_| true,
+        |_| false,
     );
     assert_eq!(
         (result.err(), picture_requests(&cache)),
@@ -214,6 +218,7 @@ fn cost_recording_failure_prevents_committed_scene_fallback() {
             Ok("committed")
         },
         |_| true,
+        |_| false,
     );
     assert_eq!(
         (
@@ -249,6 +254,7 @@ fn request_recording_failure_prevents_committed_scene_fallback() {
             Ok("committed")
         },
         |_| true,
+        |_| false,
     );
     assert_eq!(
         (
