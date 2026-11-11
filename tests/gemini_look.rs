@@ -132,15 +132,22 @@ impl kamishibai::models::PictureStyle for Watercolor {
     }
 }
 
-fn exchange(mut stream: std::net::TcpStream, response: &str, status: u16) -> String {
+/// Prepare a bounded request socket and announce its mode before reading headers.
+fn exchange(
+    mut stream: std::net::TcpStream,
+    response: &str,
+    status: u16,
+    ready: impl FnOnce(&std::net::TcpStream),
+) -> String {
     use std::io::{BufRead, Read, Write};
     stream.set_nonblocking(false).unwrap();
     stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+        .set_read_timeout(Some(std::time::Duration::from_secs(30)))
         .unwrap();
     stream
-        .set_write_timeout(Some(std::time::Duration::from_secs(3)))
+        .set_write_timeout(Some(std::time::Duration::from_secs(30)))
         .unwrap();
+    ready(&stream);
     let mut reader = std::io::BufReader::new(&mut stream);
     let mut length = None;
     loop {
@@ -173,7 +180,7 @@ fn drawing(look: Option<Look>) -> (bool, Vec<Value>) {
     listener.set_nonblocking(true).unwrap();
     let endpoint = format!("http://{}/models", listener.local_addr().unwrap());
     let server = std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
         let mut requests = Vec::new();
         while requests.len() < 3 {
             match listener.accept() {
@@ -197,6 +204,7 @@ fn drawing(look: Option<Look>) -> (bool, Vec<Value>) {
                             stream,
                             &response.to_string(),
                             status,
+                            |_| {},
                         ))
                         .unwrap(),
                     );
@@ -285,12 +293,12 @@ fn local_exchange_cannot_fail_before_delayed_headers_arrive() {
     listener.set_nonblocking(true).unwrap();
     let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
     client
-        .set_read_timeout(Some(Duration::from_secs(3)))
+        .set_read_timeout(Some(Duration::from_secs(30)))
         .unwrap();
     client
-        .set_write_timeout(Some(Duration::from_secs(3)))
+        .set_write_timeout(Some(Duration::from_secs(30)))
         .unwrap();
-    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
     let stream = loop {
         match listener.accept() {
             Ok((stream, _)) => break stream,
@@ -306,22 +314,37 @@ fn local_exchange_cannot_fail_before_delayed_headers_arrive() {
     stream.set_nonblocking(true).unwrap();
     let (started, waiting) = std::sync::mpsc::channel();
     let server = std::thread::spawn(move || {
-        started.send(()).unwrap();
-        exchange(stream, "{}", 200)
+        exchange(stream, "{}", 200, |_stream| {
+            #[cfg(unix)]
+            let nonblocking = Some(
+                rustix::fs::fcntl_getfl(_stream)
+                    .unwrap()
+                    .contains(rustix::fs::OFlags::NONBLOCK),
+            );
+            #[cfg(not(unix))]
+            let nonblocking: Option<bool> = None;
+            started.send(nonblocking).unwrap();
+        })
     });
-    waiting.recv_timeout(Duration::from_secs(3)).unwrap();
-    std::thread::sleep(Duration::from_millis(75));
+    let nonblocking = waiting.recv_timeout(Duration::from_secs(30)).unwrap();
     let sent = client.write_all(b"POST / HTTP/1.1\r\ncontent-length: 2\r\n\r\n{}");
     let mut response = String::new();
     let received = client.read_to_string(&mut response);
     assert_eq!(
         (
+            nonblocking,
             sent.is_ok(),
             received.is_ok(),
             server.join().ok(),
             response.ends_with("\r\n\r\n{}")
         ),
-        (true, true, Some(String::from("{}")), true),
-        "local exchange failed before its bounded header deadline or lost the request body"
+        (
+            cfg!(unix).then_some(false),
+            true,
+            true,
+            Some(String::from("{}")),
+            true
+        ),
+        "local exchange kept a nonblocking socket, failed before its bounded header deadline, or lost the request body"
     );
 }

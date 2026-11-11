@@ -4403,8 +4403,9 @@ mod tests {
                 .local_addr()
                 .expect("test listener must have address")
         );
+        let (finished, completion) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
             let mut stream = loop {
                 match listener.accept() {
                     Ok((stream, _)) => break stream,
@@ -4418,16 +4419,24 @@ mod tests {
                 }
             };
             stream
-                .set_read_timeout(Some(Duration::from_secs(1)))
+                .set_nonblocking(false)
+                .expect("test request must wait for bytes");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(30)))
                 .expect("test socket read must be bounded");
             let mut buffer = [0; 1024];
-            let _ = stream.read(&mut buffer);
-            thread::sleep(Duration::from_millis(250));
+            let _size = stream.read(&mut buffer).expect("test request must read");
+            completion
+                .recv_timeout(Duration::from_secs(30))
+                .expect("client must finish before the server closes");
         });
         let error = HttpTransport::from_timeout(Duration::from_millis(25))
             .expect("positive request timeout must validate")
             .post(url.as_str(), "key", "{}")
             .expect_err("slow server must time out");
+        finished
+            .send(())
+            .expect("server must await client completion");
         server.join().expect("test server must finish");
         assert!(
             error.chain().any(|cause| cause
