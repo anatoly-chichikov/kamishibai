@@ -466,19 +466,32 @@ fn panel_sentences(
     panel: &Value,
     panel_count: usize,
     compressed: bool,
-) -> [String; 3] {
+) -> Vec<String> {
     let ordinal = ["first", "second", "third", "fourth"]
         .get(index)
         .copied()
         .unwrap_or("next");
     let scene = panel.get("scene").unwrap_or(panel);
-    let (description_limit, motivation_limit) = panel_limits(panel_count, compressed);
-    let description = description(scene, description_limit);
+    let (description_limit, motivation_limit) = panel_limits(panel_count);
+    let description = description(
+        scene,
+        if compressed {
+            usize::MAX
+        } else {
+            description_limit
+        },
+    );
     let camera = scene.get("camera").unwrap_or(&Value::Null);
     let scale = enum_words(camera, "shot_scale", "medium", 3);
     let viewpoint = viewpoint_words(camera);
     let framing = framing_words(camera);
     let angle = angle_words(camera);
+    if compressed {
+        return vec![
+            format!("The {ordinal} panel: {description}."),
+            format!("Camera: {scale} {viewpoint} {framing} from {angle}."),
+        ];
+    }
     let motivation = narrative(
         panel
             .get("semantic_job")
@@ -487,17 +500,14 @@ fn panel_sentences(
             .unwrap_or("the visible narrative change"),
         motivation_limit,
     );
-    [
+    vec![
         format!("The {ordinal} panel: {description}."),
         format!("Use {scale} {viewpoint} {framing} framing from {angle}."),
         format!("Purpose: {motivation}."),
     ]
 }
 
-fn panel_limits(panels: usize, compressed: bool) -> (usize, usize) {
-    if compressed {
-        return (5, 3);
-    }
+fn panel_limits(panels: usize) -> (usize, usize) {
     match panels {
         1 => (24, 14),
         2 => (18, 14),
@@ -929,10 +939,8 @@ mod tests {
     fn style_layer_cannot_borrow_a_creator_studio_or_franchise_name() {
         let named = [OPENING, CLOSING]
             .iter()
-            .flat_map(|layer| layer.split(". "))
-            .flat_map(|sentence| sentence.split_whitespace().skip(1))
-            .filter(|word| word.chars().next().is_some_and(char::is_uppercase))
-            .count();
+            .map(|layer| style_names(layer))
+            .sum::<usize>();
         let attributed = ["style of", "inspired by", "manner of", "homage", "tribute"]
             .iter()
             .filter(|phrase| {
@@ -943,6 +951,93 @@ mod tests {
             (named, attributed),
             (0, 0),
             "the picture style layer borrowed a proper name or an attributed style"
+        );
+    }
+
+    fn style_names(layer: &str) -> usize {
+        layer
+            .split(['.', '!', '?'])
+            .map(|sentence| {
+                sentence
+                    .split_whitespace()
+                    .enumerate()
+                    .filter(|(index, word)| {
+                        let word = word.trim_matches(|character: char| !character.is_alphabetic());
+                        word.chars().next().is_some_and(char::is_uppercase)
+                            && !(*index == 0
+                                && matches!(
+                                    word,
+                                    "A" | "An"
+                                        | "The"
+                                        | "Black-and-white"
+                                        | "Thin"
+                                        | "Build"
+                                        | "Faces"
+                                        | "Flat"
+                                        | "Strictly"
+                                        | "Silent"
+                                        | "No"
+                                        | "Badge"
+                                        | "Lights/hardware/contours"
+                                ))
+                    })
+                    .count()
+            })
+            .sum()
+    }
+
+    /// A creator name cannot evade the style guard at a sentence boundary.
+    #[test]
+    fn style_names_cannot_hide_at_the_start_of_a_sentence() {
+        assert_eq!(
+            [
+                "Miyazaki draws thin pen lines.",
+                "Thin lines. Miyazaki draws faces.",
+                "Thin Miyazaki lines."
+            ]
+            .map(style_names),
+            [1, 1, 1],
+            "a creator name escaped the style guard at a sentence boundary"
+        );
+    }
+
+    /// Ordinary capitalized sentence openings remain legal descriptive prose.
+    #[test]
+    fn style_names_cannot_reject_ordinary_sentence_openings() {
+        assert_eq!(
+            style_names("Thin pen lines. Build flat shapes. Faces stay simplified. No lettering."),
+            0,
+            "ordinary descriptive sentence openings were mistaken for borrowed names"
+        );
+    }
+
+    /// Compression preserves the visible action of every real storm panel.
+    #[test]
+    fn compressed_storm_cannot_lose_its_panel_actions() {
+        let scene = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/topology-production/storm-boundary.scene.json"
+        ))
+        .expect("storm boundary scene must parse");
+        let prompt = compile_image_prompt(&scene).expect("storm boundary prompt must compile");
+        let descriptions = prompt.split(" panel: ").skip(1).collect::<Vec<_>>();
+        assert_eq!(
+            (
+                CONTRACT.contains(&prompt.split_whitespace().count()),
+                descriptions
+                    .iter()
+                    .zip([
+                        "ocean swells crest and crash",
+                        "support truss violently snaps and splits",
+                        "floodwaters carrying sheared planks",
+                    ])
+                    .filter(|(panel, action)| panel
+                        .split('.')
+                        .next()
+                        .is_some_and(|text| text.contains(action)))
+                    .count(),
+            ),
+            (true, 3),
+            "compression erased a storm panel's subject or visible action"
         );
     }
 
@@ -1275,6 +1370,52 @@ mod tests {
             .iter()
             .all(|fragment| !prompt.contains(fragment)),
             "bounded prose ended one clause on a dangling connector"
+        );
+    }
+
+    /// Crowded panels keep late predicates instead of stopping at their subjects.
+    #[test]
+    fn compressed_four_panel_scene_cannot_drop_late_actions() {
+        let mut scene = registry_scene("staggered-grid-4-v1");
+        scene["manga_panel"]["page_design"]["special_device"] = json!({
+            "kind": "overlap", "source_panel": "p1", "target_panel": "p2"
+        });
+        scene["manga_panel"]["page_design"]["camera_arc"] = json!({
+            "progression": "wide environmental setup into close details"
+        });
+        let actions = [
+            "The exhausted porter beside the crowded railway platform lifts a battered suitcase onto the departing carriage",
+            "The young passenger beneath the station's enormous clock catches a falling ticket before it reaches the tracks",
+            "The elderly conductor near the end of the carriage pulls the emergency brake with both hands",
+            "The startled driver inside the cramped locomotive cabin shuts the steam valve as the train stops",
+        ];
+        for (panel, action) in scene["manga_panel"]["panels"]
+            .as_array_mut()
+            .expect("four panels must exist")
+            .iter_mut()
+            .zip(actions)
+        {
+            panel["scene"]["description"] = json!(action);
+            panel["scene"]["camera"]["shot_scale"] = json!("medium_close");
+            panel["scene"]["camera"]["angle"] = json!("low");
+            panel["semantic_job"] = json!(
+                "Establish the visible physical action and its immediate consequence across the railway platform"
+            );
+        }
+        let panels = scene["manga_panel"]["panels"]
+            .as_array()
+            .expect("four panels must exist");
+        let uncompressed = super::assembled(&scene, panels, "staggered-grid-4-v1", false)
+            .expect("uncompressed scene must compile");
+        let prompt = compile_image_prompt(&scene).expect("crowded action scene must compile");
+        assert_eq!(
+            (
+                CONTRACT.contains(&prompt.split_whitespace().count()),
+                actions.iter().all(|action| prompt.contains(action)),
+                uncompressed.split_whitespace().count() > *CONTRACT.end(),
+            ),
+            (true, true, true),
+            "compression dropped a late predicate from a crowded panel: {prompt}"
         );
     }
 
