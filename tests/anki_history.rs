@@ -657,7 +657,7 @@ fn changed_media_cannot_leave_a_part_file_or_publish() {
     let result = snapshot.save(
         &out,
         time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-        "1.14.0",
+        env!("CARGO_PKG_VERSION"),
     );
     assert!(
         result.is_err() && fs::read_dir(out).unwrap().count() == 0,
@@ -739,7 +739,7 @@ fn concurrent_saves_cannot_replace_each_other() {
                         .save(
                             &out,
                             time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-                            "1.14.0",
+                            env!("CARGO_PKG_VERSION"),
                         )
                         .unwrap()
                 })
@@ -848,7 +848,7 @@ fn review_save_cannot_write_inside_the_anki_profile() {
     let _ = snapshot.save(
         profile,
         time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-        "1.14.0",
+        env!("CARGO_PKG_VERSION"),
     );
     assert!(
         before == inventory(profile),
@@ -866,7 +866,7 @@ fn saving_cannot_create_a_missing_profile_subdirectory() {
     let result = snapshot.save(
         &profile.join("exports-529/nested-83"),
         time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-        "1.14.0",
+        env!("CARGO_PKG_VERSION"),
     );
     assert!(
         result.is_err() && before == inventory(profile),
@@ -887,7 +887,7 @@ fn saving_cannot_follow_a_symlink_into_the_profile() {
     let result = snapshot.save(
         &alias,
         time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-        "1.14.0",
+        env!("CARGO_PKG_VERSION"),
     );
     assert!(
         result.is_err() && before == inventory(profile),
@@ -908,7 +908,7 @@ fn saving_cannot_create_a_missing_subdirectory_through_a_profile_symlink() {
     let result = snapshot.save(
         &alias.join("missing-957/nested-31"),
         time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-        "1.14.0",
+        env!("CARGO_PKG_VERSION"),
     );
     assert!(
         result.is_err() && before == inventory(profile),
@@ -926,7 +926,7 @@ fn saving_cannot_write_into_the_anki_root() {
     let result = snapshot.save(
         &anki,
         time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-        "1.14.0",
+        env!("CARGO_PKG_VERSION"),
     );
     assert!(
         result.is_err() && before == inventory(&anki),
@@ -944,7 +944,7 @@ fn saving_cannot_create_a_sibling_inside_the_anki_root() {
     let result = snapshot.save(
         &anki.join("exports-493/nested-17"),
         time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-        "1.14.0",
+        env!("CARGO_PKG_VERSION"),
     );
     assert!(
         result.is_err() && before == inventory(&anki),
@@ -989,7 +989,7 @@ fn saving_cannot_reenter_the_profile_after_missing_parent_components() {
             .join("missing-619/..")
             .join(profile.file_name().unwrap()),
         time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-        "1.14.0",
+        env!("CARGO_PKG_VERSION"),
     );
     assert!(
         result.is_err() && before == inventory(root.path()),
@@ -1010,7 +1010,7 @@ fn a_symlinked_collection_cannot_hide_its_profile_from_saving() {
     let result = snapshot.save(
         profile,
         time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-        "1.14.0",
+        env!("CARGO_PKG_VERSION"),
     );
     assert!(
         result.is_err() && before == inventory(profile),
@@ -1028,7 +1028,7 @@ fn a_similarly_named_sibling_remains_a_valid_output_directory() {
     let result = snapshot.save(
         &root.path().join("Private-profile-947-export/nested-23"),
         time::OffsetDateTime::from_unix_timestamp(1_700_600_000).unwrap(),
-        "1.14.0",
+        env!("CARGO_PKG_VERSION"),
     );
     assert!(
         result.is_ok() && before == inventory(profile),
