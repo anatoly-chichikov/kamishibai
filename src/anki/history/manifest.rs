@@ -88,7 +88,7 @@ pub(super) struct Card {
     pub(super) note: i64,
     /// Current deck.
     pub(super) deck: i64,
-    /// Template ordinal; only the first template is imported.
+    /// Template ordinal.
     pub(super) ordinal: i64,
     /// Card type: 0 new, 1 learning, 2 review, 3 relearning.
     pub(super) kind: i64,
