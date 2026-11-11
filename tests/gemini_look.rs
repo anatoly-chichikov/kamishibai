@@ -290,7 +290,19 @@ fn local_exchange_cannot_fail_before_delayed_headers_arrive() {
     client
         .set_write_timeout(Some(Duration::from_secs(3)))
         .unwrap();
-    let (stream, _) = listener.accept().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let stream = loop {
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    panic!("local connection exceeded its accept deadline");
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("local listener failed: {error}"),
+        }
+    };
     stream.set_nonblocking(true).unwrap();
     let (started, waiting) = std::sync::mpsc::channel();
     let server = std::thread::spawn(move || {
