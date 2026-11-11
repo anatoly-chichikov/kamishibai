@@ -4,7 +4,9 @@ use anyhow::Result;
 use thiserror::Error;
 
 use crate::languages::LanguageCode;
-use crate::session::{LanguagePair, RawInputBatch, SenseCorrection, Understood, WordCandidate};
+use crate::session::{
+    CardDraft, LanguagePair, RawInputBatch, SenseCorrection, Understood, WordCandidate,
+};
 
 /// Ask for a destination when the input cannot establish the learning language.
 #[derive(Debug, Error)]
@@ -49,3 +51,22 @@ pub(crate) trait WordUnderstanding:
 }
 
 impl<T> WordUnderstanding for T where T: Understanding + BulkCorrection + Clone + Send + 'static {}
+
+/// Create canonical drafts for selected senses while excluding rejected candidates.
+/// Experimental embedding API; compatibility is not guaranteed.
+#[must_use]
+pub fn drafts_for(candidates: &[WordCandidate], pair: &LanguagePair) -> Vec<CardDraft> {
+    candidates
+        .iter()
+        .filter(|candidate| candidate.ok())
+        .flat_map(|candidate| {
+            let indices: Vec<usize> = candidate.selected_senses().to_vec();
+            indices.into_iter().filter_map(move |index| {
+                candidate
+                    .senses()
+                    .get(index)
+                    .map(|_| CardDraft::from_candidate(candidate, index, pair.clone()))
+            })
+        })
+        .collect()
+}

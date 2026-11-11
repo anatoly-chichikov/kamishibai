@@ -11,7 +11,7 @@ use crate::generation::manga::{
     FidelityCheck, ImageSource, LiteralZoomCheck, RecallCard, RecallJudge, RecallReview, TextCheck,
     TextDetector, TextJudge, TextReview, TextReviewGate, literal_zoom_crops,
 };
-use crate::generation::{SceneSource, Speaker};
+use crate::generation::{SceneMode, SceneSource, Speaker, VisualResult};
 use crate::languages::{LanguageProfile, TextGate};
 
 #[derive(Clone)]
@@ -36,16 +36,17 @@ impl SceneSource for MeteredGemini {
         sentence: &str,
         target: &str,
         attempt: u8,
-    ) -> Result<serde_json::Value> {
+        mode: SceneMode,
+    ) -> VisualResult<serde_json::Value> {
         self.client
-            .scene_observed(language, term, sentence, target, attempt, |cost| {
+            .scene_observed(language, term, sentence, target, (attempt, mode), |cost| {
                 self.costs.push(cost)
             })
     }
 }
 
 impl ImageSource for MeteredGemini {
-    fn image(&self, prompt: &str) -> Result<Vec<u8>> {
+    fn image(&self, prompt: &str) -> VisualResult<Vec<u8>> {
         self.client
             .image_observed(prompt, |cost| self.costs.push(cost))
     }

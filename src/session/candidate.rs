@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use thiserror::Error;
 
 /// Largest number of vocabulary lines one understanding pass accepts.
@@ -29,7 +31,7 @@ impl IntakeTooLarge {
 }
 
 /// Raw user input captured on the `Your words` screen.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 pub struct RawInputBatch {
     text: String,
     context: Option<String>,
@@ -113,7 +115,7 @@ pub(crate) const MAX_CARD_MEANINGS: usize = 5;
 /// `tag` is a short domain, register, region, idiom, or part-of-use marker
 /// shown only when the sense needs it. `translation` names the learning-language
 /// term when the user entered this meaning in their support language.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Sense {
     understanding: String,
     tag: Option<String>,
@@ -200,7 +202,7 @@ impl Sense {
 /// rarer alternatives. `selected` points at every sense that should become a
 /// card. `ok` is the row-level inclusion gate: `false` rows are not turned into
 /// cards but stay visible in `what i understood` with a strikethrough.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct WordCandidate {
     term: String,
     senses: Vec<Sense>,

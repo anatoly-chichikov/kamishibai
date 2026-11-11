@@ -1,0 +1,107 @@
+{
+  "camera_arc": {
+    "continuity": {
+      "axis": "the line between the critical speaker on the left and the working woman on the right",
+      "axis_mode": "preserve",
+      "eyeline_policy": "matched",
+      "screen_direction": "left_to_right"
+    },
+    "motivation": "The sequence moves inward from a shared interpersonal critique to the physical evidence of dismissive handling, concluding on the targeted creator's silent impact, tracking the emotional weight of 'derogatory'.",
+    "progression": "medium two_shot -> close insert -> medium_close single",
+    "strategy": "push_in"
+  },
+  "coverage_audit": [
+    {
+      "added_view": "A medium two-shot establishing the male colleague speaking dismissively while pointing toward her architectural model or drafted board.",
+      "panel_count": 1,
+      "reason": "Compressing the disparaging speech, the specific work being disparaged, and her resulting posture into a single tableau diminishes the sharpness of the derogatory act.",
+      "source_support": "He made derogatory comments about her work.",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "A close insert of his hand carelessly flicking aside or tapping her physical design drawings on the drafting table.",
+      "panel_count": 2,
+      "reason": "Two panels capture his derogatory critique and the physical object of her work, but omit her direct entailed reaction to being demeaned, weakening the relational force of the target word.",
+      "source_support": "about her work",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "A medium-close single of the woman absorbing the belittling remarks, clutching her drawing tools tightly with tense posture.",
+      "panel_count": 3,
+      "reason": "Three panels cleanly allocate the interaction: the spoken belittling delivery, the direct physical target of her work, and the targeted recipient holding the impact of the derogatory comment without inventing outside drama.",
+      "source_support": "He made derogatory comments about her work.",
+      "verdict": "selected"
+    },
+    {
+      "added_view": "A wide shot showing uninvolved bystanders in the office eavesdropping or whispering about the exchange.",
+      "panel_count": 4,
+      "reason": "The source sentence mentions only him, his derogatory comments, and her work; introducing reacting coworkers or office spectators invents unsupported narrative elements.",
+      "source_support": "No mention of an audience, office bystanders, or public consequences in the sentence.",
+      "verdict": "redundant_or_unsupported"
+    }
+  ],
+  "decomposition_mode": "cause_reaction_detail",
+  "intensity": "medium",
+  "literal_anchor": "a man vocalizing dismissive criticism toward a woman while gesturing demeaningly at her physical work project",
+  "motion_vector": "horizontal",
+  "panel_count": 3,
+  "panel_emphasis": "rising",
+  "panel_relation": "sequence",
+  "reading_direction": "left_to_right_top_to_bottom",
+  "selection_logic": "The sentence establishes a belittling interpersonal act directed at someone's creative effort. A three-shot structure provides the complete causal progression without invented aftermath: shot one establishes the speaking action across the interpersonal axis; shot two isolates the specific physical manifestation of 'her work' being demeaned through careless physical handling; shot three registers her visible restraint under the derogatory impact. The opening two-shot sets the interpersonal baseline, while the second insert escalates the tactile disrespect, leading naturally to the heaviest visual weight on the third shot where the emotional sting of 'derogatory' lands fully.",
+  "semantic_beat_count": 2,
+  "semantic_relation": "sequence",
+  "shots": [
+    {
+      "angle": "eye_level",
+      "camera_motivation": "Establish the delivery of the demeaning comments across the workplace table between the speaker and the creator.",
+      "depth_plan": "layered",
+      "framing": "two_shot",
+      "id": "s1",
+      "information_gain": "The spatial relation between the smirking male colleague speaking dismissively and the woman seated beside her drafting workspace.",
+      "role": "action",
+      "semantic_beat_index": 1,
+      "shot_scale": "medium",
+      "source_support": "He made derogatory comments",
+      "transition_trigger": "scene_open",
+      "viewpoint": "objective",
+      "viewpoint_anchor": ""
+    ,
+      "visible_anchor": "a man speaking with a dismissive smirk toward a colleague across a workspace"
+    },
+    {
+      "angle": "high",
+      "camera_motivation": "Isolate the object of criticism to emphasize the tangible disrespect shown toward her work.",
+      "depth_plan": "shallow",
+      "framing": "insert",
+      "id": "s2",
+      "information_gain": "The physical handling of her architectural sketches and foam study model, pushed aside carelessly with the back of his fingers.",
+      "role": "detail",
+      "semantic_beat_index": 1,
+      "shot_scale": "close",
+      "source_support": "about her work",
+      "transition_trigger": "attention_shift",
+      "viewpoint": "point_of_view",
+      "viewpoint_anchor": "the woman seated at the desk",
+      "visible_anchor": "a hand dismissively flicking back the corner of physical drafted plans on the table"
+    },
+    {
+      "angle": "eye_level",
+      "camera_motivation": "Focus on the recipient bearing the brunt of the derogatory speech, grounding the emotional toll of the word.",
+      "depth_plan": "shallow",
+      "framing": "single",
+      "id": "s3",
+      "information_gain": "Her rigid posture, tightened jaw, and fingers clutched firmly around a drafting pencil as she endures the belittlement.",
+      "role": "reaction",
+      "semantic_beat_index": 2,
+      "shot_scale": "medium_close",
+      "source_support": "He made derogatory comments about her work.",
+      "transition_trigger": "emotion_change",
+      "viewpoint": "objective",
+      "viewpoint_anchor": "",
+      "visible_anchor": "the woman with clenched jaw and white-knuckled grip on her pencil looking toward the speaker"
+    }
+  ],
+  "spatial_relation": "same_space",
+  "transition_type": "action_to_action"
+}

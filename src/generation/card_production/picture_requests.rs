@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::cost_accounting::AccountingHealth;
 use crate::generation::artifact_cache::{Cache, PICTURE_REQUESTS_FILE};
 use crate::generation::manga::ImageSource;
+use crate::generation::{VisualFailure, VisualResult};
 use crate::session::ARTIFACT_ATTEMPT_CEILING;
 
 /// Return all picture requests made for one visual revision.
@@ -102,7 +103,8 @@ pub(crate) fn reserve_picture_request(cache: &Cache) -> Result<()> {
 }
 
 /// Reset the bounded series for an explicit picture regeneration.
-pub(crate) fn restart_picture_request_series(cache: &Cache) -> Result<()> {
+/// Experimental embedding API; compatibility is not guaranteed.
+pub fn restart_picture_request_series(cache: &Cache) -> Result<()> {
     if cache.exists(PICTURE_REQUESTS_FILE) {
         store_picture_request_counter(cache, &load_picture_request_counter(cache)?.restarted())?;
     }
@@ -138,9 +140,17 @@ impl<C> ImageSource for RequestCountingImage<C>
 where
     C: ImageSource,
 {
-    fn image(&self, prompt: &str) -> Result<Vec<u8>> {
+    fn image(&self, prompt: &str) -> VisualResult<Vec<u8>> {
+        let previous = self
+            .accounting
+            .record(load_picture_request_counter(&self.cache))?;
         self.accounting
             .record(reserve_picture_request(&self.cache))?;
-        self.client.image(prompt)
+        let result = self.client.image(prompt);
+        if matches!(result, Err(VisualFailure::NotSent)) {
+            self.accounting
+                .record(store_picture_request_counter(&self.cache, &previous))?;
+        }
+        result
     }
 }

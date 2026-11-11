@@ -1,0 +1,191 @@
+{
+  "semantic_spine": {
+    "literal_event": "A man dismissively speaks and flippantly nudges a woman's architectural foam model and sketches on a shared desk, while the woman sits rigidly absorbing the demeaning critique.",
+    "semantic_focus": "The physical act of dismissing someone's dedicated creative craft, capturing the belittling sting of 'derogatory'.",
+    "emotional_relation": "dismissive contempt met with restrained humiliation and quiet defiance",
+    "intensity": 3,
+    "visual_relation": "opposition",
+    "memory_hook": "The contrast between the man's flicking fingertips shoving aside a delicate foam architectural model and the woman's white-knuckled grip on her drawing pencil.",
+    "metaphor": {
+      "mode": "none",
+      "mapping": "",
+      "literal_anchor": "a man speaking with a dismissive smirk toward a colleague across a workspace"
+    }
+  },
+  "page_design": {
+    "rhythm": "expansion",
+    "special_device": {
+      "kind": "none",
+      "reason": "The three-shot diagonal sequence cleanly establishes the dialogue axis, isolates the disparaged object, and resolves on the emotional impact without requiring layout-breaking devices.",
+      "source_panel": "",
+      "target_panel": "",
+      "subject_id": ""
+    },
+    "eye_flow_summary": "In panel one, the man's pointing finger on the left leads rightward toward the woman; in panel two, his flicking knuckles shove the foam structure diagonally downward; panel three anchors the sequence on her clenched jaw and white-knuckled hand."
+  },
+  "panels": [
+    {
+      "shot_id": "s1",
+      "narrative_role": "establisher",
+      "semantic_job": "Establish the delivery of the demeaning comments across the workplace table between the speaker and the creator.",
+      "attentional_frame": "macro",
+      "narrative_weight": "secondary",
+      "transition_from_previous": "none",
+      "continuity": {
+        "shared_environment_id": "architect_studio",
+        "subject_phase": "speaker_delivery",
+        "axis_relation_from_previous": "establish",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "critic_man",
+        "eyeline_target_anchor": "creator_woman",
+        "eyeline_direction": "screen_right",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "A man leans back against a tall partition with folded arms and a dismissive smirk, gesturing with one loose hand toward a wooden workbench where a woman sits beside delicate physical foam structures.",
+        "subjects": [
+          {
+            "id": "critic_man",
+            "figure": "Tall man in a collared shirt with rolled sleeves",
+            "pose": "Leaning back loosely with one elbow on a partition, one wrist flicked out in casual mockery",
+            "expression": "Derisive smirk with raised eyebrow and tilted chin",
+            "blocking": "Standing in midground on the left, facing right toward the woman"
+          },
+          {
+            "id": "creator_woman",
+            "figure": "Woman in an unbuttoned vest over a dark sweater, hair pinned back",
+            "pose": "Seated erect on a drafting stool, hands held resting on the table edge",
+            "expression": "Stern, tightly set mouth, profile facing left toward the speaker",
+            "blocking": "Seated in midground on the right, facing left across the drafting table"
+          }
+        ],
+        "environment": {
+          "setting": "Architectural design studio",
+          "foreground": ["Corner of a heavy wooden drafting desk", "Cup of metal rulers and bone folders"],
+          "midground": ["Small white foam building massing model", "Cutting mat without text or lines"],
+          "background": ["Tall partition screen", "Window frame with diffuse late afternoon light"]
+        },
+        "camera": {
+          "shot_scale": "medium",
+          "viewpoint": "objective",
+          "viewpoint_subject_id": "",
+          "framing": "two_shot",
+          "angle": "eye_level",
+          "focus": "The critical stance of the man and the rigid posture of the woman across the table",
+          "depth_plan": "layered",
+          "eye_flow_exit": "The man's extended dismissive hand directs gaze down toward the desk surface"
+        },
+        "motion_treatment": "pose_only",
+        "lighting": "Clear directional studio light from the right casting harsh linear shadows to the left",
+        "mood": "Strained workplace tension and casual condescension"
+      }
+    ],
+    {
+      "shot_id": "s2",
+      "narrative_role": "initial",
+      "semantic_job": "Isolate the object of criticism to emphasize the tangible disrespect shown toward her work.",
+      "attentional_frame": "micro",
+      "narrative_weight": "primary",
+      "transition_from_previous": "action_to_action",
+      "continuity": {
+        "shared_environment_id": "architect_studio",
+        "subject_phase": "flicking_model",
+        "axis_relation_from_previous": "preserve",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "creator_woman",
+        "eyeline_target_anchor": "flicking_hand",
+        "eyeline_direction": "down",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "Seen from her seated perspective looking down, the back of the man's fingers flippantly nudges the fragile edge of a delicate white balsa-and-foam architectural study, displacing it across the dark work mat.",
+        "subjects": [
+          {
+            "id": "critic_man",
+            "figure": "Man's manicured hand and lower forearm",
+            "pose": "Back of two bent fingers flicking the foam pavilion model sideways with lazy force",
+            "expression": "Not visible; focus is on the dismissive hand gesture",
+            "blocking": "Reaching in from the upper left corner toward the center"
+          }
+        ],
+        "environment": {
+          "setting": "Drafting table surface",
+          "foreground": ["The man's flicking knuckles", "Displaced tiny foam pavilion leaning on its side"],
+          "midground": ["Dark grey cutting mat", "Precision craft knife lying still"],
+          "background": ["Blurred edge of the woman's dark sleeve resting nearby"]
+        },
+        "camera": {
+          "shot_scale": "close",
+          "viewpoint": "point_of_view",
+          "viewpoint_subject_id": "creator_woman",
+          "framing": "insert",
+          "angle": "high",
+          "focus": "The careless contact of his fingers pushing aside the handcrafted miniature model",
+          "depth_plan": "shallow",
+          "eye_flow_exit": "The tilted fall of the foam model directs visual flow toward the right margin"
+        },
+        "motion_treatment": "pose_only",
+        "lighting": "Direct overhead work-lamp light accentuating the delicate white facets and harsh cast shadows",
+        "mood": "Disrespectful, flippant, and belittling"
+      }
+    ],
+    {
+      "shot_id": "s3",
+      "narrative_role": "peak",
+      "semantic_job": "Focus on the recipient bearing the brunt of the derogatory speech, grounding the emotional toll of the word.",
+      "attentional_frame": "mono",
+      "narrative_weight": "primary",
+      "transition_from_previous": "action_to_action",
+      "continuity": {
+        "shared_environment_id": "architect_studio",
+        "subject_phase": "enduring_insult",
+        "axis_relation_from_previous": "preserve",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "creator_woman",
+        "eyeline_target_anchor": "critic_man",
+        "eyeline_direction": "screen_left",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "A focused framing of the woman sitting frozen under the critique; her jaw is clenched tight, eyes fixed steadily toward the man, while her hand grips a metal drafting pencil so hard the knuckles are stark white.",
+        "subjects": [
+          {
+            "id": "creator_woman",
+            "figure": "Woman with pinned dark hair",
+            "pose": "Upper body locked in stiff stillness, one hand curled on the desktop in a white-knuckled grip around a clutch pencil",
+            "expression": "Tightened jaw muscle, narrowed steady gaze, lips pressed into a thin uncompromising line",
+            "blocking": "Framed centrally, facing three-quarters toward screen-left"
+          }
+        ],
+        "environment": {
+          "setting": "Architectural studio workspace",
+          "foreground": ["Clenched fist clutching the hexagonal metal pencil against the wood grain"],
+          "midground": ["Tense line of her shoulders and neck", "Stiff collar"],
+          "background": ["Softly out-of-focus studio shelves with rolled card stock tubes"]
+        },
+        "camera": {
+          "shot_scale": "medium_close",
+          "viewpoint": "objective",
+          "viewpoint_subject_id": "",
+          "framing": "single",
+          "angle": "eye_level",
+          "focus": "Her controlled, furious facial expression and the strained tension in her gripping hand",
+          "depth_plan": "shallow",
+          "eye_flow_exit": "Her intense, unwavering stare leftward holds the final emotional impact"
+        },
+        "motion_treatment": "pose_only",
+        "lighting": "Subtle side lighting carving out the tension in her jaw and the hard knuckles of her fist",
+        "mood": "Suppressed anger, heavy psychological weight, and silent endurance"
+      }
+    }
+  ]
+}

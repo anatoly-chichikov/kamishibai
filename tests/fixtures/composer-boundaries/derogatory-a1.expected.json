@@ -1,0 +1,198 @@
+{
+  "semantic_spine": {
+    "literal_event": "A man stands over a woman's desk making contemptuous gestures and dismissive remarks toward her architectural models and project folios.",
+    "semantic_focus": "The condescending belittling of someone's hard work and creative output.",
+    "emotional_relation": "Contemptuous arrogance met with strained, suppressed humiliation and defensive restraint.",
+    "intensity": 3,
+    "visual_relation": "opposition",
+    "memory_hook": "A hand carelessly flicking aside a drafted design folio, paired with white-knuckled fingers gripping the edge of the desk.",
+    "metaphor": {
+      "mode": "none",
+      "mapping": "",
+      "literal_anchor": "man speaking dismissively toward a woman across her desk while gesturing toward her work documents"
+    }
+  },
+  "page_design": {
+    "rhythm": "compression_to_release",
+    "special_device": {
+      "kind": "none",
+      "reason": "The selected canonical layout topology with two compact left rail shots leading to the dominant right reaction panel naturally resolves the causal arc without requiring an artificial panel crossing.",
+      "source_panel": "",
+      "target_panel": "",
+      "subject_id": ""
+    },
+    "eye_flow_summary": "Top-left rail establishes the standing man's sneering address; bottom-left rail pulls in close to his dismissive hand shoving her project binder; gaze and momentum transition directly into the large right dominant panel capturing her white-knuckled emotional containment."
+  },
+  "panels": [
+    {
+      "shot_id": "s1",
+      "narrative_role": "establisher",
+      "semantic_job": "Establish the interpersonal friction and physical arrangement across the desk as he delivers the critique.",
+      "attentional_frame": "macro",
+      "narrative_weight": "primary",
+      "transition_from_previous": "none",
+      "continuity": {
+        "shared_environment_id": "office_workstation",
+        "subject_phase": "criticizing",
+        "axis_relation_from_previous": "establish",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "man",
+        "eyeline_target_anchor": "woman",
+        "eyeline_direction": "screen_right",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "A man in a rolled-up sleeve dress shirt stands over an office desk, leaning forward with a smug, mocking sneer. His right hand makes a flicking, dismissive wave toward the seated woman across from him, who sits rigid in her chair.",
+        "subjects": [
+          {
+            "id": "man",
+            "figure": "male coworker in professional office attire",
+            "pose": "leaning forward with one hand resting on hip and other hand making a sharp, dismissive wave",
+            "expression": "smirking, condescending sneer with narrowed, mocking eyes",
+            "blocking": "screen left, looming over the desk"
+          },
+          {
+            "id": "woman",
+            "figure": "female professional seated opposite",
+            "pose": "upright, shoulders stiff and squared defensively",
+            "expression": "tense, unblinking, lips pressed thin",
+            "blocking": "screen right, seated across the wooden desk surface"
+          }
+        ],
+        "environment": {
+          "setting": "design studio workstation",
+          "foreground": ["edge of desk corner", "desktop monitor frame turned away"],
+          "midground": ["wooden work desk with project folios and pencil cups", "swivel chair"],
+          "background": ["office partition", "tall metal shelving units"]
+        },
+        "camera": {
+          "shot_scale": "medium",
+          "viewpoint": "objective",
+          "viewpoint_subject_id": "",
+          "framing": "two_shot",
+          "angle": "eye_level",
+          "focus": "the man's mocking expression and forward posture",
+          "depth_plan": "layered",
+          "eye_flow_exit": "downward toward the project folio on the desk in s2"
+        },
+        "motion_treatment": "pose_only",
+        "lighting": "overhead fluorescent office lighting casting harsh shadows beneath brows and desk rim",
+        "mood": "confrontational and hostile"
+      }
+    },
+    {
+      "shot_id": "s2",
+      "narrative_role": "initial",
+      "semantic_job": "Focus on the literal target of his remarks, showing his hand disdainfully pushing or tapping the work materials.",
+      "attentional_frame": "micro",
+      "narrative_weight": "secondary",
+      "transition_from_previous": "action_to_action",
+      "continuity": {
+        "shared_environment_id": "office_workstation",
+        "subject_phase": "dismissing_work",
+        "axis_relation_from_previous": "preserve",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "man",
+        "eyeline_target_anchor": "project_binder",
+        "eyeline_direction": "down",
+        "match_on_action_enabled": true,
+        "match_on_action_subject_id": "man",
+        "match_on_action_action": "flicking folio away"
+      },
+      "scene": {
+        "description": "High-angle close insert of the desk surface from the man's vantage. His manicured fingers carelessly shove a thick, drafted portfolio binder aside, causing it to slide crookedly against an unpainted architectural wood maquette.",
+        "subjects": [
+          {
+            "id": "man",
+            "figure": "man's right hand and forearm",
+            "pose": "fingers extended in a careless shoving motion against the project folder",
+            "expression": "not visible",
+            "blocking": "entering from top left corner of the frame"
+          }
+        ],
+        "environment": {
+          "setting": "desk surface",
+          "foreground": ["stiff leather portfolio folder slid askew"],
+          "midground": ["small geometric balsa-wood block model tilted on its base", "drafting pencil"],
+          "background": ["dark desk mat"]
+        },
+        "camera": {
+          "shot_scale": "close",
+          "viewpoint": "point_of_view",
+          "viewpoint_subject_id": "man",
+          "framing": "insert",
+          "angle": "high",
+          "focus": "the hand shoving the portfolio binder aside",
+          "depth_plan": "shallow",
+          "eye_flow_exit": "sweeping rightward into the dominant panel s3"
+        },
+        "motion_treatment": "pose_only",
+        "lighting": "direct overhead task lamp highlighting the friction and displacement of the materials",
+        "mood": "disrespectful and dismissive"
+      }
+    },
+    {
+      "shot_id": "s3",
+      "narrative_role": "peak",
+      "semantic_job": "Capture the direct psychological and physical toll of receiving derogatory remarks on her face and posture.",
+      "attentional_frame": "mono",
+      "narrative_weight": "primary",
+      "transition_from_previous": "aspect_to_aspect",
+      "continuity": {
+        "shared_environment_id": "office_workstation",
+        "subject_phase": "enduring_critique",
+        "axis_relation_from_previous": "preserve",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "woman",
+        "eyeline_target_anchor": "man",
+        "eyeline_direction": "screen_left",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "Framed over the dark silhouette of the man's leaning shoulder. The woman sits in taut close view, her jaw clenched tight and her eyes fixed in strained restraint as she absorbs the derogatory remarks. In the lower frame, her hands grip the desk rim with white-knuckled intensity.",
+        "subjects": [
+          {
+            "id": "man",
+            "figure": "man's shoulder and upper torso",
+            "pose": "leaning forward into the left foreground",
+            "expression": "not visible (viewed from behind)",
+            "blocking": "foreground left frame boundary"
+          },
+          {
+            "id": "woman",
+            "figure": "seated professional woman",
+            "pose": "rigid spine, chin slightly raised, fingers clamped hard into the wooden desk edge",
+            "expression": "tightened jaw, flared nostrils, eyes burning with quiet indignation and forced composure",
+            "blocking": "center-right midground, directly facing the camera angle"
+          }
+        ],
+        "environment": {
+          "setting": "design studio workstation",
+          "foreground": ["dark blurred silhouette of man's shoulder and collar"],
+          "midground": ["edge of desk with white-knuckled gripping hands", "woman's face and torso"],
+          "background": ["soft-focus office blinds with strips of pale window daylight"]
+        },
+        "camera": {
+          "shot_scale": "medium_close",
+          "viewpoint": "over_the_shoulder",
+          "viewpoint_subject_id": "man",
+          "framing": "single",
+          "angle": "eye_level",
+          "focus": "woman's strained facial expression and clenched knuckles",
+          "depth_plan": "shallow",
+          "eye_flow_exit": "lingering on her white-knuckled hands and rigid jaw"
+        },
+        "motion_treatment": "none",
+        "lighting": "subtle side lighting creating high contrast across her cheekbone and clenched jaw",
+        "mood": "suffocating, tense, and painfully restrained"
+      }
+    }
+  ]
+}

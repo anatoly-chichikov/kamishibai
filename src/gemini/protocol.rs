@@ -9,6 +9,8 @@ use serde_json::Value;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub(super) struct Request {
     contents: Vec<Content>,
+    #[serde(skip)]
+    speech_text: Option<String>,
     #[serde(rename = "generationConfig", skip_serializing_if = "Option::is_none")]
     generation_config: Option<GenerationConfig>,
     #[serde(rename = "safetySettings", skip_serializing_if = "Option::is_none")]
@@ -16,6 +18,94 @@ pub(super) struct Request {
 }
 
 impl Request {
+    /// Preserve the exact spoken text separately from pronunciation instructions.
+    pub(super) fn with_speech_text(mut self, text: &str) -> Self {
+        self.speech_text = Some(String::from(text));
+        self
+    }
+
+    /// Translate internal canonical settings into a provider-neutral request.
+    pub(super) fn external(
+        &self,
+        stage: super::GenerationStage,
+    ) -> Result<crate::models::ModelRequest> {
+        use crate::models::{ModelImage, ModelRequest, ReasoningEffort, TextFormat, TextOptions};
+        let parts = self.contents.iter().flat_map(|content| &content.parts);
+        let prompt = parts
+            .clone()
+            .filter_map(|part| part.text.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let images = parts
+            .filter_map(|part| part.inline_data.as_ref())
+            .map(|data| {
+                Ok(ModelImage::new(
+                    data.mime_type.clone(),
+                    super::codec::decode(&data.data)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if stage == super::GenerationStage::Speech {
+            let text = self
+                .speech_text
+                .clone()
+                .ok_or_else(|| anyhow!("speech request lacks its original text"))?;
+            return Ok(ModelRequest::Speech { prompt, text });
+        }
+        if stage == super::GenerationStage::Picture {
+            let aspect_ratio = self
+                .generation_config
+                .as_ref()
+                .and_then(|config| config.image_config.as_ref())
+                .map(|config| config.aspect_ratio.clone())
+                .ok_or_else(|| anyhow!("image request lacks its page proportions"))?;
+            return Ok(ModelRequest::Image {
+                prompt,
+                aspect_ratio,
+            });
+        }
+        let options = match &self.generation_config {
+            None => TextOptions::new(TextFormat::Plain, None, None, false),
+            Some(config) => {
+                let format = if let Some(format) = &config.response_format {
+                    match format {
+                        ResponseFormat::Text { text } => TextFormat::Schema(text.schema.clone()),
+                        ResponseFormat::Audio { .. } => {
+                            return Err(anyhow!("audio format used for a text stage"));
+                        }
+                    }
+                } else if let Some(schema) = &config.response_schema {
+                    TextFormat::Schema(schema.clone())
+                } else if config.response_mime_type.as_deref() == Some("application/json") {
+                    TextFormat::Json
+                } else {
+                    TextFormat::Plain
+                };
+                let reasoning = config
+                    .thinking_config
+                    .as_ref()
+                    .and_then(|config| config.thinking_level)
+                    .map(|level| match level {
+                        ThinkingLevel::Low => ReasoningEffort::Low,
+                        ThinkingLevel::Medium => ReasoningEffort::Medium,
+                        ThinkingLevel::High => ReasoningEffort::High,
+                    });
+                TextOptions::new(
+                    format,
+                    reasoning,
+                    config.max_output_tokens,
+                    config.temperature == Some(0),
+                )
+            }
+        };
+        Ok(ModelRequest::Text {
+            stage,
+            prompt,
+            images,
+            options,
+        })
+    }
+
     /// Transform prompt directions while retaining transcripts, schemas, and media.
     pub(super) fn with_prompt<F>(&self, mut render: F) -> Result<Self>
     where
@@ -48,6 +138,7 @@ impl Request {
                     speech_metadata: None,
                 }],
             }],
+            speech_text: None,
             generation_config,
             safety_settings,
         }
@@ -56,6 +147,7 @@ impl Request {
     /// Return a speech request whose transcript stays separate from its directions.
     pub(super) fn speech(text: String, style: String, voice: &str) -> Self {
         Self {
+            speech_text: None,
             contents: vec![Content {
                 parts: vec![RequestPart {
                     text: Some(text),
@@ -93,6 +185,7 @@ impl Request {
                     },
                 ],
             }],
+            speech_text: None,
             generation_config: Some(generation_config),
             safety_settings: Some(GenerationConfig::image_safety()),
         }
@@ -121,6 +214,7 @@ impl Request {
         }));
         Self {
             contents: vec![Content { parts }],
+            speech_text: None,
             generation_config: Some(generation_config),
             safety_settings: Some(GenerationConfig::image_safety()),
         }
@@ -257,7 +351,12 @@ impl GenerationConfig {
     /// Return the structured JSON response configuration.
     pub(super) fn json(schema: Value) -> Result<Self> {
         validate_response_schema(&schema)?;
-        Ok(Self {
+        Ok(Self::from_schema(schema))
+    }
+
+    /// Construct an external text configuration without applying Gemini's schema restrictions.
+    pub(super) fn from_schema(schema: Value) -> Self {
+        Self {
             response_modalities: None,
             image_config: None,
             speech_config: None,
@@ -273,7 +372,7 @@ impl GenerationConfig {
             thinking_config: None,
             temperature: None,
             media_resolution: None,
-        })
+        }
     }
 
     /// Return JSON mode without a response schema.
@@ -1001,6 +1100,11 @@ mod tests {
             (true, true),
             "schema whitelist rejected a property name or accepted a nested unsupported keyword"
         );
+    }
+
+    #[test]
+    fn response_schema_cannot_reject_a_property_named_after_an_unsupported_keyword() {
+        assert!(GenerationConfig::json(json!({"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]})).is_ok(), "schema whitelist rejected an unsupported keyword used only as a property name");
     }
 
     #[test]

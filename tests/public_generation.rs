@@ -553,3 +553,138 @@ fn terminal_provider_failure_exhausts_only_the_existing_attempt_budget() {
         "public generation changed the four-attempt ceiling or omitted failed-call spend"
     );
 }
+
+struct Selected {
+    card: usize,
+    paused: bool,
+}
+
+struct AfterFailure<'a> {
+    remaining: &'a Cell<u8>,
+}
+
+impl kamishibai::application::GenerationControl for AfterFailure<'_> {
+    fn allows(&self, _card: usize) -> bool {
+        true
+    }
+
+    fn paused(&self) -> bool {
+        self.remaining.get() == 0
+    }
+}
+
+impl kamishibai::application::GenerationControl for Selected {
+    fn allows(&self, card: usize) -> bool {
+        self.card == card
+    }
+
+    fn paused(&self) -> bool {
+        self.paused
+    }
+}
+
+#[test]
+fn selected_generation_cannot_advance_another_card() {
+    let directory = TempDir::new().expect("invariant: artifacts directory exists");
+    let production = LocalProduction::new(directory.path(), 0);
+    let mut run = GenerationRun::new(vec![draft("lanterne"), draft("rivage")])
+        .expect("invariant: fresh cards start");
+    let step = run
+        .advance_in(
+            &production,
+            &Selected {
+                card: 1,
+                paused: false,
+            },
+        )
+        .expect("selected artifact must settle")
+        .expect("selected card must have work")
+        .into_parts();
+    assert_eq!(
+        (
+            step.0,
+            step.1,
+            run.drafts()[0].meta().is_none(),
+            run.drafts()[1].meta().is_some()
+        ),
+        (1, Artifact::Meta, true, true),
+        "selection advanced another card or renumbered its stable position"
+    );
+}
+
+#[test]
+fn paused_generation_cannot_spend_a_retry_or_lose_observed_cost() {
+    let directory = TempDir::new().expect("invariant: artifacts directory exists");
+    let production = LocalProduction::new(directory.path(), 1);
+    let mut run = GenerationRun::new(vec![draft("rivage")]).expect("invariant: fresh card starts");
+    for _ in 0..3 {
+        run.advance(&production)
+            .expect("preceding artifact must settle");
+    }
+    let step = run
+        .advance_in(
+            &production,
+            &AfterFailure {
+                remaining: &production.failures,
+            },
+        )
+        .expect("cooperative pause must settle");
+    let slot = run.drafts()[0].artifacts().picture();
+    assert_eq!(
+        (step.is_none(), run.next(), slot.tally().done(), slot.cost()),
+        (
+            true,
+            Some((0, Artifact::Picture)),
+            0,
+            Some(GenerationCost::from_nanos(37))
+        ),
+        "a cooperative pause spent a retry, lost cost, or changed the next artifact"
+    );
+}
+
+#[test]
+fn standing_pause_cannot_start_any_artifact() {
+    let mut observed = Vec::new();
+    for preceding in 0..4 {
+        let directory = TempDir::new().unwrap();
+        let production = LocalProduction::new(directory.path(), 0);
+        let mut run = GenerationRun::new(vec![draft("rivage")]).unwrap();
+        for _ in 0..preceding {
+            run.advance(&production).unwrap();
+        }
+        let before = serde_json::to_value(run.drafts()).unwrap();
+        let calls = production.calls.borrow().clone();
+        let next = run.next();
+        let control = Selected {
+            card: 0,
+            paused: true,
+        };
+        let mut settled = 0;
+        for _ in 0..273 {
+            settled += usize::from(run.advance_in(&production, &control).unwrap().is_some());
+        }
+        let unchanged = (
+            *production.calls.borrow() == calls,
+            serde_json::to_value(run.drafts()).unwrap() == before,
+        );
+        let resumed = run
+            .advance_in(
+                &production,
+                &Selected {
+                    card: 0,
+                    paused: false,
+                },
+            )
+            .unwrap()
+            .map(|step| {
+                let (card, artifact, _, _) = step.into_parts();
+                (card, artifact)
+            });
+        observed.push((settled, unchanged.0, unchanged.1, resumed == next));
+    }
+    assert_eq!(
+        observed,
+        vec![(0, true, true, true); 4],
+        "standing pause called production, changed a draft, or lost the next artifact"
+    );
+}

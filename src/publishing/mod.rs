@@ -2,4 +2,6 @@
 
 mod study_package;
 
-pub(crate) use study_package::{StudyPackagePublisher, SystemPublicationClock};
+pub use study_package::{
+    IMAGE_STYLE, PublicationClock, StudyPackagePublisher, SystemPublicationClock,
+};

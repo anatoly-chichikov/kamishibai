@@ -1,5 +1,84 @@
 use super::*;
 
+struct UnsentImage;
+
+impl ImageSource for UnsentImage {
+    fn image(&self, _prompt: &str) -> crate::generation::VisualResult<Vec<u8>> {
+        Err(crate::generation::VisualFailure::NotSent)
+    }
+}
+
+#[test]
+fn pause_cannot_consume_the_last_picture_request_in_a_series() {
+    let home = TempDir::new().expect("invariant: picture cache exists");
+    let cache = Cache::new("visual", home.path());
+    for _ in 0..3 {
+        reserve_picture_request(&cache).expect("invariant: three earlier requests fit");
+    }
+    let paused = RequestCountingImage::new(UnsentImage, cache.clone()).image("prompt-73");
+    let source = CountingImageSource::new(valid_image());
+    let image = RequestCountingImage::new(source.clone(), cache.clone());
+    let resumed = image.image("prompt-73");
+    let excess = image.image("prompt-73");
+    let counter =
+        load_picture_request_counter(&cache).expect("invariant: counter remains readable");
+    assert_eq!(
+        (
+            matches!(paused, Err(crate::generation::VisualFailure::NotSent)),
+            resumed.is_ok(),
+            excess.is_err(),
+            source.calls(),
+            counter.requests,
+            counter.series_requests
+        ),
+        (true, true, true, 1, 4, Some(4)),
+        "A pre-send pause consumed the last image request or allowed more than four sent requests"
+    );
+}
+
+#[test]
+fn not_sent_archives_cannot_spend_or_corrupt_a_restored_soft_budget() {
+    let home = TempDir::new().expect("invariant: moderation cache exists");
+    let cache = Cache::new("visual", home.path());
+    reserve_picture_request(&cache).expect("invariant: stock refusal reserves one request");
+    let directory = cache.filepath(IMAGE_ATTEMPTS_DIRECTORY).unwrap();
+    fs::create_dir_all(&directory).unwrap();
+    for (name, value) in [
+        (
+            "attempt-0001.json",
+            serde_json::json!({"category":"moderation","scene":"attempt-0001.scene.json"}),
+        ),
+        (
+            "attempt-0001.scene.json",
+            serde_json::json!({"manga_panel":{"meta":{"layout_selection":{"scene_attempt_index":0,"scene_mode":"stock"}}}}),
+        ),
+        (
+            "attempt-0002.json",
+            serde_json::json!({"status":"not_sent","category":"pause"}),
+        ),
+    ] {
+        fs::write(directory.join(name), value.to_string()).unwrap();
+    }
+    let mode = soft::mode(&cache).expect("invariant: moderation state restores");
+    let state: Value = serde_json::from_slice(
+        &fs::read(
+            cache
+                .filepath(crate::generation::artifact_cache::SOFT_FILE)
+                .unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        (mode, state["budget"].clone()),
+        (
+            crate::generation::SceneMode::Soft,
+            serde_json::json!({"remaining":3,"pictures":1,"failures":0})
+        ),
+        "An unsent archived image spent soft budget or corrupted moderation recovery"
+    );
+}
+
 #[test]
 fn transport_failure_spends_one_picture_request() {
     let home = TempDir::new().expect("tempdir must be created");

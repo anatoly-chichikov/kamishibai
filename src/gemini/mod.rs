@@ -24,8 +24,8 @@ use anyhow::Result;
 use crate::application::{
     BulkCorrection, CardCorrection, CardMetaGeneration, LearningTarget, Understanding,
 };
-use crate::generation::SceneSource;
 use crate::generation::Speaker;
+use crate::generation::{SceneMode, SceneSource, VisualResult};
 use crate::session::{
     CardDraft, CardMeta, CardRevision, LanguagePair, RawInputBatch, SenseCorrection,
     SentenceLabelSelection, Understood, WordCandidate,
@@ -57,10 +57,17 @@ where
         sentence: &str,
         target: &str,
         attempt: u8,
-    ) -> Result<serde_json::Value> {
-        GeminiClient::<T>::scene_observed(self, language, term, sentence, target, attempt, |_| {
-            Ok(())
-        })
+        mode: SceneMode,
+    ) -> VisualResult<serde_json::Value> {
+        GeminiClient::<T>::scene_observed(
+            self,
+            language,
+            term,
+            sentence,
+            target,
+            (attempt, mode),
+            |_| Ok(()),
+        )
     }
 }
 
