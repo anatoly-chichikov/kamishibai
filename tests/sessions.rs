@@ -302,27 +302,35 @@ fn poll_quiet_status(
     }
 }
 
-/// Poll the full `status` text until it satisfies the predicate, panicking when
-/// the deadline expires.
-fn poll_full_status(
-    cache: &Path,
-    id: &str,
-    deadline: Duration,
-    until: impl Fn(&str) -> bool,
-) -> String {
+/// Wait for a claimed, lock-backed worker, reporting the last status and worker
+/// log if the process never becomes live within the startup deadline.
+#[cfg(unix)]
+fn poll_live_worker(cache: &Path, id: &str) {
+    let deadline = Duration::from_secs(30);
     let started = Instant::now();
     loop {
         let output = cli(cache)
-            .args(["status", id])
+            .args(["status", id, "--json"])
+            .timeout(deadline.saturating_sub(started.elapsed()))
             .output()
             .expect("status must run");
-        let text = String::from_utf8(output.stdout).expect("status output must be UTF-8");
-        if until(text.as_str()) {
-            return text;
+        let status: serde_json::Value =
+            serde_json::from_slice(&output.stdout).unwrap_or(serde_json::Value::Null);
+        if output.status.success()
+            && status["phase"] == "generating"
+            && status["worker"]["alive"] == true
+            && status["worker"]["pid"].as_u64().is_some_and(|pid| pid > 0)
+        {
+            return;
         }
         assert!(
             started.elapsed() < deadline,
-            "status polling deadline expired; the last status was:\n{text}"
+            "session '{id}' never reported a live worker within {deadline:?}; exit: {:?}\nstdout:\n{}\nstderr:\n{}\nworker.log:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+            fs::read_to_string(cache.join("sessions").join(id).join("worker.log"))
+                .unwrap_or_else(|error| format!("could not read worker log: {error}")),
         );
         std::thread::sleep(Duration::from_millis(250));
     }
@@ -658,9 +666,7 @@ fn live_worker_session(cache: &Path, out: &Path, id: &str, gemini: &str) {
         .args(["generate", id])
         .assert()
         .success();
-    poll_full_status(cache, id, Duration::from_secs(30), |text| {
-        text.contains("building ")
-    });
+    poll_live_worker(cache, id);
 }
 
 #[test]
@@ -884,16 +890,22 @@ fn status_reports_a_live_worker_while_a_detached_run_is_in_flight() {
     let out = TempDir::new().expect("output tempdir");
     let gemini = stalled_gemini();
     live_worker_session(cache.path(), out.path(), "live", gemini.as_str());
-    let status = poll_full_status(cache.path(), "live", Duration::from_secs(5), |text| {
-        text.contains("building ")
-    });
+    let output = cli(cache.path())
+        .args(["status", "live"])
+        .timeout(Duration::from_secs(30))
+        .output()
+        .expect("status must run after the worker becomes live");
+    let status = String::from_utf8(output.stdout).expect("status output must be UTF-8");
     cli(cache.path())
         .args(["cancel", "live"])
         .assert()
         .success();
     assert!(
-        status.contains("· generating") && status.contains("building 1 card (pid"),
-        "status during a detached run must report the generating phase and a live worker"
+        output.status.success()
+            && status.contains("· generating")
+            && status.contains("building 1 card (pid"),
+        "status during a detached run must report the generating phase and a live worker; exit: {:?}\n{status}",
+        output.status,
     );
 }
 
