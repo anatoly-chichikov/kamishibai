@@ -30,6 +30,9 @@ pub const ILLUSTRATION_COST_FILE: &str = "picture.cost.json";
 pub const PICTURE_REQUESTS_FILE: &str = "picture.requests.json";
 /// Canonical filename of the latest durably reserved scene-attempt index.
 pub const SCENE_ATTEMPT_FILE: &str = "scene-attempt.json";
+/// Durable moderation decision selecting the plugged gentle world for this visual revision.
+/// Experimental embedding API; compatibility is not guaranteed.
+pub const SOFT_FILE: &str = "soft.json";
 /// Legacy visual revision marker removed when explicitly dropping artifacts.
 pub const LEGACY_VISUAL_REVISION_FILE: &str = "visual.revision";
 /// Directory that archives immutable image attempts and their verdicts.

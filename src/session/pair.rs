@@ -1,8 +1,10 @@
+use serde::{Deserialize, Serialize};
+
 use crate::languages::{LanguageCatalog, LanguageProfile};
 use anyhow::Result;
 
 /// One explicit language direction for a batch: what is being learned, and what is explained in.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct LanguagePair {
     learning: String,
     known: String,

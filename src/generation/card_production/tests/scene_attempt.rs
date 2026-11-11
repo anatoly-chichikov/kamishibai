@@ -122,3 +122,117 @@ fn cached_scene_does_not_move_recomposition_cursor_backwards() {
         "cached scene rewound or skipped the durable recomposition cursor"
     );
 }
+
+#[test]
+fn failed_reservation_cannot_skip_an_unwritten_scene_index() {
+    let temporary = TempDir::new().unwrap();
+    let cache = Cache::failing("visual", temporary.path(), 0);
+    fs::write(
+        cache.filepath(SCENE_ATTEMPT_FILE).unwrap(),
+        br#"{"scene_attempt_index":6}"#,
+    )
+    .unwrap();
+    let failed = reserve_scene_attempt(&cache, Artifact::Scene, 0, false).is_err();
+    let restored = Cache::new("visual", temporary.path());
+    let attempt = reserve_scene_attempt(&restored, Artifact::Scene, 0, false).unwrap();
+    assert_eq!(
+        (failed, attempt, load_scene_attempt(&restored).unwrap()),
+        (true, 7, Some(7)),
+        "failed cursor write skipped a scene index before any request"
+    );
+}
+
+#[test]
+fn abandoned_reservation_cannot_reuse_a_possibly_sent_scene_index() {
+    let temporary = TempDir::new().unwrap();
+    let cache = Cache::new("visual", temporary.path());
+    let first = reserve_scene_attempt(&cache, Artifact::Scene, 0, false).unwrap();
+    let restored = Cache::new("visual", temporary.path());
+    let second = reserve_scene_attempt(&restored, Artifact::Scene, 0, false).unwrap();
+    assert_eq!(
+        (first, second, load_scene_attempt(&restored).unwrap()),
+        (0, 1, Some(1)),
+        "restart reused a reserved index without confirmation that its request was unsent"
+    );
+}
+
+#[test]
+fn settled_failure_cannot_reuse_the_previous_scene_index() {
+    let temporary = TempDir::new().unwrap();
+    let cache = Cache::new("visual", temporary.path());
+    let first = reserve_scene_attempt(&cache, Artifact::Scene, 0, false).unwrap();
+    let second = reserve_scene_attempt(&cache, Artifact::Scene, 0, false).unwrap();
+    assert_eq!(
+        (first, second),
+        (0, 1),
+        "settled failure reused the previous scene selection"
+    );
+}
+
+struct PausedScene;
+
+impl crate::generation::manga::Translator for PausedScene {
+    fn translate(&self, _sentence: &str, _target: &str) -> Result<serde_json::Value> {
+        Err(crate::generation::VisualFailure::NotSent.into_error())
+    }
+
+    fn translate_observed(
+        &self,
+        _sentence: &str,
+        _target: &str,
+    ) -> crate::generation::VisualResult<serde_json::Value> {
+        Err(crate::generation::VisualFailure::NotSent)
+    }
+}
+
+#[test]
+fn unsent_scene_cannot_leave_its_reservation_on_an_existing_cursor() {
+    use crate::generation::manga::Translator;
+    let temporary = TempDir::new().unwrap();
+    let cache = Cache::new("visual", temporary.path());
+    fs::write(
+        cache.filepath(SCENE_ATTEMPT_FILE).unwrap(),
+        br#"{"scene_attempt_index":254}"#,
+    )
+    .unwrap();
+    let mut observations = Vec::new();
+    for _ in 0..273 {
+        let reserved = reserve_scene_attempt(&cache, Artifact::Scene, 0, false).unwrap();
+        let paused = ReservedScene::new(PausedScene, cache.clone(), Some(254))
+            .translate_observed("The cat sleeps", "EN");
+        observations.push((
+            reserved,
+            matches!(paused, Err(crate::generation::VisualFailure::NotSent)),
+            load_scene_attempt(&cache).unwrap(),
+        ));
+    }
+    assert_eq!(
+        observations,
+        vec![(255, true, Some(254)); 273],
+        "unsent attempts exhausted or rewound the existing cursor"
+    );
+}
+
+#[test]
+fn rollback_failure_cannot_report_a_successful_pause() {
+    use crate::generation::manga::Translator;
+    let temporary = TempDir::new().unwrap();
+    let cache = Cache::failing("visual", temporary.path(), 1);
+    fs::write(
+        cache.filepath(SCENE_ATTEMPT_FILE).unwrap(),
+        br#"{"scene_attempt_index":6}"#,
+    )
+    .unwrap();
+    reserve_scene_attempt(&cache, Artifact::Scene, 0, false).unwrap();
+    let paused = ReservedScene::new(PausedScene, cache.clone(), Some(6))
+        .translate_observed("The cat sleeps", "EN");
+    let restarted = reserve_scene_attempt(&cache, Artifact::Scene, 0, false).unwrap();
+    assert_eq!(
+        (
+            matches!(paused, Err(crate::generation::VisualFailure::Failed(_))),
+            restarted
+        ),
+        (true, 8),
+        "failed rollback hid the storage error or reused a reserved scene index"
+    );
+}

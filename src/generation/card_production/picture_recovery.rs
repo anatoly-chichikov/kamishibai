@@ -28,6 +28,7 @@ pub(super) fn render_recomposition_with_fallback<T, P, R, F, E>(
     progress: &mut P,
     recompose: R,
     fallback: F,
+    recoverable: impl FnOnce(&E) -> bool,
 ) -> std::result::Result<T, E>
 where
     R: FnOnce(&mut P) -> std::result::Result<T, E>,
@@ -41,7 +42,7 @@ where
         Ok(rendered) => return Ok(rendered),
         Err(error) => error,
     };
-    if accounting.failed() {
+    if accounting.failed() || !recoverable(&original) {
         return Err(original);
     }
     let after = accounting
@@ -168,6 +169,7 @@ pub(super) fn persisted_local_rejections(path: &Path) -> Result<LocalImageReject
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Classifies local image rejection signals relevant to recovery.
 pub(super) enum LocalImageRejection {
+    Moderation,
     Color,
     Topology,
     RecallText,
@@ -180,6 +182,7 @@ impl LocalImageRejection {
     /// Map a renderer category to the recovery vocabulary.
     pub(super) fn from_category(category: &str) -> Self {
         match category {
+            "moderation" => Self::Moderation,
             "color" => Self::Color,
             "topology" => Self::Topology,
             "ocr" | "recall_text" => Self::RecallText,
@@ -234,7 +237,8 @@ impl LocalImageRejections {
     pub(super) fn recompose(&self) -> bool {
         matches!(
             self.recent,
-            [Some(LocalImageRejection::Topology), Some(_)]
+            [_, Some(LocalImageRejection::Moderation)]
+                | [Some(LocalImageRejection::Topology), Some(_)]
                 | [Some(_), Some(LocalImageRejection::Topology)]
                 | [
                     Some(LocalImageRejection::Border),

@@ -10,36 +10,7 @@ use sha2::{Digest, Sha256};
 const DEFAULT_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 const PROFILE_VERSION: &str = "kamishibai-gemini-profile-v2";
 
-/// Identifies one provider operation without exposing delivery-specific controls.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum GenerationStage {
-    /// Understand a fresh vocabulary batch.
-    Intake,
-    /// Add or correct reviewed senses.
-    Senses,
-    /// Produce initial card metadata.
-    Metadata,
-    /// Rewrite existing card metadata.
-    Correction,
-    /// Check pronunciation and transcription.
-    Phonetics,
-    /// Extract features used to choose a scene layout.
-    Features,
-    /// Compose a scene inside its selected layout.
-    Scene,
-    /// Render the scene as an image.
-    Picture,
-    /// Judge whether an image reveals the answer.
-    Recall,
-    /// Judge whether an image preserves its scene requirements.
-    Fidelity,
-    /// Inspect enlarged crops for literal writing.
-    Zoom,
-    /// Judge visible text for languages without the OCR route.
-    Text,
-    /// Synthesize spoken pronunciation.
-    Speech,
-}
+pub use crate::models::GenerationStage;
 
 impl GenerationStage {
     fn model(self) -> &'static str {
@@ -167,6 +138,17 @@ impl GeminiProfile {
     #[must_use]
     pub fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    /// Build the internal canonical policy namespace for an external provider.
+    pub(crate) fn external(revision: &str, prompts: Arc<dyn PromptPolicy>) -> Self {
+        let models = StageModels::default();
+        Self {
+            endpoint: String::new(),
+            identity: identity("external-provider", &models, revision),
+            models,
+            prompts,
+        }
     }
 
     pub(super) fn legacy(endpoint: String) -> Self {

@@ -8,14 +8,17 @@
 //! records one [`AttemptFault`], and image artifacts keep the archived picture
 //! that was rejected so the shell can open it.
 
+use serde::{Deserialize, Serialize};
+
 use std::path::{Path, PathBuf};
 
 /// Absolute attempt ceiling shared by every generated artifact series: the
 /// plain first try plus [`AttemptTally::retries`] retries on top of it.
-pub(crate) const ARTIFACT_ATTEMPT_CEILING: u8 = 4;
+/// Experimental embedding API; compatibility is not guaranteed.
+pub const ARTIFACT_ATTEMPT_CEILING: u8 = 4;
 
 /// Number of attempts already spent versus the absolute cap.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct AttemptTally {
     done: u8,
     ceiling: u8,
@@ -63,7 +66,7 @@ impl AttemptTally {
 }
 
 /// Per-category quality penalties of one judged picture attempt.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct AttemptPenalties {
     topology: u32,
     text: u32,
@@ -95,7 +98,7 @@ impl AttemptPenalties {
 }
 
 /// Weighted verdict of one judged picture attempt, read back from its archive.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct AttemptScorecard {
     score: u32,
     blocker: bool,
@@ -140,7 +143,7 @@ impl AttemptScorecard {
 /// picture attempt — and stays empty when the attempt failed before producing
 /// anything at all; `scorecard` carries the weighted verdict when the attempt
 /// was judged rather than lost to infrastructure.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct AttemptFault {
     category: String,
     reason: String,
@@ -192,7 +195,7 @@ impl AttemptFault {
 }
 
 /// Attempts already spent for one artifact together with why they failed.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct AttemptLog {
     tally: AttemptTally,
     faults: Vec<AttemptFault>,

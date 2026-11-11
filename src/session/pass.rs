@@ -1,9 +1,11 @@
+use serde::{Deserialize, Serialize};
+
 use super::candidate::{Sense, WordCandidate};
 use super::detection::LearningGuess;
 use super::draft::CardMeta;
 
 /// The outcome of the cheap first-pass understanding step.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Understood {
     guess: LearningGuess,
     candidates: Vec<WordCandidate>,
@@ -27,7 +29,7 @@ impl Understood {
 }
 
 /// Outcome of the focused add-more sense request.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SenseCorrection {
     senses: Vec<Sense>,
     message: Option<String>,
@@ -66,7 +68,7 @@ impl SenseCorrection {
 }
 
 /// Outcome of the per-card correction pass.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct CardRevision {
     term: String,
     understanding: String,

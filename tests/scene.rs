@@ -303,9 +303,9 @@ impl QueueSource {
 
 impl ImageSource for QueueSource {
     /// Return one scripted PNG payload.
-    fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
+    fn image(&self, _prompt: &str) -> kamishibai::generation::VisualResult<Vec<u8>> {
         let Some(image) = self.values.borrow_mut().pop_front() else {
-            bail!("image source ran out of scripted images");
+            return Err(anyhow::anyhow!("image source ran out of scripted images").into());
         };
         let mut cursor = Cursor::new(Vec::new());
         DynamicImage::ImageLuma8(image).write_to(&mut cursor, ImageFormat::Png)?;
@@ -328,7 +328,7 @@ impl FixedBytes {
 
 impl ImageSource for FixedBytes {
     /// Return one fixed encoded image payload.
-    fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
+    fn image(&self, _prompt: &str) -> kamishibai::generation::VisualResult<Vec<u8>> {
         Ok(self.bytes.clone())
     }
 }
@@ -339,8 +339,8 @@ struct FailingSource;
 
 impl ImageSource for FailingSource {
     /// Return one provider failure without encoded image bytes.
-    fn image(&self, _prompt: &str) -> Result<Vec<u8>> {
-        bail!("provider rejected image request")
+    fn image(&self, _prompt: &str) -> kamishibai::generation::VisualResult<Vec<u8>> {
+        Err(anyhow::anyhow!("provider rejected image request").into())
     }
 }
 
@@ -401,10 +401,10 @@ impl CapturingSource {
 
 impl ImageSource for CapturingSource {
     /// Record the provider prompt and return one scripted PNG payload.
-    fn image(&self, prompt: &str) -> Result<Vec<u8>> {
+    fn image(&self, prompt: &str) -> kamishibai::generation::VisualResult<Vec<u8>> {
         self.prompts.borrow_mut().push(String::from(prompt));
         let Some(image) = self.values.borrow_mut().pop_front() else {
-            bail!("image source ran out of scripted images");
+            return Err(anyhow::anyhow!("image source ran out of scripted images").into());
         };
         let mut cursor = Cursor::new(Vec::new());
         DynamicImage::ImageLuma8(image).write_to(&mut cursor, ImageFormat::Png)?;
@@ -3521,5 +3521,176 @@ fn renderer_keeps_one_panel_devices_as_one_region() {
             "Rejected after 1 attempts: quality score 60/100: found 2 panel regions for 1 planned panel"
         ),
         "one-panel device accepts a hidden split page"
+    );
+}
+
+struct ModeratedSource;
+
+impl ImageSource for ModeratedSource {
+    /// Refuse every prompt as provider moderation.
+    fn image(&self, _prompt: &str) -> kamishibai::generation::VisualResult<Vec<u8>> {
+        Err(kamishibai::generation::VisualFailure::Refused {
+            stage: kamishibai::models::GenerationStage::Picture,
+        })
+    }
+}
+
+/// A moderation refusal on the final attempt still ships the archive.
+#[test]
+fn final_moderation_cannot_skip_salvage() -> Result<()> {
+    let temporary = tempdir()?;
+    let first = MangaRenderer::new(
+        QueueSource::new(vec![GrayImage::from_pixel(32, 32, Luma([0]))]),
+        1,
+        ScriptedRecall::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf());
+    let _ = first.render(&active_layout_scene(2, "en"), &mut Recorder::default());
+    let second = MangaRenderer::new(
+        ModeratedSource,
+        1,
+        ScriptedRecall::new(&[]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .with_salvage();
+    assert!(
+        second
+            .render(&active_layout_scene(2, "en"), &mut Recorder::default())
+            .is_ok(),
+        "a final moderation refusal failed the card despite a salvageable archived frame"
+    );
+    Ok(())
+}
+
+struct SalvageScene(Value);
+
+impl kamishibai::generation::manga::Translator for SalvageScene {
+    fn translate(&self, _sentence: &str, _target: &str) -> Result<Value> {
+        Ok(self.0.clone())
+    }
+}
+
+#[test]
+fn soft_salvage_cannot_discard_stock_or_better_soft_frames() -> Result<()> {
+    use kamishibai::generation::{
+        artifact_cache::{Cache, IMAGE_ATTEMPTS_DIRECTORY, SCENE_FILE, SOFT_FILE},
+        manga::Illustration,
+    };
+    struct Shelf;
+    impl kamishibai::models::SoftWorld for Shelf {
+        fn name(&self) -> &str {
+            "shelf"
+        }
+        fn brief(&self) -> &str {
+            "SOFT WORLD"
+        }
+        fn admit(&self, _scene: &Value, _prompt: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+    let mut outcomes = Vec::new();
+    for (stock, soft) in [(91, 83), (77, 94)] {
+        let temporary = tempdir()?;
+        let cache = Cache::new("salvage", temporary.path());
+        let directory = cache.filepath(IMAGE_ATTEMPTS_DIRECTORY)?;
+        std::fs::create_dir_all(&directory)?;
+        let mut scene = active_layout_scene(2, "en");
+        scene["manga_panel"]["meta"]["description"] = json!("A paper crane rests on a shelf");
+        scene["manga_panel"]["page_design"]["reading_path"] = json!(["p1", "p2"]);
+        for panel in scene["manga_panel"]["panels"].as_array_mut().unwrap() {
+            panel["scene"] = json!({"description":"A paper crane rests on a shelf","subjects":[]});
+        }
+        scene["manga_panel"]["meta"]["layout_selection"]["scene_mode"] = json!("soft");
+        std::fs::write(cache.filepath(SOFT_FILE)?, b"{}")?;
+        for (sequence, score, mode) in [(1, stock, Value::Null), (3, soft, json!("soft"))] {
+            let mut archived = scene.clone();
+            archived["manga_panel"]["meta"]["layout_selection"]["scene_mode"] = mode;
+            let image = format!("attempt-{sequence:04}.png");
+            DynamicImage::ImageLuma8(GrayImage::from_pixel(32, 32, Luma([0])))
+                .save(directory.join(&image))?;
+            let source = format!("attempt-{sequence:04}.scene.json");
+            std::fs::write(directory.join(&source), serde_json::to_vec(&archived)?)?;
+            std::fs::write(
+                directory.join(format!("attempt-{sequence:04}.json")),
+                serde_json::to_vec(
+                    &json!({"sequence":sequence,"status":"rejected","category":"topology","blocker":false,"score":score,"image":image,"scene":source}),
+                )?,
+            )?;
+        }
+        std::fs::write(
+            directory.join("attempt-0002.json"),
+            br#"{"sequence":2,"status":"rejected","category":"moderation","image":null}"#,
+        )?;
+        let renderer = MangaRenderer::new(
+            ModeratedSource,
+            1,
+            ScriptedRecall::new(&[]),
+            BorderDetector::new(2, 6, 240, 1),
+        )
+        .with_attempt_archive(directory.clone())
+        .with_salvage()
+        .with_look(kamishibai::models::Look::new(
+            std::sync::Arc::new(kamishibai::models::MangaInk),
+            Some(std::sync::Arc::new(Shelf)),
+            kamishibai::models::Resend::Automatic,
+        ));
+        let illustration = Illustration::new(cache.clone(), SalvageScene(scene), renderer);
+        let result =
+            illustration.picture_with_recomposed_scene("sentence", "en", &mut Recorder::default());
+        let saved: Value = if cache.exists(SCENE_FILE) {
+            serde_json::from_slice(&std::fs::read(cache.filepath(SCENE_FILE)?)?)?
+        } else {
+            Value::Null
+        };
+        let selected = if stock > soft { 1 } else { 3 };
+        let verdict: Value = serde_json::from_slice(&std::fs::read(
+            directory.join(format!("attempt-{selected:04}.json")),
+        )?)?;
+        outcomes.push((
+            result.is_ok(),
+            saved["manga_panel"]["meta"]["layout_selection"]["scene_mode"].clone(),
+            verdict["status"].clone(),
+        ));
+    }
+    assert_eq!(
+        outcomes,
+        vec![
+            (true, Value::Null, json!("salvaged")),
+            (true, json!("soft"), json!("salvaged"))
+        ],
+        "soft salvage ignored the best real frame or published a scene from another world"
+    );
+    Ok(())
+}
+
+#[test]
+fn accepted_picture_cannot_be_bought_again_after_restart() {
+    let temporary = tempdir().expect("invariant: archive directory exists");
+    let scene = active_layout_scene(2, "en");
+    let source = CapturingSource::new(vec![rectangular_panels()]);
+    let first = MangaRenderer::new(
+        source.clone(),
+        1,
+        ScriptedRecall::new(&[""]),
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .render(&scene, &mut Recorder::default())
+    .is_ok();
+    let second = MangaRenderer::new(
+        source.clone(),
+        1,
+        FailingRecall,
+        BorderDetector::new(2, 6, 240, 1),
+    )
+    .with_attempt_archive(temporary.path().to_path_buf())
+    .render(&scene, &mut Recorder::default())
+    .is_ok();
+    assert_eq!(
+        (first, second, source.prompts.borrow().len()),
+        (true, true, 1),
+        "an accepted frame or its completed review was bought again after restart"
     );
 }

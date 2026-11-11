@@ -1,0 +1,58 @@
+[
+  {
+    "name": "revive-a0",
+    "term": "revive",
+    "sentence": "The paramedics managed to revive the drowning swimmer.",
+    "attempt": 0,
+    "valid": true
+  },
+  {
+    "name": "revive-a1",
+    "term": "revive",
+    "sentence": "The paramedics managed to revive the drowning swimmer.",
+    "attempt": 1,
+    "valid": true
+  },
+  {
+    "name": "revive-a2",
+    "term": "revive",
+    "sentence": "The paramedics managed to revive the drowning swimmer.",
+    "attempt": 2,
+    "valid": true
+  },
+  {
+    "name": "revive-a3",
+    "term": "revive",
+    "sentence": "The paramedics managed to revive the drowning swimmer.",
+    "attempt": 3,
+    "valid": true
+  },
+  {
+    "name": "derogatory-a0",
+    "term": "derogatory",
+    "sentence": "He made derogatory comments about her work.",
+    "attempt": 0,
+    "valid": true
+  },
+  {
+    "name": "derogatory-a1",
+    "term": "derogatory",
+    "sentence": "He made derogatory comments about her work.",
+    "attempt": 1,
+    "valid": false
+  },
+  {
+    "name": "derogatory-a2",
+    "term": "derogatory",
+    "sentence": "He made derogatory comments about her work.",
+    "attempt": 2,
+    "valid": false
+  },
+  {
+    "name": "derogatory-a3",
+    "term": "derogatory",
+    "sentence": "He made derogatory comments about her work.",
+    "attempt": 3,
+    "valid": true
+  }
+]

@@ -9,7 +9,7 @@ use crate::generation::artifact_cache::{
     Cache, ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, IMAGE_ATTEMPTS_DIRECTORY,
     LEGACY_VISUAL_REVISION_FILE, META_COST_FILE, META_FILE, PICTURE_REQUESTS_FILE,
     ROOT_STAGE_LOCK_TIMEOUT, RootStage, RootStageGuard, SCENE_ATTEMPT_FILE, SCENE_COST_FILE,
-    SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE, VisualGuard,
+    SCENE_FILE, SOFT_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE, VisualGuard,
 };
 use crate::generation::visual_revision;
 #[cfg(test)]
@@ -56,6 +56,7 @@ fn invalidate_cell(cell: CardCell, keep_meta: bool, keep_meta_cost: bool) -> Res
         &[
             SCENE_FILE,
             SCENE_ATTEMPT_FILE,
+            SOFT_FILE,
             SCENE_COST_FILE,
             ILLUSTRATION_FILE,
             ILLUSTRATION_COST_FILE,
@@ -128,6 +129,7 @@ pub(super) fn clear_for_meta_refresh(cache: &Cache, visual: &Cache) -> Result<()
         &[
             SCENE_FILE,
             SCENE_ATTEMPT_FILE,
+            SOFT_FILE,
             ILLUSTRATION_FILE,
             PICTURE_REQUESTS_FILE,
         ],

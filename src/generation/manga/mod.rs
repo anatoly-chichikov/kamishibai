@@ -14,7 +14,7 @@ mod text_gate;
 mod zoom;
 
 use crate::gemini::{GeminiClient, Transport};
-use anyhow::Result;
+use crate::generation::VisualResult;
 
 pub use border::BorderDetector;
 pub use contracts::{ImageSource, ImageText, Progress, Renderer, SceneText, TextJudge, Translator};
@@ -24,6 +24,7 @@ pub(crate) use recall::{FidelityCheck, FidelityReview, LiteralZoomCheck, Literal
 pub use recall::{HiddenRecall, RecallCard, RecallJudge, RecallReview, ShownRecall};
 pub(crate) use render::MangaRenderRejection;
 pub use render::MangaRenderer;
+pub(crate) use render::{guard_image_requests, retry_image_request};
 pub use text::{NativeOutput, TextDetector, TextDetectors, TextEnsemble};
 pub use text_gate::{TextCheck, TextReview, TextReviewGate};
 pub(crate) use zoom::literal_zoom_crops;
@@ -33,8 +34,8 @@ where
     T: Transport,
 {
     /// Return one encoded image payload for the compiled prompt.
-    fn image(&self, prompt: &str) -> Result<Vec<u8>> {
-        GeminiClient::<T>::image(self, prompt)
+    fn image(&self, prompt: &str) -> VisualResult<Vec<u8>> {
+        self.image_observed(prompt, |_| Ok(()))
     }
 }
 

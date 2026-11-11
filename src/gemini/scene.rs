@@ -94,8 +94,84 @@ fn decode_composer(raw: &str) -> Result<Value> {
             serde_json::from_str::<Value>(repaired.as_str())
                 .context("registry scene composer returned invalid JSON")
         }
-        Err(error) => Err(anyhow!(error).context("registry scene composer returned invalid JSON")),
+        Err(error) => match panel_boundaries(raw) {
+            Some(repaired) => serde_json::from_str(&repaired).context(
+                "registry scene composer returned invalid JSON after panel boundary repair",
+            ),
+            None => Err(anyhow!(error).context("registry scene composer returned invalid JSON")),
+        },
     }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Delimiter {
+    Object,
+    Array,
+    Panels,
+    Panel,
+}
+
+fn panel_boundaries(raw: &str) -> Option<String> {
+    let mut stack = Vec::new();
+    let mut quoted = None;
+    let mut escaped = false;
+    let mut panels = false;
+    let mut repaired = raw.as_bytes().to_vec();
+    let mut changed = false;
+    for (index, byte) in raw.bytes().enumerate() {
+        if let Some(start) = quoted {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = None;
+                if stack == [Delimiter::Object] {
+                    panels = raw[index + 1..].trim_start().starts_with(':')
+                        && serde_json::from_str::<String>(&raw[start..=index]).ok()? == "panels";
+                }
+            }
+            continue;
+        }
+        match byte {
+            b'"' => quoted = Some(index),
+            b'{' => stack.push(if stack.last() == Some(&Delimiter::Panels) {
+                Delimiter::Panel
+            } else {
+                Delimiter::Object
+            }),
+            b'[' => {
+                stack.push(if stack == [Delimiter::Object] && panels {
+                    Delimiter::Panels
+                } else {
+                    Delimiter::Array
+                });
+                panels = false;
+            }
+            b'}' => match stack.pop()? {
+                Delimiter::Object | Delimiter::Panel => {}
+                _ => return None,
+            },
+            b']' => match stack.pop()? {
+                Delimiter::Array | Delimiter::Panels => {}
+                Delimiter::Panel
+                    if matches!(
+                        raw[index + 1..].trim_start().as_bytes().first(),
+                        Some(b',' | b']')
+                    ) =>
+                {
+                    repaired[index] = b'}';
+                    changed = true;
+                }
+                _ => return None,
+            },
+            _ => {}
+        }
+    }
+    if quoted.is_some() || !stack.is_empty() || !changed {
+        return None;
+    }
+    String::from_utf8(repaired).ok()
 }
 
 fn close_json(raw: &str) -> Option<String> {
@@ -2703,6 +2779,66 @@ fn has_subject(panel: &Value, subject: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    macro_rules! archived_boundary {
+        ($test:ident, $name:literal) => {
+            #[test]
+            fn $test() {
+                let raw = include_str!(concat!(
+                    "../../tests/fixtures/composer-boundaries/",
+                    $name,
+                    ".raw.txt"
+                ));
+                let expected: serde_json::Value = serde_json::from_str(include_str!(concat!(
+                    "../../tests/fixtures/composer-boundaries/",
+                    $name,
+                    ".expected.json"
+                )))
+                .unwrap();
+                assert_eq!(
+                    super::decode_composer(raw).ok(),
+                    Some(expected),
+                    "archived panel boundary was rejected or changed scene content"
+                );
+            }
+        };
+    }
+
+    archived_boundary!(revive_a0_cannot_lose_panel_boundaries, "revive-a0");
+    archived_boundary!(revive_a1_cannot_lose_panel_boundaries, "revive-a1");
+    archived_boundary!(revive_a2_cannot_lose_panel_boundaries, "revive-a2");
+    archived_boundary!(revive_a3_cannot_lose_panel_boundaries, "revive-a3");
+    archived_boundary!(derogatory_a0_cannot_lose_panel_boundaries, "derogatory-a0");
+    archived_boundary!(derogatory_a1_cannot_lose_panel_boundaries, "derogatory-a1");
+    archived_boundary!(derogatory_a2_cannot_lose_panel_boundaries, "derogatory-a2");
+    archived_boundary!(derogatory_a3_cannot_lose_panel_boundaries, "derogatory-a3");
+
+    #[test]
+    fn final_panel_repair_cannot_change_quoted_delimiters() {
+        let raw = r#"{"message":"嵐 ] \" [", "panels":[{"scene":"literal ] } [ \"" ]]}"#;
+        assert_eq!(
+            super::decode_composer(raw).ok(),
+            Some(
+                serde_json::json!({"message":"嵐 ] \" [", "panels":[{"scene":"literal ] } [ \""}]})
+            ),
+            "final panel repair changed quoted delimiters or Unicode text"
+        );
+    }
+
+    #[test]
+    fn repair_cannot_change_boundaries_outside_root_panels() {
+        let cases = [
+            r#"{"semantic_spine":{"event":"still"]}"#,
+            r#"{"panels":[{"scene":{"description":"still"]}]}"#,
+            r#"{"panels":[{"subjects":[{"id":"hero"]}]}"#,
+            r#"{"nested":{"panels":[{"scene":"still"]]}}"#,
+            r#"{"panels":[{"scene":"still"], {"scene":"next"}]} trailing"#,
+        ];
+        assert!(
+            cases.iter().all(|raw| super::decode_composer(raw).is_err()),
+            "repair accepted a mismatch outside a panel object boundary"
+        );
+    }
+
     use serde_json::{Value, json};
 
     use super::{

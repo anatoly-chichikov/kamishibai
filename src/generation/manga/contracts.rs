@@ -5,6 +5,7 @@ use image::{DynamicImage, GrayImage};
 use serde_json::Value;
 
 use super::text_gate::{TextReview, TextReviewGate};
+use crate::generation::VisualResult;
 
 /// Report scene and illustration progress events.
 pub trait Progress {
@@ -20,12 +21,24 @@ pub trait Progress {
 pub trait Translator {
     /// Return one scene JSON document for the sentence and target language.
     fn translate(&self, sentence: &str, target: &str) -> Result<Value>;
+    /// Translate while retaining a typed provider moderation refusal.
+    fn translate_observed(&self, sentence: &str, target: &str) -> VisualResult<Value> {
+        self.translate(sentence, target).map_err(Into::into)
+    }
 }
 
 /// Render one scene JSON document into an image.
 pub trait Renderer {
     /// Return one rendered image for the scene.
     fn render(&self, scene: &Value, progress: &mut dyn Progress) -> Result<DynamicImage>;
+    /// Render while retaining a typed provider moderation refusal.
+    fn render_observed(
+        &self,
+        scene: &Value,
+        progress: &mut dyn Progress,
+    ) -> VisualResult<DynamicImage> {
+        self.render(scene, progress).map_err(Into::into)
+    }
 }
 
 /// Detect OCR text from one grayscale image.
@@ -51,5 +64,5 @@ pub trait TextJudge {
 /// Render one compiled prose prompt into raw image bytes.
 pub trait ImageSource {
     /// Return one encoded image payload for the prompt.
-    fn image(&self, prompt: &str) -> Result<Vec<u8>>;
+    fn image(&self, prompt: &str) -> VisualResult<Vec<u8>>;
 }

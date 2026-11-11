@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use crate::generation::SceneSource;
 use crate::generation::manga::Translator;
+use crate::generation::{SceneMode, SceneSource, VisualFailure, VisualResult};
 
 /// Wrap one scene client with one fixed prompt language.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -9,7 +9,13 @@ pub struct SceneComposer<C> {
     client: C,
     language: String,
     term: String,
+    selection: SceneSelection,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SceneSelection {
     attempt: u8,
+    mode: SceneMode,
 }
 
 impl<C> SceneComposer<C> {
@@ -24,7 +30,23 @@ impl<C> SceneComposer<C> {
             client,
             language: language.into(),
             term: term.into(),
-            attempt,
+            selection: SceneSelection {
+                attempt,
+                mode: SceneMode::Stock,
+            },
+        }
+    }
+
+    /// Bind the world selected by the durable visual transaction.
+    /// Experimental embedding API; compatibility is not guaranteed.
+    #[must_use]
+    pub fn with_mode(self, mode: SceneMode) -> Self {
+        Self {
+            selection: SceneSelection {
+                mode,
+                ..self.selection
+            },
+            ..self
         }
     }
 }
@@ -35,12 +57,18 @@ where
 {
     /// Return one translated scene JSON document.
     fn translate(&self, sentence: &str, target: &str) -> Result<serde_json::Value> {
+        self.translate_observed(sentence, target)
+            .map_err(VisualFailure::into_error)
+    }
+
+    fn translate_observed(&self, sentence: &str, target: &str) -> VisualResult<serde_json::Value> {
         self.client.scene(
             self.language.as_str(),
             self.term.as_str(),
             sentence,
             target,
-            self.attempt,
+            self.selection.attempt,
+            self.selection.mode,
         )
     }
 }
@@ -67,7 +95,8 @@ mod tests {
             sentence: &str,
             target: &str,
             attempt: u8,
-        ) -> Result<Value> {
+            _mode: SceneMode,
+        ) -> VisualResult<Value> {
             self.calls
                 .borrow_mut()
                 .push(format!("{language}|{term}|{sentence}|{target}|{attempt}"));

@@ -1,0 +1,126 @@
+{
+  "camera_arc": {
+    "continuity": {
+      "axis": "shoreline medical triage line between paramedics and swimmer",
+      "axis_mode": "preserve",
+      "eyeline_policy": "matched",
+      "screen_direction": "left_to_right"
+    },
+    "motivation": "The progression moves from the broad emergency context of the rescue on the water's edge, into the focused physical effort of resuscitation, tightens to the mechanical chest-compression contact, and concludes on the physiological payoff of the swimmer coughing back to life.",
+    "progression": "wide objective to medium two_shot to close insert to close single",
+    "strategy": "push_in"
+  },
+  "coverage_audit": [
+    {
+      "added_view": "A single wide view showing paramedics kneeling over a waterlogged swimmer on the shoreline.",
+      "panel_count": 1,
+      "reason": "Compressing the emergency effort, the life-saving mechanism, and the physical moment of revival into a single distant frame obscures the physical evidence of resuscitation.",
+      "source_support": "The paramedics managed to revive the drowning swimmer.",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "A two-panel sequence contrasting the paramedics performing resuscitation with the swimmer revived.",
+      "panel_count": 2,
+      "reason": "While it separates effort from outcome, it omits both the wet beach setting that grounds 'drowning swimmer' and the critical physical compression/airway action that embodies 'managed to'.",
+      "source_support": "The paramedics managed to revive the drowning swimmer.",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "A three-panel sequence showing the beach setting, CPR compressions, and the revived swimmer coughing up water.",
+      "panel_count": 3,
+      "reason": "This captures setting, action, and result, but leaves out the close physical contact detail that substantiates the intense physical labor of 'managed to revive'.",
+      "source_support": "managed to revive",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "A dedicated close insert of the paramedic's locked hands performing rhythmic chest compressions on the swimmer's wet sternum between the setting and the cough payoff.",
+      "panel_count": 4,
+      "reason": "Splitting the compound resuscitation event into beach context, coordinated team effort, tactile mechanical compression evidence, and the resulting gasping reflex fully grounds every semantic fact without unstated additions.",
+      "source_support": "paramedics managed to revive",
+      "verdict": "selected"
+    }
+  ],
+  "decomposition_mode": "setup_detail_payoff",
+  "intensity": "high",
+  "literal_anchor": "paramedics applying rhythmic resuscitation compressions until the waterlogged swimmer coughs and breathes",
+  "motion_vector": "vertical",
+  "panel_count": 4,
+  "panel_emphasis": "rising",
+  "panel_relation": "sequence",
+  "reading_direction": "left_to_right_top_to_bottom",
+  "selection_logic": "The sentence contains two irreducible semantic beats: the rescue intervention by paramedics under difficult conditions ('paramedics managed to') and the successful recovery of respiration ('revive the drowning swimmer'). To convey 'revive' cinematically without abstract tropes, the action beat is decomposed into an establishing context on the shoreline, an urgent two-shot of resuscitation in progress, and a tight physical insert of chest compressions demonstrating mechanical effort. The sequence concludes with the dominant payoff: the swimmer coughing out seawater and gasping. The earlier shots serve as steady, escalating narrative support leading directly into the emotional and physical climax.",
+  "semantic_beat_count": 2,
+  "semantic_relation": "sequence",
+  "shots": [
+    {
+      "angle": "high",
+      "camera_motivation": "Establish the immediate crisis environment where the waterlogged victim was pulled from the surf.",
+      "depth_plan": "deep",
+      "framing": "environment",
+      "id": "s1",
+      "information_gain": "The wet sand shoreline, receding waves, and the positioning of the emergency responders beside the supine swimmer.",
+      "role": "establishing",
+      "semantic_beat_index": 1,
+      "shot_scale": "wide",
+      "source_support": "the drowning swimmer",
+      "transition_trigger": "scene_open",
+      "viewpoint": "objective",
+      "viewpoint_anchor": ""
+        ,
+      "visible_anchor": "wet shoreline with emergency gear case open beside the prone, soaked swimmer"
+    },
+    {
+      "angle": "eye_level",
+      "camera_motivation": "Focus on the coordinated physical intervention and determination of the paramedics.",
+      "depth_plan": "layered",
+      "framing": "two_shot",
+      "id": "s2",
+      "information_gain": "The active posture of the kneeling paramedic maintaining an open airway while the other positions for compressions.",
+      "role": "action",
+      "semantic_beat_index": 1,
+      "shot_scale": "medium",
+      "source_support": "The paramedics managed to",
+      "transition_trigger": "attention_shift",
+      "viewpoint": "objective",
+      "viewpoint_anchor": ""
+    ,
+      "visible_anchor": "two paramedics kneeling over the unresponsive swimmer, one bracing the head and the other locking elbows"
+    },
+    {
+      "angle": "high",
+      "camera_motivation": "Expose the tactile strain and mechanical force of the resuscitation technique.",
+      "depth_plan": "shallow",
+      "framing": "insert",
+      "id": "s3",
+      "information_gain": "Downward displacement of the chest wall under interlaced hands, displacing seawater droplets across the wet torso.",
+      "role": "detail",
+      "semantic_beat_index": 1,
+      "shot_scale": "close",
+      "source_support": "managed to revive",
+      "transition_trigger": "detail_reveal",
+      "viewpoint": "objective",
+      "viewpoint_anchor": ""
+    ,
+      "visible_anchor": "interlocked bare hands pressing firmly into the center of the soaked chest"
+    },
+    {
+      "angle": "eye_level",
+      "camera_motivation": "Reveal the physiological turnaround and return to life as the stated payoff of the rescue.",
+      "depth_plan": "shallow",
+      "framing": "single",
+      "id": "s4",
+      "information_gain": "The swimmer rolling onto their side, expelling water from the mouth with open, gasping eyes.",
+      "role": "payoff",
+      "semantic_beat_index": 2,
+      "shot_scale": "close",
+      "source_support": "revive the drowning swimmer",
+      "transition_trigger": "payoff",
+      "viewpoint": "objective",
+      "viewpoint_anchor": ""
+    ,
+      "visible_anchor": "swimmer's face turning sharply, expelling water in a sudden convulsive cough as air enters the lungs"
+    }
+  ],
+  "spatial_relation": "same_space",
+  "transition_type": "action_to_action"
+}

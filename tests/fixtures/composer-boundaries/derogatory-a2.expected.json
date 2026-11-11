@@ -1,0 +1,191 @@
+{
+  "semantic_spine": {
+    "literal_event": "A man speaks derisively while roughly shoving aside a woman's architectural balsa-wood scale model on a workbench in front of her.",
+    "semantic_focus": "The dismissive physical handling and verbal belittling of a creator's work.",
+    "emotional_relation": "disdainful hostility opposed to constrained endurance",
+    "intensity": 3,
+    "visual_relation": "opposition",
+    "memory_hook": "Rough fingertips shoving and fracturing a delicate unpainted wooden scale model structure while its maker endures the rebuke.",
+    "metaphor": {
+      "mode": "none",
+      "mapping": "",
+      "literal_anchor": "man speaking sharply over an architectural model on a studio table"
+    }
+  },
+  "page_design": {
+    "rhythm": "compression_to_release",
+    "special_device": {
+      "kind": "none",
+      "reason": "The canonical three-panel layout and clear camera progression convey the interaction without requiring panels to cross boundaries.",
+      "source_panel": "",
+      "target_panel": "",
+      "subject_id": ""
+    },
+    "eye_flow_summary": "In panel one, the man leans from left to right toward the woman; panel two focuses down on his hand shoving the wooden craftwork; panel three settles on her rigid stance and clenched hands in the wide lower frame."
+  },
+  "panels": [
+    {
+      "shot_id": "s1",
+      "narrative_role": "establisher",
+      "semantic_job": "Establish the workplace confrontation as the man delivers critical remarks across the workspace.",
+      "attentional_frame": "macro",
+      "narrative_weight": "secondary",
+      "transition_from_previous": "none",
+      "continuity": {
+        "shared_environment_id": "design_studio",
+        "subject_phase": "first_speaking",
+        "axis_relation_from_previous": "establish",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "critic_man",
+        "eyeline_target_anchor": "architect_woman",
+        "eyeline_direction": "screen_right",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "Inside a bright design atelier, a man in a dark vest leans forward with one hand on his hip and his mouth open mid-sentence, gesturing scornfully toward a wooden model on a large table where a woman stands opposite him.",
+        "subjects": [
+          {
+            "id": "critic_man",
+            "figure": "Tall man in a dark tailored vest over rolled sleeves",
+            "pose": "Leaning aggressively across the timber table, left hand propped on hip, right hand flicking outward in contempt",
+            "expression": "Sharp furrowed brows, curled upper lip expressing scornful critique",
+            "blocking": "Standing screen left, dominating the foreground-to-midground"
+          },
+          {
+            "id": "architect_woman",
+            "figure": "Young woman in a simple linen work smock with hair tied back",
+            "pose": "Standing upright with shoulders squared, hands resting flat beside a wooden assembly",
+            "expression": "Stiff face, lips pressed into a tight flat line",
+            "blocking": "Standing screen right across the wide timber table"
+          }
+        ],
+        "environment": {
+          "setting": "Architectural design workshop with tall windows",
+          "foreground": ["edge of a wooden worktable", "scattered brass metal rulers"],
+          "midground": ["delicate balsa-wood scale model building", "cutting mat"],
+          "background": ["shelves of uncarved wooden blocks", "large studio window with morning glare"]
+        },
+        "camera": {
+          "shot_scale": "medium",
+          "viewpoint": "objective",
+          "viewpoint_subject_id": "",
+          "framing": "two_shot",
+          "angle": "eye_level",
+          "focus": "The tense gap and confrontational posture between the man and woman",
+          "depth_plan": "layered",
+          "eye_flow_exit": "bottom right toward the physical model on the table"
+        },
+        "motion_treatment": "pose_only",
+        "lighting": "Crisp morning directional light cutting across the table from right to left, casting long shadows behind the man",
+        "mood": "Strained and abrasive workplace tension"
+      }
+    },
+    {
+      "shot_id": "s2",
+      "narrative_role": "initial",
+      "semantic_job": "Isolate the tactile disrespect directed specifically at the physical object of her labor.",
+      "attentional_frame": "micro",
+      "narrative_weight": "secondary",
+      "transition_from_previous": "action_to_action",
+      "continuity": {
+        "shared_environment_id": "design_studio",
+        "subject_phase": "flicking_model",
+        "axis_relation_from_previous": "preserve",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "architect_woman",
+        "eyeline_target_anchor": "critic_man_hand",
+        "eyeline_direction": "down",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "High-angle view looking down at the table surface where the man's index finger harshly flicks and tilts a fragile balsa-wood miniature structure, cracking its delicate roof truss.",
+        "subjects": [
+          {
+            "id": "critic_man_hand",
+            "figure": "A man's broad hand with rolled fabric cuff visible at the wrist",
+            "pose": "Index finger extended, roughly shoving the delicate corner of a handcrafted wooden model",
+            "expression": "none",
+            "blocking": "Entering from top left, making forceful contact with the miniature craftwork"
+          }
+        ],
+        "environment": {
+          "setting": "Worktable surface",
+          "foreground": ["shoved wooden miniature roof segment buckling under finger pressure"],
+          "midground": ["green self-healing cutting mat with gridless texture", "tiny wood splinters"],
+          "background": ["blurry rim of a porcelain coffee cup"]
+        },
+        "camera": {
+          "shot_scale": "close",
+          "viewpoint": "point_of_view",
+          "viewpoint_subject_id": "architect_woman",
+          "framing": "insert",
+          "angle": "high",
+          "focus": "The point of physical impact where his finger displaces and bends the miniature wooden framework",
+          "depth_plan": "shallow",
+          "eye_flow_exit": "downward toward panel three"
+        },
+        "motion_treatment": "pose_only",
+        "lighting": "Harsh raking light accentuating the cracked balsa fibers and the man's tense knuckle",
+        "mood": "Humiliating, dismissive, and destructive"
+      }
+    },
+    {
+      "shot_id": "s3",
+      "narrative_role": "peak",
+      "semantic_job": "Capture the direct emotional impact of the derogatory comments landing on the creator.",
+      "attentional_frame": "mono",
+      "narrative_weight": "primary",
+      "transition_from_previous": "subject_to_subject",
+      "continuity": {
+        "shared_environment_id": "design_studio",
+        "subject_phase": "enduring_criticism",
+        "axis_relation_from_previous": "preserve",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "architect_woman",
+        "eyeline_target_anchor": "critic_man",
+        "eyeline_direction": "screen_left",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "The woman stands frozen in place behind her work surface, her knuckles white as she grips the wooden apron of the table, enduring the disparaging words with tightly locked posture.",
+        "subjects": [
+          {
+            "id": "architect_woman",
+            "figure": "Young woman in work smock with tense shoulders and pulled-back hair",
+            "pose": "Torso rigid, both hands gripping the edge of the workbench until her knuckles pale, head held still",
+            "expression": "Clenched jaw, narrowed pained eyes, holding breath in silence",
+            "blocking": "Centered in the lower horizontal composition, framed by her surrounding studio tools"
+          }
+        ],
+        "environment": {
+          "setting": "Workshop interior behind the drafting table",
+          "foreground": ["white-knuckled hands gripping the table edge", "steel craft knives in a ceramic jar"],
+          "midground": ["woman's chest and rigid neck", "apron strings tied firmly"],
+          "background": ["tall timber drying racks", "softly blurred studio wall"]
+        },
+        "camera": {
+          "shot_scale": "medium_close",
+          "viewpoint": "objective",
+          "viewpoint_subject_id": "",
+          "framing": "single",
+          "angle": "eye_level",
+          "focus": "Her restrained, hurt facial expression and white-knuckled grip on the table",
+          "depth_plan": "shallow",
+          "eye_flow_exit": "center focus, concluding the reading arc"
+        },
+        "motion_treatment": "none",
+        "lighting": "Side lighting casting deep contrast across the planes of her cheek and jawline, emphasizing rigid restraint",
+        "mood": "Stifled hurt, quiet resolve, and stinging humiliation"
+      }
+    }
+  ]
+}

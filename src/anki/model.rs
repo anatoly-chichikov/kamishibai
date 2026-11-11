@@ -96,7 +96,8 @@ pub struct Model {
 
 impl Model {
     /// Return the serialized Anki model representation.
-    pub(crate) fn json(&self, timestamp: i64) -> Value {
+    /// Experimental embedding API; compatibility is not guaranteed.
+    pub fn json(&self, timestamp: i64) -> Value {
         json!({
             "css": CARD_STYLE,
             "did": Value::Null,

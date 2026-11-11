@@ -26,6 +26,7 @@ mod language_flow;
 mod learning_target;
 mod new_languages;
 mod paths;
+mod plugged_parts;
 mod profile;
 mod pty;
 mod public_generation;
@@ -125,3 +126,8 @@ fn every_sibling_test_file_is_declared_in_the_harness() {
         "test files never run because the harness does not declare them: {missing:?}"
     );
 }
+
+mod external_models;
+
+mod session_checkpoints;
+mod visual_resume;
