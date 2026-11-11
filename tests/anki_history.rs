@@ -1036,7 +1036,7 @@ fn a_similarly_named_sibling_remains_a_valid_output_directory() {
     );
 }
 
-/// Open only the export terminal with isolated preferences and synthetic Anki files.
+/// Open the color-rendered export with isolated preferences and synthetic Anki files.
 #[cfg(unix)]
 fn terminal_command(root: &Path, out: &Path) -> std::process::Command {
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_kamishibai"));
@@ -1045,6 +1045,7 @@ fn terminal_command(root: &Path, out: &Path) -> std::process::Command {
         .env_remove("OPENAI_API_KEY")
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("OPENROUTER_API_KEY")
+        .env_remove("NO_COLOR")
         .env("KAMISHIBAI_ANKI", root)
         .env("KAMISHIBAI_DATA", root.join("preferences"))
         .env("KAMISHIBAI_CACHE", root.join("cache"))
@@ -1071,28 +1072,34 @@ impl ExportTerminal {
         self.terminal.send(keys)
     }
 
+    /// Consume available output so repaints cannot block the child's event loop.
+    fn paint(&mut self) -> std::io::Result<()> {
+        let mut bytes = [0_u8; 16384];
+        match self.terminal.try_read(&mut bytes) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    self.surface.screen_chars_to_string(),
+                ));
+            }
+            Ok(count) => {
+                for action in self.parser.parse_as_vec(&bytes[..count]) {
+                    if let Some(change) = painted(action) {
+                        self.surface.add_change(change);
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => return Err(error),
+        }
+        Ok(())
+    }
+
     /// Wait for a visible phrase with a deadline, reconstructing incremental repaints.
     fn expect(&mut self, phrase: &str) -> std::io::Result<()> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-        let mut bytes = [0_u8; 16384];
         loop {
-            match self.terminal.try_read(&mut bytes) {
-                Ok(0) => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::UnexpectedEof,
-                        self.surface.screen_chars_to_string(),
-                    ));
-                }
-                Ok(count) => {
-                    for action in self.parser.parse_as_vec(&bytes[..count]) {
-                        if let Some(change) = painted(action) {
-                            self.surface.add_change(change);
-                        }
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(error) => return Err(error),
-            }
+            self.paint()?;
             let screen = self.surface.screen_chars_to_string();
             if screen.contains(phrase) {
                 return Ok(());
@@ -1316,6 +1323,7 @@ fn saved_file_links_cannot_unpack_the_archive() {
         while std::time::Instant::now() < deadline
             && !fs::read_to_string(&log).is_ok_and(|text| text.lines().count() == count)
         {
+            terminal.paint().unwrap();
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
