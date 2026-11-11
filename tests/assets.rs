@@ -139,12 +139,12 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
     Ok(())
 }
 
-/// Production registry caches isolate the Gemini 3.8 text-model configuration.
+/// Production registry caches isolate action-preserving picture compression.
 #[test]
-fn production_registry_uses_the_version_fifty_six_visual_revision() {
+fn production_registry_uses_the_version_fifty_eight_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "bd31668223fcada1aebcdecd2180f786ed5b6b85ce49e4cfceb796d47d6b45b1",
+        "02dba58042ba7f03eea6bc06faf0ac8546f1bb187204755ea0f6bdccd8b9ba47",
         "production registry visual revision drifted without a policy-version change"
     );
 }

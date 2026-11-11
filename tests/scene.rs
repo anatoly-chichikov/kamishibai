@@ -2281,7 +2281,7 @@ fn renderer_sends_compiled_prose_without_planning_metadata() {
         (
             captured.borrow().len(),
             [
-                prompt.starts_with("Create a finished black-and-white manga page"),
+                prompt.starts_with("Black-and-white seinen manga artwork"),
                 prompt.contains("two equal upright panels side by side"),
                 prompt.contains("The first panel:"),
                 !prompt.contains("EXACT_SENTENCE_MUST_NOT_REACH_IMAGE_PROVIDER"),
@@ -2983,7 +2983,7 @@ fn renderer_archives_provider_failures_without_raw_images() -> Result<()> {
                 .is_some_and(|reason| reason.contains("provider")),
             verdict["image"].is_null(),
             archived_scene == scene,
-            prompt.starts_with("Create a finished black-and-white manga page"),
+            prompt.starts_with("Black-and-white seinen manga artwork"),
             raw,
         ),
         (

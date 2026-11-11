@@ -3,17 +3,22 @@
 use anyhow::{Result, anyhow};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::ops::RangeInclusive;
 
-const OPENING: &str = "Create a finished black-and-white manga page in high-contrast Indian ink, with crisp expressive linework and fine screentone shading; keep every visible mark strictly monochrome.";
+const OPENING: &str = concat!(
+    "Black-and-white seinen manga artwork, inked digitally on a pure white background. ",
+    "Thin, sharp pen lines with tapered ends and varied weight define every form. ",
+    "Build the page from three flat values: open white, bold solid black shapes for hair, dark clothing and cast shadows, ",
+    "and flat hard-edged screentone of fine even dots for mid-tones; hatching is sparse. ",
+    "Faces are angular and simplified in the manga manner, with crisp eyes and minimal lines for nose and mouth. ",
+    "Flat and graphic: no gradients, soft shading, blur, glow, sculpted volume or photorealism. ",
+    "Strictly monochrome, without tint or paper texture. ",
+    "Silent page: no speech bubbles, captions, sound effects or lettering.",
+);
+const CONTRACT: RangeInclusive<usize> = 160..=330;
 const DOMINANT_HIERARCHY: &str = "Make unequal panel size express editorial emphasis, letting the dominant region carry the payoff while smaller regions provide only motivated visual progression.";
 const BALANCED_HIERARCHY: &str = "Keep panel areas balanced so equal editorial emphasis remains clear throughout the motivated visual progression.";
 const CLOSING: &str = "No logos, emblems, icons, symbols, pseudo-writing, glyphs. Badge mounts, plates, displays stay blank. Lights/hardware/contours remain physical; surfaces unlettered; gutters, borders, page-edge margins paper-white.";
-const FILLERS: [&str; 4] = [
-    "Keep the visual hierarchy immediate: silhouettes read cleanly, spatial layers stay distinct, and every pose supports the sentence rather than decorative spectacle.",
-    "Use deliberate negative space and controlled screentone density so the eye follows the intended edit without losing the focal action.",
-    "Preserve consistent faces, clothing, props, screen direction, and environment across the sequence.",
-    "Let each required panel remain immediately legible as part of one coherent page.",
-];
 
 /// Compile one materialized scene into a bounded prose image prompt.
 pub(crate) fn compile_image_prompt(scene: &Value) -> Result<String> {
@@ -29,19 +34,23 @@ pub(crate) fn compile_image_prompt(scene: &Value) -> Result<String> {
         .ok_or_else(|| anyhow!("image prompt requires a materialized layout template"))?;
     let prompt = assembled(scene, panels, template, false)?;
     let words = prompt.split_whitespace().count();
-    if (150..=250).contains(&words) {
+    if CONTRACT.contains(&words) {
         return Ok(prompt);
     }
-    if words < 150 {
+    if words < *CONTRACT.start() {
         return Err(anyhow!(
-            "image prompt word count {words} fell outside the 150 to 250 word contract"
+            "image prompt word count {words} fell outside the {} to {} word contract",
+            CONTRACT.start(),
+            CONTRACT.end()
         ));
     }
     let prompt = assembled(scene, panels, template, true)?;
     let words = prompt.split_whitespace().count();
-    if !(150..=250).contains(&words) {
+    if !CONTRACT.contains(&words) {
         return Err(anyhow!(
-            "image prompt word count {words} fell outside the 150 to 250 word contract"
+            "image prompt word count {words} fell outside the {} to {} word contract",
+            CONTRACT.start(),
+            CONTRACT.end()
         ));
     }
     Ok(prompt)
@@ -61,19 +70,6 @@ fn assembled(scene: &Value, panels: &[Value], template: &str, compressed: bool) 
     }
     for (index, panel) in ordered(scene, panels)?.iter().enumerate() {
         parts.extend(panel_sentences(index, panel, panels.len(), compressed));
-    }
-    let closing_words = CLOSING.split_whitespace().count();
-    for filler in FILLERS {
-        if parts
-            .iter()
-            .map(|part| part.split_whitespace().count())
-            .sum::<usize>()
-            .saturating_add(closing_words)
-            >= 150
-        {
-            break;
-        }
-        parts.push(String::from(filler));
     }
     parts.push(String::from(CLOSING));
     Ok(parts.join(" "))
@@ -470,28 +466,32 @@ fn panel_sentences(
     panel: &Value,
     panel_count: usize,
     compressed: bool,
-) -> [String; 3] {
+) -> Vec<String> {
     let ordinal = ["first", "second", "third", "fourth"]
         .get(index)
         .copied()
         .unwrap_or("next");
     let scene = panel.get("scene").unwrap_or(panel);
-    let (description_limit, motivation_limit, light_limit) = panel_limits(panel_count, compressed);
-    let description = description(scene, description_limit);
+    let (description_limit, motivation_limit) = panel_limits(panel_count);
+    let description = description(
+        scene,
+        if compressed {
+            usize::MAX
+        } else {
+            description_limit
+        },
+    );
     let camera = scene.get("camera").unwrap_or(&Value::Null);
     let scale = enum_words(camera, "shot_scale", "medium", 3);
     let viewpoint = viewpoint_words(camera);
     let framing = framing_words(camera);
     let angle = angle_words(camera);
-    let depth = depth_words(camera, 3);
-    let light = narrative(
-        scene
-            .get("lighting")
-            .or_else(|| scene.get("mood"))
-            .and_then(Value::as_str)
-            .unwrap_or("controlled high-value contrast"),
-        light_limit,
-    );
+    if compressed {
+        return vec![
+            format!("The {ordinal} panel: {description}."),
+            format!("Camera: {scale} {viewpoint} {framing} from {angle}."),
+        ];
+    }
     let motivation = narrative(
         panel
             .get("semantic_job")
@@ -500,22 +500,19 @@ fn panel_sentences(
             .unwrap_or("the visible narrative change"),
         motivation_limit,
     );
-    [
+    vec![
         format!("The {ordinal} panel: {description}."),
-        format!("Use {scale} {viewpoint} {framing} framing from {angle}, with {depth}."),
-        format!("Purpose: {motivation}; illumination: {light}."),
+        format!("Use {scale} {viewpoint} {framing} framing from {angle}."),
+        format!("Purpose: {motivation}."),
     ]
 }
 
-fn panel_limits(panels: usize, compressed: bool) -> (usize, usize, usize) {
-    if compressed {
-        return (5, 3, 2);
-    }
+fn panel_limits(panels: usize) -> (usize, usize) {
     match panels {
-        1 => (24, 14, 6),
-        2 => (18, 14, 4),
-        3 => (14, 14, 3),
-        _ => (8, 8, 3),
+        1 => (24, 14),
+        2 => (18, 14),
+        3 => (14, 14),
+        _ => (8, 8),
     }
 }
 
@@ -595,20 +592,6 @@ fn enum_words(value: &Value, field: &str, fallback: &str, limit: usize) -> Strin
         value.get(field).and_then(Value::as_str).unwrap_or(fallback),
         limit,
     )
-}
-
-fn depth_words(value: &Value, limit: usize) -> String {
-    match value
-        .get("depth_plan")
-        .and_then(Value::as_str)
-        .unwrap_or("layered")
-    {
-        "deep" => String::from("deep focus"),
-        "shallow" => String::from("shallow focus"),
-        "layered" => String::from("layered depth"),
-        "flat" => String::from("flat staging"),
-        other => sanitized(other, limit),
-    }
 }
 
 fn sanitized(value: &str, limit: usize) -> String {
@@ -755,7 +738,7 @@ mod tests {
     use serde_json::{Value, json};
     use sha2::{Digest, Sha256};
 
-    use super::{CLOSING, Emphasis, compile_image_prompt, emphasis};
+    use super::{CLOSING, CONTRACT, Emphasis, OPENING, compile_image_prompt, emphasis};
 
     fn production_scene() -> Value {
         serde_json::from_str(include_str!(
@@ -853,8 +836,8 @@ mod tests {
         let words = prompt.split_whitespace().count();
         assert_eq!(
             (
-                (150..=250).contains(&words),
-                prompt.starts_with("Create a finished black-and-white manga page"),
+                CONTRACT.contains(&words),
+                prompt.starts_with("Black-and-white seinen manga artwork"),
                 prompt.contains("gutter slanting"),
                 prompt.ends_with(CLOSING),
                 ["\"x\"", "\"y\"", "z_index", "p1", "woman_ze"]
@@ -884,7 +867,7 @@ mod tests {
             },
         );
         assert_eq!(
-            digest, "4aa8a2f9c25ccec6a861f610fda6191775c15fef6075ce4ea64a877ece7abd83",
+            digest, "bbd6328f863db83156c0189041d55d5aac442be1fcb8d170bffbd06f8879b313",
             "production image prose changed without an explicit revision review"
         );
     }
@@ -898,17 +881,173 @@ mod tests {
                 prompt.ends_with(
                     "No logos, emblems, icons, symbols, pseudo-writing, glyphs. Badge mounts, plates, displays stay blank. Lights/hardware/contours remain physical; surfaces unlettered; gutters, borders, page-edge margins paper-white.",
                 ),
-                (150..=250).contains(&prompt.split_whitespace().count()),
+                CONTRACT.contains(&prompt.split_whitespace().count()),
             ),
             (true, true),
             "production image prompt lost its exact vehicle symbol prohibition or word budget"
         );
     }
 
+    /// The opening asks for flat ink qualities instead of rendered volume.
+    #[test]
+    fn opening_cannot_lose_its_flat_ink_qualities() {
+        let prompt = compile_image_prompt(&minimal_scene("splash-1-v1", 1))
+            .expect("minimal splash prompt must compile");
+        assert!(
+            [
+                "pure white background",
+                "three flat values",
+                "solid black shapes",
+                "screentone of fine even dots",
+                "no gradients",
+                "Strictly monochrome",
+                "no speech bubbles",
+            ]
+            .iter()
+            .all(|quality| prompt.contains(quality)),
+            "the drawing request lost a flat ink quality that keeps rendered volume out"
+        );
+    }
+
+    /// Scene lighting and lens depth stay out of the drawing request.
+    #[test]
+    fn scene_lighting_and_lens_depth_cannot_reach_the_provider_prompt() {
+        let mut scene = minimal_scene("equal-split-vertical-2-v1", 2);
+        scene["manga_panel"]["panels"][0]["scene"]["lighting"] = json!("glowing volumetric haze");
+        scene["manga_panel"]["panels"][1]["scene"]["camera"]["depth_plan"] = json!("shallow");
+        let prompt = compile_image_prompt(&scene)
+            .expect("lit scene must compile")
+            .to_lowercase();
+        assert!(
+            [
+                "illumination",
+                "glowing",
+                "volumetric",
+                "haze",
+                "bright-value",
+                "shallow focus",
+                "layered depth",
+            ]
+            .iter()
+            .all(|phrase| !prompt.contains(phrase)),
+            "scene lighting or lens depth leaked into the drawing request"
+        );
+    }
+
+    /// The style layer describes visible qualities and never borrows a name.
+    #[test]
+    fn style_layer_cannot_borrow_a_creator_studio_or_franchise_name() {
+        let named = [OPENING, CLOSING]
+            .iter()
+            .map(|layer| style_names(layer))
+            .sum::<usize>();
+        let attributed = ["style of", "inspired by", "manner of", "homage", "tribute"]
+            .iter()
+            .filter(|phrase| {
+                OPENING.to_lowercase().contains(*phrase) || CLOSING.to_lowercase().contains(*phrase)
+            })
+            .count();
+        assert_eq!(
+            (named, attributed),
+            (0, 0),
+            "the picture style layer borrowed a proper name or an attributed style"
+        );
+    }
+
+    fn style_names(layer: &str) -> usize {
+        layer
+            .split(['.', '!', '?'])
+            .map(|sentence| {
+                sentence
+                    .split_whitespace()
+                    .enumerate()
+                    .filter(|(index, word)| {
+                        let word = word.trim_matches(|character: char| !character.is_alphabetic());
+                        word.chars().next().is_some_and(char::is_uppercase)
+                            && !(*index == 0
+                                && matches!(
+                                    word,
+                                    "A" | "An"
+                                        | "The"
+                                        | "Black-and-white"
+                                        | "Thin"
+                                        | "Build"
+                                        | "Faces"
+                                        | "Flat"
+                                        | "Strictly"
+                                        | "Silent"
+                                        | "No"
+                                        | "Badge"
+                                        | "Lights/hardware/contours"
+                                ))
+                    })
+                    .count()
+            })
+            .sum()
+    }
+
+    /// A creator name cannot evade the style guard at a sentence boundary.
+    #[test]
+    fn style_names_cannot_hide_at_the_start_of_a_sentence() {
+        assert_eq!(
+            [
+                "Miyazaki draws thin pen lines.",
+                "Thin lines. Miyazaki draws faces.",
+                "Thin Miyazaki lines."
+            ]
+            .map(style_names),
+            [1, 1, 1],
+            "a creator name escaped the style guard at a sentence boundary"
+        );
+    }
+
+    /// Ordinary capitalized sentence openings remain legal descriptive prose.
+    #[test]
+    fn style_names_cannot_reject_ordinary_sentence_openings() {
+        assert_eq!(
+            style_names("Thin pen lines. Build flat shapes. Faces stay simplified. No lettering."),
+            0,
+            "ordinary descriptive sentence openings were mistaken for borrowed names"
+        );
+    }
+
+    /// Compression preserves the visible action of every real storm panel.
+    #[test]
+    fn compressed_storm_cannot_lose_its_panel_actions() {
+        let scene = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/topology-production/storm-boundary.scene.json"
+        ))
+        .expect("storm boundary scene must parse");
+        let prompt = compile_image_prompt(&scene).expect("storm boundary prompt must compile");
+        let descriptions = prompt.split(" panel: ").skip(1).collect::<Vec<_>>();
+        assert_eq!(
+            (
+                CONTRACT.contains(&prompt.split_whitespace().count()),
+                descriptions
+                    .iter()
+                    .zip([
+                        "ocean swells crest and crash",
+                        "support truss violently snaps and splits",
+                        "floodwaters carrying sheared planks",
+                    ])
+                    .filter(|(panel, action)| panel
+                        .split('.')
+                        .next()
+                        .is_some_and(|text| text.contains(action)))
+                    .count(),
+            ),
+            (true, 3),
+            "compression erased a storm panel's subject or visible action"
+        );
+    }
+
     /// Scene color language becomes monochrome value language deterministically.
     #[test]
     fn color_language_is_normalized_into_tonal_values() {
-        let scene = minimal_scene("splash-1-v1", 1);
+        let mut scene = minimal_scene("splash-1-v1", 1);
+        scene["manga_panel"]["panels"][0]["scene"]["description"] = json!(
+            "A blacksmith in warm golden light carries goldfish past a cool blue greenhouse and brownie"
+        );
         let first = compile_image_prompt(&scene).expect("first prompt must compile");
         let second = compile_image_prompt(&scene).expect("second prompt must compile");
         let lowercase = first.to_lowercase();
@@ -918,10 +1057,8 @@ mod tests {
                 ["warm", "golden", "cool", "blue"]
                     .iter()
                     .all(|word| !lowercase.contains(word)),
-                lowercase.contains("value"),
-                lowercase.contains(
-                    "medium close objective single framing from eye level, with layered depth",
-                ),
+                lowercase.contains("bright-value") && lowercase.contains("restrained-value"),
+                lowercase.contains("medium close objective single framing from eye level."),
                 ["blacksmith", "goldfish", "greenhouse", "brownie"]
                     .iter()
                     .all(|word| lowercase.contains(word)),
@@ -938,7 +1075,7 @@ mod tests {
         scene["manga_panel"]["panels"][0]["scene"]["description"] = json!(
             "x 16 y 16 width 774 height 992 bounds polygon z_index subject_id woman_ze sepia crimson"
         );
-        scene["manga_panel"]["panels"][0]["scene"]["lighting"] =
+        scene["manga_panel"]["panels"][0]["semantic_job"] =
             json!("pink rose copper bronze ochre navy indigo maroon burgundy light");
         let prompt = compile_image_prompt(&scene).expect("hostile prompt must compile safely");
         let words = prompt
@@ -954,7 +1091,7 @@ mod tests {
                 ]
                 .iter()
                 .all(|forbidden| !words.iter().any(|word| word == forbidden)),
-                prompt.contains("value") || prompt.contains("shadow"),
+                prompt.contains("bright-value") && prompt.contains("deep-shadow"),
             ),
             (true, true),
             "hostile prose leaked schema, identifier, or chromatic vocabulary"
@@ -980,7 +1117,7 @@ mod tests {
                     .expect("template panels must be an array")
                     .len();
                 compile_image_prompt(&minimal_scene(id, count))
-                    .is_ok_and(|prompt| (150..=250).contains(&prompt.split_whitespace().count()))
+                    .is_ok_and(|prompt| CONTRACT.contains(&prompt.split_whitespace().count()))
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -1236,6 +1373,52 @@ mod tests {
         );
     }
 
+    /// Crowded panels keep late predicates instead of stopping at their subjects.
+    #[test]
+    fn compressed_four_panel_scene_cannot_drop_late_actions() {
+        let mut scene = registry_scene("staggered-grid-4-v1");
+        scene["manga_panel"]["page_design"]["special_device"] = json!({
+            "kind": "overlap", "source_panel": "p1", "target_panel": "p2"
+        });
+        scene["manga_panel"]["page_design"]["camera_arc"] = json!({
+            "progression": "wide environmental setup into close details"
+        });
+        let actions = [
+            "The exhausted porter beside the crowded railway platform lifts a battered suitcase onto the departing carriage",
+            "The young passenger beneath the station's enormous clock catches a falling ticket before it reaches the tracks",
+            "The elderly conductor near the end of the carriage pulls the emergency brake with both hands",
+            "The startled driver inside the cramped locomotive cabin shuts the steam valve as the train stops",
+        ];
+        for (panel, action) in scene["manga_panel"]["panels"]
+            .as_array_mut()
+            .expect("four panels must exist")
+            .iter_mut()
+            .zip(actions)
+        {
+            panel["scene"]["description"] = json!(action);
+            panel["scene"]["camera"]["shot_scale"] = json!("medium_close");
+            panel["scene"]["camera"]["angle"] = json!("low");
+            panel["semantic_job"] = json!(
+                "Establish the visible physical action and its immediate consequence across the railway platform"
+            );
+        }
+        let panels = scene["manga_panel"]["panels"]
+            .as_array()
+            .expect("four panels must exist");
+        let uncompressed = super::assembled(&scene, panels, "staggered-grid-4-v1", false)
+            .expect("uncompressed scene must compile");
+        let prompt = compile_image_prompt(&scene).expect("crowded action scene must compile");
+        assert_eq!(
+            (
+                CONTRACT.contains(&prompt.split_whitespace().count()),
+                actions.iter().all(|action| prompt.contains(action)),
+                uncompressed.split_whitespace().count() > *CONTRACT.end(),
+            ),
+            (true, true, true),
+            "compression dropped a late predicate from a crowded panel: {prompt}"
+        );
+    }
+
     /// Dense valid four-panel scenes remain inside the provider word budget.
     #[test]
     fn dense_four_panel_scene_cannot_overrun_the_prompt_budget() {
@@ -1279,7 +1462,7 @@ mod tests {
             compile_image_prompt(&scene).expect("dense valid prompt must fit the image contract");
         assert_eq!(
             (
-                (150..=250).contains(&prompt.split_whitespace().count()),
+                CONTRACT.contains(&prompt.split_whitespace().count()),
                 prompt.chars().all(|character| !character.is_ascii_digit()),
                 prompt.ends_with(CLOSING),
             ),
