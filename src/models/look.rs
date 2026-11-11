@@ -107,7 +107,9 @@ impl Look {
         self.resend == Resend::Manual
     }
 
-    /// Name the plugged style and world for caches and provenance.
+    /// Name the plugged style and world for diagnostics and provenance.
+    /// The core does not add this name to cache identities; callers include
+    /// their plugged parts' revisions in the identity passed to `models::workflow`.
     /// Experimental embedding API; compatibility is not guaranteed.
     #[must_use]
     pub fn name(&self) -> String {

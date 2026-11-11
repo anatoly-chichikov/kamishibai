@@ -19,6 +19,7 @@ use super::{
 };
 use crate::generation::{VisualFailure, VisualResult};
 use crate::models::Look;
+use crate::session::StateFailure;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RenderRejection {
@@ -223,7 +224,10 @@ where
             let recovered = self
                 .attempts
                 .as_deref()
-                .map(|directory| AttemptJournal::resume_review(directory, scene, prompt.as_str()))
+                .map(|directory| {
+                    AttemptJournal::resume_review(directory, scene, prompt.as_str())
+                        .map_err(StateFailure::new)
+                })
                 .transpose()?
                 .flatten();
             let (mut journal, bytes) = match recovered {
@@ -238,7 +242,10 @@ where
                     let mut journal = self
                         .attempts
                         .as_deref()
-                        .map(|directory| AttemptJournal::start(directory, scene, prompt.as_str()))
+                        .map(|directory| {
+                            AttemptJournal::start(directory, scene, prompt.as_str())
+                                .map_err(StateFailure::new)
+                        })
                         .transpose()?;
                     let bytes = match self.client.image(prompt.as_str()) {
                         Ok(bytes) => bytes,
@@ -259,8 +266,12 @@ where
                                 "moderation refused",
                             )?;
                             if self.salvage
-                                && let Some(bytes) =
-                                    self.attempts.as_deref().and_then(salvaged_best)
+                                && let Some(bytes) = self
+                                    .attempts
+                                    .as_deref()
+                                    .map(salvaged_best)
+                                    .transpose()?
+                                    .flatten()
                                 && let Ok(image) = image::load_from_memory(&bytes)
                             {
                                 return Ok(DynamicImage::ImageLuma8(image.into_luma8()));
@@ -328,7 +339,7 @@ where
             if let Some(text) = self.text.as_ref() {
                 let archived = journal
                     .as_ref()
-                    .map(AttemptJournal::text_review)
+                    .map(|journal| journal.text_review().map_err(StateFailure::new))
                     .transpose()?
                     .flatten();
                 let review = match archived {
@@ -366,7 +377,7 @@ where
             }
             let archived = journal
                 .as_ref()
-                .map(AttemptJournal::recall_review)
+                .map(|journal| journal.recall_review().map_err(StateFailure::new))
                 .transpose()?
                 .flatten();
             let review = match archived {
@@ -475,12 +486,15 @@ impl<J> MangaRenderer<J> {
     ///
     /// Every terminal path funnels through here — an exhausted retry loop, a
     /// provider or judge error, an exhausted picture-request budget surfacing
-    /// as a provider refusal — so a card can only fail when its archive is
-    /// empty or every archived frame was blocked.
+    /// as a provider refusal. Storage errors remain failures because the core
+    /// must be able to persist the recovered frame and its verdict.
     fn rescued(&self, error: anyhow::Error) -> Result<DynamicImage> {
+        if error.is::<StateFailure>() {
+            return Err(error);
+        }
         if self.salvage
             && let Some(directory) = self.attempts.as_deref()
-            && let Some(bytes) = salvaged_best(directory)
+            && let Some(bytes) = salvaged_best(directory)?
             && let Ok(image) = image::load_from_memory(bytes.as_slice())
         {
             return Ok(DynamicImage::ImageLuma8(image.into_luma8()));
@@ -556,7 +570,7 @@ struct AttemptJournal {
 
 impl AttemptJournal {
     fn start(directory: &Path, scene: &Value, prompt: &str) -> Result<Self> {
-        fs::create_dir_all(directory)?;
+        fs::create_dir_all(directory).map_err(StateFailure::new)?;
         let sequence = fs::read_dir(directory)?
             .filter_map(std::result::Result::ok)
             .filter_map(|entry| entry.file_name().into_string().ok())
@@ -576,8 +590,9 @@ impl AttemptJournal {
         fs::write(
             directory.join(scene_name.as_str()),
             serde_json::to_vec_pretty(scene)?,
-        )?;
-        fs::write(directory.join(prompt_name), prompt)?;
+        )
+        .map_err(StateFailure::new)?;
+        fs::write(directory.join(prompt_name), prompt).map_err(StateFailure::new)?;
         let journal = Self {
             sequence,
             image: None,
@@ -669,7 +684,7 @@ impl AttemptJournal {
             .verdict
             .parent()
             .ok_or_else(|| anyhow!("attempt verdict has no parent directory"))?;
-        fs::write(directory.join(image.as_str()), bytes)?;
+        fs::write(directory.join(image.as_str()), bytes).map_err(StateFailure::new)?;
         self.image = Some(image);
         self.record("pending", "pending", "")
     }
@@ -680,10 +695,12 @@ impl AttemptJournal {
             .verdict
             .parent()
             .ok_or_else(|| anyhow!("attempt verdict has no parent directory"))?;
-        let mut staged = tempfile::NamedTempFile::new_in(directory)?;
-        serde_json::to_writer_pretty(staged.as_file_mut(), review)?;
-        staged.as_file().sync_all()?;
-        staged.persist(directory.join(recall.as_str()))?;
+        let mut staged = tempfile::NamedTempFile::new_in(directory).map_err(StateFailure::new)?;
+        serde_json::to_writer_pretty(staged.as_file_mut(), review).map_err(StateFailure::new)?;
+        staged.as_file().sync_all().map_err(StateFailure::new)?;
+        staged
+            .persist(directory.join(recall.as_str()))
+            .map_err(StateFailure::new)?;
         self.recall = Some(recall);
         self.record("pending", "pending", "")
     }
@@ -694,10 +711,12 @@ impl AttemptJournal {
             .verdict
             .parent()
             .ok_or_else(|| anyhow!("attempt verdict has no parent directory"))?;
-        let mut staged = tempfile::NamedTempFile::new_in(directory)?;
-        serde_json::to_writer_pretty(staged.as_file_mut(), review)?;
-        staged.as_file().sync_all()?;
-        staged.persist(directory.join(text.as_str()))?;
+        let mut staged = tempfile::NamedTempFile::new_in(directory).map_err(StateFailure::new)?;
+        serde_json::to_writer_pretty(staged.as_file_mut(), review).map_err(StateFailure::new)?;
+        staged.as_file().sync_all().map_err(StateFailure::new)?;
+        staged
+            .persist(directory.join(text.as_str()))
+            .map_err(StateFailure::new)?;
         self.text = Some(text);
         self.record("pending", "pending", "")
     }
@@ -754,7 +773,7 @@ impl AttemptJournal {
             .verdict
             .parent()
             .ok_or_else(|| anyhow!("attempt verdict has no parent directory"))?;
-        let mut staged = tempfile::NamedTempFile::new_in(directory)?;
+        let mut staged = tempfile::NamedTempFile::new_in(directory).map_err(StateFailure::new)?;
         let mut verdict = json!({
             "sequence": self.sequence,
             "image": self.image,
@@ -773,9 +792,11 @@ impl AttemptJournal {
                 fields.insert(key.clone(), value.clone());
             }
         }
-        serde_json::to_writer_pretty(staged.as_file_mut(), &verdict)?;
-        staged.as_file().sync_all()?;
-        staged.persist(self.verdict.as_path())?;
+        serde_json::to_writer_pretty(staged.as_file_mut(), &verdict).map_err(StateFailure::new)?;
+        staged.as_file().sync_all().map_err(StateFailure::new)?;
+        staged
+            .persist(self.verdict.as_path())
+            .map_err(StateFailure::new)?;
         Ok(())
     }
 }
@@ -830,11 +851,16 @@ fn record_attempt_scored(
 /// Returns the archived image of the highest-scoring rejected attempt whose
 /// verdict carries a scorecard and no blocker, marking its verdict as
 /// salvaged. Blocked attempts — color or answer leakage — never qualify.
-pub(super) fn salvaged_best(directory: &Path) -> Option<Vec<u8>> {
-    let entries = fs::read_dir(directory).ok()?;
+/// A failed verdict write returns an error before the recovered image can ship.
+pub(super) fn salvaged_best(directory: &Path) -> Result<Option<Vec<u8>>> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Ok(None);
+    };
     let mut best: Option<(u64, usize, PathBuf, Value)> = None;
     for entry in entries.filter_map(std::result::Result::ok) {
-        let name = entry.file_name().into_string().ok()?;
+        let Ok(name) = entry.file_name().into_string() else {
+            return Ok(None);
+        };
         let Some(sequence) = name
             .strip_prefix("attempt-")
             .and_then(|rest| rest.strip_suffix(".json"))
@@ -867,9 +893,15 @@ pub(super) fn salvaged_best(directory: &Path) -> Option<Vec<u8>> {
             best = Some((score, sequence, entry.path(), verdict));
         }
     }
-    let (_, _, verdict_path, verdict) = best?;
-    let image_name = verdict.get("image").and_then(Value::as_str)?;
-    let image = fs::read(directory.join(image_name)).ok()?;
+    let Some((_, _, verdict_path, verdict)) = best else {
+        return Ok(None);
+    };
+    let Some(image_name) = verdict.get("image").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let Ok(image) = fs::read(directory.join(image_name)) else {
+        return Ok(None);
+    };
     let mut salvaged = verdict;
     if let Some(fields) = salvaged.as_object_mut() {
         if let Ok(Some(latest)) = latest_attempt(directory)
@@ -882,9 +914,10 @@ pub(super) fn salvaged_best(directory: &Path) -> Option<Vec<u8>> {
             String::from("status"),
             Value::String(String::from("salvaged")),
         );
-        let _ = serde_json::to_vec_pretty(&salvaged).map(|bytes| fs::write(verdict_path, bytes));
+        fs::write(verdict_path, serde_json::to_vec_pretty(&salvaged)?)
+            .map_err(StateFailure::new)?;
     }
-    Some(image)
+    Ok(Some(image))
 }
 
 fn has_active_layout(scene: &Value) -> bool {
@@ -2697,7 +2730,7 @@ mod tests {
             let scene = serde_json::json!({"manga_panel":{"meta":{"layout_selection":{"scene_mode":mode}}}});
             fs::write(attempts.join("attempt-0001.scene.json"), serde_json::to_vec(&scene).unwrap()).unwrap();
             fs::write(attempts.join("attempt-0001.png"), b"archived picture bytes").unwrap();
-            super::salvaged_best(&attempts).is_some()
+            super::salvaged_best(&attempts).unwrap().is_some()
         }).collect();
         assert_eq!(
             results,

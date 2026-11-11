@@ -940,3 +940,574 @@ fn unsent_scene_without_a_pause_cannot_bypass_the_attempt_ceiling() {
         "unpaused refusal avoided a failed attempt, exceeded the ceiling, or kept an unsent scene index"
     );
 }
+
+struct RollbackStudio {
+    inner: Studio,
+    cursor: Option<std::path::PathBuf>,
+}
+
+impl ModelProvider for RollbackStudio {
+    fn generate(&self, request: ModelRequest) -> Result<ModelReply> {
+        self.inner.generate(request)
+    }
+
+    fn generate_visual(&self, request: ModelRequest) -> VisualResult<ModelReply> {
+        if matches!(
+            request,
+            ModelRequest::Text {
+                stage: GenerationStage::Scene,
+                ..
+            }
+        ) {
+            if let Some(cursor) = &self.cursor {
+                std::fs::remove_file(cursor)?;
+                std::fs::create_dir(cursor)?;
+            }
+            return Err(VisualFailure::NotSent);
+        }
+        self.generate(request).map_err(Into::into)
+    }
+}
+
+fn rollback(fails: bool, previous: Option<u8>) -> (bool, bool, u8, Option<u64>) {
+    let root = tempdir().unwrap();
+    let draft = draft(root.path());
+    let cache = cache(root.path(), &draft);
+    if let Some(previous) = previous {
+        write(
+            &cache,
+            SCENE_ATTEMPT_FILE,
+            json!({"scene_attempt_index":previous}),
+        );
+    }
+    let control = pausing(Arc::new(RollbackStudio {
+        inner: Studio::new(false, GenerationStage::Scene),
+        cursor: fails.then(|| cache.path().join(SCENE_ATTEMPT_FILE)),
+    }));
+    let workflow = workflow(root.path(), control.clone(), look(Resend::Automatic));
+    let mut run = GenerationRun::new(vec![draft]).unwrap();
+    let result = run.advance_in(&workflow, control.as_ref());
+    (
+        result.is_err(),
+        matches!(result, Ok(None)),
+        run.drafts()[0].artifacts().scene().tally().done(),
+        run.drafts()[0].artifacts().cost().map(|cost| cost.nanos()),
+    )
+}
+
+#[test]
+fn pause_cannot_hide_a_failed_scene_cursor_removal() {
+    assert_eq!(
+        rollback(true, None),
+        (true, false, 0, Some(391)),
+        "pause hid the failed cursor removal, spent an attempt, or lost incurred cost"
+    );
+}
+
+#[test]
+fn pause_cannot_hide_a_failed_scene_cursor_restoration() {
+    assert_eq!(
+        rollback(true, Some(7)),
+        (true, false, 0, Some(391)),
+        "pause hid the failed cursor restoration, spent an attempt, or lost incurred cost"
+    );
+}
+
+#[test]
+fn successful_scene_rollback_cannot_turn_a_pause_into_a_failure() {
+    assert_eq!(
+        [rollback(false, None), rollback(false, Some(7))],
+        [(false, true, 0, Some(391)); 2],
+        "a successful cursor rollback stopped behaving as a billed cooperative pause"
+    );
+}
+
+struct StorageStudio {
+    paused: AtomicBool,
+    stage: GenerationStage,
+    obstruction: Option<std::path::PathBuf>,
+    refusal: Option<String>,
+}
+
+impl ModelProvider for StorageStudio {
+    fn generate(&self, request: ModelRequest) -> Result<ModelReply> {
+        let stage = match &request {
+            ModelRequest::Text { stage, .. } => *stage,
+            ModelRequest::Speech { .. } => GenerationStage::Speech,
+            ModelRequest::Image { .. } => GenerationStage::Picture,
+        };
+        if stage == self.stage {
+            if let Some(path) = &self.obstruction {
+                std::fs::create_dir_all(path)?;
+            }
+            self.paused.store(true, Ordering::SeqCst);
+            if let Some(message) = &self.refusal {
+                anyhow::bail!(message.clone());
+            }
+        }
+        let output = match stage {
+            GenerationStage::Metadata => ModelOutput::Text {
+                text: json!({
+                    "pronunciation":"mɛw", "transcription":"kɔn mɛw ŋu",
+                    "meaning":"a cat", "importance":5,
+                    "source_sentence":"The cat sleeps on the windowsill", "source_highlight":"cat",
+                    "source_hint":"A furry household animal", "source_context":"A concrete animal noun",
+                    "target_sentence":"Con mèo ngủ trên bậu cửa sổ",
+                    "labels":{"register":"neutral","level":"a1","type":"statement","approx":[]}
+                }).to_string(),
+                truncated: false,
+            },
+            GenerationStage::Phonetics => ModelOutput::Text {
+                text: json!({"pronunciation":"mɛw", "transcription":"kɔn mɛw ŋu"}).to_string(),
+                truncated: false,
+            },
+            GenerationStage::Speech => ModelOutput::Speech(vec![17, 0, 31, 0]),
+            GenerationStage::Features => ModelOutput::Text {
+                text: super::gemini::scene_features().to_string(),
+                truncated: false,
+            },
+            GenerationStage::Scene => ModelOutput::Text {
+                text: super::gemini::dynamic_scene().to_string(),
+                truncated: false,
+            },
+            _ => anyhow::bail!("unexpected request during storage probe"),
+        };
+        Ok(ModelReply::new(
+            output,
+            CostRecord::new(
+                "storage-studio",
+                1,
+                73,
+                19,
+                92,
+                GenerationCost::from_nanos(391),
+            ),
+        ))
+    }
+}
+
+impl GenerationControl for StorageStudio {
+    fn allows(&self, _card: usize) -> bool {
+        true
+    }
+
+    fn paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
+    }
+}
+
+fn storage_failure(
+    artifact: Artifact,
+    stage: GenerationStage,
+    filename: Option<&str>,
+    refusal: Option<String>,
+) -> (Option<String>, bool, u8, Option<u64>) {
+    let root = tempdir().unwrap();
+    let draft = match artifact {
+        Artifact::Meta => CardDraft::new("mèo", "a cat", LanguagePair::new("VI", "EN")),
+        Artifact::Sound => {
+            let draft = draft(root.path());
+            let artifacts = CardArtifacts::from_parts(
+                draft.artifacts().meta().clone(),
+                ArtifactSlot::fresh(Artifact::Scene),
+                ArtifactSlot::fresh(Artifact::Picture),
+                ArtifactSlot::fresh(Artifact::Sound),
+            );
+            draft.with_artifacts(artifacts)
+        }
+        _ => draft(root.path()),
+    };
+    let cell = CardCell::for_draft(
+        kamishibai::models::cache_root(&root.path().join("cache"), "resume-v1").unwrap(),
+        &draft,
+    );
+    let cache = match artifact {
+        Artifact::Scene | Artifact::Picture => cache(root.path(), &draft),
+        _ => cell.cache(),
+    };
+    let studio = Arc::new(StorageStudio {
+        paused: AtomicBool::new(false),
+        stage,
+        obstruction: filename.map(|name| cache.path().join(name)),
+        refusal,
+    });
+    let workflow = workflow(root.path(), studio.clone(), look(Resend::Automatic));
+    let mut run = GenerationRun::new(vec![draft]).unwrap();
+    let result = run.advance_in(&workflow, studio.as_ref());
+    let artifacts = run.drafts()[0].artifacts();
+    let slot = match artifact {
+        Artifact::Meta => artifacts.meta(),
+        Artifact::Sound => artifacts.sound(),
+        Artifact::Scene => artifacts.scene(),
+        Artifact::Picture => artifacts.picture(),
+    };
+    (
+        result.as_ref().err().map(|error| format!("{error:#}")),
+        matches!(result, Ok(None)),
+        slot.tally().done(),
+        artifacts.cost().map(|cost| cost.nanos()),
+    )
+}
+
+#[test]
+fn pause_cannot_hide_failed_scene_cost_persistence() {
+    let result = storage_failure(
+        Artifact::Scene,
+        GenerationStage::Features,
+        Some(SCENE_COST_FILE),
+        None,
+    );
+    assert_eq!(
+        (result.0.is_some(), result.1, result.2, result.3),
+        (true, false, 0, Some(391)),
+        "pause hid a cost write failure, spent an attempt, or lost billed features"
+    );
+}
+
+#[test]
+fn pause_cannot_hide_failed_scene_persistence() {
+    let result = storage_failure(
+        Artifact::Scene,
+        GenerationStage::Scene,
+        Some(SCENE_FILE),
+        None,
+    );
+    assert_eq!(
+        (result.0.is_some(), result.1, result.2, result.3),
+        (true, false, 0, Some(782)),
+        "pause hid a scene write failure, spent an attempt, or lost scene costs"
+    );
+}
+
+#[test]
+fn pause_cannot_hide_failed_metadata_persistence() {
+    let result = storage_failure(
+        Artifact::Meta,
+        GenerationStage::Phonetics,
+        Some(kamishibai::generation::artifact_cache::META_FILE),
+        None,
+    );
+    assert_eq!(
+        (result.0.is_some(), result.1, result.2, result.3),
+        (true, false, 0, Some(782)),
+        "pause hid a metadata write failure, spent an attempt, or lost metadata costs"
+    );
+}
+
+#[test]
+fn pause_cannot_hide_failed_sound_persistence() {
+    let result = storage_failure(
+        Artifact::Sound,
+        GenerationStage::Speech,
+        Some(kamishibai::generation::artifact_cache::VOICE_FILE),
+        None,
+    );
+    assert_eq!(
+        (result.0.is_some(), result.1, result.2, result.3),
+        (true, false, 0, Some(391)),
+        "pause hid an audio write failure, spent an attempt, or lost speech costs"
+    );
+}
+
+#[test]
+fn provider_failure_with_storage_error_text_cannot_escape_a_pause() {
+    let storage = storage_failure(
+        Artifact::Scene,
+        GenerationStage::Features,
+        Some(SCENE_COST_FILE),
+        None,
+    );
+    let message = storage
+        .0
+        .expect("storage failure must reach the caller before its text is replayed");
+    assert_eq!(
+        storage_failure(Artifact::Scene, GenerationStage::Scene, None, Some(message)),
+        (None, true, 0, Some(391)),
+        "a provider error was classified as storage by its text or lost earlier features cost"
+    );
+}
+
+struct RefusingLedger {
+    path: std::path::PathBuf,
+}
+
+impl kamishibai::application::GenerationCostLedger for RefusingLedger {
+    fn record(
+        &self,
+        _scope: kamishibai::application::GenerationScope,
+        _cost: &CostRecord,
+    ) -> Result<()> {
+        std::fs::write(&self.path, b"usage")?;
+        Ok(())
+    }
+}
+
+#[test]
+fn pause_cannot_hide_failed_ledger_persistence_or_lose_its_observed_cost() {
+    let root = tempdir().unwrap();
+    let studio = Arc::new(StorageStudio {
+        paused: AtomicBool::new(false),
+        stage: GenerationStage::Features,
+        obstruction: None,
+        refusal: None,
+    });
+    let workflow = kamishibai::models::workflow(
+        studio.clone(),
+        Parts::new(
+            look(Resend::Automatic),
+            Arc::new(kamishibai::gemini::EmbeddedPrompts),
+        ),
+        "resume-v1",
+        root.path().join("cache"),
+        root.path().join("output"),
+        Some(Arc::new(RefusingLedger {
+            path: root.path().to_path_buf(),
+        })),
+    )
+    .unwrap();
+    let mut run = GenerationRun::new(vec![draft(root.path())]).unwrap();
+    let result = run.advance_in(&workflow, studio.as_ref());
+    assert_eq!(
+        (
+            result.is_err(),
+            run.drafts()[0].artifacts().scene().tally().done(),
+            run.drafts()[0].artifacts().cost().map(|cost| cost.nanos())
+        ),
+        (true, 0, Some(391)),
+        "pause hid a ledger failure, spent an attempt, or lost the usage rejected by the ledger"
+    );
+}
+
+struct PictureRollbackStudio {
+    inner: Studio,
+    path: std::path::PathBuf,
+}
+
+impl ModelProvider for PictureRollbackStudio {
+    fn generate(&self, request: ModelRequest) -> Result<ModelReply> {
+        self.inner.generate(request)
+    }
+
+    fn generate_visual(&self, request: ModelRequest) -> VisualResult<ModelReply> {
+        if matches!(request, ModelRequest::Image { .. }) {
+            if self.path.is_file() {
+                std::fs::remove_file(&self.path)?;
+            }
+            std::fs::create_dir_all(&self.path)?;
+            return Err(VisualFailure::NotSent);
+        }
+        self.generate(request).map_err(Into::into)
+    }
+}
+
+fn picture_rollback(filename: &str) -> (bool, u8, Option<u64>) {
+    let root = tempdir().unwrap();
+    let draft = draft(root.path());
+    let cache = cache(root.path(), &draft);
+    write(
+        &cache,
+        SCENE_FILE,
+        json!({"manga_panel":{"meta":{"layout_selection":{"scene_attempt_index":0}}}}),
+    );
+    write(&cache, SCENE_ATTEMPT_FILE, json!({"scene_attempt_index":1}));
+    let artifacts = CardArtifacts::from_parts(
+        draft.artifacts().meta().clone(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded_with(ArtifactFile::new(
+            SCENE_FILE,
+            cache.filepath(SCENE_FILE).unwrap(),
+            "local",
+            false,
+        )),
+        ArtifactSlot::fresh(Artifact::Picture),
+        draft.artifacts().sound().clone(),
+    );
+    let control = pausing(Arc::new(PictureRollbackStudio {
+        inner: Studio::new(false, GenerationStage::Picture),
+        path: cache.path().join(filename),
+    }));
+    let workflow = workflow(root.path(), control.clone(), look(Resend::Automatic));
+    let mut run = GenerationRun::new(vec![draft.with_artifacts(artifacts)]).unwrap();
+    let result = run.advance_in(&workflow, control.as_ref());
+    (
+        result.is_err(),
+        run.drafts()[0].artifacts().picture().tally().done(),
+        run.drafts()[0].artifacts().cost().map(|cost| cost.nanos()),
+    )
+}
+
+#[test]
+fn pause_cannot_hide_failed_picture_counter_rollback() {
+    assert_eq!(
+        picture_rollback(PICTURE_REQUESTS_FILE),
+        (true, 0, Some(782)),
+        "pause hid a failed picture counter rollback or lost the related scene spend"
+    );
+}
+
+#[test]
+fn pause_cannot_hide_failed_picture_journal_persistence() {
+    assert_eq!(
+        picture_rollback("attempts/attempt-0001.json"),
+        (true, 0, Some(782)),
+        "pause hid a failed picture journal write or lost the related scene spend"
+    );
+}
+
+#[test]
+fn pause_cannot_hide_failed_moderation_settlement() {
+    assert_eq!(
+        picture_rollback("attempts/moderation-0009.json"),
+        (true, 0, Some(782)),
+        "pause hid failed moderation settlement or lost the related scene spend"
+    );
+}
+
+struct SalvageStudio {
+    inner: Studio,
+    verdict: std::path::PathBuf,
+    readonly: bool,
+    paused: AtomicBool,
+}
+
+impl ModelProvider for SalvageStudio {
+    fn generate(&self, request: ModelRequest) -> Result<ModelReply> {
+        if matches!(request, ModelRequest::Image { .. }) {
+            if self.readonly {
+                let mut permissions = std::fs::metadata(&self.verdict)?.permissions();
+                permissions.set_readonly(true);
+                std::fs::set_permissions(&self.verdict, permissions)?;
+            }
+            self.paused.store(true, Ordering::SeqCst);
+            return Ok(ModelReply::new(
+                ModelOutput::Refused,
+                CostRecord::new(
+                    "salvage-studio",
+                    1,
+                    73,
+                    19,
+                    92,
+                    GenerationCost::from_nanos(391),
+                ),
+            ));
+        }
+        self.inner.generate(request)
+    }
+}
+
+impl GenerationControl for SalvageStudio {
+    fn allows(&self, _card: usize) -> bool {
+        true
+    }
+
+    fn paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
+    }
+}
+
+fn salvage(readonly: bool, pause: bool) -> (bool, bool, bool, u8, Option<u64>) {
+    let root = tempdir().unwrap();
+    let draft = draft(root.path());
+    let cache = cache(root.path(), &draft);
+    let verdict = cache.path().join("attempts/attempt-0001.json");
+    let studio = Arc::new(SalvageStudio {
+        inner: Studio::new(false, GenerationStage::Picture),
+        verdict: verdict.clone(),
+        readonly,
+        paused: AtomicBool::new(false),
+    });
+    let workflow = workflow(root.path(), studio.clone(), look(Resend::Automatic));
+    let scene = workflow.generate_scene_in(0, &draft).into_result().unwrap();
+    let artifacts = CardArtifacts::from_parts(
+        draft.artifacts().meta().clone(),
+        ArtifactSlot::fresh(Artifact::Scene).succeeded_with(scene),
+        ArtifactSlot::fresh(Artifact::Picture)
+            .attempted()
+            .attempted()
+            .attempted(),
+        draft.artifacts().sound().clone(),
+    );
+    std::fs::create_dir_all(verdict.parent().unwrap()).unwrap();
+    write(
+        &cache,
+        "attempts/attempt-0001.json",
+        json!({"sequence":1,"status":"rejected","category":"topology","score":91,"blocker":false,"image":"attempt-0001.png","scene":"attempt-0001.scene.json"}),
+    );
+    write(
+        &cache,
+        "attempts/attempt-0001.scene.json",
+        read(&cache, SCENE_FILE),
+    );
+    image::DynamicImage::new_luma8(7, 11)
+        .save(cache.path().join("attempts/attempt-0001.png"))
+        .unwrap();
+    let permissions = std::fs::metadata(&verdict).unwrap().permissions();
+    let mut run = GenerationRun::new(vec![draft.with_artifacts(artifacts)]).unwrap();
+    let result = if pause {
+        run.advance_in(&workflow, studio.as_ref())
+    } else {
+        run.advance(&workflow)
+    };
+    std::fs::set_permissions(&verdict, permissions).unwrap();
+    let failed = result.as_ref().is_err();
+    let step_failed = result
+        .ok()
+        .flatten()
+        .is_some_and(|step| step.into_parts().3.is_some());
+    (
+        failed,
+        step_failed,
+        run.drafts()[0].artifacts().picture().ready(),
+        run.drafts()[0].artifacts().picture().tally().done(),
+        run.drafts()[0].artifacts().cost().map(|cost| cost.nanos()),
+    )
+}
+
+#[test]
+fn pause_cannot_hide_failed_salvage_verdict_persistence() {
+    assert_eq!(
+        salvage(true, true),
+        (true, false, false, 3, Some(1173)),
+        "pause hid the failed salvage verdict, spent a retry, published a picture, or lost cost"
+    );
+}
+
+#[test]
+fn unpaused_salvage_cannot_publish_after_its_verdict_write_fails() {
+    assert_eq!(
+        salvage(true, false),
+        (false, true, false, 4, Some(1173)),
+        "failed salvage persistence did not remain a visible failed attempt without pause"
+    );
+}
+
+#[test]
+fn writable_salvage_cannot_lose_its_picture_or_costs() {
+    assert_eq!(
+        salvage(false, true),
+        (false, false, true, 3, Some(1173)),
+        "writable salvage failed to publish the recovered picture with its costs"
+    );
+}
+
+#[test]
+fn text_provider_failure_with_storage_error_text_cannot_escape_a_pause() {
+    let storage = storage_failure(
+        Artifact::Scene,
+        GenerationStage::Features,
+        Some(SCENE_COST_FILE),
+        None,
+    );
+    let message = storage
+        .0
+        .expect("storage failure must reach the caller before its text is replayed");
+    assert_eq!(
+        storage_failure(
+            Artifact::Meta,
+            GenerationStage::Metadata,
+            None,
+            Some(message)
+        ),
+        (None, true, 0, None),
+        "an ordinary text provider refusal was classified as storage by its message"
+    );
+}

@@ -17,6 +17,7 @@ mod done;
 mod embedded_workflow;
 mod failure_recovery;
 mod gemini;
+mod gemini_look;
 mod illustration;
 mod input;
 mod keyboard;

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::generation::artifact_cache::{Cache, VOICE_FILE};
+use crate::session::StateFailure;
 
 /// Generate raw PCM speech bytes for one prompt.
 pub trait Speaker {
@@ -90,6 +91,6 @@ fn write(path: &Path, data: &[u8]) -> Result<()> {
     wav.extend_from_slice(b"data");
     wav.extend_from_slice(&data_size.to_le_bytes());
     wav.extend_from_slice(data);
-    fs::write(path, &wav)?;
+    fs::write(path, &wav).map_err(StateFailure::new)?;
     Ok(())
 }

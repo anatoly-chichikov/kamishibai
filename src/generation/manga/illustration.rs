@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::generation::artifact_cache::{
     Cache, ILLUSTRATION_FILE, IMAGE_ATTEMPTS_DIRECTORY, SCENE_FILE, SOFT_FILE,
 };
+use crate::session::StateFailure;
 
 use super::{Progress, Renderer, Translator};
 use crate::generation::{VisualFailure, VisualResult};
@@ -140,7 +141,8 @@ where
         let image = self.renderer.render_observed(&scene, progress)?;
         if self.cache.exists(SOFT_FILE)
             && let Some(scene) =
-                super::render::salvaged_scene(&self.cache.path().join(IMAGE_ATTEMPTS_DIRECTORY))?
+                super::render::salvaged_scene(&self.cache.path().join(IMAGE_ATTEMPTS_DIRECTORY))
+                    .map_err(StateFailure::new)?
         {
             let staged = self.cache.stage(".json")?;
             write_scene(&staged, &scene)?;
@@ -184,7 +186,8 @@ where
         progress.step("Rendering manga");
         let image = self.renderer.render_observed(&scene, progress)?;
         let scene = if self.cache.exists(SOFT_FILE) {
-            super::render::salvaged_scene(&self.cache.path().join(IMAGE_ATTEMPTS_DIRECTORY))?
+            super::render::salvaged_scene(&self.cache.path().join(IMAGE_ATTEMPTS_DIRECTORY))
+                .map_err(StateFailure::new)?
                 .unwrap_or(scene)
         } else {
             scene
@@ -199,11 +202,12 @@ where
     /// Experimental embedding API; compatibility is not guaranteed.
     pub fn salvage(&self) -> VisualResult<Option<String>> {
         let directory = self.cache.filepath(IMAGE_ATTEMPTS_DIRECTORY)?;
-        let Some(bytes) = super::render::salvaged_best(&directory) else {
+        let Some(bytes) = super::render::salvaged_best(&directory)? else {
             return Ok(None);
         };
         let image = DynamicImage::ImageLuma8(image::load_from_memory(&bytes)?.into_luma8());
-        let scene = super::render::salvaged_scene(&directory)?
+        let scene = super::render::salvaged_scene(&directory)
+            .map_err(StateFailure::new)?
             .context("salvaged frame has no archived scene")?;
         self.publish(&scene, &image)?;
         Ok(Some(ILLUSTRATION_FILE.to_owned()))
@@ -228,7 +232,7 @@ where
                     return Err(error.into());
                 }
             };
-            if let Err(error) = fs::copy(&scenepath, &path) {
+            if let Err(error) = fs::copy(&scenepath, &path).map_err(StateFailure::new) {
                 let _ = fs::remove_file(&staged_scene);
                 let _ = fs::remove_file(&staged_image);
                 let _ = fs::remove_file(&path);
@@ -304,24 +308,24 @@ where
 }
 
 fn write_scene(path: &Path, scene: &Value) -> Result<()> {
-    fs::write(path, serde_json::to_string_pretty(scene)?)?;
+    fs::write(path, serde_json::to_string_pretty(scene)?).map_err(StateFailure::new)?;
     Ok(())
 }
 
 fn write_image(path: &Path, image: &DynamicImage) -> Result<()> {
-    let writer = BufWriter::new(File::create(path)?);
+    let writer = BufWriter::new(File::create(path).map_err(StateFailure::new)?);
     let mut encoder = JpegEncoder::new_with_quality(writer, 60);
-    encoder.encode_image(image)?;
+    encoder.encode_image(image).map_err(StateFailure::new)?;
     Ok(())
 }
 
 fn restore_scene(scene: &Path, previous: Option<&Path>) -> Result<()> {
     match previous {
         Some(previous) => {
-            fs::remove_file(scene)?;
-            fs::rename(previous, scene)?;
+            fs::remove_file(scene).map_err(StateFailure::new)?;
+            fs::rename(previous, scene).map_err(StateFailure::new)?;
         }
-        None => fs::remove_file(scene)?,
+        None => fs::remove_file(scene).map_err(StateFailure::new)?,
     }
     Ok(())
 }

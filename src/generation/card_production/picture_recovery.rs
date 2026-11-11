@@ -28,7 +28,7 @@ pub(super) fn render_recomposition_with_fallback<T, P, R, F, E>(
     progress: &mut P,
     recompose: R,
     fallback: F,
-    recoverable: impl FnOnce(&E) -> bool,
+    recoverable: impl Fn(&E) -> bool,
 ) -> std::result::Result<T, E>
 where
     R: FnOnce(&mut P) -> std::result::Result<T, E>,
@@ -53,7 +53,7 @@ where
     }
     match fallback(progress) {
         Ok(rendered) => Ok(rendered),
-        Err(error) if accounting.failed() => Err(error),
+        Err(error) if accounting.failed() || !recoverable(&error) => Err(error),
         Err(error)
             if accounting
                 .record(picture_request_total(cache))
