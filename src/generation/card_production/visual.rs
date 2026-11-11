@@ -203,6 +203,7 @@ impl VisualProduction {
                             matches!(error, VisualFailure::Failed(error) if !error.is::<StateFailure>())
                                 && mode == SceneMode::Stock
                         },
+                        |error| matches!(error, VisualFailure::Failed(error) if error.is::<StateFailure>()),
                     )
                 },
             )
@@ -375,8 +376,7 @@ impl VisualProduction {
                 }
             }
             Err(VisualFailure::Failed(error)) => {
-                if !error.is::<StateFailure>()
-                    && mode == SceneMode::Soft
+                if mode == SceneMode::Soft
                     && let Err(error) = soft::reject(&cache, pictures).map_err(StateFailure::new)
                 {
                     return failed_visual(error.into(), artifact, &scene_costs, &picture_costs);

@@ -236,3 +236,38 @@ fn rollback_failure_cannot_report_a_successful_pause() {
         "failed rollback hid the storage error or reused a reserved scene index"
     );
 }
+
+#[test]
+fn an_absent_reservation_cannot_turn_an_unsent_scene_into_a_storage_failure() {
+    use crate::generation::manga::Translator;
+    let temporary = TempDir::new().unwrap();
+    let cache = Cache::new("visual", temporary.path());
+    fs::write(
+        cache.filepath(SCENE_FILE).unwrap(),
+        br#"{"manga_panel":{"meta":{"layout_selection":{"scene_attempt_index":9}}}}"#,
+    )
+    .unwrap();
+    let attempts = cache.filepath(IMAGE_ATTEMPTS_DIRECTORY).unwrap();
+    fs::create_dir_all(&attempts).unwrap();
+    fs::write(
+        attempts.join("attempt-0017.scene.json"),
+        br#"{"manga_panel":{"meta":{"layout_selection":{"scene_attempt_index":14}}}}"#,
+    )
+    .unwrap();
+    let previous = load_scene_attempt(&cache).unwrap();
+    let selected = reserve_scene_attempt(&cache, Artifact::Scene, 0, false).unwrap();
+    let reserved = load_scene_attempt(&cache).unwrap();
+    let result = ReservedScene::new(PausedScene, cache.clone(), previous)
+        .translate_observed("A cat sleeps beside the folded paper", "EN");
+    assert_eq!(
+        (
+            previous,
+            selected,
+            reserved,
+            matches!(result, Err(crate::generation::VisualFailure::NotSent)),
+            load_scene_attempt(&cache).unwrap()
+        ),
+        (None, 9, None, true, None),
+        "an already absent scene reservation turned an unsent request into a storage failure"
+    );
+}

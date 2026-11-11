@@ -40,8 +40,13 @@ impl<T: Translator> Translator for ReservedScene<T> {
         if matches!(result, Err(VisualFailure::NotSent)) {
             match self.previous {
                 Some(attempt) => write_scene_attempt(&self.cache, attempt)?,
-                None => fs::remove_file(self.cache.path().join(SCENE_ATTEMPT_FILE))
-                    .map_err(StateFailure::new)?,
+                None => {
+                    if let Err(error) = fs::remove_file(self.cache.path().join(SCENE_ATTEMPT_FILE))
+                        && error.kind() != std::io::ErrorKind::NotFound
+                    {
+                        return Err(StateFailure::new(error).into());
+                    }
+                }
             }
         }
         result

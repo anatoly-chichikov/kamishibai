@@ -23,9 +23,11 @@ use crate::session::{
 /// request confirmed not sent returns its index. A not-sent refusal without a
 /// reported pause is a failed attempt, bounded by the usual attempt ceiling.
 ///
-/// Errors saving or restoring state that the core reads back are not pauses.
-/// When control reports a pause, these errors still reach the caller without
-/// spending an artifact attempt. Costs already incurred remain in the drafts.
+/// Errors writing or rolling back the core's own state, or recording costs,
+/// including in the caller's cost ledger, still reach the caller during a pause.
+/// They do not spend an artifact attempt; incurred costs remain in the drafts.
+/// This guarantee does not cover state reads: a failed read may return an error
+/// or remain a pause and be retried on resume.
 ///
 /// Experimental embedding API; compatibility is not guaranteed.
 pub trait GenerationControl {
@@ -102,8 +104,11 @@ impl GenerationRun {
     /// such pause. A possibly sent scene keeps its index; a scene request confirmed
     /// not sent returns its index. A not-sent refusal without a reported pause
     /// spends an attempt and remains bounded by the usual attempt ceiling.
-    /// Errors saving or restoring state that the core reads back still reach the
-    /// caller during a pause, without spending an attempt or losing incurred costs.
+    /// Errors writing or rolling back the core's own state, or recording costs,
+    /// including in the caller's cost ledger, still reach the caller during a pause.
+    /// They do not spend an artifact attempt; incurred costs remain in the drafts.
+    /// This guarantee does not cover state reads: a failed read may return an error
+    /// or remain a pause and be retried on resume.
     ///
     /// Experimental embedding API; compatibility is not guaranteed.
     pub fn advance_in<P: CardProduction + ?Sized>(

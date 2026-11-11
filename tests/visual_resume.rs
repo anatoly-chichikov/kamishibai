@@ -1511,3 +1511,52 @@ fn text_provider_failure_with_storage_error_text_cannot_escape_a_pause() {
         "an ordinary text provider refusal was classified as storage by its message"
     );
 }
+
+struct PaperWorld;
+
+impl kamishibai::models::SoftWorld for PaperWorld {
+    fn name(&self) -> &str {
+        "paper-v1"
+    }
+
+    fn brief(&self) -> &str {
+        "Only folded paper animals appear"
+    }
+
+    fn admit(&self, _scene: &Value, _prompt: &str) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_soft_storage_failure_without_pause_cannot_escape_its_durable_budget() {
+    let root = tempdir().unwrap();
+    let draft = draft(root.path());
+    let cache = cache(root.path(), &draft);
+    write(
+        &cache,
+        "soft.json",
+        json!({"stage":"scene","attempt":0,"terminal":false,"budget":{"remaining":3,"pictures":0,"failures":0}}),
+    );
+    let workflow = workflow(
+        root.path(),
+        Arc::new(StorageStudio {
+            paused: AtomicBool::new(false),
+            stage: GenerationStage::Scene,
+            obstruction: Some(cache.path().join(SCENE_FILE)),
+            refusal: None,
+        }),
+        Look::new(Arc::new(Ink), Some(Arc::new(PaperWorld)), Resend::Automatic),
+    );
+    let mut run = GenerationRun::new(vec![draft]).unwrap();
+    let result = run.advance(&workflow);
+    assert_eq!(
+        (
+            result.is_ok(),
+            run.drafts()[0].artifacts().scene().tally().done(),
+            read(&cache, "soft.json")["budget"]["failures"].clone()
+        ),
+        (true, 1, json!(1)),
+        "an unpaused soft storage failure spent an artifact attempt without charging the durable budget"
+    );
+}

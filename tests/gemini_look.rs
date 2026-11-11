@@ -134,6 +134,7 @@ impl kamishibai::models::PictureStyle for Watercolor {
 
 fn exchange(mut stream: std::net::TcpStream, response: &str, status: u16) -> String {
     use std::io::{BufRead, Read, Write};
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(3)))
         .unwrap();
@@ -273,5 +274,42 @@ fn builtin_workflow_cannot_replace_a_clients_plugged_picture_style() {
             default
         ),
         "the built-in workflow lost the client's style or changed unrelated request fields"
+    );
+}
+
+#[test]
+fn local_exchange_cannot_fail_before_delayed_headers_arrive() {
+    use std::io::{Read, Write};
+    use std::time::Duration;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    client
+        .set_write_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let (stream, _) = listener.accept().unwrap();
+    stream.set_nonblocking(true).unwrap();
+    let (started, waiting) = std::sync::mpsc::channel();
+    let server = std::thread::spawn(move || {
+        started.send(()).unwrap();
+        exchange(stream, "{}", 200)
+    });
+    waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+    std::thread::sleep(Duration::from_millis(75));
+    let sent = client.write_all(b"POST / HTTP/1.1\r\ncontent-length: 2\r\n\r\n{}");
+    let mut response = String::new();
+    let received = client.read_to_string(&mut response);
+    assert_eq!(
+        (
+            sent.is_ok(),
+            received.is_ok(),
+            server.join().ok(),
+            response.ends_with("\r\n\r\n{}")
+        ),
+        (true, true, Some(String::from("{}")), true),
+        "local exchange failed before its bounded header deadline or lost the request body"
     );
 }
