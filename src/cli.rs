@@ -10,6 +10,7 @@ mod bridge;
 mod console;
 mod contract;
 mod error;
+mod export;
 mod host;
 mod jobs;
 mod session;
@@ -48,6 +49,8 @@ FIRST-TIME HEADLESS SETUP:
 
 EXAMPLES:
   kamishibai                                       open the interactive TUI
+  kamishibai export                                Save your Anki cards and reviews for Kamishibai web
+  kamishibai export --save --json                  save Anki history without the screen
   kamishibai agent-contract                        print this binary's agent contract
   kamishibai new --word bank --learning EN --json  understand words, create a session
   kamishibai new --word bank --learning EN --level b1 --types questions --generate --wait --json
@@ -124,8 +127,7 @@ struct Cli {
     /// A prebuilt cards JSON path opens the interactive TUI on those cards.
     #[arg(value_name = "WORDS")]
     input: Option<String>,
-    /// Print one JSON document on stdout instead of plain text (place it after
-    /// the session verb; interactive runs refuse it).
+    /// Print JSON for scripts and agents.
     #[arg(long, global = true)]
     json: bool,
     #[command(subcommand)]
@@ -208,6 +210,7 @@ fn execute(cli: &Cli) -> Result<()> {
             }
             contract::print()
         }
+        Some(session::Command::Export(args)) => export::run(args, render),
         Some(command) => session::handle(command, render, &bridge::TuiOpener),
         None => {
             if cli.json {

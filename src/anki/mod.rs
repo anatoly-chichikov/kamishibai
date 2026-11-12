@@ -2,6 +2,7 @@
 
 mod deck;
 mod format;
+pub mod history;
 mod model;
 
 pub use deck::VocabularyDeck;

@@ -10,6 +10,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use std::time::Duration;
 
 use crate::tui::app::BusyView;
 use crate::tui::palette;
@@ -22,6 +23,17 @@ const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
 
 /// Draw the universal blocking loader over the full terminal area.
 pub fn draw(frame: &mut Frame, area: Rect, busy: &BusyView) {
+    loader(
+        frame,
+        area,
+        " ai is working ",
+        busy.kind().label(),
+        busy.elapsed(),
+    );
+}
+
+/// Paint a blocking overlay with the shared spinner and caller-owned text.
+pub(crate) fn loader(frame: &mut Frame, area: Rect, title: &str, label: &str, elapsed: Duration) {
     let inset = super::common::overlay_rect(area, WIDTH, HEIGHT);
     super::common::paint_background(frame, inset);
     frame.render_widget(Clear, inset);
@@ -31,12 +43,12 @@ pub fn draw(frame: &mut Frame, area: Rect, busy: &BusyView) {
         .style(palette::base());
     let inner = block.inner(inset);
     frame.render_widget(block, inset);
-    frame.render_widget(panel(busy), padded(inner));
-    let title = Span::styled(" ai is working ", palette::base());
+    frame.render_widget(panel(label, elapsed), padded(inner));
+    let title = Span::styled(title, palette::base());
     let title_rect = Rect {
         x: inset.x + 2,
         y: inset.y,
-        width: title.content.chars().count() as u16,
+        width: u16::try_from(title.content.chars().count()).unwrap_or(u16::MAX),
         height: 1,
     };
     frame.render_widget(
@@ -54,17 +66,17 @@ fn padded(inner: Rect) -> Rect {
     }
 }
 
-fn panel(busy: &BusyView) -> Paragraph<'static> {
-    let label = busy.kind().label();
+fn panel(label: &str, elapsed: Duration) -> Paragraph<'static> {
     let line = Line::from(vec![
-        Span::styled(spinner(busy), palette::base()),
+        Span::styled(spinner(elapsed), palette::base()),
         Span::styled("  ", palette::base()),
         Span::styled(String::from(label), palette::Ink::Subject.on(false)),
     ]);
     Paragraph::new(vec![Line::from(""), line, Line::from("")]).style(palette::base())
 }
 
-fn spinner(busy: &BusyView) -> &'static str {
-    let index = (busy.elapsed().as_millis() / FRAME_MILLIS) as usize % FRAMES.len();
+fn spinner(elapsed: Duration) -> &'static str {
+    let index = usize::try_from((elapsed.as_millis() / FRAME_MILLIS) % 4)
+        .expect("invariant: spinner index is below four");
     FRAMES[index]
 }

@@ -14,7 +14,7 @@ use crate::generation::artifact_cache::{
 use crate::generation::visual_revision;
 #[cfg(test)]
 use crate::session::LanguagePair;
-use crate::session::{CardCell, CardDraft};
+use crate::session::{CardCell, CardDraft, StateFailure};
 
 /// Remove one card's complete current artifact set under the destructive lock order.
 #[cfg(test)]
@@ -153,7 +153,7 @@ fn remove_cached_files(cache: &Cache, files: &[&str]) -> Result<()> {
     for file in files {
         let path = cache.path().join(file);
         if path.exists() {
-            fs::remove_file(&path)?;
+            fs::remove_file(&path).map_err(StateFailure::new)?;
         }
     }
     Ok(())
@@ -162,7 +162,7 @@ fn remove_cached_files(cache: &Cache, files: &[&str]) -> Result<()> {
 fn remove_attempt_journal(cache: &Cache) -> Result<()> {
     let attempts = cache.path().join(IMAGE_ATTEMPTS_DIRECTORY);
     if attempts.exists() {
-        fs::remove_dir_all(attempts)?;
+        fs::remove_dir_all(attempts).map_err(StateFailure::new)?;
     }
     Ok(())
 }

@@ -9,7 +9,7 @@ use super::picture_requests::{load_picture_request_counter, picture_request_tota
 use crate::generation::artifact_cache::{Cache, IMAGE_ATTEMPTS_DIRECTORY, SCENE_FILE, SOFT_FILE};
 use crate::generation::{SceneMode, VisualFailure, VisualResult};
 use crate::models::GenerationStage;
-use crate::session::ARTIFACT_ATTEMPT_CEILING;
+use crate::session::{ARTIFACT_ATTEMPT_CEILING, StateFailure};
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -30,8 +30,8 @@ struct SoftBudget {
 
 /// Resolve the durable world and enforce the shared four-attempt ceiling.
 pub(super) fn mode(cache: &Cache) -> VisualResult<SceneMode> {
-    restore(cache)?;
-    let Some(state) = load(cache)? else {
+    restore(cache).map_err(StateFailure::new)?;
+    let Some(state) = load(cache).map_err(StateFailure::new)? else {
         return Ok(SceneMode::Stock);
     };
     let stage = match state.stage.as_str() {

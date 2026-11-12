@@ -9,7 +9,7 @@ use super::cost_accounting::AccountingHealth;
 use crate::generation::artifact_cache::{Cache, PICTURE_REQUESTS_FILE};
 use crate::generation::manga::ImageSource;
 use crate::generation::{VisualFailure, VisualResult};
-use crate::session::ARTIFACT_ATTEMPT_CEILING;
+use crate::session::{ARTIFACT_ATTEMPT_CEILING, StateFailure};
 
 /// Return all picture requests made for one visual revision.
 pub(super) fn picture_request_total(cache: &Cache) -> Result<u32> {
@@ -81,7 +81,12 @@ pub(super) fn load_picture_request_counter(cache: &Cache) -> Result<PictureReque
         return Ok(PictureRequestCounter::new(0, 0));
     }
     let path = cache.filepath(PICTURE_REQUESTS_FILE)?;
-    serde_json::from_slice::<PictureRequestCounter>(fs::read(path)?.as_slice())?.validated()
+    serde_json::from_slice::<PictureRequestCounter>(
+        fs::read(path).map_err(StateFailure::new)?.as_slice(),
+    )
+    .map_err(StateFailure::new)?
+    .validated()
+    .map_err(|error| StateFailure::new(error).into())
 }
 
 fn store_picture_request_counter(cache: &Cache, counter: &PictureRequestCounter) -> Result<()> {
@@ -93,7 +98,7 @@ fn store_picture_request_counter(cache: &Cache, counter: &PictureRequestCounter)
     if result.is_err() {
         let _ = fs::remove_file(&staged);
     }
-    result
+    result.map_err(|error| StateFailure::new(error).into())
 }
 
 /// Durably reserve one request before contacting the image provider.

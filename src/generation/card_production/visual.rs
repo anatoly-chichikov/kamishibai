@@ -27,6 +27,7 @@ use crate::generation::{SceneComposer, SceneMode, VisualFailure, VisualResult, v
 use crate::languages::LanguageCatalog;
 use crate::session::{
     ARTIFACT_ATTEMPT_CEILING, Artifact, ArtifactAttempt, ArtifactFile, CardCell, CardDraft,
+    StateFailure,
 };
 
 const IMAGE_ATTEMPTS_PER_ARTIFACT: usize = 1;
@@ -114,7 +115,7 @@ impl VisualProduction {
                 recompose: false,
                 salvage: false,
             },
-            |illustration, sentence, target, progress, _accounting| {
+            |illustration, sentence, target, progress, _accounting, _mode| {
                 illustration.scene_only_observed(sentence, target, progress)
             },
         );
@@ -135,8 +136,8 @@ impl VisualProduction {
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
         let gentle = self.gentle();
-        if gentle && let Err(error) = soft::restore(&cache) {
-            return ArtifactAttempt::unmetered(Err(error));
+        if gentle && let Err(error) = soft::restore(&cache).map_err(StateFailure::new) {
+            return ArtifactAttempt::unmetered(Err(error.into()));
         }
         let key = cache.path();
         if self
@@ -153,12 +154,14 @@ impl VisualProduction {
             Ok(recover) => recover,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        let cursor = match scene_attempt_cursor(&cache, draft.artifacts().scene().tally().done()) {
+        let cursor = match scene_attempt_cursor(&cache, draft.artifacts().scene().tally().done())
+            .map_err(|error| StateFailure::new(error).into())
+        {
             Ok(cursor) => cursor,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
         let recover = match if gentle {
-            soft::recompose(&cache)
+            soft::recompose(&cache).map_err(|error| StateFailure::new(error).into())
         } else {
             Ok(false)
         } {
@@ -186,7 +189,7 @@ impl VisualProduction {
                     recompose: true,
                     salvage,
                 },
-                move |illustration, sentence, target, progress, accounting| {
+                move |illustration, sentence, target, progress, accounting, mode| {
                     render_recomposition_with_fallback(
                         &fallback_cache,
                         accounting,
@@ -197,11 +200,10 @@ impl VisualProduction {
                         },
                         |progress| illustration.picture_only_observed(sentence, target, progress),
                         |error| {
-                            matches!(error, VisualFailure::Failed(_))
-                                && (!gentle
-                                    || soft::mode(&fallback_cache)
-                                        .is_ok_and(|mode| mode == SceneMode::Stock))
+                            matches!(error, VisualFailure::Failed(error) if !error.is::<StateFailure>())
+                                && mode == SceneMode::Stock
                         },
+                        |error| matches!(error, VisualFailure::Failed(error) if error.is::<StateFailure>()),
                     )
                 },
             )
@@ -215,7 +217,7 @@ impl VisualProduction {
                     recompose: false,
                     salvage,
                 },
-                |illustration, sentence, target, progress, _accounting| {
+                |illustration, sentence, target, progress, _accounting, _mode| {
                     illustration.picture_only_observed(sentence, target, progress)
                 },
             )
@@ -249,6 +251,7 @@ impl VisualProduction {
             &str,
             &mut NoopProgress,
             &AccountingHealth,
+            SceneMode,
         ) -> VisualResult<(String, bool)>,
     {
         let Some(meta) = draft.meta() else {
@@ -297,10 +300,11 @@ impl VisualProduction {
                 );
             }
         };
-        let previous = match load_scene_attempt(&cache) {
-            Ok(previous) => previous,
-            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
-        };
+        let previous =
+            match load_scene_attempt(&cache).map_err(|error| StateFailure::new(error).into()) {
+                Ok(previous) => previous,
+                Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+            };
         let scene_attempt =
             match reserve_scene_attempt(&cache, artifact, pass.fallback, pass.recompose) {
                 Ok(attempt) => attempt,
@@ -333,13 +337,14 @@ impl VisualProduction {
             learning,
             &mut progress,
             &accounting,
+            mode,
         )
         .and_then(|(filename, cached)| {
             let path = illustration.filepath(filename.as_str())?;
             Ok((filename, path, cached))
         });
-        if let Err(error) = soft::settle(&cache) {
-            return failed_visual(error, artifact, &scene_costs, &picture_costs);
+        if let Err(error) = soft::settle(&cache).map_err(StateFailure::new) {
+            return failed_visual(error.into(), artifact, &scene_costs, &picture_costs);
         }
         let (result, refused) = match result {
             Err(error @ VisualFailure::NotSent) => (Err(error.into_error()), false),
@@ -350,14 +355,15 @@ impl VisualProduction {
                 };
                 if gentle
                     && let Err(error) = soft::refuse(&cache, stage, scene_attempt, mode, spent)
+                        .map_err(StateFailure::new)
                 {
-                    return failed_visual(error, artifact, &scene_costs, &picture_costs);
+                    return failed_visual(error.into(), artifact, &scene_costs, &picture_costs);
                 }
                 if pass.salvage && stage != crate::models::GenerationStage::Picture {
                     match illustration.salvage() {
                         Ok(Some(filename)) => {
                             let result = illustration.filepath(&filename).and_then(|path| {
-                                soft::settle(&cache)?;
+                                soft::settle(&cache).map_err(StateFailure::new)?;
                                 Ok((filename, path, false))
                             });
                             (result, false)
@@ -371,9 +377,9 @@ impl VisualProduction {
             }
             Err(VisualFailure::Failed(error)) => {
                 if mode == SceneMode::Soft
-                    && let Err(error) = soft::reject(&cache, pictures)
+                    && let Err(error) = soft::reject(&cache, pictures).map_err(StateFailure::new)
                 {
-                    return failed_visual(error, artifact, &scene_costs, &picture_costs);
+                    return failed_visual(error.into(), artifact, &scene_costs, &picture_costs);
                 }
                 (Err(error), false)
             }

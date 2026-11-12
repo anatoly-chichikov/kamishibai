@@ -83,6 +83,37 @@ kamishibai agent-contract
 It covers first-time setup, JSON commands and errors, key handling, polling,
 and output paths. The repository copy is [llms.txt](llms.txt).
 
+## Export Anki history to the web
+
+Close Anki, then run:
+
+```bash
+kamishibai export
+```
+
+A separate guided screen checks that Anki is closed, lets you choose a profile
+and exact decks, then shows the cards, reviews, destination folder and any missing
+media. Press Enter on this summary to save in Downloads; nothing is written
+before that confirmation. The last screen links the folder and file, then points
+to [app.kamishibai.io](https://app.kamishibai.io/import), where the import sheet
+suggests the language pair. No Gemini key is needed.
+
+Use `--out DIR` for another destination. `Esc` goes back or exits before saving;
+during saving it cancels before the verified file is published. Ctrl+C exits from
+any selection page; during saving it shows cleanup and the cancellation outcome.
+For scripts, `--json` previews without writing and `--save` saves without opening
+the screen:
+
+```bash
+kamishibai export --profile 'User 1' --deck 'French::Daily' --json
+kamishibai export --profile 'User 1' --deck 'French::Daily' --out /tmp/history --save --json
+```
+
+Deck names are exact; repeat `--deck` to include subdecks separately. Without
+`--deck`, decks containing Kamishibai notes are selected initially. `--collection`
+accepts an explicit `collection.anki2` path. The file format and refusal details
+are in [the console contract](llms.txt).
+
 ## Bring Your Own JSON
 
 You don't have to let Gemini write the cards. The card format is plain, strict JSON, and kamishibai takes it from anywhere: an LLM you prompt yourself, a script over your reading history, your own hands. Entries land on the cards verbatim — the writing pass is skipped — and kamishibai adds only what JSON can't carry: the audio and the illustration, both generated from the target sentence.
