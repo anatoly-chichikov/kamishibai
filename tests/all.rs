@@ -3,6 +3,8 @@
 //! stays its own target to keep insta snapshot filenames stable. Run one
 //! module with `cargo test --test all your_cards::`.
 
+use kamishibai::tui;
+
 mod agent_contract;
 mod agent_onboarding;
 mod anki;
@@ -16,6 +18,8 @@ mod config;
 mod config_cli;
 mod done;
 mod embedded_workflow;
+#[path = "common/example.rs"]
+mod example;
 mod failure_recovery;
 mod gemini;
 mod gemini_look;
@@ -44,7 +48,8 @@ mod session_contracts;
 mod session_engine;
 mod sessions;
 mod state_machine;
-mod ui_contract;
+mod ui_catalog;
+mod ui_recording;
 mod what_i_understood;
 mod your_cards;
 mod your_words;

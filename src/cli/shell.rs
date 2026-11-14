@@ -31,7 +31,7 @@ const BACKGROUND_POLL: Duration = Duration::from_millis(ANIMATION_FRAME_MILLIS);
 const FAST_JOB_POLL_MILLIS: u64 = 25;
 const FAST_JOB_POLL: Duration = Duration::from_millis(FAST_JOB_POLL_MILLIS);
 const FAST_JOB_WINDOW: Duration = Duration::from_millis(50);
-const CONFIRMATION_WINDOW: Duration = Duration::from_millis(1000);
+const CONFIRMATION_WINDOW: Duration = Duration::from_millis(2000);
 const STEP_DWELL: Duration = Duration::from_millis(3 * FAST_JOB_POLL_MILLIS);
 const KEY_REJECTED_MESSAGE: &str = "Gemini rejected this API key; saved key was cleared";
 
@@ -75,7 +75,6 @@ struct PendingPublishJob {
     job: PendingJob<StudyPublishMessage>,
     cards: usize,
     failed: usize,
-    stopped: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -881,7 +880,7 @@ where
                 self.run_understanding()?;
             }
             Side::StartPublish => {
-                let _ = self.start_publish(false)?;
+                let _ = self.start_publish()?;
             }
             Side::AdoptLanguages(choice) => {
                 self.remember_languages(&choice)?;
@@ -1051,6 +1050,10 @@ where
     }
 
     fn regenerate_cards(&mut self) -> Result<()> {
+        if self.app.generation_stopped() {
+            let _ = self.start_publish()?;
+            return Ok(());
+        }
         if self.app.cards().is_empty() {
             return Ok(());
         }
@@ -1119,7 +1122,7 @@ where
             .iter()
             .all(|draft| draft.artifacts().all_ready())
         {
-            let _ = self.start_publish(false)?;
+            let _ = self.start_publish()?;
             if self.publish_job.is_none() {
                 self.rollback(previous_app, previous_engine, previous_started);
             }
@@ -1175,7 +1178,7 @@ where
         }
     }
 
-    fn start_publish(&mut self, stopped: bool) -> Result<bool> {
+    fn start_publish(&mut self) -> Result<bool> {
         if self.publish_job.is_some() {
             bail!("background publish job already running");
         }
@@ -1207,7 +1210,6 @@ where
             },
             cards,
             failed,
-            stopped,
         });
         self.app = self.app.clone().busy_started(BusyKind::PublishingDeck);
         Ok(true)
@@ -1233,7 +1235,7 @@ where
                     let message = join_thread(job.job.handle)
                         .map(|()| String::from("background publish job disconnected"))
                         .unwrap_or_else(|error| error.to_string());
-                    self.publish_failed(job.stopped, message);
+                    self.publish_failed(message);
                     return Ok(true);
                 }
             };
@@ -1252,7 +1254,7 @@ where
                         .take()
                         .expect("invariant: publish job must exist");
                     if let Err(error) = join_thread(job.job.handle) {
-                        self.publish_failed(job.stopped, error.to_string());
+                        self.publish_failed(error.to_string());
                         return Ok(true);
                     }
                     self.app = self.app.clone().busy_finished();
@@ -1266,7 +1268,7 @@ where
                             self.started = None;
                         }
                         Err(error) => {
-                            self.publish_failed(job.stopped, error.to_string());
+                            self.publish_failed(error.to_string());
                         }
                     }
                     return Ok(true);
@@ -1286,7 +1288,7 @@ where
             .iter()
             .any(|draft| draft.artifacts().all_ready() && draft.staged_rewrite().is_none())
         {
-            let _ = self.start_publish(true)?;
+            let _ = self.start_publish()?;
             return Ok(true);
         }
         self.app = self.app.clone().generation_cancellation_started();
@@ -1294,16 +1296,10 @@ where
         Ok(true)
     }
 
-    fn publish_failed(&mut self, stopped: bool, message: String) {
-        self.app = self.app.clone().busy_finished();
+    fn publish_failed(&mut self, message: String) {
+        self.app = self.app.clone().busy_finished().publication_failed(message);
         self.engine = None;
         self.started = None;
-        if stopped {
-            self.app = self.app.clone().generation_cancellation_started();
-            self.cancel_stopped_generation(Some(message));
-        } else {
-            self.app = self.app.clone().publication_failed(message);
-        }
     }
 
     fn cancel_stopped_generation(&mut self, notice: Option<String>) -> bool {
@@ -3046,8 +3042,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn failed_publish_after_stop_starts_clean_without_resuming() {
+    fn failed_stopped_publish() -> (
+        tempfile::TempDir,
+        Shell<TestWorkflow, TestWorkflow>,
+        Arc<AtomicUsize>,
+    ) {
         let home = tempfile::tempdir().expect("temp home");
         let store = SessionStore::new(home.path());
         let language_pair = pair();
@@ -3088,12 +3087,26 @@ mod tests {
             })
             .collect();
         store.create(&record).expect("the session must persist");
+        store
+            .cost_journal(&record)
+            .seed(&[ArtifactCosts::default(); 2])
+            .expect("cost journal must seed");
+        store
+            .cost_journal(&record)
+            .charge(0, Artifact::Meta, GenerationCost::from_nanos(731))
+            .expect("paid work must persist");
         let session = TuiSession::resuming_in(&record, store).expect("the session must resume");
-        let mut shell = shell_with(app, TestWorkflow::publish_failing());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut workflow = TestWorkflow::publish_failing();
+        workflow.calls = Some(calls.clone());
+        let mut shell = shell_with(app, workflow);
         shell.session = Some(session);
         shell.output = home.path().to_path_buf();
         shell.engine = Some(SessionEngine::start(drafts));
-        let claimed = shell.claim_session();
+        assert!(
+            shell.claim_session(),
+            "the stopped fixture could not claim its session"
+        );
         shell
             .handle(AppEvent::Cancel)
             .expect("first Escape must arm the stop");
@@ -3102,45 +3115,243 @@ mod tests {
             .expect("second Escape must confirm the stop");
         settle_shell(&mut shell, 200);
         shell.persist();
-        let old: SessionRecord = serde_json::from_slice(
-            std::fs::read(home.path().join("sessions/stopped-publish/session.json"))
-                .expect("the cancelled record must read")
-                .as_slice(),
+        (home, shell, calls)
+    }
+
+    fn stopped_record(home: &std::path::Path) -> SessionRecord {
+        serde_json::from_slice(
+            &std::fs::read(home.join("sessions/stopped-publish/session.json"))
+                .expect("stopped session must remain readable"),
         )
-        .expect("the cancelled record must decode");
-        let next = std::fs::read_dir(home.path().join("sessions"))
-            .expect("the sessions directory must list")
-            .flatten()
-            .filter(|entry| entry.file_name() != "stopped-publish")
-            .collect::<Vec<_>>();
+        .expect("stopped session must decode")
+    }
+
+    #[test]
+    fn failed_publish_after_stop_keeps_the_session_and_paid_cards() {
+        let (home, shell, calls) = failed_stopped_publish();
+        let stored = stopped_record(home.path());
+        let costs = shell
+            .session
+            .as_ref()
+            .expect("session must survive")
+            .cost_scope()
+            .absolute(0, ArtifactCosts::default())
+            .expect("paid costs must remain")
+            .cost(Artifact::Meta);
+        let sessions = std::fs::read_dir(home.path().join("sessions"))
+            .expect("sessions must list")
+            .count();
         assert_eq!(
             (
-                shell.app.screen(),
-                claimed,
-                shell.app.blob(),
-                shell.app.candidates().len(),
-                shell.app.cards().len(),
-                shell.app.generation_stopping(),
-                shell.engine.is_none(),
-                shell.app.error(),
-                old.phase,
-                old.worker.is_none(),
-                next.is_empty(),
+                (
+                    shell.app.screen(),
+                    shell.app.blob(),
+                    shell.app.candidates().len(),
+                    shell.app.cards().len(),
+                    shell.app.cards_ready(),
+                    shell.app.error()
+                ),
+                (
+                    shell.engine.is_none(),
+                    stored.phase,
+                    stored.worker.is_none(),
+                    stored.drafts.len(),
+                    sessions
+                ),
+                (costs, calls.load(Ordering::SeqCst))
             ),
             (
-                Screen::YourWords,
+                (
+                    Screen::YourCards,
+                    "alpha\nbeta",
+                    2,
+                    2,
+                    1,
+                    Some("publish boom")
+                ),
+                (true, Phase::Understood, true, 2, 1),
+                (Some(GenerationCost::from_nanos(731)), 1)
+            ),
+            "a stopped save failure discarded the session, paid cards, costs, or stop intent"
+        );
+    }
+
+    #[test]
+    fn retrying_a_stopped_save_publishes_only_the_ready_subset() {
+        let (home, mut shell, calls) = failed_stopped_publish();
+        shell.workflow.publish_fails = false;
+        shell
+            .handle(AppEvent::Generate)
+            .expect("Ctrl+G must retry saving");
+        settle_shell(&mut shell, 300);
+        shell.persist();
+        let stored = stopped_record(home.path());
+        assert_eq!(
+            (
+                shell.app.done_artifacts().deck.as_str(),
+                shell.app.cards().len(),
+                shell.app.cards_ready(),
+                calls.load(Ordering::SeqCst),
+                stored.phase,
+                stored.result.map(|result| (result.cards, result.failed))
+            ),
+            ("local-1-cards.apkg", 2, 1, 2, Phase::Partial, Some((1, 1))),
+            "retrying a stopped save resumed providers, changed identity, or published unfinished cards"
+        );
+    }
+
+    #[test]
+    fn dismissing_a_stopped_save_error_keeps_the_subset_for_ctrl_g() {
+        let (home, mut shell, calls) = failed_stopped_publish();
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("Escape must dismiss the saving error");
+        settle_shell(&mut shell, 20);
+        let dismissed = (
+            shell.app.screen(),
+            shell.app.error().is_none(),
+            calls.load(Ordering::SeqCst),
+        );
+        shell.workflow.publish_fails = false;
+        shell
+            .handle(AppEvent::Generate)
+            .expect("Ctrl+G must save the stopped subset");
+        settle_shell(&mut shell, 300);
+        shell.persist();
+        assert_eq!(
+            (
+                dismissed,
+                shell.app.done_artifacts().deck.as_str(),
+                calls.load(Ordering::SeqCst),
+                stopped_record(home.path()).phase
+            ),
+            (
+                (Screen::YourCards, true, 1),
+                "local-1-cards.apkg",
+                2,
+                Phase::Partial
+            ),
+            "dismissing a stopped save error lost the subset or automatically resumed work"
+        );
+    }
+
+    #[test]
+    fn leaving_a_stopped_unsaved_batch_requires_the_existing_double_escape() {
+        let (home, mut shell, calls) = failed_stopped_publish();
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("Escape must dismiss the error");
+        let first = shell
+            .handle_new_batch_escape()
+            .expect("first Escape must arm a new batch");
+        let armed = (
+            shell.app.screen(),
+            shell.app.new_batch_pending(),
+            shell.app.cards_ready(),
+        );
+        let second = shell
+            .handle_new_batch_escape()
+            .expect("second Escape must start a new batch");
+        assert_eq!(
+            (
+                first,
+                armed,
+                second,
+                shell.app.screen(),
+                shell.app.cards().len(),
+                stopped_record(home.path()).phase,
+                calls.load(Ordering::SeqCst)
+            ),
+            (
                 true,
-                "",
+                (Screen::YourCards, true, 1),
+                true,
+                Screen::YourWords,
                 0,
-                0,
+                Phase::Understood,
+                1
+            ),
+            "the stopped subset could not use the explicit new-batch path or was discarded before confirmation"
+        );
+    }
+
+    #[test]
+    fn repeated_stopped_save_failure_and_quit_cannot_cancel_the_session() {
+        let (home, mut shell, calls) = failed_stopped_publish();
+        shell
+            .handle(AppEvent::Generate)
+            .expect("Ctrl+G must retry saving");
+        settle_shell(&mut shell, 200);
+        shell.persist();
+        let failure = (
+            shell.app.error().map(str::to_owned),
+            shell.app.cards_ready(),
+            calls.load(Ordering::SeqCst),
+        );
+        let first = shell.arm_quit();
+        let second = shell.arm_quit();
+        shell.persist();
+        drop(shell);
+        let stored = stopped_record(home.path());
+        assert_eq!(
+            (
+                failure,
+                first,
+                second,
+                stored.phase,
+                stored.drafts.len(),
+                stored.worker.is_none()
+            ),
+            (
+                (Some(String::from("publish boom")), 1, 2),
                 false,
                 true,
-                Some("publish boom"),
-                Phase::Cancelled,
-                true,
-                true,
+                Phase::Understood,
+                2,
+                true
             ),
-            "a stopped publish failure kept cancelled input, left drafts able to resume, or persisted a replacement batch"
+            "a second save failure or confirmed quit cancelled the stopped session or resumed paid work"
+        );
+    }
+
+    #[test]
+    fn quit_confirmation_accepts_a_second_press_after_one_second() {
+        let mut shell = shell(App::new(pair()));
+        shell.arm_quit();
+        shell.quit_armed_at = Some(Instant::now() - Duration::from_millis(1500));
+        assert!(
+            shell.arm_quit(),
+            "quit confirmation expired before two seconds"
+        );
+    }
+
+    #[test]
+    fn escape_confirmation_accepts_a_second_press_after_one_second() {
+        let mut shell = shell(App::new(pair()).seeded_blob("whilst"));
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("first Escape must arm clear");
+        shell.destructive_escape_armed_at = Some((
+            DestructiveEscape::ClearWords,
+            Instant::now() - Duration::from_millis(1500),
+        ));
+        shell
+            .handle(AppEvent::Cancel)
+            .expect("second Escape must confirm clear");
+        assert!(
+            shell.app.blob().is_empty(),
+            "Escape confirmation expired before two seconds"
+        );
+    }
+
+    #[test]
+    fn quit_confirmation_expires_after_two_seconds() {
+        let mut shell = shell(App::new(pair()));
+        shell.arm_quit();
+        shell.quit_armed_at = Some(Instant::now() - Duration::from_millis(2100));
+        assert!(
+            !shell.arm_quit(),
+            "quit confirmation stayed armed beyond two seconds"
         );
     }
 
