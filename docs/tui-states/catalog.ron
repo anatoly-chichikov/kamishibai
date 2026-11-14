@@ -2014,8 +2014,8 @@ Catalog(
                     Shot(
                         file: "docs/tui-states/live/32-welcome-language-grid.png",
                         origin: Synthetic,
-                        revision: Some("b0ed72c"),
-                        note: "Recaptured from the prepared scene on 2026-10-01 over renderer commit b0ed72c and inspected",
+                        revision: Some("e341cbee25d474d332a11a90a053eb15e2bcc023"),
+                        note: "Recaptured and visually inspected on 2026-11-14 from release gallery e341cbee25d474d332a11a90a053eb15e2bcc023 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; prepared appearance only",
                     ),
                 ]),
             ),
@@ -3436,8 +3436,8 @@ Catalog(
                     Shot(
                         file: "docs/tui-states/live/31-language-pair-modal.png",
                         origin: Synthetic,
-                        revision: Some("b0ed72c"),
-                        note: "Recaptured from the prepared scene on 2026-10-01 over renderer commit b0ed72c and inspected",
+                        revision: Some("e341cbee25d474d332a11a90a053eb15e2bcc023"),
+                        note: "Recaptured and visually inspected on 2026-11-14 from release gallery e341cbee25d474d332a11a90a053eb15e2bcc023 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; prepared appearance only",
                     ),
                 ]),
             ),
@@ -3497,8 +3497,8 @@ Catalog(
                     Shot(
                         file: "docs/tui-states/live/35-translation-preview.png",
                         origin: Synthetic,
-                        revision: Some("b0ed72c"),
-                        note: "Recaptured from the prepared scene on 2026-10-01 over renderer commit b0ed72c and inspected",
+                        revision: Some("e341cbee25d474d332a11a90a053eb15e2bcc023"),
+                        note: "Recaptured and visually inspected on 2026-11-14 from release gallery e341cbee25d474d332a11a90a053eb15e2bcc023 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; prepared appearance only",
                     ),
                 ]),
             ),
