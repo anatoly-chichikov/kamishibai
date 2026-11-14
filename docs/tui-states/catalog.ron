@@ -2,6 +2,11 @@ Catalog(
     version: 2,
     verifications: [
         Verification(
+            command: "cargo test --lib cli::export::screen::tests::export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome",
+            establishes: "Every prepared export Page and refusal plus empty deck selection is a catalog state whose header and footer match the real private renderer at 160x48; exhaustive Page and Refusal matches require an explicit inventory choice when variants change",
+            limits: "It does not execute the route, compare PNG pixels, or prove that every possible data-dependent variant has a prepared scene; the existing export snapshots separately cover representative narrow pages",
+        ),
+        Verification(
             command: "cargo test --test all ui_catalog::",
             establishes: "The catalog decodes into its typed schema; every entry's head sits on one line and its ID is unique across kinds; each intent has at least 8 words and at most 180 characters and is neither a placeholder, a duplicate nor a retelling of the screen; every screen entry names a runtime screen, state IDs carry their screen's prefix and scopes name real screens and states; actions, routes, sources, tests and gaps point at real states, symbols and test functions and no learner action leads into a fixture; every capture decodes, is cataloged and is written by the tape its origin names; every prepared scene is a catalog state or fixture whose header and footer equal what the real renderer draws",
             limits: "It never executes a described transition, judges whether an intent is true to the product, or compares a PNG with today's renderer; the chrome of states without a prepared scene stays unverified",
@@ -38,6 +43,33 @@ Catalog(
         ),
     ],
     rules: [
+        Rule(head: Head(id: "export.read-and-save", intent: "Anki history reaches a verified file through profile, exact deck choice and one confirmation, while cancellation drains work and removes unfinished output"),
+            scope: Screens(["export"]),
+            expectations: [
+                "The standalone export uses its own Page and Intent state machine and never enters a generation session or calls Gemini",
+                "Anki ownership is checked before local reads; the chosen source is read-only and source changes refuse publication",
+                "Profile selection is step 1/3, exact deck selection step 2/3 and summary, saving and outcome step 3/3",
+                "Space toggles one exact deck; an empty choice never falls back to defaults and cannot advance",
+                "The first Enter on a reviewed summary starts the save; backing out performs no write",
+                "Escape or Ctrl+C during publication cancels once and waits for worker cleanup; elsewhere Ctrl+C exits immediately",
+                "ExportBusy records the standalone loader's private Page variant rather than a generation BusyKind",
+                "Saved links become available only after verification and publication; no temporary path is presented as a result",
+                "PNG captures are absent; prepared unit-test scenes use the real private renderer without widening the runtime API",
+            ],
+            grounds: Grounds(
+                sources: [
+                    Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                    Source(file: "src/cli/export/terminal.rs", symbol: "run"),
+                    Source(file: "src/anki/history/source.rs", symbol: "SourceGate"),
+                ],
+                tests: [
+                    Check(file: "src/cli/export/screen.rs", test: "summary_confirmation_cannot_require_another_enter"),
+                    Check(file: "src/cli/export/screen.rs", test: "back_from_summary_cannot_request_a_write"),
+                    Check(file: "src/cli/export/screen.rs", test: "cancelling_an_active_save_waits_for_temporary_file_cleanup"),
+                    Check(file: "tests/common/tui_catalog.rs", test: "catalog_cannot_leave_the_standalone_export_without_an_entry"),
+                ],
+            ),
+        ),
         Rule(head: Head(id: "inventory.boundary", intent: "Agents editing the TUI can rely on this catalog's links and copy: every reference, test and capture origin must resolve, and prepared scenes must draw its header and footer"),
             scope: Everywhere,
             expectations: [
@@ -56,7 +88,7 @@ Catalog(
                 "An intent names a key only when that key is itself what is protected, and it is derived from code, tests, rules and history; an intent the sources cannot settle stays partial and its question goes to the owner",
                 "An intent changes only when a request changes what the learner gets; code that contradicts an expectation becomes a gap instead",
                 "A rule's scope names where it applies: Everywhere, whole screens by their ID, or individual states",
-                "A screen's ID is the prefix of every state and fixture on it: welcome, words, review, cards and done",
+                "A screen's ID is the prefix of every state and fixture on it: welcome, words, review, cards, done and export",
                 "A fixture is a prepared scene that exists only to check layout; no learner action leads into it and its intent speaks to developers",
             ],
             grounds: Grounds(
@@ -98,6 +130,9 @@ Catalog(
                     Check(file: "tests/snapshot.rs", test: "ai_disclaimer_uses_the_full_terminal_width_when_the_copy_fits"),
                     Check(file: "tests/your_words.rs", test: "understanding_busy_overlay_keeps_the_your_words_background"),
                 ],
+                gaps: [
+                    Gap(summary: "The standalone Anki export shares the header, divider and footer but draws no AI reminder; its data comes from local Anki history rather than generated cards", sources: [Source(file: "src/cli/export/screen.rs", symbol: "Screen"), Source(file: "src/cli/export/terminal.rs", symbol: "run")]),
+                ],
             ),
         ),
         Rule(head: Head(id: "chrome.header", intent: "The header names what is on screen and the one next step worth taking; counts stay in the body, so the card title holds still for a whole run"),
@@ -127,6 +162,9 @@ Catalog(
                     Check(file: "src/tui/screens/your_cards.rs", test: "stopping_takes_precedence_over_running_and_staged_work"),
                     Check(file: "src/tui/screens/your_cards.rs", test: "staged_changes_cannot_claim_that_the_published_files_are_current"),
                 ],
+                gaps: [
+                    Gap(summary: "The standalone Anki export uses the additional title export from anki and step-specific hints, outside the five generation screen titles named above", sources: [Source(file: "src/cli/export/screen.rs", symbol: "Screen"), Source(file: "src/cli/export/terminal.rs", symbol: "run")]),
+                ],
             ),
         ),
         Rule(head: Head(id: "chrome.language-pair", intent: "Which direction a batch is built in stays visible on every screen after setup, and the pair can change only until cards are committed"),
@@ -155,6 +193,7 @@ Catalog(
                     Check(file: "src/tui/screens/modals.rs", test: "the_same_language_shares_a_row_across_both_columns"),
                 ],
                 gaps: [
+                    Gap(summary: "The standalone Anki export has no language-pair chip because a chosen collection may contain several learning languages", sources: [Source(file: "src/cli/export/screen.rs", symbol: "Screen"), Source(file: "src/cli/export/terminal.rs", symbol: "run")]),
                     Gap(
                         summary: "Hindi is listed by its English name although it is written left to right; the rule names only right-to-left scripts as exceptions",
                         sources: [
@@ -227,6 +266,9 @@ Catalog(
                     Check(file: "tests/your_cards.rs", test: "the_vim_walk_reaches_the_cards_screen_too"),
                     Check(file: "tests/sentence_labels_editor.rs", test: "both_r_keys_are_inert_while_space_opens_the_card_and_a_tag_opens_the_live_editor"),
                 ],
+                gaps: [
+                    Gap(summary: "The standalone export uses Enter and Right to advance, Space to select exact decks, and Left to go back; it does not use the generation disclosure grammar", sources: [Source(file: "src/cli/export/screen.rs", symbol: "Screen"), Source(file: "src/cli/export/terminal.rs", symbol: "run")]),
+                ],
             ),
         ),
         Rule(head: Head(id: "keyboard.layouts", intent: "Printed shortcuts work from Russian, Ukrainian or Greek layouts without switching, while every typed word keeps exactly the letters entered"),
@@ -281,6 +323,7 @@ Catalog(
                     Check(file: "tests/your_cards.rs", test: "an_open_tunable_card_advertises_the_walk_into_its_editor"),
                 ],
                 gaps: [
+                    Gap(summary: "The standalone export owns its footer without ScreenView and offers Esc exit or back instead of the global generation quit hint", sources: [Source(file: "src/cli/export/screen.rs", symbol: "Screen"), Source(file: "src/cli/export/terminal.rs", symbol: "run")]),
                     Gap(
                         summary: "Under a plain error overlay the base hints stay visible ([Esc] clear and [Ctrl+L] languages on words, [Esc] stop on cards) although those keys only dismiss the error; screen_hints suppresses base hints only for busy and modal overlays",
                         sources: [
@@ -348,6 +391,7 @@ Catalog(
                     Check(file: "src/tui/screens/common.rs", test: "the_way_back_is_the_first_hint_a_narrowing_bar_sheds"),
                 ],
                 gaps: [
+                    Gap(summary: "The standalone export does not advertise Ctrl+C; its dismissal and cancellation hints are Esc, while Ctrl+C still exits or cancels through its terminal driver", sources: [Source(file: "src/cli/export/screen.rs", symbol: "Screen"), Source(file: "src/cli/export/terminal.rs", symbol: "run")]),
                     Gap(
                         summary: "Welcome's [Esc] back is a secondary Useful hint rather than the review's ghost back",
                         sources: [
@@ -865,6 +909,9 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "second_escape_on_reopened_done_starts_clean_words_in_place"),
                     Check(file: "src/cli/shell.rs", test: "failed_publish_after_stop_keeps_the_session_and_paid_cards"),
                 ],
+                gaps: [
+                    Gap(summary: "The standalone export exits or cancels on one Ctrl+C or Escape rather than a two-second confirmation; cancelling a save waits for unfinished-file cleanup", sources: [Source(file: "src/cli/export/screen.rs", symbol: "Screen"), Source(file: "src/cli/export/terminal.rs", symbol: "run")]),
+                ],
             ),
         ),
         Rule(head: Head(id: "overlay.ownership", intent: "Waiting on a request or recovering from one never costs work: a running request ignores stray keys, and one retry press dismisses the error and reruns what failed"),
@@ -1008,6 +1055,9 @@ Catalog(
                     Check(file: "src/cli/shell.rs", test: "stop_applies_the_inflight_outcome_then_publishes_only_ready_cards"),
                     Check(file: "src/cli/shell.rs", test: "a_step_holds_its_row_for_its_own_beat_before_it_settles"),
                 ],
+                gaps: [
+                    Gap(summary: "The standalone export has a separate pure Page and Intent machine and terminal driver rather than App, AppEvent and Side; local I/O remains outside its screen", sources: [Source(file: "src/cli/export/screen.rs", symbol: "Screen"), Source(file: "src/cli/export/terminal.rs", symbol: "run")]),
+                ],
             ),
         ),
         Rule(head: Head(id: "removed.features", intent: "Features cut for confusing the learner stay out, and each reason is kept so a later change does not quietly bring back a half-working key or screen"),
@@ -1045,11 +1095,17 @@ Catalog(
                     Check(file: "tests/your_words.rs", test: "an_empty_words_box_spends_no_brightness_on_a_key_the_app_does_not_own"),
                     Check(file: "src/cli/shell.rs", test: "first_pass_keeps_commas_inside_lines"),
                 ],
+                gaps: [
+                    Gap(summary: "The standalone export presents failures on its own Stopped page rather than within a generation batch; it never opens a generation session", sources: [Source(file: "src/cli/export/screen.rs", symbol: "Screen"), Source(file: "src/cli/export/terminal.rs", symbol: "run")]),
+                ],
             ),
         ),
     ],
     map: Map(
         screens: [
+            Screen(head: Head(id: "export", intent: "Anki cards and review history leave as one verified file after explicit deck selection and confirmation, with the original collection kept read-only"),
+                screen: "AnkiExport",
+            ),
             Screen(head: Head(id: "welcome", intent: "Setup asks only what cannot be guessed: the learner's own language once and a Gemini key that has been checked; a later key failure asks for the key alone"),
                 screen: "Welcome",
             ),
@@ -1067,6 +1123,810 @@ Catalog(
             ),
         ],
         states: [
+            State(head: Head(id: "export.checking", intent: "Your Anki collection is checked for safe access before any profile or review history is read"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: ExportBusy("Checking")),
+                    chrome: Chrome(title: "export from anki", hint: "choose your anki profile", footer: ["[Esc] exit"]),
+                    expectations: [
+                        "The ownership check runs before profile discovery; no Gemini key or generation session is required",
+                    ],
+                    actions: [
+                        Action(
+                            event: "requested profile is absent",
+                            target: "export.profile-missing",
+                            condition: "an explicit --profile has no match",
+                            expectation: "Name available profiles before another invocation",
+                        ),
+                        Action(
+                            event: "ownership check succeeds",
+                            target: "export.profile",
+                            condition: "profiles were discovered",
+                            expectation: "Offer the discovered profiles",
+                        ),
+                        Action(
+                            event: "Anki owns the collection",
+                            target: "export.anki-open",
+                            condition: "ownership check refuses",
+                            expectation: "Ask for Anki to be closed",
+                        ),
+                        Action(
+                            event: "no profiles discovered",
+                            target: "export.no-profiles",
+                            condition: "discovery has no readable collection",
+                            expectation: "Name the searched roots",
+                        ),
+                        Action(
+                            event: "discovery fails",
+                            target: "export.read-failed",
+                            condition: "an operational read error occurs",
+                            expectation: "Keep the diagnosis visible",
+                        ),
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.checking",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.profile", intent: "A specific Anki profile is chosen before its decks are read, keeping separate learners apart"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "choose your anki profile", footer: ["[Enter] choose decks", "[↑↓] nav", "[Esc] exit"]),
+                    expectations: [
+                        "Up and Down move the focused profile; Enter or Right starts reading only that profile",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter or Right",
+                            target: "export.loading",
+                            condition: "a profile is focused",
+                            expectation: "Read the chosen profile",
+                        ),
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.profile",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "choosing_another_profile_cannot_reuse_the_previous_profile"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.loading", intent: "The chosen profile stays visible while its decks are discovered, without starting a save"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: ExportBusy("Loading")),
+                    chrome: Chrome(title: "export from anki", hint: "choose your anki profile", footer: ["[Esc] exit"]),
+                    expectations: [
+                        "The profile list remains under the shared loader while local deck discovery runs",
+                    ],
+                    actions: [
+                        Action(
+                            event: "requested deck is absent",
+                            target: "export.deck-missing",
+                            condition: "an explicit exact deck name has no match",
+                            expectation: "Ask for the full deck path",
+                        ),
+                        Action(
+                            event: "deck discovery succeeds",
+                            target: "export.decks",
+                            condition: "the chosen collection is readable",
+                            expectation: "Keep default eligible deck choices visible",
+                        ),
+                        Action(
+                            event: "collection access fails",
+                            target: "export.collection-unreadable",
+                            condition: "the chosen collection is unavailable",
+                            expectation: "Name the access problem",
+                        ),
+                        Action(
+                            event: "schema is unsupported",
+                            target: "export.schema-refused",
+                            condition: "the chosen collection has an unsupported schema",
+                            expectation: "Stop without saving",
+                        ),
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.loading",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "busy_pages_keep_the_previous_page_under_the_loader"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.decks", intent: "Exact decks are chosen with their own card counts, without silently including child decks"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "choose decks to export", footer: ["[Enter] next", "[Space] select", "[↑↓] nav", "[Esc] back"]),
+                    expectations: [
+                        "Space toggles only the focused exact deck; a parent choice does not select its descendants",
+                        "The status counts cards in the selected decks and keeps step 2/3 in the footer",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter or Right",
+                            target: "export.reading",
+                            condition: "at least one exact deck is selected",
+                            expectation: "Prepare the chosen snapshot for review",
+                        ),
+                        Action(
+                            event: "Space",
+                            target: "export.decks-empty",
+                            condition: "the final selected deck is toggled off",
+                            expectation: "Keep the empty choice without falling back to defaults",
+                        ),
+                        Action(
+                            event: "Esc or Left",
+                            target: "export.profile",
+                            condition: "always",
+                            expectation: "Return to the chosen profile list",
+                        ),
+                        Action(
+                            event: "Ctrl+C",
+                            target: "export.decks",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "deck_navigation_cannot_select_a_descendant_implicitly"),
+                        Check(file: "src/cli/export/screen.rs", test: "the_status_counts_the_cards_of_chosen_decks"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.decks-empty", intent: "An empty deck choice stays empty until a deck is selected, with no inactive next action"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "choose decks to export", footer: ["[Space] select", "[↑↓] nav", "[Esc] back"]),
+                    expectations: [
+                        "The footer says no decks chosen; Enter does nothing and is not advertised",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Space",
+                            target: "export.decks",
+                            condition: "an unselected deck is focused",
+                            expectation: "Select exactly the focused deck",
+                        ),
+                        Action(
+                            event: "Esc or Left",
+                            target: "export.profile",
+                            condition: "always",
+                            expectation: "Return to profile selection",
+                        ),
+                        Action(
+                            event: "Ctrl+C",
+                            target: "export.decks-empty",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "an_empty_checklist_cannot_offer_an_inert_enter"),
+                        Check(file: "src/cli/export/screen.rs", test: "an_empty_selection_cannot_fall_back_to_default_decks"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.reading", intent: "Chosen decks remain visible while their cards and reviews are counted for a confirmed summary"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: ExportBusy("Reading")),
+                    chrome: Chrome(title: "export from anki", hint: "choose decks to export", footer: ["[Esc] exit"]),
+                    expectations: [
+                        "The chosen deck list remains below the loader while a read-only snapshot is prepared",
+                    ],
+                    actions: [
+                        Action(
+                            event: "snapshot prepared",
+                            target: "export.summary",
+                            condition: "counts and source validation succeed",
+                            expectation: "Offer the summary before writing",
+                        ),
+                        Action(
+                            event: "source changes",
+                            target: "export.source-changed",
+                            condition: "the reviewed collection changes",
+                            expectation: "Refuse the inconsistent source",
+                        ),
+                        Action(
+                            event: "selection exceeds the limit",
+                            target: "export.oversized",
+                            condition: "the chosen cards exceed the export ceiling",
+                            expectation: "Offer the existing deck choices again",
+                        ),
+                        Action(
+                            event: "output is unsafe",
+                            target: "export.destination-refused",
+                            condition: "the output directory is inside Anki storage",
+                            expectation: "Refuse before writing",
+                        ),
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.reading",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "busy_pages_keep_the_previous_page_under_the_loader"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.summary", intent: "Cards, review history and destination are reviewed together before one deliberate save begins"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "save for kamishibai web", footer: ["[Enter] save", "[Esc] back"]),
+                    expectations: [
+                        "Step 3/3 describes the reviewed snapshot and output folder; the first Enter starts publication",
+                        "Long summaries scroll and narrow screens retain the save action and destination",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter or Right",
+                            target: "export.saving",
+                            condition: "the reviewed summary is current",
+                            expectation: "Write and verify the reviewed file",
+                        ),
+                        Action(
+                            event: "Esc or Left",
+                            target: "export.decks",
+                            condition: "always",
+                            expectation: "Return to the existing selection without writing",
+                        ),
+                        Action(
+                            event: "Ctrl+C",
+                            target: "export.summary",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "summary_confirmation_cannot_require_another_enter"),
+                        Check(file: "src/cli/export/screen.rs", test: "back_from_summary_cannot_request_a_write"),
+                        Check(file: "src/cli/export/screen.rs", test: "narrow_summary_cannot_hide_the_save_action_or_destination"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.saving", intent: "The reviewed file is written and verified while the chosen summary stays available underneath"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: ExportBusy("Saving")),
+                    chrome: Chrome(title: "export from anki", hint: "saving your file", footer: ["[Esc] cancel"]),
+                    expectations: [
+                        "The terminal driver writes only after summary confirmation; it verifies the archive before publishing the final path",
+                    ],
+                    actions: [
+                        Action(
+                            event: "publication succeeds",
+                            target: "export.saved",
+                            condition: "the archive has been verified and published",
+                            expectation: "Hand back the verified file",
+                        ),
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.cancelling",
+                            condition: "publication is active",
+                            expectation: "Cancel and wait for temporary-file cleanup",
+                        ),
+                        Action(
+                            event: "publication fails",
+                            target: "export.save-failed",
+                            condition: "the save returns an operational error",
+                            expectation: "Preserve the selected decks",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "busy_pages_keep_the_previous_page_under_the_loader"),
+                        Check(file: "src/cli/export/screen.rs", test: "cancelling_an_active_save_waits_for_temporary_file_cleanup"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.cancelling", intent: "Cancelling waits for the unfinished file to be removed before returning control to the terminal"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: ExportBusy("Cancelling")),
+                    chrome: Chrome(title: "export from anki", hint: "cancelling the save", footer: []),
+                    expectations: [
+                        "Further cancellation keys do nothing while the driver drains the worker and removes its temporary file",
+                    ],
+                    actions: [
+                        Action(
+                            event: "cleanup completes",
+                            target: "export.cancelling",
+                            condition: "the worker has stopped",
+                            expectation: "Return to the terminal after removing the unfinished file; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "cancelling_an_active_save_waits_for_temporary_file_cleanup"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.saved", intent: "The verified file and its folder are handed back with a direct route to importing online"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "your file is ready", footer: ["[Enter] exit"]),
+                    expectations: [
+                        "The FOLDER and FILE links name the verified archive and its parent directory",
+                        "The underlined app.kamishibai.io domain opens the import page; Enter exits the process",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter, Right, Esc, Left or Ctrl+C",
+                            target: "export.saved",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "the_saved_page_names_the_folder_and_the_file"),
+                        Check(file: "src/cli/export/screen.rs", test: "file_links_cannot_extend_beyond_the_underlined_labels"),
+                        Check(file: "src/cli/export/screen.rs", test: "the_import_link_cannot_capture_the_prefix_or_surrounding_cells"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.anki-open", intent: "An open or crashed Anki is named before reading begins, with a way to check again"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "close anki first", footer: ["[Enter] check again", "[Esc] exit"]),
+                    expectations: [
+                        "The screen asks the learner to sync in Anki and then close Anki before another ownership check",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter or Right",
+                            target: "export.checking",
+                            condition: "Anki has been closed",
+                            expectation: "Recheck ownership before reading",
+                        ),
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.anki-open",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "a_stop_keeps_the_step_it_happened_on"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.source-changed", intent: "A changed source collection is refused so the learner can close Anki and check again"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "close anki first", footer: ["[Enter] check again", "[Esc] exit"]),
+                    expectations: [
+                        "An inconsistent source is not published; the learner is told to keep Anki closed",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter or Right",
+                            target: "export.checking",
+                            condition: "the source is stable again",
+                            expectation: "Run a fresh ownership and discovery check",
+                        ),
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.source-changed",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.no-profiles", intent: "Missing Anki profiles name the searched location and the explicit collection option before another check"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "the export stopped", footer: ["[Enter] check again", "[Esc] exit"]),
+                    expectations: [
+                        "Searched roots and --collection are shown; another check is available after correcting discovery",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter or Right",
+                            target: "export.checking",
+                            condition: "the collection has become discoverable",
+                            expectation: "Repeat ownership and discovery",
+                        ),
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.no-profiles",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.profile-missing", intent: "A missing requested profile names the available profiles so the launch can be corrected"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "the export stopped", footer: ["[Esc] exit"]),
+                    expectations: [
+                        "A missing explicit profile is determined by launch flags and offers no inactive retry",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.profile-missing",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "refusals_decided_by_flags_offer_no_retry"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.deck-missing", intent: "A missing exact deck name keeps the full path requirement visible before another launch"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "the export stopped", footer: ["[Esc] exit"]),
+                    expectations: [
+                        "The refusal asks for a full deck name with --deck and offers no retry for unchanged flags",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.deck-missing",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "refusals_decided_by_flags_offer_no_retry"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.collection-unreadable", intent: "An unreadable chosen collection stops before deck discovery and names the access problem"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "the export stopped", footer: ["[Esc] exit"]),
+                    expectations: [
+                        "An unreadable explicit collection shows its access failure and never offers imaginary decks",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.collection-unreadable",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.destination-refused", intent: "An unsafe destination keeps the chosen decks available while the learner selects a different output folder"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "the export stopped", footer: ["[Esc] back"]),
+                    expectations: [
+                        "Saving inside an Anki directory is refused at step 3/3; Escape and Left return to the unchanged deck choices",
+                        "The output folder comes from launch arguments, so a corrected folder requires a new invocation",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Esc or Left",
+                            target: "export.decks",
+                            condition: "always",
+                            expectation: "Return to the exact selected decks",
+                        ),
+                        Action(
+                            event: "Ctrl+C",
+                            target: "export.destination-refused",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "an_output_refusal_cannot_exit_instead_of_returning_to_chosen_decks"),
+                        Check(file: "src/cli/export/screen.rs", test: "an_unsafe_folder_cannot_refuse_at_the_deck_step"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.oversized", intent: "An oversized deck selection returns to the existing choices so the learner can reduce it"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "the export stopped", footer: ["[Enter] choose decks", "[Esc] exit"]),
+                    expectations: [
+                        "A single oversized deck and an oversized combined selection receive distinct instructions",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter or Right",
+                            target: "export.decks",
+                            condition: "always",
+                            expectation: "Keep the selected deck names available for reduction",
+                        ),
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.oversized",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "an_oversized_refusal_returns_to_the_chosen_decks"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.schema-refused", intent: "An unsupported Anki version stops the export before saving and asks for an application update"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "the export stopped", footer: ["[Esc] exit"]),
+                    expectations: [
+                        "The schema refusal asks for a kamishibai update and offers no retry with unchanged input",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.schema-refused",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "refusals_decided_by_flags_offer_no_retry"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.read-failed", intent: "A failed collection read keeps its diagnosis visible and offers a fresh ownership check"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "the export stopped", footer: ["[Enter] check again", "[Esc] exit"]),
+                    expectations: [
+                        "An operational failure before saving keeps the failing step and diagnosis visible",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter or Right",
+                            target: "export.checking",
+                            condition: "the read problem is corrected",
+                            expectation: "Repeat the initial ownership check",
+                        ),
+                        Action(
+                            event: "Esc, Left or Ctrl+C",
+                            target: "export.read-failed",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "a_stop_keeps_the_step_it_happened_on"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
+            State(head: Head(id: "export.save-failed", intent: "A failed save preserves the exact deck choices and prepares a new summary when retried"),
+                contract: Contract(
+                    surface: Surface(screen: "AnkiExport", overlay: Clear),
+                    chrome: Chrome(title: "export from anki", hint: "the export stopped", footer: ["[Enter] check again", "[Esc] back"]),
+                    expectations: [
+                        "A save error at step 3/3 never reloads the default deck selection",
+                        "Enter re-prepares the chosen snapshot and its summary; it never skips confirmation or writes immediately",
+                    ],
+                    actions: [
+                        Action(
+                            event: "Enter or Right",
+                            target: "export.reading",
+                            condition: "the output problem is corrected",
+                            expectation: "Prepare a fresh summary of the same exact decks",
+                        ),
+                        Action(
+                            event: "Esc or Left",
+                            target: "export.decks",
+                            condition: "always",
+                            expectation: "Return to the unchanged selection",
+                        ),
+                        Action(
+                            event: "Ctrl+C",
+                            target: "export.save-failed",
+                            condition: "publication is not active",
+                            expectation: "Exit the process; this terminal action has no next UI state",
+                        ),
+                    ],
+                ),
+                grounds: Grounds(
+                    sources: [
+                        Source(file: "src/cli/export/screen.rs", symbol: "Page"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Screen"),
+                        Source(file: "src/cli/export/screen.rs", symbol: "Refusal"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/export/screen.rs", test: "export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome"),
+                        Check(file: "src/cli/export/screen.rs", test: "checking_again_after_a_write_failure_cannot_reload_the_default_decks"),
+                    ],
+                ),
+                evidence: Missing("No PNG has been recorded for the standalone export; its prepared test scenes compare current renderer chrome at 160x48, and the existing export snapshots cover representative pages at 120x36 and 42x16"),
+            ),
             State(head: Head(id: "welcome.language", intent: "Every gloss and translation will be written in the language chosen here, so the learner names it first and no saved or environment key can skip the choice"),
                 contract: Contract(
                     surface: Surface(screen: "Welcome", overlay: Clear),
@@ -4160,8 +5020,12 @@ Catalog(
                     ],
                 ),
                 grounds: Grounds(
-                    sources: [Source(file: "src/cli/shell.rs", symbol: "handle_new_batch_escape")],
-                    tests: [Check(file: "src/cli/shell.rs", test: "leaving_a_stopped_unsaved_batch_requires_the_existing_double_escape")],
+                    sources: [
+                        Source(file: "src/cli/shell.rs", symbol: "handle_new_batch_escape"),
+                    ],
+                    tests: [
+                        Check(file: "src/cli/shell.rs", test: "leaving_a_stopped_unsaved_batch_requires_the_existing_double_escape"),
+                    ],
                 ),
                 evidence: Captured([
                     Shot(
@@ -4670,6 +5534,60 @@ Catalog(
             ),
         ],
         scenarios: [
+            Scenario(head: Head(id: "export.save-history", intent: "Anki history reaches its verified file only after a profile, exact deck choices and a reviewed summary have each been confirmed"),
+                route: ["export.checking", "export.profile", "export.loading", "export.decks", "export.reading", "export.summary", "export.saving", "export.saved"],
+                expectations: [
+                    "No write precedes the summary confirmation and only the verified path becomes the outcome",
+                ],
+                tests: [
+                    Check(file: "src/cli/export/screen.rs", test: "summary_confirmation_cannot_require_another_enter"),
+                ],
+            ),
+            Scenario(head: Head(id: "export.empty-choice", intent: "Clearing the final selected deck keeps the choice empty until the learner deliberately selects a deck again"),
+                route: ["export.decks", "export.decks-empty", "export.decks", "export.reading", "export.summary"],
+                expectations: [
+                    "An empty selection offers no Enter action and cannot restore defaults implicitly",
+                ],
+                tests: [
+                    Check(file: "src/cli/export/screen.rs", test: "an_empty_selection_cannot_fall_back_to_default_decks"),
+                ],
+            ),
+            Scenario(head: Head(id: "export.retry-save", intent: "A failed save returns through a fresh summary of the same exact decks before another save is confirmed"),
+                route: ["export.saving", "export.save-failed", "export.reading", "export.summary", "export.saving"],
+                expectations: [
+                    "Retry preserves exact choices and requires a fresh confirmation",
+                ],
+                tests: [
+                    Check(file: "src/cli/export/screen.rs", test: "checking_again_after_a_write_failure_cannot_reload_the_default_decks"),
+                ],
+            ),
+            Scenario(head: Head(id: "export.cancel-save", intent: "Cancelling a running save returns control only after the unfinished output has been removed and the worker has stopped"),
+                route: ["export.summary", "export.saving", "export.cancelling"],
+                expectations: [
+                    "Cancellation drains publication before returning to the terminal",
+                ],
+                tests: [
+                    Check(file: "src/cli/export/screen.rs", test: "cancelling_an_active_save_waits_for_temporary_file_cleanup"),
+                ],
+            ),
+            Scenario(head: Head(id: "export.close-anki", intent: "Anki ownership refusal returns through another ownership check before any profile or deck is read"),
+                route: ["export.checking", "export.anki-open", "export.checking", "export.profile"],
+                expectations: [
+                    "The refused source is never read while Anki owns it",
+                ],
+                tests: [
+                    Check(file: "src/cli/export/screen.rs", test: "a_stop_keeps_the_step_it_happened_on"),
+                ],
+            ),
+            Scenario(head: Head(id: "export.reduce-selection", intent: "An oversized selection returns to the same exact deck choices so fewer cards can be reviewed before saving"),
+                route: ["export.decks", "export.reading", "export.oversized", "export.decks", "export.reading", "export.summary"],
+                expectations: [
+                    "The refusal keeps the choices rather than rebuilding the default selection",
+                ],
+                tests: [
+                    Check(file: "src/cli/export/screen.rs", test: "an_oversized_refusal_returns_to_the_chosen_decks"),
+                ],
+            ),
             Scenario(head: Head(id: "setup.new-learner", intent: "A first launch reaches the words through two questions only, the learner's own language and then a key Gemini accepts, in that order"),
                 route: ["welcome.language", "welcome.key", "welcome.checking-key", "words.empty", "words.editing"],
                 expectations: [
@@ -5139,8 +6057,12 @@ Catalog(
             ),
             Scenario(head: Head(id: "cards.leave-stopped", intent: "A learner can deliberately leave an unsaved stopped batch and start fresh, while a stray Escape only closes the error or arms confirmation"),
                 route: ["cards.stopped-publish-error", "cards.stopped", "cards.stopped-new-batch-armed", "words.empty"],
-                expectations: ["Escape first dismisses the saving diagnostic; two fresh Escape presses within two seconds start a new batch without deleting the stopped session"],
-                tests: [Check(file: "src/cli/shell.rs", test: "leaving_a_stopped_unsaved_batch_requires_the_existing_double_escape")],
+                expectations: [
+                    "Escape first dismisses the saving diagnostic; two fresh Escape presses within two seconds start a new batch without deleting the stopped session",
+                ],
+                tests: [
+                    Check(file: "src/cli/shell.rs", test: "leaving_a_stopped_unsaved_batch_requires_the_existing_double_escape"),
+                ],
             ),
             Scenario(head: Head(id: "cards.stopped-publish-failure", intent: "If saving a stopped subset fails, the finished cards and the session wait for another save with the reason shown, and no paid work restarts on its own"),
                 route: ["cards.generating", "cards.stop-armed", "cards.stopping", "cards.publish-deck", "cards.stopped-publish-error", "cards.stopped", "cards.publish-deck", "cards.publish-report", "cards.partial"],

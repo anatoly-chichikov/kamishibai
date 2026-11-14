@@ -3,6 +3,8 @@
 //! stays its own target to keep insta snapshot filenames stable. Run one
 //! module with `cargo test --test all your_cards::`.
 
+use kamishibai::tui;
+
 mod agent_contract;
 mod agent_onboarding;
 mod anki;

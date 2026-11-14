@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use crate::tui::{self, BusyKind, ModalKind};
 use anyhow::{Context, Result};
-use kamishibai::tui::{self, BusyKind, ModalKind};
 use serde::{Deserialize, Deserializer};
 
 /// Authored interface intent; load with `try_from_document` and inspect its links and copy.
@@ -150,6 +150,7 @@ enum Overlay {
     Clear,
     Modal(String),
     Busy(String),
+    ExportBusy(String),
     Error,
 }
 
@@ -560,18 +561,14 @@ fn scope(
 
 fn screens_of(screens: &[Screen], states: &[&State], faults: &mut Vec<Violation>) {
     for screen in screens {
-        if !runtime_screens()
-            .iter()
-            .any(|runtime| screen_name(*runtime) == screen.screen)
-        {
+        if !screen_names().any(|runtime| runtime == screen.screen) {
             faults.push(Violation::UnknownSurface(format!(
                 "screen {} names {}, which is not a runtime screen",
                 screen.head.id, screen.screen
             )));
         }
     }
-    for runtime in runtime_screens() {
-        let name = screen_name(runtime);
+    for name in screen_names() {
         let entries = screens
             .iter()
             .filter(|screen| screen.screen == name)
@@ -658,10 +655,7 @@ fn grounds(value: &Grounds, root: &Path, owner: &str, faults: &mut Vec<Violation
 }
 
 fn surface(value: &Surface, owner: &str, faults: &mut Vec<Violation>) {
-    if !runtime_screens()
-        .iter()
-        .any(|screen| screen_name(*screen) == value.screen)
-    {
+    if !screen_names().any(|screen| screen == value.screen) {
         faults.push(Violation::UnknownSurface(format!(
             "{owner}: {}",
             value.screen
@@ -671,6 +665,9 @@ fn surface(value: &Surface, owner: &str, faults: &mut Vec<Violation>) {
         Overlay::Clear | Overlay::Error => true,
         Overlay::Modal(name) => modals().iter().any(|modal| modal_name(*modal) == name),
         Overlay::Busy(name) => jobs().iter().any(|job| busy_name(*job) == name),
+        Overlay::ExportBusy(name) => {
+            value.screen == "AnkiExport" && export_jobs().contains(&name.as_str())
+        }
     };
     if !known {
         faults.push(Violation::UnknownSurface(owner.to_owned()));
@@ -807,8 +804,7 @@ fn relative(path: &Path) -> bool {
 }
 
 fn coverage(states: &[State], faults: &mut Vec<Violation>) {
-    for screen in runtime_screens() {
-        let name = screen_name(screen);
+    for name in screen_names() {
         if !states
             .iter()
             .any(|state| state.contract.surface.screen == name)
@@ -830,6 +826,11 @@ fn coverage(states: &[State], faults: &mut Vec<Violation>) {
             matches!(&state.contract.surface.overlay, Overlay::Busy(value) if value == name)
         }) {
             faults.push(Violation::MissingSurface(name.to_owned()));
+        }
+    }
+    for name in export_jobs() {
+        if !states.iter().any(|state| matches!(&state.contract.surface.overlay, Overlay::ExportBusy(value) if value == name)) {
+            faults.push(Violation::MissingSurface(format!("AnkiExport::{name}")));
         }
     }
     if !states
@@ -975,6 +976,17 @@ fn runtime_screens() -> [tui::Screen; 5] {
         tui::Screen::YourCards,
         tui::Screen::Done,
     ]
+}
+
+fn screen_names() -> impl Iterator<Item = &'static str> {
+    runtime_screens()
+        .into_iter()
+        .map(screen_name)
+        .chain(["AnkiExport"])
+}
+
+fn export_jobs() -> [&'static str; 5] {
+    ["Checking", "Loading", "Reading", "Saving", "Cancelling"]
 }
 
 fn screen_name(screen: tui::Screen) -> &'static str {
@@ -1525,6 +1537,28 @@ mod tests {
                 .iter()
                 .any(|fault| matches!(fault, Violation::MissingSurface(name) if name.contains("Welcome"))),
             "a runtime screen had no catalog entry and nothing noticed"
+        );
+    }
+
+    #[test]
+    fn catalog_cannot_leave_the_standalone_export_without_an_entry() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        assert!(catalog(vec![state("cards.open")], Vec::new()).inspect(directory.path()).iter().any(|fault| matches!(fault, Violation::MissingSurface(name) if name.contains("AnkiExport"))), "the standalone export escaped runtime screen coverage");
+    }
+
+    #[test]
+    fn an_export_loader_cannot_belong_to_the_generation_screen() {
+        let directory = tempfile::tempdir().expect("invariant: temporary root must exist");
+        let mut scene = state("cards.open");
+        scene.contract.surface.overlay = Overlay::ExportBusy(String::from("Checking"));
+        assert!(
+            catalog(vec![scene], Vec::new())
+                .inspect(directory.path())
+                .iter()
+                .any(
+                    |fault| matches!(fault, Violation::UnknownSurface(name) if name == "cards.open")
+                ),
+            "an export loader was accepted on the generation screen"
         );
     }
 

@@ -23,6 +23,10 @@ use crate::tui::{
 const IMPORT_PREFIX: &str = "import at ";
 const IMPORT_DOMAIN: &str = "app.kamishibai.io";
 
+#[cfg(test)]
+#[path = "../../../tests/common/tui_catalog.rs"]
+mod catalog;
+
 /// One requested operation; only the terminal driver performs I/O.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Intent {
@@ -764,6 +768,94 @@ mod tests {
                 step: 3,
             }),
         ]
+    }
+
+    fn catalog_id(page: &Page) -> &'static str {
+        match page {
+            Page::Checking => "export.checking",
+            Page::Profile => "export.profile",
+            Page::Loading => "export.loading",
+            Page::Decks => "export.decks",
+            Page::Reading => "export.reading",
+            Page::Summary(_) => "export.summary",
+            Page::Saving(_) => "export.saving",
+            Page::Cancelling(_) => "export.cancelling",
+            Page::Saved(_) => "export.saved",
+            Page::Stopped(stop) => match &stop.refusal {
+                Refusal::Open => "export.anki-open",
+                Refusal::Changed => "export.source-changed",
+                Refusal::NoProfiles { .. } => "export.no-profiles",
+                Refusal::NoProfile { .. } => "export.profile-missing",
+                Refusal::Deck(_) => "export.deck-missing",
+                Refusal::Collection(_) => "export.collection-unreadable",
+                Refusal::Destination => "export.destination-refused",
+                Refusal::Oversized { .. } => "export.oversized",
+                Refusal::Schema => "export.schema-refused",
+                Refusal::Other(_) if stop.step == 3 => "export.save-failed",
+                Refusal::Other(_) => "export.read-failed",
+            },
+        }
+    }
+
+    fn catalog_pages() -> Vec<Page> {
+        let mut pages = pages();
+        for refusal in [
+            Refusal::Changed,
+            Refusal::NoProfiles {
+                roots: String::from("/Anki2"),
+            },
+            Refusal::NoProfile {
+                name: String::from("Learner"),
+                available: String::from("User 1, User 2"),
+            },
+            Refusal::Deck(String::from("no deck named French::Missing")),
+            Refusal::Collection(String::from("collection could not be read")),
+            Refusal::Oversized { decks: 2 },
+            Refusal::Schema,
+            Refusal::Other(String::from("collection read failed")),
+        ] {
+            pages.push(Page::Stopped(Stop { refusal, step: 1 }));
+        }
+        pages.push(Page::Stopped(Stop {
+            refusal: Refusal::Other(String::from("output path is a file")),
+            step: 3,
+        }));
+        pages
+    }
+
+    #[test]
+    fn export_pages_cannot_escape_the_catalog_or_drift_from_its_chrome() {
+        let document = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/tui-states/catalog.ron"),
+        )
+        .unwrap();
+        let catalog = catalog::Catalog::try_from_document(&document).unwrap();
+        let mut renders = catalog_pages()
+            .into_iter()
+            .map(|page| {
+                (
+                    String::from(catalog_id(&page)),
+                    render(&mut screen(page), 160, 48)
+                        .trim_end_matches('\n')
+                        .to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut empty = screen(Page::Decks);
+        empty.key(KeyCode::Char(' '));
+        renders.push((
+            String::from("export.decks-empty"),
+            render(&mut empty, 160, 48)
+                .trim_end_matches('\n')
+                .to_owned(),
+        ));
+        let mut faults =
+            catalog.inspect_scenes(&renders.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>());
+        faults.extend(catalog.inspect_renders(&renders));
+        assert!(
+            faults.is_empty(),
+            "export pages left the intent inventory or changed their chrome: {faults:#?}"
+        );
     }
 
     #[test]
