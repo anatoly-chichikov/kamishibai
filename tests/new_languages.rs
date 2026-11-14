@@ -370,3 +370,111 @@ fn czech_works_in_both_language_roles_offline() {
         "Czech did not preserve both offline language roles"
     );
 }
+
+#[test]
+fn sr_works_in_both_language_roles_offline() {
+    assert_eq!(
+        both("SR", "Čovek čeka čaj.", "Čovek čeka čaj."),
+        expected(
+            "SR",
+            "Serbian Vocabulary",
+            ("Prevod", "Kontekst", "Nagoveštaj", "Važnost")
+        ),
+        "SR did not preserve both offline language roles"
+    );
+}
+
+#[test]
+fn ka_works_in_both_language_roles_offline() {
+    assert_eq!(
+        both("KA", "ქართული ᲥᲐᲠᲗᲣᲚᲘ.", "ქართული ᲥᲐᲠᲗᲣᲚᲘ."),
+        expected(
+            "KA",
+            "Georgian Vocabulary",
+            ("თარგმანი", "კონტექსტი", "მინიშნება", "მნიშვნელობა")
+        ),
+        "KA did not preserve both offline language roles"
+    );
+}
+
+#[test]
+fn hy_works_in_both_language_roles_offline() {
+    assert_eq!(
+        both("HY", "Արև և ջուր։", "Արև և ջուր։"),
+        expected(
+            "HY",
+            "Armenian Vocabulary",
+            ("Թարգմանություն", "Համատեքստ", "Հուշում", "Կարևորություն")
+        ),
+        "HY did not preserve both offline language roles"
+    );
+}
+
+#[test]
+fn fa_works_in_both_language_roles_offline() {
+    assert_eq!(
+        both("FA", "من کتاب‌ها را می‌خوانم.", "من کتاب‌ها را می‌خوانم."),
+        expected(
+            "FA",
+            "Persian Vocabulary",
+            ("ترجمه", "بافت", "راهنما", "اهمیت")
+        ),
+        "FA did not preserve both offline language roles"
+    );
+}
+
+#[test]
+fn sv_works_in_both_language_roles_offline() {
+    assert_eq!(
+        both("SV", "En lång väg till taket.", "En lång väg till taket."),
+        expected(
+            "SV",
+            "Swedish Vocabulary",
+            ("Översättning", "Sammanhang", "Ledtråd", "Viktighet")
+        ),
+        "SV did not preserve both offline language roles"
+    );
+}
+
+#[test]
+fn ro_works_in_both_language_roles_offline() {
+    assert_eq!(
+        both("RO", "Șapte rațe înoată.", "Șapte rațe înoată."),
+        expected(
+            "RO",
+            "Romanian Vocabulary",
+            ("Traducere", "Context", "Indiciu", "Importanță")
+        ),
+        "RO did not preserve both offline language roles"
+    );
+}
+
+#[test]
+fn hu_works_in_both_language_roles_offline() {
+    assert_eq!(
+        both("HU", "Ő szűrőt kér.", "Ő szűrőt kér."),
+        expected(
+            "HU",
+            "Hungarian Vocabulary",
+            ("Fordítás", "Szövegkörnyezet", "Támpont", "Fontosság")
+        ),
+        "HU did not preserve both offline language roles"
+    );
+}
+
+#[test]
+fn fi_works_in_both_language_roles_offline() {
+    assert_eq!(
+        both(
+            "FI",
+            "Tuli palaa, tuuli puhaltaa.",
+            "Tuli palaa, tuuli puhaltaa."
+        ),
+        expected(
+            "FI",
+            "Finnish Vocabulary",
+            ("Käännös", "Asiayhteys", "Vihje", "Tärkeys")
+        ),
+        "FI did not preserve both offline language roles"
+    );
+}

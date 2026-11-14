@@ -338,7 +338,7 @@ fn pick_languages_modal_scrolls_the_last_language_into_view() {
     )
     .0;
     assert!(
-        render_sized(&walked, 96, 20).contains("Čeština"),
+        render_sized(&walked, 96, 20).contains("suomi"),
         "the last language stayed unreachable however far the column scrolled"
     );
 }

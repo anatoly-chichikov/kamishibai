@@ -60,7 +60,7 @@ impl LanguageCatalog {
     }
 
     /// Return the supported language codes in stable order.
-    pub fn codes(&self) -> [&'static str; 22] {
+    pub fn codes(&self) -> [&'static str; 30] {
         profile_codes()
     }
 
@@ -88,7 +88,7 @@ impl LanguageCatalog {
 }
 
 /// Return codes from the canonical profile declarations.
-pub(super) fn profile_codes() -> [&'static str; 22] {
+pub(super) fn profile_codes() -> [&'static str; 30] {
     from_fn(|index| profiles()[index].code)
 }
 
@@ -106,10 +106,10 @@ pub fn language(code: &str) -> Result<LanguageProfile> {
 ///
 /// Every catalog lookup reads this table, and the TUI reads it thousands of
 /// times per rendered frame, so declaring it per call meant rebuilding
-/// twenty-two profiles — and every string inside them — on each one. The
+/// thirty profiles — and every string inside them — on each one. The
 /// declaration is a constant, so it is built once and lent out by reference.
-fn profiles() -> &'static [LanguageProfile; 22] {
-    static PROFILES: OnceLock<[LanguageProfile; 22]> = OnceLock::new();
+fn profiles() -> &'static [LanguageProfile; 30] {
+    static PROFILES: OnceLock<[LanguageProfile; 30]> = OnceLock::new();
     PROFILES.get_or_init(declared_profiles)
 }
 
@@ -117,7 +117,7 @@ fn profiles() -> &'static [LanguageProfile; 22] {
 /// the order surfaced everywhere in the UI (Welcome chips, `Cmd+L` picker,
 /// Gemini language list) and is sorted by global learning popularity, not
 /// alphabetically.
-fn declared_profiles() -> [LanguageProfile; 22] {
+fn declared_profiles() -> [LanguageProfile; 30] {
     [
         LanguageProfile {
             code: "en",
@@ -317,6 +317,78 @@ fn declared_profiles() -> [LanguageProfile; 22] {
             naming: DeckNaming::new("Czech Vocabulary", "cs", super::DEFAULT_FILE),
             labels: UiLabels::new("Překlad", "Kontext", "Nápověda", "Důležitost"),
         },
+        LanguageProfile {
+            code: "sr",
+            prompt: String::from("Serbian (Latin script)"),
+            endonym: String::from("srpski"),
+            text_gate: TextGate::Ocr(OcrModel::Latin),
+            direction: TextDirection::Ltr,
+            naming: DeckNaming::new("Serbian Vocabulary", "sr", super::DEFAULT_FILE),
+            labels: UiLabels::new("Prevod", "Kontekst", "Nagoveštaj", "Važnost"),
+        },
+        LanguageProfile {
+            code: "ka",
+            prompt: String::from("Modern Georgian"),
+            endonym: String::from("ქართული"),
+            text_gate: TextGate::LlmJudge,
+            direction: TextDirection::Ltr,
+            naming: DeckNaming::new("Georgian Vocabulary", "ka", super::DEFAULT_FILE),
+            labels: UiLabels::new("თარგმანი", "კონტექსტი", "მინიშნება", "მნიშვნელობა"),
+        },
+        LanguageProfile {
+            code: "hy",
+            prompt: String::from("Eastern Armenian"),
+            endonym: String::from("Հայերեն"),
+            text_gate: TextGate::LlmJudge,
+            direction: TextDirection::Ltr,
+            naming: DeckNaming::new("Armenian Vocabulary", "hy", super::DEFAULT_FILE),
+            labels: UiLabels::new("Թարգմանություն", "Համատեքստ", "Հուշում", "Կարևորություն"),
+        },
+        LanguageProfile {
+            code: "fa",
+            prompt: String::from("Iranian Persian"),
+            endonym: String::from("Persian"),
+            text_gate: TextGate::Ocr(OcrModel::Arabic),
+            direction: TextDirection::Rtl,
+            naming: DeckNaming::new("Persian Vocabulary", "fa", super::DEFAULT_FILE),
+            labels: UiLabels::new("ترجمه", "بافت", "راهنما", "اهمیت"),
+        },
+        LanguageProfile {
+            code: "sv",
+            prompt: String::from("Swedish"),
+            endonym: String::from("svenska"),
+            text_gate: TextGate::Ocr(OcrModel::Latin),
+            direction: TextDirection::Ltr,
+            naming: DeckNaming::new("Swedish Vocabulary", "sv", super::DEFAULT_FILE),
+            labels: UiLabels::new("Översättning", "Sammanhang", "Ledtråd", "Viktighet"),
+        },
+        LanguageProfile {
+            code: "ro",
+            prompt: String::from("Romanian"),
+            endonym: String::from("română"),
+            text_gate: TextGate::Ocr(OcrModel::Latin),
+            direction: TextDirection::Ltr,
+            naming: DeckNaming::new("Romanian Vocabulary", "ro", super::DEFAULT_FILE),
+            labels: UiLabels::new("Traducere", "Context", "Indiciu", "Importanță"),
+        },
+        LanguageProfile {
+            code: "hu",
+            prompt: String::from("Hungarian"),
+            endonym: String::from("magyar"),
+            text_gate: TextGate::Ocr(OcrModel::Latin),
+            direction: TextDirection::Ltr,
+            naming: DeckNaming::new("Hungarian Vocabulary", "hu", super::DEFAULT_FILE),
+            labels: UiLabels::new("Fordítás", "Szövegkörnyezet", "Támpont", "Fontosság"),
+        },
+        LanguageProfile {
+            code: "fi",
+            prompt: String::from("Finnish"),
+            endonym: String::from("suomi"),
+            text_gate: TextGate::Ocr(OcrModel::Latin),
+            direction: TextDirection::Ltr,
+            naming: DeckNaming::new("Finnish Vocabulary", "fi", super::DEFAULT_FILE),
+            labels: UiLabels::new("Käännös", "Asiayhteys", "Vihje", "Tärkeys"),
+        },
     ]
 }
 
@@ -356,7 +428,8 @@ mod tests {
             catalog().codes(),
             [
                 "en", "zh", "es", "ja", "fr", "de", "ko", "ru", "it", "pt", "hi", "ar", "tr", "pl",
-                "uk", "id", "vi", "th", "el", "he", "nl", "cs",
+                "uk", "id", "vi", "th", "el", "he", "nl", "cs", "sr", "ka", "hy", "fa", "sv", "ro",
+                "hu", "fi",
             ],
             "language profiles no longer follow the requested popularity order"
         );
@@ -396,6 +469,14 @@ mod tests {
                 ("he", TextGate::LlmJudge, TextDirection::Rtl),
                 ("nl", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
                 ("cs", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
+                ("sr", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
+                ("ka", TextGate::LlmJudge, TextDirection::Ltr),
+                ("hy", TextGate::LlmJudge, TextDirection::Ltr),
+                ("fa", TextGate::Ocr(OcrModel::Arabic), TextDirection::Rtl),
+                ("sv", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
+                ("ro", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
+                ("hu", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
+                ("fi", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
             ],
             "a language profile lost its authoritative gate or direction declaration"
         );
@@ -487,6 +568,14 @@ mod tests {
                 ("he", "Hebrew".into()),
                 ("nl", "Nederlands".into()),
                 ("cs", "Čeština".into()),
+                ("sr", "srpski".into()),
+                ("ka", "ქართული".into()),
+                ("hy", "Հայերեն".into()),
+                ("fa", "Persian".into()),
+                ("sv", "svenska".into()),
+                ("ro", "română".into()),
+                ("hu", "magyar".into()),
+                ("fi", "suomi".into()),
             ],
             "a language profile lost or misspelled the name it shows itself under"
         );

@@ -850,7 +850,7 @@ mod tests {
 
     /// A terminal tall enough to show every language without scrolling.
     fn tall() -> Rect {
-        Rect::new(0, 0, 96, 40)
+        Rect::new(0, 0, 96, 48)
     }
 
     /// A terminal that forces both columns to scroll.

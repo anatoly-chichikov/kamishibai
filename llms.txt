@@ -754,6 +754,14 @@ Languages
 - `HE`: Hebrew
 - `NL`: Dutch
 - `CS`: Czech
+- `SR`: Serbian (Latin script)
+- `KA`: Modern Georgian
+- `HY`: Eastern Armenian
+- `FA`: Iranian Persian
+- `SV`: Swedish
+- `RO`: Romanian
+- `HU`: Hungarian
+- `FI`: Finnish
 
 Input schema for `new --build`
 

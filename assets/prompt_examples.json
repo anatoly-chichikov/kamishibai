@@ -1473,5 +1473,805 @@
       "focus": {"focus": "hrad", "longer": "ohrada"},
       "fragment": {"visible": "KONEČNÝ NÁVRH", "sentence_end": "konečný návrh"}
     }
+  },
+  "sr": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": [
+          "fin.",
+          "arh.",
+          "idiom",
+          "brit.",
+          "poker"
+        ],
+        "parts": [
+          "im.",
+          "gl.",
+          "prid.",
+          "pril.",
+          "zam.",
+          "predl."
+        ]
+      },
+      "forbidden": {
+        "starters": [
+          "Učimo",
+          "Proučavamo",
+          "Sada učimo"
+        ],
+        "joins": [
+          "X ili Y",
+          "može značiti X i Y"
+        ],
+        "fillers": [
+          "običan",
+          "čest",
+          "svakodnevan",
+          "standardan",
+          "osnovni",
+          "jednostavan"
+        ]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "<jedno precizno glavno značenje u kratkoj rečenici>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "<jedno zasebno sporedno značenje u kratkoj rečenici>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "<tačno značenje koje određuje korisnikova napomena>",
+          "tag": null
+        },
+        "invalid": "Ova reč nije na otkrivenom ciljnom jeziku."
+      },
+      "messages": {
+        "listed": "Ovo je već na spisku.",
+        "absent": "Nema šta da se doda."
+      }
+    },
+    "card": {
+      "writing": [
+        {
+          "bad": "Početi rad — za mašinu.",
+          "good": "Mašina počinje da radi."
+        },
+        {
+          "bad": "Označava budućnost radnje.",
+          "good": "Pokazuje da će se nešto desiti kasnije."
+        }
+      ],
+      "hint": {
+        "bad": [
+          "Koristi se pri ljubaznoj molbi.",
+          "Znači umoran.",
+          "Često u poslovnom govoru."
+        ],
+        "good": "Stene okružuju mirnu vodu gde stoji mali čamac.",
+        "contrast": "\"<near target word>\" ima …; ovde, …"
+      },
+      "context": {
+        "headers": [
+          "Značenje.",
+          "Gde se čuje.",
+          "Gde nije prikladno.",
+          "Nijansa."
+        ],
+        "rarity": "retko, klasična proza"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "rad",
+        "longer": "grad"
+      },
+      "fragment": {
+        "visible": "KONAČNI NACRT",
+        "sentence_end": "konačni nacrt"
+      }
+    }
+  },
+  "ka": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": [
+          "ფინ.",
+          "არქ.",
+          "იდიომა",
+          "ბრიტ.",
+          "პოკერი"
+        ],
+        "parts": [
+          "არს.",
+          "ზმ.",
+          "ზედს.",
+          "ზმნიზ.",
+          "ნაცვ.",
+          "თანდ."
+        ]
+      },
+      "forbidden": {
+        "starters": [
+          "ვსწავლობთ",
+          "შესწავლა",
+          "ჩვენ ვსწავლობთ"
+        ],
+        "joins": [
+          "X ან Y",
+          "შეიძლება ნიშნავდეს X-ს და Y-ს"
+        ],
+        "fillers": [
+          "ჩვეულებრივი",
+          "ხშირი",
+          "ყოველდღიური",
+          "სტანდარტული",
+          "საბაზისო",
+          "მარტივი"
+        ]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "<ერთი ზუსტი ძირითადი მნიშვნელობა მოკლე წინადადებით>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "<ერთი განსხვავებული მეორეული მნიშვნელობა მოკლე წინადადებით>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "<მომხმარებლის მინიშნებით განსაზღვრული ზუსტი მნიშვნელობა>",
+          "tag": null
+        },
+        "invalid": "ეს სიტყვა ამოცნობილ სამიზნე ენას არ ეკუთვნის."
+      },
+      "messages": {
+        "listed": "ეს უკვე სიაშია.",
+        "absent": "დასამატებელი არაფერია."
+      }
+    },
+    "card": {
+      "writing": [
+        {
+          "bad": "მუშაობის დაწყება — მანქანის შესახებ.",
+          "good": "მანქანა მუშაობას იწყებს."
+        },
+        {
+          "bad": "მოქმედების მომავალ დროზე მიუთითებს.",
+          "good": "აჩვენებს, რომ რაღაც მოგვიანებით მოხდება."
+        }
+      ],
+      "hint": {
+        "bad": [
+          "გამოიყენება თავაზიანი თხოვნისას.",
+          "ნიშნავს დაღლილს.",
+          "ხშირია საქმიან საუბარში."
+        ],
+        "good": "კლდეებით შემოსაზღვრულ წყნარ წყალში პატარა ნავი დგას.",
+        "contrast": "\"<near target word>\" გულისხმობს …; აქ კი …"
+      },
+      "context": {
+        "headers": [
+          "მნიშვნელობა.",
+          "სად გაიგონებთ.",
+          "სად არის შეუსაბამო.",
+          "ნიუანსი."
+        ],
+        "rarity": "იშვიათი, კლასიკური პროზა"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "კარი",
+        "longer": "კარიბჭე"
+      },
+      "fragment": {
+        "visible": "საბოლოო ნახაზი",
+        "sentence_end": "საბოლოო ნახაზი"
+      }
+    }
+  },
+  "hy": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": [
+          "ֆին.",
+          "հնց.",
+          "դարձվածք",
+          "բրիտ.",
+          "պոկեր"
+        ],
+        "parts": [
+          "գոյ.",
+          "բայ",
+          "ած.",
+          "մակբ.",
+          "դեր.",
+          "կապ"
+        ]
+      },
+      "forbidden": {
+        "starters": [
+          "Սովորում ենք",
+          "Ուսումնասիրում ենք",
+          "Մենք սովորում ենք"
+        ],
+        "joins": [
+          "X կամ Y",
+          "կարող է նշանակել X և Y"
+        ],
+        "fillers": [
+          "սովորական",
+          "հաճախակի",
+          "առօրյա",
+          "ստանդարտ",
+          "հիմնական",
+          "պարզ"
+        ]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "<մեկ ճշգրիտ հիմնական իմաստ կարճ նախադասությամբ>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "<մեկ առանձին երկրորդական իմաստ կարճ նախադասությամբ>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "<օգտատիրոջ հուշմամբ որոշված ճշգրիտ իմաստը>",
+          "tag": null
+        },
+        "invalid": "Այս բառը հայտնաբերված թիրախային լեզվով չէ։"
+      },
+      "messages": {
+        "listed": "Սա արդեն ցանկում է։",
+        "absent": "Ավելացնելու բան չկա։"
+      }
+    },
+    "card": {
+      "writing": [
+        {
+          "bad": "Սկսել գործել՝ մեքենայի մասին։",
+          "good": "Մեքենան սկսում է աշխատել։"
+        },
+        {
+          "bad": "Ցույց է տալիս գործողության ապառնիությունը։",
+          "good": "Ցույց է տալիս, որ մի բան ավելի ուշ կլինի։"
+        }
+      ],
+      "hint": {
+        "bad": [
+          "Օգտագործվում է քաղաքավարի խնդրանքի ժամանակ։",
+          "Նշանակում է հոգնած։",
+          "Հաճախ է գործածվում գործնական խոսքում։"
+        ],
+        "good": "Ժայռերով շրջապատված հանդարտ ջրում փոքրիկ նավակ է կանգնած։",
+        "contrast": "«<near target word>»-ը … է, իսկ այստեղ՝ …"
+      },
+      "context": {
+        "headers": [
+          "Իմաստը.",
+          "Որտեղ կլսեք.",
+          "Որտեղ տեղին չէ.",
+          "Նրբերանգը."
+        ],
+        "rarity": "հազվադեպ, դասական արձակ"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "տուն",
+        "longer": "տնատուն"
+      },
+      "fragment": {
+        "visible": "վերջնական գծագիր",
+        "sentence_end": "վերջնական գծագիր"
+      }
+    }
+  },
+  "fa": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": [
+          "مالی",
+          "قدیمی",
+          "اصطلاح",
+          "بریتانیایی",
+          "پوکر"
+        ],
+        "parts": [
+          "اسم",
+          "فعل",
+          "صفت",
+          "قید",
+          "ضمیر",
+          "حرف اضافه"
+        ]
+      },
+      "forbidden": {
+        "starters": [
+          "یاد می‌گیریم",
+          "در حال یادگیری",
+          "ما یاد می‌گیریم"
+        ],
+        "joins": [
+          "X یا Y",
+          "می‌تواند به معنی X و Y باشد"
+        ],
+        "fillers": [
+          "معمولی",
+          "رایج",
+          "روزمره",
+          "استاندارد",
+          "پایه",
+          "ساده"
+        ]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "<یک معنی اصلی دقیق در جمله‌ای کوتاه>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "<یک معنی فرعی جداگانه در جمله‌ای کوتاه>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "<معنی دقیقی که راهنمای کاربر مشخص می‌کند>",
+          "tag": null
+        },
+        "invalid": "این واژه به زبان مقصد شناسایی‌شده نیست."
+      },
+      "messages": {
+        "listed": "این مورد از قبل در فهرست است.",
+        "absent": "چیزی برای افزودن نیست."
+      }
+    },
+    "card": {
+      "writing": [
+        {
+          "bad": "شروع به کار کردن — دربارهٔ دستگاه.",
+          "good": "دستگاه شروع به کار می‌کند."
+        },
+        {
+          "bad": "بر آینده بودن عمل دلالت دارد.",
+          "good": "نشان می‌دهد چیزی بعداً رخ می‌دهد."
+        }
+      ],
+      "hint": {
+        "bad": [
+          "هنگام درخواست مؤدبانه به کار می‌رود.",
+          "یعنی خسته.",
+          "در محیط کاری رایج است."
+        ],
+        "good": "صخره‌ها آب آرامی را فراگرفته‌اند که قایقی کوچک در آن است.",
+        "contrast": "«<near target word>» … دارد؛ اینجا …"
+      },
+      "context": {
+        "headers": [
+          "معنی.",
+          "کجا می‌شنوید.",
+          "کجا نامناسب است.",
+          "نکتهٔ ظریف."
+        ],
+        "rarity": "نادر، نثر کلاسیک"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "کار",
+        "longer": "کارخانه"
+      },
+      "fragment": {
+        "visible": "طرح نهایی",
+        "sentence_end": "طرح نهایی"
+      }
+    }
+  },
+  "sv": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": [
+          "fin.",
+          "åld.",
+          "idiom",
+          "britt.",
+          "poker"
+        ],
+        "parts": [
+          "subst.",
+          "verb",
+          "adj.",
+          "adv.",
+          "pron.",
+          "prep."
+        ]
+      },
+      "forbidden": {
+        "starters": [
+          "Vi lär oss",
+          "Studerar",
+          "Vi håller på att lära oss"
+        ],
+        "joins": [
+          "X eller Y",
+          "kan betyda X och även Y"
+        ],
+        "fillers": [
+          "vanlig",
+          "allmän",
+          "vardaglig",
+          "standard",
+          "grundläggande",
+          "enkel"
+        ]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "<en exakt huvudbetydelse i en kort mening>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "<en separat bibetydelse i en kort mening>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "<den exakta betydelse som användarens ledtråd anger>",
+          "tag": null
+        },
+        "invalid": "Det här ordet finns inte i det identifierade målspråket."
+      },
+      "messages": {
+        "listed": "Det finns redan i listan.",
+        "absent": "Det finns inget att lägga till."
+      }
+    },
+    "card": {
+      "writing": [
+        {
+          "bad": "Börja fungera — om en maskin.",
+          "good": "En maskin börjar arbeta."
+        },
+        {
+          "bad": "Anger handlingens framtidighet.",
+          "good": "Visar att något kommer att hända senare."
+        }
+      ],
+      "hint": {
+        "bad": [
+          "Används vid en artig förfrågan.",
+          "Betyder trött.",
+          "Vanligt i affärssammanhang."
+        ],
+        "good": "Klippor omger stilla vatten där en liten båt ligger.",
+        "contrast": "\"<near target word>\" har …; här …"
+      },
+      "context": {
+        "headers": [
+          "Betydelse.",
+          "Var du hör det.",
+          "Var det inte passar.",
+          "Nyans."
+        ],
+        "rarity": "sällsynt, klassisk prosa"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "sol",
+        "longer": "solros"
+      },
+      "fragment": {
+        "visible": "SLUTLIG RITNING",
+        "sentence_end": "slutlig ritning"
+      }
+    }
+  },
+  "ro": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": [
+          "fin.",
+          "arh.",
+          "idiom",
+          "brit.",
+          "poker"
+        ],
+        "parts": [
+          "s.",
+          "v.",
+          "adj.",
+          "adv.",
+          "pron.",
+          "prep."
+        ]
+      },
+      "forbidden": {
+        "starters": [
+          "Învățăm",
+          "Studiem",
+          "Suntem în curs de învățare"
+        ],
+        "joins": [
+          "X sau Y",
+          "poate însemna X și Y"
+        ],
+        "fillers": [
+          "obișnuit",
+          "comun",
+          "cotidian",
+          "standard",
+          "de bază",
+          "simplu"
+        ]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "<un singur sens principal precis într-o propoziție scurtă>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "<un singur sens secundar distinct într-o propoziție scurtă>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "<sensul exact indicat de precizarea utilizatorului>",
+          "tag": null
+        },
+        "invalid": "Acest cuvânt nu aparține limbii țintă detectate."
+      },
+      "messages": {
+        "listed": "Acesta este deja în listă.",
+        "absent": "Nu mai este nimic de adăugat."
+      }
+    },
+    "card": {
+      "writing": [
+        {
+          "bad": "A începe funcționarea — despre o mașină.",
+          "good": "O mașină începe să funcționeze."
+        },
+        {
+          "bad": "Indică posterioritatea acțiunii.",
+          "good": "Arată că ceva se va întâmpla mai târziu."
+        }
+      ],
+      "hint": {
+        "bad": [
+          "Folosit pentru o cerere politicoasă.",
+          "Înseamnă obosit.",
+          "Frecvent în contexte de afaceri."
+        ],
+        "good": "Stâncile înconjoară apa liniștită unde stă o barcă mică.",
+        "contrast": "„<near target word>” are …; aici, …"
+      },
+      "context": {
+        "headers": [
+          "Sens.",
+          "Unde îl auzi.",
+          "Unde nu se potrivește.",
+          "Nuanță."
+        ],
+        "rarity": "rar, proză clasică"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "port",
+        "longer": "aeroport"
+      },
+      "fragment": {
+        "visible": "DESEN FINAL",
+        "sentence_end": "desen final"
+      }
+    }
+  },
+  "hu": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": [
+          "pénz.",
+          "rég.",
+          "szólás",
+          "brit",
+          "póker"
+        ],
+        "parts": [
+          "fn.",
+          "ige",
+          "mn.",
+          "hat.",
+          "névm.",
+          "névutó"
+        ]
+      },
+      "forbidden": {
+        "starters": [
+          "Tanuljuk",
+          "Tanulmányozzuk",
+          "Most tanuljuk"
+        ],
+        "joins": [
+          "X vagy Y",
+          "X-et és Y-t is jelenthet"
+        ],
+        "fillers": [
+          "szokásos",
+          "gyakori",
+          "hétköznapi",
+          "szabványos",
+          "alapvető",
+          "egyszerű"
+        ]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "<egyetlen pontos elsődleges jelentés rövid mondatban>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "<egyetlen különálló másodlagos jelentés rövid mondatban>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "<a felhasználó megjegyzésével meghatározott pontos jelentés>",
+          "tag": null
+        },
+        "invalid": "Ez a szó nem a felismert célnyelven van."
+      },
+      "messages": {
+        "listed": "Ez már szerepel a listában.",
+        "absent": "Nincs mit hozzáadni."
+      }
+    },
+    "card": {
+      "writing": [
+        {
+          "bad": "Működésbe lépni — gépről.",
+          "good": "A gép működni kezd."
+        },
+        {
+          "bad": "A cselekvés jövőbeliségét jelzi.",
+          "good": "Azt mutatja, hogy valami később történik."
+        }
+      ],
+      "hint": {
+        "bad": [
+          "Udvarias kérésnél használatos.",
+          "Azt jelenti, fáradt.",
+          "Üzleti környezetben gyakori."
+        ],
+        "good": "Sziklák veszik körül a nyugodt vizet, ahol egy kis csónak áll.",
+        "contrast": "A „<near target word>” …; itt viszont …"
+      },
+      "context": {
+        "headers": [
+          "Jelentés.",
+          "Hol hallhatod.",
+          "Hol nem illik.",
+          "Árnyalat."
+        ],
+        "rarity": "ritka, klasszikus próza"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "ház",
+        "longer": "kórház"
+      },
+      "fragment": {
+        "visible": "VÉGLEGES TERV",
+        "sentence_end": "végleges terv"
+      }
+    }
+  },
+  "fi": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": [
+          "tal.",
+          "vanh.",
+          "idiomi",
+          "britt.",
+          "pokeri"
+        ],
+        "parts": [
+          "subst.",
+          "verbi",
+          "adj.",
+          "adv.",
+          "pron.",
+          "prep."
+        ]
+      },
+      "forbidden": {
+        "starters": [
+          "Opimme",
+          "Opiskellaan",
+          "Olemme oppimassa"
+        ],
+        "joins": [
+          "X tai Y",
+          "voi tarkoittaa X:ää ja myös Y:tä"
+        ],
+        "fillers": [
+          "tavallinen",
+          "yleinen",
+          "arkinen",
+          "vakio",
+          "perustason",
+          "yksinkertainen"
+        ]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "<yksi täsmällinen päämerkitys lyhyenä lauseena>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "<yksi erillinen sivumerkitys lyhyenä lauseena>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "<käyttäjän vihjeen määrittämä täsmällinen merkitys>",
+          "tag": null
+        },
+        "invalid": "Tämä sana ei kuulu tunnistettuun kohdekieleen."
+      },
+      "messages": {
+        "listed": "Tämä on jo luettelossa.",
+        "absent": "Mitään lisättävää ei ole."
+      }
+    },
+    "card": {
+      "writing": [
+        {
+          "bad": "Alkaa toimia — koneesta.",
+          "good": "Kone alkaa toimia."
+        },
+        {
+          "bad": "Ilmaisee toiminnan tulevaisuutta.",
+          "good": "Osoittaa, että jotain tapahtuu myöhemmin."
+        }
+      ],
+      "hint": {
+        "bad": [
+          "Käytetään kohteliaassa pyynnössä.",
+          "Tarkoittaa väsynyttä.",
+          "Yleinen liike-elämässä."
+        ],
+        "good": "Kalliot ympäröivät tyyntä vettä, jossa pieni vene lepää.",
+        "contrast": "Sanalla ”<near target word>” on …; tässä …"
+      },
+      "context": {
+        "headers": [
+          "Merkitys.",
+          "Missä sen kuulee.",
+          "Minne se ei sovi.",
+          "Sävy."
+        ],
+        "rarity": "harvinainen, klassinen proosa"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "talo",
+        "longer": "kerrostalo"
+      },
+      "fragment": {
+        "visible": "LOPULLINEN PIIRROS",
+        "sentence_end": "lopullinen piirros"
+      }
+    }
   }
 }

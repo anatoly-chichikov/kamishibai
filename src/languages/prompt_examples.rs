@@ -362,6 +362,17 @@ mod tests {
     use crate::languages::catalog;
 
     #[test]
+    fn eight_added_languages_resolve_with_complete_local_examples() {
+        let codes = ["SR", "KA", "HY", "FA", "SV", "RO", "HU", "FI"];
+        assert!(
+            codes
+                .into_iter()
+                .all(|code| catalog().resolve(code).is_ok() && examples(code).valid()),
+            "an added language cannot resolve with complete localized examples"
+        );
+    }
+
+    #[test]
     fn context_headers_keep_the_original_appropriateness_and_nuance_roles() {
         let expected = [
             (
@@ -532,6 +543,63 @@ mod tests {
                     "Přirozený kontext.",
                     "Kontext, kde působí nepatřičně.",
                     "Významový odstín.",
+                ],
+            ),
+            (
+                "sr",
+                [
+                    "Značenje.",
+                    "Gde se čuje.",
+                    "Gde nije prikladno.",
+                    "Nijansa.",
+                ],
+            ),
+            (
+                "ka",
+                [
+                    "მნიშვნელობა.",
+                    "სად გაიგონებთ.",
+                    "სად არის შეუსაბამო.",
+                    "ნიუანსი.",
+                ],
+            ),
+            (
+                "hy",
+                ["Իմաստը.", "Որտեղ կլսեք.", "Որտեղ տեղին չէ.", "Նրբերանգը."],
+            ),
+            (
+                "fa",
+                ["معنی.", "کجا می‌شنوید.", "کجا نامناسب است.", "نکتهٔ ظریف."],
+            ),
+            (
+                "sv",
+                [
+                    "Betydelse.",
+                    "Var du hör det.",
+                    "Var det inte passar.",
+                    "Nyans.",
+                ],
+            ),
+            (
+                "ro",
+                [
+                    "Sens.",
+                    "Unde îl auzi.",
+                    "Unde nu se potrivește.",
+                    "Nuanță.",
+                ],
+            ),
+            (
+                "hu",
+                ["Jelentés.", "Hol hallhatod.", "Hol nem illik.", "Árnyalat."],
+            ),
+            (
+                "fi",
+                [
+                    "Merkitys.",
+                    "Missä sen kuulee.",
+                    "Minne se ei sovi.",
+                    "Sävy.",
                 ],
             ),
         ];
