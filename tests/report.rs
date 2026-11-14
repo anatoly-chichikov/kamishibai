@@ -145,8 +145,10 @@ fn logical_text(sheet: bool, language: &str, sample: &str) -> Result<bool> {
             let properties = operation.operands[1].as_dict()?;
             let bytes = properties.get(b"ActualText")?.as_str()?;
             let units = bytes[2..]
-                .chunks_exact(2)
-                .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| u16::from_be_bytes(*pair))
                 .collect::<Vec<_>>();
             logical.push(String::from_utf16(&units)?);
         }
