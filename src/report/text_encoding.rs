@@ -6,9 +6,10 @@ use std::fmt::Write;
 use anyhow::{Context, Result, anyhow, bail};
 use lopdf::{Dictionary, Document, Object, Stream};
 use printpdf::{DictItem, Op, PdfDocument, PdfFontHandle, PdfSaveOptions, TextItem};
+use unicode_script::{Script, UnicodeScript};
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Serialize complete shaped clusters without printpdf's first-character truncation.
+/// Serialize Armenian ligatures with every source letter in their Unicode mapping.
 pub(super) fn encoded(source: &PdfDocument, options: &PdfSaveOptions) -> Result<Vec<u8>> {
     let bytes = source.save(options, &mut Vec::new());
     let mappings = mappings(source)?;
@@ -120,7 +121,7 @@ fn mappings(document: &PdfDocument) -> Result<BTreeMap<String, BTreeMap<u16, Vec
                                         mappings
                                             .entry(id.0.clone())
                                             .or_default()
-                                            .insert(glyph.gid, text.encode_utf16().collect());
+                                            .insert(glyph.gid, unicode(&text));
                                     }
                                 }
                             }
@@ -133,6 +134,16 @@ fn mappings(document: &PdfDocument) -> Result<BTreeMap<String, BTreeMap<u16, Vec
         }
     }
     Ok(mappings)
+}
+
+/// Keep complete Armenian ligatures and the existing scalar mapping of other scripts.
+fn unicode(text: &str) -> Vec<u16> {
+    if text.chars().all(|ch| ch.script() == Script::Armenian) {
+        return text.encode_utf16().collect();
+    }
+    text.chars()
+        .next()
+        .map_or_else(Vec::new, |ch| ch.to_string().encode_utf16().collect())
 }
 
 /// Encode bounded bfchar sections with complete UTF-16BE destination sequences.
@@ -158,8 +169,13 @@ fn cmap(mappings: &BTreeMap<u16, Vec<u16>>) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmap, ordered};
+    use super::{cmap, encoded, ordered};
+    use crate::report::FontPalette;
+    use crate::report::font::font_arc;
     use lopdf::{Document, Stream, dictionary};
+    use printpdf::{
+        Codepoint, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Pt, TextItem,
+    };
     use std::collections::BTreeMap;
 
     /// Plain RTL punctuation mirrors without reversing the marks within a grapheme.
@@ -201,6 +217,61 @@ mod tests {
                 .expect("test code must decode"),
             "ու𐀀",
             "a Unicode cluster or surrogate pair was truncated"
+        );
+    }
+
+    /// A cluster painted as several ordinary glyphs must not repeat its continuation.
+    #[test]
+    fn non_armenian_multiglyph_clusters_cannot_duplicate_their_continuation() {
+        let mut font = font_arc(FontPalette::default().primary(), false)
+            .expect("test font must resolve")
+            .as_ref()
+            .clone();
+        let continuation = font
+            .lookup_glyph_index(u32::from('B'))
+            .expect("test B must exist");
+        font.cache_glyph_mapping(continuation, "B");
+        let mut source = PdfDocument::new("multi-glyph Unicode");
+        let id = source.add_font(&font);
+        source.pages.push(PdfPage::new(
+            Mm(50.0),
+            Mm(50.0),
+            vec![
+                Op::StartTextSection,
+                Op::SetFont {
+                    font: PdfFontHandle::External(id),
+                    size: Pt(12.0),
+                },
+                Op::ShowText {
+                    items: vec![TextItem::GlyphIds(vec![
+                        Codepoint {
+                            gid: font
+                                .lookup_glyph_index(u32::from('A'))
+                                .expect("test A must exist"),
+                            offset: 0.0,
+                            cid: Some(String::from("AB")),
+                        },
+                        Codepoint {
+                            gid: font
+                                .lookup_glyph_index(u32::from('B'))
+                                .expect("test B must exist"),
+                            offset: 0.0,
+                            cid: None,
+                        },
+                    ])],
+                },
+                Op::EndTextSection,
+            ],
+        ));
+        let bytes = encoded(&source, &PdfSaveOptions::default()).expect("test PDF must encode");
+        let document = Document::load_mem(&bytes).expect("test PDF must parse");
+        assert_eq!(
+            document
+                .extract_text(&[1])
+                .expect("test text must decode")
+                .trim(),
+            "AB",
+            "a multi-glyph cluster repeated its continuation"
         );
     }
 }
