@@ -22,7 +22,7 @@ Type "./target/release/kamishibai"
 Enter
 Show
 
-Wait+Screen /words you want to learn/
+Wait+Screen /one per line/
 Sleep 400ms
 Type "dépaysement"
 Enter
@@ -85,7 +85,7 @@ Wait+Screen@5m /(building|your cards)/
 Sleep 6s
 Screenshot "live/04-your-cards.png"
 
-Wait+Screen@15m /(all done|make it)/
+Wait+Screen@15m /(your files are ready|retry the rest)/
 Sleep 1500ms
 Screenshot "live/08-done.png"
 
@@ -117,11 +117,11 @@ Sleep 1600ms
 Screenshot "live/09d-card-staged.png"
 
 Ctrl+G
-Wait+Screen@30s /drawing each card/
+Wait+Screen@30s /follow the changes/
 Sleep 800ms
 Screenshot "live/09b-card-regenerating.png"
 
-Wait+Screen@15m /all done/
+Wait+Screen@15m /(your files are ready|retry the rest)/
 Sleep 1500ms
 Screenshot "live/09c-card-regenerated.png"
 Enter

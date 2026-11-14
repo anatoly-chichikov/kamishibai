@@ -164,6 +164,9 @@ pub(super) fn header_hint(app: &App) -> &'static str {
     if app.generation_stopping() {
         return "you can browse while the current step finishes";
     }
+    if app.generation_stopped() {
+        return "save the ready cards so you can start learning";
+    }
     if let Some(activity) = app.card_activity() {
         return match activity {
             CardActivity::Building => "open a card to see how it's coming along",
@@ -1813,14 +1816,16 @@ fn status(app: &App) -> Vec<Span<'static>> {
 /// appears exactly when there is a rewrite, a failure, or an unfinished
 /// artifact waiting for it.
 fn can_regenerate(app: &App) -> bool {
-    app.cards_running_target().is_none() && app.card_census().unfinished()
+    !app.generation_stopped()
+        && app.cards_running_target().is_none()
+        && app.card_census().unfinished()
 }
 
-/// Offer saving when every artifact is ready but its study package is unpublished.
+/// Offer saving for an unpublished complete batch or the ready subset of a stopped batch.
 fn can_publish(app: &App) -> bool {
     app.cards_running_target().is_none()
         && !app.cards().is_empty()
-        && !app.card_census().unfinished()
+        && (app.generation_stopped() || !app.card_census().unfinished())
         && (app.done_artifacts().deck.is_empty() || app.done_artifacts().report.is_empty())
 }
 
@@ -1896,7 +1901,7 @@ fn hints(app: &App) -> Vec<super::common::FooterHint> {
         }
         if app.can_start_new_batch() {
             hints.push(super::common::new_batch_hint(app.new_batch_pending()));
-        } else if !app.cards().is_empty() && !app.card_expanded() {
+        } else if !app.cards().is_empty() && !app.card_expanded() && !app.generation_stopped() {
             // The same Escape that starts a fresh batch on a settled screen
             // stops the run on a live one, and until now it went unnamed until
             // the first press had already armed it — the only destructive key
@@ -2139,6 +2144,19 @@ mod tests {
             YourCards.hint(&app),
             "your files will appear here when they're ready",
             "a stopped batch offered browsing while its publication overlay blocked input"
+        );
+    }
+
+    #[test]
+    fn a_stopped_save_failure_keeps_the_next_step_on_saving() {
+        assert_eq!(
+            YourCards.hint(
+                &app(vec![draft(true), draft(false)])
+                    .generation_stop_started()
+                    .publication_failed("output refused")
+            ),
+            "save the ready cards so you can start learning",
+            "a stopped save failure offered more generation or a finished result"
         );
     }
 
