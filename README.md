@@ -128,7 +128,7 @@ Decks round-trip, too: `kamishibai result --json` returns the finished cards in 
 
 ## Languages
 
-Twenty-two languages:
+Thirty languages:
 
 - `en` English
 - `zh` Chinese
@@ -152,6 +152,14 @@ Twenty-two languages:
 - `he` Hebrew
 - `nl` Dutch
 - `cs` Czech
+- `sr` Serbian (Latin script)
+- `ka` Modern Georgian
+- `hy` Eastern Armenian
+- `fa` Iranian Persian
+- `sv` Swedish
+- `ro` Romanian
+- `hu` Hungarian
+- `fi` Finnish
 
 Choose your language once. The app uses it for card labels, then detects what you're learning from each batch: paste French words for a French deck, Japanese words for a Japanese deck. When a word lives in several languages at once, `Ctrl+L` sets the pair for that batch yourself.
 

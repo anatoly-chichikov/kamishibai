@@ -152,7 +152,8 @@ fn registry_keeps_the_supported_codes_in_stable_order() {
         catalog().codes(),
         [
             "en", "zh", "es", "ja", "fr", "de", "ko", "ru", "it", "pt", "hi", "ar", "tr", "pl",
-            "uk", "id", "vi", "th", "el", "he", "nl", "cs",
+            "uk", "id", "vi", "th", "el", "he", "nl", "cs", "sr", "ka", "hy", "fa", "sv", "ro",
+            "hu", "fi",
         ],
         "profile registry codes no longer match the frozen order"
     );

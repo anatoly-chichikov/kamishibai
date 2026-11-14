@@ -1,9 +1,10 @@
 //! Tests for PDF report rendering.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use image::{Rgb, RgbImage};
 use kamishibai::languages::ReportLabels;
 use kamishibai::report::{
@@ -27,6 +28,239 @@ impl ReportLayout for StaticLayout {
     fn row(&self, _entry: &VocabularyEntry) -> Vec<(String, f32)> {
         self.rows.clone()
     }
+}
+
+/// Produce both PDF surfaces from the reviewer's mixed-script synthetic input.
+fn unicode_pdf(path: &Path, sheet: bool, language: &str, sample: &str) -> Result<()> {
+    let mut item = entry(sample, language, "RU");
+    item.source.sentence = text(sample);
+    item.source.highlight = text(sample);
+    item.source.hint = text(sample);
+    item.source.context = text(&format!("**{sample}**\n\n{sample}"));
+    item.target.sentence = text(sample);
+    if sheet {
+        let mut output = CardSheet::new();
+        output.append(&item, None);
+        output.save(path, &Thumbnail::new(150))?;
+    } else {
+        let mut output = Report::new(StaticLayout {
+            rows: vec![(sample.to_string(), 10.0), (sample.to_string(), 10.0)],
+        });
+        output.append(&item, None);
+        output.save(path, &Thumbnail::new(150))?;
+    }
+    Ok(())
+}
+
+/// Canonicalize only a legacy CMap header that lopdf cannot parse, preserving its actual mappings.
+fn readable(path: &Path) -> Result<Document> {
+    let mut document = Document::load(path)?;
+    let mut maps = BTreeSet::new();
+    for page in document.get_pages().values() {
+        for font in document.get_page_fonts(*page)?.values() {
+            maps.insert(font.get(b"ToUnicode")?.as_reference()?);
+        }
+    }
+    for id in maps {
+        let stream = document.get_object_mut(id)?.as_stream_mut()?;
+        let text = String::from_utf8(stream.get_plain_content()?)?;
+        let marker = text
+            .find("begincodespacerange")
+            .context("test CMap must declare its code space")?;
+        let start = text[..marker].rfind('\n').map_or(0, |index| index + 1);
+        let end = text
+            .find("endcmap")
+            .context("test CMap must close its mappings")?;
+        let text = format!(
+            "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /TestUnicode def\n/CMapType 2 def\n{}endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n",
+            &text[start..end]
+        );
+        *stream = lopdf::Stream::new(lopdf::Dictionary::new(), text.into_bytes());
+    }
+    Ok(document)
+}
+
+/// Decode the actual ToUnicode text instead of trusting font coverage or ActualText.
+fn armenian_text(sheet: bool) -> Result<bool> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("armenian.pdf");
+    let sample = "Արև և ջուր։ Թարգմանություն Հուշում";
+    unicode_pdf(&path, sheet, "HY", sample)?;
+    let document = readable(&path)?;
+    let fonts = extracted_fonts(&document)?
+        .into_values()
+        .filter(|text| text.contains("Արև"))
+        .collect::<Vec<_>>();
+    Ok(fonts.len() >= 2
+        && fonts.iter().all(|text| {
+            ["Արևևջուր։", "Թարգմանություն", "Հուշում"]
+                .iter()
+                .all(|sample| text.contains(sample))
+        }))
+}
+
+/// Decode each font separately so a working regular face cannot conceal a broken bold face.
+fn extracted_fonts(document: &Document) -> Result<BTreeMap<Vec<u8>, String>> {
+    let mut texts = BTreeMap::<Vec<u8>, String>::new();
+    for id in document.get_pages().values() {
+        let fonts = document.get_page_fonts(*id)?;
+        let mut selected = None;
+        for operation in document.get_and_decode_page_content(*id)?.operations {
+            if operation.operator == "Tf" {
+                selected = Some(operation.operands[0].as_name()?.to_vec());
+            } else if matches!(operation.operator.as_str(), "Tj" | "TJ") {
+                let name = selected.as_ref().expect("test text must select a font");
+                let encoding = fonts[name].get_font_encoding(document)?;
+                for operand in operation.operands.iter().flat_map(|operand| match operand {
+                    lopdf::Object::Array(values) => values.as_slice(),
+                    _ => std::slice::from_ref(operand),
+                }) {
+                    if let Ok(bytes) = operand.as_str() {
+                        texts.entry(name.clone()).or_default().extend(
+                            encoding
+                                .bytes_to_string(bytes)?
+                                .chars()
+                                .filter(|ch| !ch.is_whitespace()),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(texts)
+}
+
+/// Each emitted visual line must retain its complete logical Unicode source.
+fn logical_text(sheet: bool, language: &str, sample: &str) -> Result<bool> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("persian.pdf");
+    unicode_pdf(&path, sheet, language, sample)?;
+    let document = readable(&path)?;
+    let mut logical = Vec::new();
+    for id in document.get_pages().values() {
+        for operation in document.get_and_decode_page_content(*id)?.operations {
+            if operation.operator != "BDC" {
+                continue;
+            }
+            let properties = operation.operands[1].as_dict()?;
+            let bytes = properties.get(b"ActualText")?.as_str()?;
+            let units = bytes[2..]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| u16::from_be_bytes(*pair))
+                .collect::<Vec<_>>();
+            logical.push(String::from_utf16(&units)?);
+        }
+    }
+    Ok(logical.iter().filter(|text| *text == sample).count() >= 2)
+}
+
+/// Report regular and bold Armenian text must keep every ligature character.
+#[test]
+fn report_cannot_lose_armenian_ligature_characters() {
+    assert!(
+        armenian_text(false).expect("PDF fixture must render and decode"),
+        "report extraction lost Armenian letters or labels"
+    );
+}
+
+/// Card-sheet regular and bold Armenian text must keep every ligature character.
+#[test]
+fn card_sheet_cannot_lose_armenian_ligature_characters() {
+    assert!(
+        armenian_text(true).expect("PDF fixture must render and decode"),
+        "card-sheet extraction lost Armenian letters or labels"
+    );
+}
+
+/// Visual bidi order must not replace the report's logical text representation.
+#[test]
+fn report_cannot_lose_the_logical_persian_line() {
+    assert!(
+        logical_text(false, "FA", "من کتاب‌ها را می‌خوانم. (۲۰۲۶) ABC 42")
+            .expect("PDF fixture must render and decode"),
+        "report lost logical Persian text, punctuation or ZWNJ"
+    );
+}
+
+/// Visual bidi order must not replace the card sheet's logical text representation.
+#[test]
+fn card_sheet_cannot_lose_the_logical_persian_line() {
+    assert!(
+        logical_text(true, "FA", "من کتاب‌ها را می‌خوانم. (۲۰۲۶) ABC 42")
+            .expect("PDF fixture must render and decode"),
+        "card sheet lost logical Persian text, punctuation or ZWNJ"
+    );
+}
+
+/// Inspect the visual glyph stream independently of the logical ActualText carrier.
+fn visual_parentheses(sheet: bool, language: &str, sample: &str) -> Result<bool> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("bidi.pdf");
+    unicode_pdf(&path, sheet, language, sample)?;
+    let document = readable(&path)?;
+    let extracted =
+        document.extract_text(&document.get_pages().keys().copied().collect::<Vec<_>>())?;
+    let brackets = extracted
+        .chars()
+        .filter(|ch| matches!(ch, '(' | ')'))
+        .collect::<Vec<_>>();
+    Ok(!brackets.is_empty() && brackets.chunks(2).all(|pair| pair == ['(', ')']))
+}
+
+/// Every Persian digit group must be visually enclosed by mirrored primary glyphs.
+#[test]
+fn report_cannot_lose_persian_parenthesis_orientation() {
+    assert!(
+        visual_parentheses(false, "FA", "من کتاب‌ها را می‌خوانم. (۲۰۲۶) ABC 42")
+            .expect("PDF fixture must render and decode"),
+        "report drew reversed Persian parentheses"
+    );
+}
+
+/// Fallback boundaries must preserve bracket orientation on printable cards.
+#[test]
+fn card_sheet_cannot_lose_persian_parenthesis_orientation() {
+    assert!(
+        visual_parentheses(true, "FA", "من کتاب‌ها را می‌خوانم. (۲۰۲۶) ABC 42")
+            .expect("PDF fixture must render and decode"),
+        "card sheet drew reversed Persian parentheses"
+    );
+}
+
+/// Both surfaces must preserve the visual and logical Arabic control case.
+#[test]
+fn arabic_pdf_text_cannot_regress_when_persian_is_repaired() {
+    let sample = "أنا أقرأ كتابًا. (٢٠٢٦) ABC 42";
+    let mut checks = Vec::new();
+    for sheet in [false, true] {
+        checks.push(
+            visual_parentheses(sheet, "AR", sample).expect("PDF fixture must render and decode")
+                && logical_text(sheet, "AR", sample).expect("PDF fixture must render and decode"),
+        );
+    }
+    assert!(
+        checks.into_iter().all(|valid| valid),
+        "Arabic PDF order, punctuation or logical text regressed"
+    );
+}
+
+/// Both surfaces must preserve the visual and logical Hebrew control case.
+#[test]
+fn hebrew_pdf_text_cannot_regress_when_persian_is_repaired() {
+    let sample = "אני קורא ספר. (2026) ABC 42";
+    let mut checks = Vec::new();
+    for sheet in [false, true] {
+        checks.push(
+            visual_parentheses(sheet, "HE", sample).expect("PDF fixture must render and decode")
+                && logical_text(sheet, "HE", sample).expect("PDF fixture must render and decode"),
+        );
+    }
+    assert!(
+        checks.into_iter().all(|valid| valid),
+        "Hebrew PDF order, punctuation or logical text regressed"
+    );
 }
 
 /// Create one strict entry for report tests.

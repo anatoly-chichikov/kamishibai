@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.16.1
+Release: 1.17.0
 
 Overview
 
@@ -28,7 +28,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.16.1/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.17.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -754,6 +754,14 @@ Languages
 - `HE`: Hebrew
 - `NL`: Dutch
 - `CS`: Czech
+- `SR`: Serbian (Latin script)
+- `KA`: Modern Georgian
+- `HY`: Eastern Armenian
+- `FA`: Iranian Persian
+- `SV`: Swedish
+- `RO`: Romanian
+- `HU`: Hungarian
+- `FI`: Finnish
 
 Input schema for `new --build`
 

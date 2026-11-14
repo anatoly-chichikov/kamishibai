@@ -85,14 +85,13 @@ where
             let ops = pages.last_mut().expect("report must keep one active page");
             self.row(&mut doc, ops, &prepared, &registered, entry, image, &mut y)?;
         }
-        let pdf = doc
-            .with_pages(
-                pages
-                    .into_iter()
-                    .map(|ops| PdfPage::new(Mm(210.0), Mm(297.0), ops))
-                    .collect(),
-            )
-            .save(&PdfSaveOptions::default(), &mut Vec::new());
+        let pdf = doc.with_pages(
+            pages
+                .into_iter()
+                .map(|ops| PdfPage::new(Mm(210.0), Mm(297.0), ops))
+                .collect(),
+        );
+        let pdf = super::text_encoding::encoded(pdf, &PdfSaveOptions::default())?;
         fs::write(output, super::font_embedding::normalized(pdf)?)?;
         Ok(())
     }
@@ -251,13 +250,21 @@ where
         let view = ClassifierView::from(fonts);
         let direction = inferred_direction(line);
         let spans = visual_spans(line, direction, bold, view);
+        let logical = spans.iter().any(|span| span.rtl);
+        if logical {
+            super::text_encoding::logical(ops, line);
+        }
         let line_width = spans
             .iter()
             .map(|span| {
                 if fonts.shaping_active && matches!(span.track, Track::Supplemental(_)) {
                     return shaped_span_width(view.font(span.track, bold), span, size);
                 }
-                view.measure(span.text.as_str(), bold, size)
+                view.measure(
+                    super::text_encoding::ordered(&span.text, span.rtl).as_str(),
+                    bold,
+                    size,
+                )
             })
             .sum::<f32>();
         let mut x = if direction == TextDirection::Rtl {
@@ -271,18 +278,14 @@ where
             let advance = if fonts.shaping_active && matches!(span.track, Track::Supplemental(_)) {
                 emit_shaped(ops, font, id, &span, size, x, HEIGHT - y, color.clone())
             } else {
-                emit_plain(
-                    ops,
-                    id,
-                    span.text.as_str(),
-                    size,
-                    x,
-                    HEIGHT - y,
-                    color.clone(),
-                );
-                view.measure(span.text.as_str(), bold, size)
+                let text = super::text_encoding::ordered(&span.text, span.rtl);
+                emit_plain(ops, id, text.as_str(), size, x, HEIGHT - y, color.clone());
+                view.measure(text.as_str(), bold, size)
             };
             x += advance;
+        }
+        if logical {
+            ops.push(Op::EndMarkedContent);
         }
     }
 }
@@ -398,27 +401,28 @@ impl CharBuckets {
 
     fn insert(&mut self, track: Track, bold: bool, ch: char) {
         self.shaping |= supplemental_slot(ch).is_some();
+        let characters = std::iter::once(ch).chain(unicode_bidi_mirroring::get_mirrored(ch));
         match (track, bold) {
             (Track::Primary, true) => {
-                self.primary_bold.insert(ch);
+                self.primary_bold.extend(characters);
             }
             (Track::Primary, false) => {
-                self.primary_regular.insert(ch);
+                self.primary_regular.extend(characters);
             }
             (Track::Cjk, true) => {
-                self.cjk_bold.insert(ch);
+                self.cjk_bold.extend(characters);
             }
             (Track::Cjk, false) => {
-                self.cjk_regular.insert(ch);
+                self.cjk_regular.extend(characters);
             }
             (Track::Supplemental(index), true) => {
-                self.supplemental_bold[index].insert(ch);
+                self.supplemental_bold[index].extend(characters);
             }
             (Track::Supplemental(index), false) => {
-                self.supplemental_regular[index].insert(ch);
+                self.supplemental_regular[index].extend(characters);
             }
             (Track::Fallback, _) => {
-                self.fallback.insert(ch);
+                self.fallback.extend(characters);
             }
         }
     }

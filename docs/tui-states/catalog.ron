@@ -436,6 +436,37 @@ Catalog(
                 ],
             ),
         ),
+        Rule(head: Head(id: "language.catalog", intent: "Thirty languages stay selectable in either role without hiding familiar choices, while regional writing remains explicit wherever it changes how a term is read"),
+            scope: States(["welcome.language", "words.languages", "words.translation-choice", "review.languages", "review.translation-preview"]),
+            expectations: [
+                "One shared catalog offers EN ZH ES JA FR DE KO RU IT PT HI AR TR PL UK ID VI TH EL HE NL CS SR KA HY FA SV RO HU FI in that stable order",
+                "The former twenty-two choices keep their positions; Serbian, Georgian, Armenian, Persian, Swedish, Romanian, Hungarian and Finnish follow them",
+                "Both pair-picker roles offer all thirty languages; a translation-only picker omits the known language and keeps the remaining catalog order",
+                "Serbian uses Latin script, Georgian uses the modern norm, Armenian the Eastern norm and Persian the Iranian norm",
+                "The new codes normalize to uppercase like every existing choice; Persian declares right-to-left presentation and uses the English picker name Persian",
+            ],
+            grounds: Grounds(
+                sources: [
+                    Source(file: "src/languages/registry.rs", symbol: "declared_profiles"),
+                    Source(file: "src/tui/picker.rs", symbol: "PickerSection"),
+                    Source(file: "src/tui/picker.rs", symbol: "TranslationCursor"),
+                ],
+                tests: [
+                    Check(file: "src/languages/registry.rs", test: "profiles_keep_the_requested_global_popularity_order"),
+                    Check(file: "src/languages/registry.rs", test: "profiles_declare_every_text_gate_and_direction"),
+                    Check(file: "src/languages/prompt_examples.rs", test: "eight_added_languages_resolve_with_complete_local_examples"),
+                    Check(file: "src/tui/picker.rs", test: "translation_navigation_cannot_wrap_onto_the_known_language"),
+                    Check(file: "tests/new_languages.rs", test: "sr_works_in_both_language_roles_offline"),
+                    Check(file: "tests/new_languages.rs", test: "ka_works_in_both_language_roles_offline"),
+                    Check(file: "tests/new_languages.rs", test: "hy_works_in_both_language_roles_offline"),
+                    Check(file: "tests/new_languages.rs", test: "fa_works_in_both_language_roles_offline"),
+                    Check(file: "tests/new_languages.rs", test: "sv_works_in_both_language_roles_offline"),
+                    Check(file: "tests/new_languages.rs", test: "ro_works_in_both_language_roles_offline"),
+                    Check(file: "tests/new_languages.rs", test: "hu_works_in_both_language_roles_offline"),
+                    Check(file: "tests/new_languages.rs", test: "fi_works_in_both_language_roles_offline"),
+                ],
+            ),
+        ),
         Rule(head: Head(id: "language.translation-choice", intent: "Own-language input gets one plain question about which language to learn while the words wait intact, and a prepared proposal becomes a session only once confirmed"),
             scope: States(["words.translation-choice", "review.translation-preview"]),
             expectations: [
@@ -1932,7 +1963,9 @@ Catalog(
                     surface: Surface(screen: "Welcome", overlay: Clear),
                     chrome: Chrome(title: "setup", hint: "choose your language and add a gemini key", footer: ["[Enter] next", "[↑↓←→] language", "[Ctrl+C] quit"]),
                     expectations: [
-                        "Responsive native-name catalog grid fills the width; short layouts reduce to one column or codes",
+                        "Responsive native-name catalog grid offers all thirty languages; short layouts reduce to one column or codes",
+                        "The inactive key underline, notice and buttons take zero rows during language selection; the key label remains visible",
+                        "All thirty choices stay visible and clickable at 80x16 instead of losing the last six to inactive key-entry rows",
                         "Enter confirms the highlighted known language before exposing key entry; environment keys cannot skip this choice",
                         "Left/Right or Ctrl+L step one language; Up/Down move one grid row and a pointer click chooses its language",
                     ],
@@ -1960,6 +1993,8 @@ Catalog(
                 grounds: Grounds(
                     sources: [
                         Source(file: "src/tui/screens/welcome.rs", symbol: "Welcome"),
+                        Source(file: "src/tui/screens/welcome.rs", symbol: "body_rows"),
+                        Source(file: "src/tui/screens/language_grid.rs", symbol: "LanguageGrid"),
                         Source(file: "src/tui/transition.rs", symbol: "transit"),
                     ],
                     tests: [
@@ -1969,6 +2004,9 @@ Catalog(
                         Check(file: "tests/language_context.rs", test: "a_vertical_arrow_on_the_welcome_grid_moves_one_whole_line"),
                         Check(file: "tests/language_context.rs", test: "clicking_a_language_on_the_welcome_grid_picks_that_language"),
                         Check(file: "src/tui/screens/language_grid.rs", test: "a_short_screen_falls_back_to_the_bare_code"),
+                        Check(file: "tests/language_context.rs", test: "every_language_stays_clickable_on_a_narrow_welcome_step"),
+                        Check(file: "tests/snapshot.rs", test: "welcome_language_grid_cannot_hide_the_added_codes_on_a_short_terminal"),
+                        Check(file: "tests/snapshot.rs", test: "narrow_welcome_key_step_keeps_the_chosen_language_and_every_form_control_visible"),
                         Check(file: "tests/ui_catalog.rs", test: "catalog_copy_cannot_drift_from_the_rendered_scenes"),
                     ],
                 ),
@@ -1976,8 +2014,8 @@ Catalog(
                     Shot(
                         file: "docs/tui-states/live/32-welcome-language-grid.png",
                         origin: Synthetic,
-                        revision: Some("b0ed72c"),
-                        note: "Recaptured from the prepared scene on 2026-10-01 over renderer commit b0ed72c and inspected",
+                        revision: Some("e341cbee25d474d332a11a90a053eb15e2bcc023"),
+                        note: "Recaptured and visually inspected on 2026-11-14 from release gallery e341cbee25d474d332a11a90a053eb15e2bcc023 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; prepared appearance only",
                     ),
                 ]),
             ),
@@ -2495,6 +2533,7 @@ Catalog(
                     surface: Surface(screen: "YourWords", overlay: Modal("PickLanguages")),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+C] quit"]),
                     expectations: [
+                        "Each role uses the same thirty-language catalog as Welcome and review; the learning column keeps its pinned auto row",
                         "Two vertically scrolling columns share catalog rows under one directional heading",
                         "A pinned auto row exists only on the learning side; focus and selected values remain distinguishable",
                         "Up/Down choose a row, Left/Right choose a column, and the wheel moves and focuses the pick of the column under the pointer",
@@ -2631,7 +2670,7 @@ Catalog(
                     surface: Surface(screen: "YourWords", overlay: Modal("PickTranslationLanguage")),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+C] quit"]),
                     expectations: [
-                        "A single catalog-ordered list asks Which language do you want to learn? with one blank row before choices",
+                        "A single list offers the eligible choices from the thirty-language catalog in their stable order and asks Which language do you want to learn? with one blank row before choices",
                         "The newest eligible history choice is highlighted in place; absent history the first eligible choice is highlighted",
                         "No auto option, known-language column, grouping or history explanation renders",
                     ],
@@ -3348,7 +3387,7 @@ Catalog(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Modal("PickLanguages")),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+C] quit"]),
                     expectations: [
-                        "Two scrolling native-name columns keep the selected pair visible with a fixed learning auto row",
+                        "Two scrolling native-name columns each offer all thirty languages and keep the selected pair visible with a fixed learning auto row",
                         "Changing the pair rereads when the existing candidate meanings would be invalidated or a pinned language returns to auto; a reread above 60 lines is refused with too many words to re-read — start a new batch",
                     ],
                     actions: [
@@ -3397,8 +3436,8 @@ Catalog(
                     Shot(
                         file: "docs/tui-states/live/31-language-pair-modal.png",
                         origin: Synthetic,
-                        revision: Some("b0ed72c"),
-                        note: "Recaptured from the prepared scene on 2026-10-01 over renderer commit b0ed72c and inspected",
+                        revision: Some("e341cbee25d474d332a11a90a053eb15e2bcc023"),
+                        note: "Recaptured and visually inspected on 2026-11-14 from release gallery e341cbee25d474d332a11a90a053eb15e2bcc023 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; prepared appearance only",
                     ),
                 ]),
             ),
@@ -3408,7 +3447,7 @@ Catalog(
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+C] quit"]),
                     expectations: [
                         "The proposed candidates are visible behind the single-column language question",
-                        "The prepared target is highlighted in catalog order and its saved generation guidance is already loaded",
+                        "The prepared target is highlighted among the eligible choices of the thirty-language catalog in its normal position and its saved generation guidance is already loaded",
                         "Proposed candidates do not create a persisted session before confirmation",
                     ],
                     actions: [
@@ -3458,8 +3497,8 @@ Catalog(
                     Shot(
                         file: "docs/tui-states/live/35-translation-preview.png",
                         origin: Synthetic,
-                        revision: Some("b0ed72c"),
-                        note: "Recaptured from the prepared scene on 2026-10-01 over renderer commit b0ed72c and inspected",
+                        revision: Some("e341cbee25d474d332a11a90a053eb15e2bcc023"),
+                        note: "Recaptured and visually inspected on 2026-11-14 from release gallery e341cbee25d474d332a11a90a053eb15e2bcc023 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; prepared appearance only",
                     ),
                 ]),
             ),

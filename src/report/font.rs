@@ -142,6 +142,8 @@ impl FontPath {
             "Arial Hebrew" => &[".SF Hebrew", "Noto Sans Hebrew", "Arial", "Tahoma"],
             "Kohinoor Devanagari" => &["Devanagari Sangam MN", "Noto Sans Devanagari", "Mangal"],
             "Thonburi" => &["Noto Sans Thai", "Leelawadee UI", "Tahoma"],
+            "Noto Sans Georgian" => &[".SF Georgian", "Sylfaen"],
+            "Noto Sans Armenian" => &[".SF Armenian", "Sylfaen"],
             "Courier New" => &[
                 "CourierNewPSMT",
                 "Courier",
@@ -308,6 +310,8 @@ impl Default for FontPalette {
                 FontFamily::new("Arial Hebrew"),
                 FontFamily::new("Kohinoor Devanagari"),
                 FontFamily::new("Thonburi"),
+                FontFamily::new("Noto Sans Georgian"),
+                FontFamily::new("Noto Sans Armenian"),
             ],
             fallback: FontFamily::new("Arial Unicode MS"),
         }
@@ -478,6 +482,26 @@ mod tests {
     use printpdf::ParsedFont;
     use rustybuzz::ttf_parser::Face;
 
+    #[test]
+    fn caucasian_fonts_cannot_omit_letters_or_punctuation_in_either_weight() {
+        let palette = FontPalette::default();
+        let samples = [
+            ("Noto Sans Georgian", "ქართულიᲥᲐᲠᲗᲣᲚᲘ"),
+            ("Noto Sans Armenian", "Հայերենև։՜՞"),
+        ];
+        assert!(
+            samples.into_iter().all(|(name, sample)| palette
+                .supplemental()
+                .iter()
+                .find(|family| family.name() == name)
+                .is_some_and(|family| [false, true]
+                    .into_iter()
+                    .all(|bold| font_arc(family, bold)
+                        .is_ok_and(|font| sample.chars().all(|ch| carries(&font, ch)))))),
+            "a Caucasian report font cannot render its script in both weights"
+        );
+    }
+
     /// A selected collection weight must survive the PDF shaping boundary.
     #[test]
     fn supplemental_shaping_cannot_replace_the_selected_bold_face_with_regular() {
@@ -537,6 +561,8 @@ mod tests {
             ("שָׁלוֹם", true),
             ("किताब अच्छी", false),
             ("เก่งมาก", false),
+            ("ქართული ᲥᲐᲠᲗᲣᲚᲘ", false),
+            ("Արև և ջուր։", false),
         ];
         let mut comparisons = Vec::new();
         for (family, (sample, rtl)) in palette.supplemental().iter().zip(samples) {
@@ -588,7 +614,7 @@ mod tests {
     #[test]
     fn supplemental_fonts_cover_every_complex_script() {
         let palette = FontPalette::default();
-        let samples = ['한', 'ش', 'ש', 'क', 'ก'];
+        let samples = ['한', 'ش', 'ש', 'क', 'ก', 'Ქ', 'և'];
         let covered = palette
             .supplemental()
             .iter()

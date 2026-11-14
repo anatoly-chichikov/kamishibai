@@ -506,10 +506,10 @@ mod tests {
 
     #[test]
     fn translation_navigation_cannot_wrap_onto_the_known_language() {
-        let cursor = TranslationCursor::opening("CS", &[]).advanced(-1);
+        let cursor = TranslationCursor::opening("FI", &[]).advanced(-1);
         assert_eq!(
-            cursor.choice("CS").pinned(),
-            Some("NL"),
+            cursor.choice("FI").pinned(),
+            Some("HU"),
             "translation navigation wrapped onto the excluded known language"
         );
     }

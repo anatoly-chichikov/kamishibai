@@ -1,44 +1,45 @@
 ---
 source: tests/snapshot.rs
+assertion_line: 313
 expression: "render_sized(&opened_picker(), 96, 40)"
 ---
-                                                                                                
-     word meanings   choose the meanings you want to learn                            RU → ?    
-                                                                                                
-    understanding your words…                                                                   
-                                                                                                
                 ┌─ languages ──────────────────────────────────────────────────┐                
-                │                                                              │                
+     word meanin│                                                              │      RU → ?    
                 │  your language             →  what you're learning           │                
-                │  ──────────────────────       ───────────────────────────    │                
+    understandin│  ──────────────────────       ───────────────────────────    │                
                 │                               auto  detect from the words    │                
-                │  EN    English                EN    English                  │                
-                │  ZH    中 文                    ZH    中 文                      │                
-                │  ES    Español                ES    Español                  │                
-                │  JA    日 本 語                  JA    日 本 語                    │                
-                │  FR    Français               FR    Français                 │                
-                │  DE    Deutsch                DE    Deutsch                  │                
-                │  KO    한 국 어                  KO    한 국 어                    │                
-                │  RU    Русский                RU    Русский                  │                
-                │  IT    Italiano               IT    Italiano                 │                
-                │  PT    Português              PT    Português                │                
-                │  HI    Hindi                  HI    Hindi                    │                
-                │  AR    Arabic                 AR    Arabic                   │                
-                │  TR    Türkçe                 TR    Türkçe                   │                
-                │  PL    Polski                 PL    Polski                   │                
-                │  UK    Українська             UK    Українська               │                
-                │  ID    Bahasa Indonesia       ID    Bahasa Indonesia         │                
-                │  VI    Tiếng Việt             VI    Tiếng Việt               │                
-                │  TH    ไทย                    TH    ไทย                      │                
-                │  EL    Ελληνικά               EL    Ελληνικά                 │                
-                │  HE    Hebrew                 HE    Hebrew                   │                
-                │  NL    Nederlands             NL    Nederlands               │                
-                │  CS    Čeština                CS    Čeština                  │                
+                │  EN    English          ┃     EN    English               ┃  │                
+                │  ZH    中 文              ┃     ZH    中 文                   ┃  │                
+                │  ES    Español          ┃     ES    Español               ┃  │                
+                │  JA    日 本 語            ┃     JA    日 本 語                 ┃  │                
+                │  FR    Français         ┃     FR    Français              ┃  │                
+                │  DE    Deutsch          ┃     DE    Deutsch               ┃  │                
+                │  KO    한 국 어            ┃     KO    한 국 어                 ┃  │                
+                │  RU    Русский          ┃     RU    Русский               ┃  │                
+                │  IT    Italiano         ┃     IT    Italiano              ┃  │                
+                │  PT    Português        ┃     PT    Português             ┃  │                
+                │  HI    Hindi            ┃     HI    Hindi                 ┃  │                
+                │  AR    Arabic           ┃     AR    Arabic                ┃  │                
+                │  TR    Türkçe           ┃     TR    Türkçe                ┃  │                
+                │  PL    Polski           ┃     PL    Polski                ┃  │                
+                │  UK    Українська       ┃     UK    Українська            ┃  │                
+                │  ID    Bahasa Indonesia ┃     ID    Bahasa Indonesia      ┃  │                
+                │  VI    Tiếng Việt       ┃     VI    Tiếng Việt            ┃  │                
+                │  TH    ไทย              ┃     TH    ไทย                   ┃  │                
+                │  EL    Ελληνικά         ┃     EL    Ελληνικά              ┃  │                
+                │  HE    Hebrew           ┃     HE    Hebrew                ┃  │                
+                │  NL    Nederlands       ┃     NL    Nederlands            ┃  │                
+                │  CS    Čeština          ┃     CS    Čeština               ┃  │                
+                │  SR    srpski           ┃     SR    srpski                ┃  │                
+                │  KA    ქართული          ┃     KA    ქართული               ┃  │                
+                │  HY    Հայերեն          ┃     HY    Հայերեն               ┃  │                
+                │  FA    Persian          ┃     FA    Persian               ┃  │                
+                │  SV    svenska          ┃     SV    svenska               ┃  │                
+                │  RO    română           ┃     RO    română                ┃  │                
+                │  HU    magyar           ┃     HU    magyar                ┃  │                
                 │                                                              │                
                 │  [Enter] confirm  [←→] column  [↑↓] nav  [Esc] cancel        │                
                 └──────────────────────────────────────────────────────────────┘                
-                                                                                                
-                                                                                                
                                                       ai may be wrong, please verify results    
                                                                                                 
     step 2/3  nothing to make                                                  [Ctrl+C] quit

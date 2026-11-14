@@ -175,6 +175,8 @@ pub(super) fn supplemental_slot(ch: char) -> Option<usize> {
         0x0590..=0x05FF | 0xFB1D..=0xFB4F => Some(2),
         0x0900..=0x097F | 0xA8E0..=0xA8FF => Some(3),
         0x0E00..=0x0E7F => Some(4),
+        0x10A0..=0x10FF | 0x1C90..=0x1CBF | 0x2D00..=0x2D2F => Some(5),
+        0x0530..=0x058F | 0xFB13..=0xFB17 => Some(6),
         _ => None,
     }
 }
@@ -206,8 +208,18 @@ mod tests {
                 supplemental_slot('ש'),
                 supplemental_slot('क'),
                 supplemental_slot('ก'),
+                supplemental_slot('ქ'),
+                supplemental_slot('և'),
             ],
-            [Some(0), Some(1), Some(2), Some(3), Some(4)],
+            [
+                Some(0),
+                Some(1),
+                Some(2),
+                Some(3),
+                Some(4),
+                Some(5),
+                Some(6)
+            ],
             "a complex script lost its dedicated font dispatch slot"
         );
     }
@@ -246,6 +258,22 @@ mod tests {
         assert_ne!(
             shaped, raw,
             "Arabic shaping collapsed to isolated Unicode cmap glyphs"
+        );
+    }
+
+    #[test]
+    fn persian_non_joiner_cannot_be_ignored_at_a_font_boundary() {
+        let palette = FontPalette::default();
+        let font = font_arc(&palette.supplemental()[1], false)
+            .expect("the Persian font must resolve locally");
+        let separated = shape_with_context(&font, "می", true, "", "‌خوانم")
+            .expect("Persian with a non-joiner must shape");
+        let joined = shape_with_context(&font, "می", true, "", "خوانم")
+            .expect("Persian without a non-joiner must shape");
+        assert_ne!(
+            separated.iter().map(|glyph| glyph.gid).collect::<Vec<_>>(),
+            joined.iter().map(|glyph| glyph.gid).collect::<Vec<_>>(),
+            "a font boundary ignored the Persian non-joiner and joined adjacent letters"
         );
     }
 

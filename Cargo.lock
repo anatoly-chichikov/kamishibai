@@ -2071,7 +2071,7 @@ dependencies = [
 
 [[package]]
 name = "kamishibai"
-version = "1.16.1"
+version = "1.17.0"
 dependencies = [
  "allsorts",
  "anyhow",
@@ -2108,6 +2108,7 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "unicode-bidi",
+ "unicode-bidi-mirroring",
  "unicode-script",
  "unicode-segmentation",
  "unicode-width",
