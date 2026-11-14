@@ -1,0 +1,34 @@
+---
+source: src/cli/export/screen.rs
+expression: "render(&mut screen(pages().remove(9)), 100, 30)"
+---
+                                                                                                    
+     export from anki   your file is ready                                                          
+                                                                                                    
+    │ ↓ FOLDER  /Users/learner/Downloads                                                            
+    │ ↓ FILE    kamishibai-anki-2026-11-07.zip                                                      
+                                                                                                    
+                                                                                                    
+    ✓ saved 2 cards and 3 reviews                                                                   
+                                                                                                    
+    import at app.kamishibai.io                                                                     
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+    step 3/3                                                                        [Enter] exit    

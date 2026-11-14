@@ -1,0 +1,458 @@
+//! Terminal ownership and asynchronous local I/O for the separate export screen.
+
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use anyhow::{Result, anyhow};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::execute;
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use time::OffsetDateTime;
+
+use crate::anki::history::{
+    self, AnkiProcess, DeckSummary, HistoryError, SaveGate, Snapshot, SystemAnkiProcess,
+};
+use crate::runtime::locations::compact_path;
+use crate::tui::latin_key;
+
+use super::input::{Input, TerminalInput};
+use super::interrupt::Cancellation;
+use super::screen::{Intent, Refusal, Screen};
+use super::{ExportArgs, profiles, refusal};
+
+struct TerminalLease;
+
+struct ScreenWriter<W> {
+    output: W,
+    cancelled: Cancellation,
+}
+
+impl<W> ScreenWriter<W> {
+    fn new(output: W, cancelled: Cancellation) -> Self {
+        Self { output, cancelled }
+    }
+}
+
+impl<W: Write> Write for ScreenWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match self.output.write(bytes) {
+            Err(_) if self.cancelled.verify().is_err() => Ok(bytes.len()),
+            result => result,
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self.output.flush() {
+            Err(_) if self.cancelled.verify().is_err() => Ok(()),
+            result => result,
+        }
+    }
+}
+
+impl Drop for TerminalLease {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = write!(io::stdout(), "\x1b[?1000l\x1b[?1006l");
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
+    }
+}
+
+struct Prepared {
+    snapshot: Snapshot,
+}
+
+struct Job {
+    receiver: Receiver<Result<Reply, Failure>>,
+    worker: Option<JoinHandle<()>>,
+    cancelled: Cancellation,
+}
+
+impl Job {
+    fn new(
+        receiver: Receiver<Result<Reply, Failure>>,
+        worker: Option<JoinHandle<()>>,
+        cancelled: Cancellation,
+    ) -> Self {
+        Self {
+            receiver,
+            worker,
+            cancelled,
+        }
+    }
+
+    fn poll(&mut self) -> Result<Result<Reply, Failure>, TryRecvError> {
+        let result = self.receiver.try_recv()?;
+        if let Some(worker) = self.worker.take() {
+            worker.join().map_err(|_| TryRecvError::Disconnected)?;
+        }
+        Ok(result)
+    }
+}
+
+impl Drop for Job {
+    fn drop(&mut self) {
+        if let Some(worker) = self.worker.take() {
+            self.cancelled.cancel();
+            let _ = worker.join();
+        }
+    }
+}
+
+enum Reply {
+    Checked(Vec<PathBuf>),
+    Inspected(Vec<DeckSummary>),
+    Reviewed(Box<Prepared>),
+    Saved(PathBuf),
+}
+
+enum Failure {
+    History(HistoryError),
+    Delivery(anyhow::Error),
+    Refusal(Refusal),
+}
+
+/// Distinguish normal dismissal from lost input after all archive work is drained.
+pub(super) enum Exit {
+    /// Return normally after a key or signal dismissed the screen.
+    Dismissed,
+    /// Report cancellation only after the writer refused publication and drained.
+    Cancelled,
+    /// Preserve the input failure even when draining the writer requested cancellation.
+    InputEnded(io::Error),
+}
+
+impl From<HistoryError> for Failure {
+    fn from(error: HistoryError) -> Self {
+        Self::History(error)
+    }
+}
+
+impl From<anyhow::Error> for Failure {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Delivery(error)
+    }
+}
+
+impl From<io::Error> for Failure {
+    fn from(error: io::Error) -> Self {
+        Self::History(HistoryError::Io(error))
+    }
+}
+
+/// Own the alternate terminal until success, cancellation or an unrecoverable I/O error.
+pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation) -> Result<Exit> {
+    enable_raw_mode()?;
+    let _lease = TerminalLease;
+    execute!(io::stdout(), EnterAlternateScreen)?;
+    let output = ScreenWriter::new(io::stdout(), cancelled.clone());
+    let mut terminal = Terminal::new(CrosstermBackend::new(output))?;
+    let input = TerminalInput::from_terminal();
+    let mut screen = Screen::from_directory(directory.clone());
+    let mut prepared = None;
+    let mut job = Some(start(
+        Intent::Check,
+        args.clone(),
+        None,
+        &directory,
+        None,
+        cancelled.clone(),
+    ));
+    let mut tick = 0;
+    loop {
+        if cancelled.verify().is_err() && screen.interrupt() == Intent::Exit {
+            return Ok(Exit::Dismissed);
+        }
+        terminal.draw(|frame| screen.draw(frame, tick))?;
+        if let Some(worker) = &mut job {
+            match worker.poll() {
+                Ok(result) => {
+                    job = None;
+                    match result {
+                        Ok(Reply::Checked(profiles)) => screen.checked(profiles),
+                        Ok(Reply::Inspected(decks)) => screen.inspected(decks),
+                        Ok(Reply::Reviewed(snapshot)) => {
+                            screen.reviewed(snapshot.snapshot.preview().map_err(refusal)?);
+                            prepared = Some(snapshot);
+                        }
+                        Ok(Reply::Saved(path)) => {
+                            screen.saved(path);
+                            write!(terminal.backend_mut(), "\x1b[?1000h\x1b[?1006h")?;
+                            terminal.backend_mut().flush()?;
+                        }
+                        Err(_) if cancelled.verify().is_err() => return Ok(Exit::Cancelled),
+                        Err(error) => {
+                            let refusal = stopped(error, &screen);
+                            screen.failed(refusal);
+                        }
+                    }
+                    continue;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    return Err(anyhow!("export stopped unexpectedly"));
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+        let event = input.poll(Duration::from_millis(80));
+        if cancelled.verify().is_err() {
+            continue;
+        }
+        let event = match event {
+            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+                return Ok(Exit::InputEnded(error));
+            }
+            result => result?,
+        };
+        if let Some(Event::Mouse(mouse)) = &event
+            && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && let Some((path, reveal)) =
+                screen.link(mouse.column, mouse.row, terminal.size()?.width)
+        {
+            let path = path.to_string_lossy();
+            if reveal {
+                crate::cli::host::reveal_path(&path)?;
+            } else {
+                crate::cli::host::open_path(&path)?;
+            }
+        }
+        if let Some(Event::Key(key)) = event
+            && key.kind != KeyEventKind::Release
+        {
+            let intent = if key.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(key.code, KeyCode::Char(c) if latin_key(c) == 'c')
+            {
+                screen.interrupt()
+            } else {
+                screen.key(key.code)
+            };
+            match intent {
+                Intent::Exit => return Ok(Exit::Dismissed),
+                Intent::Cancel => cancelled.cancel(),
+                Intent::Wait => {}
+                _ if job.is_none() => {
+                    let selection = if intent == Intent::Check {
+                        None
+                    } else {
+                        Some(screen.select())
+                    };
+                    job = Some(start(
+                        intent,
+                        args.clone(),
+                        selection,
+                        &directory,
+                        prepared.take(),
+                        cancelled.clone(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        tick = tick.wrapping_add(1);
+    }
+}
+
+fn start(
+    intent: Intent,
+    args: ExportArgs,
+    selection: Option<(PathBuf, Vec<String>)>,
+    directory: &Path,
+    prepared: Option<Box<Prepared>>,
+    cancelled: Cancellation,
+) -> Job {
+    let directory = directory.to_path_buf();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let cancellation = cancelled.clone();
+    let worker = std::thread::spawn(move || {
+        let result = perform(intent, &args, selection, &directory, prepared, cancellation);
+        let _ = sender.send(result);
+    });
+    Job::new(receiver, Some(worker), cancelled)
+}
+
+fn stopped(error: Failure, screen: &Screen) -> Refusal {
+    match error {
+        Failure::History(error) => match error {
+            HistoryError::Open => Refusal::Open,
+            HistoryError::Changed => Refusal::Changed,
+            HistoryError::Destination => Refusal::Destination,
+            HistoryError::Oversized => Refusal::Oversized {
+                decks: screen.select().1.len(),
+            },
+            HistoryError::Schema(_) => Refusal::Schema,
+            HistoryError::Selection(text) => Refusal::Deck(text),
+            HistoryError::Collection(text) => Refusal::Collection(text),
+            error => Refusal::Other(format!("{error:#}")),
+        },
+        Failure::Delivery(error) => Refusal::Other(format!("{error:#}")),
+        Failure::Refusal(refusal) => refusal,
+    }
+}
+
+fn perform(
+    intent: Intent,
+    args: &ExportArgs,
+    selection: Option<(PathBuf, Vec<String>)>,
+    directory: &Path,
+    prepared: Option<Box<Prepared>>,
+    cancelled: Cancellation,
+) -> Result<Reply, Failure> {
+    if intent == Intent::Check {
+        if args.collection.is_none() {
+            let roots = history::roots();
+            let paths = history::discover(&roots)?;
+            if paths.is_empty() {
+                return Err(Failure::Refusal(Refusal::NoProfiles {
+                    roots: roots
+                        .iter()
+                        .map(|root| compact_path(root))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                }));
+            }
+            if let Some(name) = &args.profile
+                && !paths.iter().any(|path| {
+                    path.parent()
+                        .and_then(Path::file_name)
+                        .is_some_and(|folder| folder == std::ffi::OsStr::new(name))
+                })
+            {
+                return Err(Failure::Refusal(Refusal::NoProfile {
+                    name: name.clone(),
+                    available: super::profile_names(&paths),
+                }));
+            }
+        }
+        let paths = profiles(args)?;
+        if paths.len() == 1 {
+            history::closed(&paths[0], &SystemAnkiProcess)?;
+        } else if SystemAnkiProcess.running(&paths[0])? {
+            return Err(HistoryError::Open.into());
+        }
+        return Ok(Reply::Checked(paths));
+    }
+    let (path, names) = selection.expect("invariant: read/save steps follow profile selection");
+    match intent {
+        Intent::Inspect => Ok(Reply::Inspected(history::inspect(
+            &path,
+            &args.decks,
+            &SystemAnkiProcess,
+            &history::application_version(),
+        )?)),
+        Intent::Review => {
+            let path = path.canonicalize()?;
+            history::closed(&path, &SystemAnkiProcess)?;
+            let snapshot = history::read(
+                &path,
+                &names,
+                &SystemAnkiProcess,
+                &history::application_version(),
+            )?;
+            cancelled.verify()?;
+            snapshot.check_destination(directory)?;
+            Ok(Reply::Reviewed(Box::new(Prepared { snapshot })))
+        }
+        Intent::Save => {
+            let prepared = prepared.expect("invariant: saving follows a reviewed snapshot");
+            let path = prepared.snapshot.save_guarded(
+                directory,
+                OffsetDateTime::now_utc(),
+                env!("CARGO_PKG_VERSION"),
+                &cancelled,
+            )?;
+            Ok(Reply::Saved(path))
+        }
+        _ => unreachable!("invariant: only export effects reach the worker"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_collection_cannot_suggest_decks_on_screen() {
+        let root = tempfile::tempdir().unwrap();
+        let failure = history::read(
+            &root.path().join("absent-973.anki2"),
+            &[],
+            &SystemAnkiProcess,
+            "test",
+        )
+        .err()
+        .unwrap();
+        let mut screen = Screen::from_directory(root.path().join("output"));
+        screen.failed(stopped(Failure::History(failure), &screen));
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| screen.draw(frame, 0)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(
+            rendered.contains("Anki collection not found") && !rendered.contains("--deck"),
+            "a missing collection incorrectly suggested decks on screen: {rendered}"
+        );
+    }
+
+    struct ClosedDisplay;
+
+    impl Write for ClosedDisplay {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "display closed"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "display closed"))
+        }
+    }
+
+    #[test]
+    fn an_active_display_cannot_hide_a_write_failure() {
+        let result = ScreenWriter::new(ClosedDisplay, Cancellation::new()).write(b"frame 947");
+        assert!(
+            matches!(result, Err(error) if error.kind() == io::ErrorKind::BrokenPipe),
+            "an active display hid its write failure"
+        );
+    }
+
+    #[test]
+    fn an_active_display_cannot_hide_a_flush_failure() {
+        let result = ScreenWriter::new(ClosedDisplay, Cancellation::new()).flush();
+        assert!(
+            matches!(result, Err(error) if error.kind() == io::ErrorKind::BrokenPipe),
+            "an active display hid its flush failure"
+        );
+    }
+
+    #[test]
+    fn a_cancelled_display_cannot_fail_during_cursor_restoration() {
+        let cancelled = Cancellation::new();
+        cancelled.cancel();
+        let result = ScreenWriter::new(ClosedDisplay, cancelled).write_all(b"cursor 593");
+        assert!(
+            result.is_ok(),
+            "a cancelled display propagated its cursor restoration failure"
+        );
+    }
+
+    #[test]
+    fn a_cancelled_display_cannot_fail_during_the_final_flush() {
+        let cancelled = Cancellation::new();
+        cancelled.cancel();
+        let result = ScreenWriter::new(ClosedDisplay, cancelled).flush();
+        assert!(
+            result.is_ok(),
+            "a cancelled display propagated its final flush failure"
+        );
+    }
+}

@@ -504,6 +504,11 @@ pub fn back_hint() -> FooterHint {
     FooterHint::with("Esc", "back", Tier::Ghost, Keep::Optional)
 }
 
+/// Build a quiet dismissal hint that survives optional navigation hints.
+pub(crate) fn exit_hint(key: &str, label: &str) -> FooterHint {
+    FooterHint::with(key, label, Tier::Ghost, Keep::Exit)
+}
+
 /// The review-screen generation-guidance action — the door out of the top of
 /// the list, advertised only while the walk actually stands there.
 pub fn sentence_settings_hint() -> FooterHint {

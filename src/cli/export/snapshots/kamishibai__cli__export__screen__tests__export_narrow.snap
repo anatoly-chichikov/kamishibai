@@ -1,0 +1,190 @@
+---
+source: src/cli/export/screen.rs
+expression: rendered
+---
+                                          
+  export from anki   choose your anki pro 
+                                          
+                                          
+                                          
+┌─ reading anki ─────────────────────────┐
+│                                        │
+│  ◐  checking that anki is closed       │
+│                                        │
+└────────────────────────────────────────┘
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 1/3                      [Esc] exit 
+
+                                          
+  export from anki   close anki first     
+                                          
+ anki is open or has crashed              
+                                          
+ 1. sync in anki                          
+ 2. close anki                            
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 1/3             [Enter] check again 
+
+                                          
+  export from anki   choose your anki pro 
+                                          
+ User 1                                   
+ User 2                                   
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 1/3            [Enter] choose decks 
+
+                                          
+  export from anki   choose your anki pro 
+                                          
+ User 1                                   
+ User 2                                   
+┌─ reading anki ─────────────────────────┐
+│                                        │
+│  ◐  finding your decks                 │
+│                                        │
+└────────────────────────────────────────┘
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 1/3                      [Esc] exit 
+
+                                          
+  export from anki   choose decks to expo 
+                                          
+ ✓ French     1 card                      
+     Daily   0 cards                      
+   Other     0 cards                      
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 2/3  1 card                         
+ [Enter] next  [Space] select  [Esc] back 
+
+                                          
+  export from anki   choose decks to expo 
+                                          
+ ✓ French     1 card                      
+     Daily   0 cards                      
+┌─ reading anki ─────────────────────────┐
+│                                        │
+│  ◐  counting cards and reviews         │
+│                                        │
+└────────────────────────────────────────┘
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 2/3  1 card              [Esc] exit 
+
+                                          
+  export from anki   save for kamishibai  
+                                          
+ cards     2                              
+ reviews   3                              
+ folder    /Users/learner/Downloads       
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 3/3        [Enter] save  [Esc] back 
+
+                                          
+  export from anki   saving your file     
+                                          
+ cards     2                              
+ reviews   3                              
+┌─ saving ───────────────────────────────┐
+│                                        │
+│  ◐  writing and checking your file     │
+│                                        │
+└────────────────────────────────────────┘
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 3/3                    [Esc] cancel 
+
+                                          
+  export from anki   cancelling the save  
+                                          
+ cards     2                              
+ reviews   3                              
+┌─ cancelling ───────────────────────────┐
+│                                        │
+│  ◐  removing the unfinished file       │
+│                                        │
+└────────────────────────────────────────┘
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 3/3                                 
+
+                                          
+  export from anki   your file is ready   
+                                          
+ │ ↓ FOLDER  /Users/learner/Downloads     
+ │ ↓ FILE    kamishibai-anki-2026-11-07.z 
+                                          
+                                          
+ ✓ saved 2 cards and 3 reviews            
+                                          
+ import at app.kamishibai.io              
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 3/3                    [Enter] exit 
+
+                                          
+  export from anki   the export stopped   
+                                          
+ can't save inside the anki folder        
+                                          
+ choose another folder with --out         
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+ step 3/3                      [Esc] back

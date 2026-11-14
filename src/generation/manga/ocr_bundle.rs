@@ -201,8 +201,9 @@ mod tests {
                 .local_addr()
                 .expect("model server address must resolve")
         );
+        let (finished, completion) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(2);
+            let deadline = Instant::now() + Duration::from_secs(30);
             let mut stream = loop {
                 match listener.accept() {
                     Ok((stream, _)) => break stream,
@@ -216,10 +217,13 @@ mod tests {
                 }
             };
             stream
-                .set_read_timeout(Some(Duration::from_secs(2)))
+                .set_nonblocking(false)
+                .expect("model request must wait for bytes");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(30)))
                 .expect("model request read must be bounded");
             stream
-                .set_write_timeout(Some(Duration::from_secs(2)))
+                .set_write_timeout(Some(Duration::from_secs(30)))
                 .expect("model response write must be bounded");
             let mut buffer = [0; 1];
             stream
@@ -228,7 +232,9 @@ mod tests {
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nmo")
                 .expect("partial model response must write");
-            thread::sleep(Duration::from_millis(500));
+            completion
+                .recv_timeout(Duration::from_secs(30))
+                .expect("download must finish before the body is released");
             let _ = stream.write_all(b"del");
         });
         let result = download(
@@ -236,6 +242,9 @@ mod tests {
             &directory.path().join("model.part"),
             Duration::from_millis(100),
         );
+        finished
+            .send(())
+            .expect("server must await download completion");
         server.join().expect("model server must finish");
         assert!(
             result.is_err_and(|error| error.chain().any(|cause| cause

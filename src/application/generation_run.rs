@@ -7,7 +7,46 @@ use anyhow::{Context, Result, bail};
 use super::CardProduction;
 use crate::session::{
     Artifact, ArtifactAttempt, ArtifactFile, CardDraft, CardRevision, EngineEvent, SessionEngine,
+    StateFailure,
 };
+
+/// Delivery-owned selection and cooperative refusal of new paid work within one artifact.
+///
+/// A pause reported before `GenerationRun::advance_in` starts prevents all provider
+/// requests and leaves attempts, request budgets, and scene indices unchanged,
+/// however many times the caller advances while paused.
+///
+/// A request refused after a step starts may raise the pause without spending an
+/// artifact attempt. Costs already incurred remain recorded, but unfinished work
+/// is discarded and bought again on resume: one such pause loses at most one
+/// composed scene. An index for a possibly sent scene stays reserved; a scene
+/// request confirmed not sent returns its index. A not-sent refusal without a
+/// reported pause is a failed attempt, bounded by the usual attempt ceiling.
+///
+/// Errors writing or rolling back the core's own state, or recording costs,
+/// including in the caller's cost ledger, still reach the caller during a pause.
+/// They do not spend an artifact attempt; incurred costs remain in the drafts.
+/// This guarantee does not cover state reads: a failed read may return an error
+/// or remain a pause and be retried on resume.
+///
+/// Experimental embedding API; compatibility is not guaranteed.
+pub trait GenerationControl {
+    /// Whether this stable card position may start its next artifact.
+    fn allows(&self, card: usize) -> bool;
+    /// Whether work must stay paused, including after a request was refused mid-step.
+    /// Keep this true until work is explicitly resumed.
+    fn paused(&self) -> bool;
+}
+
+struct Unrestricted;
+impl GenerationControl for Unrestricted {
+    fn allows(&self, _card: usize) -> bool {
+        true
+    }
+    fn paused(&self) -> bool {
+        false
+    }
+}
 
 /// Drives one batch through the same artifact queue used by the terminal.
 ///
@@ -52,14 +91,49 @@ impl GenerationRun {
         &mut self,
         production: &P,
     ) -> Result<Option<GenerationStep>> {
-        if self.cancelled {
+        self.advance_in(production, &Unrestricted)
+    }
+
+    /// Advance one allowed position unless control already reports a pause.
+    ///
+    /// While paused at entry, repeated calls return `None` without any provider
+    /// request or change to attempts, request budgets, or scene indices.
+    /// If a request is refused and raises the pause during this step, return `None`
+    /// and retain its costs without spending an artifact attempt. Unfinished work
+    /// is discarded and repeated on resume, losing at most one composed scene per
+    /// such pause. A possibly sent scene keeps its index; a scene request confirmed
+    /// not sent returns its index. A not-sent refusal without a reported pause
+    /// spends an attempt and remains bounded by the usual attempt ceiling.
+    /// Errors writing or rolling back the core's own state, or recording costs,
+    /// including in the caller's cost ledger, still reach the caller during a pause.
+    /// They do not spend an artifact attempt; incurred costs remain in the drafts.
+    /// This guarantee does not cover state reads: a failed read may return an error
+    /// or remain a pause and be retried on resume.
+    ///
+    /// Experimental embedding API; compatibility is not guaranteed.
+    pub fn advance_in<P: CardProduction + ?Sized>(
+        &mut self,
+        production: &P,
+        control: &dyn GenerationControl,
+    ) -> Result<Option<GenerationStep>> {
+        if self.cancelled || control.paused() {
             return Ok(None);
         }
         validate_ready(self.engine.drafts())?;
-        let Some((card, artifact)) = self.next() else {
+        let Some((card, artifact)) = self.engine.next_allowed(|card| control.allows(card)) else {
             return Ok(None);
         };
         let outcome = produce_artifact(production, card, artifact, &self.engine.drafts()[card]);
+        if let Some(error) = outcome.error()
+            && control.paused()
+        {
+            let storage = error.is::<StateFailure>();
+            let result = outcome.pause(&mut self.engine, card, artifact);
+            if storage {
+                result?;
+            }
+            return Ok(None);
+        }
         let error = outcome.error().map(|error| format!("{error:#}"));
         let event = outcome.apply(&mut self.engine, card, artifact);
         validate_ready(self.engine.drafts())?;
@@ -177,6 +251,14 @@ impl ArtifactOutcome {
         match self {
             Self::Meta(attempt) => attempt.error(),
             Self::Media(attempt) => attempt.error(),
+        }
+    }
+
+    /// Account a cooperative refusal without recording a failed artifact attempt.
+    fn pause(self, engine: &mut SessionEngine, card: usize, artifact: Artifact) -> Result<()> {
+        match self {
+            Self::Meta(attempt) => engine.paused(card, artifact, *attempt),
+            Self::Media(attempt) => engine.paused(card, artifact, *attempt),
         }
     }
 

@@ -104,6 +104,7 @@ pub(super) fn handle(command: &Command, render: Render, opener: &dyn SessionOpen
         Command::Rm(args) => maintenance::rm(args, render),
         Command::CachePath => maintenance::cache_path(render),
         Command::Config(args) => config::config(args, render),
+        Command::Export(_) => unreachable!("invariant: export is routed before session delivery"),
         Command::Worker(args) => worker::run_detached_entry(args.id.as_str(), args.launch.as_str()),
     }
 }

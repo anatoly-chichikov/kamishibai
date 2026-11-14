@@ -53,7 +53,17 @@ impl SessionEngine {
 
     /// Return the next pending artifact to work on, if any.
     pub fn next_target(&self) -> Option<(usize, Artifact)> {
+        self.next_allowed(|_| true)
+    }
+
+    /// Select an allowed stable position without removing or renumbering any draft.
+    /// Experimental embedding API; compatibility is not guaranteed.
+    #[must_use]
+    pub fn next_allowed(&self, allows: impl Fn(usize) -> bool) -> Option<(usize, Artifact)> {
         for (index, draft) in self.drafts.iter().enumerate() {
+            if !allows(index) {
+                continue;
+            }
             let staged = draft.staged_rewrite().is_some();
             if staged && draft.meta().is_none() {
                 continue;
@@ -75,6 +85,23 @@ impl SessionEngine {
             }
         }
         None
+    }
+
+    /// Retain billed spend without consuming an attempt, then return the operation's error.
+    pub(crate) fn paused<T>(
+        &mut self,
+        card: usize,
+        artifact: Artifact,
+        attempt: ArtifactAttempt<T>,
+    ) -> Result<()> {
+        let (result, cost, related, _fault) = attempt.into_accounted_parts();
+        let draft = self.drafts[card].clone();
+        let artifacts = mark_related_costs(
+            mark_cost(draft.artifacts().clone(), artifact, cost),
+            related,
+        );
+        self.drafts[card] = draft.with_artifacts(artifacts);
+        result.map(|_| ())
     }
 
     /// Apply the outcome of a meta-generation pass for one card.

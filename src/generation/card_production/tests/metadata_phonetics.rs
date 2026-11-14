@@ -7,7 +7,10 @@ use super::*;
 /// Read the complete local request before choosing the author or IPA response.
 fn request(stream: &mut TcpStream) -> String {
     stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
+        .set_nonblocking(false)
+        .expect("local request must wait for bytes");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
         .expect("local request timeout must configure");
     let mut bytes = Vec::new();
     loop {
@@ -108,13 +111,16 @@ fn failed_phonetic_refresh_keeps_cached_artifacts_and_both_charges() {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let observed = requests.clone();
         let server = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(15);
+            let deadline = Instant::now() + Duration::from_secs(90);
             while !stop.load(Ordering::SeqCst) && Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         let body = request(&mut stream);
                         let phonetics = body.contains("Verify only the two IPA fields");
                         observed.lock().expect("requests must lock").push(phonetics);
+                        stream
+                            .set_write_timeout(Some(Duration::from_secs(30)))
+                            .expect("local response timeout must configure");
                         stream
                             .write_all(response(phonetics).as_bytes())
                             .expect("local response must write");
@@ -140,7 +146,7 @@ fn failed_phonetic_refresh_keeps_cached_artifacts_and_both_charges() {
             .stdout(Stdio::null())
             .spawn()
             .expect("refresh child must spawn");
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(60);
         let succeeded = loop {
             if let Some(status) = child.try_wait().expect("child state must resolve") {
                 break status.success();

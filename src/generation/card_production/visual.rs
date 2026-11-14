@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 
-use super::artifact_file;
 use super::attempt_archive::{archived_reply, archived_sequence, latest_verdict};
 use super::cost_accounting::{
     AccountingHealth, CostAccounting, CostRecorder, attach_scene_cost, visual_costs,
@@ -13,18 +12,22 @@ use super::gemini_media::{GeminiRecall, GeminiTextGate, MeteredGemini};
 use super::picture_recovery::{
     LocalImageRejection, NoopProgress, PictureRecovery, render_recomposition_with_fallback,
 };
-use super::picture_requests::RequestCountingImage;
-use super::scene_attempt::{reserve_scene_attempt, scene_attempt_cursor};
+use super::picture_requests::{RequestCountingImage, load_picture_request_counter};
+use super::scene_attempt::{
+    ReservedScene, load_scene_attempt, reserve_scene_attempt, scene_attempt_cursor,
+};
+use super::{artifact_file, soft};
 use crate::gemini::GeminiAccess;
 use crate::generation::artifact_cache::{Cache, IMAGE_ATTEMPTS_DIRECTORY, VISUAL_LOCK_TIMEOUT};
 use crate::generation::manga::{
     BorderDetector, HiddenRecall, Illustration, ImageSource, MangaRenderRejection, MangaRenderer,
     NativeOutput, RecallCard, RecallJudge, ShownRecall,
 };
-use crate::generation::{SceneComposer, visual_revision};
+use crate::generation::{SceneComposer, SceneMode, VisualFailure, VisualResult, visual_revision};
 use crate::languages::LanguageCatalog;
 use crate::session::{
     ARTIFACT_ATTEMPT_CEILING, Artifact, ArtifactAttempt, ArtifactFile, CardCell, CardDraft,
+    StateFailure,
 };
 
 const IMAGE_ATTEMPTS_PER_ARTIFACT: usize = 1;
@@ -41,10 +44,13 @@ struct VisualPass {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RenderControls {
     scene_attempt: u8,
+    previous: Option<u8>,
     salvage: bool,
+    mode: SceneMode,
 }
 
-type GeminiIllustration = Illustration<SceneComposer<MeteredGemini>, MangaRenderer<GeminiRecall>>;
+type GeminiIllustration =
+    Illustration<ReservedScene<SceneComposer<MeteredGemini>>, MangaRenderer<GeminiRecall>>;
 
 /// Produces scenes and pictures while preserving visual recovery state.
 #[derive(Clone)]
@@ -92,6 +98,14 @@ impl VisualProduction {
 
     /// Compose a scene attributed to one stable card slot.
     pub(super) fn scene(&self, slot: usize, draft: &CardDraft) -> ArtifactAttempt<ArtifactFile> {
+        let cache = match self.cell(draft).cache().visual(visual_revision()) {
+            Ok(cache) => cache,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
+        let _guard = match cache.hold_visual(VISUAL_LOCK_TIMEOUT) {
+            Ok(guard) => guard,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
         let attempt = self.generate(
             slot,
             draft,
@@ -101,8 +115,8 @@ impl VisualProduction {
                 recompose: false,
                 salvage: false,
             },
-            |illustration, sentence, target, progress, _accounting| {
-                illustration.scene_only(sentence, target, progress)
+            |illustration, sentence, target, progress, _accounting, _mode| {
+                illustration.scene_only_observed(sentence, target, progress)
             },
         );
         match self.cell(draft).cache().visual(visual_revision()) {
@@ -117,20 +131,53 @@ impl VisualProduction {
             Ok(cache) => cache,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
+        let _guard = match cache.hold_visual(VISUAL_LOCK_TIMEOUT) {
+            Ok(guard) => guard,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
+        let gentle = self.gentle();
+        if gentle && let Err(error) = soft::restore(&cache).map_err(StateFailure::new) {
+            return ArtifactAttempt::unmetered(Err(error.into()));
+        }
         let key = cache.path();
+        if self
+            .access
+            .client()
+            .is_ok_and(|client| client.look().manual())
+            && let Err(error) =
+                crate::generation::manga::guard_image_requests(&key.join(IMAGE_ATTEMPTS_DIRECTORY))
+        {
+            return ArtifactAttempt::unmetered(Err(error));
+        }
         let done = draft.artifacts().picture().tally().done();
         let recover = match self.state.pictures.prepare(key.as_path(), done) {
             Ok(recover) => recover,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        let cursor = match scene_attempt_cursor(&cache, draft.artifacts().scene().tally().done()) {
+        let cursor = match scene_attempt_cursor(&cache, draft.artifacts().scene().tally().done())
+            .map_err(|error| StateFailure::new(error).into())
+        {
             Ok(cursor) => cursor,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
-        let recover = cursor.recompose(recover);
+        let recover = match if gentle {
+            soft::recompose(&cache).map_err(|error| StateFailure::new(error).into())
+        } else {
+            Ok(false)
+        } {
+            Ok(soft) => {
+                soft || cache.exists(crate::generation::artifact_cache::SCENE_FILE)
+                    && cursor.recompose(recover)
+            }
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
         let archived = archived_sequence(&cache);
+        let requests = match load_picture_request_counter(&cache) {
+            Ok(counter) => counter.series_requests.unwrap_or(counter.requests),
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
         let salvage = done.saturating_add(1) >= ARTIFACT_ATTEMPT_CEILING
-            || archived >= usize::from(ARTIFACT_ATTEMPT_CEILING);
+            || requests >= u32::from(ARTIFACT_ATTEMPT_CEILING);
         let attempt = if recover {
             let fallback_cache = cache.clone();
             self.generate(
@@ -142,15 +189,21 @@ impl VisualProduction {
                     recompose: true,
                     salvage,
                 },
-                move |illustration, sentence, target, progress, accounting| {
+                move |illustration, sentence, target, progress, accounting, mode| {
                     render_recomposition_with_fallback(
                         &fallback_cache,
                         accounting,
                         progress,
                         |progress| {
-                            illustration.picture_with_recomposed_scene(sentence, target, progress)
+                            illustration
+                                .picture_with_recomposed_scene_observed(sentence, target, progress)
                         },
-                        |progress| illustration.picture_only(sentence, target, progress),
+                        |progress| illustration.picture_only_observed(sentence, target, progress),
+                        |error| {
+                            matches!(error, VisualFailure::Failed(error) if !error.is::<StateFailure>())
+                                && mode == SceneMode::Stock
+                        },
+                        |error| matches!(error, VisualFailure::Failed(error) if error.is::<StateFailure>()),
                     )
                 },
             )
@@ -164,8 +217,8 @@ impl VisualProduction {
                     recompose: false,
                     salvage,
                 },
-                |illustration, sentence, target, progress, _accounting| {
-                    illustration.picture_only(sentence, target, progress)
+                |illustration, sentence, target, progress, _accounting, _mode| {
+                    illustration.picture_only_observed(sentence, target, progress)
                 },
             )
         };
@@ -198,7 +251,8 @@ impl VisualProduction {
             &str,
             &mut NoopProgress,
             &AccountingHealth,
-        ) -> Result<(String, bool)>,
+            SceneMode,
+        ) -> VisualResult<(String, bool)>,
     {
         let Some(meta) = draft.meta() else {
             return ArtifactAttempt::unmetered(Err(anyhow!(
@@ -224,10 +278,33 @@ impl VisualProduction {
             Some(slot),
             accounting.clone(),
         );
-        let _guard = match cache.hold_visual(VISUAL_LOCK_TIMEOUT) {
-            Ok(guard) => guard,
-            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        let gentle = self.gentle();
+        let mode = match if gentle {
+            soft::mode(&cache)
+        } else {
+            Ok(SceneMode::Stock)
+        } {
+            Ok(mode) => mode,
+            Err(VisualFailure::Failed(error)) => return ArtifactAttempt::unmetered(Err(error)),
+            Err(error @ VisualFailure::NotSent) => {
+                return ArtifactAttempt::unmetered(Err(error.into_error()));
+            }
+            Err(error @ VisualFailure::Refused { .. }) => {
+                return ArtifactAttempt::unmetered(Err(error.into())).with_fault(
+                    crate::session::AttemptFault::new(
+                        "moderation",
+                        "moderation refused the soft scene",
+                        None,
+                        None,
+                    ),
+                );
+            }
         };
+        let previous =
+            match load_scene_attempt(&cache).map_err(|error| StateFailure::new(error).into()) {
+                Ok(previous) => previous,
+                Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+            };
         let scene_attempt =
             match reserve_scene_attempt(&cache, artifact, pass.fallback, pass.recompose) {
                 Ok(attempt) => attempt,
@@ -240,11 +317,17 @@ impl VisualProduction {
             picture_costs.clone(),
             RenderControls {
                 scene_attempt,
+                previous,
                 salvage: pass.salvage,
+                mode,
             },
             accounting.clone(),
         ) {
             Ok(illustration) => illustration,
+            Err(error) => return ArtifactAttempt::unmetered(Err(error)),
+        };
+        let pictures = match super::picture_requests::picture_request_total(&cache) {
+            Ok(pictures) => pictures,
             Err(error) => return ArtifactAttempt::unmetered(Err(error)),
         };
         let mut progress = NoopProgress;
@@ -254,11 +337,54 @@ impl VisualProduction {
             learning,
             &mut progress,
             &accounting,
+            mode,
         )
         .and_then(|(filename, cached)| {
             let path = illustration.filepath(filename.as_str())?;
             Ok((filename, path, cached))
         });
+        if let Err(error) = soft::settle(&cache).map_err(StateFailure::new) {
+            return failed_visual(error.into(), artifact, &scene_costs, &picture_costs);
+        }
+        let (result, refused) = match result {
+            Err(error @ VisualFailure::NotSent) => (Err(error.into_error()), false),
+            Err(VisualFailure::Refused { stage }) => {
+                let spent = match artifact {
+                    Artifact::Scene => draft.artifacts().scene().tally().done(),
+                    _ => draft.artifacts().picture().tally().done(),
+                };
+                if gentle
+                    && let Err(error) = soft::refuse(&cache, stage, scene_attempt, mode, spent)
+                        .map_err(StateFailure::new)
+                {
+                    return failed_visual(error.into(), artifact, &scene_costs, &picture_costs);
+                }
+                if pass.salvage && stage != crate::models::GenerationStage::Picture {
+                    match illustration.salvage() {
+                        Ok(Some(filename)) => {
+                            let result = illustration.filepath(&filename).and_then(|path| {
+                                soft::settle(&cache).map_err(StateFailure::new)?;
+                                Ok((filename, path, false))
+                            });
+                            (result, false)
+                        }
+                        Ok(None) => (Err(anyhow!("moderation refused at {stage:?}")), true),
+                        Err(error) => (Err(error.into_error()), false),
+                    }
+                } else {
+                    (Err(anyhow!("moderation refused at {stage:?}")), true)
+                }
+            }
+            Err(VisualFailure::Failed(error)) => {
+                if mode == SceneMode::Soft
+                    && let Err(error) = soft::reject(&cache, pictures).map_err(StateFailure::new)
+                {
+                    return failed_visual(error.into(), artifact, &scene_costs, &picture_costs);
+                }
+                (Err(error), false)
+            }
+            Ok(value) => (Ok(value), false),
+        };
         match result {
             Ok((filename, path, cached)) => {
                 let (cost, related) =
@@ -278,7 +404,18 @@ impl VisualProduction {
                         Ok(costs) => costs,
                         Err(cost_error) => return ArtifactAttempt::unmetered(Err(cost_error)),
                     };
-                attach_scene_cost(ArtifactAttempt::new(Err(error), cost), artifact, related)
+                let attempt =
+                    attach_scene_cost(ArtifactAttempt::new(Err(error), cost), artifact, related);
+                if refused {
+                    attempt.with_fault(crate::session::AttemptFault::new(
+                        "moderation",
+                        "moderation refused",
+                        None,
+                        None,
+                    ))
+                } else {
+                    attempt
+                }
             }
         }
     }
@@ -326,7 +463,8 @@ impl VisualProduction {
         );
         let renderer =
             production_renderer(picture_client, recall, BorderDetector::new(6, 24, 240, 10))
-                .with_text_judge(text);
+                .with_text_judge(text)
+                .with_look(self.access.client()?.look().clone());
         let renderer = renderer.with_attempt_archive(cache.filepath(IMAGE_ATTEMPTS_DIRECTORY)?);
         let renderer = if controls.salvage {
             renderer.with_salvage()
@@ -334,12 +472,17 @@ impl VisualProduction {
             renderer
         };
         Ok(Illustration::new(
-            cache,
-            SceneComposer::new(
-                scene_client,
-                learning.prompt.as_str(),
-                draft.term(),
-                controls.scene_attempt,
+            cache.clone(),
+            ReservedScene::new(
+                SceneComposer::new(
+                    scene_client,
+                    learning.prompt.as_str(),
+                    draft.term(),
+                    controls.scene_attempt,
+                )
+                .with_mode(controls.mode),
+                cache,
+                controls.previous,
             ),
             renderer,
         ))
@@ -347,6 +490,12 @@ impl VisualProduction {
 
     fn cell(&self, draft: &CardDraft) -> CardCell {
         CardCell::for_draft(self.cache.clone(), draft)
+    }
+
+    fn gentle(&self) -> bool {
+        self.access
+            .client()
+            .is_ok_and(|client| client.look().gentle())
     }
 }
 
@@ -386,4 +535,18 @@ where
     J: RecallJudge,
 {
     MangaRenderer::new(client, IMAGE_ATTEMPTS_PER_ARTIFACT, recall, border)
+}
+
+fn failed_visual(
+    error: anyhow::Error,
+    artifact: Artifact,
+    scene: &CostRecorder,
+    picture: &CostRecorder,
+) -> ArtifactAttempt<ArtifactFile> {
+    match visual_costs(artifact, false, scene, picture) {
+        Ok((cost, related)) => {
+            attach_scene_cost(ArtifactAttempt::new(Err(error), cost), artifact, related)
+        }
+        Err(error) => ArtifactAttempt::unmetered(Err(error)),
+    }
 }

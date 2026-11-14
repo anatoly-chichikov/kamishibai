@@ -1,4 +1,8 @@
 //! Word-first session contracts: language pair, target detection, and batch state.
+//!
+//! Serializable domain values support trusted, version-matched workflow checkpoints.
+//! They are not an untrusted input schema; construct and validate learner input
+//! through the application ports before persisting those values.
 
 mod attempt;
 mod bridge;
@@ -11,6 +15,7 @@ mod engine;
 mod labels;
 mod pair;
 mod pass;
+mod persistence;
 mod sentence_settings;
 mod state;
 mod vault;
@@ -19,7 +24,7 @@ mod vault;
 pub use crate::application::{
     BulkCorrection, CardCorrection, CardMetaGeneration, LearningTarget, Understanding,
 };
-pub(crate) use attempt::ARTIFACT_ATTEMPT_CEILING;
+pub use attempt::ARTIFACT_ATTEMPT_CEILING;
 pub use attempt::{AttemptFault, AttemptLog, AttemptPenalties, AttemptScorecard, AttemptTally};
 pub use bridge::{drafts_from_document, from_entry, to_document, to_entry};
 pub(crate) use cache::CandidateRecord;
@@ -39,6 +44,7 @@ pub use labels::{
 };
 pub use pair::LanguagePair;
 pub use pass::{CardRevision, SenseCorrection, Understood};
+pub(crate) use persistence::StateFailure;
 pub use sentence_settings::{SentenceBatchSettings, SentenceTypeMix};
 pub use state::SessionState;
 pub use vault::CardCell;

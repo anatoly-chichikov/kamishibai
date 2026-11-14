@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use super::cost_accounting::AccountingHealth;
 use crate::generation::artifact_cache::{Cache, PICTURE_REQUESTS_FILE};
 use crate::generation::manga::ImageSource;
-use crate::session::ARTIFACT_ATTEMPT_CEILING;
+use crate::generation::{VisualFailure, VisualResult};
+use crate::session::{ARTIFACT_ATTEMPT_CEILING, StateFailure};
 
 /// Return all picture requests made for one visual revision.
 pub(super) fn picture_request_total(cache: &Cache) -> Result<u32> {
@@ -80,7 +81,12 @@ pub(super) fn load_picture_request_counter(cache: &Cache) -> Result<PictureReque
         return Ok(PictureRequestCounter::new(0, 0));
     }
     let path = cache.filepath(PICTURE_REQUESTS_FILE)?;
-    serde_json::from_slice::<PictureRequestCounter>(fs::read(path)?.as_slice())?.validated()
+    serde_json::from_slice::<PictureRequestCounter>(
+        fs::read(path).map_err(StateFailure::new)?.as_slice(),
+    )
+    .map_err(StateFailure::new)?
+    .validated()
+    .map_err(|error| StateFailure::new(error).into())
 }
 
 fn store_picture_request_counter(cache: &Cache, counter: &PictureRequestCounter) -> Result<()> {
@@ -92,7 +98,7 @@ fn store_picture_request_counter(cache: &Cache, counter: &PictureRequestCounter)
     if result.is_err() {
         let _ = fs::remove_file(&staged);
     }
-    result
+    result.map_err(|error| StateFailure::new(error).into())
 }
 
 /// Durably reserve one request before contacting the image provider.
@@ -102,7 +108,8 @@ pub(crate) fn reserve_picture_request(cache: &Cache) -> Result<()> {
 }
 
 /// Reset the bounded series for an explicit picture regeneration.
-pub(crate) fn restart_picture_request_series(cache: &Cache) -> Result<()> {
+/// Experimental embedding API; compatibility is not guaranteed.
+pub fn restart_picture_request_series(cache: &Cache) -> Result<()> {
     if cache.exists(PICTURE_REQUESTS_FILE) {
         store_picture_request_counter(cache, &load_picture_request_counter(cache)?.restarted())?;
     }
@@ -138,9 +145,17 @@ impl<C> ImageSource for RequestCountingImage<C>
 where
     C: ImageSource,
 {
-    fn image(&self, prompt: &str) -> Result<Vec<u8>> {
+    fn image(&self, prompt: &str) -> VisualResult<Vec<u8>> {
+        let previous = self
+            .accounting
+            .record(load_picture_request_counter(&self.cache))?;
         self.accounting
             .record(reserve_picture_request(&self.cache))?;
-        self.client.image(prompt)
+        let result = self.client.image(prompt);
+        if matches!(result, Err(VisualFailure::NotSent)) {
+            self.accounting
+                .record(store_picture_request_counter(&self.cache, &previous))?;
+        }
+        result
     }
 }

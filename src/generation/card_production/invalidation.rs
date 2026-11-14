@@ -9,12 +9,12 @@ use crate::generation::artifact_cache::{
     Cache, ILLUSTRATION_COST_FILE, ILLUSTRATION_FILE, IMAGE_ATTEMPTS_DIRECTORY,
     LEGACY_VISUAL_REVISION_FILE, META_COST_FILE, META_FILE, PICTURE_REQUESTS_FILE,
     ROOT_STAGE_LOCK_TIMEOUT, RootStage, RootStageGuard, SCENE_ATTEMPT_FILE, SCENE_COST_FILE,
-    SCENE_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE, VisualGuard,
+    SCENE_FILE, SOFT_FILE, VISUAL_LOCK_TIMEOUT, VOICE_COST_FILE, VOICE_FILE, VisualGuard,
 };
 use crate::generation::visual_revision;
 #[cfg(test)]
 use crate::session::LanguagePair;
-use crate::session::{CardCell, CardDraft};
+use crate::session::{CardCell, CardDraft, StateFailure};
 
 /// Remove one card's complete current artifact set under the destructive lock order.
 #[cfg(test)]
@@ -56,6 +56,7 @@ fn invalidate_cell(cell: CardCell, keep_meta: bool, keep_meta_cost: bool) -> Res
         &[
             SCENE_FILE,
             SCENE_ATTEMPT_FILE,
+            SOFT_FILE,
             SCENE_COST_FILE,
             ILLUSTRATION_FILE,
             ILLUSTRATION_COST_FILE,
@@ -128,6 +129,7 @@ pub(super) fn clear_for_meta_refresh(cache: &Cache, visual: &Cache) -> Result<()
         &[
             SCENE_FILE,
             SCENE_ATTEMPT_FILE,
+            SOFT_FILE,
             ILLUSTRATION_FILE,
             PICTURE_REQUESTS_FILE,
         ],
@@ -151,7 +153,7 @@ fn remove_cached_files(cache: &Cache, files: &[&str]) -> Result<()> {
     for file in files {
         let path = cache.path().join(file);
         if path.exists() {
-            fs::remove_file(&path)?;
+            fs::remove_file(&path).map_err(StateFailure::new)?;
         }
     }
     Ok(())
@@ -160,7 +162,7 @@ fn remove_cached_files(cache: &Cache, files: &[&str]) -> Result<()> {
 fn remove_attempt_journal(cache: &Cache) -> Result<()> {
     let attempts = cache.path().join(IMAGE_ATTEMPTS_DIRECTORY);
     if attempts.exists() {
-        fs::remove_dir_all(attempts)?;
+        fs::remove_dir_all(attempts).map_err(StateFailure::new)?;
     }
     Ok(())
 }

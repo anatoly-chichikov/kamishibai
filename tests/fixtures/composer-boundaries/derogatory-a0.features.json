@@ -1,0 +1,106 @@
+{
+  "camera_arc": {
+    "continuity": {
+      "axis": "interaction line between the male speaker and the female colleague",
+      "axis_mode": "preserve",
+      "eyeline_policy": "matched",
+      "screen_direction": "left_to_right"
+    },
+    "motivation": "The progression moves from the social delivery of the dismissive utterance, to the specific physical subject being belittled, to the silent somatic impact on the creator, maintaining a coherent interpersonal axis across the interaction.",
+    "progression": "medium two_shot -> close insert -> medium_close single",
+    "strategy": "wide_detail_return"
+  },
+  "coverage_audit": [
+    {
+      "added_view": "A medium two-shot showing the man speaking dismissively toward the woman while pointing at her project materials.",
+      "panel_count": 1,
+      "reason": "Compressing the disparaging speech, the physical work being criticized, and the personal target into a single frame obscures the targeted nature of 'derogatory' and flattens the distinct emotional weight of the recipient.",
+      "source_support": "He made derogatory comments about her work.",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "A close insert of her physical work being casually tapped or pushed aside dismissively.",
+      "panel_count": 2,
+      "reason": "While linking the dismissive speaker to the physical work, two panels omit the direct interpersonal impact on 'her', failing to complete the relational harm explicit in making derogatory remarks about someone's labor.",
+      "source_support": "about her work",
+      "verdict": "insufficient"
+    },
+    {
+      "added_view": "A medium-close reaction shot of the woman holding her posture tight, absorbing the verbal slight.",
+      "panel_count": 3,
+      "reason": "Provides full narrative coverage: the delivery of the derogatory comment, the concrete object of criticism ('her work'), and the immediate personal reception without inventing unstated plot turns.",
+      "source_support": "about her work",
+      "verdict": "selected"
+    },
+    {
+      "added_view": "A fourth shot depicting surrounding coworkers turning to listen or reacting in the room.",
+      "panel_count": 4,
+      "reason": "The source sentence specifies only 'he', 'her work', and the derogatory comments made; introducing an audience or bystander reaction invents unsupported characters and actions.",
+      "source_support": "No bystander or audience presence is stated or implied in the source sentence.",
+      "verdict": "redundant_or_unsupported"
+    }
+  ],
+  "decomposition_mode": "cause_reaction_detail",
+  "intensity": "medium",
+  "literal_anchor": "the man speaking dismissively toward her physical project while she absorbs the verbal belittlement",
+  "motion_vector": "horizontal",
+  "panel_count": 3,
+  "panel_emphasis": "rising",
+  "panel_relation": "sequence",
+  "reading_direction": "left_to_right_top_to_bottom",
+  "selection_logic": "The sentence establishes a focused three-part interpersonal interaction: a man uttering dismissive remarks ('He made derogatory comments'), the specific focal object of his disparagement ('about her work'), and the woman whose effort is belittled. Panel 1 serves as an establishing baseline with moderate narrative weight showing the speaker's scornful posture. Panel 2 introduces concrete focus with an insert of the physical portfolio being treated with contempt. Panel 3 carries the heaviest emotional weight as a dominant payoff, capturing her restrained, tense reaction to the verbal disparagement. A fourth panel involving surrounding observers was rejected as completely unsupported by the text.",
+  "semantic_beat_count": 2,
+  "semantic_relation": "sequence",
+  "shots": [
+    {
+      "angle": "eye_level",
+      "camera_motivation": "Establish the interpersonal friction and physical proximity between the speaker and the creator.",
+      "depth_plan": "layered",
+      "framing": "two_shot",
+      "id": "s1",
+      "information_gain": "The condescending posture of the man speaking with a dismissive smirk toward the woman across a worktable.",
+      "role": "action",
+      "semantic_beat_index": 1,
+      "shot_scale": "medium",
+      "source_support": "He made derogatory comments",
+      "transition_trigger": "scene_open",
+      "viewpoint": "objective",
+      "viewpoint_anchor": "",
+      "visible_anchor": "man speaking dismissively with a flick of his hand across a shared desk"
+    },
+    {
+      "angle": "high",
+      "camera_motivation": "Focus on the exact physical entity receiving the disparagement, emphasizing its vulnerability to scrutiny.",
+      "depth_plan": "shallow",
+      "framing": "insert",
+      "id": "s2",
+      "information_gain": "The specific physical work—drafting papers and architectural model parts—being casually flicked or nudged aside.",
+      "role": "detail",
+      "semantic_beat_index": 1,
+      "shot_scale": "close",
+      "source_support": "about her work",
+      "transition_trigger": "attention_shift",
+      "viewpoint": "point_of_view",
+      "viewpoint_anchor": "the male speaker",
+      "visible_anchor": "the physical project portfolio and model pieces on the table surface"
+    },
+    {
+      "angle": "eye_level",
+      "camera_motivation": "Conclude on the personal cost of the derogatory remarks by centering her internal response.",
+      "depth_plan": "shallow",
+      "framing": "single",
+      "id": "s3",
+      "information_gain": "Her clenched jaw, downward gaze, and stiffened shoulders as the slight registers.",
+      "role": "reaction",
+      "semantic_beat_index": 2,
+      "shot_scale": "medium_close",
+      "source_support": "about her work",
+      "transition_trigger": "emotion_change",
+      "viewpoint": "objective",
+      "viewpoint_anchor": "",
+      "visible_anchor": "the woman with tightly pressed lips and stiff shoulders receiving the critique"
+    }
+  ],
+  "spatial_relation": "same_space",
+  "transition_type": "subject_to_subject"
+}

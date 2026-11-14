@@ -28,6 +28,8 @@ pub(super) fn render_recomposition_with_fallback<T, P, R, F, E>(
     progress: &mut P,
     recompose: R,
     fallback: F,
+    recoverable: impl Fn(&E) -> bool,
+    storage: impl Fn(&E) -> bool,
 ) -> std::result::Result<T, E>
 where
     R: FnOnce(&mut P) -> std::result::Result<T, E>,
@@ -41,7 +43,7 @@ where
         Ok(rendered) => return Ok(rendered),
         Err(error) => error,
     };
-    if accounting.failed() {
+    if accounting.failed() || !recoverable(&original) {
         return Err(original);
     }
     let after = accounting
@@ -52,7 +54,7 @@ where
     }
     match fallback(progress) {
         Ok(rendered) => Ok(rendered),
-        Err(error) if accounting.failed() => Err(error),
+        Err(error) if accounting.failed() || storage(&error) => Err(error),
         Err(error)
             if accounting
                 .record(picture_request_total(cache))
@@ -168,6 +170,7 @@ pub(super) fn persisted_local_rejections(path: &Path) -> Result<LocalImageReject
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Classifies local image rejection signals relevant to recovery.
 pub(super) enum LocalImageRejection {
+    Moderation,
     Color,
     Topology,
     RecallText,
@@ -180,6 +183,7 @@ impl LocalImageRejection {
     /// Map a renderer category to the recovery vocabulary.
     pub(super) fn from_category(category: &str) -> Self {
         match category {
+            "moderation" => Self::Moderation,
             "color" => Self::Color,
             "topology" => Self::Topology,
             "ocr" | "recall_text" => Self::RecallText,
@@ -234,7 +238,8 @@ impl LocalImageRejections {
     pub(super) fn recompose(&self) -> bool {
         matches!(
             self.recent,
-            [Some(LocalImageRejection::Topology), Some(_)]
+            [_, Some(LocalImageRejection::Moderation)]
+                | [Some(LocalImageRejection::Topology), Some(_)]
                 | [Some(_), Some(LocalImageRejection::Topology)]
                 | [
                     Some(LocalImageRejection::Border),
@@ -264,4 +269,49 @@ impl LocalImageRejections {
 struct PictureRecoveryState {
     observed_attempts: u8,
     rejections: LocalImageRejections,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::generation::{VisualFailure, VisualResult};
+    use crate::session::StateFailure;
+
+    #[test]
+    fn an_unsent_fallback_cannot_replace_the_original_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = Cache::new("visual", root.path());
+        let result: VisualResult<()> = render_recomposition_with_fallback(
+            &cache,
+            &AccountingHealth::default(),
+            &mut (),
+            |_| Err(std::io::Error::from(std::io::ErrorKind::InvalidData).into()),
+            |_| Err(VisualFailure::NotSent),
+            |error| matches!(error, VisualFailure::Failed(error) if !error.is::<StateFailure>()),
+            |error| matches!(error, VisualFailure::Failed(error) if error.is::<StateFailure>()),
+        );
+        assert!(
+            matches!(result, Err(VisualFailure::Failed(error)) if error.is::<std::io::Error>()),
+            "an unsent fallback hid the original failure without reserving an image"
+        );
+    }
+
+    #[test]
+    fn a_fallback_storage_failure_cannot_be_replaced_by_the_original_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = Cache::new("visual", root.path());
+        let result: VisualResult<()> = render_recomposition_with_fallback(
+            &cache,
+            &AccountingHealth::default(),
+            &mut (),
+            |_| Err(std::io::Error::from(std::io::ErrorKind::InvalidData).into()),
+            |_| Err(StateFailure::new(std::io::Error::from(std::io::ErrorKind::BrokenPipe)).into()),
+            |error| matches!(error, VisualFailure::Failed(error) if !error.is::<StateFailure>()),
+            |error| matches!(error, VisualFailure::Failed(error) if error.is::<StateFailure>()),
+        );
+        assert!(
+            matches!(result, Err(VisualFailure::Failed(error)) if error.is::<StateFailure>()),
+            "fallback storage failure was hidden behind the original provider error"
+        );
+    }
 }

@@ -1,0 +1,278 @@
+{
+  "semantic_spine": {
+    "literal_event": "Paramedics perform emergency resuscitation on a prone, waterlogged swimmer on the beach until the swimmer coughs out water and regains breath.",
+    "semantic_focus": "The physical transition from limp unconsciousness to spontaneous breathing through intense medical resuscitation.",
+    "emotional_relation": "Urgent mechanical intervention shifting into profound physical relief as life returns.",
+    "intensity": 5,
+    "visual_relation": "cause_effect",
+    "memory_hook": "Interlocked hands compressing a sodden sternum, triggering the decisive lateral expulsion of seawater as the swimmer's eyes flutter open.",
+    "metaphor": {
+      "mode": "none",
+      "mapping": "",
+      "literal_anchor": "paramedics administering CPR until the drowning swimmer expels water and regains consciousness"
+    }
+  },
+  "page_design": {
+    "rhythm": "compression_to_release",
+    "special_device": {
+      "kind": "none",
+      "reason": "The canonical blockage-rail layout naturally compresses the three procedural preparation shots along the left rail before delivering the full-height revival payoff on the right.",
+      "source_panel": "",
+      "target_panel": "",
+      "subject_id": ""
+    },
+    "eye_flow_summary": "The gaze steps downward through the stacked left rail—from establishing context to team posture to close hand compression—then sweeps into the dominant right panel where the swimmer coughs awake facing left toward the paramedic."
+  },
+  "panels": [
+    {
+      "shot_id": "s1",
+      "narrative_role": "establisher",
+      "semantic_job": "Establish the immediate post-water beach scene with two kneeling paramedics attending to the prone, soaking swimmer.",
+      "attentional_frame": "macro",
+      "narrative_weight": "secondary",
+      "transition_from_previous": "none",
+      "continuity": {
+        "shared_environment_id": "beach_shoreline",
+        "subject_phase": "initial_assessment",
+        "axis_relation_from_previous": "establish",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "paramedic_lead",
+        "eyeline_target_anchor": "swimmer",
+        "eyeline_direction": "down",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "A high-angle establishing view of wet sand where two paramedics in dark rescue gear kneel beside a limp, water-soaked swimmer lying supine near the foamy surfline.",
+        "subjects": [
+          {
+            "id": "paramedic_lead",
+            "figure": "paramedic in high-visibility medical vest and rescue trousers",
+            "pose": "kneeling on both knees, hands placed directly over the swimmer's chest",
+            "expression": "focused, tense jaw",
+            "blocking": "screen left, hovering over swimmer's torso"
+          },
+          {
+            "id": "paramedic_assistant",
+            "figure": "second paramedic holding a medical gear kit",
+            "pose": "crouched near the swimmer's head, hands preparing airway support",
+            "expression": "alert, focused downward",
+            "blocking": "screen left-center, above swimmer's head"
+          },
+          {
+            "id": "swimmer",
+            "figure": "young athletic swimmer in dark trunks, dripping with seawater",
+            "pose": "supine, motionless, head slightly tilted, limbs slack against wet sand",
+            "expression": "eyes closed, completely slack and unresponsive",
+            "blocking": "screen center-right, prone on the shoreline"
+          }
+        ],
+        "environment": {
+          "setting": "coastal shoreline",
+          "foreground": ["damp ripples of packed sand", "receding sea foam"],
+          "midground": ["paramedics kneeling around prone swimmer", "opened medical response pack"],
+          "background": ["rolling ocean surf", "gray horizon under overcast sky"]
+        },
+        "camera": {
+          "shot_scale": "wide",
+          "viewpoint": "objective",
+          "viewpoint_subject_id": "",
+          "framing": "group",
+          "angle": "high",
+          "focus": "paramedics and prone swimmer on the wet sand",
+          "depth_plan": "deep",
+          "eye_flow_exit": "downward toward chest compressions in panel 2"
+        },
+        "motion_treatment": "none",
+        "lighting": "diffuse coastal daylight filtering through thick cloud cover",
+        "mood": "tense, cold, critical"
+      }
+    ],
+    {
+      "shot_id": "s2",
+      "narrative_role": "initial",
+      "semantic_job": "Show the physical strain and coordination of CPR, with one paramedic executing torso compressions and the partner stabilizing the airway.",
+      "attentional_frame": "mono",
+      "narrative_weight": "primary",
+      "transition_from_previous": "action_to_action",
+      "continuity": {
+        "shared_environment_id": "beach_shoreline",
+        "subject_phase": "active_cpr",
+        "axis_relation_from_previous": "preserve",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "paramedic_lead",
+        "eyeline_target_anchor": "swimmer",
+        "eyeline_direction": "down",
+        "match_on_action_enabled": true,
+        "match_on_action_subject_id": "paramedic_lead",
+        "match_on_action_action": "chest compressions"
+      },
+      "scene": {
+        "description": "Eye-level medium view framing the two responders in coordinated exertion; the lead paramedic bears down with straight, rigid arms while the second maintains head-tilt position.",
+        "subjects": [
+          {
+            "id": "paramedic_lead",
+            "figure": "paramedic with rolled-up sleeves",
+            "pose": "shoulders locked forward directly above wrists, rhythmic body weight bearing downward",
+            "expression": "strained breathing, brow furrowed in concentration",
+            "blocking": "screen left, angled over the victim"
+          },
+          {
+            "id": "paramedic_assistant",
+            "figure": "second paramedic kneeling close to the swimmer's head",
+            "pose": "two hands carefully tilting the swimmer's jaw and chin upward to keep the throat clear",
+            "expression": "watchful, checking the victim's chest rise",
+            "blocking": "center, adjacent to victim's head"
+          },
+          {
+            "id": "swimmer",
+            "figure": "unconscious swimmer",
+            "pose": "chest visibly compressed beneath hands, head tilted back on sand",
+            "expression": "slack mouth, pale complexion, droplets running down cheek",
+            "blocking": "lower frame, chest and neck prominent"
+          }
+        ],
+        "environment": {
+          "setting": "wet sand beside surf",
+          "foreground": ["edge of a high-vis emergency pack"],
+          "midground": ["paramedics' braced knees in wet sand", "prone torso"],
+          "background": ["blurred ocean mist and distant breaker"]
+        },
+        "camera": {
+          "shot_scale": "medium",
+          "viewpoint": "objective",
+          "viewpoint_subject_id": "",
+          "framing": "two_shot",
+          "angle": "eye_level",
+          "focus": "rigid arms and locked wrists of the compressor",
+          "depth_plan": "layered",
+          "eye_flow_exit": "downward to the tight contact point of the hands in panel 3"
+        },
+        "motion_treatment": "pose_only",
+        "lighting": "flat, cool coastal light emphasizing wet skin and taut muscles",
+        "mood": "strenuous, methodical urgency"
+      }
+    ],
+    {
+      "shot_id": "s3",
+      "narrative_role": "initial",
+      "semantic_job": "Provide the tactile mechanical evidence of revival: interlocked fingers depressing the wet sternum as pooled seawater expels.",
+      "attentional_frame": "micro",
+      "narrative_weight": "secondary",
+      "transition_from_previous": "action_to_action",
+      "continuity": {
+        "shared_environment_id": "beach_shoreline",
+        "subject_phase": "peak_compression",
+        "axis_relation_from_previous": "preserve",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": false,
+        "eyeline_looker_id": "",
+        "eyeline_target_anchor": "",
+        "eyeline_direction": "none",
+        "match_on_action_enabled": true,
+        "match_on_action_subject_id": "paramedic_lead",
+        "match_on_action_action": "depressing sternum"
+      },
+      "scene": {
+        "description": "An overhead insert shot centered on the swimmer's glistening sternum, where two gloved hands with locked interlocked fingers depress deeply, splashing tiny drops of salt water.",
+        "subjects": [
+          {
+            "id": "paramedic_lead",
+            "figure": "paramedic's hands and forearms",
+            "pose": "heel of lower hand planted squarely on the lower sternum, upper fingers woven between lower fingers, white knuckles under pressure",
+            "expression": "not visible in frame",
+            "blocking": "centered vertically in frame"
+          },
+          {
+            "id": "swimmer",
+            "figure": "swimmer's wet chest and collarbone",
+            "pose": "sternum depressed under firm pressure, ribcage wet with ocean brine",
+            "expression": "not visible in frame",
+            "blocking": "fills lower half of frame"
+          }
+        ],
+        "environment": {
+          "setting": "sand-flecked beach surface directly beneath torso",
+          "foreground": ["interlocked hands pressing downward"],
+          "midground": ["wet chest hair, water droplets shearing outward"],
+          "background": ["dark sand wet with expelled sea spray"]
+        },
+        "camera": {
+          "shot_scale": "close",
+          "viewpoint": "objective",
+          "viewpoint_subject_id": "",
+          "framing": "insert",
+          "angle": "overhead",
+          "focus": "interlocked knuckles pressing against sternum",
+          "depth_plan": "shallow",
+          "eye_flow_exit": "rightward into the dominant revival panel"
+        },
+        "motion_treatment": "none",
+        "lighting": "specular reflections glistening on wet skin and taut tendons",
+        "mood": "visceral, focused, critical threshold"
+      }
+    ],
+    {
+      "shot_id": "s4",
+      "narrative_role": "peak",
+      "semantic_job": "Deliver the full physiological payoff of 'revive': the swimmer rolls to the side, forcefully coughing out seawater and opening eyes as the paramedic supports.",
+      "attentional_frame": "mono",
+      "narrative_weight": "primary",
+      "transition_from_previous": "action_to_action",
+      "continuity": {
+        "shared_environment_id": "beach_shoreline",
+        "subject_phase": "regained_consciousness",
+        "axis_relation_from_previous": "preserve",
+        "screen_direction": "left_to_right",
+        "eyeline_enabled": true,
+        "eyeline_looker_id": "swimmer",
+        "eyeline_target_anchor": "paramedic_lead",
+        "eyeline_direction": "screen_left",
+        "match_on_action_enabled": false,
+        "match_on_action_subject_id": "",
+        "match_on_action_action": ""
+      },
+      "scene": {
+        "description": "An over-the-shoulder medium-close payoff framing the paramedic's shoulder in the left foreground while the swimmer, turned sideways in the recovery posture, coughs violently, expelling water and gasping for air with opening eyes.",
+        "subjects": [
+          {
+            "id": "paramedic_lead",
+            "figure": "paramedic seen from behind shoulder",
+            "pose": "one firm hand steadying the swimmer's upper back, the other hand withdrawing from the chest",
+            "expression": "visible in profile: sharp exhalation of relief",
+            "blocking": "left foreground, framing the swimmer"
+          },
+          {
+            "id": "swimmer",
+            "figure": "revived swimmer",
+            "pose": "turned on side, torso curled inward in a violent convulsive cough, one hand digging into the sand",
+            "expression": "eyelids cracked open in dazed consciousness, mouth open coughing out a spray of ocean water, chest heaving with air",
+            "blocking": "center and right, clear view of face and coughing mouth"
+          }
+        ],
+        "environment": {
+          "setting": "windswept beach shoreline",
+          "foreground": ["paramedic's supportive arm and shoulder"],
+          "midground": ["swimmer coughing onto sand", "water expelled pooling on beach"],
+          "background": ["rolling grey waves breaking gently in soft focus", "vast coastal sky"]
+        },
+        "camera": {
+          "shot_scale": "medium_close",
+          "viewpoint": "over_the_shoulder",
+          "viewpoint_subject_id": "paramedic_lead",
+          "framing": "two_shot",
+          "angle": "eye_level",
+          "focus": "swimmer's coughing face and gasping breath",
+          "depth_plan": "layered",
+          "eye_flow_exit": "settles on the coughing face and opening eyes"
+        },
+        "motion_treatment": "pose_only",
+        "lighting": "brightening ambient coastal light breaking slightly through clouds, illuminating the expelled water droplets",
+        "mood": "breathless breakthrough, sudden life, immense relief"
+      }
+    }
+  ]
+}

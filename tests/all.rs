@@ -6,6 +6,7 @@
 mod agent_contract;
 mod agent_onboarding;
 mod anki;
+mod anki_history;
 mod assets;
 mod audio;
 mod batch_sentence_settings;
@@ -19,6 +20,7 @@ mod embedded_workflow;
 mod example;
 mod failure_recovery;
 mod gemini;
+mod gemini_look;
 mod illustration;
 mod input;
 mod keyboard;
@@ -27,6 +29,7 @@ mod language_flow;
 mod learning_target;
 mod new_languages;
 mod paths;
+mod plugged_parts;
 mod profile;
 mod pty;
 mod public_generation;
@@ -127,3 +130,8 @@ fn every_sibling_test_file_is_declared_in_the_harness() {
         "test files never run because the harness does not declare them: {missing:?}"
     );
 }
+
+mod external_models;
+
+mod session_checkpoints;
+mod visual_resume;

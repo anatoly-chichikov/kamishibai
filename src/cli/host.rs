@@ -22,3 +22,22 @@ pub(super) fn open_path(path: &str) -> Result<()> {
     }
     Ok(())
 }
+
+/// Show a saved archive in its folder without opening or unpacking it.
+pub(super) fn reveal_path(path: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    Command::new("open").args(["-R", path]).spawn()?;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    Command::new("xdg-open")
+        .arg(
+            std::path::Path::new(path)
+                .parent()
+                .unwrap_or(std::path::Path::new(".")),
+        )
+        .spawn()?;
+    #[cfg(target_os = "windows")]
+    Command::new("explorer")
+        .arg(format!("/select,{path}"))
+        .spawn()?;
+    Ok(())
+}
