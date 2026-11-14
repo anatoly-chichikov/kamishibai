@@ -135,14 +135,13 @@ impl CardSheet {
             }),
             ..PdfSaveOptions::default()
         };
-        let pdf = doc
-            .with_pages(
-                pages
-                    .into_iter()
-                    .map(|ops| PdfPage::new(Mm(SHEET_W), Mm(SHEET_H), ops))
-                    .collect(),
-            )
-            .save(&save, &mut Vec::new());
+        let pdf = doc.with_pages(
+            pages
+                .into_iter()
+                .map(|ops| PdfPage::new(Mm(SHEET_W), Mm(SHEET_H), ops))
+                .collect(),
+        );
+        let pdf = super::text_encoding::encoded(pdf, &save)?;
         fs::write(output, super::font_embedding::normalized(pdf)?)?;
         Ok(())
     }
@@ -1219,13 +1218,25 @@ fn draw_runs(
 ) {
     let view = ClassifierView::from(fonts);
     let spans = render_spans(chunks, direction, view);
+    let logical = spans.iter().any(|span| span.rtl);
+    if logical {
+        let text = chunks
+            .iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<String>();
+        super::text_encoding::logical(ops, &text);
+    }
     let line_width = spans
         .iter()
         .map(|span| {
             if fonts.shaping_active && matches!(span.track, Track::Supplemental(_)) {
                 return shaped_span_width(view.font(span.track, span.bold), span, size);
             }
-            view.measure(span.text.as_str(), span.bold, size)
+            view.measure(
+                super::text_encoding::ordered(&span.text, span.rtl).as_str(),
+                span.bold,
+                size,
+            )
         })
         .sum::<f32>();
     let mut x = if direction == TextDirection::Rtl {
@@ -1240,9 +1251,16 @@ fn draw_runs(
             emit_shaped(ops, font, id, &span, size, x, y, color)
         } else {
             emit_plain(ops, id, &span, size, x, y, color);
-            view.measure(span.text.as_str(), span.bold, size)
+            view.measure(
+                super::text_encoding::ordered(&span.text, span.rtl).as_str(),
+                span.bold,
+                size,
+            )
         };
         x += advance;
+    }
+    if logical {
+        ops.push(Op::EndMarkedContent);
     }
 }
 
@@ -1360,7 +1378,7 @@ fn emit_shaped(
     cursor * scale * 25.4 / 72.0
 }
 
-/// Emit one ordinary LTR span through printpdf's Unicode text path.
+/// Emit ordinary Unicode glyphs in their resolved direction with mirrored punctuation.
 #[allow(clippy::too_many_arguments)]
 fn emit_plain(
     ops: &mut Vec<Op>,
@@ -1397,7 +1415,9 @@ fn emit_plain(
         size: Pt(size),
     });
     ops.push(Op::ShowText {
-        items: vec![TextItem::Text(span.text.clone())],
+        items: vec![TextItem::Text(super::text_encoding::ordered(
+            &span.text, span.rtl,
+        ))],
     });
     ops.push(Op::EndTextSection);
 }
@@ -1693,27 +1713,28 @@ impl CharBuckets {
     /// Record one character into the bucket selected by track and weight.
     fn insert(&mut self, track: Track, bold: bool, ch: char) {
         self.shaping |= supplemental_slot(ch).is_some();
+        let characters = std::iter::once(ch).chain(unicode_bidi_mirroring::get_mirrored(ch));
         match (track, bold) {
             (Track::Primary, true) => {
-                self.primary_bold.insert(ch);
+                self.primary_bold.extend(characters);
             }
             (Track::Primary, false) => {
-                self.primary_regular.insert(ch);
+                self.primary_regular.extend(characters);
             }
             (Track::Cjk, true) => {
-                self.cjk_bold.insert(ch);
+                self.cjk_bold.extend(characters);
             }
             (Track::Cjk, false) => {
-                self.cjk_regular.insert(ch);
+                self.cjk_regular.extend(characters);
             }
             (Track::Supplemental(index), true) => {
-                self.supplemental_bold[index].insert(ch);
+                self.supplemental_bold[index].extend(characters);
             }
             (Track::Supplemental(index), false) => {
-                self.supplemental_regular[index].insert(ch);
+                self.supplemental_regular[index].extend(characters);
             }
             (Track::Fallback, _) => {
-                self.fallback.insert(ch);
+                self.fallback.extend(characters);
             }
         }
     }

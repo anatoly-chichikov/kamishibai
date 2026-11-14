@@ -6,6 +6,7 @@ mod font;
 mod font_embedding;
 mod layout;
 mod shaping;
+mod text_encoding;
 mod thumbnail;
 
 pub use cards::CardSheet;
