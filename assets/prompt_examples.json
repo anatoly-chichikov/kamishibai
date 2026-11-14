@@ -1765,8 +1765,8 @@
     },
     "recall": {
       "focus": {
-        "focus": "տուն",
-        "longer": "տնատուն"
+        "focus": "գիր",
+        "longer": "գիրք"
       },
       "fragment": {
         "visible": "վերջնական գծագիր",

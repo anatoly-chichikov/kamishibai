@@ -199,6 +199,22 @@ fn welcome_language_row_keeps_the_czech_chip_visible_at_standard_width() {
     );
 }
 
+#[test]
+fn welcome_language_grid_cannot_hide_the_added_codes_on_a_short_terminal() {
+    let app = App::new(LanguagePair::new("fr", "en")).opening_welcome(
+        KeySource::Empty,
+        String::new(),
+        false,
+    );
+    let rendered = render_sized(&app, 80, 16);
+    assert!(
+        ["SR", "KA", "HY", "FA", "SV", "RO", "HU", "FI"]
+            .into_iter()
+            .all(|code| rendered.contains(format!(" {code} ").as_str())),
+        "the short Welcome grid hid an added language code"
+    );
+}
+
 /// The answered language step collapses to the one language it was answered
 /// with, which is what leaves a narrow terminal the rows the key form needs.
 #[test]

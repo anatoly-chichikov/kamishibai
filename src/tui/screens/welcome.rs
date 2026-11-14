@@ -148,6 +148,7 @@ fn language_height(app: &App, area: Rect) -> u16 {
 fn body_rows(app: &App, area: Rect) -> Rc<[Rect]> {
     let language_height = language_height(app, area);
     let language_gap = u16::from(language_height <= 1);
+    let key_rows = u16::from(app.welcome().stage == WelcomeStage::EnterKey);
     Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -156,9 +157,9 @@ fn body_rows(app: &App, area: Rect) -> Rc<[Rect]> {
             Constraint::Length(language_height), // 01 · language
             Constraint::Length(language_gap),    // blank
             Constraint::Length(1),               // 02 · key field
-            Constraint::Length(1),               // input underline
-            Constraint::Length(1),               // blank · notice wraps here on a narrow terminal
-            Constraint::Length(1),               // buttons
+            Constraint::Length(key_rows),
+            Constraint::Length(key_rows),
+            Constraint::Length(key_rows),
             Constraint::Min(0),
         ])
         .split(area)
