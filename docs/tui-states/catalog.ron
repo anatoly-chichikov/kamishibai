@@ -2017,8 +2017,8 @@ Catalog(
                     Shot(
                         file: "docs/tui-states/live/32-welcome-language-grid.png",
                         origin: Synthetic,
-                        revision: Some("e341cbee25d474d332a11a90a053eb15e2bcc023"),
-                        note: "Recaptured and visually inspected on 2026-11-14 from release gallery e341cbee25d474d332a11a90a053eb15e2bcc023 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; prepared appearance only",
+                        revision: Some("11ab8dda016f1e9f07858e67915ba509d0e7f8e9"),
+                        note: "Recaptured and visually inspected on 2026-11-16 from release gallery 11ab8dda016f1e9f07858e67915ba509d0e7f8e9 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; the shared catalog now has thirty-one languages including Classical Latin",
                     ),
                 ]),
             ),
@@ -3439,8 +3439,8 @@ Catalog(
                     Shot(
                         file: "docs/tui-states/live/31-language-pair-modal.png",
                         origin: Synthetic,
-                        revision: Some("e341cbee25d474d332a11a90a053eb15e2bcc023"),
-                        note: "Recaptured and visually inspected on 2026-11-14 from release gallery e341cbee25d474d332a11a90a053eb15e2bcc023 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; prepared appearance only",
+                        revision: Some("11ab8dda016f1e9f07858e67915ba509d0e7f8e9"),
+                        note: "Recaptured and visually inspected on 2026-11-16 from release gallery 11ab8dda016f1e9f07858e67915ba509d0e7f8e9 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; the shared catalog now has thirty-one languages including Classical Latin",
                     ),
                 ]),
             ),
@@ -3500,8 +3500,8 @@ Catalog(
                     Shot(
                         file: "docs/tui-states/live/35-translation-preview.png",
                         origin: Synthetic,
-                        revision: Some("e341cbee25d474d332a11a90a053eb15e2bcc023"),
-                        note: "Recaptured and visually inspected on 2026-11-14 from release gallery e341cbee25d474d332a11a90a053eb15e2bcc023 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; prepared appearance only",
+                        revision: Some("11ab8dda016f1e9f07858e67915ba509d0e7f8e9"),
+                        note: "Recaptured and visually inspected on 2026-11-16 from release gallery 11ab8dda016f1e9f07858e67915ba509d0e7f8e9 at 2250x1688, FontSize 36, using the focused synthetic procedure in recording.ron; the shared catalog now has thirty-one languages including Classical Latin",
                     ),
                 ]),
             ),
