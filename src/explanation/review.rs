@@ -167,8 +167,32 @@ impl Review<'_> {
             .unwrap_or_default()
     }
 
+    /// Mark quoted learning phrases while leaving reader-language glosses intact.
+    fn normalize(&self, text: &str) -> String {
+        use unicode_script::UnicodeScript;
+        let [open, close] = &self.language.context.quotes;
+        let pattern = format!(
+            "{}(?s:(.*?)){}",
+            regex::escape(open.trim()),
+            regex::escape(close.trim())
+        );
+        regex(&pattern)
+            .replace_all(text, |capture: &fancy_regex::Captures<'_>| {
+                if capture[1]
+                    .chars()
+                    .any(|ch| self.language.learning.contains(&ch.script()))
+                {
+                    format!("⟦{}⟧", &capture[1])
+                } else {
+                    capture[0].to_string()
+                }
+            })
+            .into_owned()
+    }
+
     fn mistake(&self, text: &str) -> bool {
-        let marked = regex("⟦[^⟦⟧]+⟧").replace_all(text, "a");
+        let normalized = self.normalize(text);
+        let marked = regex("⟦[^⟦⟧]+⟧").replace_all(&normalized, "a");
         let foreign = text
             .chars()
             .map(|ch| {
@@ -186,7 +210,8 @@ impl Review<'_> {
 
     fn learning_words(&self, text: &str) -> Vec<String> {
         use unicode_script::UnicodeScript;
-        let marked = hits("⟦[^⟦⟧]+⟧", text);
+        let normalized = self.normalize(text);
+        let marked = hits("⟦[^⟦⟧]+⟧", &normalized);
         let phrases = if marked.is_empty() {
             text.to_string()
         } else {

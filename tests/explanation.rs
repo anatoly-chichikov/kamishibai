@@ -685,6 +685,190 @@ fn review_f2_shared_scripts_cannot_hide_marked_mistakes_or_borrow_reader_words()
 }
 
 #[test]
+fn review_f2r_correct_reasons_cannot_depend_on_the_quotation_form() {
+    let failures = [
+        "Говорят ⟦στην Ελλάδα⟧, а не ⟦σε Ελλάδα⟧.",
+        "Говорят «στην Ελλάδα», а не «σε Ελλάδα».",
+    ]
+    .into_iter()
+    .flat_map(|nuance| {
+        [
+            "⟦Στην⟧ называет страну как место.",
+            "«Στην» называет страну как место.",
+        ]
+        .into_iter()
+        .flat_map(move |reason| {
+            let mut value = review_fixture("Греция", "страна у Эгейского моря");
+            value["nuance"]["text"] = nuance.into();
+            value["nuance"]["why"] = reason.into();
+            reviewed_failures(value, "RU", "EL", &reviewed_card("Ελλάδα", "Греция"))
+        })
+    })
+    .collect::<Vec<_>>();
+    assert!(
+        failures.is_empty(),
+        "reader quotes changed a correct reason into a refusal: {failures:?}"
+    );
+}
+
+#[test]
+fn review_f2r_missing_reasons_cannot_hide_behind_reader_quotes() {
+    let missed = [
+        "Говорят ⟦στην Ελλάδα⟧, а не ⟦σε Ελλάδα⟧.",
+        "Говорят «στην Ελλάδα», а не «σε Ελλάδα».",
+    ]
+    .into_iter()
+    .filter(|nuance| {
+        let mut value = review_fixture("Греция", "страна у Эгейского моря");
+        value["nuance"]["text"] = (*nuance).into();
+        !reviewed_failures(value, "RU", "EL", &reviewed_card("Ελλάδα", "Греция"))
+            .iter()
+            .any(|fail| fail.starts_with("why:"))
+    })
+    .collect::<Vec<_>>();
+    assert!(
+        missed.is_empty(),
+        "quotation syntax hid the reason obligation: {missed:?}"
+    );
+}
+
+#[test]
+fn review_f2r_unrelated_reasons_cannot_pass_in_either_quotation_form() {
+    let outcomes = [
+        "Говорят ⟦στην Ελλάδα⟧, а не ⟦σε Ελλάδα⟧.",
+        "Говорят «στην Ελλάδα», а не «σε Ελλάδα».",
+    ]
+    .into_iter()
+    .flat_map(|nuance| {
+        ["⟦από⟧ называет начало пути.", "«από» называет начало пути."]
+            .into_iter()
+            .map(move |reason| {
+                let mut value = review_fixture("Греция", "страна у Эгейского моря");
+                value["nuance"]["text"] = nuance.into();
+                value["nuance"]["why"] = reason.into();
+                reviewed_failures(value, "RU", "EL", &reviewed_card("Ελλάδα", "Греция"))
+                    .iter()
+                    .any(|fail| fail.starts_with("why:"))
+            })
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(
+        outcomes, [true; 4],
+        "a quoted unrelated reason passed the obligation"
+    );
+}
+
+#[test]
+fn review_f2r_shared_scripts_cannot_borrow_reader_words_outside_quotes() {
+    let outcomes = [
+        "Говорят ⟦в Україні⟧, а не ⟦на Україні⟧.",
+        "Говорят «в Україні», а не «на Україні».",
+    ]
+    .into_iter()
+    .flat_map(|nuance| {
+        [
+            "⟦В⟧ называет страну как место.",
+            "«В» называет страну как место.",
+            "⟦З⟧ называет страну как место.",
+            "«З» называет страну как место.",
+            "",
+        ]
+        .into_iter()
+        .map(move |reason| {
+            let mut value = review_fixture("Украина", "страна у Чёрного моря");
+            value["nuance"]["text"] = nuance.into();
+            value["nuance"]["why"] = reason.into();
+            reviewed_failures(value, "RU", "UK", &reviewed_card("Україна", "Украина"))
+                .iter()
+                .any(|fail| fail.starts_with("why:"))
+        })
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(
+        outcomes,
+        [
+            false, false, true, true, true, false, false, true, true, true
+        ],
+        "shared scripts confused quoted learning words with reader prose"
+    );
+}
+
+#[test]
+fn review_f2r_reader_glosses_cannot_be_mistaken_for_learning_phrases() {
+    let language = Language::from_codes("RU", "EN").unwrap();
+    let cases: Vec<Case> =
+        serde_json::from_str(include_str!("fixtures/explanation/judge.json")).unwrap();
+    let failures = cases
+        .into_iter()
+        .filter(|case| ["3.t2.A14.parts", "4.r1.K57.parts"].contains(&case.id.as_str()))
+        .flat_map(|case| judge(&case.card, &case.parts, &language).into_parts().0)
+        .collect::<Vec<_>>();
+    assert!(
+        failures.is_empty(),
+        "reader-language quotations hid a learning word or introduced a false mistake: {failures:?}"
+    );
+}
+
+#[test]
+fn review_f2r_writing_cannot_accept_a_quoted_mistake_without_a_relevant_reason() {
+    use kamishibai::explanation::{Input, Task, write};
+    let language = Language::from_codes("RU", "EL").unwrap();
+    let task = Task::from_input(
+        Input::new(
+            reviewed_card("Ελλάδα", "Греция"),
+            "Предложение карточки.".into(),
+            "original context".into(),
+            String::new(),
+        ),
+        &language,
+    )
+    .unwrap();
+    let outcomes = [("⟦", "⟧"), ("«", "»")]
+        .into_iter()
+        .flat_map(|(open, close)| {
+            ["Στην", "", "από"]
+                .into_iter()
+                .map(move |word| (open, close, word))
+        })
+        .map(|(open, close, word)| {
+            let mut value = review_fixture("Греция", "страна у Эгейского моря");
+            value["nuance"]["text"] =
+                format!("Говорят {open}στην Ελλάδα{close}, а не {open}σε Ελλάδα{close}.").into();
+            value["nuance"]["why"] = if word.is_empty() {
+                String::new()
+            } else {
+                format!("{open}{word}{close} называет страну как место.")
+            }
+            .into();
+            let mut writer = Writer {
+                answers: vec![value.to_string(); 4].into(),
+                prompts: Vec::new(),
+            };
+            let result = write(&mut writer, &task, &language).unwrap();
+            let repair = [1, 3].into_iter().all(|index| {
+                writer
+                    .prompts
+                    .get(index)
+                    .is_some_and(|prompt| prompt.contains("why:"))
+            });
+            (result.is_some(), writer.prompts.len(), repair)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        outcomes,
+        [
+            (true, 2, false),
+            (false, 4, true),
+            (false, 4, true),
+            (true, 2, false),
+            (false, 4, true),
+            (false, 4, true)
+        ],
+        "the full write transaction accepted an incomplete explanation or lost its why repair"
+    );
+}
+
+#[test]
 fn review_f3_single_letter_heads_cannot_be_treated_as_empty() {
     let failures = [
         ("JA", "猫", "窓辺で日向ぼっこをする身近なペット"),
