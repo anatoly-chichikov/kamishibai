@@ -208,20 +208,23 @@ impl Review<'_> {
             || self.local("mistake", &foreign)
     }
 
+    /// Preserve unquoted foreign-script words alongside marked learning phrases.
     fn learning_words(&self, text: &str) -> Vec<String> {
         use unicode_script::UnicodeScript;
         let normalized = self.normalize(text);
         let marked = hits("⟦[^⟦⟧]+⟧", &normalized);
-        let phrases = if marked.is_empty() {
-            text.to_string()
-        } else {
-            marked.join(" ")
-        };
-        hits(r"\p{L}[\p{L}\p{M}'’-]*", &phrases.to_lowercase())
+        let pattern = r"\p{L}[\p{L}\p{M}'’-]*";
+        let explicit = hits(pattern, &marked.join(" ").to_lowercase());
+        hits(pattern, &normalized.to_lowercase())
             .into_iter()
             .filter(|word| {
                 word.chars()
                     .any(|ch| self.language.learning.contains(&ch.script()))
+            })
+            .filter(|word| {
+                marked.is_empty()
+                    || explicit.contains(word)
+                    || word.chars().any(|ch| self.language.foreign(ch))
             })
             .collect()
     }

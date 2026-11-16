@@ -869,6 +869,142 @@ fn review_f2r_writing_cannot_accept_a_quoted_mistake_without_a_relevant_reason()
 }
 
 #[test]
+fn review_r1_judging_cannot_drop_unquoted_learning_words_beside_quoted_phrases() {
+    let failures = ["EN", "EL"]
+        .into_iter()
+        .flat_map(|learning| {
+            let language = Language::from_codes("RU", learning).unwrap();
+            mixed_cases(learning)
+                .into_iter()
+                .filter_map(move |(card, parts, accepted)| {
+                    let failures = judge(&card, &parts, &language).into_parts().0;
+                    let correct = if accepted {
+                        failures.is_empty()
+                    } else {
+                        failures.iter().any(|failure| failure.starts_with("why:"))
+                    };
+                    (!correct).then_some((learning, parts, failures))
+                })
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        failures.is_empty(),
+        "mixed quotation changed reason relevance: {failures:?}"
+    );
+}
+
+#[test]
+fn review_r1_writing_cannot_spend_repairs_on_a_correct_mixed_reason() {
+    use kamishibai::explanation::{Input, Task, write};
+    let failures = ["EN", "EL"]
+        .into_iter()
+        .flat_map(|learning| {
+            let language = Language::from_codes("RU", learning).unwrap();
+            mixed_cases(learning)
+                .into_iter()
+                .filter_map(move |(card, parts, accepted)| {
+                    let task = Task::from_input(
+                        Input::new(
+                            card,
+                            "Предложение карточки.".into(),
+                            "metadata draft".into(),
+                            String::new(),
+                        ),
+                        &language,
+                    )
+                    .unwrap();
+                    let mut writer = Writer {
+                        answers: vec![serde_json::to_string(&parts).unwrap(); 4].into(),
+                        prompts: Vec::new(),
+                    };
+                    let result = write(&mut writer, &task, &language).unwrap();
+                    let expected = if accepted {
+                        (Some(parts.clone()), 2)
+                    } else {
+                        (None, 4)
+                    };
+                    ((result, writer.prompts.len()) != expected).then_some((
+                        learning,
+                        parts,
+                        writer.prompts.len(),
+                    ))
+                })
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        failures.is_empty(),
+        "mixed quotation lost a valid explanation or accepted a missing or unrelated reason: {failures:?}"
+    );
+}
+
+#[test]
+fn review_r1_shared_scripts_cannot_borrow_unmarked_reader_words() {
+    let mut value = review_fixture("Украина", "страна у Чёрного моря");
+    value["nuance"]["text"] = "Говорят ⟦в Україні⟧, а не ⟦на Україні⟧.".into();
+    value["nuance"]["why"] = "⟦Говорят⟧ описывает обычный выбор слова.".into();
+    assert!(
+        reviewed_failures(value, "RU", "UK", &reviewed_card("Україна", "Украина"))
+            .iter()
+            .any(|failure| failure.starts_with("why:")),
+        "the reason borrowed a reader word outside marked learning phrases"
+    );
+}
+
+fn mixed_cases(learning: &str) -> Vec<(Card, Parts, bool)> {
+    let (term, head, note, right, wrong, reasons) = match learning {
+        "EN" => (
+            "shore",
+            "берег",
+            "край земли у воды",
+            "on the shore",
+            "in the shore",
+            [
+                "On показывает место на краю воды.",
+                "In означало бы место внутри берега.",
+                "",
+                "At указывает на точку назначения.",
+            ],
+        ),
+        "EL" => (
+            "Ελλάδα",
+            "Греция",
+            "страна у Эгейского моря",
+            "στην Ελλάδα",
+            "σε Ελλάδα",
+            [
+                "Στην называет страну как место.",
+                "Σε само по себе не называет страну как место.",
+                "",
+                "Από называет начало пути.",
+            ],
+        ),
+        _ => panic!("unsupported mixed-quotation fixture language"),
+    };
+    [
+        (right.to_string(), wrong.to_string()),
+        (format!("«{right}»"), format!("«{wrong}»")),
+        (format!("«{right}»"), wrong.to_string()),
+        (right.to_string(), format!("«{wrong}»")),
+        (format!("⟦{right}⟧"), wrong.to_string()),
+        (right.to_string(), format!("⟦{wrong}⟧")),
+    ]
+    .into_iter()
+    .flat_map(|(right, wrong)| {
+        reasons.into_iter().enumerate().map(move |(index, reason)| {
+            let mut value = review_fixture(head, note);
+            value["nuance"]["text"] = format!("Говорят {right}, а не {wrong}.").into();
+            value["nuance"]["why"] = reason.into();
+            (
+                reviewed_card(term, head),
+                serde_json::from_value(value).unwrap(),
+                index < 2,
+            )
+        })
+    })
+    .collect()
+}
+
+#[test]
 fn review_f3_single_letter_heads_cannot_be_treated_as_empty() {
     let failures = [
         ("JA", "猫", "窓辺で日向ぼっこをする身近なペット"),
