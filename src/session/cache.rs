@@ -616,6 +616,8 @@ struct MetaRecord {
     target_sentence: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     labels: Option<SentenceLabels>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    explanation: Option<crate::explanation::Record>,
 }
 
 impl MetaRecord {
@@ -636,6 +638,7 @@ impl MetaRecord {
             source_context: meta.source_context().to_string(),
             target_sentence: meta.target_sentence().to_string(),
             labels: meta.sentence_labels().cloned(),
+            explanation: meta.explanation_record(),
         }
     }
 
@@ -654,7 +657,8 @@ impl MetaRecord {
             self.source_hint,
             crate::markdown::compact_card_context(&self.source_context),
             self.target_sentence,
-        );
+        )
+        .with_explanation(self.explanation);
         match self.labels {
             Some(labels) => meta.with_sentence_labels(labels),
             None => meta,

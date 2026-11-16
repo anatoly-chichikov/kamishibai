@@ -2071,7 +2071,7 @@ dependencies = [
 
 [[package]]
 name = "kamishibai"
-version = "1.18.0"
+version = "1.19.0"
 dependencies = [
  "allsorts",
  "anyhow",
@@ -2082,6 +2082,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "expectrl",
+ "fancy-regex",
  "image",
  "insta",
  "lopdf",

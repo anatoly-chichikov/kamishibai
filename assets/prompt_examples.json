@@ -58,7 +58,12 @@
           "Where it's out of place.",
           "Subtlety."
         ],
-        "rarity": "rare, classical prose"
+        "rarity": "rare, classical prose",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "literally"
       }
     },
     "recall": {
@@ -126,7 +131,12 @@
       },
       "context": {
         "headers": ["含义", "常见场景", "不适用的场合", "细微差别"],
-        "rarity": "罕见，多见于古典散文"
+        "rarity": "罕见，多见于古典散文",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "字面意思是"
       }
     },
     "recall": {
@@ -199,7 +209,12 @@
           "Dónde desentona.",
           "Matiz."
         ],
-        "rarity": "raro, propio de la prosa clásica"
+        "rarity": "raro, propio de la prosa clásica",
+        "quotes": [
+          "«",
+          "»"
+        ],
+        "literally": "literalmente"
       }
     },
     "recall": {
@@ -267,7 +282,12 @@
       },
       "context": {
         "headers": ["意味", "どこで耳にするか", "不自然な場面", "ニュアンス"],
-        "rarity": "まれで、古典的な散文に見られる"
+        "rarity": "まれで、古典的な散文に見られる",
+        "quotes": [
+          "「",
+          "」"
+        ],
+        "literally": "直訳すると"
       }
     },
     "recall": {
@@ -340,7 +360,12 @@
           "Où il détonne.",
           "Nuance."
         ],
-        "rarity": "rare, propre à la prose classique"
+        "rarity": "rare, propre à la prose classique",
+        "quotes": [
+          "« ",
+          " »"
+        ],
+        "literally": "littéralement"
       }
     },
     "recall": {
@@ -413,7 +438,12 @@
           "Wo es unpassend ist.",
           "Nuance."
         ],
-        "rarity": "selten, vor allem in klassischer Prosa"
+        "rarity": "selten, vor allem in klassischer Prosa",
+        "quotes": [
+          "„",
+          "“"
+        ],
+        "literally": "wörtlich"
       }
     },
     "recall": {
@@ -486,7 +516,24 @@
           "Где неуместно.",
           "Нюанс."
         ],
-        "rarity": "редко, преимущественно в классической прозе"
+        "rarity": "редко, преимущественно в классической прозе",
+        "quotes": [
+          "«",
+          "»"
+        ],
+        "literally": "дословно",
+        "notes": "When addressing the reader, use ты. Office words: является, данный, осуществляется, используется, применяется, в контексте, в ситуациях когда, с целью, в качестве, посредством, в рамках. Avoid vague stand-ins: вещь, предмет, объект, действие, процесс. Prefer говорят, скажешь, услышишь. Write ё where it belongs.",
+        "judge": {
+          "mistake": "(?:,\\s*|\\s)(?:а не|но не)\\s+[A-Za-z]|вместо\\s+[A-Za-z]|не говорят|нельзя сказать|никогда не\\s+[A-Za-z]",
+          "calm": "(?i)нет\\s+(?:\\S+\\s+){0,3}(?:ограничен|рамок|запрет)|ограничений\\s+(?:\\S+\\s+){0,3}нет|без особых ограничений|нейтрально и (?:уместно|подходит)|одинаково уместн|в любой (?:ситуации|обстановке)|подходит (?:везде|всегда)|уместно (?:везде|всегда|в любом)",
+          "blank": "(?i)не требуется|нет дополнительных|нет других особых|дополнительных особых|никаких дополнительных|добавить нечего|ничего особенного|особых тонкостей",
+          "opener": "^(Слово|Выражение|Оборот|Фразу|Фраза|Словосочетание|Оно|Его|Это слово|Эту фразу|Это выражение)\\s+(?:часто\\s+|обычно\\s+|чаще всего\\s+|редко,?\\s+)?(используют|используется|выбирают|подходит|пригодится|встречается|встретится|звучит|помогает|популярно|характер|употребля|применя)|^(Подходит|Используйте|Используется|Используют|Употребляется|Употребляют|Применяется|Означает|Обозначает|Показывает,? что|Служит)",
+          "grammar": "(?i)предлог|артикл|окончани|множественн|единственн|глагол|частиц|существительн|прилагательн|наречи|местоимен|конструкци|связок|связк|падеж|инфинитив|причасти|без изменения формы|форму\\s|формы\\s|форма\\s|действи[еяю]|действием|somebody|something|smb|smth",
+          "office": "(?i)(?<![а-яё])являе?тся|(?<![а-яё])являются|(?<![а-яё])данн(?:ый|ая|ое|ого|ой|ом|ую)(?![а-яё])|осуществля|(?<![а-яё])используется|(?<![а-яё])используются|(?<![а-яё])применяется|(?<![а-яё])применяются|(?<![а-яё])употребля|в контексте|в ситуациях,? когда|в случаях,? когда|с целью|в целях|в качестве|посредством|в рамках|(?<![а-яё])соответствующ|имеет место",
+          "standin": "(?i)(?:вещь|предмет|объект|процесс)\\s+(?:всегда\\s+|обычно\\s+)?(?:ставят|называют|стоит|идёт)|слово-оценк|слово-уточнен",
+          "narrated": "(?i)(?:через|с помощью|при помощи)\\s+(?:слов[оа]\\s+)?[A-Za-z]|ставят\\s+(?:в середину|посередине|сразу после|перед тем)|присоединяют",
+          "polite": "(?i)(?:^|[^а-яё])(вы|вам|вас|вами|ваш[аеиу]?|ваших|вашим)(?![а-яё])|[а-яё](?:уйте|айте|яйте|ойте|ите|ьте)(?![а-яё])"
+        }
       }
     },
     "recall": {
@@ -559,7 +606,12 @@
           "Dove stona.",
           "Sfumatura."
         ],
-        "rarity": "raro, tipico della prosa classica"
+        "rarity": "raro, tipico della prosa classica",
+        "quotes": [
+          "«",
+          "»"
+        ],
+        "literally": "letteralmente"
       }
     },
     "recall": {
@@ -632,7 +684,12 @@
           "Onde não combina.",
           "Nuance."
         ],
-        "rarity": "raro, próprio da prosa clássica"
+        "rarity": "raro, próprio da prosa clássica",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "literalmente"
       }
     },
     "recall": {
@@ -705,7 +762,12 @@
           "Πού δεν ταιριάζει.",
           "Απόχρωση."
         ],
-        "rarity": "σπάνιο, κυρίως στην κλασική πεζογραφία"
+        "rarity": "σπάνιο, κυρίως στην κλασική πεζογραφία",
+        "quotes": [
+          "«",
+          "»"
+        ],
+        "literally": "κυριολεκτικά"
       }
     },
     "recall": {
@@ -778,7 +840,12 @@
           "Waar het niet past.",
           "Nuance."
         ],
-        "rarity": "zeldzaam, vooral in klassiek proza"
+        "rarity": "zeldzaam, vooral in klassiek proza",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "letterlijk"
       }
     },
     "recall": {
@@ -846,7 +913,12 @@
       },
       "context": {
         "headers": ["뜻.", "자연스럽게 쓰는 상황.", "어색해지는 상황.", "말맛과 뉘앙스."],
-        "rarity": "드문 표현으로, 주로 옛 문학의 산문에서 보임"
+        "rarity": "드문 표현으로, 주로 옛 문학의 산문에서 보임",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "직역하면"
       }
     },
     "recall": {
@@ -908,7 +980,12 @@
       },
       "context": {
         "headers": ["Anlamı.", "Doğal kullanıldığı yer.", "Yadırganacağı yer.", "Söyleyiş inceliği."],
-        "rarity": "seyrek; daha çok eski edebî metinlerde geçer"
+        "rarity": "seyrek; daha çok eski edebî metinlerde geçer",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "kelimesi kelimesine"
       }
     },
     "recall": {
@@ -970,7 +1047,12 @@
       },
       "context": {
         "headers": ["Znaczenie.", "Naturalny kontekst.", "Kontekst, w którym razi.", "Odcień znaczeniowy."],
-        "rarity": "rzadkie; spotykane głównie w dawnej prozie"
+        "rarity": "rzadkie; spotykane głównie w dawnej prozie",
+        "quotes": [
+          "„",
+          "”"
+        ],
+        "literally": "dosłownie"
       }
     },
     "recall": {
@@ -1032,7 +1114,12 @@
       },
       "context": {
         "headers": ["Значення.", "Природний контекст.", "Недоречний контекст.", "Смисловий відтінок."],
-        "rarity": "рідковживане; переважно трапляється в давній художній прозі"
+        "rarity": "рідковживане; переважно трапляється в давній художній прозі",
+        "quotes": [
+          "«",
+          "»"
+        ],
+        "literally": "дослівно"
       }
     },
     "recall": {
@@ -1094,7 +1181,12 @@
       },
       "context": {
         "headers": ["Makna.", "Konteks yang wajar.", "Konteks yang terasa janggal.", "Nuansa pemakaian."],
-        "rarity": "jarang; terutama ditemukan dalam prosa sastra lama"
+        "rarity": "jarang; terutama ditemukan dalam prosa sastra lama",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "secara harfiah"
       }
     },
     "recall": {
@@ -1156,7 +1248,12 @@
       },
       "context": {
         "headers": ["अर्थ।", "स्वाभाविक प्रयोग।", "जहाँ प्रयोग अटपटा लगे।", "भाव और लहजा।"],
-        "rarity": "दुर्लभ; मुख्यतः पुराने साहित्यिक गद्य में मिलता है"
+        "rarity": "दुर्लभ; मुख्यतः पुराने साहित्यिक गद्य में मिलता है",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "शाब्दिक अर्थ"
       }
     },
     "recall": {
@@ -1218,7 +1315,12 @@
       },
       "context": {
         "headers": ["المعنى.", "موضع الاستعمال الطبيعي.", "موضع لا يلائمه.", "الإيحاء والأسلوب."],
-        "rarity": "نادر، ويظهر غالبًا في النثر التراثي"
+        "rarity": "نادر، ويظهر غالبًا في النثر التراثي",
+        "quotes": [
+          "«",
+          "»"
+        ],
+        "literally": "حرفيًا"
       }
     },
     "recall": {
@@ -1280,7 +1382,12 @@
       },
       "context": {
         "headers": ["ความหมาย", "บริบทที่ใช้ได้เป็นธรรมชาติ", "บริบทที่ฟังดูไม่เข้าที่", "น้ำเสียงและนัย"],
-        "rarity": "พบน้อยและมักปรากฏในร้อยแก้ววรรณกรรมเก่า"
+        "rarity": "พบน้อยและมักปรากฏในร้อยแก้ววรรณกรรมเก่า",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "แปลตรงตัวว่า"
       }
     },
     "recall": {
@@ -1342,7 +1449,12 @@
       },
       "context": {
         "headers": ["משמעות.", "הקשר טבעי.", "הקשר שבו זה צורם.", "גוון ומשלב."],
-        "rarity": "נדיר, ומופיע בעיקר בפרוזה ספרותית ישנה"
+        "rarity": "נדיר, ומופיע בעיקר בפרוזה ספרותית ישנה",
+        "quotes": [
+          "”",
+          "“"
+        ],
+        "literally": "מילולית"
       }
     },
     "recall": {
@@ -1404,7 +1516,12 @@
       },
       "context": {
         "headers": ["Nghĩa.", "Ngữ cảnh dùng tự nhiên.", "Ngữ cảnh nghe gượng.", "Sắc thái và văn phong."],
-        "rarity": "hiếm, chủ yếu gặp trong văn xuôi văn chương xưa"
+        "rarity": "hiếm, chủ yếu gặp trong văn xuôi văn chương xưa",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "nghĩa đen là"
       }
     },
     "recall": {
@@ -1466,7 +1583,12 @@
       },
       "context": {
         "headers": ["Význam.", "Přirozený kontext.", "Kontext, kde působí nepatřičně.", "Významový odstín."],
-        "rarity": "zřídka; hlavně ve starší próze"
+        "rarity": "zřídka; hlavně ve starší próze",
+        "quotes": [
+          "„",
+          "“"
+        ],
+        "literally": "doslova"
       }
     },
     "recall": {
@@ -1560,7 +1682,12 @@
           "Gde nije prikladno.",
           "Nijansa."
         ],
-        "rarity": "retko, klasična proza"
+        "rarity": "retko, klasična proza",
+        "quotes": [
+          "„",
+          "“"
+        ],
+        "literally": "дословно"
       }
     },
     "recall": {
@@ -1660,7 +1787,12 @@
           "სად არის შეუსაბამო.",
           "ნიუანსი."
         ],
-        "rarity": "იშვიათი, კლასიკური პროზა"
+        "rarity": "იშვიათი, კლასიკური პროზა",
+        "quotes": [
+          "„",
+          "“"
+        ],
+        "literally": "სიტყვასიტყვით"
       }
     },
     "recall": {
@@ -1760,7 +1892,12 @@
           "Որտեղ տեղին չէ.",
           "Նրբերանգը."
         ],
-        "rarity": "հազվադեպ, դասական արձակ"
+        "rarity": "հազվադեպ, դասական արձակ",
+        "quotes": [
+          "«",
+          "»"
+        ],
+        "literally": "բառացի"
       }
     },
     "recall": {
@@ -1860,7 +1997,12 @@
           "کجا نامناسب است.",
           "نکتهٔ ظریف."
         ],
-        "rarity": "نادر، نثر کلاسیک"
+        "rarity": "نادر، نثر کلاسیک",
+        "quotes": [
+          "«",
+          "»"
+        ],
+        "literally": "تحت‌اللفظی"
       }
     },
     "recall": {
@@ -1960,7 +2102,12 @@
           "Var det inte passar.",
           "Nyans."
         ],
-        "rarity": "sällsynt, klassisk prosa"
+        "rarity": "sällsynt, klassisk prosa",
+        "quotes": [
+          "”",
+          "”"
+        ],
+        "literally": "ordagrant"
       }
     },
     "recall": {
@@ -2060,7 +2207,12 @@
           "Unde nu se potrivește.",
           "Nuanță."
         ],
-        "rarity": "rar, proză clasică"
+        "rarity": "rar, proză clasică",
+        "quotes": [
+          "„",
+          "”"
+        ],
+        "literally": "literal"
       }
     },
     "recall": {
@@ -2160,7 +2312,12 @@
           "Hol nem illik.",
           "Árnyalat."
         ],
-        "rarity": "ritka, klasszikus próza"
+        "rarity": "ritka, klasszikus próza",
+        "quotes": [
+          "„",
+          "”"
+        ],
+        "literally": "szó szerint"
       }
     },
     "recall": {
@@ -2260,7 +2417,12 @@
           "Minne se ei sovi.",
           "Sävy."
         ],
-        "rarity": "harvinainen, klassinen proosa"
+        "rarity": "harvinainen, klassinen proosa",
+        "quotes": [
+          "”",
+          "”"
+        ],
+        "literally": "kirjaimellisesti"
       }
     },
     "recall": {
@@ -2359,7 +2521,12 @@
           "Ubi nōn convenit.",
           "Subtīlitās."
         ],
-        "rarity": "rārum, in ōrātiōne solūtā antīquā"
+        "rarity": "rārum, in ōrātiōne solūtā antīquā",
+        "quotes": [
+          "“",
+          "”"
+        ],
+        "literally": "ad verbum"
       }
     },
     "recall": {

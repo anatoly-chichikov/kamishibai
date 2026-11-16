@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.18.0
+Release: 1.19.0
 
 Overview
 
@@ -28,7 +28,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.18.0/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.19.0/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -252,8 +252,8 @@ The allocation is stable across retries and process restarts. The retired
 `natural` and `varied` values remain accepted as aliases for `best-fit` and
 `mixed`.
 
-These settings constrain the initial authoring request. Each successful metadata
-attempt uses two text requests: card authoring with HIGH thinking, followed by
+These settings constrain the initial authoring request. Each metadata
+attempt starts with two text requests: card authoring with HIGH thinking, followed by
 a focused IPA verification with MEDIUM thinking. Both use Gemini 3.8 Flash and
 JSON mode. The second response can replace pronunciation and transcription only;
 it cannot rewrite the sentence, meaning, reviewed senses, labels, or description.
@@ -261,13 +261,27 @@ It runs after initial validation and uses the corrected term and understanding
 when a correction changes the card. Invalid initial metadata stops before this
 second request. A failed IPA request fails that metadata attempt, retaining the
 previous cached metadata and every measured cost; there is no inner retry or
-silent fallback. The ordinary four-attempt ceiling can therefore spend up to
-eight text requests on metadata. This model check reduces observed errors but
+silent fallback. The explanation then uses one writing request and one editing request, with
+at most one repair after each, all under GenerationStage::Explanation with LOW
+thinking, a strict JSON schema and a 3000-token ceiling. Every completed
+request is accounted, including an unparseable response. An unparseable first
+answer or a final rejected explanation keeps the Metadata text; a transport or
+provider failure fails the Meta attempt. One Meta attempt uses at most six text
+requests, so the ordinary four-attempt ceiling can spend at most 24.
+New explanations use the reader's four familiar section headings and omit
+empty sections. Only headings are bold. Reviewed meanings appear in their
+approved order, the first brighter than the others. Learning-language phrases
+use the reader's quotation marks, examples have a translation on the next line,
+and a named common mistake carries a short reason. The offline explanation
+judge and composer are public library APIs. This model check reduces observed errors but
 does not certify pronunciation as dictionary-verified.
 When neither a level nor a non-`best-fit` type policy is requested, the rendered metadata
-prompt and provider-call shape are unchanged. This release advances the
-metadata policy, so a card carrying metadata from an older policy refreshes it
-once even under defaults. Explicit settings are accepted with both word intake
+authoring prompt is unchanged. Release 1.19.0 retains the metadata cache
+policy, session format, card keys, Anki note type and templates. Existing
+current-policy cached cards are reused without buying an explanation. New
+meta.json records retain the explanation parts, assignment stamp and Metadata
+draft as optional provenance. Correction uses that draft as its factual source
+and reruns the explanation with the learner's request. Explicit settings are accepted with both word intake
 and `--build`; an imported card whose cached metadata does not satisfy them is
 refreshed only when generation starts.
 

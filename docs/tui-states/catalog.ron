@@ -1017,6 +1017,7 @@ Catalog(
             expectations: [
                 "Expanded metadata labels are the phrase, in your language, a visual clue, word meaning, word pronunciation, phrase pronunciation and worth learning",
                 "Show the right context only for nonempty context",
+                "New explanations keep only headings bold, the first meaning bright and other meanings muted, with quoted learning phrases and adjacent example and translation lines",
                 "Preview labels are statements or nouns, while adjustment controls are questions",
             ],
             grounds: Grounds(
@@ -3790,6 +3791,7 @@ Catalog(
                     expectations: [
                         "Focus remains on the head; tune rows are visible without bright questions, bright chevrons or a note cursor",
                         "Step rows precede tune rows, metadata preview and rejected attempts; collapsed tags do not repeat beside the open block",
+                        "The explanation lists approved meanings in order and omits empty sections; only headings are bold and the first meaning is brighter",
                     ],
                     actions: [
                         Action(
@@ -3845,6 +3847,18 @@ Catalog(
                     ],
                 ),
                 evidence: Captured([
+                    Shot(
+                        file: "docs/tui-states/live/39-card-explanation.png",
+                        origin: Synthetic,
+                        revision: None,
+                        note: "Captured from the T437 prepared explanation scene on 2026-11-16 and visually inspected",
+                    ),
+                    Shot(
+                        file: "docs/tui-states/live/41-card-explanation-narrow.png",
+                        origin: Synthetic,
+                        revision: None,
+                        note: "Captured from the T437 prepared explanation at narrow width on 2026-11-16 and visually inspected",
+                    ),
                     Shot(
                         file: "docs/tui-states/live/09-card-open.png",
                         origin: Live,
@@ -5381,6 +5395,18 @@ Catalog(
                     ],
                 ),
                 evidence: Captured([
+                    Shot(
+                        file: "docs/tui-states/live/40-card-explanation-end.png",
+                        origin: Synthetic,
+                        revision: None,
+                        note: "Captured from the T437 prepared explanation end on 2026-11-16 and visually inspected",
+                    ),
+                    Shot(
+                        file: "docs/tui-states/live/42-card-explanation-end-narrow.png",
+                        origin: Synthetic,
+                        revision: None,
+                        note: "Captured from the T437 prepared explanation end at narrow width on 2026-11-16 and visually inspected",
+                    ),
                     Shot(
                         file: "docs/tui-states/live/10-card-scroll-end.png",
                         origin: Live,

@@ -71,6 +71,15 @@ Import the deck into Anki, and the cards look roughly like this on your phone:
   <img src="docs/previews/anki-card-back.jpg" alt="Anki card back preview" width="260">
 </p>
 
+New cards explain each reviewed meaning in a short list, with the card's own
+meaning first and brighter. The familiar sections describe where it occurs,
+where it does not fit, and a useful nuance; empty sections disappear. Only
+headings are bold, learning-language phrases use the reader's quotation marks,
+and a common mistake includes a short reason. A separate writing and editing
+pass checks the explanation, with at most two repairs; rejected explanations
+keep the original metadata text. Existing cached cards and Anki note identities
+stay intact.
+
 ## Console
 
 The same flow runs headless without opening the TUI. Start with the

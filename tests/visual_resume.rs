@@ -1061,6 +1061,10 @@ impl ModelProvider for StorageStudio {
                 text: json!({"pronunciation":"mɛw", "transcription":"kɔn mɛw ŋu"}).to_string(),
                 truncated: false,
             },
+            GenerationStage::Explanation => ModelOutput::Text {
+                text: String::from("not JSON"),
+                truncated: false,
+            },
             GenerationStage::Speech => ModelOutput::Speech(vec![17, 0, 31, 0]),
             GenerationStage::Features => ModelOutput::Text {
                 text: super::gemini::scene_features().to_string(),
@@ -1183,13 +1187,13 @@ fn pause_cannot_hide_failed_scene_persistence() {
 fn pause_cannot_hide_failed_metadata_persistence() {
     let result = storage_failure(
         Artifact::Meta,
-        GenerationStage::Phonetics,
+        GenerationStage::Explanation,
         Some(kamishibai::generation::artifact_cache::META_FILE),
         None,
     );
     assert_eq!(
         (result.0.is_some(), result.1, result.2, result.3),
-        (true, false, 0, Some(782)),
+        (true, false, 0, Some(1173)),
         "pause hid a metadata write failure, spent an attempt, or lost metadata costs"
     );
 }

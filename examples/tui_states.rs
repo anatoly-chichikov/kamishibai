@@ -74,7 +74,8 @@ fn main() -> Result<()> {
     }
     let index = state_index(&states, arguments.state.as_deref())?;
     if let Some(area) = arguments.render {
-        println!("{}", rendered(&states[index].1, area)?);
+        let app = fit(states[index].0, &states[index].1, area);
+        println!("{}", rendered(&app, area)?);
         return Ok(());
     }
     enable_raw_mode()?;
@@ -132,6 +133,18 @@ fn rendered(app: &App, area: Rect) -> Result<String> {
         .join("\n"))
 }
 
+fn fit(id: &str, app: &App, area: Rect) -> App {
+    if id == "cards.scroll-end" {
+        app.clone().body_scrolled(
+            i32::MAX,
+            kamishibai::tui::scroll_viewport(app, area),
+            kamishibai::tui::scroll_body_width(area),
+        )
+    } else {
+        app.clone()
+    }
+}
+
 fn enable_hover_mouse_capture<W: io::Write>(out: &mut W) {
     let _ = out.write_all(b"\x1b[?1006h\x1b[?1003h");
     let _ = out.flush();
@@ -155,9 +168,14 @@ fn run(
             terminal.clear()?;
             force_redraw = false;
         }
-        let (_, app) = &states[index];
+        let (id, app) = &states[index];
+        let app = fit(
+            id,
+            app,
+            Rect::new(0, 0, terminal.size()?.width, terminal.size()?.height),
+        );
         terminal.draw(|frame| {
-            draw(frame, app);
+            draw(frame, &app);
         })?;
         let size = terminal.size()?;
         let rect = Rect {
@@ -167,7 +185,7 @@ fn run(
             height: size.height,
         };
         if let Some((column, row)) = mouse_position {
-            let next = mouse_pointer_at(app, rect, column, row);
+            let next = mouse_pointer_at(&app, rect, column, row);
             write_mouse_pointer(terminal.backend_mut(), next);
         }
         let timeout = if mouse_position.is_some() {
@@ -228,7 +246,7 @@ fn run(
                         width: size.width,
                         height: size.height,
                     };
-                    let next = mouse_pointer_at(app, rect, mouse.column, mouse.row);
+                    let next = mouse_pointer_at(&app, rect, mouse.column, mouse.row);
                     write_mouse_pointer(terminal.backend_mut(), next);
                 }
                 _ => {}
@@ -640,6 +658,44 @@ fn cards_with_first(first: CardDraft) -> App {
         .with_elapsed(Duration::from_secs(41))
 }
 
+fn explained_card() -> App {
+    let card = &serde_json::from_str::<Vec<serde_json::Value>>(include_str!(
+        "../tests/fixtures/explanation/cards.json"
+    ))
+    .expect("approved cards must decode")[0];
+    let value = |field: &str| {
+        card[field]
+            .as_str()
+            .expect("approved card field must exist")
+    };
+    let meta = CardMeta::new(
+        value("pronunciation"),
+        value("transcription"),
+        value("translation"),
+        7,
+        value("sentence_known"),
+        "крайняя черта",
+        "A boundary traced on the sand",
+        value("markdown"),
+        value("sentence"),
+    )
+    .with_sentence_labels(fresh_labels());
+    App::new(LanguagePair::new("EN", "RU"))
+        .with_screen(Screen::YourCards)
+        .confirmed_learning("EN")
+        .cards_started(vec![
+            CardDraft::new(
+                value("term"),
+                value("translation"),
+                LanguagePair::new("EN", "RU"),
+            )
+            .with_meta(meta, None)
+            .with_artifacts(cached_artifacts()),
+        ])
+        .card_toggle_expanded()
+        .done_published("/tmp/explanation.apkg", "/tmp/explanation.pdf", "/tmp")
+}
+
 fn build_states() -> Vec<(&'static str, App)> {
     let words_seed = "dépaysement\nflâner\ncanard\nchouette";
     let base_words = App::new(pair()).seeded_blob(words_seed);
@@ -988,6 +1044,11 @@ fn build_states() -> Vec<(&'static str, App)> {
         ("review.closed", review),
         ("review.correction", change_something),
         ("cards.closed", base_cards),
+        ("cards.open", explained_card()),
+        (
+            "cards.scroll-end",
+            explained_card().body_scrolled(20, 28, 100),
+        ),
         ("cards.tuning", label_editor),
         ("cards.retrying", retrying),
         ("cards.failed", failed),

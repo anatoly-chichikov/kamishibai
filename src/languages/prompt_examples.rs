@@ -22,6 +22,15 @@ pub(crate) struct LanguagePromptExamples {
 }
 
 impl LanguagePromptExamples {
+    /// Supply the complete reader-specific explanation conventions.
+    pub(crate) fn explanation(&self) -> ContextExamples {
+        self.card.context.clone()
+    }
+
+    /// Apply word-based checks only to languages whose writing separates words.
+    pub(crate) fn worded(&self) -> bool {
+        self.spacing == TextSpacing::Words
+    }
     /// Render localized pairs demonstrating natural learner-facing wording.
     pub(crate) fn writing(&self) -> Result<String> {
         Ok(serde_json::to_string_pretty(&self.card.writing)?)
@@ -278,9 +287,15 @@ struct HintExamples {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct ContextExamples {
-    headers: [String; 4],
+pub(crate) struct ContextExamples {
+    pub(crate) headers: [String; 4],
     rarity: String,
+    pub(crate) quotes: [String; 2],
+    pub(crate) literally: String,
+    #[serde(default)]
+    pub(crate) notes: String,
+    #[serde(default)]
+    pub(crate) judge: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -354,6 +369,26 @@ fn nonempty<'a>(mut values: impl Iterator<Item = &'a String>) -> bool {
         !value.is_empty()
     });
     seen && filled
+}
+
+/// Resolve the writing systems declared for explanation quotation.
+pub(crate) fn explanation_scripts(code: &str) -> Vec<unicode_script::Script> {
+    use unicode_script::Script;
+    match code.to_ascii_lowercase().as_str() {
+        "ru" | "uk" => vec![Script::Cyrillic],
+        "sr" => vec![Script::Cyrillic, Script::Latin],
+        "el" => vec![Script::Greek],
+        "ar" | "fa" => vec![Script::Arabic],
+        "he" => vec![Script::Hebrew],
+        "hi" => vec![Script::Devanagari],
+        "th" => vec![Script::Thai],
+        "ka" => vec![Script::Georgian],
+        "hy" => vec![Script::Armenian],
+        "zh" => vec![Script::Han],
+        "ja" => vec![Script::Han, Script::Hiragana, Script::Katakana],
+        "ko" => vec![Script::Hangul, Script::Han],
+        _ => vec![Script::Latin],
+    }
 }
 
 #[cfg(test)]

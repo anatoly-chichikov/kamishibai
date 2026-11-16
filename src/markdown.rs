@@ -41,6 +41,9 @@ pub enum Block {
 /// Limit a recognized card context to five meaning groups and remove its glossary recap.
 #[must_use]
 pub fn compact_card_context(input: &str) -> String {
+    if is_explanation(&parse_markdown(input)) {
+        return input.to_string();
+    }
     let lines = input.lines().collect::<Vec<_>>();
     let headers = lines
         .iter()
@@ -196,6 +199,9 @@ pub fn parse_markdown(input: &str) -> Vec<Block> {
 /// because Anki's web view strips most class-based CSS.
 #[must_use]
 pub fn to_html(blocks: &[Block]) -> String {
+    if is_explanation(blocks) {
+        return explanation_html(blocks);
+    }
     let mut out = String::new();
     let mut in_list = false;
     for block in blocks {
@@ -231,13 +237,100 @@ pub fn to_html(blocks: &[Block]) -> String {
 /// `• ` glyph and a two-space-per-level left indent.
 #[must_use]
 pub fn to_ratatui(blocks: &[Block]) -> Vec<Line<'static>> {
+    let explanation = is_explanation(blocks);
+    let mut order = 0;
     blocks
         .iter()
         .map(|block| match block {
             Block::Paragraph(chunks) => paragraph_line(chunks),
-            Block::Bullet { indent, chunks } => bullet_line(*indent, chunks),
+            Block::Bullet { indent, chunks } => {
+                let mut line = bullet_line(*indent, chunks);
+                if explanation {
+                    let color = if order == 0 {
+                        ratatui::style::Color::Rgb(0xe6, 0xe3, 0xda)
+                    } else {
+                        ratatui::style::Color::Rgb(0x8b, 0x8a, 0x83)
+                    };
+                    for span in &mut line.spans {
+                        span.style = span.style.fg(color);
+                    }
+                }
+                order += 1;
+                line
+            }
         })
         .collect()
+}
+
+/// Recognize the new explanation by its meaning heading and unweighted list.
+#[must_use]
+pub fn is_explanation(blocks: &[Block]) -> bool {
+    matches!(blocks.first(), Some(Block::Paragraph(chunks)) if chunks.len() == 1 && chunks[0].bold && crate::languages::is_meaning_header(&chunks[0].text))
+        && matches!(blocks.get(1), Some(Block::Bullet { .. }))
+        && blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Bullet { chunks, .. } => Some(chunks),
+                _ => None,
+            })
+            .all(|chunks| {
+                chunks.iter().all(|chunk| !chunk.bold)
+                    && chunks
+                        .iter()
+                        .map(|chunk| chunk.text.as_str())
+                        .collect::<String>()
+                        .contains(" — ")
+            })
+}
+
+fn explanation_html(blocks: &[Block]) -> String {
+    let mut output = String::new();
+    let mut list = false;
+    let mut order = 0;
+    for block in blocks {
+        match block {
+            Block::Bullet { chunks, .. } => {
+                if !list {
+                    output.push_str(
+                        "<ul style=\"margin: 0.45em 0; padding-left: 1.2em; line-height: 1.5;\">",
+                    );
+                    list = true;
+                    order = 0;
+                }
+                let color = if order == 0 {
+                    "--kamishibai-term"
+                } else {
+                    "--kamishibai-hint"
+                };
+                output.push_str(&format!("<li style=\"color: var({color}, inherit);\">"));
+                push_html_chunks(&mut output, chunks);
+                output.push_str("</li>");
+                order += 1;
+            }
+            Block::Paragraph(chunks) => {
+                if list {
+                    output.push_str("</ul>");
+                    list = false;
+                }
+                let text = chunks
+                    .iter()
+                    .map(|chunk| chunk.text.as_str())
+                    .collect::<String>();
+                if text.trim_start().starts_with(['—', '–']) && output.ends_with("</p>") {
+                    output.truncate(output.len() - 4);
+                    output.push_str("<br>");
+                } else {
+                    output.push_str("<p style=\"margin: 0.55em 0; line-height: 1.5;\">");
+                }
+                push_html_chunks(&mut output, chunks);
+                output.push_str("</p>");
+            }
+        }
+    }
+    if list {
+        output.push_str("</ul>");
+    }
+    output
 }
 
 /// Render markdown blocks back into plain text, stripping every styling

@@ -512,7 +512,7 @@ fn back_rows(plan: &CardPlan, size: f32, fonts: &SheetFonts, padding: f32) -> Ve
             .map(|(index, row)| FaceRow {
                 content: RowContent::Text {
                     chunks: row.chunks,
-                    color: INK,
+                    color: row.color,
                     bullet: row.bullet,
                 },
                 size,
@@ -683,8 +683,16 @@ fn explanation_layout(
 ) -> ExplanationLayout {
     let marker_width = view.measure(BULLET_MARKER, false, size);
     let mut rows = Vec::new();
+    let explanation = crate::markdown::is_explanation(blocks);
+    let mut order = 0;
     for (index, block) in blocks.iter().enumerate() {
-        let gap_before = explanation_gap(blocks.get(index.wrapping_sub(1)), block, size);
+        let gap_before = if explanation
+            && matches!(block, Block::Paragraph(chunks) if chunks.first().is_some_and(|chunk| chunk.text.trim_start().starts_with(['—', '–'])))
+        {
+            0.0
+        } else {
+            explanation_gap(blocks.get(index.wrapping_sub(1)), block, size)
+        };
         let (chunks, inner_w, indent) = match block {
             Block::Paragraph(chunks) => (chunks.as_slice(), width, None),
             Block::Bullet { indent, chunks } => {
@@ -696,6 +704,14 @@ fn explanation_layout(
                 )
             }
         };
+        let color = if explanation && indent.is_some() && order > 0 {
+            MUTED
+        } else {
+            INK
+        };
+        if indent.is_some() {
+            order += 1;
+        }
         for (line_index, chunks) in wrap_runs(chunks, inner_w, size, view)
             .into_iter()
             .enumerate()
@@ -703,6 +719,7 @@ fn explanation_layout(
             let gap = if line_index == 0 { gap_before } else { 0.0 };
             rows.push(ExplanationRow {
                 chunks,
+                color,
                 gap_before: gap,
                 bullet: indent.map(|value| BulletLead {
                     indent: value,
@@ -732,6 +749,7 @@ struct ExplanationLayout {
 #[derive(Clone, Debug)]
 struct ExplanationRow {
     chunks: Vec<TextChunk>,
+    color: (u8, u8, u8),
     gap_before: f32,
     bullet: Option<BulletLead>,
 }

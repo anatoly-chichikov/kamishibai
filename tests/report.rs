@@ -717,6 +717,54 @@ fn card_sheets_fit_four_duplex_cards_onto_each_printable_a4_page() -> Result<()>
     Ok(())
 }
 
+#[test]
+fn all_twenty_five_approved_explanations_cannot_overflow_the_fixed_pdf_cards() -> Result<()> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("approved-explanations.pdf");
+    let cards: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("fixtures/explanation/cards.json"))?;
+    let mut sheet = CardSheet::new();
+    for card in &cards {
+        let mut item = entry(card["term"].as_str().unwrap(), "ru", "en");
+        item.meaning = text(card["translation"].as_str().unwrap());
+        item.target.sentence = text(card["sentence"].as_str().unwrap());
+        item.source.sentence = text(card["sentence_known"].as_str().unwrap());
+        item.source.context = text(card["markdown"].as_str().unwrap());
+        sheet.append(&item, None);
+    }
+    sheet.save(&path, &Thumbnail::new(256))?;
+    assert_eq!(
+        (cards.len(), pages(&path)),
+        (25, 7),
+        "an approved explanation no longer fits the original four-card sheet geometry"
+    );
+    Ok(())
+}
+
+#[test]
+fn old_and_new_explanations_keep_their_complete_pdf_page_snapshot() -> Result<()> {
+    let directory = TempDir::new()?;
+    let mut item = super::explanation::approved_entry();
+    let mut output = Vec::new();
+    for variant in ["new", "old"] {
+        if variant == "old" {
+            item.source.context = text(
+                "**Значение.**\n- **граница**\n- черта на песке\n\n**Где встречается.**\nНа переговорах.",
+            );
+        }
+        let path = directory.path().join(format!("{variant}.pdf"));
+        let mut sheet = CardSheet::new();
+        sheet.append(&item, None);
+        sheet.save(&path, &Thumbnail::new(256))?;
+        output.push(format!(
+            "{variant}:\n{}",
+            readable(&path)?.extract_text(&[1])?
+        ));
+    }
+    insta::assert_snapshot!("explanation_pdf_pages", output.join("\n"));
+    Ok(())
+}
+
 /// Card sheets save a realistic dense multi-sense card after its complete
 /// back-face layout has passed the lower-level content-preservation check.
 #[test]

@@ -1,0 +1,177 @@
+---
+source: tests/explanation.rs
+assertion_line: 142
+expression: "serde_json::to_string_pretty(&snapshots).unwrap()"
+---
+{
+  "new": {
+    "html": "<p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Значение.</strong></p><ul style=\"margin: 0.45em 0; padding-left: 1.2em; line-height: 1.5;\"><li style=\"color: var(--kamishibai-term, inherit);\">жёсткая граница — в споре, в сделке, в требованиях</li><li style=\"color: var(--kamishibai-hint, inherit);\">дословно — «черта на песке»</li></ul><p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Где встречается.</strong> На переговорах, в политике и деловых спорах, когда объявляют крайний предел уступок.</p><p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Где неуместно.</strong> О мелких бытовых рамках или гибких правилах говорят «limit» или «boundary». Иначе прозвучит слишком пафосно.</p><p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Нюанс.</strong> Говорят «draw a line in the sand», а не «make a line in the sand». Слово «draw» передаёт черту, проведённую по песку.</p><p style=\"margin: 0.55em 0; line-height: 1.5;\">«We need to draw a line in the sand.»<br>— Нам пора провести крайнюю черту.</p>",
+    "terminal": [
+      [
+        {
+          "bold": true,
+          "color": null,
+          "text": "Значение."
+        }
+      ],
+      [
+        {
+          "bold": false,
+          "color": [
+            230,
+            227,
+            218
+          ],
+          "text": "• "
+        },
+        {
+          "bold": false,
+          "color": [
+            230,
+            227,
+            218
+          ],
+          "text": "жёсткая граница — в споре, в сделке, в требованиях"
+        }
+      ],
+      [
+        {
+          "bold": false,
+          "color": [
+            139,
+            138,
+            131
+          ],
+          "text": "• "
+        },
+        {
+          "bold": false,
+          "color": [
+            139,
+            138,
+            131
+          ],
+          "text": "дословно — «черта на песке»"
+        }
+      ],
+      [
+        {
+          "bold": true,
+          "color": null,
+          "text": "Где встречается."
+        },
+        {
+          "bold": false,
+          "color": null,
+          "text": " "
+        },
+        {
+          "bold": false,
+          "color": null,
+          "text": "На переговорах, в политике и деловых спорах, когда объявляют крайний предел уступок."
+        }
+      ],
+      [
+        {
+          "bold": true,
+          "color": null,
+          "text": "Где неуместно."
+        },
+        {
+          "bold": false,
+          "color": null,
+          "text": " "
+        },
+        {
+          "bold": false,
+          "color": null,
+          "text": "О мелких бытовых рамках или гибких правилах говорят «limit» или «boundary». Иначе прозвучит слишком пафосно."
+        }
+      ],
+      [
+        {
+          "bold": true,
+          "color": null,
+          "text": "Нюанс."
+        },
+        {
+          "bold": false,
+          "color": null,
+          "text": " "
+        },
+        {
+          "bold": false,
+          "color": null,
+          "text": "Говорят «draw a line in the sand», а не «make a line in the sand». Слово «draw» передаёт черту, проведённую по песку."
+        }
+      ],
+      [
+        {
+          "bold": false,
+          "color": null,
+          "text": "«We need to draw a line in the sand.»"
+        }
+      ],
+      [
+        {
+          "bold": false,
+          "color": null,
+          "text": "— Нам пора провести крайнюю черту."
+        }
+      ]
+    ]
+  },
+  "old": {
+    "html": "<p style=\"margin: 0.4em 0;\"><strong>Значение.</strong></p><ul style=\"margin: 0.4em 0; padding-left: 1.2em;\"><li><strong>граница</strong></li><li>черта на песке</li></ul><p style=\"margin: 0.4em 0;\"><strong>Где встречается.</strong> На переговорах.</p>",
+    "terminal": [
+      [
+        {
+          "bold": true,
+          "color": null,
+          "text": "Значение."
+        }
+      ],
+      [
+        {
+          "bold": false,
+          "color": null,
+          "text": "• "
+        },
+        {
+          "bold": true,
+          "color": null,
+          "text": "граница"
+        }
+      ],
+      [
+        {
+          "bold": false,
+          "color": null,
+          "text": "• "
+        },
+        {
+          "bold": false,
+          "color": null,
+          "text": "черта на песке"
+        }
+      ],
+      [
+        {
+          "bold": true,
+          "color": null,
+          "text": "Где встречается."
+        },
+        {
+          "bold": false,
+          "color": null,
+          "text": " "
+        },
+        {
+          "bold": false,
+          "color": null,
+          "text": "На переговорах."
+        }
+      ]
+    ]
+  }
+}

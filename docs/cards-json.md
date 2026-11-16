@@ -85,8 +85,8 @@ Validation checks structure, not taste. What makes the fields good is the style 
 
 - `target.sentence` is a natural sentence a native speaker would actually say, using the term in one specific sense. Remember it also drives the audio and the picture: a concrete, visual sentence makes a better card than an abstract one.
 - `source.hint` is contrastive — "not X, but Y" — separating the term from its nearest neighbour in the learning language, naming that neighbour verbatim. Under a dozen words, and never mentioning the term or its translation.
-- `source.context` is four short sections, each opened by a bold header on its own line, written in the source language — the equivalents of `**Meaning.**` (up to three `- ` bullets), `**Where you'll hear it.**`, `**Where it's out of place.**` (name the safer word to swap in), `**Subtlety.**` (one trap or false friend). The house style uses only `**bold**` and `- ` bullets, with blank lines between sections.
+- `source.context` uses the reader's familiar four section headings: meaning, where it occurs, where it does not fit, and nuance, in that order. Empty sections are omitted. Meanings are plain `- head — note` bullets, with the card's meaning first and brighter. Only section headings are bold. Every learning-language phrase uses the reader's quotation marks. An example is a quoted phrase, a blank line, then its translation after `—`; the renderers join those into one block. A common mistake in the nuance includes a short reason. Older contexts retain their original rendering and note identity.
 
 ## Languages
 
-Twenty-two codes, accepted in any case and normalized to uppercase: `EN`, `ZH`, `ES`, `JA`, `FR`, `DE`, `KO`, `RU`, `IT`, `PT`, `HI`, `AR`, `TR`, `PL`, `UK`, `ID`, `VI`, `TH`, `EL`, `HE`, `NL`, `CS`.
+Thirty-one codes, accepted in any case and normalized to uppercase: `EN`, `ZH`, `ES`, `JA`, `FR`, `DE`, `KO`, `RU`, `IT`, `PT`, `HI`, `AR`, `TR`, `PL`, `UK`, `ID`, `VI`, `TH`, `EL`, `HE`, `NL`, `CS`, `SR`, `KA`, `HY`, `FA`, `SV`, `RO`, `HU`, `FI`, `LA`.

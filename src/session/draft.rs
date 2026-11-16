@@ -507,6 +507,8 @@ pub struct CardMeta {
     labels: Option<SentenceLabels>,
     #[serde(default, skip_serializing_if = "generated_meta")]
     rewritten: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    explanation: Option<Box<crate::explanation::Record>>,
 }
 
 fn generated_meta(rewritten: &bool) -> bool {
@@ -540,6 +542,7 @@ impl CardMeta {
             target_sentence: target_sentence.into(),
             labels: None,
             rewritten: false,
+            explanation: None,
         }
     }
 
@@ -581,6 +584,26 @@ impl CardMeta {
     /// Return the multi-sentence usage explanation in source language.
     pub fn source_context(&self) -> &str {
         self.source_context.as_str()
+    }
+
+    /// Recover the original metadata explanation for a correction rather than its rewrite.
+    #[must_use]
+    pub fn metadata_context(&self) -> &str {
+        self.explanation
+            .as_deref()
+            .map_or(&self.source_context, crate::explanation::Record::metadata)
+    }
+
+    /// Preserve the explanation assignment and draft alongside the displayed context.
+    #[must_use]
+    pub fn with_explanation(mut self, record: Option<crate::explanation::Record>) -> Self {
+        self.explanation = record.map(Box::new);
+        self
+    }
+
+    /// Copy optional explanation provenance into the metadata cache record.
+    pub(crate) fn explanation_record(&self) -> Option<crate::explanation::Record> {
+        self.explanation.as_deref().cloned()
     }
 
     /// Return the metadata with a locally normalized usage explanation installed.

@@ -132,6 +132,7 @@ impl ModelProvider for Complete {
                     GenerationStage::Phonetics => {
                         serde_json::json!({"pronunciation":"mɛw", "transcription":"kɔn mɛw ŋu"})
                     }
+                    GenerationStage::Explanation => super::explanation::cat_response(),
                     GenerationStage::Features => super::gemini::scene_features(),
                     GenerationStage::Scene => super::gemini::dynamic_scene(),
                     GenerationStage::Text => {
@@ -262,6 +263,7 @@ fn external_provider_cannot_skip_canonical_artifacts_inspections_or_publication(
             GenerationStage::Intake,
             GenerationStage::Metadata,
             GenerationStage::Phonetics,
+            GenerationStage::Explanation,
             GenerationStage::Speech,
             GenerationStage::Features,
             GenerationStage::Scene,
