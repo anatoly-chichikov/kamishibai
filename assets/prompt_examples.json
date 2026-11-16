@@ -362,8 +362,8 @@
         ],
         "rarity": "rare, propre à la prose classique",
         "quotes": [
-          "« ",
-          " »"
+          "«\u00a0",
+          "\u00a0»"
         ],
         "literally": "littéralement"
       }
@@ -1452,7 +1452,7 @@
         "rarity": "נדיר, ומופיע בעיקר בפרוזה ספרותית ישנה",
         "quotes": [
           "”",
-          "“"
+          "”"
         ],
         "literally": "מילולית"
       }

@@ -54,6 +54,7 @@ fn valid_entries_map_into_the_full_strict_shape() -> Result<()> {
                 transcription: text("kat"),
                 importance: score(7),
                 source: VocabularySource {
+                    context_format: kamishibai::vocabulary::ContextFormat::Legacy,
                     sentence: text("Кошка спит на окне"),
                     lang: code("ru"),
                     highlight: text("Кошка"),

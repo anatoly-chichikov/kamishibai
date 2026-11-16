@@ -10,8 +10,42 @@
 //!   ITALIC modifiers, bullets get a `•` glyph prefix and a left indent).
 //! - `to_plain` for legacy text reports that cannot render any styling.
 
+use crate::vocabulary::ContextFormat;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+
+impl ContextFormat {
+    /// Apply only the normalization belonging to this persisted format.
+    #[must_use]
+    pub fn compact(self, input: &str) -> String {
+        match self {
+            Self::Legacy => compact_card_context(input),
+            Self::ExplanationV1 => input.to_string(),
+        }
+    }
+
+    /// Parse a context without guessing its format from Markdown content.
+    #[must_use]
+    pub fn parse(self, input: &str) -> Vec<Block> {
+        parse_markdown(&self.compact(input))
+    }
+
+    /// Render the persisted format into its exact Anki note field.
+    #[must_use]
+    pub fn html(self, input: &str) -> String {
+        let blocks = self.parse(input);
+        match self {
+            Self::Legacy => to_html(&blocks),
+            Self::ExplanationV1 => explanation_html(&blocks),
+        }
+    }
+
+    /// Project a context into terminal spans using its explicit format.
+    #[must_use]
+    pub fn terminal(self, input: &str) -> Vec<Line<'static>> {
+        terminal(&self.parse(input), self == Self::ExplanationV1)
+    }
+}
 
 /// One styled run inside a paragraph or bullet line.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,9 +75,6 @@ pub enum Block {
 /// Limit a recognized card context to five meaning groups and remove its glossary recap.
 #[must_use]
 pub fn compact_card_context(input: &str) -> String {
-    if is_explanation(&parse_markdown(input)) {
-        return input.to_string();
-    }
     let lines = input.lines().collect::<Vec<_>>();
     let headers = lines
         .iter()
@@ -199,9 +230,6 @@ pub fn parse_markdown(input: &str) -> Vec<Block> {
 /// because Anki's web view strips most class-based CSS.
 #[must_use]
 pub fn to_html(blocks: &[Block]) -> String {
-    if is_explanation(blocks) {
-        return explanation_html(blocks);
-    }
     let mut out = String::new();
     let mut in_list = false;
     for block in blocks {
@@ -237,7 +265,10 @@ pub fn to_html(blocks: &[Block]) -> String {
 /// `• ` glyph and a two-space-per-level left indent.
 #[must_use]
 pub fn to_ratatui(blocks: &[Block]) -> Vec<Line<'static>> {
-    let explanation = is_explanation(blocks);
+    terminal(blocks, false)
+}
+
+fn terminal(blocks: &[Block], explanation: bool) -> Vec<Line<'static>> {
     let mut order = 0;
     blocks
         .iter()
@@ -260,27 +291,6 @@ pub fn to_ratatui(blocks: &[Block]) -> Vec<Line<'static>> {
             }
         })
         .collect()
-}
-
-/// Recognize the new explanation by its meaning heading and unweighted list.
-#[must_use]
-pub fn is_explanation(blocks: &[Block]) -> bool {
-    matches!(blocks.first(), Some(Block::Paragraph(chunks)) if chunks.len() == 1 && chunks[0].bold && crate::languages::is_meaning_header(&chunks[0].text))
-        && matches!(blocks.get(1), Some(Block::Bullet { .. }))
-        && blocks
-            .iter()
-            .filter_map(|block| match block {
-                Block::Bullet { chunks, .. } => Some(chunks),
-                _ => None,
-            })
-            .all(|chunks| {
-                chunks.iter().all(|chunk| !chunk.bold)
-                    && chunks
-                        .iter()
-                        .map(|chunk| chunk.text.as_str())
-                        .collect::<String>()
-                        .contains(" — ")
-            })
 }
 
 fn explanation_html(blocks: &[Block]) -> String {

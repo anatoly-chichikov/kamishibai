@@ -16,7 +16,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::ScreenView;
-use crate::markdown::{parse_card_context, to_ratatui};
 use crate::session::{
     Artifact, ArtifactFile, ArtifactSlot, AttemptFault, CardArtifacts, CardDraft, CardMeta,
     GenerationCost,
@@ -1214,8 +1213,8 @@ fn meta_preview<'a>(
         lines.push(label("the right context"));
         let indent_w = super::common::display_width(indent);
         let inner = width.saturating_sub(indent_w).max(20);
-        for line in to_ratatui(&parse_card_context(meta.source_context())) {
-            for wrapped in softwrap_line(line, inner) {
+        for line in meta.context_format().terminal(meta.source_context()) {
+            for wrapped in context_wrap(line, inner, meta.context_format()) {
                 lines.push(restyle_with_indent(wrapped, indent));
             }
         }
@@ -1293,6 +1292,14 @@ fn value_lines<'a>(
 /// CJK code points count as two cells, others as one — close enough to the
 /// real terminal width without pulling in `unicode-width`.
 fn softwrap_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
+    context_wrap(line, width, crate::vocabulary::ContextFormat::Legacy)
+}
+
+fn context_wrap(
+    line: Line<'static>,
+    width: usize,
+    format: crate::vocabulary::ContextFormat,
+) -> Vec<Line<'static>> {
     if width == 0 {
         return vec![line];
     }
@@ -1301,7 +1308,7 @@ fn softwrap_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
     let mut current_width = 0usize;
     let mut pending_space: Option<ratatui::style::Style> = None;
     for span in line.spans {
-        for (token, whitespace) in styled_tokens(span.content.as_ref()) {
+        for (token, whitespace) in styled_tokens(span.content.as_ref(), format) {
             if whitespace {
                 if current_width > 0 {
                     pending_space = Some(span.style);
@@ -1350,12 +1357,13 @@ fn softwrap_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
     out
 }
 
-fn styled_tokens(text: &str) -> Vec<(String, bool)> {
+fn styled_tokens(text: &str, format: crate::vocabulary::ContextFormat) -> Vec<(String, bool)> {
     let mut tokens: Vec<(String, bool)> = Vec::new();
     let mut current = String::new();
     let mut current_space: Option<bool> = None;
     for ch in text.chars() {
-        let space = ch.is_whitespace();
+        let space =
+            ch.is_whitespace() && (format.is_legacy() || !matches!(ch, '\u{a0}' | '\u{202f}'));
         if current_space == Some(space) {
             current.push(ch);
             continue;
@@ -2246,6 +2254,23 @@ mod tests {
             rows,
             vec![String::from("alpha beta"), String::from("gamma")],
             "markdown preview wrap must move whole words instead of splitting them"
+        );
+    }
+
+    #[test]
+    fn review_f8_terminal_wrap_cannot_separate_french_quotes() {
+        let rows = super::context_wrap(
+            Line::from("avant «\u{a0}duck\u{a0}» après"),
+            10,
+            crate::vocabulary::ContextFormat::ExplanationV1,
+        )
+        .iter()
+        .map(plain)
+        .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            ["avant", "«\u{a0}duck\u{a0}»", "après"],
+            "terminal wrapping separated French quotation marks from their word"
         );
     }
 }

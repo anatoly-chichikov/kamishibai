@@ -1018,6 +1018,8 @@ Catalog(
                 "Expanded metadata labels are the phrase, in your language, a visual clue, word meaning, word pronunciation, phrase pronunciation and worth learning",
                 "Show the right context only for nonempty context",
                 "New explanations keep only headings bold, the first meaning bright and other meanings muted, with quoted learning phrases and adjacent example and translation lines",
+                "Explicit explanation format or accepted provenance selects the new layout; legacy contexts retain their original styles regardless of wording",
+                "French quotation spaces stay joined to their words when a new explanation wraps",
                 "Preview labels are statements or nouns, while adjustment controls are questions",
             ],
             grounds: Grounds(
@@ -1027,6 +1029,8 @@ Catalog(
                 ],
                 tests: [
                     Check(file: "tests/your_cards.rs", test: "expanded_card_shows_meta_preview_only_no_duplicate_artifact_pane"),
+                    Check(file: "src/tui/screens/your_cards.rs", test: "review_f8_terminal_wrap_cannot_separate_french_quotes"),
+                    Check(file: "tests/explanation.rs", test: "old_and_new_note_fields_and_terminal_lines_keep_their_rendering_snapshots"),
                 ],
             ),
         ),
@@ -3851,13 +3855,13 @@ Catalog(
                         file: "docs/tui-states/live/39-card-explanation.png",
                         origin: Synthetic,
                         revision: None,
-                        note: "Captured from the T437 prepared explanation scene on 2026-11-16 and visually inspected",
+                        note: "Recaptured with the T437 explicit-format fix on 2026-11-16; byte-identical to the earlier prepared explanation capture and visually inspected",
                     ),
                     Shot(
                         file: "docs/tui-states/live/41-card-explanation-narrow.png",
                         origin: Synthetic,
                         revision: None,
-                        note: "Captured from the T437 prepared explanation at narrow width on 2026-11-16 and visually inspected",
+                        note: "Recaptured at narrow width with the T437 explicit-format fix on 2026-11-16; byte-identical to the earlier capture and visually inspected",
                     ),
                     Shot(
                         file: "docs/tui-states/live/09-card-open.png",
@@ -5399,13 +5403,13 @@ Catalog(
                         file: "docs/tui-states/live/40-card-explanation-end.png",
                         origin: Synthetic,
                         revision: None,
-                        note: "Captured from the T437 prepared explanation end on 2026-11-16 and visually inspected",
+                        note: "Recaptured at the explanation end with the T437 explicit-format fix on 2026-11-16; byte-identical to the earlier capture and visually inspected",
                     ),
                     Shot(
                         file: "docs/tui-states/live/42-card-explanation-end-narrow.png",
                         origin: Synthetic,
                         revision: None,
-                        note: "Captured from the T437 prepared explanation end at narrow width on 2026-11-16 and visually inspected",
+                        note: "Recaptured at the narrow explanation end with the T437 explicit-format fix on 2026-11-16; byte-identical to the earlier capture and visually inspected",
                     ),
                     Shot(
                         file: "docs/tui-states/live/10-card-scroll-end.png",

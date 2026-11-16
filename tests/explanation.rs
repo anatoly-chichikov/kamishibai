@@ -15,7 +15,7 @@ pub(crate) fn approved_entry() -> kamishibai::vocabulary::VocabularyEntry {
     let cards: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("fixtures/explanation/cards.json")).unwrap();
     let card = &cards[0];
-    serde_json::from_value(serde_json::json!({"term":card["term"],"meaning":card["translation"],"pronunciation":card["pronunciation"],"transcription":"sample","importance":7,"source":{"sentence":card["sentence_known"],"lang":"RU","highlight":"крайняя черта","hint":"A boundary on the sand","context":card["markdown"]},"target":{"sentence":card["sentence"],"lang":"EN"}})).unwrap()
+    serde_json::from_value(serde_json::json!({"term":card["term"],"meaning":card["translation"],"pronunciation":card["pronunciation"],"transcription":"sample","importance":7,"source":{"sentence":card["sentence_known"],"lang":"RU","highlight":"крайняя черта","hint":"A boundary on the sand","context":card["markdown"],"context_format":"explanation_v1"},"target":{"sentence":card["sentence"],"lang":"EN"}})).unwrap()
 }
 
 #[test]
@@ -117,10 +117,10 @@ fn markers_cannot_escape_the_readers_quotation_marks() {
 
 #[test]
 fn new_html_cannot_lose_meaning_contrast_or_split_an_example() {
-    use kamishibai::markdown::{parse_card_context, to_html};
+    use kamishibai::vocabulary::ContextFormat;
     let context = "**Meaning.**\n- duck — a bird near the pond\n- hoax — a newspaper story\n\n**Subtlety.**\nA short fact.\n\n“A duck swims.”\n\n— Une cane nage.";
     assert_eq!(
-        to_html(&parse_card_context(context)),
+        ContextFormat::ExplanationV1.html(context),
         "<p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Meaning.</strong></p><ul style=\"margin: 0.45em 0; padding-left: 1.2em; line-height: 1.5;\"><li style=\"color: var(--kamishibai-term, inherit);\">duck — a bird near the pond</li><li style=\"color: var(--kamishibai-hint, inherit);\">hoax — a newspaper story</li></ul><p style=\"margin: 0.55em 0; line-height: 1.5;\"><strong>Subtlety.</strong> A short fact.</p><p style=\"margin: 0.55em 0; line-height: 1.5;\">“A duck swims.”<br>— Une cane nage.</p>",
         "the new note lost its inline colors, spacing, or joined example"
     );
@@ -139,8 +139,178 @@ fn legacy_html_cannot_change_even_one_byte() {
 }
 
 #[test]
+fn review_f1_unweighted_imported_contexts_cannot_change_legacy_note_identity() {
+    use kamishibai::anki::{CardModel, NoteFormat, VocabularyNote};
+    let cases: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("fixtures/explanation/legacy/cases.json")).unwrap();
+    let format = VocabularyNote::new(CardModel::new().model());
+    let changed = cases
+        .into_iter()
+        .filter_map(|case| {
+            let entry = serde_json::from_value(case["entry"].clone()).unwrap();
+            let note = format.note(&entry, "[sound:a.wav]", "");
+            (note.guid != case["guid"] || note.fields[9] != case["html"])
+                .then_some(case["name"].clone())
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        changed.is_empty(),
+        "valid 1.18.0 imports gained new note identities: {changed:?}"
+    );
+}
+
+#[test]
+fn review_f1_explicit_formats_cannot_be_lost_in_import_cache_or_result_json() {
+    use kamishibai::session::{CardMetaCache, LanguagePair, from_entry, to_entry};
+    use kamishibai::vocabulary::ContextFormat;
+    let cases: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("fixtures/explanation/legacy/cases.json")).unwrap();
+    let restored = [ContextFormat::Legacy, ContextFormat::ExplanationV1]
+        .into_iter()
+        .map(|format| {
+            let root = tempfile::tempdir().unwrap();
+            let cache = CardMetaCache::new(root.path());
+            let mut entry: kamishibai::vocabulary::VocabularyEntry =
+                serde_json::from_value(cases[2]["entry"].clone()).unwrap();
+            entry.source.context_format = format;
+            let pair = LanguagePair::new("FR", "EN");
+            let draft = from_entry(&entry, pair.clone());
+            cache
+                .store("chat", "a cat", &pair, draft.meta().unwrap())
+                .unwrap();
+            let meta = cache.load("chat", "a cat", &pair).unwrap().unwrap();
+            let output = to_entry(&draft.with_meta(meta, None)).unwrap();
+            let json = serde_json::to_value(&output).unwrap();
+            let decoded: kamishibai::vocabulary::VocabularyEntry =
+                serde_json::from_value(json.clone()).unwrap();
+            decoded == entry
+                && json["source"].get("context_format").is_some()
+                    == (format == ContextFormat::ExplanationV1)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        restored,
+        [true, true],
+        "an import or cache round trip lost the format or added a legacy discriminator"
+    );
+}
+
+#[test]
+fn review_f1_fallback_provenance_cannot_enable_the_new_format() {
+    use kamishibai::session::CardMeta;
+    use kamishibai::vocabulary::ContextFormat;
+    let context = "**Meaning.**\n- a cat — a furry pet on a windowsill\n\n**Usage.**\nAt home.";
+    let formats = [None, Some(serde_json::from_value(cat_response()).unwrap())]
+        .into_iter()
+        .map(|parts| {
+            let meta = CardMeta::new(
+                "ipa",
+                "ipa",
+                "a cat",
+                7,
+                "The cat sleeps",
+                "cat",
+                "a furry pet",
+                context,
+                "Le chat dort",
+            )
+            .with_explanation(Some(kamishibai::explanation::Record::new(
+                parts,
+                "stamp".into(),
+                context.into(),
+            )));
+            let mut json = serde_json::to_value(meta).unwrap();
+            json.as_object_mut().unwrap().remove("context_format");
+            serde_json::from_value::<CardMeta>(json)
+                .unwrap()
+                .context_format()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        formats,
+        [ContextFormat::Legacy, ContextFormat::ExplanationV1],
+        "fallback provenance enabled the new renderer or accepted 1.19.0 provenance lost it"
+    );
+}
+
+/// Run explicitly with ANKI_PYTHON pointing to Python with Anki on its module path.
+#[test]
+#[ignore = "requires the native Anki Python engine; run with ANKI_PYTHON and --ignored"]
+fn review_f1_native_anki_reimports_cannot_duplicate_legacy_notes() {
+    use kamishibai::anki::{CardModel, VocabularyDeck, VocabularyNote};
+    let directory = tempfile::tempdir().unwrap();
+    let cases: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("fixtures/explanation/legacy/cases.json")).unwrap();
+    for case in cases {
+        let entry = serde_json::from_value(case["entry"].clone()).unwrap();
+        let mut deck = VocabularyDeck::new(
+            1525230255,
+            "Compatibility Review",
+            VocabularyNote::new(CardModel::new().model()),
+            Vec::<(std::path::PathBuf, String)>::new(),
+        );
+        deck.add(&entry, "[sound:a.wav]", "");
+        deck.save(
+            directory
+                .path()
+                .join(format!("{}.apkg", case["name"].as_str().unwrap())),
+        )
+        .unwrap();
+    }
+    let mut child = std::process::Command::new(
+        std::env::var_os("ANKI_PYTHON")
+            .expect("ANKI_PYTHON must name Python with the native Anki package"),
+    )
+    .args([
+        "-c",
+        r#"
+from contextlib import closing
+import json
+from pathlib import Path
+import sys
+from anki.collection import Collection
+from anki.import_export_pb2 import ImportAnkiPackageRequest
+root, fixtures = map(Path, sys.argv[1:])
+results = []
+for case in json.loads((fixtures / 'cases.json').read_text()):
+    name = case['name']
+    with closing(Collection(str(root / (name + '.anki2')))) as collection:
+        old = fixtures / (name + '-1.18.0.apkg')
+        new = root / (name + '.apkg')
+        counts = []
+        for package in [old, old, new, new]:
+            collection.import_anki_package(ImportAnkiPackageRequest(package_path=str(package)))
+            counts.append((collection.note_count(), collection.card_count()))
+        results.append(counts)
+        print(json.dumps({'case': name, 'counts': counts}), flush=True)
+assert results == [[(1, 1)] * 4] * 3, 'cross-version imports duplicated a legacy note'
+"#,
+    ])
+    .arg(directory.path())
+    .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/explanation/legacy"))
+    .spawn()
+    .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let success = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status.success();
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            break false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert!(
+        success,
+        "the native Anki import regression failed or exceeded its deadline"
+    );
+}
+
+#[test]
 fn old_and_new_note_fields_and_terminal_lines_keep_their_rendering_snapshots() {
-    use kamishibai::markdown::{parse_card_context, to_html, to_ratatui};
+    use kamishibai::vocabulary::ContextFormat;
     let cards: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("fixtures/explanation/cards.json")).unwrap();
     let contexts = [
@@ -151,12 +321,12 @@ fn old_and_new_note_fields_and_terminal_lines_keep_their_rendering_snapshots() {
         ),
     ];
     let snapshots = contexts.into_iter().map(|(kind, context)| {
-        let blocks = parse_card_context(context);
-        let lines = to_ratatui(&blocks).into_iter().map(|line| line.spans.into_iter().map(|span| {
+        let format = if kind == "new" { ContextFormat::ExplanationV1 } else { ContextFormat::Legacy };
+        let lines = format.terminal(context).into_iter().map(|line| line.spans.into_iter().map(|span| {
             let color = match span.style.fg { Some(ratatui::style::Color::Rgb(red, green, blue)) => Some([red,green,blue]), _ => None };
             serde_json::json!({"text":span.content,"bold":span.style.add_modifier.contains(ratatui::style::Modifier::BOLD),"color":color})
         }).collect::<Vec<_>>()).collect::<Vec<_>>();
-        (kind, serde_json::json!({"html":to_html(&blocks),"terminal":lines}))
+        (kind, serde_json::json!({"html":format.html(context),"terminal":lines}))
     }).collect::<std::collections::BTreeMap<_,_>>();
     insta::assert_snapshot!(
         "explanation_renderings",
@@ -407,6 +577,377 @@ fn non_latin_readers_cannot_be_rejected_by_russian_word_matching() {
 struct Writer {
     answers: std::collections::VecDeque<String>,
     prompts: Vec<String>,
+}
+
+fn review_fixture(head: &str, note: &str) -> serde_json::Value {
+    let mut value = cat_response();
+    value["meanings"][0]["head"] = head.into();
+    value["meanings"][0]["note"] = note.into();
+    value
+}
+
+fn reviewed_card(term: &str, head: &str) -> Card {
+    Card::new(
+        term.into(),
+        head.into(),
+        "A different sentence.".into(),
+        vec![kamishibai::explanation::Sense::new(
+            "1".into(),
+            head.into(),
+            String::new(),
+        )],
+    )
+}
+
+fn reviewed_failures(
+    value: serde_json::Value,
+    known: &str,
+    learning: &str,
+    card: &Card,
+) -> Vec<String> {
+    let parts: Parts = serde_json::from_value(value).unwrap();
+    judge(
+        card,
+        &tidy(&parts),
+        &Language::from_codes(known, learning).unwrap(),
+    )
+    .into_parts()
+    .0
+}
+
+#[test]
+fn review_f2_greek_mistakes_cannot_reject_their_relevant_reason() {
+    let failures = [
+        "Говорят ⟦στην Ελλάδα⟧, а не ⟦σε Ελλάδα⟧.",
+        "В Греции не говорят ⟦σε Ελλάδα⟧, говорят ⟦στην Ελλάδα⟧.",
+    ]
+    .into_iter()
+    .flat_map(|text| {
+        let mut value = review_fixture("Греция", "страна у Эгейского моря");
+        value["nuance"]["text"] = text.into();
+        value["nuance"]["why"] = "⟦Στην⟧ называет страну как место.".into();
+        reviewed_failures(value, "RU", "EL", &reviewed_card("Ελλάδα", "Греция"))
+    })
+    .collect::<Vec<_>>();
+    assert!(
+        failures.is_empty(),
+        "a Greek correction lost its explanation: {failures:?}"
+    );
+}
+
+#[test]
+fn review_f2_greek_mistakes_cannot_pass_without_a_reason() {
+    let mut value = review_fixture("Греция", "страна у Эгейского моря");
+    value["nuance"]["text"] = "Говорят ⟦στην Ελλάδα⟧, а не ⟦σε Ελλάδα⟧.".into();
+    assert!(
+        reviewed_failures(value, "RU", "EL", &reviewed_card("Ελλάδα", "Греция"))
+            .iter()
+            .any(|fail| fail.starts_with("why:")),
+        "a Greek mistake escaped the reason obligation"
+    );
+}
+
+#[test]
+fn review_f2_reader_words_cannot_make_an_unrelated_reason_relevant() {
+    let mut value = review_fixture("Греция", "страна у Эгейского моря");
+    value["nuance"]["text"] = "В Греции не говорят ⟦σε Ελλάδα⟧, говорят ⟦στην Ελλάδα⟧.".into();
+    value["nuance"]["why"] = "В Греции ⟦από⟧ называет начало пути.".into();
+    assert!(
+        reviewed_failures(value, "RU", "EL", &reviewed_card("Ελλάδα", "Греция"))
+            .iter()
+            .any(|fail| fail.starts_with("why:")),
+        "shared reader words accepted an unrelated Greek reason"
+    );
+}
+
+#[test]
+fn review_f2_shared_scripts_cannot_hide_marked_mistakes_or_borrow_reader_words() {
+    let outcomes = [
+        "⟦В⟧ называет страну как место.",
+        "⟦З⟧ называет страну как место.",
+        "",
+    ]
+    .into_iter()
+    .map(|reason| {
+        let mut value = review_fixture("Украина", "страна у Чёрного моря");
+        value["nuance"]["text"] = "Говорят ⟦в Україні⟧, а не ⟦на Україні⟧.".into();
+        value["nuance"]["why"] = reason.into();
+        reviewed_failures(value, "RU", "UK", &reviewed_card("Україна", "Украина"))
+            .iter()
+            .any(|fail| fail.starts_with("why:"))
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(
+        outcomes,
+        [false, true, true],
+        "shared Cyrillic scripts hid the mistake or confused reader prose with its reason"
+    );
+}
+
+#[test]
+fn review_f3_single_letter_heads_cannot_be_treated_as_empty() {
+    let failures = [
+        ("JA", "猫", "窓辺で日向ぼっこをする身近なペット"),
+        ("JA", "水", "川や海を流れる透明な液体"),
+        ("ZH", "火", "燃烧木材时出现的明亮火焰"),
+        ("RU", "я", "говорящий человек называет себя"),
+    ]
+    .into_iter()
+    .flat_map(|(known, head, note)| {
+        reviewed_failures(
+            review_fixture(head, note),
+            known,
+            "EN",
+            &reviewed_card("word", head),
+        )
+    })
+    .collect::<Vec<_>>();
+    assert!(
+        failures.is_empty(),
+        "a natural single-letter head was rejected: {failures:?}"
+    );
+}
+
+#[test]
+fn review_f4_reversed_or_nested_quotes_cannot_pass_the_judge() {
+    let missed = [
+        ("EN", "At home people say ⟧chat⟦."),
+        ("EN", "At home people say ⟦⟦chat⟧⟧."),
+        ("EN", "At home people say ”chat“."),
+        ("EN", "At home people say ““chat””."),
+        ("EN", "At home people say “⟦chat⟧”."),
+        ("FR", "Au bord du lac on dit »cat«."),
+        ("FR", "Au bord du lac on dit ««cat»»."),
+        (
+            "FR",
+            "Au bord du lac on dit «\u{a0}«\u{a0}cat\u{a0}»\u{a0}».",
+        ),
+    ]
+    .into_iter()
+    .filter(|(known, text)| {
+        let mut value = cat_response();
+        value["where"]["text"] = (*text).into();
+        let learning = if *known == "FR" { "EN" } else { "FR" };
+        !reviewed_failures(value, known, learning, &reviewed_card("chat", "a cat"))
+            .iter()
+            .any(|fail| fail.starts_with("quotes:"))
+    })
+    .collect::<Vec<_>>();
+    assert!(
+        missed.is_empty(),
+        "unordered or nested quotes were accepted: {missed:?}"
+    );
+}
+
+/// The six reviewed meanings used by the independent CLI explanation review.
+pub(crate) fn six_meanings() -> (Card, Parts) {
+    let senses = (1..=6)
+        .map(|number| {
+            kamishibai::explanation::Sense::new(
+                number.to_string(),
+                format!("sense {number}"),
+                String::new(),
+            )
+        })
+        .collect();
+    let card = Card::new(
+        "set".into(),
+        "a group".into(),
+        "This is a set.".into(),
+        senses,
+    );
+    let mut value = cat_response();
+    value["meanings"] = serde_json::json!([
+        {"head":"a group","note":"books beside a window","from":"1"},
+        {"head":"place","note":"put on a table","from":"2"},
+        {"head":"harden","note":"cooling concrete","from":"3"},
+        {"head":"sunset","note":"at the horizon","from":"4"},
+        {"head":"prepare","note":"a dining table","from":"5"},
+        {"head":"fixed","note":"the agreed price","from":"6"}
+    ]);
+    (card, serde_json::from_value(value).unwrap())
+}
+
+#[test]
+fn review_f5_six_reviewed_senses_cannot_expand_the_five_line_limit() {
+    let (card, parts) = six_meanings();
+    let failures = judge(&card, &parts, &Language::from_codes("EN", "FR").unwrap())
+        .into_parts()
+        .0;
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.starts_with("length:")),
+        "six reviewed senses silently expanded the explanation limit: {failures:?}"
+    );
+}
+
+#[test]
+fn review_f5_six_senses_cannot_spend_any_explanation_calls() {
+    use kamishibai::explanation::{Input, Task, write};
+    let (card, parts) = six_meanings();
+    let language = Language::from_codes("EN", "FR").unwrap();
+    let task = Task::from_input(
+        Input::new(
+            card,
+            "a sentence".into(),
+            "metadata draft".into(),
+            String::new(),
+        ),
+        &language,
+    )
+    .unwrap();
+    let mut writer = Writer {
+        answers: vec![serde_json::to_string(&parts).unwrap(); 4].into(),
+        prompts: Vec::new(),
+    };
+    let written = write(&mut writer, &task, &language).unwrap();
+    assert_eq!(
+        (written, writer.prompts.len()),
+        (None, 0),
+        "six reviewed senses spent requests on an unsatisfiable explanation"
+    );
+}
+
+#[test]
+fn review_f5_unreviewed_groups_cannot_spend_requests_beyond_five() {
+    use kamishibai::explanation::{Input, Task, write};
+    let language = Language::from_codes("RU", "EN").unwrap();
+    let calls = [
+        "one; two; three; four; five",
+        "one; two; three; four; five; six",
+        ";one;;two;three;four;five;",
+    ]
+    .into_iter()
+    .map(|translation| {
+        let task = Task::from_input(
+            Input::new(
+                Card::new(
+                    "set".into(),
+                    translation.into(),
+                    "This is a set.".into(),
+                    Vec::new(),
+                ),
+                "sentence".into(),
+                "complete metadata draft".into(),
+                String::new(),
+            ),
+            &language,
+        )
+        .unwrap();
+        let mut writer = Writer {
+            answers: vec!["unparseable".into()].into(),
+            prompts: Vec::new(),
+        };
+        let result = write(&mut writer, &task, &language).unwrap();
+        (result, writer.prompts.len())
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(
+        calls,
+        [(None, 1), (None, 0), (None, 1)],
+        "the preflight changed the five-group boundary or counted empty groups"
+    );
+}
+
+#[test]
+fn review_f4_identical_hebrew_quote_marks_cannot_be_treated_as_nested() {
+    let mut value = review_fixture("חתול", "חיית מחמד פרוותית ליד החלון");
+    value["where"]["text"] = "בבית אומרים ⟦chat⟧ וגם ⟦minou⟧.".into();
+    let failures = reviewed_failures(value, "HE", "FR", &reviewed_card("chat", "חתול"));
+    assert!(
+        failures.is_empty(),
+        "balanced Hebrew high quotes failed review: {failures:?}"
+    );
+}
+
+#[test]
+fn review_f6_native_sentence_endings_cannot_gain_an_ascii_stop() {
+    let changed = ['。', '！', '？', '؟', '।']
+        .into_iter()
+        .filter(|end| {
+            let mut value = review_fixture("猫ちゃん", "窓辺で日向ぼっこをする身近なペット");
+            let text = format!("家庭で飼っている動物について話すとき{end}");
+            value["where"]["text"] = text.clone().into();
+            let parts: Parts = serde_json::from_value(value).unwrap();
+            serde_json::to_value(tidy(&parts)).unwrap()["where"]["text"] != text
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        changed.is_empty(),
+        "native sentence endings gained a second stop: {changed:?}"
+    );
+}
+
+#[test]
+fn review_f6_native_full_stops_cannot_pass_in_unpunctuated_notes() {
+    let missed = ['。', '！', '？', '؟', '।']
+        .into_iter()
+        .filter(|end| {
+            let value = review_fixture(
+                "猫ちゃん",
+                &format!("窓辺で日向ぼっこをする身近なペット{end}"),
+            );
+            !reviewed_failures(value, "JA", "EN", &reviewed_card("cat", "猫ちゃん"))
+                .iter()
+                .any(|fail| fail.starts_with("form:"))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        missed.is_empty(),
+        "sentence punctuation escaped the note form rule: {missed:?}"
+    );
+}
+
+#[test]
+fn review_f6_native_sentence_endings_cannot_be_rejected_by_form() {
+    let failures = ['。', '！', '？', '؟', '।']
+        .into_iter()
+        .flat_map(|end| {
+            let mut value = review_fixture("猫ちゃん", "窓辺で日向ぼっこをする身近なペット");
+            value["where"]["text"] = format!("家庭で飼っている動物について話すとき{end}").into();
+            let parts: Parts = serde_json::from_value(value).unwrap();
+            judge(
+                &reviewed_card("cat", "猫ちゃん"),
+                &parts,
+                &Language::from_codes("JA", "EN").unwrap(),
+            )
+            .into_parts()
+            .0
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        failures.is_empty(),
+        "native sentence endings failed review: {failures:?}"
+    );
+}
+
+#[test]
+fn review_f7_hebrew_high_quotes_cannot_reverse_the_closing_mark() {
+    assert_eq!(
+        quote("⟦duck⟧", &Language::from_codes("HE", "EN").unwrap()),
+        "”duck”",
+        "Hebrew high quotation marks used a reversed English closer"
+    );
+}
+
+#[test]
+fn review_f8_french_quotes_cannot_break_away_from_the_phrase() {
+    assert_eq!(
+        quote("⟦duck⟧", &Language::from_codes("FR", "EN").unwrap()),
+        "«\u{a0}duck\u{a0}»",
+        "French quotation spaces can break away from their phrase"
+    );
+}
+
+#[test]
+fn review_f9_combining_accents_cannot_escape_their_quoted_word() {
+    let language = Language::from_codes("RU", "EN").unwrap();
+    assert_eq!(
+        [quote("café", &language), quote("cafe\u{301}", &language)],
+        ["«café»", "«cafe\u{301}»"],
+        "a decomposed accent was detached from its quoted letter"
+    );
 }
 
 impl kamishibai::explanation::Writer for Writer {

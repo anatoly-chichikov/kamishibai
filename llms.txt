@@ -1,5 +1,5 @@
 kamishibai agent contract
-Release: 1.19.0
+Release: 1.19.1
 
 Overview
 
@@ -28,7 +28,7 @@ kamishibai agent-contract
 
 It prints the contract embedded in the installed binary. Its `Release` always
 matches that binary's application version. The release-pinned remote copy is
-`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.19.0/llms.txt`;
+`https://raw.githubusercontent.com/anatoly-chichikov/kamishibai/v1.19.1/llms.txt`;
 never use mutable `main/llms.txt` as the installed binary's contract.
 
 Language terminology is fixed:
@@ -268,6 +268,10 @@ request is accounted, including an unparseable response. An unparseable first
 answer or a final rejected explanation keeps the Metadata text; a transport or
 provider failure fails the Meta attempt. One Meta attempt uses at most six text
 requests, so the ordinary four-attempt ceiling can spend at most 24.
+More than five reviewed senses, or nonempty semicolon-separated translation
+groups when no reviewed senses exist, retain the Metadata text before any
+explanation request. The complete reviewed inventory remains available; the
+five-line explanation limit and legacy rendering are unchanged.
 New explanations use the reader's four familiar section headings and omit
 empty sections. Only headings are bold. Reviewed meanings appear in their
 approved order, the first brighter than the others. Learning-language phrases
@@ -276,11 +280,15 @@ and a named common mistake carries a short reason. The offline explanation
 judge and composer are public library APIs. This model check reduces observed errors but
 does not certify pronunciation as dictionary-verified.
 When neither a level nor a non-`best-fit` type policy is requested, the rendered metadata
-authoring prompt is unchanged. Release 1.19.0 retains the metadata cache
+authoring prompt is unchanged. Release 1.19.1 retains the metadata cache
 policy, session format, card keys, Anki note type and templates. Existing
 current-policy cached cards are reused without buying an explanation. New
 meta.json records retain the explanation parts, assignment stamp and Metadata
-draft as optional provenance. Correction uses that draft as its factual source
+draft as optional provenance. Accepted parts select the new rendering; a rejected
+attempt keeps legacy rendering. Cards JSON carries `source.context_format` as
+`explanation_v1` for the new layout. Its absence means legacy rendering even
+when the text resembles a new explanation, preserving old note fields and GUIDs.
+Correction uses that draft as its factual source
 and reruns the explanation with the learner's request. Explicit settings are accepted with both word intake
 and `--build`; an imported card whose cached metadata does not satisfy them is
 refreshed only when generation starts.
@@ -781,7 +789,10 @@ Languages
 Input schema for `new --build`
 
 `new --build FILE --json` accepts a strict cards JSON document. `FILE` can be a path or
-`-` for stdin. Every field is required, and unknown fields are rejected.
+`-` for stdin. Every content field is required, and unknown fields are rejected.
+The optional `source.context_format` accepts `explanation_v1` or `legacy`;
+omitting it preserves the legacy rendering. Results retain the new format through
+export, reimport, cache and sessions. Unknown format versions are rejected.
 
 Rules:
 

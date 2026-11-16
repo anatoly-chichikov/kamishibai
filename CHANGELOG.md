@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.19.1
+
+- Preserve legacy note fields and GUIDs with an explicit explanation format, including imported JSON and rejected explanation attempts.
+- Retain the metadata explanation without paid explanation requests above five meanings; accept natural single-character meanings and review non-Latin mistake reasons and quote ordering.
+- Preserve native sentence punctuation and combining accents, correct Hebrew high quotes, and keep French quote spaces unbreakable in new explanations.
+
 ## 1.19.0
 
 - Add reviewed, edited explanations with ordered meanings, reader-language quotation marks, short reasons for common mistakes, and omitted empty sections.

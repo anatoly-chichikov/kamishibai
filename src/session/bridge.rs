@@ -26,9 +26,8 @@ pub fn to_entry(draft: &CardDraft) -> Result<VocabularyEntry> {
             lang: LanguageCode::new(draft.pair().known())?,
             highlight: NonEmptyText::new(meta.source_highlight())?,
             hint: NonEmptyText::new(meta.source_hint())?,
-            context: NonEmptyText::new(crate::markdown::compact_card_context(
-                meta.source_context(),
-            ))?,
+            context: NonEmptyText::new(meta.context_format().compact(meta.source_context()))?,
+            context_format: meta.context_format(),
         },
         target: VocabularyTarget {
             sentence: NonEmptyText::new(meta.target_sentence())?,
@@ -106,7 +105,8 @@ pub fn from_entry(entry: &VocabularyEntry, pair: LanguagePair) -> CardDraft {
         entry.source.hint.as_str(),
         entry.source.context.as_str(),
         entry.target.sentence.as_str(),
-    );
+    )
+    .with_context_format(entry.source.context_format);
     CardDraft::new(entry.term.as_str(), entry.meaning.as_str(), pair).with_meta(meta, None)
 }
 
@@ -126,6 +126,7 @@ mod tests {
                 .expect("transcription must accept non-empty"),
             importance: Importance::new(7).expect("importance 7 must be in 1..=10"),
             source: VocabularySource {
+                context_format: crate::vocabulary::ContextFormat::Legacy,
                 sentence: NonEmptyText::new("Я искренне извиняюсь.")
                     .expect("source.sentence must accept non-empty"),
                 lang: LanguageCode::new("ru").expect("lang must accept non-empty"),

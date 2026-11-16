@@ -62,7 +62,7 @@ kamishibai writes:
 
 The front asks: the illustration, the sentence in your language, a hint. The back answers: the same sentence in the learning language, read by a native voice, with the gloss, IPA, and a usage note.
 
-The printable sheet uses four fixed-size fold-cards per A4 page. Explanations show at most five reviewed meanings: the selected meaning first and bold, then the highest-priority alternatives. The complete meaning list stays available for choosing cards. Concise guidance on usage, unsuitable situations, and one useful nuance follows the glossary. Denser cards use tighter spacing within the same card size.
+The printable sheet uses four fixed-size fold-cards per A4 page. New explanations show the selected meaning first and brighter, within the five-line glossary limit. More than five reviewed meanings keep the metadata explanation without calling the explanation writer or editor. Legacy contexts retain their original five-meaning projection and bold selected meaning. The complete meaning list stays available for choosing cards. Concise guidance on usage, unsuitable situations, and one useful nuance follows the glossary. Denser cards use tighter spacing within the same card size.
 
 Import the deck into Anki, and the cards look roughly like this on your phone:
 
@@ -78,7 +78,7 @@ headings are bold, learning-language phrases use the reader's quotation marks,
 and a common mistake includes a short reason. A separate writing and editing
 pass checks the explanation, with at most two repairs; rejected explanations
 keep the original metadata text. Existing cached cards and Anki note identities
-stay intact.
+stay intact, including imported JSON without an explicit explanation format.
 
 ## Console
 

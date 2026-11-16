@@ -195,6 +195,7 @@ fn run(input: &Path, output: &Path) -> Result<()> {
         )?;
         if let Some(parts) = parts {
             entry.source.context = NonEmptyText::new(compose(&parts, &language))?;
+            entry.source.context_format = kamishibai::vocabulary::ContextFormat::ExplanationV1;
         }
         entries.push(entry);
     }

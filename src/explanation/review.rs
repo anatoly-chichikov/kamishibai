@@ -118,6 +118,28 @@ fn shared(left: &str, right: &str, term: &str) -> bool {
         && one.intersection(&two).count() * 10 >= one.len().min(two.len()) * 6
 }
 
+fn paired(text: &str, open: &str, close: &str) -> bool {
+    let open = open.trim();
+    let close = close.trim();
+    let mut inside = false;
+    let mut remaining = text;
+    while !remaining.is_empty() {
+        if let Some(rest) = remaining.strip_prefix(if inside { close } else { open }) {
+            inside = !inside;
+            remaining = rest;
+        } else if remaining.starts_with(open) || remaining.starts_with(close) {
+            return false;
+        } else {
+            remaining = &remaining[remaining
+                .chars()
+                .next()
+                .expect("invariant: remaining text is nonempty")
+                .len_utf8()..];
+        }
+    }
+    !inside
+}
+
 struct Review<'a> {
     language: &'a Language,
     fails: Vec<String>,
@@ -143,6 +165,40 @@ impl Review<'_> {
             .get(name)
             .map(|pattern| hits(pattern, &text.replace(['⟦', '⟧'], "")))
             .unwrap_or_default()
+    }
+
+    fn mistake(&self, text: &str) -> bool {
+        let marked = regex("⟦[^⟦⟧]+⟧").replace_all(text, "a");
+        let foreign = text
+            .chars()
+            .map(|ch| {
+                if ch.is_alphabetic() && self.language.foreign(ch) {
+                    'a'
+                } else {
+                    ch
+                }
+            })
+            .collect::<String>();
+        self.local("mistake", text)
+            || self.local("mistake", &marked)
+            || self.local("mistake", &foreign)
+    }
+
+    fn learning_words(&self, text: &str) -> Vec<String> {
+        use unicode_script::UnicodeScript;
+        let marked = hits("⟦[^⟦⟧]+⟧", text);
+        let phrases = if marked.is_empty() {
+            text.to_string()
+        } else {
+            marked.join(" ")
+        };
+        hits(r"\p{L}[\p{L}\p{M}'’-]*", &phrases.to_lowercase())
+            .into_iter()
+            .filter(|word| {
+                word.chars()
+                    .any(|ch| self.language.learning.contains(&ch.script()))
+            })
+            .collect()
     }
 
     fn list(&mut self, card: &Card, parts: &Parts) {
@@ -300,16 +356,11 @@ impl Review<'_> {
                     .collect::<String>()
             })
             .collect::<Vec<_>>();
-        if body.iter().any(|text| {
-            if open == close {
-                text.matches(open).count() % 2 != 0
-            } else {
-                text.matches(open).count() != text.matches(close).count()
-            }
-        }) || parts
-            .strings()
-            .iter()
-            .any(|text| text.matches('⟦').count() != text.matches('⟧').count())
+        if body.iter().any(|text| !paired(text, open, close))
+            || parts
+                .strings()
+                .iter()
+                .any(|text| !paired(text, "⟦", "⟧") || !paired(text, open, close))
         {
             self.fail(
                 "quotes",
@@ -332,7 +383,7 @@ impl Review<'_> {
 
     fn empty(&mut self, parts: &Parts, whole: &str) {
         for line in &parts.meanings {
-            if letters(&line.head) < 2 || letters(&line.note) < 3 {
+            if letters(&line.head) < 1 || letters(&line.note) < 3 {
                 self.fail(
                     "empty",
                     format!(
@@ -443,7 +494,7 @@ impl Review<'_> {
 
     fn why(&mut self, parts: &Parts) {
         let reason = parts.nuance.why.trim();
-        if self.local("mistake", &parts.nuance.text) {
+        if self.mistake(&parts.nuance.text) {
             if letters(reason) < 8 {
                 self.fail("why", "\"nuance\" names a mistake, so \"why\" must say in one short sentence why the wrong phrase does not work: what the right small word shows here or what the wrong one would mean");
             } else {
@@ -456,17 +507,20 @@ impl Review<'_> {
                         ),
                     );
                 }
-                if sentences(reason).len() != 1 || !matches(r"[.!?»]$", reason) {
+                if sentences(reason).len() != 1
+                    || !(super::layout::terminated(reason) || reason.ends_with('»'))
+                {
                     self.fail("why", "\"why\" must be one full sentence");
                 }
-                let words = hits("[a-z][a-z'’-]*", &parts.nuance.text.to_lowercase());
-                if !hits("[a-z][a-z'’-]*", &reason.to_lowercase())
+                let words = self.learning_words(&parts.nuance.text);
+                if !self
+                    .learning_words(reason)
                     .iter()
                     .any(|word| words.contains(word))
                 {
                     self.fail("why", "\"why\" must speak about the very word that differs in the two phrases of \"nuance\" and name it");
                 }
-                if self.local("mistake", reason) {
+                if self.mistake(reason) {
                     self.fail(
                         "why",
                         "\"why\" repeats the pair of phrases; it must only give the reason",
@@ -616,7 +670,7 @@ impl Review<'_> {
 
     fn form(&mut self, card: &Card, parts: &Parts, blocks: &[Block]) {
         for line in &parts.meanings {
-            if matches("[.!?]$", line.note.trim()) {
+            if super::layout::terminated(line.note.trim()) {
                 self.fail(
                     "form",
                     format!("the note of the line «{}» ends with a full stop", line.head),
@@ -626,7 +680,7 @@ impl Review<'_> {
         let [open, close] = &self.language.context.quotes;
         if !parts.literal.trim().is_empty()
             && (!(parts.literal.contains(open) && parts.literal.contains(close))
-                || matches("[.!?]$", parts.literal.trim()))
+                || super::layout::terminated(parts.literal.trim()))
         {
             self.fail("form", "\"literal\" must give the picture in quotation marks and must not end with a full stop");
         }
@@ -635,7 +689,8 @@ impl Review<'_> {
             if value.is_empty() {
                 continue;
             }
-            if !matches("[.!?»]$", value) && !value.ends_with(close) {
+            if !super::layout::terminated(value) && !value.ends_with('»') && !value.ends_with(close)
+            {
                 self.fail(
                     "form",
                     format!("the text of \"{name}\" must end as a full sentence"),

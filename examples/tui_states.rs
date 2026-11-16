@@ -679,6 +679,7 @@ fn explained_card() -> App {
         value("markdown"),
         value("sentence"),
     )
+    .with_context_format(kamishibai::vocabulary::ContextFormat::ExplanationV1)
     .with_sentence_labels(fresh_labels());
     App::new(LanguagePair::new("EN", "RU"))
         .with_screen(Screen::YourCards)

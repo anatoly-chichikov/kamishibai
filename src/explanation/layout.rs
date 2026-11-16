@@ -1,6 +1,7 @@
 //! Deterministic normalization, quotation, and four-section explanation layout.
 
 use super::{Example, Language, Parts};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Trim model strings and complete prose sentences without changing their facts.
 #[must_use]
@@ -29,11 +30,16 @@ pub fn tidy(parts: &Parts) -> Parts {
 
 fn sentence(value: &str) -> String {
     let text = value.trim();
-    if text.is_empty() || text.ends_with(['.', '!', '?', '…', '»']) {
+    if text.is_empty() || terminated(text) || text.ends_with(['…', '»']) {
         text.to_string()
     } else {
         format!("{text}.")
     }
+}
+
+/// Recognize complete sentence punctuation shared by normalization and review.
+pub(super) fn terminated(text: &str) -> bool {
+    text.ends_with(['.', '!', '?', '。', '！', '？', '؟', '।', '॥'])
 }
 
 /// Replace model markers and quote foreign-script word runs outside existing quotes.
@@ -60,12 +66,12 @@ pub fn quote(text: &str, language: &Language) -> String {
 }
 
 fn runs(text: &str, language: &Language) -> String {
-    let chars = text.chars().collect::<Vec<_>>();
+    let chars = text.graphemes(true).collect::<Vec<_>>();
     let mut output = String::new();
     let mut index = 0;
     while index < chars.len() {
-        if !language.foreign(chars[index]) {
-            output.push(chars[index]);
+        if !chars[index].chars().any(|ch| language.foreign(ch)) {
+            output.push_str(chars[index]);
             index += 1;
             continue;
         }
@@ -73,46 +79,47 @@ fn runs(text: &str, language: &Language) -> String {
         index = word(&chars, index, language);
         loop {
             let mut next = index;
-            while next < chars.len() && chars[next].is_whitespace() {
+            while next < chars.len() && chars[next].chars().all(char::is_whitespace) {
                 next += 1;
             }
             if next == index {
                 break;
             }
             let digit = next;
-            while next < chars.len() && chars[next].is_ascii_digit() {
+            while next < chars.len() && chars[next].chars().all(|ch| ch.is_ascii_digit()) {
                 next += 1;
             }
             if next > digit {
                 let space = next;
-                while next < chars.len() && chars[next].is_whitespace() {
+                while next < chars.len() && chars[next].chars().all(char::is_whitespace) {
                     next += 1;
                 }
                 if space == next {
                     break;
                 }
             }
-            if next >= chars.len() || !language.foreign(chars[next]) {
+            if next >= chars.len() || !chars[next].chars().any(|ch| language.foreign(ch)) {
                 break;
             }
             index = word(&chars, next, language);
         }
         output.push_str(&language.context.quotes[0]);
-        output.extend(&chars[start..index]);
+        output.push_str(&chars[start..index].concat());
         output.push_str(&language.context.quotes[1]);
     }
     output
 }
 
-fn word(chars: &[char], start: usize, language: &Language) -> usize {
+fn word(chars: &[&str], start: usize, language: &Language) -> usize {
+    let belongs = |text: &str| {
+        text.chars().any(|ch| language.foreign(ch)) || text.chars().all(|ch| ch.is_ascii_digit())
+    };
     let mut index = start + 1;
     while index < chars.len() {
-        if language.foreign(chars[index]) || chars[index].is_ascii_digit() {
+        if belongs(chars[index]) {
             index += 1;
-        } else if matches!(chars[index], '\'' | '’' | '-')
-            && chars
-                .get(index + 1)
-                .is_some_and(|ch| language.foreign(*ch) || ch.is_ascii_digit())
+        } else if matches!(chars[index], "'" | "’" | "-")
+            && chars.get(index + 1).is_some_and(|next| belongs(next))
         {
             index += 2;
         } else {

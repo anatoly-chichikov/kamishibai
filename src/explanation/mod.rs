@@ -31,6 +31,15 @@ impl Record {
     pub fn metadata(&self) -> &str {
         &self.draft
     }
+
+    /// Select the new renderer only when this transaction accepted replacement parts.
+    #[must_use]
+    pub fn format(&self) -> crate::vocabulary::ContextFormat {
+        match self.parts {
+            Some(_) => crate::vocabulary::ContextFormat::ExplanationV1,
+            None => crate::vocabulary::ContextFormat::Legacy,
+        }
+    }
 }
 
 /// The strict model response, shared by writing, editing, and repair requests.

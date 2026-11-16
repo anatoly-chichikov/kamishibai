@@ -272,6 +272,7 @@ fn entry(word: &str, source: &str, target: &str) -> VocabularyEntry {
         transcription: text(word),
         importance: score(5),
         source: VocabularySource {
+            context_format: kamishibai::vocabulary::ContextFormat::Legacy,
             sentence: text("пример"),
             lang: code(source),
             highlight: text("пример"),
@@ -305,6 +306,7 @@ fn source_scripted_entry(fields: [&str; 8]) -> VocabularyEntry {
         transcription: text(term),
         importance: score(5),
         source: VocabularySource {
+            context_format: kamishibai::vocabulary::ContextFormat::Legacy,
             sentence: text(source_sentence),
             lang: code(source),
             highlight: text(highlight),
@@ -338,6 +340,7 @@ fn reversed_scripted_entry(fields: [&str; 8]) -> VocabularyEntry {
         transcription: text(term),
         importance: score(5),
         source: VocabularySource {
+            context_format: kamishibai::vocabulary::ContextFormat::Legacy,
             sentence: text(source_sentence),
             lang: code(source),
             highlight: text(meaning),
@@ -458,6 +461,7 @@ fn vocabulary_layout_keeps_the_frozen_full_entry_row_structure() {
         transcription: text("cafe"),
         importance: score(7),
         source: VocabularySource {
+            context_format: kamishibai::vocabulary::ContextFormat::Legacy,
             sentence: text("В кафе подают крепы"),
             lang: code("en"),
             highlight: text("кафе"),
@@ -652,6 +656,7 @@ fn reports_with_many_entries_still_span_multiple_pages() -> Result<()> {
                 transcription: text("word"),
                 importance: score(5),
                 source: VocabularySource {
+                    context_format: kamishibai::vocabulary::ContextFormat::Legacy,
                     sentence: text(format!("Ünïcödé {index}").as_str()),
                     lang: code("en"),
                     highlight: text(format!("Ünïcödé {index}").as_str()),
@@ -730,6 +735,7 @@ fn all_twenty_five_approved_explanations_cannot_overflow_the_fixed_pdf_cards() -
         item.target.sentence = text(card["sentence"].as_str().unwrap());
         item.source.sentence = text(card["sentence_known"].as_str().unwrap());
         item.source.context = text(card["markdown"].as_str().unwrap());
+        item.source.context_format = kamishibai::vocabulary::ContextFormat::ExplanationV1;
         sheet.append(&item, None);
     }
     sheet.save(&path, &Thumbnail::new(256))?;
@@ -742,12 +748,39 @@ fn all_twenty_five_approved_explanations_cannot_overflow_the_fixed_pdf_cards() -
 }
 
 #[test]
+fn review_f5_six_reviewed_meanings_cannot_disappear_from_the_fixed_pdf() -> Result<()> {
+    let directory = TempDir::new()?;
+    let path = directory.path().join("six-meanings.pdf");
+    let (_, parts) = super::explanation::six_meanings();
+    let mut item = entry("set", "en", "fr");
+    item.source.context = text(&kamishibai::explanation::compose(
+        &parts,
+        &kamishibai::explanation::Language::from_codes("EN", "FR")?,
+    ));
+    item.source.context_format = kamishibai::vocabulary::ContextFormat::ExplanationV1;
+    let mut sheet = CardSheet::new();
+    sheet.append(&item, None);
+    sheet.save(&path, &Thumbnail::new(256))?;
+    let output = readable(&path)?.extract_text(&[1])?;
+    let words = output.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        pages(&path) == 1
+            && ["a group", "place", "harden", "sunset", "prepare", "fixed"]
+                .iter()
+                .all(|head| words.contains(head)),
+        "the fixed PDF clipped or dropped a reviewed meaning: {output}"
+    );
+    Ok(())
+}
+
+#[test]
 fn old_and_new_explanations_keep_their_complete_pdf_page_snapshot() -> Result<()> {
     let directory = TempDir::new()?;
     let mut item = super::explanation::approved_entry();
     let mut output = Vec::new();
     for variant in ["new", "old"] {
         if variant == "old" {
+            item.source.context_format = kamishibai::vocabulary::ContextFormat::Legacy;
             item.source.context = text(
                 "**Значение.**\n- **граница**\n- черта на песке\n\n**Где встречается.**\nНа переговорах.",
             );

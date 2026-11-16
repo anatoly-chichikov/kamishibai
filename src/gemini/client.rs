@@ -2851,6 +2851,61 @@ mod tests {
         );
     }
 
+    #[test]
+    fn six_reviewed_senses_keep_the_complete_metadata_without_explanation_spend() {
+        let candidate = WordCandidate::with_senses(
+            "set",
+            ["a group", "place", "harden", "sunset", "prepare", "fixed"]
+                .into_iter()
+                .map(Sense::plain)
+                .collect(),
+            0,
+            true,
+        );
+        let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("EN", "RU"));
+        let original =
+            "a group; place; harden; sunset; prepare; fixed — complete original explanation";
+        let meta = CardMeta::new(
+            "ipa",
+            "sentence ipa",
+            "a group",
+            7,
+            "source",
+            "group",
+            "hint",
+            original,
+            "This is a set.",
+        );
+        let transport = FakeTransport::new(vec![explanation_fallback_body()]);
+        let client = GeminiClient::new("key", transport.clone());
+        let mut costs = Vec::new();
+        let result = client
+            .explanation_observed(&draft, meta, "", &mut |cost| {
+                costs.push(cost);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            (
+                result.source_context(),
+                result.metadata_context(),
+                result.context_format(),
+                transport.requests.borrow().len(),
+                costs.len(),
+                draft.reviewed_senses().len()
+            ),
+            (
+                original,
+                original,
+                crate::vocabulary::ContextFormat::Legacy,
+                0,
+                0,
+                6
+            ),
+            "the six-sense fallback changed the source, dropped a sense or billed an explanation request"
+        );
+    }
+
     fn explanation_config() -> Value {
         let schema = serde_json::from_str(include_str!("../../assets/explanation.schema.json"))
             .expect("explanation schema must decode");

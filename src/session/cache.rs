@@ -613,6 +613,11 @@ struct MetaRecord {
     source_highlight: String,
     source_hint: String,
     source_context: String,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::vocabulary::ContextFormat::is_legacy"
+    )]
+    context_format: crate::vocabulary::ContextFormat,
     target_sentence: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     labels: Option<SentenceLabels>,
@@ -636,6 +641,7 @@ impl MetaRecord {
             source_highlight: meta.source_highlight().to_string(),
             source_hint: meta.source_hint().to_string(),
             source_context: meta.source_context().to_string(),
+            context_format: meta.context_format(),
             target_sentence: meta.target_sentence().to_string(),
             labels: meta.sentence_labels().cloned(),
             explanation: meta.explanation_record(),
@@ -647,6 +653,10 @@ impl MetaRecord {
     }
 
     fn meta(self) -> CardMeta {
+        let format = self
+            .explanation
+            .as_ref()
+            .map_or(self.context_format, crate::explanation::Record::format);
         let meta = CardMeta::new(
             self.pronunciation,
             self.transcription,
@@ -655,9 +665,10 @@ impl MetaRecord {
             self.source_sentence,
             self.source_highlight,
             self.source_hint,
-            crate::markdown::compact_card_context(&self.source_context),
+            format.compact(&self.source_context),
             self.target_sentence,
         )
+        .with_context_format(self.context_format)
         .with_explanation(self.explanation);
         match self.labels {
             Some(labels) => meta.with_sentence_labels(labels),

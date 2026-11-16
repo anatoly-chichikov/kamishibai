@@ -44,7 +44,7 @@ Every entry must contain:
 - `target.sentence`
 - `target.lang`
 
-The input contract is strict. There are no optional entry fields.
+The content fields above are required. The optional `source.context_format` discriminator accepts `explanation_v1` or `legacy`; absence selects legacy rendering. Accepted explanation provenance selects the new layout in cached metadata, and exported/imported cards preserve the explicit format. Never infer the format from Markdown wording: legacy HTML determines existing Anki GUIDs.
 
 ## Sessions (non-interactive)
 

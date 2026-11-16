@@ -141,8 +141,21 @@ fn ask(writer: &mut impl Writer, prompt: String) -> Result<Option<Parts>> {
         .map(|parts| tidy(&parts)))
 }
 
-/// Write and edit with at most two repairs, returning no replacement on final rejection.
+/// Write and edit with at most two repairs, retaining the draft without requests above five meanings.
 pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Result<Option<Parts>> {
+    let count = if task.input.card.senses.is_empty() {
+        task.input
+            .card
+            .translation
+            .split(';')
+            .filter(|group| !group.trim().is_empty())
+            .count()
+    } else {
+        task.input.card.senses.len()
+    };
+    if count > 5 {
+        return Ok(None);
+    }
     let Some(mut current) = ask(writer, task.prompt(&task.writer, None, &[])?)? else {
         return Ok(None);
     };
