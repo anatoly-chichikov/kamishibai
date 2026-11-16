@@ -208,7 +208,7 @@ fn welcome_language_grid_cannot_hide_the_added_codes_on_a_short_terminal() {
     );
     let rendered = render_sized(&app, 80, 16);
     assert!(
-        ["SR", "KA", "HY", "FA", "SV", "RO", "HU", "FI"]
+        ["SR", "KA", "HY", "FA", "SV", "RO", "HU", "FI", "LA"]
             .into_iter()
             .all(|code| rendered.contains(format!(" {code} ").as_str())),
         "the short Welcome grid hid an added language code"
@@ -354,7 +354,7 @@ fn pick_languages_modal_scrolls_the_last_language_into_view() {
     )
     .0;
     assert!(
-        render_sized(&walked, 96, 20).contains("suomi"),
+        render_sized(&walked, 96, 20).contains("Latīna"),
         "the last language stayed unreachable however far the column scrolled"
     );
 }
@@ -372,14 +372,23 @@ fn pick_languages_modal_keeps_every_row_in_one_grid() {
     let borders = (0..buffer.area.height)
         .map(|row| {
             (0..buffer.area.width)
-                .filter(|column| buffer[(*column, row)].symbol() == "│")
+                .filter(|column| matches!(buffer[(*column, row)].symbol(), "│" | "┃"))
                 .collect::<Vec<_>>()
         })
         .filter(|found| !found.is_empty())
+        .collect::<Vec<_>>();
+    let outer = borders
+        .iter()
+        .map(|row| (row[0], row[row.len() - 1]))
+        .collect::<std::collections::BTreeSet<_>>();
+    let inner = borders
+        .iter()
+        .filter(|row| row.len() > 2)
+        .map(|row| &row[1..row.len() - 1])
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
-        borders.len(),
-        1,
+        (outer.len(), inner.len()),
+        (1, 1),
         "a row of the language modal escaped the grid the others share"
     );
 }

@@ -436,13 +436,14 @@ Catalog(
                 ],
             ),
         ),
-        Rule(head: Head(id: "language.catalog", intent: "Thirty languages stay selectable in either role without hiding familiar choices, while regional writing remains explicit wherever it changes how a term is read"),
+        Rule(head: Head(id: "language.catalog", intent: "Thirty-one languages stay selectable in either role without hiding familiar choices, while regional writing remains explicit wherever it changes how a term is read"),
             scope: States(["welcome.language", "words.languages", "words.translation-choice", "review.languages", "review.translation-preview"]),
             expectations: [
-                "One shared catalog offers EN ZH ES JA FR DE KO RU IT PT HI AR TR PL UK ID VI TH EL HE NL CS SR KA HY FA SV RO HU FI in that stable order",
-                "The former twenty-two choices keep their positions; Serbian, Georgian, Armenian, Persian, Swedish, Romanian, Hungarian and Finnish follow them",
-                "Both pair-picker roles offer all thirty languages; a translation-only picker omits the known language and keeps the remaining catalog order",
+                "One shared catalog offers EN ZH ES JA FR DE KO RU IT PT HI AR TR PL UK ID VI TH EL HE NL CS SR KA HY FA SV RO HU FI LA in that stable order",
+                "The former twenty-two choices keep their positions; Serbian, Georgian, Armenian, Persian, Swedish, Romanian, Hungarian, Finnish and Classical Latin follow them",
+                "Both pair-picker roles offer all thirty-one languages; a translation-only picker omits the known language and keeps the remaining catalog order",
                 "Serbian uses Latin script, Georgian uses the modern norm, Armenian the Eastern norm and Persian the Iranian norm",
+                "Latin uses the native name Latīna and the Classical Latin profile name for both metadata and voice; general prompt templates stay unchanged",
                 "The new codes normalize to uppercase like every existing choice; Persian declares right-to-left presentation and uses the English picker name Persian",
             ],
             grounds: Grounds(
@@ -464,6 +465,8 @@ Catalog(
                     Check(file: "tests/new_languages.rs", test: "ro_works_in_both_language_roles_offline"),
                     Check(file: "tests/new_languages.rs", test: "hu_works_in_both_language_roles_offline"),
                     Check(file: "tests/new_languages.rs", test: "fi_works_in_both_language_roles_offline"),
+                    Check(file: "tests/new_languages.rs", test: "classical_latin_works_in_both_language_roles_offline"),
+                    Check(file: "tests/profile.rs", test: "classical_latin_cannot_lose_its_pronunciation_variety"),
                 ],
             ),
         ),
@@ -1963,9 +1966,9 @@ Catalog(
                     surface: Surface(screen: "Welcome", overlay: Clear),
                     chrome: Chrome(title: "setup", hint: "choose your language and add a gemini key", footer: ["[Enter] next", "[↑↓←→] language", "[Ctrl+C] quit"]),
                     expectations: [
-                        "Responsive native-name catalog grid offers all thirty languages; short layouts reduce to one column or codes",
+                        "Responsive native-name catalog grid offers all thirty-one languages; short layouts reduce to one column or codes",
                         "The inactive key underline, notice and buttons take zero rows during language selection; the key label remains visible",
-                        "All thirty choices stay visible and clickable at 80x16 instead of losing the last six to inactive key-entry rows",
+                        "All thirty-one choices stay visible and clickable at 80x16 instead of losing the last seven to inactive key-entry rows",
                         "Enter confirms the highlighted known language before exposing key entry; environment keys cannot skip this choice",
                         "Left/Right or Ctrl+L step one language; Up/Down move one grid row and a pointer click chooses its language",
                     ],
@@ -2533,7 +2536,7 @@ Catalog(
                     surface: Surface(screen: "YourWords", overlay: Modal("PickLanguages")),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+C] quit"]),
                     expectations: [
-                        "Each role uses the same thirty-language catalog as Welcome and review; the learning column keeps its pinned auto row",
+                        "Each role uses the same thirty-one-language catalog as Welcome and review; the learning column keeps its pinned auto row",
                         "Two vertically scrolling columns share catalog rows under one directional heading",
                         "A pinned auto row exists only on the learning side; focus and selected values remain distinguishable",
                         "Up/Down choose a row, Left/Right choose a column, and the wheel moves and focuses the pick of the column under the pointer",
@@ -2670,7 +2673,7 @@ Catalog(
                     surface: Surface(screen: "YourWords", overlay: Modal("PickTranslationLanguage")),
                     chrome: Chrome(title: "your words", hint: "add words or phrases, one per line", footer: ["[Ctrl+C] quit"]),
                     expectations: [
-                        "A single list offers the eligible choices from the thirty-language catalog in their stable order and asks Which language do you want to learn? with one blank row before choices",
+                        "A single list offers the eligible choices from the thirty-one-language catalog in their stable order and asks Which language do you want to learn? with one blank row before choices",
                         "The newest eligible history choice is highlighted in place; absent history the first eligible choice is highlighted",
                         "No auto option, known-language column, grouping or history explanation renders",
                     ],
@@ -3387,7 +3390,7 @@ Catalog(
                     surface: Surface(screen: "WhatIUnderstood", overlay: Modal("PickLanguages")),
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+C] quit"]),
                     expectations: [
-                        "Two scrolling native-name columns each offer all thirty languages and keep the selected pair visible with a fixed learning auto row",
+                        "Two scrolling native-name columns each offer all thirty-one languages and keep the selected pair visible with a fixed learning auto row",
                         "Changing the pair rereads when the existing candidate meanings would be invalidated or a pinned language returns to auto; a reread above 60 lines is refused with too many words to re-read — start a new batch",
                     ],
                     actions: [
@@ -3447,7 +3450,7 @@ Catalog(
                     chrome: Chrome(title: "word meanings", hint: "choose the meanings you want to learn", footer: ["[Ctrl+C] quit"]),
                     expectations: [
                         "The proposed candidates are visible behind the single-column language question",
-                        "The prepared target is highlighted among the eligible choices of the thirty-language catalog in its normal position and its saved generation guidance is already loaded",
+                        "The prepared target is highlighted among the eligible choices of the thirty-one-language catalog in its normal position and its saved generation guidance is already loaded",
                         "Proposed candidates do not create a persisted session before confirmation",
                     ],
                     actions: [

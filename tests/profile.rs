@@ -45,6 +45,34 @@ fn score(value: u8) -> Importance {
     Importance::new(value).expect("test importance must be valid")
 }
 
+/// The Latin profile carries its classical variety through the existing speech template.
+#[test]
+fn classical_latin_cannot_lose_its_pronunciation_variety() {
+    let item = language("lA").expect("Classical Latin must resolve");
+    assert_eq!(
+        (
+            catalog()
+                .resolve("la")
+                .expect("Latin must canonicalize")
+                .to_string(),
+            item.endonym,
+            item.text_gate,
+            item.direction,
+            item.naming.prefix,
+            kamishibai::generation::render_audio_prompt(&item.prompt)
+        ),
+        (
+            String::from("LA"),
+            String::from("Latīna"),
+            TextGate::Ocr(OcrModel::Latin),
+            TextDirection::Ltr,
+            String::from("la"),
+            String::from("Say in natural Classical Latin: {text}")
+        ),
+        "Latin lost its canonical identity or classical speech variety"
+    );
+}
+
 /// Supported profiles keep the frozen runtime values.
 #[test]
 fn english_profile_keeps_the_frozen_runtime_values() -> Result<()> {
@@ -153,7 +181,7 @@ fn registry_keeps_the_supported_codes_in_stable_order() {
         [
             "en", "zh", "es", "ja", "fr", "de", "ko", "ru", "it", "pt", "hi", "ar", "tr", "pl",
             "uk", "id", "vi", "th", "el", "he", "nl", "cs", "sr", "ka", "hy", "fa", "sv", "ro",
-            "hu", "fi",
+            "hu", "fi", "la",
         ],
         "profile registry codes no longer match the frozen order"
     );

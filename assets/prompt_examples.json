@@ -2273,5 +2273,104 @@
         "sentence_end": "lopullinen piirros"
       }
     }
+  },
+  "la": {
+    "spacing": "words",
+    "understanding": {
+      "markers": {
+        "tags": [
+          "pec.",
+          "vet.",
+          "locūtiō",
+          "poēt.",
+          "iūs"
+        ],
+        "parts": [
+          "n.",
+          "v.",
+          "adi.",
+          "adv.",
+          "prōn.",
+          "praep."
+        ]
+      },
+      "forbidden": {
+        "starters": [
+          "Discimus",
+          "Discendum est",
+          "Nunc discimus"
+        ],
+        "joins": [
+          "X aut Y",
+          "X significat atque etiam Y"
+        ],
+        "fillers": [
+          "ūsitātus",
+          "commūnis",
+          "cotīdiānus",
+          "simplex",
+          "vulgāris"
+        ]
+      },
+      "intake": {
+        "primary": {
+          "understanding": "<ūna significātiō prīnceps brevī sententiā explicāta>",
+          "tag": null
+        },
+        "secondary": {
+          "understanding": "<alia significātiō distincta brevī sententiā explicāta>",
+          "tag": null
+        },
+        "hinted": {
+          "understanding": "<ipsa significātiō quam indicium ūsōris dēsignat>",
+          "tag": null
+        },
+        "invalid": "Hoc vocābulum nōn est linguae discendae."
+      },
+      "messages": {
+        "listed": "Hoc iam in indicē est.",
+        "absent": "Nihil addendum est."
+      }
+    },
+    "card": {
+      "writing": [
+        {
+          "bad": "Iter facere — dē homine.",
+          "good": "Homō iter facit."
+        },
+        {
+          "bad": "Futūram āctiōnem significat.",
+          "good": "Dīcit quid posteā futūrum sit."
+        }
+      ],
+      "hint": {
+        "bad": [
+          "Dīcitur cum aliquid petitur.",
+          "Significat fessum.",
+          "Saepe in negōtiīs dīcitur."
+        ],
+        "good": "Saxa aquam quiētam cingunt, ubi parva nāvis stat.",
+        "contrast": "\"<near target word>\" … significat; hīc …"
+      },
+      "context": {
+        "headers": [
+          "Significātiō.",
+          "Ubi audītur.",
+          "Ubi nōn convenit.",
+          "Subtīlitās."
+        ],
+        "rarity": "rārum, in ōrātiōne solūtā antīquā"
+      }
+    },
+    "recall": {
+      "focus": {
+        "focus": "vīnum",
+        "longer": "dīvīnum"
+      },
+      "fragment": {
+        "visible": "IN FORŌ",
+        "sentence_end": "in forō"
+      }
+    }
   }
 }

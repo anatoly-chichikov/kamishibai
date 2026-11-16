@@ -594,6 +594,15 @@ mod tests {
                 ["Jelentés.", "Hol hallhatod.", "Hol nem illik.", "Árnyalat."],
             ),
             (
+                "la",
+                [
+                    "Significātiō.",
+                    "Ubi audītur.",
+                    "Ubi nōn convenit.",
+                    "Subtīlitās.",
+                ],
+            ),
+            (
                 "fi",
                 [
                     "Merkitys.",

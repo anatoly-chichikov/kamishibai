@@ -60,7 +60,7 @@ impl LanguageCatalog {
     }
 
     /// Return the supported language codes in stable order.
-    pub fn codes(&self) -> [&'static str; 30] {
+    pub fn codes(&self) -> [&'static str; 31] {
         profile_codes()
     }
 
@@ -88,7 +88,7 @@ impl LanguageCatalog {
 }
 
 /// Return codes from the canonical profile declarations.
-pub(super) fn profile_codes() -> [&'static str; 30] {
+pub(super) fn profile_codes() -> [&'static str; 31] {
     from_fn(|index| profiles()[index].code)
 }
 
@@ -106,10 +106,10 @@ pub fn language(code: &str) -> Result<LanguageProfile> {
 ///
 /// Every catalog lookup reads this table, and the TUI reads it thousands of
 /// times per rendered frame, so declaring it per call meant rebuilding
-/// thirty profiles — and every string inside them — on each one. The
+/// thirty-one profiles — and every string inside them — on each one. The
 /// declaration is a constant, so it is built once and lent out by reference.
-fn profiles() -> &'static [LanguageProfile; 30] {
-    static PROFILES: OnceLock<[LanguageProfile; 30]> = OnceLock::new();
+fn profiles() -> &'static [LanguageProfile; 31] {
+    static PROFILES: OnceLock<[LanguageProfile; 31]> = OnceLock::new();
     PROFILES.get_or_init(declared_profiles)
 }
 
@@ -117,7 +117,7 @@ fn profiles() -> &'static [LanguageProfile; 30] {
 /// the order surfaced everywhere in the UI (Welcome chips, `Cmd+L` picker,
 /// Gemini language list) and is sorted by global learning popularity, not
 /// alphabetically.
-fn declared_profiles() -> [LanguageProfile; 30] {
+fn declared_profiles() -> [LanguageProfile; 31] {
     [
         LanguageProfile {
             code: "en",
@@ -389,6 +389,15 @@ fn declared_profiles() -> [LanguageProfile; 30] {
             naming: DeckNaming::new("Finnish Vocabulary", "fi", super::DEFAULT_FILE),
             labels: UiLabels::new("Käännös", "Asiayhteys", "Vihje", "Tärkeys"),
         },
+        LanguageProfile {
+            code: "la",
+            prompt: String::from("Classical Latin"),
+            endonym: String::from("Latīna"),
+            text_gate: TextGate::Ocr(OcrModel::Latin),
+            direction: TextDirection::Ltr,
+            naming: DeckNaming::new("Latin Vocabulary", "la", super::DEFAULT_FILE),
+            labels: UiLabels::new("Interpretātiō", "Contextus", "Indicium", "Momentum"),
+        },
     ]
 }
 
@@ -429,7 +438,7 @@ mod tests {
             [
                 "en", "zh", "es", "ja", "fr", "de", "ko", "ru", "it", "pt", "hi", "ar", "tr", "pl",
                 "uk", "id", "vi", "th", "el", "he", "nl", "cs", "sr", "ka", "hy", "fa", "sv", "ro",
-                "hu", "fi",
+                "hu", "fi", "la",
             ],
             "language profiles no longer follow the requested popularity order"
         );
@@ -477,6 +486,7 @@ mod tests {
                 ("ro", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
                 ("hu", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
                 ("fi", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
+                ("la", TextGate::Ocr(OcrModel::Latin), TextDirection::Ltr),
             ],
             "a language profile lost its authoritative gate or direction declaration"
         );
@@ -576,6 +586,7 @@ mod tests {
                 ("ro", "română".into()),
                 ("hu", "magyar".into()),
                 ("fi", "suomi".into()),
+                ("la", "Latīna".into()),
             ],
             "a language profile lost or misspelled the name it shows itself under"
         );
