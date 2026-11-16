@@ -221,6 +221,19 @@ fn expected(code: &str, deck: &str, labels: (&str, &str, &str, &str)) -> (Smoke,
 }
 
 #[test]
+fn classical_latin_works_in_both_language_roles_offline() {
+    assert_eq!(
+        both("LA", "Caesar vīnum bibit.", "Caesar vīnum bibit."),
+        expected(
+            "LA",
+            "Latin Vocabulary",
+            ("Interpretātiō", "Contextus", "Indicium", "Momentum")
+        ),
+        "Classical Latin did not preserve both offline language roles"
+    );
+}
+
+#[test]
 fn korean_works_in_both_language_roles_offline() {
     assert_eq!(
         both("KO", "표현을 익혔다.", "표현을 익혔다."),

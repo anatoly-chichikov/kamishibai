@@ -2502,6 +2502,39 @@ mod tests {
     }
 
     #[test]
+    fn classical_latin_speech_cannot_be_refused_or_lose_its_variety() {
+        let transport = FakeTransport::new(vec![body(json!({
+            "candidates": [{"content": {"parts": [{"inlineData": {
+                "mimeType": "audio/L16;codec=pcm;rate=24000", "data": "AAA="
+            }}]}}]
+        }))]);
+        let profile = crate::languages::language("LA").expect("Latin must resolve");
+        let prompt = crate::generation::render_audio_prompt(&profile.prompt);
+        let client = GeminiClient::new("key", transport.clone());
+        let bytes = client
+            .speech(
+                &prompt.replace("{text}", "Caesar. Gelū. Vīnum."),
+                "Caesar. Gelū. Vīnum.",
+            )
+            .expect("Latin speech must reach the configured model");
+        let request: Value = serde_json::from_str(&transport.requests.borrow()[0])
+            .expect("Latin speech request must decode");
+        assert_eq!(
+            (
+                bytes,
+                transport.requests.borrow().len(),
+                request["contents"][0]["parts"][0].clone()
+            ),
+            (
+                vec![0, 0],
+                1,
+                json!({"text": "Caesar. Gelū. Vīnum.", "speech_metadata": {"style": "Say in natural Classical Latin"}})
+            ),
+            "Latin speech was refused or lost its classical delivery directions"
+        );
+    }
+
+    #[test]
     fn observed_speech_cannot_skip_the_new_request_or_usage_record() {
         let transport = FakeTransport::new(vec![body(json!({
             "candidates": [{"content": {"parts": [{"inlineData": {

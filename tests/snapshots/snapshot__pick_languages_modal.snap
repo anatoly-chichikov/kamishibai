@@ -1,6 +1,6 @@
 ---
 source: tests/snapshot.rs
-assertion_line: 313
+assertion_line: 329
 expression: "render_sized(&opened_picker(), 96, 40)"
 ---
                 ┌─ languages ──────────────────────────────────────────────────┐                
@@ -36,7 +36,7 @@ expression: "render_sized(&opened_picker(), 96, 40)"
                 │  FA    Persian          ┃     FA    Persian               ┃  │                
                 │  SV    svenska          ┃     SV    svenska               ┃  │                
                 │  RO    română           ┃     RO    română                ┃  │                
-                │  HU    magyar           ┃     HU    magyar                ┃  │                
+                │  HU    magyar           │     HU    magyar                │  │                
                 │                                                              │                
                 │  [Enter] confirm  [←→] column  [↑↓] nav  [Esc] cancel        │                
                 └──────────────────────────────────────────────────────────────┘                

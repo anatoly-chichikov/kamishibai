@@ -425,6 +425,17 @@ mod tests {
     };
 
     #[test]
+    fn classical_latin_metadata_cannot_request_an_unspecified_variety() {
+        let draft = CardDraft::new("vīnum", "wine", LanguagePair::new("LA", "EN"));
+        assert!(
+            render_card_meta_prompt(&draft, None, &catalog())
+                .expect("Latin metadata must render")
+                .contains("la (Classical Latin)"),
+            "Latin metadata omitted its classical pronunciation variety"
+        );
+    }
+
+    #[test]
     fn recent_language_prompt_cannot_hide_history_or_override_foreign_evidence() {
         let raw = RawInputBatch::new("лук")
             .with_context("лук\ncat")

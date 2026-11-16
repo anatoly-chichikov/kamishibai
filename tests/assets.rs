@@ -144,7 +144,7 @@ fn production_composer_flattens_wire_continuity_without_weakening_the_scene_cont
 fn production_registry_uses_the_version_fifty_eight_visual_revision() {
     assert_eq!(
         assets::visual_revision(),
-        "163c399a67b9796e9b4a7cd12272165245555405a9ee684d46588e0ffafe3e1a",
+        "07f78a65b8de30216b8d0ba7afed68a07c3a2f97efad19c5d02c85570d8caa16",
         "production registry visual revision drifted without a policy-version change"
     );
 }

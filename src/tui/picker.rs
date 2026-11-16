@@ -509,8 +509,20 @@ mod tests {
         let cursor = TranslationCursor::opening("FI", &[]).advanced(-1);
         assert_eq!(
             cursor.choice("FI").pinned(),
-            Some("HU"),
+            Some("LA"),
             "translation navigation wrapped onto the excluded known language"
+        );
+    }
+
+    #[test]
+    fn latin_translation_navigation_cannot_offer_itself() {
+        assert_eq!(
+            TranslationCursor::opening("LA", &[])
+                .advanced(-1)
+                .choice("LA")
+                .pinned(),
+            Some("FI"),
+            "translation navigation offered Latin as its own destination"
         );
     }
 
