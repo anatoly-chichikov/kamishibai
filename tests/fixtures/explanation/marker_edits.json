@@ -1,0 +1,110 @@
+{
+  "job": {
+    "id": "ru-04",
+    "known": "ru",
+    "learning": "en",
+    "card": {
+      "term": "suite",
+      "translation": "пакет программ, набор программ",
+      "sentence": "We bought an office suite to edit documents and create presentations.",
+      "highlight": "пакет программ"
+    },
+    "sentence_known": "Мы купили офисный пакет программ, чтобы редактировать документы и создавать презентации."
+  },
+  "attempts": [
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": ""
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "пакет программ, набор программ",
+          "head": "пакет программ",
+          "note": "для офиса, дизайна, безопасности"
+        },
+        {
+          "from": "",
+          "head": "люкс",
+          "note": "номер в отеле"
+        },
+        {
+          "from": "",
+          "head": "гарнитур",
+          "note": "мебели"
+        },
+        {
+          "from": "",
+          "head": "сюита",
+          "note": "в музыке"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "They use a full software suite.",
+          "translation": "Они используют полный пакет программ."
+        },
+        "text": "Произносится как слово «sweet». Звука «ю» в нём нет.",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "В IT и в офисе, когда говорят о софте: ⟦office suite⟧, ⟦software suite⟧."
+      }
+    },
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": ""
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "пакет программ, набор программ",
+          "head": "пакет программ",
+          "note": "для офиса, дизайна, безопасности"
+        },
+        {
+          "from": "",
+          "head": "люкс",
+          "note": "номер в отеле"
+        },
+        {
+          "from": "",
+          "head": "гарнитур",
+          "note": "мебели"
+        },
+        {
+          "from": "",
+          "head": "сюита",
+          "note": "в музыке"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "They use a full software suite.",
+          "translation": "Они используют полный пакет программ."
+        },
+        "text": "Произносится как ⟦sweet⟧. Звука «ю» в слове нет.",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "В IT и в офисе, когда говорят о программах: ⟦office suite⟧, ⟦software suite⟧."
+      }
+    }
+  ]
+}

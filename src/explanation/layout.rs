@@ -42,6 +42,30 @@ pub(super) fn terminated(text: &str) -> bool {
     text.ends_with(['.', '!', '?', '。', '！', '？', '؟', '।', '॥'])
 }
 
+/// Normalize quoted learning phrases to markers for review and edit comparison.
+pub(super) fn mark(text: &str, language: &Language) -> String {
+    use unicode_script::UnicodeScript;
+    let [open, close] = &language.context.quotes;
+    let pattern = format!(
+        "{}(?s:(.*?)){}",
+        regex::escape(open.trim()),
+        regex::escape(close.trim())
+    );
+    regex::Regex::new(&pattern)
+        .expect("invariant: quoted learning pattern must compile")
+        .replace_all(text, |capture: &regex::Captures<'_>| {
+            if capture[1]
+                .chars()
+                .any(|ch| language.learning.contains(&ch.script()))
+            {
+                format!("⟦{}⟧", &capture[1])
+            } else {
+                capture[0].to_string()
+            }
+        })
+        .into_owned()
+}
+
 /// Replace model markers and quote foreign-script word runs outside existing quotes.
 #[must_use]
 pub fn quote(text: &str, language: &Language) -> String {

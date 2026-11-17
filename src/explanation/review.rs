@@ -175,25 +175,7 @@ impl Review<'_> {
 
     /// Mark quoted learning phrases while leaving reader-language glosses intact.
     fn normalize(&self, text: &str) -> String {
-        use unicode_script::UnicodeScript;
-        let [open, close] = &self.language.context.quotes;
-        let pattern = format!(
-            "{}(?s:(.*?)){}",
-            regex::escape(open.trim()),
-            regex::escape(close.trim())
-        );
-        regex(&pattern)
-            .replace_all(text, |capture: &fancy_regex::Captures<'_>| {
-                if capture[1]
-                    .chars()
-                    .any(|ch| self.language.learning.contains(&ch.script()))
-                {
-                    format!("⟦{}⟧", &capture[1])
-                } else {
-                    capture[0].to_string()
-                }
-            })
-            .into_owned()
+        super::layout::mark(text, self.language)
     }
 
     fn mistake(&self, text: &str) -> bool {

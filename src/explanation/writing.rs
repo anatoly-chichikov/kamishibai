@@ -232,15 +232,19 @@ fn ask(writer: &mut impl Writer, prompt: String) -> Result<Option<Parts>> {
         .map(|parts| tidy(&parts)))
 }
 
-fn preserves(current: &Parts, edited: &Parts) -> bool {
+fn preserves(current: &Parts, edited: &Parts, language: &Language) -> bool {
     let pattern =
         regex::Regex::new("⟦[^⟦⟧]*⟧").expect("invariant: learning marker pattern must compile");
     let phrases = |parts: &Parts| {
         parts
             .strings()
             .into_iter()
-            .flat_map(|text| pattern.find_iter(text))
-            .map(|hit| hit.as_str().to_string())
+            .flat_map(|text| {
+                pattern
+                    .find_iter(&super::layout::mark(text, language))
+                    .map(|hit| hit.as_str().to_string())
+                    .collect::<Vec<_>>()
+            })
             .collect::<std::collections::BTreeSet<_>>()
     };
     phrases(edited).is_subset(&phrases(current))
@@ -289,7 +293,7 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
             .into_parts()
             .0
             .is_empty();
-        let intact = !accepted || preserves(&current, &edited);
+        let intact = !accepted || preserves(&current, &edited, language);
         let original = current;
         current = edited;
         let (mut fails, _) = judge(&task.input.card, &current, language).into_parts();
@@ -302,7 +306,7 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
                 writer,
                 task.prompt(&task.writer, Some(source), &fails, language)?,
             )? {
-                if !intact && !preserves(&original, &fixed) {
+                if !intact && !preserves(&original, &fixed, language) {
                     return Ok(None);
                 }
                 current = fixed;
@@ -555,6 +559,54 @@ mod tests {
         assert_eq!(
             rejected, 0,
             "safe deletion or reordering of unchanged learning phrases was rejected"
+        );
+    }
+
+    #[test]
+    fn quality_quote_normalization_cannot_discard_an_unchanged_learning_phrase() {
+        let case: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/marker_edits.json"
+        ))
+        .unwrap();
+        let language = Language::from_codes("ru", "en").unwrap();
+        let task = Task::from_input(
+            Input::new(
+                serde_json::from_value(case["job"]["card"].clone()).unwrap(),
+                case["job"]["sentence_known"].as_str().unwrap().into(),
+                String::new(),
+                String::new(),
+            ),
+            &language,
+        )
+        .unwrap();
+        let mut writer = Replies {
+            answers: case["attempts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(serde_json::Value::to_string)
+                .collect(),
+        };
+        let expected = super::tidy(&serde_json::from_value(case["attempts"][1].clone()).unwrap());
+        assert_eq!(
+            super::write(&mut writer, &task, &language).ok().flatten(),
+            Some(expected),
+            "changing quotation syntax discarded an unchanged learning phrase"
+        );
+    }
+
+    #[test]
+    fn quality_quote_normalization_cannot_hide_a_changed_learning_word() {
+        let case: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/marker_edits.json"
+        ))
+        .unwrap();
+        let current = serde_json::from_value(case["attempts"][0].clone()).unwrap();
+        let mut edited: super::Parts = serde_json::from_value(case["attempts"][1].clone()).unwrap();
+        edited.nuance.text = edited.nuance.text.replace("sweet", "sweat");
+        assert!(
+            !super::preserves(&current, &edited, &language("ru", "en")),
+            "a real word change escaped through quotation normalization"
         );
     }
 

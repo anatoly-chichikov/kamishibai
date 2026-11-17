@@ -59,6 +59,8 @@ Check every letter of every learning phrase and every example against {learning}
 
 Check facts before polishing style. A pronunciation comparison needs no added story about individual sounds. Never infer a sound from the spelling: verify any claimed first or last sound against the complete spoken word, including final consonants. If unsure, omit that sound detail. For every warning, test an ordinary context where the rejected phrase could be correct; qualify a real distinction or omit the warning. For every reason, check that it explains the actual difference rather than repeating a fact from another section. Do not expand a concise true statement with a less certain explanation.
 
+When repairing an existing answer, fix only the named problem and keep accepted sense labels. Do not invent a new contrast or reason during a repair. If an optional nuance cannot be made natural without a banned grammar term or a fabricated explanation, empty that nuance, its why and its example. Removing an optional part is a complete repair; filling every part is not a goal.
+
 Before you answer, read every sentence you wrote the way a {known}-speaking editor reads a text aloud. A sentence stays only if a person would say it to a friend across a table and the friend would understand it at once. Rewrite the sentence when it has any of these:
 - a phrase translated word for word from {learning};
 - office language where everyday words exist, in {known} words like {office};
