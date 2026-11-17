@@ -12,6 +12,9 @@ mod profile;
 mod prompt_examples;
 mod registry;
 
+#[cfg(test)]
+pub(crate) use explanation_examples::prompt_scripted;
+
 pub use labels::ReportLabels;
 pub use naming::{naming, prefix};
 pub use profile::{

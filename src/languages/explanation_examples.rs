@@ -179,13 +179,52 @@ impl ExplanationExamples {
     }
 }
 
-/// Check alphabetic characters against the declared reader writing systems.
+/// Check native letters and marks, requiring a native base for generic marks.
 pub(super) fn scripted(value: &str, code: &str) -> bool {
+    characters(value, code, false)
+}
+
+/// Check rendered instructions while allowing their ASCII prose outside native examples.
+#[cfg(test)]
+pub(crate) fn prompt_scripted(value: &str, code: &str) -> bool {
+    characters(value, code, true)
+}
+
+fn characters(value: &str, code: &str, ascii: bool) -> bool {
     let scripts = explanation_scripts(code);
-    value
-        .chars()
-        .filter(|ch| ch.is_alphabetic())
-        .all(|ch| scripts.contains(&ch.script()))
+    let pattern = regex::Regex::new(r"(?s)(\p{L})|(\p{M})|(.)")
+        .expect("invariant: script classification pattern must compile");
+    let mut base = false;
+    for capture in pattern.captures_iter(value) {
+        if capture.get(3).is_some() {
+            base = false;
+            continue;
+        }
+        let character = capture[0]
+            .chars()
+            .next()
+            .expect("invariant: script classification must consume one character");
+        if capture.get(2).is_some() && !base {
+            return false;
+        }
+        let extension = character.script_extension();
+        if extension.is_common() || extension.is_inherited() {
+            if !base {
+                return false;
+            }
+        } else {
+            let native = scripts
+                .iter()
+                .any(|script| extension.contains_script(*script));
+            if !(native || ascii && character.is_ascii()) {
+                return false;
+            }
+            if capture.get(1).is_some() {
+                base = native;
+            }
+        }
+    }
+    true
 }
 
 fn angle(value: &str) -> bool {
@@ -199,13 +238,85 @@ fn angle(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::ExplanationExamples;
+    use super::{ExplanationExamples, prompt_scripted, scripted};
     use serde_json::{Value, json};
 
     fn block(code: &str) -> Value {
         serde_json::from_str::<Value>(include_str!("../../assets/prompt_examples.json")).unwrap()
             [code]["card"]["explanation"]
             .clone()
+    }
+
+    #[test]
+    fn native_diacritics_cannot_be_rejected_as_foreign_scripts() {
+        let rejected = [
+            ("ar", "يُقال"),
+            ("ar", "شيئًا"),
+            ("fa", "دربارهٔ"),
+            ("fa", "بعداً"),
+            ("ru", "а\u{301}"),
+            ("en", "e\u{301}"),
+        ]
+        .into_iter()
+        .filter(|(code, text)| !scripted(text, code))
+        .collect::<Vec<_>>();
+        assert!(
+            rejected.is_empty(),
+            "native diacritics were rejected as foreign scripts: {rejected:?}"
+        );
+    }
+
+    #[test]
+    fn foreign_letters_and_marks_cannot_borrow_a_native_base() {
+        let accepted = [
+            ("ar", "قالя"),
+            ("fa", "گفت猫"),
+            ("ar", "ق\u{5b0}"),
+            ("ar", "ق\u{591}"),
+            ("fa", "گ\u{5b0}"),
+            ("ru", "а\u{64f}"),
+            ("en", "e\u{64f}"),
+        ]
+        .into_iter()
+        .filter(|(code, text)| scripted(text, code))
+        .collect::<Vec<_>>();
+        assert!(
+            accepted.is_empty(),
+            "a foreign letter or mark borrowed a native base: {accepted:?}"
+        );
+    }
+
+    #[test]
+    fn generic_marks_cannot_survive_without_a_native_letter_base() {
+        let accepted = [
+            ("ar", "\u{301}"),
+            ("fa", "\u{301}گ"),
+            ("en", "\u{301}"),
+            ("ru", "а \u{301}"),
+            ("en", "e.\u{301}"),
+            ("ru", "7\u{301}"),
+            ("ar", "\u{64f}"),
+            ("fa", "7\u{654}"),
+        ]
+        .into_iter()
+        .filter(|(code, text)| scripted(text, code))
+        .collect::<Vec<_>>();
+        assert!(
+            accepted.is_empty(),
+            "a generic combining mark survived without a native base: {accepted:?}"
+        );
+    }
+
+    #[test]
+    fn prompt_marks_cannot_use_ascii_prose_as_a_foreign_base() {
+        let accepted = [("ar", "a\u{301}"), ("fa", "a\u{301}"), ("ru", "e\u{301}")]
+            .into_iter()
+            .filter(|(code, text)| prompt_scripted(text, code))
+            .collect::<Vec<_>>();
+        assert!(
+            accepted.is_empty(),
+            "an ASCII instruction letter lent its script to a foreign mark: {accepted:?}"
+        );
     }
 
     #[test]

@@ -268,10 +268,8 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
 mod tests {
     use std::collections::BTreeMap;
 
-    use unicode_script::UnicodeScript;
-
     use super::{Card, Input, Language, Task, substitutions};
-    use crate::languages::{LanguagePromptExamples, explanation_scripts};
+    use crate::languages::{LanguagePromptExamples, explanation_scripts, prompt_scripted};
 
     fn examples() -> BTreeMap<String, LanguagePromptExamples> {
         serde_json::from_str(include_str!("../../assets/prompt_examples.json")).unwrap()
@@ -333,9 +331,7 @@ mod tests {
                         faults.push(format!("{known}->{learning}: missing {field}"));
                     }
                 }
-                if both.chars().any(|ch| {
-                    ch.is_alphabetic() && !ch.is_ascii() && !language.known.contains(&ch.script())
-                }) {
+                if !prompt_scripted(&both, known) {
                     faults.push(format!("{known}->{learning}: foreign script"));
                 }
                 let injected = [false, true]

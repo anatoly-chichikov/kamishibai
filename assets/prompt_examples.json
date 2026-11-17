@@ -173,22 +173,64 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "大家会说",
+            "你会说",
+            "你会听到"
+          ],
+          "office": [
+            "进行",
+            "加以",
+            "予以",
+            "用于",
+            "该",
+            "相关",
+            "所述",
+            "以便",
+            "具有",
+            "作为"
+          ],
+          "vague": [
+            "东西",
+            "事物",
+            "物品",
+            "对象",
+            "过程"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "跟朋友聊天时⟦1⟧",
+            "good": "跟朋友聊天时会说⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "炒",
+              "bad": "用少量油在锅里翻动加热",
+              "good": "青菜、鸡蛋、米饭"
+            },
+            {
+              "head": "串",
+              "bad": "连在一起的一组东西",
+              "good": "葡萄、钥匙、糖葫芦"
+            }
+          ],
+          "openers": [
+            "在菜市场和饭馆里",
+            "在医院",
+            "过年拜年的时候"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "一般说⟦1⟧，不说⟦2⟧",
+          "reasons": [
+            "⟦1⟧说明<正确的词在这里多了什么意思>。",
+            "说⟦2⟧就成了<另一个你没想说的意思>。"
+          ],
+          "narrated": [
+            "放在句末",
+            "要和⟦1⟧连用"
+          ]
         },
         "letters": []
       },
@@ -267,22 +309,66 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "dicen",
+            "dirás",
+            "oirás"
+          ],
+          "office": [
+            "se utiliza",
+            "se emplea",
+            "en el marco de",
+            "a nivel de",
+            "de cara a",
+            "con el fin de",
+            "mediante",
+            "llevar a cabo",
+            "proceder a",
+            "dicho",
+            "en relación con",
+            "en el ámbito de"
+          ],
+          "vague": [
+            "cosa",
+            "elemento",
+            "asunto",
+            "acción",
+            "proceso"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "A un niño, ⟦1⟧",
+            "good": "A un niño le dices ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "tender",
+              "bad": "extender algo para que se seque",
+              "good": "la ropa, las sábanas, las toallas"
+            },
+            {
+              "head": "docena",
+              "bad": "conjunto de doce unidades",
+              "good": "de huevos, de rosas, de galletas"
+            }
+          ],
+          "openers": [
+            "En el bar y en el mercado",
+            "En una entrevista de trabajo",
+            "Cuando alguien se enfada"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Se dice ⟦1⟧, no ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ indica <lo que añade aquí la palabra correcta>.",
+            "⟦2⟧ querría decir <otra cosa que no buscabas>."
+          ],
+          "narrated": [
+            "va delante",
+            "se construye con ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -366,22 +452,63 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "言います",
+            "耳にします",
+            "見かけます"
+          ],
+          "office": [
+            "用いられる",
+            "使用される",
+            "において",
+            "に関して",
+            "に際して",
+            "を目的として",
+            "当該",
+            "を行う",
+            "実施する"
+          ],
+          "vague": [
+            "物事",
+            "事柄",
+            "対象",
+            "行為",
+            "過程"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "友達には⟦1⟧",
+            "good": "友達には⟦1⟧と言います"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "磨く",
+              "bad": "表面をこすってきれいにする",
+              "good": "歯、靴、床"
+            },
+            {
+              "head": "粒",
+              "bad": "小さくて丸いもの",
+              "good": "米、ぶどう、汗"
+            }
+          ],
+          "openers": [
+            "コンビニや駅で",
+            "病院で",
+            "目上の人と話すとき"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "⟦1⟧と言い、⟦2⟧とは言いません",
+          "reasons": [
+            "⟦1⟧は<正しい語がここで加える意味>を表します。",
+            "⟦2⟧だと<言うつもりのなかった別の意味>になります。"
+          ],
+          "narrated": [
+            "文の最後に置かれます",
+            "⟦1⟧と一緒に使います"
+          ]
         },
         "letters": []
       },
@@ -460,22 +587,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "on dit",
+            "vous direz",
+            "vous entendrez"
+          ],
+          "office": [
+            "s’emploie",
+            "est utilisé",
+            "dans le cadre de",
+            "au niveau de",
+            "en matière de",
+            "par le biais de",
+            "procéder à",
+            "effectuer",
+            "s’avérer",
+            "relatif à",
+            "dans un contexte"
+          ],
+          "vague": [
+            "chose",
+            "élément",
+            "objet",
+            "action",
+            "le fait de"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Dans une lettre officielle, ⟦1⟧",
+            "good": "Dans une lettre officielle, on écrit ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "plier",
+              "bad": "rabattre une partie sur une autre",
+              "good": "une lettre, une serviette, le linge"
+            },
+            {
+              "head": "tranche",
+              "bad": "morceau mince coupé dans un aliment",
+              "good": "de pain, de jambon, de citron"
+            }
+          ],
+          "openers": [
+            "Au marché et à la boulangerie",
+            "Au téléphone",
+            "Quand on s’excuse"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "On dit ⟦1⟧, et non ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ indique <ce que le bon mot ajoute ici>.",
+            "⟦2⟧ voudrait dire <autre chose que ce que vous voulez dire>."
+          ],
+          "narrated": [
+            "se place avant",
+            "se construit avec ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -559,22 +729,66 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "man sagt",
+            "du sagst",
+            "du hörst"
+          ],
+          "office": [
+            "wird verwendet",
+            "findet Verwendung",
+            "bezüglich",
+            "hinsichtlich",
+            "im Rahmen",
+            "im Zusammenhang mit",
+            "mittels",
+            "zwecks",
+            "seitens",
+            "erfolgt",
+            "im Kontext von"
+          ],
+          "vague": [
+            "Sache",
+            "Ding",
+            "Gegenstand",
+            "Objekt",
+            "Vorgang",
+            "Handlung"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Unter Freunden lieber ⟦1⟧",
+            "good": "Unter Freunden sagt man lieber ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "schneiden",
+              "bad": "mit einer Klinge in Teile trennen",
+              "good": "Brot, Gemüse, Haare"
+            },
+            {
+              "head": "Schlüssel",
+              "bad": "Werkzeug zum Öffnen eines Schlosses",
+              "good": "für Haustür, Auto, Briefkasten"
+            }
+          ],
+          "openers": [
+            "Im Büro und in E-Mails",
+            "Beim Bäcker",
+            "Wenn Kinder streiten"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Man sagt ⟦1⟧, nicht ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ zeigt <was das richtige Wort hier hinzufügt>.",
+            "⟦2⟧ hieße <etwas anderes, das du nicht meinst>."
+          ],
+          "narrated": [
+            "steht am Satzende",
+            "wird mit ⟦1⟧ gebildet"
+          ]
         },
         "letters": []
       },
@@ -815,22 +1029,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "si dice",
+            "dirai",
+            "sentirai"
+          ],
+          "office": [
+            "viene utilizzato",
+            "risulta",
+            "effettuare",
+            "procedere a",
+            "in merito a",
+            "nell’ambito di",
+            "relativamente a",
+            "al fine di",
+            "mediante",
+            "suddetto",
+            "in un contesto di"
+          ],
+          "vague": [
+            "cosa",
+            "elemento",
+            "oggetto",
+            "azione",
+            "aspetto"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Al bar, tra amici, ⟦1⟧",
+            "good": "Al bar, tra amici, si dice ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "versare",
+              "bad": "far uscire un liquido da un recipiente",
+              "good": "il caffè, l’acqua, il vino"
+            },
+            {
+              "head": "manico",
+              "bad": "parte di un oggetto fatta per impugnarlo",
+              "good": "della tazza, della padella, dell’ombrello"
+            }
+          ],
+          "openers": [
+            "Al mercato e in piazza",
+            "Dal medico",
+            "Quando si litiga in famiglia"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Si dice ⟦1⟧, non ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ fa capire <cosa aggiunge qui la parola giusta>.",
+            "⟦2⟧ vorrebbe dire <un’altra cosa, che non intendevi>."
+          ],
+          "narrated": [
+            "va messo prima",
+            "si costruisce con ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -914,22 +1171,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "dizem",
+            "você vai dizer",
+            "você vai ouvir"
+          ],
+          "office": [
+            "é utilizado",
+            "no âmbito de",
+            "no que diz respeito a",
+            "no que tange a",
+            "com o intuito de",
+            "por meio de",
+            "mediante",
+            "efetuar",
+            "proceder a",
+            "o referido",
+            "a nível de"
+          ],
+          "vague": [
+            "coisa",
+            "elemento",
+            "questão",
+            "ação",
+            "aspecto"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Com o chefe, ⟦1⟧",
+            "good": "Com o chefe, você diz ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "alugar",
+              "bad": "usar algo por um tempo em troca de pagamento",
+              "good": "um apartamento, um carro, uma bicicleta"
+            },
+            {
+              "head": "tampa",
+              "bad": "peça que fecha a abertura de um recipiente",
+              "good": "da panela, do pote, da garrafa"
+            }
+          ],
+          "openers": [
+            "Na feira e no supermercado",
+            "No consultório",
+            "Quando alguém se despede"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Diz-se ⟦1⟧, e não ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ mostra <o que a palavra certa acrescenta aqui>.",
+            "⟦2⟧ significaria <outra coisa, que você não quis dizer>."
+          ],
+          "narrated": [
+            "vem antes",
+            "se constrói com ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -1013,22 +1313,64 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "λένε",
+            "θα πεις",
+            "θα ακούσεις"
+          ],
+          "office": [
+            "χρησιμοποιείται",
+            "στο πλαίσιο",
+            "όσον αφορά",
+            "αναφορικά με",
+            "με σκοπό",
+            "μέσω",
+            "εν λόγω",
+            "προβαίνει σε",
+            "διενεργείται",
+            "ως προς",
+            "δύναται"
+          ],
+          "vague": [
+            "πράγμα",
+            "αντικείμενο",
+            "στοιχείο",
+            "ενέργεια",
+            "διαδικασία"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Σε φίλους μάλλον ⟦1⟧",
+            "good": "Σε φίλους μάλλον θα πεις ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "στύβω",
+              "bad": "πιέζω κάτι για να βγει το υγρό του",
+              "good": "λεμόνι, πορτοκάλι, ρούχα"
+            },
+            {
+              "head": "κουταλιά",
+              "bad": "ποσότητα που χωράει σε ένα κουτάλι",
+              "good": "ζάχαρη, μέλι, λάδι"
+            }
+          ],
+          "openers": [
+            "Στη λαϊκή και στο περίπτερο",
+            "Στον γιατρό",
+            "Όταν παζαρεύουν"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Λέμε ⟦1⟧, όχι ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ δείχνει <τι προσθέτει εδώ η σωστή λέξη>.",
+            "⟦2⟧ θα σήμαινε <κάτι άλλο, που δεν εννοείς>."
+          ],
+          "narrated": [
+            "μπαίνει στο τέλος"
+          ]
         },
         "letters": []
       },
@@ -1112,22 +1454,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "ze zeggen",
+            "je zegt",
+            "je hoort"
+          ],
+          "office": [
+            "wordt gebruikt",
+            "inzake",
+            "middels",
+            "teneinde",
+            "ten behoeve van",
+            "met betrekking tot",
+            "in het kader van",
+            "derhalve",
+            "betreffende",
+            "dient te",
+            "in de context van"
+          ],
+          "vague": [
+            "ding",
+            "zaak",
+            "voorwerp",
+            "object",
+            "handeling"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Tegen je baas liever ⟦1⟧",
+            "good": "Tegen je baas zeg je liever ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "inpakken",
+              "bad": "iets in een omhulsel stoppen",
+              "good": "een cadeau, boterhammen"
+            },
+            {
+              "head": "kwart",
+              "bad": "een van vier gelijke delen",
+              "good": "van de taart, van de prijs, van de route"
+            }
+          ],
+          "openers": [
+            "Op verjaardagen en feestjes",
+            "Bij de huisarts",
+            "Als je iemand bedankt"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Je zegt ⟦1⟧, niet ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ laat zien <wat het juiste woord hier toevoegt>.",
+            "⟦2⟧ zou <iets anders dat je niet bedoelt> betekenen."
+          ],
+          "narrated": [
+            "staat achteraan",
+            "gaat samen met ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -1211,22 +1596,64 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "말해요",
+            "듣게 돼요",
+            "보게 돼요"
+          ],
+          "office": [
+            "사용된다",
+            "에 있어서",
+            "에 의해",
+            "을 통해",
+            "에 대하여",
+            "로 인하여",
+            "의 경우",
+            "해당",
+            "실시하다",
+            "진행하다",
+            "을 가지다"
+          ],
+          "vague": [
+            "사물",
+            "물건",
+            "대상",
+            "행위",
+            "과정"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "친구끼리는 보통 ⟦1⟧",
+            "good": "친구끼리는 보통 이렇게 말해요: ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "끓이다",
+              "bad": "액체를 뜨겁게 해서 거품이 솟게 하다",
+              "good": "라면, 찌개, 보리차"
+            },
+            {
+              "head": "송이",
+              "bad": "꽃이나 열매가 한데 달린 덩이",
+              "good": "포도, 장미, 바나나"
+            }
+          ],
+          "openers": [
+            "시장이나 식당에서",
+            "병원에서",
+            "어른께 인사할 때"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "⟦1⟧처럼 말하고, ⟦2⟧처럼은 말하지 않아요",
+          "reasons": [
+            "⟦1⟧에 이런 뜻이 있어요: <맞는 말이 여기서 더해 주는 뜻>.",
+            "⟦2⟧처럼 말하면 <뜻하지 않은 다른 의미>가 돼요."
+          ],
+          "narrated": [
+            "문장 끝에 와요"
+          ]
         },
         "letters": []
       },
@@ -1299,22 +1726,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "denir",
+            "dersin",
+            "duyarsın"
+          ],
+          "office": [
+            "kullanılmaktadır",
+            "söz konusu",
+            "kapsamında",
+            "bağlamında",
+            "hususunda",
+            "amacıyla",
+            "vasıtasıyla",
+            "yönelik",
+            "gerçekleştirmek",
+            "mevcut",
+            "itibarıyla"
+          ],
+          "vague": [
+            "şey",
+            "nesne",
+            "eylem",
+            "süreç",
+            "unsur"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Arkadaşına daha çok ⟦1⟧",
+            "good": "Arkadaşına daha çok ⟦1⟧ dersin"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "kızartmak",
+              "bad": "yağda pişirmek",
+              "good": "patates, balık, patlıcan"
+            },
+            {
+              "head": "bardak",
+              "bad": "içine içecek konan kap",
+              "good": "çay, su, ayran"
+            }
+          ],
+          "openers": [
+            "Pazarda ve bakkalda",
+            "Doktorda",
+            "Misafirlikte"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "⟦1⟧ denir, ⟦2⟧ denmez",
+          "reasons": [
+            "⟦1⟧ burada <doğru kelimenin kattığı anlamı> gösterir.",
+            "⟦2⟧ dersen <istemediğin başka bir anlam> çıkar."
+          ],
+          "narrated": [
+            "cümlenin sonuna gelir",
+            "⟦1⟧ ile bağlanır"
+          ]
         },
         "letters": []
       },
@@ -1387,22 +1857,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "mówi się",
+            "powiesz",
+            "usłyszysz"
+          ],
+          "office": [
+            "stosuje się",
+            "w ramach",
+            "w kontekście",
+            "w celu",
+            "dokonać",
+            "w zakresie",
+            "w oparciu o",
+            "posiadać",
+            "przedmiotowy",
+            "odnośnie do",
+            "za pośrednictwem"
+          ],
+          "vague": [
+            "rzecz",
+            "przedmiot",
+            "obiekt",
+            "czynność",
+            "zjawisko"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Koledze raczej ⟦1⟧",
+            "good": "Koledze raczej powiesz ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "obierać",
+              "bad": "usuwać zewnętrzną warstwę",
+              "good": "ziemniaki, jabłko, jajko"
+            },
+            {
+              "head": "kawałek",
+              "bad": "część oddzielona od całości",
+              "good": "ciasta, chleba, mydła"
+            }
+          ],
+          "openers": [
+            "Na poczcie i w urzędzie",
+            "U fryzjera",
+            "Kiedy ktoś składa życzenia"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Mówi się ⟦1⟧, a nie ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ pokazuje <co dodaje tu właściwe słowo>.",
+            "⟦2⟧ znaczyłoby <coś innego, niż masz na myśli>."
+          ],
+          "narrated": [
+            "stawia się na końcu",
+            "łączy się z ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -1475,24 +1988,70 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "кажуть",
+            "ти скажеш",
+            "ти почуєш"
+          ],
+          "office": [
+            "здійснюється",
+            "використовується",
+            "застосовується",
+            "з метою",
+            "шляхом",
+            "у разі",
+            "стосовно",
+            "даний",
+            "в якості",
+            "вищезазначений",
+            "являє собою",
+            "відповідний"
+          ],
+          "vague": [
+            "річ",
+            "предмет",
+            "об’єкт",
+            "дія",
+            "явище"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Дитині радше ⟦1⟧",
+            "good": "Дитині радше скажеш ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "прати",
+              "bad": "очищати тканину водою",
+              "good": "сорочки, рушники, постіль"
+            },
+            {
+              "head": "край",
+              "bad": "зовнішня межа чогось",
+              "good": "столу, дороги, тарілки"
+            }
+          ],
+          "openers": [
+            "На пошті й у банку",
+            "У перукарні",
+            "Коли хтось вибачається"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Кажуть ⟦1⟧, а не ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ показує <що тут додає правильне слово>.",
+            "⟦2⟧ означало б <інше, ніж ти хочеш сказати>."
+          ],
+          "narrated": [
+            "ставлять наприкінці",
+            "приєднують через ⟦1⟧"
+          ]
         },
-        "letters": []
+        "letters": [
+          "ґ"
+        ]
       },
       "writing": [
         {
@@ -1563,22 +2122,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "orang bilang",
+            "kamu bilang",
+            "kamu dengar"
+          ],
+          "office": [
+            "merupakan",
+            "digunakan",
+            "dalam rangka",
+            "dalam konteks",
+            "guna",
+            "terkait",
+            "sehubungan dengan",
+            "adapun",
+            "tersebut",
+            "melakukan",
+            "yang mana"
+          ],
+          "vague": [
+            "sesuatu",
+            "barang",
+            "benda",
+            "tindakan",
+            "kegiatan"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Dengan teman, biasanya ⟦1⟧",
+            "good": "Dengan teman, biasanya kamu bilang ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "menjemur",
+              "bad": "mengeringkan sesuatu di bawah matahari",
+              "good": "pakaian, kasur, ikan asin"
+            },
+            {
+              "head": "bungkus",
+              "bad": "kemasan untuk membawa sesuatu",
+              "good": "nasi, rokok, mi"
+            }
+          ],
+          "openers": [
+            "Di pasar dan di warung",
+            "Di klinik",
+            "Saat Lebaran"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Orang bilang ⟦1⟧, bukan ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ menunjukkan <apa yang ditambahkan kata yang tepat di sini>.",
+            "⟦2⟧ bisa berarti <hal lain yang tidak kamu maksud>."
+          ],
+          "narrated": [
+            "diletakkan di akhir",
+            "disambung dengan ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -1651,22 +2253,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "कहते हैं",
+            "आप कहेंगे",
+            "आप सुनेंगे"
+          ],
+          "office": [
+            "प्रयोग किया जाता है",
+            "के संदर्भ में",
+            "के अंतर्गत",
+            "हेतु",
+            "के माध्यम से",
+            "के उद्देश्य से",
+            "उक्त",
+            "के संबंध में",
+            "एवं",
+            "संबंधित",
+            "द्वारा"
+          ],
+          "vague": [
+            "चीज़",
+            "वस्तु",
+            "तत्त्व",
+            "कार्य",
+            "प्रक्रिया"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "दोस्तों के बीच ज़्यादातर ⟦1⟧",
+            "good": "दोस्तों के बीच ज़्यादातर ⟦1⟧ कहते हैं"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "बेलना",
+              "bad": "किसी चीज़ को दबाकर पतला फैलाना",
+              "good": "रोटी, पूरी, पराठा"
+            },
+            {
+              "head": "चुटकी",
+              "bad": "बहुत थोड़ी मात्रा",
+              "good": "नमक, हल्दी, हींग"
+            }
+          ],
+          "openers": [
+            "बाज़ार में और दुकान पर",
+            "डॉक्टर के पास",
+            "जब कोई मेहमान आता है"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "⟦1⟧ कहते हैं, ⟦2⟧ नहीं",
+          "reasons": [
+            "⟦1⟧ बताता है <कि सही शब्द यहाँ क्या जोड़ता है>।",
+            "⟦2⟧ का मतलब <कोई दूसरी बात, जो आप कहना नहीं चाहते> होता।"
+          ],
+          "narrated": [
+            "वाक्य के आख़िर में आता है",
+            "⟦1⟧ के साथ जुड़ता है"
+          ]
         },
         "letters": []
       },
@@ -1739,22 +2384,64 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "يقولون",
+            "ستقول",
+            "ستسمع"
+          ],
+          "office": [
+            "يتم",
+            "في إطار",
+            "في سياق",
+            "بهدف",
+            "من خلال",
+            "بواسطة",
+            "فيما يتعلق",
+            "المذكور",
+            "على صعيد",
+            "حيث إن"
+          ],
+          "vague": [
+            "شيء",
+            "أمر",
+            "عنصر",
+            "عمل",
+            "عملية"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "مع الأصدقاء ⟦1⟧",
+            "good": "مع الأصدقاء تقول ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "قطف",
+              "bad": "أخذ الثمرة أو الزهرة من نبتتها",
+              "good": "العنب، الزهور، الزيتون"
+            },
+            {
+              "head": "باقة",
+              "bad": "مجموعة من الأزهار أو النباتات مربوطة معا",
+              "good": "ورد، بقدونس، نعناع"
+            }
+          ],
+          "openers": [
+            "في السوق وفي المقهى",
+            "عند الطبيب",
+            "عندما يتعارف الناس"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "نقول ⟦1⟧ وليس ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ يبين <ما تضيفه الكلمة الصحيحة هنا>.",
+            "لو قلت ⟦2⟧ لفهم السامع <معنى آخر لم تقصده>."
+          ],
+          "narrated": [
+            "يأتي في آخر الجملة",
+            "يتصل بكلمة ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -1827,22 +2514,64 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "พูดกันว่า",
+            "คุณจะพูดว่า",
+            "คุณจะได้ยิน"
+          ],
+          "office": [
+            "ถูกใช้",
+            "ทำการ",
+            "มีการ",
+            "ได้รับการ",
+            "ในบริบทของ",
+            "ในส่วนของ",
+            "เพื่อที่จะ",
+            "โดยการ",
+            "ดังกล่าว",
+            "ดำเนินการ"
+          ],
+          "vague": [
+            "สิ่ง",
+            "สิ่งของ",
+            "วัตถุ",
+            "การกระทำ",
+            "กระบวนการ"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "กับเพื่อนสนิท⟦1⟧",
+            "good": "กับเพื่อนสนิทมักพูดว่า⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "ตำ",
+              "bad": "ทุบให้ละเอียดด้วยสาก",
+              "good": "พริกกระเทียมหรือมะละกอ"
+            },
+            {
+              "head": "จาน",
+              "bad": "ภาชนะแบนสำหรับใส่อาหาร",
+              "good": "ข้าวผัดหรือส้มตำ"
+            }
+          ],
+          "openers": [
+            "ในตลาดและร้านอาหาร",
+            "ที่โรงพยาบาล",
+            "เวลาไหว้ผู้ใหญ่"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "เขาพูดว่า⟦1⟧ไม่พูดว่า⟦2⟧",
+          "reasons": [
+            "⟦1⟧บอกว่า<คำที่ถูกต้องเพิ่มความหมายอะไรตรงนี้>",
+            "ถ้าพูดว่า⟦2⟧จะกลายเป็น<อีกความหมายที่คุณไม่ได้ตั้งใจ>"
+          ],
+          "narrated": [
+            "วางไว้ท้ายประโยค",
+            "ต่อด้วย⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -1915,22 +2644,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "אומרים",
+            "שומעים",
+            "כותבים"
+          ],
+          "office": [
+            "נעשה שימוש",
+            "במסגרת",
+            "בהקשר של",
+            "לצורך",
+            "על מנת",
+            "באמצעות",
+            "בנוגע",
+            "האמור",
+            "לבצע",
+            "הנ״ל",
+            "בגין"
+          ],
+          "vague": [
+            "דבר",
+            "פריט",
+            "אובייקט",
+            "פעולה",
+            "תהליך"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "בשיחה עם הבוס ⟦1⟧",
+            "good": "בשיחה עם הבוס אומרים ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "לשטוף",
+              "bad": "לנקות במים",
+              "good": "כלים, רצפה, ידיים"
+            },
+            {
+              "head": "שקית",
+              "bad": "כלי קטן ורך מניילון או מנייר",
+              "good": "חלב, במבה, זבל"
+            }
+          ],
+          "openers": [
+            "בשוק ובמכולת",
+            "אצל הרופא",
+            "כשנפגשים במקרה"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "אומרים ⟦1⟧, לא ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ מראה <מה המילה הנכונה מוסיפה כאן>.",
+            "⟦2⟧ אומר <משהו אחר ממה שהתכוונו>."
+          ],
+          "narrated": [
+            "בא בסוף המשפט",
+            "מתחבר עם ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -2003,22 +2775,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "người ta nói",
+            "bạn sẽ nói",
+            "bạn sẽ nghe"
+          ],
+          "office": [
+            "được sử dụng",
+            "nhằm",
+            "trong bối cảnh",
+            "đối với",
+            "thông qua",
+            "với tư cách là",
+            "tiến hành",
+            "thực hiện",
+            "nêu trên",
+            "mang tính",
+            "liên quan đến"
+          ],
+          "vague": [
+            "thứ",
+            "vật",
+            "đối tượng",
+            "hành động",
+            "quá trình"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Với bạn bè thì ⟦1⟧",
+            "good": "Với bạn bè, người ta nói ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "gói",
+              "bad": "bọc kín một vật bằng giấy hoặc lá",
+              "good": "quà, bánh chưng, hàng"
+            },
+            {
+              "head": "bát",
+              "bad": "đồ đựng thức ăn hình tròn, miệng rộng",
+              "good": "cơm, canh, phở"
+            }
+          ],
+          "openers": [
+            "Ở chợ và ngoài quán",
+            "Ở phòng khám",
+            "Khi gặp người lớn tuổi"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Người ta nói ⟦1⟧, chứ không nói ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ cho thấy <từ đúng thêm ý gì ở đây>.",
+            "⟦2⟧ sẽ có nghĩa là <một ý khác mà bạn không định nói>."
+          ],
+          "narrated": [
+            "đứng ở cuối câu",
+            "đi kèm với ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -2091,22 +2906,66 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "říká se",
+            "řekneš",
+            "uslyšíš"
+          ],
+          "office": [
+            "používá se",
+            "v rámci",
+            "v kontextu",
+            "za účelem",
+            "prostřednictvím",
+            "v souvislosti s",
+            "provést",
+            "uskutečnit",
+            "daný",
+            "příslušný",
+            "jakožto",
+            "ohledně"
+          ],
+          "vague": [
+            "věc",
+            "předmět",
+            "objekt",
+            "činnost",
+            "děj"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Učiteli spíš ⟦1⟧",
+            "good": "Učiteli spíš řekneš ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "zamést",
+              "bad": "odstranit nečistotu koštětem",
+              "good": "podlahu, dvůr, schody"
+            },
+            {
+              "head": "hrst",
+              "bad": "množství, které se vejde do dlaně",
+              "good": "ořechů, rýže, třešní"
+            }
+          ],
+          "openers": [
+            "V tramvaji a na nádraží",
+            "U doktora",
+            "Když se v hospodě platí"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Říká se ⟦1⟧, ne ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ ukazuje <co tu správné slovo přidává>.",
+            "⟦2⟧ by znamenalo <něco jiného, než máš na mysli>."
+          ],
+          "narrated": [
+            "dává se na konec",
+            "pojí se s ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -2206,22 +3065,66 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "kaže se",
+            "reći ćeš",
+            "čućeš"
+          ],
+          "office": [
+            "vrši se",
+            "koristi se",
+            "u okviru",
+            "u kontekstu",
+            "u cilju",
+            "putem",
+            "u svojstvu",
+            "izvršiti",
+            "shodno",
+            "u pogledu",
+            "predmetni",
+            "navedeni"
+          ],
+          "vague": [
+            "stvar",
+            "predmet",
+            "objekat",
+            "radnja",
+            "pojava"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Profesoru pre ⟦1⟧",
+            "good": "Profesoru ćeš pre reći ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "zaliti",
+              "bad": "dati vodu biljkama",
+              "good": "cveće, baštu, travnjak"
+            },
+            {
+              "head": "gutljaj",
+              "bad": "količina tečnosti koja se proguta odjednom",
+              "good": "vode, kafe, vina"
+            }
+          ],
+          "openers": [
+            "Na pijaci i u prodavnici",
+            "Kod zubara",
+            "Kad se ljudi pozdravljaju"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Kaže se ⟦1⟧, a ne ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ pokazuje <šta tačna reč ovde dodaje>.",
+            "⟦2⟧ bi značilo <nešto drugo, a ne ono što misliš>."
+          ],
+          "narrated": [
+            "stavlja se na kraj",
+            "ide uz ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -2332,22 +3235,64 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "ამბობენ",
+            "იტყვით",
+            "გაიგონებთ"
+          ],
+          "office": [
+            "წარმოადგენს",
+            "გამოიყენება",
+            "ხორციელდება",
+            "ფარგლებში",
+            "მიზნით",
+            "საშუალებით",
+            "მიმართებით",
+            "აღნიშნული",
+            "შესაბამისი",
+            "თვალსაზრისით"
+          ],
+          "vague": [
+            "ნივთი",
+            "საგანი",
+            "ობიექტი",
+            "მოქმედება",
+            "პროცესი"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "მეგობრებთან ⟦1⟧",
+            "good": "მეგობრებთან ამბობენ ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "დაფქვა",
+              "bad": "მყარის წვრილ ფხვნილად ქცევა",
+              "good": "ყავა, ხორბალი, წიწაკა"
+            },
+            {
+              "head": "წვეთი",
+              "bad": "სითხის პატარა მრგვალი ნაწილი",
+              "good": "წვიმის, ღვინის, ოფლის"
+            }
+          ],
+          "openers": [
+            "ბაზარში და მაღაზიაში",
+            "ექიმთან",
+            "სუფრაზე სადღეგრძელოს დროს"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "ამბობენ ⟦1⟧ და არა ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ აჩვენებს <რას ამატებს აქ სწორი სიტყვა>.",
+            "⟦2⟧ რომ თქვათ, გამოვა <სხვა რამ, რაც არ გიგულისხმიათ>."
+          ],
+          "narrated": [
+            "წინადადების ბოლოს დგება",
+            "⟦1⟧ სიტყვით უკავშირდება"
+          ]
         },
         "letters": []
       },
@@ -2458,22 +3403,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "ասում են",
+            "կասեք",
+            "կլսեք"
+          ],
+          "office": [
+            "հանդիսանում է",
+            "օգտագործվում է",
+            "կիրառվում է",
+            "իրականացվում է",
+            "շրջանակներում",
+            "համատեքստում",
+            "նպատակով",
+            "միջոցով",
+            "վերաբերյալ",
+            "տվյալ",
+            "համապատասխան"
+          ],
+          "vague": [
+            "բան",
+            "առարկա",
+            "օբյեկտ",
+            "գործողություն",
+            "գործընթաց"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Ընկերների հետ ավելի շուտ ⟦1⟧",
+            "good": "Ընկերների հետ ավելի շուտ կասեք ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "կարել",
+              "bad": "թելով միացնել կտորները",
+              "good": "շոր, կոճակ, վարագույր"
+            },
+            {
+              "head": "կես",
+              "bad": "երկու հավասար մասերից մեկը",
+              "good": "հացի, ձմերուկի, խնձորի"
+            }
+          ],
+          "openers": [
+            "Շուկայում և խանութում",
+            "Բժշկի մոտ",
+            "Երբ հյուր է գալիս"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Ասում են ⟦1⟧, ոչ թե ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ բառը ցույց է տալիս <ինչ է ավելացնում այստեղ ճիշտ բառը>։",
+            "⟦2⟧ կնշանակեր <մի այլ բան, որ նկատի չունեք>։"
+          ],
+          "narrated": [
+            "դրվում է նախադասության վերջում",
+            "կապվում է ⟦1⟧ բառով"
+          ]
         },
         "letters": []
       },
@@ -2584,22 +3572,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "می‌گویند",
+            "می‌گویید",
+            "می‌شنوید"
+          ],
+          "office": [
+            "می‌باشد",
+            "مورد استفاده قرار می‌گیرد",
+            "در راستای",
+            "به منظور",
+            "توسط",
+            "جهت",
+            "در خصوص",
+            "مذکور",
+            "نمودن",
+            "اقدام به",
+            "از طریق"
+          ],
+          "vague": [
+            "چیز",
+            "مورد",
+            "شیء",
+            "عمل",
+            "فرایند"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "با دوستان بیشتر ⟦1⟧",
+            "good": "با دوستان بیشتر ⟦1⟧ می‌گویید"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "دم کردن",
+              "bad": "خیس کردن چیزی در آب داغ تا عطرش را بدهد",
+              "good": "چای، گل‌گاوزبان"
+            },
+            {
+              "head": "مشت",
+              "bad": "مقداری که در یک دست بسته جا می‌شود",
+              "good": "برنج، آجیل، نمک"
+            }
+          ],
+          "openers": [
+            "در بازار و نانوایی",
+            "در مطب دکتر",
+            "وقتی مهمان می‌آید"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "می‌گویند ⟦1⟧، نه ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ نشان می‌دهد <واژه درست اینجا چه چیزی اضافه می‌کند>.",
+            "اگر بگویید ⟦2⟧، یعنی <چیزی که منظورتان نیست>."
+          ],
+          "narrated": [
+            "آخر جمله می‌آید",
+            "با ⟦1⟧ همراه می‌شود"
+          ]
         },
         "letters": []
       },
@@ -2710,22 +3741,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "man säger",
+            "du säger",
+            "du får höra"
+          ],
+          "office": [
+            "används",
+            "avseende",
+            "beträffande",
+            "i syfte att",
+            "medelst",
+            "erhålla",
+            "tillhandahålla",
+            "i samband med",
+            "ovan nämnda",
+            "i form av",
+            "i enlighet med"
+          ],
+          "vague": [
+            "sak",
+            "föremål",
+            "objekt",
+            "handling",
+            "process"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Till ett barn hellre ⟦1⟧",
+            "good": "Till ett barn säger man hellre ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "låna",
+              "bad": "ta något för en tid och lämna tillbaka",
+              "good": "pengar, en bok, en laddare"
+            },
+            {
+              "head": "ett par",
+              "bad": "två saker av samma slag",
+              "good": "skor, strumpor, vantar"
+            }
+          ],
+          "openers": [
+            "På jobbet och i mejl",
+            "Hos tandläkaren",
+            "När man hälsar"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Man säger ⟦1⟧, inte ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ visar <vad det rätta ordet tillför här>.",
+            "⟦2⟧ skulle betyda <något annat som du inte menar>."
+          ],
+          "narrated": [
+            "står sist",
+            "kopplas ihop med ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -2836,24 +3910,70 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "se spune",
+            "o să spui",
+            "o să auzi"
+          ],
+          "office": [
+            "este utilizat",
+            "în cadrul",
+            "în contextul",
+            "în vederea",
+            "cu scopul de a",
+            "prin intermediul",
+            "în ceea ce privește",
+            "a efectua",
+            "aferent",
+            "sus-menționat",
+            "la nivelul"
+          ],
+          "vague": [
+            "lucru",
+            "obiect",
+            "acțiune",
+            "chestiune",
+            "activitate"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "La un interviu, mai degrabă ⟦1⟧",
+            "good": "La un interviu spui mai degrabă ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "coace",
+              "bad": "a pregăti un aliment la cuptor",
+              "good": "pâine, cozonac, cartofi"
+            },
+            {
+              "head": "colț",
+              "bad": "locul unde se întâlnesc două margini",
+              "good": "al mesei, al străzii, al camerei"
+            }
+          ],
+          "openers": [
+            "La piață și la magazin",
+            "La medic",
+            "Când cineva mulțumește"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Se spune ⟦1⟧, nu ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ arată <ce adaugă aici cuvântul corect>.",
+            "⟦2⟧ ar însemna <altceva decât vrei să spui>."
+          ],
+          "narrated": [
+            "se pune la sfârșit",
+            "se construiește cu ⟦1⟧"
+          ]
         },
-        "letters": []
+        "letters": [
+          "ș",
+          "ț"
+        ]
       },
       "writing": [
         {
@@ -2962,22 +4082,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "mondják",
+            "mondod",
+            "hallod"
+          ],
+          "office": [
+            "sor kerül",
+            "használatos",
+            "vonatkozásában",
+            "tekintetében",
+            "céljából",
+            "keretében",
+            "kapcsán",
+            "eszközöl",
+            "foganatosít",
+            "rendelkezik",
+            "fent említett"
+          ],
+          "vague": [
+            "dolog",
+            "tárgy",
+            "cselekvés",
+            "folyamat",
+            "jelenség"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "A főnöknek inkább ⟦1⟧",
+            "good": "A főnöknek inkább azt mondod: ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "főz",
+              "bad": "ételt hővel elkészít",
+              "good": "levest, kávét, ebédet"
+            },
+            {
+              "head": "falat",
+              "bad": "egyszerre a szájba vett ételmennyiség",
+              "good": "kenyér, hús, sütemény"
+            }
+          ],
+          "openers": [
+            "A piacon és a boltban",
+            "Az orvosnál",
+            "Amikor koccintanak"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Úgy mondják: ⟦1⟧, nem pedig ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ azt mutatja, <mit tesz hozzá itt a helyes szó>.",
+            "⟦2⟧ mást jelentene: <azt, amit nem akartál mondani>."
+          ],
+          "narrated": [
+            "a mondat végére kerül",
+            "⟦1⟧ kapcsolja hozzá"
+          ]
         },
         "letters": []
       },
@@ -3088,22 +4251,65 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "sanotaan",
+            "sanoo",
+            "kuulee"
+          ],
+          "office": [
+            "käytetään",
+            "toimesta",
+            "osalta",
+            "suhteen",
+            "puitteissa",
+            "koskien",
+            "liittyen",
+            "suorittaa",
+            "kyseinen",
+            "omata",
+            "kohdalla"
+          ],
+          "vague": [
+            "asia",
+            "seikka",
+            "kohde",
+            "toiminta",
+            "prosessi"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Kaverille mieluummin ⟦1⟧",
+            "good": "Kaverille sanotaan mieluummin ⟦1⟧"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "lämmittää",
+              "bad": "nostaa jonkin lämpötilaa",
+              "good": "saunaa, ruokaa, taloa"
+            },
+            {
+              "head": "nippu",
+              "bad": "yhteen sidottu joukko samanlaisia esineitä",
+              "good": "avaimia, kirjeitä, seteleitä"
+            }
+          ],
+          "openers": [
+            "Kaupassa ja kahvilassa",
+            "Lääkärissä",
+            "Kun soitetaan virastoon"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Sanotaan ⟦1⟧, ei ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ kertoo, <mitä oikea sana tässä lisää>.",
+            "⟦2⟧ tarkoittaisi <jotain muuta kuin oli tarkoitus>."
+          ],
+          "narrated": [
+            "tulee lauseen loppuun",
+            "yhdistetään sanalla ⟦1⟧"
+          ]
         },
         "letters": []
       },
@@ -3213,22 +4419,62 @@
     "card": {
       "explanation": {
         "voice": {
-          "active": [],
-          "office": [],
-          "vague": [],
+          "active": [
+            "dīcunt",
+            "dīcēs",
+            "audiēs"
+          ],
+          "office": [
+            "adhibētur",
+            "ūsurpātur",
+            "in contextū",
+            "quoad",
+            "respectū",
+            "ratiōne habitā",
+            "quod attinet ad",
+            "praedictus"
+          ],
+          "vague": [
+            "rēs",
+            "āctiō",
+            "prōcessus",
+            "negōtium",
+            "aliquid"
+          ],
           "verbless": {
-            "bad": "",
-            "good": ""
+            "bad": "Inter amīcōs potius ⟦1⟧",
+            "good": "Inter amīcōs potius ⟦1⟧ dīcunt"
           }
         },
         "meaning": {
-          "notes": [],
-          "openers": []
+          "notes": [
+            {
+              "head": "serō",
+              "bad": "sēmen in terram mittere",
+              "good": "frūmentum, vītēs, arborēs"
+            },
+            {
+              "head": "pōculum",
+              "bad": "vās ex quō bibitur",
+              "good": "vīnī, aquae, lactis"
+            }
+          ],
+          "openers": [
+            "In forō et in tabernā",
+            "Apud medicum",
+            "Cum hospes advenit"
+          ]
         },
         "mistake": {
-          "contrast": "",
-          "reasons": [],
-          "narrated": []
+          "contrast": "Dīcunt ⟦1⟧, nōn ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ ostendit <quid verbum rēctum hīc addat>.",
+            "⟦2⟧ significāret <aliud quod nōn vīs>."
+          ],
+          "narrated": [
+            "in fīne pōnitur",
+            "cum ⟦1⟧ iungitur"
+          ]
         },
         "letters": []
       },
