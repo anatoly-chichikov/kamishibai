@@ -2,6 +2,8 @@
 
 ## 1.19.1
 
+- Calibrate Russian-to-English explanations with complete examples restricted to that exact pair, without reusing evaluation cards or changing other readers' examples.
+
 - Keep explanation facts and examples tied to the sentence's sense, avoid invented usage restrictions, and retain valid learning text when an editor corrupts it; reject foreign scripts in learning fragments and recognize short native words in echo checks.
 
 - Inject explanation examples from the reader language; style checks for office wording, empty openers, grammar terms, and address forms currently apply to Russian readers, while other readers receive the shared structural checks.

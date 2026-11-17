@@ -53,7 +53,7 @@ How to write, in every string:
 - Quotation marks for {known} are {open} and {close}.{letters_rule}
 - A note in "meanings" and "literal" do not end with a full stop. The texts of "where", "limits" and "nuance" and the "why" are full sentences and do.
 
-Check every letter of every learning phrase and every example against {learning} spelling. They must be entirely in {learning}, including endings and connecting words, without letters or words borrowed from {known}. Keep each example separate from its translation.
+Check every letter of every learning phrase and every example against {learning} spelling. They must be entirely in {learning}, including endings and connecting words, without letters or words borrowed from {known}. Keep each example separate from its translation. Do not invent a respelling to illustrate pronunciation. Keep the conventional written form even when explaining informal speech, and describe its sound in reader prose. Use only a genuinely established regional spelling when a variant matters.
 
 Before you answer, read every sentence you wrote the way a {known}-speaking editor reads a text aloud. A sentence stays only if a person would say it to a friend across a table and the friend would understand it at once. Rewrite the sentence when it has any of these:
 - a phrase translated word for word from {learning};

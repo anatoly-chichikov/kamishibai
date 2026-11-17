@@ -56,7 +56,9 @@ impl Task {
             PromptTemplate::new(include_str!("../../assets/explanation_edit.txt")).render(
                 &substitutions(language, !input.card.senses.is_empty(), true),
             )?;
-        let stamp = Sha256::digest(format!("{writer}\n{editor}"))
+        let examples =
+            crate::languages::explanation_pair(&language.names.reader, &language.names.learning)?;
+        let stamp = Sha256::digest(format!("{writer}\n{editor}{examples}"))
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
@@ -79,9 +81,12 @@ impl Task {
         instructions: &str,
         parts: Option<&Parts>,
         fails: &[String],
+        language: &Language,
     ) -> Result<String> {
+        let examples =
+            crate::languages::explanation_pair(&language.names.reader, &language.names.learning)?;
         let mut prompt = format!(
-            "{instructions}\n\nCard input:\n{}",
+            "{instructions}{examples}\n\nCard input:\n{}",
             serde_json::to_string_pretty(&self.input)?
         );
         if let Some(parts) = parts {
@@ -230,17 +235,15 @@ fn ask(writer: &mut impl Writer, prompt: String) -> Result<Option<Parts>> {
 fn preserves(current: &Parts, edited: &Parts) -> bool {
     let pattern =
         regex::Regex::new("⟦[^⟦⟧]*⟧").expect("invariant: learning marker pattern must compile");
-    let original = current.strings();
-    let proposed = edited.strings();
-    original.len() == proposed.len()
-        && original.iter().zip(proposed).all(|(before, after)| {
-            after.trim().is_empty()
-                || (!before.trim().is_empty()
-                    && pattern
-                        .find_iter(before)
-                        .map(|hit| hit.as_str())
-                        .eq(pattern.find_iter(after).map(|hit| hit.as_str())))
-        })
+    let phrases = |parts: &Parts| {
+        parts
+            .strings()
+            .into_iter()
+            .flat_map(|text| pattern.find_iter(text))
+            .map(|hit| hit.as_str().to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    phrases(edited).is_subset(&phrases(current))
         && current
             .meanings
             .iter()
@@ -266,16 +269,22 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
     if count > 5 {
         return Ok(None);
     }
-    let Some(mut current) = ask(writer, task.prompt(&task.writer, None, &[])?)? else {
+    let Some(mut current) = ask(writer, task.prompt(&task.writer, None, &[], language)?)? else {
         return Ok(None);
     };
     let (fails, _) = judge(&task.input.card, &current, language).into_parts();
     if !fails.is_empty()
-        && let Some(fixed) = ask(writer, task.prompt(&task.writer, Some(&current), &fails)?)?
+        && let Some(fixed) = ask(
+            writer,
+            task.prompt(&task.writer, Some(&current), &fails, language)?,
+        )?
     {
         current = fixed;
     }
-    if let Some(edited) = ask(writer, task.prompt(&task.editor, Some(&current), &[])?)? {
+    if let Some(edited) = ask(
+        writer,
+        task.prompt(&task.editor, Some(&current), &[], language)?,
+    )? {
         let accepted = judge(&task.input.card, &current, language)
             .into_parts()
             .0
@@ -289,7 +298,10 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
         }
         if !fails.is_empty() {
             let source = if intact { &current } else { &original };
-            if let Some(fixed) = ask(writer, task.prompt(&task.writer, Some(source), &fails)?)? {
+            if let Some(fixed) = ask(
+                writer,
+                task.prompt(&task.writer, Some(source), &fails, language)?,
+            )? {
                 if !intact && !preserves(&original, &fixed) {
                     return Ok(None);
                 }
@@ -312,6 +324,45 @@ mod tests {
 
     struct Replies {
         answers: std::collections::VecDeque<String>,
+    }
+
+    struct Capture(String);
+
+    impl super::Writer for Capture {
+        fn ask(&mut self, prompt: String) -> anyhow::Result<String> {
+            self.0 = prompt;
+            Ok(String::new())
+        }
+    }
+
+    #[test]
+    fn pair_examples_cannot_escape_their_exact_pair_across_930_requests() {
+        let samples = examples();
+        let mut faults = Vec::new();
+        for known in samples.keys() {
+            for learning in samples.keys().filter(|code| *code != known) {
+                let language = language(known, learning);
+                let mut writer = Capture(String::new());
+                super::write(&mut writer, &task(&language), &language).unwrap();
+                let expected = known == "ru" && learning == "en";
+                if !prompt_scripted(&writer.0, known) {
+                    faults.push(format!("{known}->{learning}: foreign script in request"));
+                }
+                for text in [
+                    "The bank closes at five.",
+                    "Don't spill the beans about the party.",
+                    "I borrowed this book from a friend.",
+                ] {
+                    if writer.0.contains(text) != expected {
+                        faults.push(format!("{known}->{learning}: {text}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            faults.is_empty(),
+            "pair examples were absent or crossed a language boundary: {faults:?}"
+        );
     }
 
     impl super::Writer for Replies {
@@ -463,6 +514,50 @@ mod tests {
     }
 
     #[test]
+    fn quality_editing_cannot_reject_removal_or_reordering_of_unchanged_phrases() {
+        let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/editor_deletions.json"
+        ))
+        .unwrap();
+        let rejected = cases
+            .iter()
+            .filter(|case| {
+                let job = &case["job"];
+                let language = Language::from_codes(
+                    job["known"].as_str().unwrap(),
+                    job["learning"].as_str().unwrap(),
+                )
+                .unwrap();
+                let task = Task::from_input(
+                    Input::new(
+                        serde_json::from_value(job["card"].clone()).unwrap(),
+                        job["sentence_known"].as_str().unwrap().into(),
+                        String::new(),
+                        String::new(),
+                    ),
+                    &language,
+                )
+                .unwrap();
+                let mut writer = Replies {
+                    answers: case["attempts"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(serde_json::Value::to_string)
+                        .collect(),
+                };
+                super::write(&mut writer, &task, &language)
+                    .unwrap()
+                    .is_none()
+            })
+            .count();
+        assert_eq!(
+            rejected, 0,
+            "safe deletion or reordering of unchanged learning phrases was rejected"
+        );
+    }
+
+    #[test]
     fn quality_writer_cannot_omit_observed_semantic_failure_constraints() {
         let task = task(&language("ru", "en"));
         let missing = [
@@ -480,6 +575,19 @@ mod tests {
         assert!(
             missing.is_empty(),
             "writer lacks safeguards for observed semantic failures: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn quality_editor_cannot_preserve_misspellings_as_untouchable_learning_text() {
+        let task = task(&language("es", "fa"));
+        assert!(
+            task.editor
+                .contains("Proofread the learning phrases and examples for standard spelling")
+                && task
+                    .writer
+                    .contains("Do not invent a respelling to illustrate pronunciation"),
+            "the editor was told to preserve a writer's spelling error without checking it"
         );
     }
 

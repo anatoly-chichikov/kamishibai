@@ -6,6 +6,7 @@ const DEFAULT_FILE: &str = "kamishibai.json";
 const FALLBACK_OCR: &str = "eng";
 
 mod explanation_examples;
+mod explanation_pairs;
 mod labels;
 mod naming;
 mod profile;
@@ -13,6 +14,7 @@ mod prompt_examples;
 mod registry;
 
 pub(crate) use explanation_examples::native_scripted;
+pub(crate) use explanation_pairs::explanation_pair;
 
 #[cfg(test)]
 pub(crate) use explanation_examples::prompt_scripted;

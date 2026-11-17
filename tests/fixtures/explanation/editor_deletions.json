@@ -1,0 +1,409 @@
+[
+  {
+    "job": {
+      "known": "ru",
+      "learning": "en",
+      "card": {
+        "term": "stick out",
+        "translation": "торчать, высовываться; выделяться",
+        "sentence": "Don't let your elbows stick out when you eat at the table.",
+        "highlight": "торчать"
+      },
+      "sentence_known": "Не давай локтям торчать, когда ешь за столом."
+    },
+    "attempts": [
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "торчать, высовываться",
+            "head": "торчать",
+            "note": "локти, гвоздь, провод из стены"
+          },
+          {
+            "from": "торчать, высовываться",
+            "head": "высовываться",
+            "note": "из окна, из кармана"
+          },
+          {
+            "from": "выделяться",
+            "head": "выделяться",
+            "note": "в толпе, среди других"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Когда кто-то нелепо привлекает внимание, добавляют ⟦like a sore thumb⟧.",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "Your keys are sticking out of your pocket.",
+            "translation": "У тебя ключи торчат из кармана."
+          },
+          "text": "Дома, на улице и в мастерской, когда что-то топорщится или мешает. Часто говорят с ⟦like a sore thumb⟧."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "торчать, высовываться",
+            "head": "торчать",
+            "note": "локти, гвоздь, провод из стены"
+          },
+          {
+            "from": "торчать, высовываться",
+            "head": "высовываться",
+            "note": "из окна, из кармана"
+          },
+          {
+            "from": "выделяться",
+            "head": "выделяться",
+            "note": "в толпе, среди других"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Когда кто-то нелепо привлекает внимание, добавляют ⟦like a sore thumb⟧.",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "Your keys are sticking out of your pocket.",
+            "translation": "У тебя ключи торчат из кармана."
+          },
+          "text": "Дома, на улице или в мастерской, когда что-то топорщится или мешает."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "торчать, высовываться",
+            "head": "торчать",
+            "note": "локти, гвоздь, провод из стены"
+          },
+          {
+            "from": "торчать, высовываться",
+            "head": "высовываться",
+            "note": "из окна, из кармана"
+          },
+          {
+            "from": "выделяться",
+            "head": "выделяться",
+            "note": "в толпе, среди других"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Когда кто-то нелепо привлекает внимание, добавляют ⟦like a sore thumb⟧.",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "Your keys are sticking out of your pocket.",
+            "translation": "У тебя ключи торчат из кармана."
+          },
+          "text": "Дома, на улице и в мастерской, когда что-то топорщится или мешает."
+        }
+      }
+    ]
+  },
+  {
+    "job": {
+      "known": "el",
+      "learning": "ka",
+      "card": {
+        "term": "წყალი",
+        "translation": "νερό",
+        "sentence": "მე წყალს ვსვამ.",
+        "senses": [
+          {
+            "number": "1",
+            "understanding": "νερό",
+            "label": ""
+          }
+        ]
+      },
+      "sentence_known": "Πίνω νερό."
+    },
+    "attempts": [
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "νερό",
+            "note": "πόσιμο, βρύσης, ποταμού"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Όταν πίνεις ή ζητάς νερό, το τελικό ⟦ი⟧ γίνεται ⟦ს⟧: λέμε ⟦წყალს ვსვამ⟧.",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "ერთი ჭიქα წყალი, თუ შეიძლება.",
+            "translation": "Ένα ποτήρι νερό, παρακαλώ."
+          },
+          "text": "Στην ταβέρνα, στο σπίτι και στο μαγαζί, όταν ζητάς κάτι να πιεις με το ⟦ცივი წყალი⟧."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "νερό",
+            "note": "πόσιμο, βρύσης, ποταμού"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Όταν πίνεις ή ζητάς νερό, το τελικό ⟦ი⟧ γίνεται ⟦ს⟧: λέμε ⟦წყალს ვსვამ⟧.",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "ერთი ჭიქა წყალი, თუ შეიძლება.",
+            "translation": "Ένα ποτήρι νερό, παρακαλώ."
+          },
+          "text": "Στην ταβέρνα, στο σπίτι και στο μαγαζί, όταν ζητάς κάτι να πιεις με το ⟦ცივი წყალი⟧."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "νερό",
+            "note": "πόσιμο, βρύσης, ποταμού"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Όταν πίνεις νερό, θα πεις ⟦წყალს ვსვამ⟧ και όχι ⟦წყალი ვსვამ⟧.",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "ერთი ჭიქა წყალი, თუ შეიძლება.",
+            "translation": "Ένα ποτήρι νερό, παρακαλώ."
+          },
+          "text": "Στην ταβέρνα, στο σπίτι ή στο μαγαζί, όταν ζητάς να πιεις ⟦ცივი წყალი⟧."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": ""
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "νερό",
+            "note": "πόσιμο, βρύσης, ποταμού"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Όταν πίνεις κάτι, αλλάζει η κατάληξη: θα πεις ⟦წყალს ვსვამ⟧.",
+          "why": ""
+        },
+        "where": {
+          "example": {
+            "text": "ერთი ჭიქა წყალი, თუ შეიძლება.",
+            "translation": "Ένα ποτήρι νερό, παρακαλώ."
+          },
+          "text": "Στην ταβέρνα, στο σπίτι και στο μαγαζί, όταν ζητάς να πιεις ⟦ცივი წყალი⟧."
+        }
+      }
+    ]
+  },
+  {
+    "job": {
+      "known": "tr",
+      "learning": "uk",
+      "card": {
+        "term": "кіт",
+        "translation": "kedi",
+        "sentence": "Кіт спить.",
+        "senses": [
+          {
+            "number": "1",
+            "understanding": "kedi",
+            "label": ""
+          }
+        ]
+      },
+      "sentence_known": "Kedi uyuyor."
+    },
+    "attempts": [
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Özellikle dişi kediden bahsediyorsan ⟦кіт⟧ yerine ⟦кішка⟧ dersin."
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "kedi",
+            "note": "evde beslenen erkek kedi veya türün kendisi"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "У мене є два коти.",
+            "translation": "İki kedim var."
+          },
+          "text": "Çoğul yaparken veya başka hallerde kelimedeki ses değişir: ⟦коти⟧ ve ⟦кота⟧ denir, ⟦кіти⟧ denmez.",
+          "why": "⟦і⟧ sesi diğer hallerde yerini ⟦о⟧ sesine bırakır."
+        },
+        "where": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Evde, sokakta veya veterinerde hayvanlardan bahsederken en çok ⟦чорний кіт⟧ veya ⟦домашній кіт⟧ olarak duyarsın."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Dişi bir kediden söz ediyorsan ⟦кіт⟧ yerine ⟦кішка⟧ dersin."
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "kedi",
+            "note": "evcil kedi veya erkek kedi"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "У мене є два коти.",
+            "translation": "İki kedim var."
+          },
+          "text": "Çoğulunda veya ek aldığında ⟦коти⟧ ve ⟦кота⟧ dersin, ⟦кіти⟧ denmez.",
+          "why": "⟦кіт⟧ sözcüğündeki ⟦і⟧ diğer durumlarda ⟦о⟧ olur."
+        },
+        "where": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Evde, sokakta veya veterinerde en çok ⟦чорний кіт⟧ ya da ⟦домашній кіт⟧ olarak duyarsın."
+        }
+      },
+      {
+        "limits": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Dişi kedi için ⟦кіт⟧ yerine ⟦кішка⟧ dersin."
+        },
+        "literal": "",
+        "meanings": [
+          {
+            "from": "1",
+            "head": "kedi",
+            "note": "erkek kedi ya da türün adı"
+          }
+        ],
+        "nuance": {
+          "example": {
+            "text": "У мене є два коти.",
+            "translation": "İki kedim var."
+          },
+          "text": "Birden fazla kedi sayarken ⟦коти⟧ ve ⟦кота⟧ denir, ⟦кіти⟧ denmez.",
+          "why": "⟦о⟧ sesi burada ⟦і⟧ sesinin yerine geçer."
+        },
+        "where": {
+          "example": {
+            "text": "",
+            "translation": ""
+          },
+          "text": "Evde, sokakta ve veterinerde sıkça ⟦чорний кіт⟧ ya da ⟦домашній кіт⟧ olarak duyarsın."
+        }
+      }
+    ]
+  }
+]
