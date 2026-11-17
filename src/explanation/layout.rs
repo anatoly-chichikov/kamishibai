@@ -43,6 +43,7 @@ pub(super) fn terminated(text: &str) -> bool {
 }
 
 /// Normalize quoted learning phrases to markers for review and edit comparison.
+#[must_use]
 pub(super) fn mark(text: &str, language: &Language) -> String {
     use unicode_script::UnicodeScript;
     let [open, close] = &language.context.quotes;

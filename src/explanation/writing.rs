@@ -357,6 +357,7 @@ mod tests {
                     "Don't spill the beans about the party.",
                     "I borrowed this book from a friend.",
                     "I had the roof repaired last week.",
+                    "He is a bright kid with plenty of ideas.",
                 ] {
                     if writer.0.contains(text) != expected {
                         faults.push(format!("{known}->{learning}: {text}"));
