@@ -2,6 +2,8 @@
 
 ## 1.19.1
 
+- Inject explanation examples from the reader language; style checks for office wording, empty openers, grammar terms, and address forms currently apply to Russian readers, while other readers receive the shared structural checks.
+
 - Preserve legacy note fields and GUIDs with an explicit explanation format, including imported JSON and rejected explanation attempts.
 - Retain the metadata explanation without paid explanation requests above five meanings; accept natural single-character meanings and review non-Latin mistake reasons and quote ordering.
 - Preserve native sentence punctuation and combining accents, correct Hebrew high quotes, and keep French quote spaces unbreakable in new explanations.

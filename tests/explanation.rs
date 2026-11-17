@@ -1373,3 +1373,52 @@ fn writing_cannot_exceed_four_calls_or_install_an_unaccepted_answer() {
         "an explanation path exceeded its call budget or installed rejected text: {results:?}"
     );
 }
+
+#[test]
+fn language_templates_cannot_embed_concrete_language_examples() {
+    let templates = [
+        include_str!("../assets/explanation_task.txt"),
+        include_str!("../assets/explanation_edit.txt"),
+        include_str!("../assets/explanation_senses.txt"),
+    ];
+    assert!(
+        templates.into_iter().all(|template| template
+            .chars()
+            .all(|ch| !ch.is_alphabetic() || ch.is_ascii())),
+        "a shared explanation template contains letters of a concrete reader language"
+    );
+}
+
+#[test]
+fn language_placeholders_cannot_be_accepted_as_real_words() {
+    let missed = [
+        "People say ⟦1⟧ here.",
+        "People say <the actual words> here.",
+        "People say ⟦…⟧ here.",
+    ]
+    .into_iter()
+    .filter(|text| {
+        let mut value = cat_response();
+        value["where"]["text"] = (*text).into();
+        !reviewed_failures(value, "EN", "FR", &reviewed_card("chat", "a cat"))
+            .iter()
+            .any(|fail| fail.starts_with("placeholder:"))
+    })
+    .collect::<Vec<_>>();
+    assert!(
+        missed.is_empty(),
+        "task placeholders escaped the judge: {missed:?}"
+    );
+}
+
+#[test]
+fn language_diagnostics_cannot_use_another_readers_quotes() {
+    let mut value = cat_response();
+    value["meanings"][0]["note"] = "a furry pet beside a windowsill ".repeat(4).into();
+    let failures = reviewed_failures(value, "EN", "FR", &reviewed_card("chat", "a cat"));
+    assert!(
+        failures.iter().any(|fail| fail.starts_with("length:"))
+            && failures.iter().all(|fail| !fail.contains(['«', '»'])),
+        "English repair diagnostics borrowed Russian quotation marks: {failures:?}"
+    );
+}

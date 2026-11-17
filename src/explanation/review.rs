@@ -230,10 +230,11 @@ impl Review<'_> {
     }
 
     fn list(&mut self, card: &Card, parts: &Parts) {
+        let [open, close] = self.language.context.quotes.clone();
         if card.senses.is_empty() {
             for line in &parts.meanings {
                 if !line.from.trim().is_empty() && !card.translation.contains(line.from.trim()) {
-                    self.fail("list", format!("\"from\" of the line «{}» is «{}», which is not a piece of the translation copied character for character", line.head, line.from));
+                    self.fail("list", format!("\"from\" of the line {open}{}{close} is {open}{}{close}, which is not a piece of the translation copied character for character", line.head, line.from));
                 }
             }
             for group in card
@@ -247,7 +248,7 @@ impl Review<'_> {
                     .iter()
                     .any(|line| !line.from.trim().is_empty() && group.contains(line.from.trim()))
                 {
-                    self.fail("list", format!("the meaning «{group}» of the translation has no line of its own in \"meanings\""));
+                    self.fail("list", format!("the meaning {open}{group}{close} of the translation has no line of its own in \"meanings\""));
                 }
             }
         } else if parts.meanings.len() != card.senses.len()
@@ -264,7 +265,7 @@ impl Review<'_> {
             if !seen.insert(bare(&line.head)) {
                 self.fail(
                     "list",
-                    format!("two lines have the same head «{}»", line.head),
+                    format!("two lines have the same head {open}{}{close}", line.head),
                 );
             }
         }
@@ -272,13 +273,13 @@ impl Review<'_> {
             return;
         };
         let known = stems(&format!("{} {}", card.translation, main.head));
-        let echo = if self.language.names.worded {
+        let echo = if self.language.names.examples.worded() {
             stems(&main.note).difference(&known).count() < 2
         } else {
             bare(&main.note) == bare(&main.head) || bare(&main.note) == bare(&card.translation)
         };
         if echo {
-            self.fail("echo", format!("the note of the first line («{}») says the translation again; say what things or what situation it is about", main.note));
+            self.fail("echo", format!("the note of the first line ({open}{}{close}) says the translation again; say what things or what situation it is about", main.note));
         }
         let borrowed = parts
             .meanings
@@ -290,11 +291,12 @@ impl Review<'_> {
             .map(|line| line.head.as_str())
             .collect::<Vec<_>>();
         if !borrowed.is_empty() {
-            self.fail("list", format!("the note of the first line uses «{}», which is the head of another line; say it with other words", borrowed.join("», «")));
+            self.fail("list", format!("the note of the first line uses {open}{}{close}, which is the head of another line; say it with other words", borrowed.join(&format!("{close}, {open}"))));
         }
     }
 
     fn structure(&mut self, parts: &Parts, blocks: &[Block]) {
+        let [open, close] = self.language.context.quotes.clone();
         let heads = &self.language.context.headers;
         let found = blocks
             .iter()
@@ -317,7 +319,7 @@ impl Review<'_> {
             .map(|head| heads.iter().position(|known| known == head))
             .collect::<Vec<_>>();
         if order.iter().any(Option::is_none) || order.windows(2).any(|pair| pair[0] >= pair[1]) {
-            self.fail("structure", format!("the headings on the card are «{}», expected the four known ones in their order without repeats", found.join("», «")));
+            self.fail("structure", format!("the headings on the card are {open}{}{close}, expected the four known ones in their order without repeats", found.join(&format!("{close}, {open}"))));
         }
         if found.len()
             != 1 + parts
@@ -410,12 +412,13 @@ impl Review<'_> {
     }
 
     fn empty(&mut self, parts: &Parts, whole: &str) {
+        let [open, close] = self.language.context.quotes.clone();
         for line in &parts.meanings {
             if letters(&line.head) < 1 || letters(&line.note) < 3 {
                 self.fail(
                     "empty",
                     format!(
-                        "the line «{}» of \"meanings\" lacks a head or a note",
+                        "the line {open}{}{close} of \"meanings\" lacks a head or a note",
                         line.head
                     ),
                 );
@@ -442,6 +445,7 @@ impl Review<'_> {
     }
 
     fn lengths(&mut self, parts: &Parts, whole: &str) {
+        let [open, close] = self.language.context.quotes.clone();
         let count = parts.meanings.len() + usize::from(!parts.literal.trim().is_empty());
         if count > 5 {
             self.fail("length", format!("the list has {count} lines with the literal picture, the limit is 5; keep every reviewed sense"));
@@ -450,7 +454,7 @@ impl Review<'_> {
             let drawn = format!("{} — {}", line.head.trim(), line.note.trim());
             let limit = if index == 0 { 68 } else { 38 };
             if size(&drawn) > limit {
-                self.fail("length", format!("the line «{drawn}» takes {} characters with its head and dash, the limit is {limit}; shorten the note", size(&drawn)));
+                self.fail("length", format!("the line {open}{drawn}{close} takes {} characters with its head and dash, the limit is {limit}; shorten the note", size(&drawn)));
             }
         }
         if !parts.literal.trim().is_empty()
@@ -487,7 +491,7 @@ impl Review<'_> {
                 self.fail(
                     "length",
                     format!(
-                        "the example «{}» takes {} characters, the limit is 65",
+                        "the example {open}{}{close} takes {} characters, the limit is 65",
                         example.text,
                         size(example.text.trim())
                     ),
@@ -497,7 +501,7 @@ impl Review<'_> {
                 self.fail(
                     "length",
                     format!(
-                        "the translation «{}» is too long, the limit is 83",
+                        "the translation {open}{}{close} is too long, the limit is 83",
                         example.translation
                     ),
                 );
@@ -564,6 +568,18 @@ impl Review<'_> {
     }
 
     fn wording(&mut self, card: &Card, parts: &Parts, whole: &str) {
+        let [open, close] = self.language.context.quotes.clone();
+        if parts.strings().iter().any(|value| {
+            value.contains(['<', '>'])
+                || hits(r"⟦[^⟦⟧]*⟧", value)
+                    .iter()
+                    .any(|marker| !marker.chars().any(char::is_alphabetic))
+        }) {
+            self.fail(
+                "placeholder",
+                "a placeholder of the task was copied; write the real words",
+            );
+        }
         if matches("[;；]", whole) {
             self.fail(
                 "semicolon",
@@ -577,7 +593,7 @@ impl Review<'_> {
                 .flat_map(|(_, value, _)| sentences(value)),
         ) {
             if self.local("opener", piece.trim()) {
-                self.fail("opener", format!("«{}» starts with an empty opener; start with the place, the occasion or the fact", piece.trim().chars().take(50).collect::<String>()));
+                self.fail("opener", format!("{open}{}{close} starts with an empty opener; start with the place, the occasion or the fact", piece.trim().chars().take(50).collect::<String>()));
             }
         }
         let prose = parts
@@ -630,8 +646,9 @@ impl Review<'_> {
             self.fail(
                 "formal address",
                 format!(
-                    "«{}» addresses the reader as «вы»; use «ты» or say «говорят»",
-                    hit.trim()
+                    "{open}{}{close} speaks to the reader in a form the card does not use; use the form of {}",
+                    hit.trim(),
+                    self.language.names.examples.guidance().voice.active.iter().map(|value| format!("{open}{value}{close}")).collect::<Vec<_>>().join(", ")
                 ),
             );
         }
@@ -697,11 +714,15 @@ impl Review<'_> {
     }
 
     fn form(&mut self, card: &Card, parts: &Parts, blocks: &[Block]) {
+        let [open, close] = self.language.context.quotes.clone();
         for line in &parts.meanings {
             if super::layout::terminated(line.note.trim()) {
                 self.fail(
                     "form",
-                    format!("the note of the line «{}» ends with a full stop", line.head),
+                    format!(
+                        "the note of the line {open}{}{close} ends with a full stop",
+                        line.head
+                    ),
                 );
             }
         }
@@ -743,7 +764,7 @@ impl Review<'_> {
             for sentence in sentences(value) {
                 let count = hits(r"[\p{L}][\p{L}'’-]*", sentence).len();
                 if count > 18 {
-                    self.fail("clumsy", format!("the sentence «{}…» of \"{name}\" has {count} words, the limit is 18; split it or cut it", sentence.chars().take(60).collect::<String>()));
+                    self.fail("clumsy", format!("the sentence {open}{}…{close} of \"{name}\" has {count} words, the limit is 18; split it or cut it", sentence.chars().take(60).collect::<String>()));
                 }
             }
         }
@@ -824,5 +845,161 @@ pub fn judge(card: &Card, parts: &Parts, language: &Language) -> Verdict {
     Verdict {
         fails: review.fails,
         markdown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Card, Language, Parts, Review};
+
+    fn language(code: &str) -> Language {
+        let examples = serde_json::from_str::<
+            std::collections::BTreeMap<String, crate::languages::LanguagePromptExamples>,
+        >(include_str!("../../assets/prompt_examples.json"))
+        .unwrap()
+        .remove(code)
+        .unwrap();
+        Language {
+            context: examples.explanation(),
+            known: crate::languages::explanation_scripts(code),
+            learning: crate::languages::explanation_scripts("fr"),
+            names: super::super::Names {
+                reader: crate::languages::catalog().item(code).unwrap().prompt,
+                learning: "French".into(),
+                examples,
+            },
+        }
+    }
+
+    fn parts(text: &str) -> Parts {
+        serde_json::from_value(serde_json::json!({"meanings":[{"head":"cat", "note":"a furry pet on the windowsill", "from":"1"}],"literal":"","where":{"text":text,"example":{"text":"","translation":""}},"limits":{"text":"","example":{"text":"","translation":""}},"nuance":{"text":"","why":"","example":{"text":"","translation":""}}})).unwrap()
+    }
+
+    #[test]
+    fn seed_placeholders_cannot_pass_repair_review() {
+        let language = language("en");
+        let card = Card::new(
+            "chat".into(),
+            "cat".into(),
+            "Le chat dort.".into(),
+            Vec::new(),
+        );
+        let missed = [
+            "People say ⟦1⟧ here.",
+            "People say <the words> here.",
+            "People say ⟦…⟧ here.",
+            "People say ⟦⟧ here.",
+            "People say > here.",
+            "People say < here.",
+        ]
+        .into_iter()
+        .filter(|text| {
+            let mut review = Review {
+                language: &language,
+                fails: Vec::new(),
+            };
+            review.wording(&card, &parts(text), text);
+            !review
+                .fails
+                .iter()
+                .any(|failure| failure.starts_with("placeholder:"))
+        })
+        .collect::<Vec<_>>();
+        assert!(
+            missed.is_empty(),
+            "copied task placeholders survived repair review: {missed:?}"
+        );
+    }
+
+    #[test]
+    fn seed_real_marked_words_cannot_be_rejected_as_placeholders() {
+        let language = language("en");
+        let card = Card::new(
+            "chat".into(),
+            "cat".into(),
+            "Le chat dort.".into(),
+            Vec::new(),
+        );
+        let rejected = [
+            "People say ⟦chat⟧ here.",
+            "People say ⟦café⟧ here.",
+            "People say ⟦猫⟧ here.",
+            "People say ⟦A1⟧ here.",
+        ]
+        .into_iter()
+        .filter(|text| {
+            let mut review = Review {
+                language: &language,
+                fails: Vec::new(),
+            };
+            review.wording(&card, &parts(text), text);
+            review
+                .fails
+                .iter()
+                .any(|failure| failure.starts_with("placeholder:"))
+        })
+        .collect::<Vec<_>>();
+        assert!(
+            rejected.is_empty(),
+            "real marked words were rejected as placeholders: {rejected:?}"
+        );
+    }
+
+    #[test]
+    fn seed_english_length_diagnostics_cannot_borrow_russian_quotes() {
+        let language = language("en");
+        let mut review = Review {
+            language: &language,
+            fails: Vec::new(),
+        };
+        let mut parts = parts("");
+        parts.meanings[0].note = "furry pet beside the window ".repeat(5);
+        parts.r#where.example.text = "Le chat dort au soleil ".repeat(5);
+        parts.r#where.example.translation = "The cat sleeps in the sun ".repeat(5);
+        review.lengths(&parts, "");
+        assert!(
+            review.fails.len() >= 3
+                && review.fails.iter().all(|failure| failure.contains('“')
+                    && failure.contains('”')
+                    && !failure.contains(['«', '»'])),
+            "English length diagnostics lost their reader quotation marks: {:?}",
+            review.fails
+        );
+    }
+
+    #[test]
+    fn seed_address_diagnostics_cannot_ignore_the_catalog_voice() {
+        let mut language = language("ru");
+        let mut examples: serde_json::Value =
+            serde_json::from_str(include_str!("../../assets/prompt_examples.json")).unwrap();
+        examples["ru"]["card"]["explanation"]["voice"]["active"] =
+            serde_json::json!(["шепчут", "говоришь", "пишешь"]);
+        language.names.examples = serde_json::from_value(examples["ru"].clone()).unwrap();
+        let mut review = Review {
+            language: &language,
+            fails: Vec::new(),
+        };
+        let card = Card::new(
+            "chat".into(),
+            "кот".into(),
+            "Le chat dort.".into(),
+            Vec::new(),
+        );
+        review.wording(
+            &card,
+            &parts("Вы увидите кота дома."),
+            "Вы увидите кота дома.",
+        );
+        assert!(
+            review
+                .fails
+                .iter()
+                .any(|failure| failure.starts_with("formal address:")
+                    && ["«шепчут»", "«говоришь»", "«пишешь»"]
+                        .into_iter()
+                        .all(|word| failure.contains(word))),
+            "address repair ignored the reader's catalog voice: {:?}",
+            review.fails
+        );
     }
 }

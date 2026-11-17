@@ -32,6 +32,67 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [
+            "people say",
+            "you'll say",
+            "you'll hear"
+          ],
+          "office": [
+            "utilize",
+            "in order to",
+            "with regard to",
+            "in the context of",
+            "prior to",
+            "facilitate",
+            "the aforementioned",
+            "in the event that"
+          ],
+          "vague": [
+            "thing",
+            "item",
+            "object",
+            "action",
+            "process"
+          ],
+          "verbless": {
+            "bad": "About a friend who is late, ⟦1⟧",
+            "good": "About a friend who is late, people say ⟦1⟧"
+          }
+        },
+        "meaning": {
+          "notes": [
+            {
+              "head": "to choose",
+              "bad": "one option out of several",
+              "good": "a colour, a dish, a job"
+            },
+            {
+              "head": "a third",
+              "bad": "one of three equal parts",
+              "good": "of your pay, of the way there, of the class"
+            }
+          ],
+          "openers": [
+            "In the news and in court",
+            "In the kitchen and in recipes",
+            "When people are in a hurry"
+          ]
+        },
+        "mistake": {
+          "contrast": "People say ⟦1⟧, not ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ shows <what the right word adds here>.",
+            "⟦2⟧ would mean <the other thing you did not intend>."
+          ],
+          "narrated": [
+            "is put in the middle",
+            "is joined through ⟦1⟧"
+          ]
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Start operating — of a machine.",
@@ -110,6 +171,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "开始运转——说的是机器。",
@@ -183,6 +265,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Empezar a funcionar: dicho de una máquina.",
@@ -261,6 +364,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "動き始める。機械について。",
@@ -334,6 +458,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Commencer à fonctionner, en parlant d’une machine.",
@@ -412,6 +557,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "In Gang kommen – von einer Maschine.",
@@ -490,6 +656,74 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [
+            "говорят",
+            "скажешь",
+            "услышишь"
+          ],
+          "office": [
+            "является",
+            "данный",
+            "осуществляется",
+            "используется",
+            "применяется",
+            "в контексте",
+            "в ситуациях, когда",
+            "в случаях, когда",
+            "с целью",
+            "в качестве",
+            "посредством",
+            "в рамках",
+            "соответствующий"
+          ],
+          "vague": [
+            "вещь",
+            "предмет",
+            "объект",
+            "действие",
+            "процесс"
+          ],
+          "verbless": {
+            "bad": "О друге, который опоздал, ⟦1⟧",
+            "good": "О друге, который опоздал, говорят ⟦1⟧"
+          }
+        },
+        "meaning": {
+          "notes": [
+            {
+              "head": "выбирать",
+              "bad": "один вариант из нескольких",
+              "good": "цвет, блюдо, работу"
+            },
+            {
+              "head": "треть",
+              "bad": "одна из трёх равных частей",
+              "good": "зарплаты, пути, класса"
+            }
+          ],
+          "openers": [
+            "В новостях и в суде",
+            "На кухне и в рецептах",
+            "Когда торопятся"
+          ]
+        },
+        "mistake": {
+          "contrast": "Говорят ⟦1⟧, а не ⟦2⟧",
+          "reasons": [
+            "⟦1⟧ показывает <что добавляет верное слово>.",
+            "⟦2⟧ значило бы <другой смысл, которого ты не хотел>."
+          ],
+          "narrated": [
+            "ставят в середину",
+            "называют через ⟦1⟧"
+          ]
+        },
+        "letters": [
+          "ё"
+        ]
+      },
       "writing": [
         {
           "bad": "Начинать работать — о машине.",
@@ -522,7 +756,6 @@
           "»"
         ],
         "literally": "дословно",
-        "notes": "When addressing the reader, use ты. Office words: является, данный, осуществляется, используется, применяется, в контексте, в ситуациях когда, с целью, в качестве, посредством, в рамках. Avoid vague stand-ins: вещь, предмет, объект, действие, процесс. Prefer говорят, скажешь, услышишь. Write ё where it belongs.",
         "judge": {
           "mistake": "(?:,\\s*|\\s)(?:а не|но не)\\s+[A-Za-z]|вместо\\s+[A-Za-z]|не говорят|нельзя сказать|никогда не\\s+[A-Za-z]",
           "calm": "(?i)нет\\s+(?:\\S+\\s+){0,3}(?:ограничен|рамок|запрет)|ограничений\\s+(?:\\S+\\s+){0,3}нет|без особых ограничений|нейтрально и (?:уместно|подходит)|одинаково уместн|в любой (?:ситуации|обстановке)|подходит (?:везде|всегда)|уместно (?:везде|всегда|в любом)",
@@ -580,6 +813,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Iniziare a funzionare, detto di una macchina.",
@@ -658,6 +912,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Começar a funcionar, dito de uma máquina.",
@@ -736,6 +1011,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Αρχίζει να λειτουργεί — για μηχανή.",
@@ -814,6 +1110,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Beginnen te werken, gezegd van een machine.",
@@ -892,6 +1209,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "작동하기 시작함 — 기계에 관하여.",
@@ -959,6 +1297,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Çalışmaya başlamak; bir makine için söylenir.",
@@ -1026,6 +1385,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Zaczynać działać — o maszynie.",
@@ -1093,6 +1473,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Починати працювати — про машину.",
@@ -1160,6 +1561,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Mulai beroperasi, tentang mesin.",
@@ -1227,6 +1649,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "काम करना शुरू होना — मशीन के बारे में।",
@@ -1294,6 +1737,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "بدء العمل، ويُقال عن آلة.",
@@ -1361,6 +1825,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "เริ่มทำงาน ใช้กล่าวถึงเครื่องจักร",
@@ -1428,6 +1913,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "להתחיל לפעול — על מכונה.",
@@ -1495,6 +2001,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Bắt đầu hoạt động, nói về máy móc.",
@@ -1562,6 +2089,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Začít pracovat, řečeno o stroji.",
@@ -1656,6 +2204,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Početi rad — za mašinu.",
@@ -1687,7 +2256,7 @@
           "„",
           "“"
         ],
-        "literally": "дословно"
+        "literally": "doslovno"
       }
     },
     "recall": {
@@ -1761,6 +2330,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "მუშაობის დაწყება — მანქანის შესახებ.",
@@ -1866,6 +2456,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Սկսել գործել՝ մեքենայի մասին։",
@@ -1971,6 +2582,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "شروع به کار کردن — دربارهٔ دستگاه.",
@@ -2076,6 +2708,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Börja fungera — om en maskin.",
@@ -2181,6 +2834,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "A începe funcționarea — despre o mașină.",
@@ -2286,6 +2960,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Működésbe lépni — gépről.",
@@ -2391,6 +3086,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Alkaa toimia — koneesta.",
@@ -2495,6 +3211,27 @@
       }
     },
     "card": {
+      "explanation": {
+        "voice": {
+          "active": [],
+          "office": [],
+          "vague": [],
+          "verbless": {
+            "bad": "",
+            "good": ""
+          }
+        },
+        "meaning": {
+          "notes": [],
+          "openers": []
+        },
+        "mistake": {
+          "contrast": "",
+          "reasons": [],
+          "narrated": []
+        },
+        "letters": []
+      },
       "writing": [
         {
           "bad": "Iter facere — dē homine.",

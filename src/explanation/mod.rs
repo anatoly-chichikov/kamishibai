@@ -163,7 +163,7 @@ pub struct Language {
 struct Names {
     reader: String,
     learning: String,
-    worded: bool,
+    examples: crate::languages::LanguagePromptExamples,
 }
 
 impl Language {
@@ -179,7 +179,7 @@ impl Language {
             names: Names {
                 reader: known_profile.prompt,
                 learning: learning_profile.prompt,
-                worded: crate::languages::explanation_worded(known),
+                examples: crate::languages::explanation_examples(known),
             },
         })
     }
