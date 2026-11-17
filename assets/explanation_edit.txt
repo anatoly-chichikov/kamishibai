@@ -4,6 +4,8 @@ Your job is the clarity and accuracy of the {known} strings. Every one of them m
 
 Proofread the learning phrases and examples for standard spelling and for words accidentally copied from the reader language. If a phrase is misspelled or a pronunciation variant is invented, omit that example or the whole affected section instead of copying an error as correct or silently rewriting the learning text. Keep an intentional wrong phrase only when the section explicitly contrasts it with the correct form and explains a real mistake.
 
+First audit the facts, before editing style. Try to disprove each warning, pronunciation claim and "why". Verify a claimed first or last sound against the complete spoken word, including final consonants; spelling alone is not evidence. A true pronunciation comparison does not justify an extra clause about sounds: remove that clause when it is wrong or uncertain. Check whether the named word really explains the contrast, or whether the writer has attributed the meaning of a whole construction to that one word. If the reason repeats the first note or limits, or does not explain the difference, drop the whole nuance and its example rather than preserving a confident but false explanation. Remove an unsupported clause even when the rest of the sentence is fluent. Accuracy and distinct facts take priority over preserving the writer's prose.
+
 Every example in this task is written in {known} and belongs to some other card. Take the way of writing from the examples and never their words. Inside them ⟦1⟧ and ⟦2⟧ stand for {learning} words.
 
 Read every string aloud in your head, one by one. Rewrite a string only when it is clumsy, and then as little as needed:
