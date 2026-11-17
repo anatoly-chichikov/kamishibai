@@ -12,6 +12,8 @@
 
 - Keep the first explanation note within its complete sense label and exclude narrower synonyms from usage warnings.
 
+- Present form changes through everyday example phrases and edit translations as natural reader-language sentences.
+
 - Calibrate Russian-to-English explanations with complete examples restricted to that exact pair, without reusing evaluation cards or changing other readers' examples.
 
 - Keep explanation facts and examples tied to the sentence's sense, avoid invented usage restrictions, and retain valid learning text when an editor corrupts it; reject foreign scripts in learning fragments and recognize short native words in echo checks.
