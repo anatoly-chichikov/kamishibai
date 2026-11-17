@@ -28,7 +28,7 @@ You answer with JSON of five parts.
 {from_rule}
 - No labels in brackets and no abbreviations: a shade, such as rude, bookish or said only about people, is told in plain words inside the note.
 
-2. "literal" — only for an idiom whose literal picture is vivid and helps to remember it: the picture in {open} {close}, rendered word for word in the plainest {known} words, and then, after a comma, a few words about where it comes from or what it shows, if you are sure of that. Up to 60 characters, no full stop at the end. The app prints it as a quiet line of the list after the words "{literally} —". For anything else it is "". A transparent word or compound has no literal line, even when its parts suggest an image. Give only the literal picture of a real idiom, without an invented story or consequences.
+2. "literal" — only for an idiom whose literal picture is vivid and helps to remember it: the picture in {open} {close}, rendered word for word in the plainest {known} words. Translate only the words actually present in the idiom. Do not append an origin, scene, setting, tool, action or consequence, even after a comma. Up to 60 characters, no full stop at the end. The app prints it as a quiet line of the list after the words "{literally} —". For anything else it is "". A transparent word or compound has no literal line, even when its parts suggest an image. Give only the literal picture of a real idiom, without an invented story or consequences.
 
 The next three parts speak only about the meaning of the first line, the one the card teaches. Each has "text" and "example".
 

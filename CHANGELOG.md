@@ -8,6 +8,8 @@
 
 - Accept equivalent quotation markers during explanation editing while still rejecting changed learning words, and allow repair to omit an unsupported optional nuance.
 
+- Limit literal idiom translations to the words in the idiom, without appended scenes or origin stories.
+
 - Calibrate Russian-to-English explanations with complete examples restricted to that exact pair, without reusing evaluation cards or changing other readers' examples.
 
 - Keep explanation facts and examples tied to the sentence's sense, avoid invented usage restrictions, and retain valid learning text when an editor corrupts it; reject foreign scripts in learning fragments and recognize short native words in echo checks.

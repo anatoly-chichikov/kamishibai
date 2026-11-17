@@ -25,7 +25,7 @@ Read every string aloud in your head, one by one. Rewrite a string only when it 
 - it has a word that can be removed without any loss, or two words that say the same;
 - a list of things or places has an odd member that a learner would not think of first: drop it;
 - the same thought is said twice on the card in different words, for example that the word sounds bookish: keep it once, under {open}{limits}{close};
-- the literal picture of an idiom in "literal" is not a plain word-for-word rendering but a paraphrase: render the picture word for word;
+- the literal picture of an idiom in "literal" is not a plain word-for-word rendering: keep only the translated words of the idiom and remove any appended scene, origin, setting, tool, action or consequence;
 - a translation of an example does not sound like something people say.
 
 Keep what the writer had to keep:
