@@ -4,6 +4,8 @@
 
 - Check explanation pronunciation claims and contrast reasons before polishing prose, omitting unsupported details and repeated reasons.
 
+- Show a complete construction contrast and its rejected interpretation only in the matching Russian-to-English calibration data.
+
 - Calibrate Russian-to-English explanations with complete examples restricted to that exact pair, without reusing evaluation cards or changing other readers' examples.
 
 - Keep explanation facts and examples tied to the sentence's sense, avoid invented usage restrictions, and retain valid learning text when an editor corrupts it; reject foreign scripts in learning fragments and recognize short native words in echo checks.

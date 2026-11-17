@@ -34,7 +34,7 @@ pub(crate) fn explanation_pair(reader: &str, learning: &str) -> Result<String> {
         );
         if known == reader && target == learning {
             result = format!(
-                "\n\nComplete examples for this exact pair, reader {reader} and learning {learning}:\nThese examples calibrate scope, brevity and optional sections. Their reader prose is in {reader}; their marked phrases and example sentences are in {learning}. Copy the standard of accuracy, never their words or facts into another card. Notice that the first note stays within the sentence's sense, literal has no invented continuation, and empty sections stay empty.\n{}",
+                "\n\nComplete examples for this exact pair, reader {reader} and learning {learning}:\nThese examples calibrate scope, brevity and optional sections. Their reader prose is in {reader}; their marked phrases and example sentences are in {learning}. Copy the standard of accuracy, never their words or facts into another card. Notice that the first note stays within the sentence's sense, literal has no invented continuation, and empty sections stay empty. Review notes explain rejected claims; they are guidance, never part of the answer.\n{}",
                 example.text
             );
         }
