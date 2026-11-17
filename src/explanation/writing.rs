@@ -259,6 +259,21 @@ fn preserves(current: &Parts, edited: &Parts, language: &Language) -> bool {
         )
 }
 
+fn revision(original: &Parts, edited: &Parts) -> Parts {
+    let mut source = original.clone();
+    for (before, after) in [
+        (&mut source.r#where.example, &edited.r#where.example),
+        (&mut source.limits.example, &edited.limits.example),
+        (&mut source.nuance.example, &edited.nuance.example),
+    ] {
+        if before.text != after.text {
+            before.text.clear();
+            before.translation.clear();
+        }
+    }
+    source
+}
+
 /// Write and edit with at most two repairs, rejecting edits that change learning text.
 pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Result<Option<Parts>> {
     let count = if task.input.card.senses.is_empty() {
@@ -300,6 +315,7 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
         let (mut fails, _) = judge(&task.input.card, &current, language).into_parts();
         if !intact {
             fails.push("learning language: the editor changed the learning text; the supplied JSON is the original writer response, preserve its marked phrases and example texts exactly while editing only the reader prose".into());
+            fails.push("editing: any example the editor rewrote or removed is now empty in the supplied JSON; keep it empty, do not restore the original or add a replacement; keep every meaning's head and from in their supplied order while correcting its note".into());
             let allowed = phrases(&original, language);
             let added = phrases(&current, language)
                 .difference(&allowed)
@@ -314,10 +330,14 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
             }
         }
         if !fails.is_empty() {
-            let source = if intact { &current } else { &original };
+            let source = if intact {
+                current.clone()
+            } else {
+                revision(&original, &current)
+            };
             if let Some(fixed) = ask(
                 writer,
-                task.prompt(&task.writer, Some(source), &fails, language)?,
+                task.prompt(&task.editor, Some(&source), &fails, language)?,
             )? {
                 if !intact && !preserves(&original, &fixed, language) {
                     return Ok(None);
@@ -348,6 +368,26 @@ mod tests {
     struct Feedback {
         answers: std::collections::VecDeque<String>,
         diagnosis: String,
+    }
+
+    struct Revision {
+        answers: std::collections::VecDeque<String>,
+        editor: String,
+        reviewed: bool,
+    }
+
+    impl super::Writer for Revision {
+        fn ask(&mut self, prompt: String) -> anyhow::Result<String> {
+            if let Some(answer) = self.answers.pop_front() {
+                return Ok(answer);
+            }
+            self.reviewed = prompt.starts_with(&self.editor);
+            let (_, source) = prompt.split_once("Writer's JSON:\n").unwrap();
+            let (source, _) = source
+                .split_once("\n\nYour answer breaks these rules:")
+                .unwrap();
+            Ok(source.into())
+        }
     }
 
     impl super::Writer for Feedback {
@@ -673,6 +713,46 @@ mod tests {
                 .iter()
                 .all(|phrase| writer.diagnosis.contains(phrase)),
             "repair feedback hid the changed phrase or the original spelling"
+        );
+    }
+
+    #[test]
+    fn quality_editor_repair_cannot_resurrect_a_replaced_example() {
+        let case: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/editor_sense.json"
+        ))
+        .unwrap();
+        let language = language("ru", "en");
+        let task = Task::from_input(
+            Input::new(
+                serde_json::from_value(case["job"]["card"].clone()).unwrap(),
+                case["job"]["sentence_known"].as_str().unwrap().into(),
+                String::new(),
+                String::new(),
+            ),
+            &language,
+        )
+        .unwrap();
+        let mut writer = Revision {
+            answers: case["attempts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .take(2)
+                .map(serde_json::Value::to_string)
+                .collect(),
+            editor: task.editor.clone(),
+            reviewed: false,
+        };
+        let mut expected: super::Parts =
+            serde_json::from_value(case["attempts"][0].clone()).unwrap();
+        expected.r#where.example.text.clear();
+        expected.r#where.example.translation.clear();
+        let result = super::write(&mut writer, &task, &language).unwrap();
+        assert_eq!(
+            (result, writer.reviewed),
+            (Some(expected), true),
+            "a repeated writer restored an example the editor tried to replace"
         );
     }
 
