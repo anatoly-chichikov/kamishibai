@@ -315,7 +315,7 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
         let (mut fails, _) = judge(&task.input.card, &current, language).into_parts();
         if !intact {
             fails.push("learning language: the editor changed the learning text; the supplied JSON is the original writer response, preserve its marked phrases and example texts exactly while editing only the reader prose".into());
-            fails.push("editing: any example the editor rewrote or removed is now empty in the supplied JSON; keep it empty, do not restore the original or add a replacement; keep every meaning's head and from in their supplied order while correcting its note".into());
+            fails.push("editing: any example the editor rewrote or removed is now empty in the supplied JSON; keep it empty, do not restore the original or add a replacement; keep every from and the row order, qualify only an ambiguous first head with its sentence object, and correct the notes without merging senses".into());
             let allowed = phrases(&original, language);
             let added = phrases(&current, language)
                 .difference(&allowed)
@@ -428,6 +428,7 @@ mod tests {
                     "I had the roof repaired last week.",
                     "He is a bright kid with plenty of ideas.",
                     "She taught French for ten years.",
+                    "He has a deep understanding of local history.",
                 ] {
                     if writer.0.contains(text) != expected {
                         faults.push(format!("{known}->{learning}: {text}"));
