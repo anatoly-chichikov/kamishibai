@@ -8,6 +8,8 @@ On a fresh card, when both "old" and "request" are empty, the nuance gives only 
 
 Show a spelling or usage fact through a tiny phrase in an everyday situation. Do not name tenses, word classes or grammatical forms, even in otherwise simple prose. Read each example translation as an independent {known} sentence: convey the intended meaning naturally instead of copying a figurative image or word order that sounds foreign in {known}.
 
+The example translation describes the same people and things as the learning sentence. Use the number and agreement natural in {known}, including inside translated idioms. A singular dictionary head does not stay singular in a sentence about several people. An unchanged or collective learning phrase does not require unchanged wording in the reader translation.
+
 The explanation always has the same four sections under the same headings in the same order, so the learner knows where to look: {open}{meaning}{close}, {open}{where}{close}, {open}{limits}{close}, {open}{nuance}{close}. The app prints the headings. You write only what stands under each. A section says only what its heading promises, so the learner never wonders what a phrase is about. A section that has nothing real to say stays empty, and the app leaves it out together with its heading. Never fill a section to have it filled. An answer with the list and a single section is a whole answer: most words have nothing real for at least one of the other three.
 
 You get one card:

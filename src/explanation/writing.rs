@@ -429,6 +429,7 @@ mod tests {
                     "He is a bright kid with plenty of ideas.",
                     "She taught French for ten years.",
                     "He has a deep understanding of local history.",
+                    "Those two players are dark horses.",
                 ] {
                     if writer.0.contains(text) != expected {
                         faults.push(format!("{known}->{learning}: {text}"));
