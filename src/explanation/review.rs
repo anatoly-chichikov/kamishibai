@@ -59,6 +59,12 @@ fn stems(text: &str) -> BTreeSet<String> {
         })
         .collect()
 }
+
+fn words(text: &str) -> BTreeSet<String> {
+    hits(r"\p{L}[\p{L}\p{M}'’-]*", &text.to_lowercase())
+        .into_iter()
+        .collect()
+}
 fn bare(text: &str) -> String {
     regex(r"[^\p{L}0-9]+")
         .replace_all(&text.to_lowercase().replace('ё', "е"), " ")
@@ -272,9 +278,15 @@ impl Review<'_> {
         let Some(main) = parts.meanings.first() else {
             return;
         };
-        let known = stems(&format!("{} {}", card.translation, main.head));
+        let translation = format!("{} {}", card.translation, main.head);
+        let known = stems(&translation);
+        let note = stems(&main.note);
         let echo = if self.language.names.examples.worded() {
-            stems(&main.note).difference(&known).count() < 2
+            if known.is_empty() || note.is_empty() {
+                words(&main.note).difference(&words(&translation)).count() < 2
+            } else {
+                note.difference(&known).count() < 2
+            }
         } else {
             bare(&main.note) == bare(&main.head) || bare(&main.note) == bare(&card.translation)
         };
@@ -408,6 +420,25 @@ impl Review<'_> {
                 "quotes",
                 "words of the learning language stand on the card outside quotation marks",
             );
+        }
+    }
+
+    fn learning(&mut self, parts: &Parts) {
+        let fragments = parts
+            .strings()
+            .into_iter()
+            .flat_map(|text| hits("⟦[^⟦⟧]*⟧", &self.normalize(text)))
+            .chain(
+                parts
+                    .sections()
+                    .into_iter()
+                    .map(|(_, _, example)| example.text.clone()),
+            )
+            .filter(|text| !crate::languages::native_scripted(text, &self.language.learning))
+            .collect::<BTreeSet<_>>();
+        for fragment in fragments {
+            let [open, close] = &self.language.context.quotes;
+            self.fail("learning language", format!("{open}{fragment}{close} contains letters or marks outside {}; write the whole phrase in the learning language without mixing scripts", self.language.names.learning));
         }
     }
 
@@ -762,7 +793,7 @@ impl Review<'_> {
                 self.fail("example", format!("the text of \"{name}\" holds a whole sentence in the learning language or its translation; move it to \"example\""));
             }
             for sentence in sentences(value) {
-                let count = hits(r"[\p{L}][\p{L}'’-]*", sentence).len();
+                let count = hits(r"\p{L}[\p{L}\p{M}'’-]*", sentence).len();
                 if count > 18 {
                     self.fail("clumsy", format!("the sentence {open}{}…{close} of \"{name}\" has {count} words, the limit is 18; split it or cut it", sentence.chars().take(60).collect::<String>()));
                 }
@@ -837,6 +868,7 @@ pub fn judge(card: &Card, parts: &Parts, language: &Language) -> Verdict {
     }
     review.structure(parts, &blocks);
     review.quotes(parts, &blocks);
+    review.learning(parts);
     review.empty(parts, &whole);
     review.lengths(parts, &whole);
     review.why(parts);
@@ -851,6 +883,157 @@ pub fn judge(card: &Card, parts: &Parts, language: &Language) -> Verdict {
 #[cfg(test)]
 mod tests {
     use super::{Card, Language, Parts, Review};
+
+    #[test]
+    fn quality_short_native_words_cannot_be_mistaken_for_translation_echoes() {
+        let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/quality.json"
+        ))
+        .unwrap();
+        let rejected = cases[..4]
+            .iter()
+            .flat_map(|case| {
+                let job = &case["job"];
+                let language = Language::from_codes(
+                    job["known"].as_str().unwrap(),
+                    job["learning"].as_str().unwrap(),
+                )
+                .unwrap();
+                let card = serde_json::from_value(job["card"].clone()).unwrap();
+                case["attempts"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .flat_map(|value| {
+                        let parts = serde_json::from_value(value.clone()).unwrap();
+                        let mut review = Review {
+                            language: &language,
+                            fails: Vec::new(),
+                        };
+                        review.list(&card, &parts);
+                        review.fails
+                    })
+                    .filter(|failure| failure.starts_with("echo:"))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            rejected.is_empty(),
+            "native descriptions were rejected as echoes: {rejected:?}"
+        );
+    }
+
+    #[test]
+    fn quality_short_native_translation_echoes_cannot_escape_review() {
+        let missed = [("hi", "पानी"), ("ko", "물"), ("en", "cat")]
+            .into_iter()
+            .filter(|(code, head)| {
+                let language = Language::from_codes(code, "fr").unwrap();
+                let card = Card::new("eau".into(), (*head).into(), String::new(), Vec::new());
+                let mut parts = parts("");
+                parts.meanings[0].head = (*head).into();
+                parts.meanings[0].note = (*head).into();
+                parts.meanings[0].from = (*head).into();
+                !super::judge(&card, &parts, &language)
+                    .into_parts()
+                    .0
+                    .iter()
+                    .any(|failure| failure.starts_with("echo:"))
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            missed.is_empty(),
+            "short translation echoes survived: {missed:?}"
+        );
+    }
+
+    #[test]
+    fn quality_foreign_letters_in_learning_spans_cannot_survive_review() {
+        let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/quality.json"
+        ))
+        .unwrap();
+        let case = &cases[4];
+        let card = serde_json::from_value(case["job"]["card"].clone()).unwrap();
+        let parts = serde_json::from_value(case["attempts"][1].clone()).unwrap();
+        let language = Language::from_codes("sr", "fa").unwrap();
+        assert!(
+            super::judge(&card, &parts, &language)
+                .into_parts()
+                .0
+                .iter()
+                .any(|failure| failure.starts_with("learning language:")),
+            "a Latin letter inside a Persian learning phrase survived review"
+        );
+    }
+
+    #[test]
+    fn quality_foreign_letters_in_learning_examples_cannot_survive_review() {
+        let card = Card::new("آب".into(), "water".into(), String::new(), Vec::new());
+        let mut parts = parts("");
+        parts.r#where.example.text = "آb می‌خوری؟".into();
+        let language = Language::from_codes("en", "fa").unwrap();
+        assert!(
+            super::judge(&card, &parts, &language)
+                .into_parts()
+                .0
+                .iter()
+                .any(|failure| failure.starts_with("learning language:")),
+            "a corrupt learning example survived review"
+        );
+    }
+
+    #[test]
+    fn quality_native_learning_scripts_and_marks_cannot_be_rejected() {
+        let rejected = [
+            ("ja", "コーヒーを飲む"),
+            ("ja", "水を飲んでいる"),
+            ("hi", "पानी पीना"),
+            ("ko", "물을 마셔요"),
+            ("fa", "آب می‌خوری؟"),
+            ("he", "מַיִם"),
+            ("fr", "cafe\u{301}"),
+        ]
+        .into_iter()
+        .filter(|(code, text)| {
+            let language = Language::from_codes("en", code).unwrap();
+            let card = Card::new((*text).into(), "water".into(), String::new(), Vec::new());
+            super::judge(
+                &card,
+                &parts(&format!("People say ⟦{text}⟧ here.")),
+                &language,
+            )
+            .into_parts()
+            .0
+            .iter()
+            .any(|failure| failure.starts_with("learning language:"))
+        })
+        .collect::<Vec<_>>();
+        assert!(
+            rejected.is_empty(),
+            "native learning letters or marks were rejected: {rejected:?}"
+        );
+    }
+
+    #[test]
+    fn quality_combining_marks_cannot_split_native_words_for_sentence_limits() {
+        let language = Language::from_codes("hi", "hu").unwrap();
+        let card = Card::new("macska".into(), "बिल्ली".into(), String::new(), Vec::new());
+        let parts = parts("घर में और जानवरों के डॉक्टर के पास। अक्सर ⟦fekete macska⟧ या ⟦házi macska⟧।");
+        let mut review = Review {
+            language: &language,
+            fails: Vec::new(),
+        };
+        review.form(&card, &parts, &[]);
+        assert!(
+            !review
+                .fails
+                .iter()
+                .any(|failure| failure.starts_with("clumsy:")),
+            "native combining marks inflated the word count: {:?}",
+            review.fails
+        );
+    }
 
     fn language(code: &str) -> Language {
         let examples = serde_json::from_str::<

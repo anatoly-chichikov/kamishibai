@@ -181,17 +181,21 @@ impl ExplanationExamples {
 
 /// Check native letters and marks, requiring a native base for generic marks.
 pub(super) fn scripted(value: &str, code: &str) -> bool {
-    characters(value, code, false)
+    native_scripted(value, &explanation_scripts(code))
+}
+
+/// Check learning fragments against their native scripts, including attached marks.
+pub(crate) fn native_scripted(value: &str, scripts: &[unicode_script::Script]) -> bool {
+    characters(value, scripts, false)
 }
 
 /// Check rendered instructions while allowing their ASCII prose outside native examples.
 #[cfg(test)]
 pub(crate) fn prompt_scripted(value: &str, code: &str) -> bool {
-    characters(value, code, true)
+    characters(value, &explanation_scripts(code), true)
 }
 
-fn characters(value: &str, code: &str, ascii: bool) -> bool {
-    let scripts = explanation_scripts(code);
+fn characters(value: &str, scripts: &[unicode_script::Script], ascii: bool) -> bool {
     let pattern = regex::Regex::new(r"(?s)(\p{L})|(\p{M})|(.)")
         .expect("invariant: script classification pattern must compile");
     let mut base = false;

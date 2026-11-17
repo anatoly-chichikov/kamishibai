@@ -2,6 +2,8 @@
 
 ## 1.19.1
 
+- Keep explanation facts and examples tied to the sentence's sense, avoid invented usage restrictions, and retain valid learning text when an editor corrupts it; reject foreign scripts in learning fragments and recognize short native words in echo checks.
+
 - Inject explanation examples from the reader language; style checks for office wording, empty openers, grammar terms, and address forms currently apply to Russian readers, while other readers receive the shared structural checks.
 
 - Preserve legacy note fields and GUIDs with an explicit explanation format, including imported JSON and rejected explanation attempts.

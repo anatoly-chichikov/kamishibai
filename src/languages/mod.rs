@@ -12,6 +12,8 @@ mod profile;
 mod prompt_examples;
 mod registry;
 
+pub(crate) use explanation_examples::native_scripted;
+
 #[cfg(test)]
 pub(crate) use explanation_examples::prompt_scripted;
 

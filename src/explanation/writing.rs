@@ -227,7 +227,31 @@ fn ask(writer: &mut impl Writer, prompt: String) -> Result<Option<Parts>> {
         .map(|parts| tidy(&parts)))
 }
 
-/// Write and edit with at most two repairs, retaining the draft without requests above five meanings.
+fn preserves(current: &Parts, edited: &Parts) -> bool {
+    let pattern =
+        regex::Regex::new("⟦[^⟦⟧]*⟧").expect("invariant: learning marker pattern must compile");
+    let original = current.strings();
+    let proposed = edited.strings();
+    original.len() == proposed.len()
+        && original.iter().zip(proposed).all(|(before, after)| {
+            after.trim().is_empty()
+                || (!before.trim().is_empty()
+                    && pattern
+                        .find_iter(before)
+                        .map(|hit| hit.as_str())
+                        .eq(pattern.find_iter(after).map(|hit| hit.as_str())))
+        })
+        && current
+            .meanings
+            .iter()
+            .map(|line| &line.from)
+            .eq(edited.meanings.iter().map(|line| &line.from))
+        && current.sections().into_iter().zip(edited.sections()).all(
+            |((_, _, before), (_, _, after))| after.text.is_empty() || before.text == after.text,
+        )
+}
+
+/// Write and edit with at most two repairs, rejecting edits that change learning text.
 pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Result<Option<Parts>> {
     let count = if task.input.card.senses.is_empty() {
         task.input
@@ -252,12 +276,27 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
         current = fixed;
     }
     if let Some(edited) = ask(writer, task.prompt(&task.editor, Some(&current), &[])?)? {
+        let accepted = judge(&task.input.card, &current, language)
+            .into_parts()
+            .0
+            .is_empty();
+        let intact = !accepted || preserves(&current, &edited);
+        let original = current;
         current = edited;
-        let (fails, _) = judge(&task.input.card, &current, language).into_parts();
-        if !fails.is_empty()
-            && let Some(fixed) = ask(writer, task.prompt(&task.writer, Some(&current), &fails)?)?
-        {
-            current = fixed;
+        let (mut fails, _) = judge(&task.input.card, &current, language).into_parts();
+        if !intact {
+            fails.push("learning language: the editor changed the learning text; the supplied JSON is the original writer response, preserve its marked phrases and example texts exactly while editing only the reader prose".into());
+        }
+        if !fails.is_empty() {
+            let source = if intact { &current } else { &original };
+            if let Some(fixed) = ask(writer, task.prompt(&task.writer, Some(source), &fails)?)? {
+                if !intact && !preserves(&original, &fixed) {
+                    return Ok(None);
+                }
+                current = fixed;
+            } else if !intact {
+                return Ok(None);
+            }
         }
     }
     let (fails, _) = judge(&task.input.card, &current, language).into_parts();
@@ -270,6 +309,179 @@ mod tests {
 
     use super::{Card, Input, Language, Task, substitutions};
     use crate::languages::{LanguagePromptExamples, explanation_scripts, prompt_scripted};
+
+    struct Replies {
+        answers: std::collections::VecDeque<String>,
+    }
+
+    impl super::Writer for Replies {
+        fn ask(&mut self, _prompt: String) -> anyhow::Result<String> {
+            self.answers
+                .pop_front()
+                .ok_or_else(|| anyhow::anyhow!("unexpected extra quality request"))
+        }
+    }
+
+    #[test]
+    fn quality_editing_cannot_corrupt_learning_phrases_or_examples() {
+        let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/quality.json"
+        ))
+        .unwrap();
+        let corrupted = cases[4..]
+            .iter()
+            .filter(|case| {
+                let job = &case["job"];
+                let language = Language::from_codes(
+                    job["known"].as_str().unwrap(),
+                    job["learning"].as_str().unwrap(),
+                )
+                .unwrap();
+                let task = Task::from_input(
+                    Input::new(
+                        serde_json::from_value(job["card"].clone()).unwrap(),
+                        job["sentence_known"].as_str().unwrap().into(),
+                        String::new(),
+                        String::new(),
+                    ),
+                    &language,
+                )
+                .unwrap();
+                let answers = case["attempts"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .chain(std::iter::once(&case["attempts"][0]))
+                    .map(serde_json::Value::to_string)
+                    .collect();
+                let mut writer = Replies { answers };
+                let expected =
+                    super::tidy(&serde_json::from_value(case["attempts"][0].clone()).unwrap());
+                super::write(&mut writer, &task, &language).unwrap() != Some(expected)
+            })
+            .map(|case| case["job"]["id"].clone())
+            .collect::<Vec<_>>();
+        assert!(
+            corrupted.is_empty(),
+            "editor corrupted previously valid learning text: {corrupted:?}"
+        );
+    }
+
+    #[test]
+    fn quality_editing_cannot_discard_safe_reader_changes_or_section_removal() {
+        let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/quality.json"
+        ))
+        .unwrap();
+        let original = cases[4]["attempts"][0].clone();
+        let mut rewritten = original.clone();
+        rewritten["where"]["text"] = serde_json::json!(
+            original["where"]["text"]
+                .as_str()
+                .unwrap()
+                .replace("Za stolom", "Za ručkom")
+        );
+        let mut removed = original.clone();
+        removed["nuance"] =
+            serde_json::json!({"text":"", "why":"", "example":{"text":"", "translation":""}});
+        let language = Language::from_codes("sr", "fa").unwrap();
+        let job = &cases[4]["job"];
+        let task = Task::from_input(
+            Input::new(
+                serde_json::from_value(job["card"].clone()).unwrap(),
+                job["sentence_known"].as_str().unwrap().into(),
+                String::new(),
+                String::new(),
+            ),
+            &language,
+        )
+        .unwrap();
+        let lost = [rewritten, removed]
+            .into_iter()
+            .filter(|edited| {
+                let mut writer = Replies {
+                    answers: [original.to_string(), edited.to_string()].into(),
+                };
+                super::write(&mut writer, &task, &language).unwrap()
+                    != Some(super::tidy(
+                        &serde_json::from_value(edited.clone()).unwrap(),
+                    ))
+            })
+            .count();
+        assert_eq!(
+            lost, 0,
+            "safe reader editing or unsupported-section removal was discarded"
+        );
+    }
+
+    #[test]
+    fn quality_learning_corruption_cannot_survive_a_failed_editor_repair() {
+        let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/quality.json"
+        ))
+        .unwrap();
+        let accepted = cases[4..]
+            .iter()
+            .flat_map(|case| {
+                let job = &case["job"];
+                let language = Language::from_codes(
+                    job["known"].as_str().unwrap(),
+                    job["learning"].as_str().unwrap(),
+                )
+                .unwrap();
+                let task = Task::from_input(
+                    Input::new(
+                        serde_json::from_value(job["card"].clone()).unwrap(),
+                        job["sentence_known"].as_str().unwrap().into(),
+                        String::new(),
+                        String::new(),
+                    ),
+                    &language,
+                )
+                .unwrap();
+                [case["attempts"][1].to_string(), "unparsed".into()]
+                    .into_iter()
+                    .map(move |repair| {
+                        let mut writer = Replies {
+                            answers: [
+                                case["attempts"][0].to_string(),
+                                case["attempts"][1].to_string(),
+                                repair,
+                            ]
+                            .into(),
+                        };
+                        super::write(&mut writer, &task, &language)
+                            .unwrap()
+                            .is_some()
+                    })
+            })
+            .any(|accepted| accepted);
+        assert!(
+            !accepted,
+            "an unrepaired editor change installed corrupt learning text"
+        );
+    }
+
+    #[test]
+    fn quality_writer_cannot_omit_observed_semantic_failure_constraints() {
+        let task = task(&language("ru", "en"));
+        let missing = [
+            "Do not merge another sense into the first note",
+            "Do not turn a typical situation into a necessary condition",
+            "A more specific alternative does not make the original word wrong",
+            "A transparent word or compound has no literal line",
+            "An example must demonstrate the card's sense, never a contrasting sense",
+            "Choose a different fact for each section",
+            "Check every letter of every learning phrase",
+        ]
+        .into_iter()
+        .filter(|rule| !task.writer.contains(rule))
+        .collect::<Vec<_>>();
+        assert!(
+            missing.is_empty(),
+            "writer lacks safeguards for observed semantic failures: {missing:?}"
+        );
+    }
 
     fn examples() -> BTreeMap<String, LanguagePromptExamples> {
         serde_json::from_str(include_str!("../../assets/prompt_examples.json")).unwrap()
