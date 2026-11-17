@@ -16,6 +16,8 @@
 
 - Check each quoted combination against the sentence sense and remove register advice whose replacement does not fit its setting.
 
+- Use positive nuance facts for fresh cards and identify altered learning phrases explicitly in repair feedback.
+
 - Calibrate Russian-to-English explanations with complete examples restricted to that exact pair, without reusing evaluation cards or changing other readers' examples.
 
 - Keep explanation facts and examples tied to the sentence's sense, avoid invented usage restrictions, and retain valid learning text when an editor corrupts it; reject foreign scripts in learning fragments and recognize short native words in echo checks.

@@ -1,0 +1,157 @@
+{
+  "job": {
+    "id": "ru-04",
+    "known": "ru",
+    "learning": "en",
+    "card": {
+      "term": "suite",
+      "translation": "пакет программ, набор программ",
+      "sentence": "We bought an office suite to edit documents and create presentations.",
+      "highlight": "пакет программ"
+    },
+    "sentence_known": "Мы купили офисный пакет программ, чтобы редактировать документы и создавать презентации."
+  },
+  "attempts": [
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Об одной отдельной программе говорят ⟦program⟧ или ⟦app⟧. ⟦Suite⟧ объединяет несколько таких программ."
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "пакет программ, набор программ",
+          "head": "пакет программ",
+          "note": "для офиса, дизайна, безопасности"
+        },
+        {
+          "from": "",
+          "head": "люкс",
+          "note": "в отеле"
+        },
+        {
+          "from": "",
+          "head": "сюита",
+          "note": "в музыке"
+        },
+        {
+          "from": "",
+          "head": "гарнитур",
+          "note": "мебели"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Звучит в точности как ⟦sweet⟧.",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "They installed a new security suite.",
+          "translation": "Они установили новый пакет программ безопасности."
+        },
+        "text": "В описании софта, тарифов и на сайтах разработчиков: ⟦software suite⟧, ⟦office suite⟧."
+      }
+    },
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Об одной отдельной программе говорят ⟦program⟧ или ⟦app⟧. Словом ⟦suite⟧ называют целый набор таких программ."
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "пакет программ, набор программ",
+          "head": "пакет программ",
+          "note": "для офиса, дизайна, безопасности"
+        },
+        {
+          "from": "",
+          "head": "люкс",
+          "note": "в отеле"
+        },
+        {
+          "from": "",
+          "head": "сюита",
+          "note": "в музыке"
+        },
+        {
+          "from": "",
+          "head": "гарнитур",
+          "note": "мебели"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Звучит в точности как ⟦sweet⟧.",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "They installed a new security suite.",
+          "translation": "Они установили новый пакет программ для защиты."
+        },
+        "text": "В описании софта, тарифов и на сайтах разработчиков: ⟦software suite⟧, ⟦office suite⟧."
+      }
+    },
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Об одной отдельной программе говорят ⟦program⟧ или ⟦app⟧. Слово ⟦suite⟧ объединяет несколько таких программ."
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "пакет программ, набор программ",
+          "head": "пакет программ",
+          "note": "для офиса, дизайна, безопасности"
+        },
+        {
+          "from": "",
+          "head": "люкс",
+          "note": "в отеле"
+        },
+        {
+          "from": "",
+          "head": "сюита",
+          "note": "в музыке"
+        },
+        {
+          "from": "",
+          "head": "гарнитур",
+          "note": "мебели"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Звучит точно так же, как слово ⟦sweet⟧.",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "They installed a new security suite.",
+          "translation": "Они установили новый пакет программ безопасности."
+        },
+        "text": "В описании софта, тарифов и на сайтах разработчиков: ⟦software suite⟧, ⟦office suite⟧."
+      }
+    }
+  ]
+}

@@ -232,22 +232,23 @@ fn ask(writer: &mut impl Writer, prompt: String) -> Result<Option<Parts>> {
         .map(|parts| tidy(&parts)))
 }
 
-fn preserves(current: &Parts, edited: &Parts, language: &Language) -> bool {
+fn phrases(parts: &Parts, language: &Language) -> std::collections::BTreeSet<String> {
     let pattern =
         regex::Regex::new("⟦[^⟦⟧]*⟧").expect("invariant: learning marker pattern must compile");
-    let phrases = |parts: &Parts| {
-        parts
-            .strings()
-            .into_iter()
-            .flat_map(|text| {
-                pattern
-                    .find_iter(&super::layout::mark(text, language))
-                    .map(|hit| hit.as_str().to_string())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<std::collections::BTreeSet<_>>()
-    };
-    phrases(edited).is_subset(&phrases(current))
+    parts
+        .strings()
+        .into_iter()
+        .flat_map(|text| {
+            pattern
+                .find_iter(&super::layout::mark(text, language))
+                .map(|hit| hit.as_str().to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn preserves(current: &Parts, edited: &Parts, language: &Language) -> bool {
+    phrases(edited, language).is_subset(&phrases(current, language))
         && current
             .meanings
             .iter()
@@ -299,6 +300,18 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
         let (mut fails, _) = judge(&task.input.card, &current, language).into_parts();
         if !intact {
             fails.push("learning language: the editor changed the learning text; the supplied JSON is the original writer response, preserve its marked phrases and example texts exactly while editing only the reader prose".into());
+            let allowed = phrases(&original, language);
+            let added = phrases(&current, language)
+                .difference(&allowed)
+                .cloned()
+                .collect::<Vec<_>>();
+            if !added.is_empty() {
+                fails.push(format!(
+                    "learning language: these phrases were not in the original: {}; original phrases allowed to survive: {}; preserve spelling and capitalization exactly, rephrase the reader prose around them or remove the optional section",
+                    added.join(", "),
+                    allowed.into_iter().collect::<Vec<_>>().join(", ")
+                ));
+            }
         }
         if !fails.is_empty() {
             let source = if intact { &current } else { &original };
@@ -331,6 +344,22 @@ mod tests {
     }
 
     struct Capture(String);
+
+    struct Feedback {
+        answers: std::collections::VecDeque<String>,
+        diagnosis: String,
+    }
+
+    impl super::Writer for Feedback {
+        fn ask(&mut self, prompt: String) -> anyhow::Result<String> {
+            if let Some((_, diagnosis)) = prompt.split_once("Your answer breaks these rules:") {
+                self.diagnosis = diagnosis.to_string();
+            }
+            self.answers
+                .pop_front()
+                .ok_or_else(|| anyhow::anyhow!("unexpected extra feedback request"))
+        }
+    }
 
     impl super::Writer for Capture {
         fn ask(&mut self, prompt: String) -> anyhow::Result<String> {
@@ -609,6 +638,41 @@ mod tests {
         assert!(
             !super::preserves(&current, &edited, &language("ru", "en")),
             "a real word change escaped through quotation normalization"
+        );
+    }
+
+    #[test]
+    fn quality_repair_feedback_cannot_hide_the_changed_learning_phrase() {
+        let case: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/editor_case.json"
+        ))
+        .unwrap();
+        let language = language("ru", "en");
+        let task = Task::from_input(
+            Input::new(
+                serde_json::from_value(case["job"]["card"].clone()).unwrap(),
+                case["job"]["sentence_known"].as_str().unwrap().into(),
+                String::new(),
+                String::new(),
+            ),
+            &language,
+        )
+        .unwrap();
+        let mut writer = Feedback {
+            answers: case["attempts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(serde_json::Value::to_string)
+                .collect(),
+            diagnosis: String::new(),
+        };
+        super::write(&mut writer, &task, &language).unwrap();
+        assert!(
+            ["⟦suite⟧", "⟦Suite⟧"]
+                .iter()
+                .all(|phrase| writer.diagnosis.contains(phrase)),
+            "repair feedback hid the changed phrase or the original spelling"
         );
     }
 
