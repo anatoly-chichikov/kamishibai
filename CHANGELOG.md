@@ -4,7 +4,7 @@
 
 - Check explanation pronunciation claims and contrast reasons before polishing prose, omitting unsupported details and repeated reasons.
 
-- Show a complete construction contrast and its rejected interpretation only in the matching Russian-to-English calibration data.
+- Calibrate intentional omission of redundant construction advice only in the matching Russian-to-English data; prefer positive usage facts over invented incorrect alternatives and preserve meaning labels during editing.
 
 - Calibrate Russian-to-English explanations with complete examples restricted to that exact pair, without reusing evaluation cards or changing other readers' examples.
 
