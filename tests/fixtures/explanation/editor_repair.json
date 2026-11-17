@@ -1,0 +1,157 @@
+{
+  "job": {
+    "id": "ru-04",
+    "card": {
+      "term": "suite",
+      "translation": "пакет программ, набор программ",
+      "sentence": "We bought an office suite to edit documents and create presentations.",
+      "highlight": "пакет программ"
+    },
+    "known": "ru",
+    "learning": "en",
+    "sentence_known": "Мы купили офисный пакет программ, чтобы редактировать документы и создавать презентации."
+  },
+  "attempts": [
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Об одной отдельной программе говорят ⟦program⟧ или ⟦app⟧."
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "пакет программ, набор программ",
+          "head": "пакет программ",
+          "note": "для офиса, дизайна, текстов"
+        },
+        {
+          "from": "",
+          "head": "люкс",
+          "note": "номер в отеле"
+        },
+        {
+          "from": "",
+          "head": "сюита",
+          "note": "в музыке"
+        },
+        {
+          "from": "",
+          "head": "гарнитур",
+          "note": "мебели"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Звучит в точности как ⟦sweet⟧.",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "This software suite includes several tools.",
+          "translation": "В этот пакет программ входит несколько инструментов."
+        },
+        "text": "В офисе и при покупке программ: ⟦office suite⟧, ⟦software suite⟧."
+      }
+    },
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Об одной отдельной программе говорят ⟦program⟧ или ⟦app⟧."
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "пакет программ, набор программ",
+          "head": "пакет программ",
+          "note": "для офиса, дизайна, текстов"
+        },
+        {
+          "from": "",
+          "head": "люкс",
+          "note": "номер в отеле"
+        },
+        {
+          "from": "",
+          "head": "сюита",
+          "note": "в музыке"
+        },
+        {
+          "from": "",
+          "head": "гарнитур",
+          "note": "мебели"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Звучит в точности как ⟦sweet⟧.",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "This software suite includes several tools.",
+          "translation": "В этот пакет программ входит несколько инструментов."
+        },
+        "text": "Существительное. В офисе и при покупке программ: ⟦office suite⟧, ⟦software suite⟧."
+      }
+    },
+    {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Об одной отдельной программе говорят ⟦program⟧ или ⟦app⟧."
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "пакет программ, набор программ",
+          "head": "пакет программ",
+          "note": "для офиса, дизайна, текстов"
+        },
+        {
+          "from": "",
+          "head": "люкс",
+          "note": "номер в отеле"
+        },
+        {
+          "from": "",
+          "head": "сюита",
+          "note": "в музыке"
+        },
+        {
+          "from": "",
+          "head": "гарнитур",
+          "note": "мебели"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Звучит в точности как ⟦sweat⟧.",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "This software suite includes several tools.",
+          "translation": "В этот пакет программ входит несколько инструментов."
+        },
+        "text": "В офисе и при покупке программ: ⟦office suite⟧, ⟦software suite⟧."
+      }
+    }
+  ]
+}

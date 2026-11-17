@@ -24,6 +24,8 @@
 
 - Match reader-language example translations to their actual participants instead of copying the dictionary head unchanged.
 
+- Protect accepted learning text during every editor repair, including repairs triggered only by reader-language wording.
+
 - Calibrate Russian-to-English explanations with complete examples restricted to that exact pair, without reusing evaluation cards or changing other readers' examples.
 
 - Keep explanation facts and examples tied to the sentence's sense, avoid invented usage restrictions, and retain valid learning text when an editor corrupts it; reject foreign scripts in learning fragments and recognize short native words in echo checks.

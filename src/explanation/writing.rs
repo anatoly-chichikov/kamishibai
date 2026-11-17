@@ -339,7 +339,7 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
                 writer,
                 task.prompt(&task.editor, Some(&source), &fails, language)?,
             )? {
-                if !intact && !preserves(&original, &fixed, language) {
+                if accepted && !preserves(&original, &fixed, language) {
                     return Ok(None);
                 }
                 current = fixed;
@@ -715,6 +715,39 @@ mod tests {
                 .iter()
                 .all(|phrase| writer.diagnosis.contains(phrase)),
             "repair feedback hid the changed phrase or the original spelling"
+        );
+    }
+
+    #[test]
+    fn quality_reader_repair_cannot_change_accepted_learning_text() {
+        let case: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/editor_repair.json"
+        ))
+        .unwrap();
+        let language = language("ru", "en");
+        let task = Task::from_input(
+            Input::new(
+                serde_json::from_value(case["job"]["card"].clone()).unwrap(),
+                case["job"]["sentence_known"].as_str().unwrap().into(),
+                String::new(),
+                String::new(),
+            ),
+            &language,
+        )
+        .unwrap();
+        let mut writer = Replies {
+            answers: case["attempts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(serde_json::Value::to_string)
+                .collect(),
+        };
+        assert!(
+            super::write(&mut writer, &task, &language)
+                .unwrap()
+                .is_none(),
+            "repairing reader prose bypassed protection of accepted learning text"
         );
     }
 
