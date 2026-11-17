@@ -412,6 +412,12 @@ impl Review<'_> {
             .flat_map(|text| hits("⟦[^⟦⟧]*⟧", &self.normalize(text)))
             .chain(
                 parts
+                    .strings()
+                    .into_iter()
+                    .flat_map(|text| super::layout::unmarked(text, self.language)),
+            )
+            .chain(
+                parts
                     .sections()
                     .into_iter()
                     .map(|(_, _, example)| example.text.clone()),
@@ -994,6 +1000,54 @@ mod tests {
         assert!(
             rejected.is_empty(),
             "native learning letters or marks were rejected: {rejected:?}"
+        );
+    }
+
+    #[test]
+    fn unmarked_learning_cannot_borrow_foreign_letters_when_the_pair_shares_a_script() {
+        let language = Language::from_codes("en", "fr").unwrap();
+        let card = Card::new("charge".into(), "load".into(), String::new(), Vec::new());
+        assert!(
+            ["chаrge", "chargeְ"].into_iter().all(|text| {
+                super::judge(
+                    &card,
+                    &parts(&format!("People say {text} here.")),
+                    &language,
+                )
+                .into_parts()
+                .0
+                .iter()
+                .any(|failure| failure.starts_with("learning language:"))
+            }),
+            "a shared reader script hid a foreign letter or mark in a learning word"
+        );
+    }
+
+    #[test]
+    fn unmarked_learning_cannot_reject_native_reader_or_learning_tokens() {
+        let rejected = [
+            ("ru", "fr", "cafe\u{301}"),
+            ("en", "he", "מַיִם"),
+            ("en", "ja", "コーヒーを飲む"),
+            ("en", "hi", "पानी पीना"),
+            ("en", "fa", "آب می‌خوری"),
+            ("ja", "zh", "水を飲む"),
+            ("ja", "zh", "人々"),
+        ]
+        .into_iter()
+        .filter(|(known, learning, text)| {
+            let language = Language::from_codes(known, learning).unwrap();
+            let card = Card::new(String::new(), String::new(), String::new(), Vec::new());
+            super::judge(&card, &parts(text), &language)
+                .into_parts()
+                .0
+                .iter()
+                .any(|failure| failure.starts_with("learning language:"))
+        })
+        .collect::<Vec<_>>();
+        assert!(
+            rejected.is_empty(),
+            "native tokens were mistaken for corrupt insertions: {rejected:?}"
         );
     }
 

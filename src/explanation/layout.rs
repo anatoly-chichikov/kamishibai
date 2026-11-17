@@ -135,6 +135,27 @@ fn runs(text: &str, language: &Language) -> String {
     output
 }
 
+/// Capture complete unmarked tokens before quotation can split their scripts.
+pub(super) fn unmarked(text: &str, language: &Language) -> Vec<String> {
+    use unicode_script::UnicodeScript;
+    let orphan = regex::Regex::new(r"\A\p{M}")
+        .expect("invariant: orphan learning mark pattern must compile");
+    regex::Regex::new(r"[\p{L}\p{M}\p{N}\x{200c}\x{200d}]+")
+        .expect("invariant: unmarked learning token pattern must compile")
+        .find_iter(text)
+        .filter(|token| {
+            let text = token.as_str();
+            orphan.is_match(text)
+                || text.chars().any(|ch| language.foreign(ch))
+                || (!crate::languages::native_scripted(text, &language.known)
+                    && text
+                        .chars()
+                        .any(|ch| language.learning.contains(&ch.script())))
+        })
+        .map(|token| token.as_str().to_string())
+        .collect()
+}
+
 fn word(chars: &[&str], start: usize, language: &Language) -> usize {
     let belongs = |text: &str| {
         text.chars().any(|ch| language.foreign(ch)) || text.chars().all(|ch| ch.is_ascii_digit())

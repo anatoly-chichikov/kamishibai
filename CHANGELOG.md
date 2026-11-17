@@ -2,6 +2,10 @@
 
 ## 1.19.1
 
+- Declare creation and revision explicitly throughout explanation writing and editing, preserving the metadata draft for provenance and fallback.
+
+- Validate complete unmarked learning tokens and their attached marks before quotation, including pairs with a shared script.
+
 - Check explanation pronunciation claims and contrast reasons before polishing prose, omitting unsupported details and repeated reasons.
 
 - Calibrate intentional omission of redundant construction advice only in the matching Russian-to-English data; prefer positive usage facts over invented incorrect alternatives and preserve meaning labels during editing.

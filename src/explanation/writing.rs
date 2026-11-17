@@ -13,6 +13,15 @@ pub trait Writer {
     fn ask(&mut self, prompt: String) -> Result<String>;
 }
 
+/// Select creation or revision independently of the retained metadata draft.
+#[derive(Clone, Copy, Debug)]
+pub enum Operation {
+    /// Explain a newly generated card, including every repair and editor pass.
+    Create,
+    /// Revisit an existing card, even when its correction note is empty.
+    Revise,
+}
+
 /// Facts and the learner's request for one explanation transaction.
 #[derive(Clone, Debug, Serialize)]
 pub struct Input {
@@ -46,16 +55,26 @@ pub struct Task {
 }
 
 impl Task {
-    /// Render the catalog's reader conventions with checked template substitution.
+    /// Prepare a fresh explanation while retaining its metadata draft as input.
     pub fn from_input(input: Input, language: &Language) -> Result<Self> {
-        let writer =
-            PromptTemplate::new(include_str!("../../assets/explanation_task.txt")).render(
-                &substitutions(language, !input.card.senses.is_empty(), false),
-            )?;
-        let editor =
-            PromptTemplate::new(include_str!("../../assets/explanation_edit.txt")).render(
-                &substitutions(language, !input.card.senses.is_empty(), true),
-            )?;
+        Self::from_operation(input, language, Operation::Create)
+    }
+
+    /// Render a declared operation without inferring it from draft or request text.
+    pub fn from_operation(input: Input, language: &Language, operation: Operation) -> Result<Self> {
+        let operation = match operation {
+            Operation::Create => "create",
+            Operation::Revise => "revise",
+        };
+        let values = |editor| {
+            let mut values = substitutions(language, !input.card.senses.is_empty(), editor);
+            values.push(("{operation}", operation.to_string()));
+            values
+        };
+        let writer = PromptTemplate::new(include_str!("../../assets/explanation_task.txt"))
+            .render(&values(false))?;
+        let editor = PromptTemplate::new(include_str!("../../assets/explanation_edit.txt"))
+            .render(&values(true))?;
         let examples =
             crate::languages::explanation_pair(&language.names.reader, &language.names.learning)?;
         let stamp = Sha256::digest(format!("{writer}\n{editor}{examples}"))

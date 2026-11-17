@@ -798,7 +798,13 @@ where
         let senses = prioritized_senses(draft);
         let meta = card_meta_from_raw(raw.as_str(), request, &senses)?;
         let meta = self.phonetics_observed(draft, meta, draft.pair(), &mut observe)?;
-        self.explanation_observed(draft, meta, "", &mut observe)
+        self.explanation_observed(
+            draft,
+            meta,
+            crate::explanation::Operation::Create,
+            "",
+            &mut observe,
+        )
     }
 
     /// Recompose one card draft after a per-card refinement.
@@ -848,7 +854,13 @@ where
         let settled = draft.clone().with_revision(revision.clone(), None);
         let (term, understanding, meta) = revision.into_parts();
         let meta = self.phonetics_observed(&settled, meta, pair, &mut observe)?;
-        let meta = self.explanation_observed(&settled, meta, comment, &mut observe)?;
+        let meta = self.explanation_observed(
+            &settled,
+            meta,
+            crate::explanation::Operation::Revise,
+            comment,
+            &mut observe,
+        )?;
         Ok(CardRevision::new(term, understanding, meta))
     }
 
@@ -2880,10 +2892,16 @@ mod tests {
         let client = GeminiClient::new("key", transport.clone());
         let mut costs = Vec::new();
         let result = client
-            .explanation_observed(&draft, meta, "", &mut |cost| {
-                costs.push(cost);
-                Ok(())
-            })
+            .explanation_observed(
+                &draft,
+                meta,
+                crate::explanation::Operation::Create,
+                "",
+                &mut |cost| {
+                    costs.push(cost);
+                    Ok(())
+                },
+            )
             .unwrap();
         assert_eq!(
             (
@@ -2916,6 +2934,113 @@ mod tests {
                 .with_max_output_tokens(3000),
         )
         .expect("explanation config must serialize")
+    }
+
+    #[test]
+    fn fresh_metadata_cannot_hide_creation_behind_its_nonempty_explanation_draft() {
+        let mut value = card_meta_response(sentence_labels_response(
+            "neutral",
+            "a2",
+            "statement",
+            Vec::new(),
+        ));
+        let context = "**Meaning.**\n- **a duck**\n- a false report\n\n**Usage.**\nAround ponds.\n\n**Limits.**\nNot other birds.\n\n**Nuance.**\nA water bird.";
+        value["source_context"] = json!(context);
+        let transport = FakeTransport::new(
+            [text_body(&value), phonetics_body(&value)]
+                .into_iter()
+                .chain((0..4).map(|_| unacceptable_explanation_body()))
+                .collect(),
+        );
+        let candidate = WordCandidate::with_senses(
+            "canard",
+            vec![Sense::plain("a duck"), Sense::plain("a false report")],
+            0,
+            true,
+        );
+        let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("FR", "EN"));
+        let meta = GeminiClient::new("key", transport.clone())
+            .generate_draft_meta_observed(&draft, None, |_| Ok(()))
+            .unwrap();
+        let requests = transport.requests.borrow();
+        let prompts = requests[2..]
+            .iter()
+            .map(|request| {
+                let request: Value = serde_json::from_str(request).unwrap();
+                let prompt = request["contents"][0]["parts"][0]["text"].as_str().unwrap();
+                let input = serde_json::Deserializer::from_str(
+                    prompt.split("Card input:\n").nth(1).unwrap(),
+                )
+                .into_iter::<Value>()
+                .next()
+                .unwrap()
+                .unwrap();
+                (
+                    prompt.contains("Operation: create."),
+                    input["old"].clone(),
+                    input["senses"].clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (prompts, meta.source_context(), meta.metadata_context()),
+            (
+                vec![
+                    (
+                        true,
+                        value["source_context"].clone(),
+                        json!([
+                            {"number":"1","understanding":"a duck","label":""},
+                            {"number":"2","understanding":"a false report","label":""}
+                        ])
+                    );
+                    4
+                ],
+                context,
+                context
+            ),
+            "the real metadata path lost creation intent, reviewed senses, or its fallback draft"
+        );
+    }
+
+    #[test]
+    fn an_empty_correction_note_cannot_turn_a_revision_into_creation() {
+        let value = card_correction_response(sentence_labels_response(
+            "neutral",
+            "a2",
+            "statement",
+            Vec::new(),
+        ));
+        let transport = FakeTransport::new(
+            [text_body(&value), phonetics_body(&value)]
+                .into_iter()
+                .chain((0..4).map(|_| unacceptable_explanation_body()))
+                .collect(),
+        );
+        let pair = LanguagePair::new("FR", "EN");
+        let draft = CardDraft::new("canard", "a duck", pair.clone());
+        GeminiClient::new("key", transport.clone())
+            .correct_card_observed(&draft, "", &pair, |_| Ok(()))
+            .unwrap();
+        assert!(
+            transport.requests.borrow()[2..].iter().all(|request| {
+                let request: Value = serde_json::from_str(request).unwrap();
+                request["contents"][0]["parts"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Operation: revise.")
+            }),
+            "an empty correction note activated the fresh-card rule"
+        );
+    }
+
+    fn unacceptable_explanation_body() -> Result<TransportResponse> {
+        text_body(&json!({
+            "meanings": [], "literal": "",
+            "where": {"text": "", "example": {"text": "", "translation": ""}},
+            "limits": {"text": "", "example": {"text": "", "translation": ""}},
+            "nuance": {"text": "", "why": "", "example": {"text": "", "translation": ""}}
+        }))
     }
 
     fn metadata_fields(meta: &CardMeta) -> Value {

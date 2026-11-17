@@ -6,7 +6,9 @@ use super::super::protocol::{GenerationConfig, Request, ThinkingLevel};
 use super::{
     GeminiClient, GeneratedResponse, Transport, diagnosis, prioritized_senses, response_text,
 };
-use crate::explanation::{Card, Input, Language, Record, Sense, Task, Writer, compose, write};
+use crate::explanation::{
+    Card, Input, Language, Operation, Record, Sense, Task, Writer, compose, write,
+};
 use crate::models::{GenerationStage, ModelOutput};
 use crate::session::{CardDraft, CardMeta, CostRecord};
 
@@ -27,6 +29,7 @@ impl<T: Transport> GeminiClient<T> {
         &self,
         draft: &CardDraft,
         meta: CardMeta,
+        operation: Operation,
         request: &str,
         observe: &mut F,
     ) -> Result<CardMeta> {
@@ -49,7 +52,7 @@ impl<T: Transport> GeminiClient<T> {
             senses,
         );
         let old = meta.source_context().to_string();
-        let task = Task::from_input(
+        let task = Task::from_operation(
             Input::new(
                 card,
                 meta.source_sentence().to_string(),
@@ -57,6 +60,7 @@ impl<T: Transport> GeminiClient<T> {
                 request.to_string(),
             ),
             &language,
+            operation,
         )?;
         let parts = write(
             &mut ExplanationWriter {

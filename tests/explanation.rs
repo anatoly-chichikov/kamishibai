@@ -44,6 +44,80 @@ struct Case {
     fails: BTreeSet<String>,
 }
 
+fn unmarked_outcome(fragment: &str) -> (bool, bool) {
+    use kamishibai::explanation::{Input, Task, write};
+    let cases: Vec<Case> =
+        serde_json::from_str(include_str!("fixtures/explanation/judge.json")).unwrap();
+    let case = cases
+        .into_iter()
+        .find(|case| case.id == "4.t1.K23.beforeEdit")
+        .unwrap();
+    let language = Language::from_codes("RU", "EN").unwrap();
+    let mut value = serde_json::to_value(case.parts).unwrap();
+    value["where"]["text"] = format!("В новостях и разговорах о суде говорят {fragment}.").into();
+    let parts = serde_json::from_value(value.clone()).unwrap();
+    let rejected = judge(&case.card, &parts, &language)
+        .into_parts()
+        .0
+        .iter()
+        .any(|failure| failure.starts_with("learning language:"));
+    let task = Task::from_input(
+        Input::new(case.card, String::new(), String::new(), String::new()),
+        &language,
+    )
+    .unwrap();
+    let mut writer = Writer {
+        answers: vec![value.to_string(); 4].into(),
+        prompts: Vec::new(),
+    };
+    (
+        rejected,
+        write(&mut writer, &task, &language).unwrap().is_none(),
+    )
+}
+
+#[test]
+fn unmarked_learning_cannot_hide_a_cyrillic_letter_inside_an_english_word() {
+    assert_eq!(
+        unmarked_outcome("chаrge"),
+        (true, true),
+        "an unmarked mixed-script word passed review or writing"
+    );
+}
+
+#[test]
+fn unmarked_learning_cannot_attach_a_hebrew_mark_to_an_english_word() {
+    assert_eq!(
+        unmarked_outcome("chargeְ"),
+        (true, true),
+        "an unmarked foreign mark passed review or writing"
+    );
+}
+
+#[test]
+fn unmarked_learning_marks_cannot_follow_spaces_digits_or_punctuation() {
+    assert_eq!(
+        ["charge \u{301}", "charge1\u{301}", "charge-\u{301}"].map(unmarked_outcome),
+        [(true, true); 3],
+        "an unmarked combining mark without its native letter passed review or writing"
+    );
+}
+
+#[test]
+fn unmarked_learning_controls_cannot_change_marked_refusals_or_native_acceptance() {
+    assert_eq!(
+        ["⟦chаrge⟧", "⟦chargeְ⟧", "charge", "⟦charge⟧", "cafe\u{301}"].map(unmarked_outcome),
+        [
+            (true, true),
+            (true, true),
+            (false, false),
+            (false, false),
+            (false, false)
+        ],
+        "script checking rejected native learning text or accepted a marked foreign character"
+    );
+}
+
 #[test]
 fn the_reference_corpus_cannot_change_its_text_or_failed_rules() {
     let language = Language::from_codes("ru", "en").unwrap();
