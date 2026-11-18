@@ -179,6 +179,14 @@ impl Screen {
         self.show(Page::Saved(Outcome { path, overview }));
     }
 
+    /// Return the published file when an interrupt dismisses the export.
+    pub(super) fn finish(self) -> Option<PathBuf> {
+        match self.page {
+            Page::Saved(outcome) => Some(outcome.path),
+            _ => None,
+        }
+    }
+
     /// Keep the refusal at the step where it happened.
     pub(super) fn failed(&mut self, refusal: Refusal) {
         let step = if matches!(&refusal, Refusal::Destination) {

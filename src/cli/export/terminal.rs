@@ -124,6 +124,8 @@ pub(super) enum Exit {
     Dismissed,
     /// Report cancellation only after the writer refused publication and drained.
     Cancelled,
+    /// Report the verified path when publication won the race with an interrupt.
+    Saved(PathBuf),
     /// Preserve the input failure even when draining the writer requested cancellation.
     InputEnded(io::Error),
 }
@@ -167,7 +169,7 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
     let mut tick = 0;
     loop {
         if cancelled.verify().is_err() && screen.interrupt() == Intent::Exit {
-            return Ok(Exit::Dismissed);
+            return Ok(screen.finish().map_or(Exit::Dismissed, Exit::Saved));
         }
         terminal.draw(|frame| screen.draw(frame, tick))?;
         if let Some(worker) = &mut job {
@@ -225,18 +227,17 @@ pub(super) fn run(args: &ExportArgs, directory: PathBuf, cancelled: Cancellation
         if let Some(Event::Key(key)) = event
             && key.kind != KeyEventKind::Release
         {
-            let intent = if key.modifiers.contains(KeyModifiers::CONTROL)
+            if key.modifiers.contains(KeyModifiers::CONTROL)
                 && matches!(key.code, KeyCode::Char(c) if latin_key(c) == 'c')
             {
-                screen.interrupt()
-            } else {
-                screen.key(key.code)
-            };
-            match intent {
+                cancelled.cancel();
+                continue;
+            }
+            match screen.key(key.code) {
                 Intent::Exit => return Ok(Exit::Dismissed),
                 Intent::Cancel => cancelled.cancel(),
                 Intent::Wait => {}
-                _ if job.is_none() => {
+                intent if job.is_none() => {
                     let selection = if intent == Intent::Check {
                         None
                     } else {

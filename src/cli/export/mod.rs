@@ -58,6 +58,10 @@ pub(super) fn run(args: &ExportArgs, render: Render) -> Result<()> {
                 println!("export cancelled, nothing saved");
                 Ok(())
             }
+            Ok(terminal::Exit::Saved(path)) => {
+                println!("saved {}", path.display());
+                Ok(())
+            }
             _ if cancelled.verify().is_err() => Ok(()),
             result => result.map(|_| ()),
         }

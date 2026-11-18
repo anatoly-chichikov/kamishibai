@@ -1061,46 +1061,82 @@ fn terminal_command(root: &Path, out: &Path) -> std::process::Command {
 struct ExportTerminal {
     terminal: expectrl::session::OsSession,
     parser: termwiz::escape::parser::Parser,
-    surface: termwiz::surface::Surface,
+    primary: termwiz::surface::Surface,
+    alternate: Option<termwiz::surface::Surface>,
 }
 
 #[cfg(unix)]
 impl ExportTerminal {
+    fn new(terminal: expectrl::session::OsSession) -> Self {
+        Self {
+            terminal,
+            parser: termwiz::escape::parser::Parser::new(),
+            primary: termwiz::surface::Surface::new(80, 24),
+            alternate: None,
+        }
+    }
+
+    fn text(&self) -> String {
+        self.alternate
+            .as_ref()
+            .unwrap_or(&self.primary)
+            .screen_chars_to_string()
+    }
+
     /// Forward a physical key sequence to the export process.
     fn send(&mut self, keys: &str) -> Result<(), expectrl::Error> {
         use expectrl::Expect;
         self.terminal.send(keys)
     }
 
-    /// Consume available output so repaints cannot block the child's event loop.
-    fn paint(&mut self) -> std::io::Result<()> {
+    /// Paint a PTY read, retaining the last alternate frame if the read also restores the shell.
+    fn paint(&mut self) -> std::io::Result<Option<termwiz::surface::Surface>> {
+        use termwiz::escape::csi::{
+            DecPrivateMode::Code, DecPrivateModeCode::ClearAndEnableAlternateScreen as Alternate,
+            Mode,
+        };
+        use termwiz::escape::{Action, CSI};
         let mut bytes = [0_u8; 16384];
+        let mut closed = None;
         match self.terminal.try_read(&mut bytes) {
             Ok(0) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
-                    self.surface.screen_chars_to_string(),
+                    self.text(),
                 ));
             }
             Ok(count) => {
                 for action in self.parser.parse_as_vec(&bytes[..count]) {
-                    if let Some(change) = painted(action) {
-                        self.surface.add_change(change);
+                    match action {
+                        Action::CSI(CSI::Mode(Mode::SetDecPrivateMode(Code(Alternate)))) => {
+                            let (width, height) = self.primary.dimensions();
+                            self.alternate = Some(termwiz::surface::Surface::new(width, height));
+                        }
+                        Action::CSI(CSI::Mode(Mode::ResetDecPrivateMode(Code(Alternate)))) => {
+                            closed = self.alternate.take();
+                        }
+                        action => {
+                            if let Some(change) = painted(action) {
+                                self.alternate
+                                    .as_mut()
+                                    .unwrap_or(&mut self.primary)
+                                    .add_change(change);
+                            }
+                        }
                     }
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
             Err(error) => return Err(error),
         }
-        Ok(())
+        Ok(closed)
     }
 
     /// Wait for a visible phrase with a deadline, reconstructing incremental repaints.
     fn expect(&mut self, phrase: &str) -> std::io::Result<()> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         loop {
-            self.paint()?;
-            let screen = self.surface.screen_chars_to_string();
+            let screen = self.text();
             if screen.contains(phrase) {
                 return Ok(());
             }
@@ -1110,13 +1146,19 @@ impl ExportTerminal {
                     format!("missing {phrase:?} in painted screen:\n{screen}"),
                 ));
             }
+            if self
+                .paint()?
+                .is_some_and(|closed| closed.screen_chars_to_string().contains(phrase))
+            {
+                return Ok(());
+            }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
 
     /// Walk to a named visible deck instead of assuming its sorted position.
     fn focus(&mut self, name: &str) {
-        let screen = self.surface.screen_chars_to_string();
+        let screen = self.text();
         let index = screen
             .lines()
             .skip(3)
@@ -1174,11 +1216,7 @@ fn painted(action: termwiz::escape::Action) -> Option<termwiz::surface::Change> 
 fn export_terminal(root: &Path, out: &Path) -> ExportTerminal {
     let mut terminal = expectrl::Session::spawn(terminal_command(root, out)).unwrap();
     terminal.set_expect_timeout(Some(std::time::Duration::from_secs(15)));
-    ExportTerminal {
-        terminal,
-        parser: termwiz::escape::parser::Parser::new(),
-        surface: termwiz::surface::Surface::new(80, 24),
-    }
+    ExportTerminal::new(terminal)
 }
 
 #[test]
@@ -1266,6 +1304,20 @@ fn a_profile_destination_cannot_offer_save_on_the_summary() {
 
 #[test]
 #[cfg(unix)]
+fn a_single_terminal_write_cannot_hide_either_export_screen() {
+    let mut command = std::process::Command::new("/usr/bin/printf");
+    command.arg("shell> \x1b[?1049h\x1b[4;52Hremoving the unfinished file\x1b[?1049lexport cancelled, nothing saved\r\n");
+    let mut terminal = ExportTerminal::new(expectrl::Session::spawn(command).unwrap());
+    let cleanup = terminal.expect("removing the unfinished file");
+    let outcome = terminal.expect("shell> export cancelled, nothing saved");
+    assert!(
+        cleanup.is_ok() && outcome.is_ok(),
+        "a combined repaint and shell outcome lost the cleanup screen or the restored cursor: {cleanup:?}, {outcome:?}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
 fn cancelling_a_save_cannot_hide_cleanup_or_its_outcome() {
     let root = TempDir::new().unwrap();
     slow_collection(root.path());
@@ -1285,6 +1337,30 @@ fn cancelling_a_save_cannot_hide_cleanup_or_its_outcome() {
     assert!(
         cleanup && outcome && fs::read_dir(out).unwrap().next().is_none(),
         "cancellation hid cleanup, lost the outcome or left an archive"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn a_late_control_c_cannot_hide_the_published_archive() {
+    let root = TempDir::new().unwrap();
+    collection(root.path());
+    let out = root.path().join("export");
+    let mut terminal = export_terminal(root.path(), &out);
+    for phrase in ["[Enter] choose decks", "[Space] select", "[Enter] save"] {
+        terminal.expect(phrase).unwrap();
+        terminal.send("\r").unwrap();
+    }
+    let archive = wait_for_file(&out, "zip");
+    terminal.send("\x03").unwrap();
+    let output = terminal.finish().unwrap();
+    let text = String::from_utf8_lossy(output.as_bytes());
+    let primary = text.rsplit_once("\x1b[?1049l").map(|(_, primary)| primary);
+    let path = archive.canonicalize().unwrap();
+    assert!(
+        primary.is_some_and(|message| message.contains(path.to_str().unwrap()))
+            && kamishibai::anki::history::validate(&archive).is_ok(),
+        "interrupting after publication hid or damaged the saved archive: {primary:?}"
     );
 }
 
@@ -1679,17 +1755,24 @@ fn slow_collection(root: &Path) -> PathBuf {
 /// Wait for a real writer stage rather than delaying a presumed save window.
 #[cfg(unix)]
 fn staged(out: &Path) {
+    wait_for_file(out, "part");
+}
+
+/// Wait for the writer to create a file with the requested extension.
+#[cfg(unix)]
+fn wait_for_file(out: &Path, extension: &str) -> PathBuf {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
-        if fs::read_dir(out).is_ok_and(|entries| {
-            entries
+        if let Ok(entries) = fs::read_dir(out)
+            && let Some(path) = entries
                 .flatten()
-                .any(|entry| entry.path().extension().is_some_and(|ext| ext == "part"))
-        }) {
-            return;
+                .map(|entry| entry.path())
+                .find(|path| path.extension().is_some_and(|ext| ext == extension))
+        {
+            return path;
         }
         if std::time::Instant::now() >= deadline {
-            panic!("export never staged its private archive");
+            panic!("export never created its .{extension} file");
         }
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
@@ -1879,14 +1962,7 @@ fn split_terminal(root: &Path, out: &Path) -> (fs::File, ExportTerminal) {
     command.env("KAMISHIBAI_TEST_INPUT", path.to_str().unwrap());
     let mut terminal = expectrl::Session::spawn(command).unwrap();
     terminal.set_expect_timeout(Some(std::time::Duration::from_secs(3)));
-    (
-        input.into(),
-        ExportTerminal {
-            terminal,
-            parser: termwiz::escape::parser::Parser::new(),
-            surface: termwiz::surface::Surface::new(80, 24),
-        },
-    )
+    (input.into(), ExportTerminal::new(terminal))
 }
 
 /// Walk the real screen using only the separate input terminal.
