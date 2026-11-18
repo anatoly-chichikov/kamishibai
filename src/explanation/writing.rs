@@ -1013,6 +1013,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn usage_advice_cannot_treat_a_single_combination_as_a_general_rule() {
+        let language = language("ja", "fr");
+        let task = task(&language);
+        assert!(
+            [&task.prompts.writer, &task.prompts.editor]
+                .into_iter()
+                .all(
+                    |prompt| prompt.contains("with and without the following words")
+                        && prompt.contains("state or degree")
+                ),
+            "a writing stage missed whether the usage advice still fits a different continuation or a state"
+        );
+    }
+
     fn calibrations(task: &Task, role: &str) -> Vec<super::Calibration> {
         let prompt = task.prompt(role, None, &[]).unwrap();
         let (instructions, _) = prompt.split_once("\n\nCard input:").unwrap();

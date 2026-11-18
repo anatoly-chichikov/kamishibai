@@ -108,6 +108,11 @@ impl Parts {
         self.sections().map(|(_, _, example)| example.text.as_str())
     }
 
+    /// Preserve the meaning and participant context of each example in section order.
+    pub(crate) fn example_context(&self) -> [&str; 3] {
+        self.sections().map(|(_, text, _)| text)
+    }
+
     /// Install translations in their existing sections without changing the learning text.
     pub(crate) fn with_translations(
         mut self,

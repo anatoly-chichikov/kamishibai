@@ -3086,6 +3086,12 @@ mod tests {
             let clean = charges == 5
                 && translation_input["sense_context"]
                     == json!([parts["meanings"][0]["note"], parts["where"]["text"]])
+                && translation_input["example_context"]
+                    == json!([
+                        parts["where"]["text"],
+                        parts["limits"]["text"],
+                        parts["nuance"]["text"]
+                    ])
                 && requests.len() == charges
                 && !prompt.contains(meta["source_sentence"].as_str().unwrap())
                 && !prompt.contains(case["senses"][0].as_str().unwrap())
