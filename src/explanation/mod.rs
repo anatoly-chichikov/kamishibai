@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub use layout::{compose, quote, tidy};
 pub use review::{Verdict, judge};
+pub(crate) use writing::sentence_translations;
 pub use writing::{Input, Operation, Task, Writer, write};
 
 /// Persisted provenance of an attempted explanation, retaining the metadata draft.

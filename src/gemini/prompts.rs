@@ -181,6 +181,13 @@ pub(super) fn render_card_meta_prompt(
     )?;
     if draft.reviewed_senses().len() > 1 {
         prompt.push_str("\n\nBefore returning the card, translate the people and things in the whole sentence. The reviewed gloss identifies a sense. Its dictionary form need not fit the sentence. Keep distinct individuals distinct, and preserve whether an action was merely arranged or actually completed. Take source_highlight from that final translation.");
+        if let Some(sentences) = crate::explanation::sentence_translations(
+            &source.prompt,
+            &pair.learning_profile(catalog)?.prompt,
+        )? {
+            prompt.push_str("\nBack-translate source_sentence without looking at the gloss. Could someone do everything it says and still miss the result required by target_sentence? If so, restore that result, its deadline and its participants in source_sentence and source_highlight. The examples below illustrate how the whole sentence is translated. Use a different situation for this card.\nSentence translation examples:\n");
+            prompt.push_str(&sentences);
+        }
     }
     Ok(prompt)
 }
@@ -754,6 +761,43 @@ mod tests {
                 true,
             ),
             "a reviewed tag stopped constraining one of the card-generation prompts"
+        );
+    }
+
+    #[test]
+    fn reviewed_metadata_cannot_teach_a_deadline_for_booking_in_place_of_a_finished_job() {
+        let candidate = WordCandidate::with_senses(
+            "get the car fixed",
+            vec![
+                Sense::plain("отдать в сервис"),
+                Sense::plain("починить в сервисе"),
+            ],
+            0,
+            true,
+        );
+        let captures = [("en", "ru"), ("en", "fr"), ("ru", "en")].map(|(learning, known)| {
+            let draft =
+                CardDraft::from_candidate(&candidate, 0, LanguagePair::new(learning, known));
+            let prompt = render_card_meta_prompt(&draft, None, &catalog()).unwrap();
+            prompt
+                .split_once("\nSentence translation examples:\n")
+                .and_then(|(_, examples)| {
+                    let rows: Vec<serde_json::Value> = serde_json::from_str(examples).ok()?;
+                    rows.into_iter().find(|row| {
+                        row["target_sentence"] == "We need to have the roof repaired before winter."
+                    })
+                })
+        });
+        assert_eq!(
+            captures,
+            [
+                Some(
+                    serde_json::json!({"target_sentence":"We need to have the roof repaired before winter.","source_sentence":"Нужно, чтобы нам починили крышу до зимы."})
+                ),
+                None,
+                None
+            ],
+            "the metadata author lacked a completed-result translation for its pair or leaked it to another pair"
         );
     }
 

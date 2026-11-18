@@ -176,6 +176,24 @@ struct Calibration {
     review_notes: Option<String>,
 }
 
+/// Project the exact pair's approved example sentences for the metadata author.
+pub(crate) fn sentence_translations(reader: &str, learning: &str) -> Result<Option<String>> {
+    let Some(text) = crate::languages::explanation_pair(reader, learning)? else {
+        return Ok(None);
+    };
+    let samples: Vec<Calibration> = serde_json::from_str(&text)?;
+    let sentences = samples
+        .into_iter()
+        .map(|sample| {
+            serde_json::json!({
+                "target_sentence": sample.card.sentence,
+                "source_sentence": sample.sentence_known,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Some(serde_json::to_string(&sentences)?))
+}
+
 fn pair_examples(language: &Language, reviewed: bool) -> Result<String> {
     let reader = &language.names.reader;
     let learning = &language.names.learning;
@@ -534,6 +552,14 @@ mod tests {
                 let mut writer = Capture(String::new());
                 super::write(&mut writer, &task(&language), &language).unwrap();
                 let expected = known == "ru" && learning == "en";
+                let translations =
+                    super::sentence_translations(&language.names.reader, &language.names.learning)
+                        .unwrap();
+                if translations.is_some() != expected {
+                    faults.push(format!(
+                        "{known}->{learning}: wrong pair in metadata translations"
+                    ));
+                }
                 if !prompt_scripted(&writer.0, known) {
                     faults.push(format!("{known}->{learning}: foreign script in request"));
                 }
@@ -1098,6 +1124,24 @@ mod tests {
                 serde_json::json!({"number": "2", "approved": "малыши", "head": "малыши", "note": "дети или мальки рыб"})
             ),
             "the editor was never asked to reconcile the fish gloss with the specific reviewed row"
+        );
+    }
+
+    #[test]
+    fn a_note_example_cannot_join_places_and_a_definition_after_the_same_head() {
+        let language = language("ru", "en");
+        let (input, _) = metadata_example();
+        let task = Task::from_input(input, &language).unwrap();
+        let bank = calibrations(&task, &task.prompts.writer)
+            .into_iter()
+            .find(|sample| sample.card.term == "bank")
+            .unwrap();
+        assert!(
+            bank.parts.meanings[0].note == "для вкладов и переводов"
+                && bank
+                    .review_notes
+                    .is_some_and(|notes| notes.contains("или учреждение")),
+            "the pair example omitted the correction for a note mixing locations with a definition"
         );
     }
 
