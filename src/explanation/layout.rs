@@ -22,7 +22,14 @@ pub fn tidy(parts: &Parts) -> Parts {
         &mut output.limits.example,
         &mut output.nuance.example,
     ] {
-        example.text = example.text.trim().to_string();
+        let text = example.text.trim();
+        example.text = text
+            .strip_prefix('⟦')
+            .and_then(|inner| inner.strip_suffix('⟧'))
+            .filter(|inner| !inner.contains(['⟦', '⟧']))
+            .unwrap_or(text)
+            .trim()
+            .to_string();
         example.translation = example.translation.trim().to_string();
     }
     output

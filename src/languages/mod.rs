@@ -13,7 +13,7 @@ mod profile;
 mod prompt_examples;
 mod registry;
 
-pub(crate) use explanation_examples::{example_punctuation, native_scripted};
+pub(crate) use explanation_examples::{example_punctuation, mixed_sentence_word, native_scripted};
 pub(crate) use explanation_pairs::explanation_pair;
 
 #[cfg(test)]

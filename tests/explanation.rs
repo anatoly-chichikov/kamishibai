@@ -1526,3 +1526,57 @@ fn an_armenian_example_cannot_publish_an_ascii_colon_as_a_full_stop() {
         "the learning-language check accepted terminal ASCII punctuation or rejected native Armenian punctuation"
     );
 }
+
+#[test]
+fn sentence_examples_cannot_render_the_inline_learning_markers() {
+    let mut response = review_fixture("macska", "háziállatként vagy kóbor állatként");
+    let sentence = "Այս սիրուն կատուն շատ հանգիստ է։";
+    response["where"] = serde_json::json!({
+        "text":"Otthon és az állatorvosnál mondják.",
+        "example":{"text":format!("⟦{sentence}⟧"),"translation":"Ez a szép macska nagyon nyugodt."}
+    });
+    let parts: Parts = serde_json::from_value(response).unwrap();
+    let clean = serde_json::to_value(tidy(&parts)).unwrap();
+    assert_eq!(
+        clean["where"]["example"]["text"], sentence,
+        "the learner would see internal markers around the intact Armenian sentence"
+    );
+}
+
+#[test]
+fn misplaced_learning_markers_cannot_survive_in_an_example_or_its_translation() {
+    let language = Language::from_codes("HU", "HY").unwrap();
+    let card = reviewed_card("կատու", "macska");
+    let errors = [
+        (
+            "Այս ⟦սիրուն⟧ կատուն շատ հանգիստ է։",
+            "Ez a szép macska nagyon nyugodt.",
+        ),
+        (
+            "Այս սիրուն կատուն շատ հանգիստ է։",
+            "Ez a ⟦szép⟧ macska nagyon nyugodt.",
+        ),
+        (
+            "Այս սիրուն կատուն շատ հանգիստ է։",
+            "Ez a szép macska nagyon nyugodt.",
+        ),
+    ]
+    .map(|(sentence, translation)| {
+        let mut response = review_fixture("macska", "háziállatként vagy kóbor állatként");
+        response["where"] = serde_json::json!({
+            "text":"Otthon és az állatorvosnál mondják.",
+            "example":{"text":sentence,"translation":translation}
+        });
+        let parts: Parts = serde_json::from_value(response).unwrap();
+        judge(&card, &tidy(&parts), &language)
+            .into_parts()
+            .0
+            .iter()
+            .any(|finding| finding.starts_with("example:"))
+    });
+    assert_eq!(
+        errors,
+        [true, true, false],
+        "the judge leaked learning markers or rejected a bare bilingual example"
+    );
+}

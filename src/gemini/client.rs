@@ -794,9 +794,32 @@ where
     {
         let catalog = catalog();
         let prompt = render_card_meta_prompt(draft, request, &catalog)?;
-        let raw = self.card_text_observed(GenerationStage::Metadata, prompt, &mut observe)?;
         let senses = prioritized_senses(draft);
-        let meta = card_meta_from_raw(raw.as_str(), request, &senses)?;
+        let mut author = |prompt| {
+            let raw = self.card_text_observed(GenerationStage::Metadata, prompt, &mut observe)?;
+            card_meta_from_raw(&raw, request, &senses)
+        };
+        let pair = draft.pair();
+        let spelling = |meta: &CardMeta| {
+            crate::languages::mixed_sentence_word(
+                meta.target_sentence(),
+                draft.term(),
+                pair.learning(),
+                pair.known(),
+            )
+            .map(str::to_owned)
+        };
+        let mut meta = author(prompt.clone())?;
+        if let Some(word) = spelling(&meta) {
+            meta = author(format!(
+                "{prompt}\n\nThe previous target_sentence mixed letters from the reader and learning languages inside the word {word:?}. Write the whole sentence in the learning language and return the complete card JSON again with matching translations and phonetics."
+            ))?;
+            if let Some(word) = spelling(&meta) {
+                bail!(
+                    "The corrected target sentence still mixes reader and learning scripts in {word:?}"
+                );
+            }
+        }
         let meta = self.phonetics_observed(draft, meta, draft.pair(), &mut observe)?;
         self.explanation_observed(
             draft,
@@ -2588,6 +2611,90 @@ mod tests {
                 json!({"audio": {"mimeType": "AUDIO_L16", "sampleRate": 24000}})
             ),
             "the production speech route lost its current request schema or usage record"
+        );
+    }
+
+    fn water_metadata(sentence: &str) -> Value {
+        let mut value = card_meta_response(sentence_labels_response(
+            "neutral",
+            "a1",
+            "statement",
+            vec![],
+        ));
+        value["meaning"] = json!("पानी");
+        value["source_sentence"] = json!("इस गिलास में ठंडा पानी है।");
+        value["source_highlight"] = json!("पानी");
+        value["source_hint"] = json!("काँच के गिलास में भरा साफ़ तरल।");
+        value["source_context"] = json!("पीने के लिए पानी।");
+        value["target_sentence"] = json!(sentence);
+        value
+    }
+
+    #[test]
+    fn a_new_card_cannot_send_a_mixed_alphabet_word_to_phonetics() {
+        let wrong = water_metadata("В этом стакаने холодная вода.");
+        let right = water_metadata("В этом стакане холодная вода.");
+        let transport = FakeTransport::new(vec![
+            text_body(&wrong),
+            text_body(&right),
+            phonetics_body(&right),
+            explanation_fallback_body(),
+        ]);
+        let draft = CardDraft::new("вода", "पानी", LanguagePair::new("ru", "hi"));
+        let mut charges = 0;
+        let result = GeminiClient::new("key", transport.clone()).generate_draft_meta_observed(
+            &draft,
+            None,
+            |_| {
+                charges += 1;
+                Ok(())
+            },
+        );
+        let requests = transport.requests.borrow();
+        let target = requests.get(2).and_then(|request| {
+            let wire: Value = serde_json::from_str(request).unwrap();
+            let prompt = wire["contents"][0]["parts"][0]["text"].as_str().unwrap();
+            prompt
+                .contains("В этом стакане холодная вода.")
+                .then_some(())
+        });
+        assert_eq!(
+            (
+                result.ok().map(|meta| meta.target_sentence().to_string()),
+                target,
+                charges
+            ),
+            (
+                Some("В этом стакане холодная вода.".to_owned()),
+                Some(()),
+                4
+            ),
+            "the real path lost the corrected target sentence, used the wrong phonetics, or lost a charge"
+        );
+    }
+
+    #[test]
+    fn persistent_mixed_word_spelling_cannot_reach_phonetics_after_a_paid_repair() {
+        let wrong = water_metadata("В этом стакаने холодная вода.");
+        let transport = FakeTransport::new(vec![text_body(&wrong), text_body(&wrong)]);
+        let draft = CardDraft::new("вода", "पानी", LanguagePair::new("ru", "hi"));
+        let mut charges = 0;
+        let result = GeminiClient::new("key", transport.clone()).generate_draft_meta_observed(
+            &draft,
+            None,
+            |_| {
+                charges += 1;
+                Ok(())
+            },
+        );
+        let requests = transport.requests.borrow();
+        let stages: Vec<Value> = requests.iter().map(|body| {
+            serde_json::from_str::<Value>(body).unwrap()["generationConfig"]["thinkingConfig"]["thinkingLevel"].clone()
+        }).collect();
+        assert_eq!(
+            (result.is_err(), charges, stages),
+            (true, 2, vec![json!("HIGH"), json!("HIGH")]),
+            "a repeated script error escaped the bounded, fully accounted metadata repair"
         );
     }
 

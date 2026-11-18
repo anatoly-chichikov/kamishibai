@@ -827,6 +827,10 @@ impl Review<'_> {
             if bare(&example.text) == bare(&card.sentence) {
                 self.fail("form", "an example repeats the sentence of the card");
             }
+            if example.text.contains(['⟦', '⟧']) || example.translation.contains(['⟦', '⟧'])
+            {
+                self.fail("example", "inline learning markers belong in prose; write the example and its translation as plain text");
+            }
             if matches("[*_«»\"“”]", &example.text)
                 || matches("[*_]", &example.translation)
                 || example.text.contains(open)

@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use unicode_script::UnicodeScript;
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::prompt_examples::explanation_scripts;
 
@@ -189,6 +190,39 @@ pub(crate) fn native_scripted(value: &str, scripts: &[unicode_script::Script]) -
     characters(value, scripts, false)
 }
 
+/// Find a word that splices reader letters into learning text, preserving the reviewed term.
+pub(crate) fn mixed_sentence_word<'a>(
+    value: &'a str,
+    term: &str,
+    learning: &str,
+    reader: &str,
+) -> Option<&'a str> {
+    use unicode_script::Script;
+    let mut native = explanation_scripts(learning);
+    if native.contains(&Script::Han) {
+        native.push(Script::Latin);
+    }
+    let foreign: Vec<_> = explanation_scripts(reader)
+        .into_iter()
+        .filter(|s| !native.contains(s))
+        .collect();
+    if foreign.is_empty() {
+        return None;
+    }
+    value.unicode_words().find(|word| {
+        let scripts = || {
+            word.chars()
+                .filter(|ch| ch.is_alphabetic())
+                .map(|ch| ch.script())
+        };
+        scripts().any(|script| native.contains(&script))
+            && scripts().any(|script| foreign.contains(&script))
+            && !term
+                .unicode_words()
+                .any(|approved| approved.to_lowercase() == word.to_lowercase())
+    })
+}
+
 /// Diagnose terminal punctuation in a complete learning-language example.
 pub(crate) fn example_punctuation(
     value: &str,
@@ -253,6 +287,23 @@ fn angle(value: &str) -> bool {
 mod tests {
     use super::{ExplanationExamples, prompt_scripted, scripted};
     use serde_json::{Value, json};
+
+    #[test]
+    fn sentence_spelling_cannot_reject_loanwords_native_script_combinations_or_the_reviewed_term() {
+        let faults = [
+            ("В этом стакане вода из IKEA.", "вода", "ru", "hi"),
+            ("PDFを読みました。", "資料", "ja", "en"),
+            ("K팝을 좋아합니다.", "음악", "ko", "en"),
+            ("Das Logo sagt КиївCity.", "КиївCity", "de", "uk"),
+        ]
+        .map(|(text, term, learning, reader)| {
+            super::mixed_sentence_word(text, term, learning, reader)
+        });
+        assert_eq!(
+            faults, [None; 4],
+            "an intact word, a native script combination or an approved spelling was refused"
+        );
+    }
 
     fn block(code: &str) -> Value {
         serde_json::from_str::<Value>(include_str!("../../assets/prompt_examples.json")).unwrap()
