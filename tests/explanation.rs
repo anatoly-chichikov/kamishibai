@@ -44,7 +44,7 @@ struct Case {
     fails: BTreeSet<String>,
 }
 
-fn unmarked_outcome(fragment: &str) -> (bool, bool) {
+fn fragment_verdict(fragment: &str) -> (Vec<String>, bool) {
     use kamishibai::explanation::{Input, Task, write};
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/explanation/judge.json")).unwrap();
@@ -56,11 +56,7 @@ fn unmarked_outcome(fragment: &str) -> (bool, bool) {
     let mut value = serde_json::to_value(case.parts).unwrap();
     value["where"]["text"] = format!("В новостях и разговорах о суде говорят {fragment}.").into();
     let parts = serde_json::from_value(value.clone()).unwrap();
-    let rejected = judge(&case.card, &parts, &language)
-        .into_parts()
-        .0
-        .iter()
-        .any(|failure| failure.starts_with("learning language:"));
+    let failures = judge(&case.card, &parts, &language).into_parts().0;
     let task = Task::from_input(
         Input::new(case.card, String::new(), String::new(), String::new()),
         &language,
@@ -71,8 +67,18 @@ fn unmarked_outcome(fragment: &str) -> (bool, bool) {
         prompts: Vec::new(),
     };
     (
-        rejected,
+        failures,
         write(&mut writer, &task, &language).unwrap().is_none(),
+    )
+}
+
+fn unmarked_outcome(fragment: &str) -> (bool, bool) {
+    let (failures, rejected) = fragment_verdict(fragment);
+    (
+        failures
+            .iter()
+            .any(|failure| failure.starts_with("learning language:")),
+        rejected,
     )
 }
 
@@ -121,15 +127,20 @@ fn unmarked_learning_controls_cannot_change_marked_refusals_or_native_acceptance
 #[test]
 fn release_review_foreign_tokens_cannot_depend_on_markup_or_a_nearby_learning_letter() {
     let accepted: Vec<_> = [
-        "charge 2\u{301}",
-        "2\u{301} charge",
-        "猫",
-        "γ猫",
-        "\u{301}γ",
+        ("charge 2\u{301}", "learning language:"),
+        ("2\u{301} charge", "learning language:"),
+        ("猫", "writing system:"),
+        ("γ猫", "writing system:"),
+        ("\u{301}γ", "writing system:"),
     ]
     .into_iter()
-    .flat_map(|word| [word.to_owned(), format!("⟦{word}⟧"), format!("«{word}»")])
-    .filter(|word| unmarked_outcome(word) != (true, true))
+    .flat_map(|(word, rule)| {
+        [word.to_owned(), format!("⟦{word}⟧"), format!("«{word}»")].map(|form| (form, rule))
+    })
+    .filter(|(word, rule)| {
+        let (failures, rejected) = fragment_verdict(word);
+        !rejected || !failures.iter().any(|fault| fault.starts_with(rule))
+    })
     .collect();
     assert!(
         accepted.is_empty(),

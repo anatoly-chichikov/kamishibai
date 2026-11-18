@@ -426,7 +426,11 @@ impl Review<'_> {
             .collect::<BTreeSet<_>>();
         for fragment in fragments {
             let [open, close] = &self.language.context.quotes;
-            self.fail("learning language", format!("{open}{fragment}{close} contains letters or marks outside {}; write the whole phrase in the learning language without mixing scripts", self.language.names.learning));
+            if self.language.outside_pair(&fragment) {
+                self.fail("writing system", format!("{open}{fragment}{close} uses letters outside both {} and {}; use the script of the intended language", self.language.names.reader, self.language.names.learning));
+            } else {
+                self.fail("learning language", format!("{open}{fragment}{close} contains letters or marks outside {}; write the whole phrase in the learning language without mixing scripts", self.language.names.learning));
+            }
         }
         for (section, _, example) in parts.sections() {
             if crate::languages::missing_question(

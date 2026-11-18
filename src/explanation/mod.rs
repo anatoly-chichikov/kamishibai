@@ -249,6 +249,20 @@ impl Language {
         self.learning.contains(&script) && !self.known.contains(&script)
     }
 
+    fn outside_pair(&self, text: &str) -> bool {
+        use unicode_script::UnicodeScript;
+        let mut letters = text.chars().filter(|ch| ch.is_alphabetic()).peekable();
+        letters.peek().is_some()
+            && letters.all(|ch| {
+                let scripts = ch.script_extension();
+                !self
+                    .known
+                    .iter()
+                    .chain(&self.learning)
+                    .any(|&script| scripts.contains_script(script))
+            })
+    }
+
     /// Check that a replacement has reader-script letters and differs from the learning sentence.
     #[must_use]
     pub(crate) fn translates(&self, learning: &str, reader: &str) -> bool {
