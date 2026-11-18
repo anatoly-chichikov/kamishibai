@@ -75,9 +75,13 @@ New cards explain each reviewed meaning in a short list, with the card's own
 meaning first and brighter. The familiar sections describe where it occurs,
 where it does not fit, and a useful nuance; empty sections disappear. Only
 headings are bold, learning-language phrases use the reader's quotation marks,
-and a common mistake includes a short reason. A separate writing and editing
-pass checks the explanation, with at most two repairs; rejected explanations
-keep the original metadata text. Existing cached cards and Anki note identities
+and a common mistake includes a short reason. The author and editor each get
+up to one repair. Card writing, spelling repair, pronunciation, explanation
+and translation share a limit of six text requests per metadata attempt and
+24 over four attempts per card. Cards with multiple reviewed meanings get an
+independent sentence translation when the explanation passes and budget
+remains. An unchecked or copied bilingual example is omitted. A rejected
+explanation keeps the original metadata text. Existing cached cards and Anki note identities
 stay intact, including imported JSON without an explicit explanation format.
 
 ## Console
@@ -107,9 +111,10 @@ before that confirmation. The last screen links the folder and file, then points
 to [app.kamishibai.io](https://app.kamishibai.io/import), where the import sheet
 suggests the language pair. No Gemini key is needed.
 
-Use `--out DIR` for another destination. `Esc` goes back or exits before saving;
-during saving it cancels before the verified file is published. Ctrl+C exits from
-any selection page; during saving it shows cleanup and the cancellation outcome.
+Use `--out DIR` for another destination. Esc goes back and Ctrl+C exits from
+selection pages. During saving, either key requests cancellation. If the worker
+cancels before publication, Ctrl+C prints `export cancelled, nothing saved` after cleanup.
+If the worker publishes the verified ZIP first, Ctrl+C prints `saved <path>` in the terminal.
 For scripts, `--json` previews without writing and `--save` saves without opening
 the screen:
 

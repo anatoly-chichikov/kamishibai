@@ -15,6 +15,31 @@ fn contract() -> String {
     fs::read_to_string(contract_path()).expect("agent contract must exist")
 }
 
+#[test]
+fn release_review_export_instructions_cannot_hide_a_saved_archive_after_ctrl_c() {
+    let output = Command::cargo_bin("kamishibai")
+        .unwrap()
+        .arg("agent-contract")
+        .output()
+        .unwrap();
+    let embedded = String::from_utf8(output.stdout).unwrap();
+    let missing: Vec<_> = [
+        ("README", include_str!("../README.md")),
+        ("agent-contract", &embedded),
+        ("CHANGELOG", include_str!("../CHANGELOG.md")),
+    ]
+    .into_iter()
+    .filter(|(_, text)| {
+        !text.contains("export cancelled, nothing saved") || !text.contains("saved <path>")
+    })
+    .map(|(name, _)| name)
+    .collect();
+    assert!(
+        missing.is_empty(),
+        "export instructions omitted one of the two Ctrl+C outcomes: {missing:?}"
+    );
+}
+
 /// Extract the application release declared by the contract.
 fn release(document: &str) -> &str {
     document

@@ -1,12 +1,13 @@
 //! Accounted explanation requests after metadata and phonetics have settled.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use serde::Deserialize;
 use serde_json::json;
 
 use super::super::protocol::{GenerationConfig, Request, ThinkingLevel};
 use super::{
-    GeminiClient, GeneratedResponse, Transport, diagnosis, prioritized_senses, response_text,
+    GeminiClient, GeneratedResponse, MetaAttempt, Transport, diagnosis, prioritized_senses,
+    response_text,
 };
 use crate::explanation::{
     Card, Input, Language, Operation, Parts, Record, Sense, Task, Writer, compose, judge, write,
@@ -16,7 +17,7 @@ use crate::session::{CardDraft, CardMeta, CostRecord};
 
 struct ExplanationWriter<'a, T: Transport, F> {
     client: &'a GeminiClient<T>,
-    observe: &'a mut F,
+    attempt: &'a mut MetaAttempt<F>,
 }
 
 #[derive(Deserialize)]
@@ -29,19 +30,19 @@ struct Translations {
 
 impl<T: Transport, F: FnMut(CostRecord) -> Result<()>> Writer for ExplanationWriter<'_, T, F> {
     fn ask(&mut self, prompt: String) -> Result<String> {
-        self.client.explanation_text(prompt, self.observe)
+        self.client.explanation_text(prompt, self.attempt)
     }
 }
 
 impl<T: Transport> GeminiClient<T> {
-    /// Compose the explanation and independently translate reviewed multiword expressions on creation.
+    /// Compose an explanation and independently translate fresh cards with multiple reviewed senses.
     pub(super) fn explanation_observed<F: FnMut(CostRecord) -> Result<()>>(
         &self,
         draft: &CardDraft,
         meta: CardMeta,
         operation: Operation,
         request: &str,
-        observe: &mut F,
+        attempt: &mut MetaAttempt<F>,
     ) -> Result<CardMeta> {
         let language = Language::from_codes(draft.pair().known(), draft.pair().learning())?;
         let senses = prioritized_senses(draft)
@@ -75,19 +76,24 @@ impl<T: Transport> GeminiClient<T> {
         let parts = write(
             &mut ExplanationWriter {
                 client: self,
-                observe,
+                attempt,
             },
             &task,
             &language,
         )?;
         let (meta, parts) = match parts {
             Some(parts)
-                if matches!(operation, Operation::Create)
-                    && draft.reviewed_senses().len() > 1
-                    && draft.term().split_whitespace().nth(1).is_some() =>
+                if matches!(operation, Operation::Create) && draft.reviewed_senses().len() > 1 =>
             {
-                let translations = self.translate(draft, &meta, &parts, observe)?;
-                let parts = parts.with_translations(translations.examples)?;
+                let translation = self.translate(draft, &meta, &parts, attempt)?;
+                let (source, examples) = translation.map_or((None, None), |translation| {
+                    (
+                        Some((translation.source_sentence, translation.source_highlight)),
+                        Some(translation.examples),
+                    )
+                });
+                let mut parts = parts.with_translations(examples, &language)?;
+                task.omit_copies(&mut parts);
                 let (failures, _) = judge(&card, &parts, &language).into_parts();
                 anyhow::ensure!(
                     failures.is_empty(),
@@ -95,10 +101,7 @@ impl<T: Transport> GeminiClient<T> {
                     failures.join(", ")
                 );
                 (
-                    meta.with_source_translation(
-                        translations.source_sentence,
-                        translations.source_highlight,
-                    )?,
+                    meta.with_source_translation(source, &language)?,
                     Some(parts),
                 )
             }
@@ -115,14 +118,14 @@ impl<T: Transport> GeminiClient<T> {
     fn explanation_text<F: FnMut(CostRecord) -> Result<()>>(
         &self,
         prompt: String,
-        observe: &mut F,
+        attempt: &mut MetaAttempt<F>,
     ) -> Result<String> {
         let schema = serde_json::from_str(include_str!("../../assets/explanation.schema.json"))?;
         let config = GenerationConfig::json(schema)?
             .with_thinking_level(ThinkingLevel::Low)
             .with_max_output_tokens(3000);
         Ok(self
-            .explanation_request(prompt, config, observe)?
+            .explanation_request(prompt, config, attempt)?
             .unwrap_or_default())
     }
 
@@ -131,8 +134,11 @@ impl<T: Transport> GeminiClient<T> {
         draft: &CardDraft,
         meta: &CardMeta,
         parts: &Parts,
-        observe: &mut F,
-    ) -> Result<Translations> {
+        attempt: &mut MetaAttempt<F>,
+    ) -> Result<Option<Translations>> {
+        if attempt.remaining == 0 {
+            return Ok(None);
+        }
         let input = json!({"learning_language": draft.pair().learning(), "reader_language": draft.pair().known(),
             "term": draft.term(), "sentence": meta.target_sentence(), "examples": parts.learning_examples(), "sense_context": parts.sense_context()});
         let mut prompt = String::from(
@@ -154,48 +160,50 @@ impl<T: Transport> GeminiClient<T> {
         let raw = match self.explanation_request(
             prompt.clone(),
             config.clone().with_max_output_tokens(8192),
-            observe,
+            attempt,
         )? {
-            Some(raw) => raw,
-            None => self
-                .explanation_request(prompt, config.with_max_output_tokens(16384), observe)?
-                .context("Sentence translation reached its output limit on both attempts")?,
+            Some(raw) => Some(raw),
+            None => {
+                self.explanation_request(prompt, config.with_max_output_tokens(16384), attempt)?
+            }
         };
-        Ok(serde_json::from_str(super::unfence(raw.trim()))?)
+        Ok(raw
+            .map(|text| serde_json::from_str(super::unfence(text.trim())))
+            .transpose()?)
     }
 
     fn explanation_request<F: FnMut(CostRecord) -> Result<()>>(
         &self,
         prompt: String,
         config: GenerationConfig,
-        observe: &mut F,
+        attempt: &mut MetaAttempt<F>,
     ) -> Result<Option<String>> {
-        let metered = self.request_stage(
+        if attempt.remaining == 0 {
+            return Ok(None);
+        }
+        let response = attempt.request(
+            self,
             GenerationStage::Explanation,
             &Request::text(prompt, Some(config), None),
         )?;
-        observe(metered.cost.clone())?;
-        let raw = response_text(&metered.response);
-        if matches!(
-            metered.response,
-            GeneratedResponse::External(ModelOutput::Refused)
-        ) || metered
-            .response
-            .finish_reason()
-            .is_some_and(|reason| !matches!(reason, "STOP" | "UNKNOWN" | "MAX_TOKENS"))
+        let raw = response_text(&response);
+        if matches!(response, GeneratedResponse::External(ModelOutput::Refused))
+            || response
+                .finish_reason()
+                .is_some_and(|reason| !matches!(reason, "STOP" | "UNKNOWN" | "MAX_TOKENS"))
         {
             bail!(
                 "Explanation provider returned no usable answer: {}",
-                diagnosis(&metered.response)
+                diagnosis(&response)
             );
         }
-        if metered.response.finish_reason() == Some("MAX_TOKENS") {
+        if response.finish_reason() == Some("MAX_TOKENS") {
             return Ok(None);
         }
         anyhow::ensure!(
             !raw.trim().is_empty(),
             "Explanation provider returned no usable answer: {}",
-            diagnosis(&metered.response)
+            diagnosis(&response)
         );
         Ok(Some(raw))
     }

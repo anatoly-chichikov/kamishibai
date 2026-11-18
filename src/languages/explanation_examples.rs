@@ -271,36 +271,36 @@ pub(crate) fn prompt_scripted(value: &str, code: &str) -> bool {
 }
 
 fn characters(value: &str, scripts: &[unicode_script::Script], ascii: bool) -> bool {
-    let pattern = regex::Regex::new(r"(?s)(\p{L})|(\p{M})|(.)")
-        .expect("invariant: script classification pattern must compile");
-    let mut base = false;
-    for capture in pattern.captures_iter(value) {
+    static CHARACTERS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?s)(\p{L})|(\p{M})|(.)")
+            .expect("invariant: script classification pattern must compile")
+    });
+    let mut base: Option<unicode_script::ScriptExtension> = None;
+    for capture in CHARACTERS.captures_iter(value) {
         if capture.get(3).is_some() {
-            base = false;
+            base = None;
             continue;
         }
         let character = capture[0]
             .chars()
             .next()
             .expect("invariant: script classification must consume one character");
-        if capture.get(2).is_some() && !base {
-            return false;
-        }
         let extension = character.script_extension();
-        if extension.is_common() || extension.is_inherited() {
-            if !base {
+        if capture.get(2).is_some() || extension.is_common() || extension.is_inherited() {
+            if base.is_none_or(|letter| letter.intersection(extension).is_empty()) {
                 return false;
             }
         } else {
             let native = scripts
                 .iter()
-                .any(|script| extension.contains_script(*script));
-            if !(native || ascii && character.is_ascii()) {
+                .copied()
+                .filter(|&script| extension.contains_script(script))
+                .map(unicode_script::ScriptExtension::from)
+                .reduce(unicode_script::ScriptExtension::union);
+            if native.is_none() && !(ascii && character.is_ascii()) {
                 return false;
             }
-            if capture.get(1).is_some() {
-                base = native;
-            }
+            base = native;
         }
     }
     true

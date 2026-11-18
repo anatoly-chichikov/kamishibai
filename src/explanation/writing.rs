@@ -131,6 +131,15 @@ impl Task {
                 ) && shortened_ending(&words(&self.input.sentence_known), &reader, None)))
     }
 
+    /// Remove illustrations that repeat the retained draft in both languages.
+    pub(crate) fn omit_copies(&self, parts: &mut Parts) {
+        for example in parts.examples_mut() {
+            if self.copied(example) {
+                example.omit();
+            }
+        }
+    }
+
     fn prompt(
         &self,
         instructions: &str,
@@ -379,23 +388,50 @@ fn ask(writer: &mut impl Writer, prompt: String) -> Result<Option<Parts>> {
         .map(|parts| tidy(&parts)))
 }
 
-fn phrases(parts: &Parts, language: &Language) -> std::collections::BTreeSet<String> {
-    let pattern =
-        regex::Regex::new("⟦[^⟦⟧]*⟧").expect("invariant: learning marker pattern must compile");
-    parts
-        .strings()
-        .into_iter()
-        .flat_map(|text| {
-            pattern
-                .find_iter(&super::layout::mark(text, language))
-                .map(|hit| hit.as_str().to_string())
-                .collect::<Vec<_>>()
-        })
+fn phrases(text: &str, language: &Language) -> Vec<String> {
+    use unicode_script::UnicodeScript;
+    static MARKERS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new("⟦([^⟦⟧]*)⟧").expect("invariant: learning marker pattern must compile")
+    });
+    let rendered = super::layout::mark(&super::quote(text, language), language);
+    let explicit = MARKERS.captures_iter(text).filter(|hit| {
+        !hit[1]
+            .chars()
+            .any(|ch| language.learning.contains(&ch.script()))
+    });
+    MARKERS
+        .captures_iter(&rendered)
+        .chain(explicit)
+        .map(|hit| format!("⟦{}⟧", hit[1].trim()))
         .collect()
 }
 
+fn added_phrases(
+    current: &Parts,
+    edited: &Parts,
+    language: &Language,
+) -> std::collections::BTreeSet<String> {
+    let mut added = std::collections::BTreeSet::new();
+    for (before, after) in current
+        .strings()
+        .into_iter()
+        .zip(edited.strings())
+        .filter(|(before, after)| before != after)
+    {
+        let mut original = phrases(before, language);
+        for phrase in phrases(after, language) {
+            if let Some(index) = original.iter().position(|word| word == &phrase) {
+                original.swap_remove(index);
+            } else {
+                added.insert(phrase);
+            }
+        }
+    }
+    added
+}
+
 fn preserves(current: &Parts, edited: &Parts, language: &Language) -> bool {
-    phrases(edited, language).is_subset(&phrases(current, language))
+    added_phrases(current, edited, language).is_empty()
         && current
             .meanings
             .iter()
@@ -468,15 +504,16 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
         if !intact {
             fails.push("learning language: the editor changed the learning text; the supplied JSON is the original writer response, preserve its marked phrases and example texts exactly while editing only the reader prose".into());
             fails.push("editing: any example the editor rewrote or removed is now empty in the supplied JSON; keep it empty, do not restore the original or add a replacement; keep every from and the row order, qualify only an ambiguous first head with its sentence object, and correct the notes without merging senses".into());
-            let allowed = phrases(&original, language);
-            let added = phrases(&current, language)
-                .difference(&allowed)
-                .cloned()
-                .collect::<Vec<_>>();
+            let added = added_phrases(&original, &current, language);
             if !added.is_empty() {
+                let allowed: std::collections::BTreeSet<_> = original
+                    .strings()
+                    .into_iter()
+                    .flat_map(|text| phrases(text, language))
+                    .collect();
                 fails.push(format!(
-                    "learning language: these phrases were not in the original: {}; original phrases allowed to survive: {}; preserve spelling and capitalization exactly, rephrase the reader prose around them or remove the optional section",
-                    added.join(", "),
+                    "learning language: these phrases were added or repeated in a different field: {}; original phrases allowed in their original fields: {}; preserve spelling and capitalization exactly, rephrase the reader prose around them or remove the optional section",
+                    added.into_iter().collect::<Vec<_>>().join(", "),
                     allowed.into_iter().collect::<Vec<_>>().join(", ")
                 ));
             }
@@ -500,16 +537,7 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
             }
         }
     }
-    for example in [
-        &mut current.r#where.example,
-        &mut current.limits.example,
-        &mut current.nuance.example,
-    ] {
-        if task.copied(example) {
-            example.text.clear();
-            example.translation.clear();
-        }
-    }
+    task.omit_copies(&mut current);
     let (fails, _) = judge(&task.input.card, &current, language).into_parts();
     Ok(fails.is_empty().then_some(current))
 }

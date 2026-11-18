@@ -119,6 +119,103 @@ fn unmarked_learning_controls_cannot_change_marked_refusals_or_native_acceptance
 }
 
 #[test]
+fn release_review_foreign_tokens_cannot_depend_on_markup_or_a_nearby_learning_letter() {
+    let accepted: Vec<_> = [
+        "charge 2\u{301}",
+        "2\u{301} charge",
+        "猫",
+        "γ猫",
+        "\u{301}γ",
+    ]
+    .into_iter()
+    .flat_map(|word| [word.to_owned(), format!("⟦{word}⟧"), format!("«{word}»")])
+    .filter(|word| unmarked_outcome(word) != (true, true))
+    .collect();
+    assert!(
+        accepted.is_empty(),
+        "a foreign token passed the judge or writer: {accepted:?}"
+    );
+}
+
+#[test]
+fn release_review_kana_marks_cannot_attach_to_a_han_base() {
+    let language = Language::from_codes("EN", "JA").unwrap();
+    let card = Card::new("term".into(), "load".into(), String::new(), Vec::new());
+    let task = kamishibai::explanation::Task::from_input(
+        kamishibai::explanation::Input::new(
+            card.clone(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ),
+        &language,
+    )
+    .unwrap();
+    let outcomes = ["木\u{3099}", "⟦木\u{3099}⟧", "か\u{3099}", "⟦か\u{3099}⟧"].map(|fragment| {
+        let mut value = review_fixture("load", "a heavy parcel");
+        value["meanings"][0]["from"] = "load".into();
+        value["where"]["text"] = format!("People say {fragment} here.").into();
+        let parts = serde_json::from_value(value.clone()).unwrap();
+        let mut writer = Writer {
+            answers: vec![value.to_string(); 4].into(),
+            prompts: Vec::new(),
+        };
+        (
+            judge(&card, &parts, &language).into_parts().0.is_empty(),
+            kamishibai::explanation::write(&mut writer, &task, &language)
+                .unwrap()
+                .is_some(),
+        )
+    });
+    assert_eq!(
+        outcomes,
+        [(false, false), (false, false), (true, true), (true, true)],
+        "the mark borrowed another script from the Japanese language profile"
+    );
+}
+
+#[test]
+fn release_review_an_editor_cannot_substitute_a_word_that_the_renderer_will_quote() {
+    use kamishibai::explanation::{Input, Task, write};
+    let cases: Vec<Case> =
+        serde_json::from_str(include_str!("fixtures/explanation/judge.json")).unwrap();
+    let case = cases
+        .into_iter()
+        .find(|case| case.id == "4.t1.K23.beforeEdit")
+        .unwrap();
+    let language = Language::from_codes("ru", "en").unwrap();
+    let task = Task::from_input(
+        Input::new(case.card, String::new(), String::new(), String::new()),
+        &language,
+    )
+    .unwrap();
+    let form = |word: &str| {
+        let mut parts = serde_json::to_value(&case.parts).unwrap();
+        parts["where"]["text"] = format!("В новостях и разговорах о суде говорят {word}.").into();
+        parts.to_string()
+    };
+    let outcomes = [
+        ("charge", "blame"),
+        ("⟦charge⟧", "⟦blame⟧"),
+        ("«charge»", "«blame»"),
+        ("charge", "«charge»"),
+        ("⟦charge⟧", "charge"),
+    ]
+    .map(|(before, after)| {
+        let mut writer = Writer {
+            answers: [form(before), form(after), form(after)].into(),
+            prompts: Vec::new(),
+        };
+        write(&mut writer, &task, &language).unwrap().is_some()
+    });
+    assert_eq!(
+        outcomes,
+        [false, false, false, true, true],
+        "editor protection changed with the spelling of the quotation marks"
+    );
+}
+
+#[test]
 fn the_reference_corpus_cannot_change_its_text_or_failed_rules() {
     let language = Language::from_codes("ru", "en").unwrap();
     let cases: Vec<Case> =

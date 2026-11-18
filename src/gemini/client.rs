@@ -752,7 +752,7 @@ where
 
     /// Refine only the supplied card's term and sentence pronunciation in its selected meaning.
     pub fn refine_pronunciation(&self, draft: &CardDraft, meta: CardMeta) -> Result<CardMeta> {
-        self.phonetics_observed(draft, meta, draft.pair(), &mut |_| Ok(()))
+        self.phonetics_observed(draft, meta, draft.pair(), &mut MetaAttempt::new(|_| Ok(())))
     }
 
     /// Build rich card meta and return the request cost record.
@@ -787,7 +787,7 @@ where
         &self,
         draft: &CardDraft,
         request: Option<&SentenceLabelSelection>,
-        mut observe: F,
+        observe: F,
     ) -> Result<CardMeta>
     where
         F: FnMut(CostRecord) -> Result<()>,
@@ -795,8 +795,9 @@ where
         let catalog = catalog();
         let prompt = render_card_meta_prompt(draft, request, &catalog)?;
         let senses = prioritized_senses(draft);
+        let mut attempt = MetaAttempt::new(observe);
         let mut author = |prompt| {
-            let raw = self.card_text_observed(GenerationStage::Metadata, prompt, &mut observe)?;
+            let raw = self.card_text_observed(GenerationStage::Metadata, prompt, &mut attempt)?;
             card_meta_from_raw(&raw, request, &senses)
         };
         let pair = draft.pair();
@@ -820,13 +821,13 @@ where
                 );
             }
         }
-        let meta = self.phonetics_observed(draft, meta, draft.pair(), &mut observe)?;
+        let meta = self.phonetics_observed(draft, meta, draft.pair(), &mut attempt)?;
         self.explanation_observed(
             draft,
             meta,
             crate::explanation::Operation::Create,
             "",
-            &mut observe,
+            &mut attempt,
         )
     }
 
@@ -864,25 +865,26 @@ where
         draft: &CardDraft,
         comment: &str,
         pair: &LanguagePair,
-        mut observe: F,
+        observe: F,
     ) -> Result<CardRevision>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
         let catalog = catalog();
         let prompt = render_card_prompt(draft, comment, pair, &catalog)?;
-        let raw = self.card_text_observed(GenerationStage::Correction, prompt, &mut observe)?;
+        let mut attempt = MetaAttempt::new(observe);
+        let raw = self.card_text_observed(GenerationStage::Correction, prompt, &mut attempt)?;
         let decoded: CardCorrectionResponse = serde_json::from_str(unfence(raw.trim()))?;
         let revision = contextual_revision(draft, decoded.into_revision(label_selection(draft))?)?;
         let settled = draft.clone().with_revision(revision.clone(), None);
         let (term, understanding, meta) = revision.into_parts();
-        let meta = self.phonetics_observed(&settled, meta, pair, &mut observe)?;
+        let meta = self.phonetics_observed(&settled, meta, pair, &mut attempt)?;
         let meta = self.explanation_observed(
             &settled,
             meta,
             crate::explanation::Operation::Revise,
             comment,
-            &mut observe,
+            &mut attempt,
         )?;
         Ok(CardRevision::new(term, understanding, meta))
     }
@@ -1293,12 +1295,13 @@ where
         &self,
         stage: GenerationStage,
         prompt: String,
-        observe: &mut F,
+        attempt: &mut MetaAttempt<F>,
     ) -> Result<String>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
-        let metered = self.request_stage(
+        let response = attempt.request(
+            self,
             stage,
             &Request::text(
                 prompt,
@@ -1306,8 +1309,7 @@ where
                 None,
             ),
         )?;
-        observe(metered.cost.clone())?;
-        let raw = response_text(&metered.response);
+        let raw = response_text(&response);
         if raw.trim().is_empty() {
             bail!("No text content in Gemini response");
         }
@@ -1319,13 +1321,14 @@ where
         draft: &CardDraft,
         meta: CardMeta,
         pair: &LanguagePair,
-        observe: &mut F,
+        attempt: &mut MetaAttempt<F>,
     ) -> Result<CardMeta>
     where
         F: FnMut(CostRecord) -> Result<()>,
     {
         let prompt = render_phonetics_prompt(draft, &meta, pair)?;
-        let metered = self.request_stage(
+        let response = attempt.request(
+            self,
             GenerationStage::Phonetics,
             &Request::text(
                 prompt,
@@ -1333,8 +1336,7 @@ where
                 None,
             ),
         )?;
-        observe(metered.cost.clone())?;
-        let raw = response_text(&metered.response);
+        let raw = response_text(&response);
         if raw.trim().is_empty() {
             bail!("No text content in Gemini phonetics response");
         }
@@ -1524,6 +1526,36 @@ fn diagnosis(response: &GeneratedResponse) -> String {
 struct MeteredResponse {
     response: GeneratedResponse,
     cost: CostRecord,
+}
+
+/// Share the six text requests and their cost observer across one card metadata attempt.
+struct MetaAttempt<F> {
+    remaining: u8,
+    observe: F,
+}
+
+impl<F: FnMut(CostRecord) -> Result<()>> MetaAttempt<F> {
+    fn new(observe: F) -> Self {
+        Self {
+            remaining: 6,
+            observe,
+        }
+    }
+
+    fn request<T: Transport>(
+        &mut self,
+        client: &GeminiClient<T>,
+        stage: GenerationStage,
+        request: &Request,
+    ) -> Result<GeneratedResponse> {
+        self.remaining = self
+            .remaining
+            .checked_sub(1)
+            .context("Card metadata reached its six-request limit")?;
+        let metered = client.request_stage(stage, request)?;
+        (self.observe)(metered.cost)?;
+        Ok(metered.response)
+    }
 }
 
 fn response_text(response: &GeneratedResponse) -> String {
@@ -2630,6 +2662,309 @@ mod tests {
         value
     }
 
+    fn translation_case(index: usize) -> Value {
+        let cases: Vec<Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/sentence_translations.json"
+        ))
+        .unwrap();
+        cases.into_iter().nth(index).unwrap()
+    }
+
+    fn reviewed_draft(case: &Value, learning: &str) -> CardDraft {
+        let candidate = WordCandidate::with_senses(
+            case["term"].as_str().unwrap(),
+            case["senses"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|sense| Sense::plain(sense.as_str().unwrap()))
+                .collect(),
+            0,
+            true,
+        );
+        CardDraft::from_candidate(&candidate, 0, LanguagePair::new(learning, "RU"))
+    }
+
+    fn translate_case(case: &Value, draft: &CardDraft, translation: &Value) -> (CardMeta, usize) {
+        let transport = FakeTransport::new(vec![
+            text_body(&case["metadata"]),
+            phonetics_body(&case["metadata"]),
+            text_body(&case["parts"]),
+            text_body(&case["parts"]),
+            text_body(translation),
+        ]);
+        let meta = GeminiClient::new("fixture", transport.clone())
+            .generate_draft_meta(draft, None)
+            .unwrap();
+        let calls = transport.requests.borrow().len();
+        (meta, calls)
+    }
+
+    #[test]
+    fn release_review_metadata_repairs_and_translation_cannot_exceed_six_calls_per_attempt() {
+        let case = translation_case(0);
+        let draft = reviewed_draft(&case, "EN");
+        let meta = &case["metadata"];
+        let mut mixed = meta.clone();
+        mixed["target_sentence"] = meta["target_sentence"]
+            .as_str()
+            .unwrap()
+            .replace("need", "neеd")
+            .into();
+        let parts = &case["parts"];
+        let mut invalid = parts.clone();
+        invalid["meanings"] = json!([]);
+        let mut bad = case["translations"].clone();
+        bad["source_highlight"] = json!("отсутствующая подстрока");
+        let charges = [&case["translations"], &bad, &bad, &bad].map(|translation| {
+            let transport = FakeTransport::new(vec![
+                text_body(&mixed),
+                text_body(meta),
+                phonetics_body(meta),
+                text_body(&invalid),
+                text_body(parts),
+                text_body(&invalid),
+                text_body(parts),
+                body(json!({"candidates":[{"finishReason":"MAX_TOKENS"}]})),
+                text_body(translation),
+            ]);
+            let mut charged = 0;
+            let _result = GeminiClient::new("fixture", transport.clone())
+                .generate_draft_meta_observed(&draft, None, |cost| {
+                    charged += cost.requests();
+                    Ok(())
+                });
+            (transport.requests.borrow().len(), charged)
+        });
+        assert_eq!(
+            charges,
+            [(6, 6); 4],
+            "repairs or translations escaped the common twenty-four-call budget"
+        );
+    }
+
+    #[test]
+    fn release_review_a_translation_cannot_expose_the_answer_on_the_anki_front() {
+        use crate::anki::{CardModel, NoteFormat, VocabularyNote};
+        let case = translation_case(0);
+        let draft = reviewed_draft(&case, "EN");
+        let front = |translation: &Value| {
+            let (meta, _) = translate_case(&case, &draft, translation);
+            let entry = crate::session::to_entry(&draft.clone().with_meta(meta, None)).unwrap();
+            VocabularyNote::new(CardModel::new().model())
+                .note(&entry, "", "")
+                .fields
+                .remove(0)
+        };
+        let mut echo = case["translations"].clone();
+        echo["source_sentence"] = case["metadata"]["target_sentence"].clone();
+        echo["source_highlight"] = case["term"].clone();
+        let mut wrong = echo.clone();
+        wrong["source_sentence"] = json!("We should get the car fixed this week.");
+        assert_eq!(
+            [front(&echo), front(&wrong), front(&case["translations"])],
+            [
+                "Мне нужно <strong><em>отдать машину в сервис</em></strong> до выходных.",
+                "Мне нужно <strong><em>отдать машину в сервис</em></strong> до выходных.",
+                "Нужно, чтобы мне <strong><em>починили машину</em></strong> до выходных.",
+            ],
+            "an unchecked or incorrect translation reached the Anki front"
+        );
+    }
+
+    #[test]
+    fn release_review_an_exhausted_translation_budget_cannot_publish_unverified_examples() {
+        let case = translation_case(1);
+        let draft = reviewed_draft(&case, "EN");
+        let meta = &case["metadata"];
+        let mut mixed = meta.clone();
+        mixed["target_sentence"] = meta["target_sentence"]
+            .as_str()
+            .unwrap()
+            .replace("police", "pоlice")
+            .into();
+        let parts = &case["parts"];
+        let mut invalid = parts.clone();
+        invalid["meanings"] = json!([]);
+        let outcomes = [true, false].map(|writer_repair| {
+            let mut replies = vec![text_body(&mixed), text_body(meta), phonetics_body(meta)];
+            if writer_repair {
+                replies.push(text_body(&invalid));
+            }
+            replies.extend([text_body(parts), text_body(parts)]);
+            if !writer_repair {
+                replies.push(body(json!({"candidates":[{"finishReason":"MAX_TOKENS"}]})));
+            }
+            replies.push(text_body(&case["translations"]));
+            let transport = FakeTransport::new(replies);
+            let settled = GeminiClient::new("fixture", transport.clone())
+                .generate_draft_meta(&draft, None)
+                .unwrap();
+            let kept = settled.source_sentence() == meta["source_sentence"].as_str().unwrap();
+            let value = serde_json::to_value(settled).unwrap();
+            (
+                transport.requests.borrow().len(),
+                kept,
+                value["explanation"]["parts"]["nuance"]["example"].clone(),
+            )
+        });
+        assert_eq!(
+            outcomes,
+            std::array::from_fn(|_| (6, true, json!({"text":"","translation":""}))),
+            "an unavailable translation spent a seventh request or published an unchecked example"
+        );
+    }
+
+    #[test]
+    fn release_review_an_untranslated_optional_example_cannot_reach_the_card() {
+        let mut case = translation_case(1);
+        let draft = reviewed_draft(&case, "EN");
+        let valid = json!({"text":"The guards caught only small fry.", "translation":"Охранники поймали только мелких сошек."});
+        case["parts"]["where"]["example"] = valid.clone();
+        let mut bad = case["translations"].clone();
+        bad["examples"][0] = valid["translation"].clone();
+        bad["examples"][2] = case["parts"]["nuance"]["example"]["text"].clone();
+        let (meta, _) = translate_case(&case, &draft, &bad);
+        let value = serde_json::to_value(meta).unwrap();
+        assert_eq!(
+            [
+                &value["explanation"]["parts"]["nuance"]["example"],
+                &value["explanation"]["parts"]["where"]["example"]
+            ],
+            [&json!({"text":"","translation":""}), &valid],
+            "a copied learning sentence survived or an independent example was removed"
+        );
+    }
+
+    #[test]
+    fn release_review_an_unsafe_original_translation_cannot_be_used_as_a_fallback() {
+        let mut case = translation_case(0);
+        let draft = reviewed_draft(&case, "EN");
+        case["metadata"]["source_sentence"] = case["metadata"]["target_sentence"].clone();
+        case["metadata"]["source_highlight"] = case["term"].clone();
+        let mut echo = case["translations"].clone();
+        echo["source_sentence"] = case["metadata"]["target_sentence"].clone();
+        echo["source_highlight"] = case["term"].clone();
+        let transport = FakeTransport::new(vec![
+            text_body(&case["metadata"]),
+            phonetics_body(&case["metadata"]),
+            text_body(&case["parts"]),
+            text_body(&case["parts"]),
+            text_body(&echo),
+        ]);
+        let mut charges = 0;
+        let result = GeminiClient::new("fixture", transport).generate_draft_meta_observed(
+            &draft,
+            None,
+            |cost| {
+                charges += cost.requests();
+                Ok(())
+            },
+        );
+        assert_eq!(
+            (result.is_err(), charges),
+            (true, 5),
+            "the English answer was allowed onto the front when both proposed translations were unsafe"
+        );
+    }
+
+    #[test]
+    fn release_review_final_translations_cannot_restore_a_metadata_example() {
+        let mut case = translation_case(1);
+        let draft = reviewed_draft(&case, "EN");
+        let copied = case["translations"]["examples"][2]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let sentence = case["parts"]["nuance"]["example"]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        case["metadata"]["source_context"] = format!(
+            "{}\n{sentence} — {copied}",
+            case["metadata"]["source_context"].as_str().unwrap()
+        )
+        .into();
+        let alternate = "Оба клерка — мелкие сошки.";
+        let results = [copied.as_str(), alternate].map(|text| {
+            let mut translation = case["translations"].clone();
+            translation["examples"][2] = text.into();
+            let (meta, _) = translate_case(&case, &draft, &translation);
+            serde_json::to_value(meta).unwrap()["explanation"]["parts"]["nuance"]["example"].clone()
+        });
+        assert_eq!(
+            results,
+            [
+                json!({"text":"","translation":""}),
+                json!({"text":sentence,"translation":alternate})
+            ],
+            "the final translation restored a copied illustration or removed an independent one"
+        );
+    }
+
+    #[test]
+    fn release_review_reviewed_senses_cannot_require_spaces_to_qualify_for_translation() {
+        let mut missed = Vec::new();
+        for (learning, spellings, sentence, reader, translated) in [
+            (
+                "JA",
+                ["手を貸す", "手 を 貸す"],
+                "彼は友人に手を貸す。",
+                "Он помогает другу.",
+                "Он приходит другу на помощь.",
+            ),
+            (
+                "ZH",
+                ["开绿灯", "开 绿灯"],
+                "市政府为项目开绿灯。",
+                "Власти дают проекту зелёный свет.",
+                "Городские власти одобряют проект.",
+            ),
+            (
+                "TH",
+                ["ยื่นมือช่วย", "ยื่น มือ ช่วย"],
+                "เขายื่นมือช่วยเพื่อน",
+                "Он протягивает другу руку помощи.",
+                "Он помогает своему другу.",
+            ),
+        ] {
+            for term in spellings {
+                let mut case = translation_case(0);
+                let heads = if learning == "ZH" {
+                    ["дать разрешение", "включить зелёный свет"]
+                } else {
+                    ["помочь", "поддержать"]
+                };
+                case["term"] = term.into();
+                case["senses"] = json!(heads);
+                let meta = &mut case["metadata"];
+                meta["meaning"] = heads[0].into();
+                meta["target_sentence"] = sentence.into();
+                meta["source_sentence"] = reader.into();
+                meta["source_highlight"] = reader.into();
+                let parts = &mut case["parts"];
+                parts["meanings"] = json!([{"from":"1","head":heads[0],"note":"по решению соседа"},{"from":"2","head":heads[1],"note":"по просьбе"}]);
+                parts["where"]["text"] = "В разговорах о семейных делах.".into();
+                parts["limits"]["text"] = "".into();
+                parts["nuance"]["text"] = "".into();
+                parts["nuance"]["example"] = json!({"text":"","translation":""});
+                let translation = json!({"source_sentence":translated,"source_highlight":translated,"examples":["","",""]});
+                let (meta, calls) =
+                    translate_case(&case, &reviewed_draft(&case, learning), &translation);
+                if calls != 5
+                    || meta.source_sentence() != translated
+                    || meta.context_format() != crate::vocabulary::ContextFormat::ExplanationV1
+                {
+                    missed.push((term, calls));
+                }
+            }
+        }
+        assert!(
+            missed.is_empty(),
+            "a reviewed expression lost its translation by spelling: {missed:?}"
+        );
+    }
+
     #[test]
     fn a_new_card_cannot_send_a_mixed_alphabet_word_to_phonetics() {
         let wrong = water_metadata("В этом стакаने холодная вода.");
@@ -3196,10 +3531,10 @@ mod tests {
                 meta,
                 crate::explanation::Operation::Create,
                 "",
-                &mut |cost| {
+                &mut MetaAttempt::new(|cost| {
                     costs.push(cost);
                     Ok(())
-                },
+                }),
             )
             .unwrap();
         assert_eq!(

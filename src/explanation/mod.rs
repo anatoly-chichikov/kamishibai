@@ -6,6 +6,7 @@ mod writing;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use unicode_segmentation::UnicodeSegmentation;
 
 pub use layout::{compose, quote, tidy};
 pub use review::{Verdict, judge};
@@ -69,6 +70,13 @@ struct Example {
     translation: String,
 }
 
+impl Example {
+    fn omit(&mut self) {
+        self.text.clear();
+        self.translation.clear();
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Section {
@@ -101,21 +109,38 @@ impl Parts {
     }
 
     /// Install translations in their existing sections without changing the learning text.
-    pub(crate) fn with_translations(mut self, translations: [String; 3]) -> Result<Self> {
-        let examples = [
-            &mut self.r#where.example,
-            &mut self.limits.example,
-            &mut self.nuance.example,
-        ];
-        for (example, translated) in examples.into_iter().zip(translations) {
+    pub(crate) fn with_translations(
+        mut self,
+        translations: Option<[String; 3]>,
+        language: &Language,
+    ) -> Result<Self> {
+        let Some(translations) = translations else {
+            for example in self.examples_mut() {
+                example.omit();
+            }
+            return Ok(self);
+        };
+        for (example, translated) in self.examples_mut().into_iter().zip(translations) {
             let translated = translated.trim();
             anyhow::ensure!(
                 example.text.is_empty() == translated.is_empty(),
                 "Translated examples must match the populated sections"
             );
-            example.translation = translated.to_string();
+            if language.translates(&example.text, translated) {
+                example.translation = translated.to_string();
+            } else {
+                example.omit();
+            }
         }
         Ok(self)
+    }
+
+    fn examples_mut(&mut self) -> [&mut Example; 3] {
+        [
+            &mut self.r#where.example,
+            &mut self.limits.example,
+            &mut self.nuance.example,
+        ]
     }
 
     fn sections(&self) -> [(&str, &str, &Example); 3] {
@@ -222,5 +247,16 @@ impl Language {
         use unicode_script::UnicodeScript;
         let script = ch.script();
         self.learning.contains(&script) && !self.known.contains(&script)
+    }
+
+    /// Check that a replacement has reader-script letters and differs from the learning sentence.
+    #[must_use]
+    pub(crate) fn translates(&self, learning: &str, reader: &str) -> bool {
+        reader.chars().any(char::is_alphabetic)
+            && crate::languages::native_scripted(reader, &self.known)
+            && !reader
+                .unicode_words()
+                .map(str::to_lowercase)
+                .eq(learning.unicode_words().map(str::to_lowercase))
     }
 }

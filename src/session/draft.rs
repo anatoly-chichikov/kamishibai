@@ -637,18 +637,28 @@ impl CardMeta {
         self
     }
 
-    /// Install a whole-sentence translation with its exact, nonempty card-term highlight.
+    /// Select a reader-language sentence and verify its exact, nonempty card-term highlight.
     pub(crate) fn with_source_translation(
         mut self,
-        sentence: String,
-        highlight: String,
+        translation: Option<(String, String)>,
+        language: &crate::explanation::Language,
     ) -> Result<Self> {
+        if let Some((sentence, highlight)) =
+            translation.filter(|(sentence, _)| language.translates(&self.target_sentence, sentence))
+        {
+            self.source_sentence = sentence;
+            self.source_highlight = highlight;
+        } else {
+            anyhow::ensure!(
+                language.translates(&self.target_sentence, &self.source_sentence),
+                "The card has no usable reader-language sentence translation"
+            );
+        }
         anyhow::ensure!(
-            !highlight.trim().is_empty() && sentence.contains(&highlight),
+            !self.source_highlight.trim().is_empty()
+                && self.source_sentence.contains(&self.source_highlight),
             "The translated term must occur in the reader sentence"
         );
-        self.source_sentence = sentence;
-        self.source_highlight = highlight;
         Ok(self)
     }
 
