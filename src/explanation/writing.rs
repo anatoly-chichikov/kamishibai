@@ -1243,6 +1243,26 @@ mod tests {
     }
 
     #[test]
+    fn a_singular_head_cannot_define_a_group_of_people() {
+        let task = task(&language("ru", "en"));
+        assert!(
+            [&task.prompts.writer, &task.prompts.editor]
+                .into_iter()
+                .all(|prompt| {
+                    prompt.contains("the head and its definition must describe the same number")
+                        && calibrations(&task, prompt).into_iter().any(|sample| {
+                            sample.card.term == "dark horse"
+                                && sample.parts.meanings[0].head == "тёмная лошадка"
+                                && sample.parts.meanings[0].note == "соперник с неясными шансами"
+                                && sample.parts.r#where.example.translation
+                                    == "Эти два игрока — тёмные лошадки."
+                        })
+                }),
+            "the writer or editor lost the difference between an individual gloss and a plural illustration"
+        );
+    }
+
+    #[test]
     fn a_note_example_cannot_join_places_and_a_definition_after_the_same_head() {
         let language = language("ru", "en");
         let (input, _) = metadata_example();

@@ -180,7 +180,7 @@ pub(super) fn render_card_meta_prompt(
         ],
     )?;
     if draft.reviewed_senses().len() > 1 {
-        prompt.push_str("\n\nBefore returning the card, translate the people and things in the whole sentence. The reviewed gloss identifies a sense. Its dictionary form need not fit the sentence. Keep distinct individuals distinct, and preserve whether an action was merely arranged or actually completed. Take source_highlight from that final translation.");
+        prompt.push_str("\n\nBefore returning the card, translate the people and things in the whole sentence. The reviewed gloss identifies a sense. Its dictionary form need not fit the sentence. When the expression could mean either one person or several, make the intended number clear in the learning sentence before translating it. Keep distinct individuals distinct, and preserve whether an action was merely arranged or actually completed. Take source_highlight from that final translation.");
         if let Some(sentences) = crate::explanation::sentence_translations(
             &source.prompt,
             &pair.learning_profile(catalog)?.prompt,
@@ -813,6 +813,7 @@ mod tests {
         let prompt = render_card_meta_prompt(&draft, None, &catalog()).unwrap();
         assert!(
             prompt.contains("translate the people and things in the whole sentence")
+                && prompt.contains("make the intended number clear in the learning sentence")
                 && prompt.contains("source_highlight from that final translation"),
             "the real metadata prompt let the singular dictionary head override multiple referents"
         );
