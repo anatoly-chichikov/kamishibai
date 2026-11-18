@@ -137,6 +137,14 @@ impl Task {
             serde_json::to_string_pretty(&self.input)?
         );
         if let Some(parts) = parts {
+            if self.input.card.senses.len() > 1 {
+                let rows: Vec<_> = self.input.card.senses.iter().filter_map(|sense| {
+                    let row = parts.meanings.iter().find(|row| row.from == sense.number)?;
+                    Some(serde_json::json!({"number":sense.number, "approved":sense.understanding,
+                        "head":row.head, "note":row.note}))
+                }).collect();
+                prompt.push_str(&format!("\n\nCheck every proposed note against its own approved sense. Remove any item from a different sense, including a literal image suggested by the term. Keep the row and its number.\nReviewed row check:\n{}", serde_json::to_string(&rows)?));
+            }
             prompt.push_str(&format!(
                 "\n\nWriter's JSON:\n{}",
                 serde_json::to_string(parts)?
@@ -538,6 +546,7 @@ mod tests {
                     "Those two players are dark horses.",
                     "The museum admits visitors with tickets.",
                     "Both men are her kin.",
+                    "The sailors came ashore at dawn.",
                 ] {
                     if writer.0.contains(text) != expected {
                         faults.push(format!("{known}->{learning}: {text}"));
@@ -1062,6 +1071,30 @@ mod tests {
             super::write(&mut writer, &task, &language).unwrap(),
             Some(parts),
             "the editor discarded a pre-existing example from a requested revision"
+        );
+    }
+
+    #[test]
+    fn an_editor_cannot_review_a_later_note_against_the_first_or_literal_sense() {
+        let (input, parts) = metadata_example();
+        let task = Task::from_input(input, &language("ru", "en")).unwrap();
+        let prompt = task
+            .prompt(&task.prompts.editor, Some(&parts), &[])
+            .unwrap();
+        let rows: Option<Vec<serde_json::Value>> = prompt
+            .split_once("Reviewed row check:\n")
+            .and_then(|(_, tail)| {
+                serde_json::Deserializer::from_str(tail)
+                    .into_iter::<Vec<serde_json::Value>>()
+                    .next()?
+                    .ok()
+            });
+        assert_eq!(
+            rows.and_then(|rows| rows.get(1).cloned()),
+            Some(
+                serde_json::json!({"number": "2", "approved": "малыши", "head": "малыши", "note": "дети или мальки рыб"})
+            ),
+            "the editor was never asked to reconcile the fish gloss with the specific reviewed row"
         );
     }
 
