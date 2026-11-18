@@ -1496,3 +1496,33 @@ fn language_diagnostics_cannot_use_another_readers_quotes() {
         "English repair diagnostics borrowed Russian quotation marks: {failures:?}"
     );
 }
+
+#[test]
+fn an_armenian_example_cannot_publish_an_ascii_colon_as_a_full_stop() {
+    let language = Language::from_codes("ZH", "HY").unwrap();
+    let card = reviewed_card("ջուր", "水");
+    let outcomes = [
+        ("Սառը ջուր ես ուզում:", "你想喝凉水吗？"),
+        ("Սառը ջուր ես ուզում?", "你想喝凉水吗？"),
+        ("Սառը ջուր ուզո՞ւմ ես։", "你想喝凉水吗？"),
+        ("Սառը ջուր եմ ուզում։", "我想喝凉水。"),
+    ]
+    .map(|(sentence, translation)| {
+        let mut response = review_fixture("水", "喝的、做饭用的水");
+        response["where"] = serde_json::json!({
+            "text": "在餐馆点水时常说。",
+            "example": {"text":sentence, "translation":translation}
+        });
+        let parts: Parts = serde_json::from_value(response).unwrap();
+        judge(&card, &parts, &language)
+            .into_parts()
+            .0
+            .iter()
+            .any(|finding| finding.starts_with("learning language:"))
+    });
+    assert_eq!(
+        outcomes,
+        [true, true, false, false],
+        "the learning-language check accepted terminal ASCII punctuation or rejected native Armenian punctuation"
+    );
+}

@@ -189,6 +189,15 @@ pub(crate) fn native_scripted(value: &str, scripts: &[unicode_script::Script]) -
     characters(value, scripts, false)
 }
 
+/// Diagnose terminal punctuation in a complete learning-language example.
+pub(crate) fn example_punctuation(
+    value: &str,
+    scripts: &[unicode_script::Script],
+) -> Option<&'static str> {
+    (scripts.contains(&unicode_script::Script::Armenian) && value.trim_end().ends_with([':', '?']))
+        .then_some("end the Armenian sentence with its native full stop (։); for a direct question, place the Armenian question mark (՞) on the stressed vowel")
+}
+
 /// Check rendered instructions while allowing their ASCII prose outside native examples.
 #[cfg(test)]
 pub(crate) fn prompt_scripted(value: &str, code: &str) -> bool {

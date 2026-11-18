@@ -428,6 +428,16 @@ impl Review<'_> {
             let [open, close] = &self.language.context.quotes;
             self.fail("learning language", format!("{open}{fragment}{close} contains letters or marks outside {}; write the whole phrase in the learning language without mixing scripts", self.language.names.learning));
         }
+        for (section, _, example) in parts.sections() {
+            if let Some(advice) =
+                crate::languages::example_punctuation(&example.text, &self.language.learning)
+            {
+                self.fail(
+                    "learning language",
+                    format!("the example in \"{section}\": {advice}"),
+                );
+            }
+        }
     }
 
     fn empty(&mut self, parts: &Parts, whole: &str) {
