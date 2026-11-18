@@ -61,7 +61,7 @@ How to write, in every string:
 - Plain everyday {known}, the way a good tutor talks to one student. Speak to the reader in the same form as these {known} words: {active}.
 - Start with the fact. A sentence never opens by calling the term a word, a phrase or an expression and then saying that it is used, chosen, suitable or common, and never opens with a verb that means to denote or to serve.
 - No grammar terms at all: no names of parts of speech, of parts of a sentence or of word forms, and no vague stand-ins for them. No dictionary formulas with a placeholder for a person or a thing. Do not narrate grammar in everyday words either, like {narrated}: put two real phrases side by side instead.
-- No semicolons, no brackets of any kind, no bold or other markup, no line breaks. Where a second thought is needed, start a second short sentence.
+- No semicolons, no brackets of any kind, no bold or other markup, no line breaks. Where a second thought is needed, start a second short sentence.{question_rule}
 - Nothing on the card is bold except the headings. Every {learning} word or phrase inside {known} text is wrapped in the marks ⟦ ⟧: the app turns the marks into the quotation marks of {known} and prints the words in plain type. Never use other quotation marks or bold marks around {learning} words, and never leave a {learning} word in {known} text without the marks. A {known} word that is being named or translated stands in {open} {close}.
 - Quotation marks for {known} are {open} and {close}.{letters_rule}
 - A note in "meanings" and "literal" do not end with a full stop. The texts of "where", "limits" and "nuance" and the "why" are full sentences and do.

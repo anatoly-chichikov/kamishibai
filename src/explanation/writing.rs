@@ -123,7 +123,12 @@ impl Task {
         !learning.is_empty()
             && !reader.is_empty()
             && (draft.contains(&format!(" {learning} {reader} "))
-                || draft.contains(&format!(" {reader} {learning} ")))
+                || draft.contains(&format!(" {reader} {learning} "))
+                || (shortened_ending(
+                    &words(&self.input.card.sentence),
+                    &learning,
+                    Some(&self.input.card.term),
+                ) && shortened_ending(&words(&self.input.sentence_known), &reader, None)))
     }
 
     fn prompt(
@@ -164,6 +169,29 @@ fn words(text: &str) -> String {
         .map(str::to_lowercase)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn shortened_ending(sentence: &str, example: &str, term: Option<&str>) -> bool {
+    let source: Vec<_> = sentence.split_whitespace().collect();
+    let illustration: Vec<_> = example.split_whitespace().collect();
+    let shared = source
+        .iter()
+        .rev()
+        .zip(illustration.iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    if shared < 2 || illustration.len() - shared > 2 || source.len() < illustration.len() + 2 {
+        return false;
+    }
+    term.is_none_or(|term| {
+        let normalized = words(term);
+        let anchor: Vec<_> = normalized.split_whitespace().collect();
+        !anchor.is_empty()
+            && shared > anchor.len()
+            && illustration[illustration.len() - shared..]
+                .windows(anchor.len())
+                .any(|phrase| phrase == anchor.as_slice())
+    })
 }
 
 #[derive(Deserialize, Serialize)]
@@ -244,6 +272,10 @@ fn substitutions(language: &Language, reviewed: bool, editor: bool) -> Vec<(&'st
         ("{known}", known.clone()),
         ("{learning}", language.names.learning.clone()),
         ("{open}", open.clone()),
+        (
+            "{question_rule}",
+            crate::languages::question_guidance(&language.known, &language.learning).to_string(),
+        ),
         ("{close}", close.clone()),
         ("{limits}", headers[2].trim_end_matches('.').to_string()),
         ("{office}", joined(&block.voice.office, language)),
@@ -414,7 +446,7 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
     let (mut fails, _) = judge(&task.input.card, &current, language).into_parts();
     for (section, _, example) in current.sections() {
         if task.copied(example) {
-            fails.push(format!("{section} example: the entire bilingual example was copied from the unverified metadata draft. Write a fresh illustration in a different situation and translate the whole sentence independently, or omit this optional example"));
+            fails.push(format!("{section} example: the bilingual illustration copies the draft or shortens the same action in both card sentences. Show the term in a different situation, using a different action or context, and translate that example independently, or omit it"));
         }
     }
     if !fails.is_empty()
@@ -1049,6 +1081,35 @@ mod tests {
             input,
             serde_json::from_value(case["parts"].clone()).unwrap(),
         )
+    }
+
+    #[test]
+    fn a_short_example_cannot_replace_the_subject_and_repeat_both_sentence_endings() {
+        let language = language("ru", "en");
+        let (mut input, _) = metadata_example();
+        input.card.term = "skyward".into();
+        input.card.sentence = "The hawk spread its wings and soared skyward.".into();
+        input.sentence_known = "Ястреб расправил крылья и взмыл ввысь.".into();
+        let task = Task::from_input(input, &language).unwrap();
+        let flags = [
+            ("The eagle soared skyward.", "Орёл взмыл ввысь."),
+            ("The eagle looked skyward.", "Орёл посмотрел в небо."),
+            (
+                "At dawn they soared skyward.",
+                "На рассвете они поднялись в небо.",
+            ),
+        ]
+        .map(|(text, translation)| {
+            task.copied(&super::Example {
+                text: text.into(),
+                translation: translation.into(),
+            })
+        });
+        assert_eq!(
+            flags,
+            [true, false, false],
+            "the card accepted the same short bilingual action or discarded an independent example"
+        );
     }
 
     #[test]

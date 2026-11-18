@@ -48,7 +48,7 @@ Keep what the writer had to keep:
 - "why" stays one short sentence of at most 60 characters that names the {learning} word or the part of a word it explains. You may make it plainer, you may not drop it while its mistake remains, and you do not add one where the writer left "";
 - an example stays bare: no quotation marks and no bold marks, the app adds {open} {close} itself;
 - {learning} words and phrases inside the texts stay in ⟦ ⟧: keep the markers around every one, the app replaces them with the reader's quotation marks;
-- no grammar terms, no semicolons, no brackets, no markup, no line breaks, {known} quotation marks {open} {close}, the reader is spoken to in the same form as {active};
+- no grammar terms, no semicolons, no brackets, no markup, no line breaks, {known} quotation marks {open} {close}, the reader is spoken to in the same form as {active};{question_rule}
 - a sentence does not open by calling the term a word, a phrase or an expression and then saying that it is used, chosen, suitable or common;
 - a note in "meanings" and "literal" do not end with a full stop, the texts of the parts do;
 - an empty string stays empty: you do not fill what the writer left out.

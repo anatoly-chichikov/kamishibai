@@ -429,6 +429,17 @@ impl Review<'_> {
             self.fail("learning language", format!("{open}{fragment}{close} contains letters or marks outside {}; write the whole phrase in the learning language without mixing scripts", self.language.names.learning));
         }
         for (section, _, example) in parts.sections() {
+            if crate::languages::missing_question(
+                &example.text,
+                &self.language.learning,
+                &example.translation,
+            ) || crate::languages::missing_question(
+                &example.translation,
+                &self.language.known,
+                &example.text,
+            ) {
+                self.fail("example", format!("the complete Greek question in {section} needs its terminal Greek question mark (;)"));
+            }
             if let Some(advice) =
                 crate::languages::example_punctuation(&example.text, &self.language.learning)
             {
@@ -609,12 +620,6 @@ impl Review<'_> {
                 "a placeholder of the task was copied; write the real words",
             );
         }
-        if matches("[;；]", whole) {
-            self.fail(
-                "semicolon",
-                "a semicolon is used; start a second short sentence instead",
-            );
-        }
         for piece in parts.meanings.iter().map(|line| line.note.as_str()).chain(
             parts
                 .sections()
@@ -631,8 +636,25 @@ impl Review<'_> {
             .flat_map(|line| [line.head.as_str(), &line.note])
             .chain([parts.literal.as_str(), &parts.nuance.why])
             .chain(parts.sections().into_iter().map(|(_, text, _)| text))
-            .collect::<Vec<_>>()
-            .join("\n");
+            .collect::<Vec<_>>();
+        if whole.contains([';', ';', '；'])
+            && (prose
+                .iter()
+                .any(|value| crate::languages::example_semicolon(value, &self.language.known))
+                || parts.sections().into_iter().any(|(_, _, example)| {
+                    crate::languages::example_semicolon(&example.text, &self.language.learning)
+                        || crate::languages::example_semicolon(
+                            &example.translation,
+                            &self.language.known,
+                        )
+                }))
+        {
+            self.fail(
+                "semicolon",
+                "a semicolon is used; start a second short sentence instead",
+            );
+        }
+        let prose = prose.join("\n");
         let terms = unique(
             self.local_hits("grammar", &prose)
                 .into_iter()

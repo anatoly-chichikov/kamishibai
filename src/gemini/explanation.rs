@@ -1,6 +1,6 @@
 //! Accounted explanation requests after metadata and phonetics have settled.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -121,7 +121,9 @@ impl<T: Transport> GeminiClient<T> {
         let config = GenerationConfig::json(schema)?
             .with_thinking_level(ThinkingLevel::Low)
             .with_max_output_tokens(3000);
-        self.explanation_request(prompt, config, observe)
+        Ok(self
+            .explanation_request(prompt, config, observe)?
+            .unwrap_or_default())
     }
 
     fn translate<F: FnMut(CostRecord) -> Result<()>>(
@@ -132,18 +134,33 @@ impl<T: Transport> GeminiClient<T> {
         observe: &mut F,
     ) -> Result<Translations> {
         let input = json!({"learning_language": draft.pair().learning(), "reader_language": draft.pair().known(),
-            "term": draft.term(), "sentence": meta.target_sentence(), "examples": parts.learning_examples()});
-        let prompt = format!(
-            "Translate each complete learning sentence independently into natural reader-language speech. Infer the term's meaning in each sentence from that sentence. Keep every participant and their number, who actually performs the action, and whether the sentence asks for, requires or reports a completed result. If there is a deadline, it applies to the same event in both languages. Do not replace a finished result with booking, ordering or merely starting the work. A dictionary head may need a different number, case or wording in a real sentence. Read the translation on its own to check that it still says the same thing. Return source_sentence for the main sentence and source_highlight as its exact nonempty substring translating the term here. Return one reader translation per example in the original order, with an empty string for an empty input. Output only the requested JSON.\n\nTranslation input:\n{input}"
+            "term": draft.term(), "sentence": meta.target_sentence(), "examples": parts.learning_examples(), "sense_context": parts.sense_context()});
+        let mut prompt = String::from(
+            "Translate each complete learning sentence independently into natural reader-language speech. The sense_context describes the selected situation. Use it when an example could describe either the intended figurative meaning or a literal one. Keep every participant and their number. Preserve who actually performs the action: if another person does the work, the translation must keep that distinction clear. Preserve whether the sentence asks for, requires or reports a completed result. When there is a deadline, it applies to the same event in both languages. Booking, ordering or merely starting the work cannot stand in for the finished result. A dictionary head may need a different number, case or wording in a real sentence. Return source_sentence for the main sentence and source_highlight as its exact nonempty substring translating the term here. Return one reader translation per example in the original order, with an empty string for an empty input. Output only the requested JSON.",
         );
+        let catalog = crate::languages::catalog();
+        if let Some(examples) = crate::explanation::sentence_translations(
+            &draft.pair().known_profile(&catalog)?.prompt,
+            &draft.pair().learning_profile(&catalog)?.prompt,
+        )? {
+            prompt.push_str(&format!("\n\nSentence translation examples:\n{examples}"));
+        }
+        prompt.push_str(&format!("\n\nTranslation input:\n{input}"));
         let schema = json!({"type":"object","properties":{
             "source_sentence":{"type":"string"},"source_highlight":{"type":"string"},
             "examples":{"type":"array","items":{"type":"string"},"minItems":3,"maxItems":3}
         },"required":["source_sentence","source_highlight","examples"],"additionalProperties":false});
-        let config = GenerationConfig::json(schema)?
-            .with_thinking_level(ThinkingLevel::Medium)
-            .with_max_output_tokens(1800);
-        let raw = self.explanation_request(prompt, config, observe)?;
+        let config = GenerationConfig::json(schema)?.with_thinking_level(ThinkingLevel::Medium);
+        let raw = match self.explanation_request(
+            prompt.clone(),
+            config.clone().with_max_output_tokens(8192),
+            observe,
+        )? {
+            Some(raw) => raw,
+            None => self
+                .explanation_request(prompt, config.with_max_output_tokens(16384), observe)?
+                .context("Sentence translation reached its output limit on both attempts")?,
+        };
         Ok(serde_json::from_str(super::unfence(raw.trim()))?)
     }
 
@@ -152,7 +169,7 @@ impl<T: Transport> GeminiClient<T> {
         prompt: String,
         config: GenerationConfig,
         observe: &mut F,
-    ) -> Result<String> {
+    ) -> Result<Option<String>> {
         let metered = self.request_stage(
             GenerationStage::Explanation,
             &Request::text(prompt, Some(config), None),
@@ -166,7 +183,6 @@ impl<T: Transport> GeminiClient<T> {
             .response
             .finish_reason()
             .is_some_and(|reason| !matches!(reason, "STOP" | "UNKNOWN" | "MAX_TOKENS"))
-            || raw.trim().is_empty()
         {
             bail!(
                 "Explanation provider returned no usable answer: {}",
@@ -174,8 +190,13 @@ impl<T: Transport> GeminiClient<T> {
             );
         }
         if metered.response.finish_reason() == Some("MAX_TOKENS") {
-            return Ok(String::new());
+            return Ok(None);
         }
-        Ok(raw)
+        anyhow::ensure!(
+            !raw.trim().is_empty(),
+            "Explanation provider returned no usable answer: {}",
+            diagnosis(&metered.response)
+        );
+        Ok(Some(raw))
     }
 }

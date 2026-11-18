@@ -47,6 +47,7 @@ fn sentence(value: &str) -> String {
 /// Recognize complete sentence punctuation shared by normalization and review.
 pub(super) fn terminated(text: &str) -> bool {
     text.ends_with(['.', '!', '?', '。', '！', '？', '؟', '।', '॥'])
+        || crate::languages::native_terminator(text)
 }
 
 /// Normalize quoted learning phrases to markers for review and edit comparison.

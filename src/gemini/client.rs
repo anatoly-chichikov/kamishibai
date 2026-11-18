@@ -2745,7 +2745,12 @@ mod tests {
                 .map(|body| serde_json::from_str::<Value>(body).unwrap())
                 .unwrap();
             let prompt = blind["contents"][0]["parts"][0]["text"].as_str().unwrap();
+            let translation_input: Value =
+                serde_json::from_str(prompt.split_once("\nTranslation input:\n").unwrap().1)
+                    .unwrap();
             let clean = charges == 5
+                && translation_input["sense_context"]
+                    == json!([parts["meanings"][0]["note"], parts["where"]["text"]])
                 && requests.len() == charges
                 && !prompt.contains(meta["source_sentence"].as_str().unwrap())
                 && !prompt.contains(case["senses"][0].as_str().unwrap())
@@ -2769,6 +2774,66 @@ mod tests {
         assert!(
             missed.is_empty(),
             "the real creation path lost a deadline, plural participants, provenance or a translation charge: {missed:?}"
+        );
+    }
+
+    #[test]
+    fn an_independent_translation_cannot_spend_its_entire_output_on_thinking_then_drop_the_card() {
+        let cases: Vec<Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/sentence_translations.json"
+        ))
+        .unwrap();
+        let case = &cases[0];
+        let meta = &case["metadata"];
+        let parts = &case["parts"];
+        let translations = &case["translations"];
+        let candidate = WordCandidate::with_senses(
+            case["term"].as_str().unwrap(),
+            case["senses"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| Sense::plain(s.as_str().unwrap()))
+                .collect(),
+            0,
+            true,
+        );
+        let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("en", "ru"));
+        let truncated = body(
+            json!({"candidates":[{"content":{"parts":[{"text":"{\"source_sentence\":"}]},"finishReason":"MAX_TOKENS"}],"usageMetadata":{"promptTokenCount":235,"thoughtsTokenCount":1728,"candidatesTokenCount":58,"totalTokenCount":2021}}),
+        );
+        let transport = FakeTransport::new(vec![
+            text_body(meta),
+            phonetics_body(meta),
+            text_body(parts),
+            text_body(parts),
+            truncated,
+            text_body(translations),
+        ]);
+        let mut charges = 0;
+        let result = GeminiClient::new("key", transport.clone()).generate_draft_meta_observed(
+            &draft,
+            None,
+            |_| {
+                charges += 1;
+                Ok(())
+            },
+        );
+        let requests = transport.requests.borrow();
+        let limits: Vec<_> = requests
+            .iter()
+            .skip(4)
+            .map(|r| {
+                serde_json::from_str::<Value>(r).unwrap()["generationConfig"]["maxOutputTokens"]
+                    .as_u64()
+                    .unwrap()
+            })
+            .collect();
+        assert!(
+            result.is_ok()
+                && charges == 6
+                && matches!(limits.as_slice(), [first, second] if *first>1800 && second>first),
+            "a truncated translation discarded the card, retried outside its budget or lost a paid response: {charges} {limits:?}"
         );
     }
 

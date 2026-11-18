@@ -1580,3 +1580,80 @@ fn misplaced_learning_markers_cannot_survive_in_an_example_or_its_translation() 
         "the judge leaked learning markers or rejected a bare bilingual example"
     );
 }
+
+#[test]
+fn a_greek_question_cannot_be_refused_as_a_prose_semicolon() {
+    let outcomes = [
+        ("EL","EN","Did you feed the cat?","Τάισες τη γάτα;"),
+        ("EN","EL","Τάισες τη γάτα;","Did you feed the cat?"),
+        ("EL","EN","Did you feed the cat?","Τη γάτα; στο σπίτι;"),
+        ("EN","EL","Τάισες τη γάτα;","Feed the cat;"),
+    ].map(|(reader, learning, sentence, translation)| {
+        let lang = Language::from_codes(reader,learning).unwrap();
+        let card=reviewed_card("cat", "pet");
+        let mut value = cat_response();
+        value["where"] = serde_json::json!({"text":"Around the house and at the vet.","example":{"text":sentence,"translation":translation}});
+        let parts:Parts = serde_json::from_value(value).unwrap();
+        judge(&card,&parts,&lang).into_parts().0.iter().any(|rule| rule.starts_with("semicolon:"))
+    });
+    assert_eq!(
+        outcomes,
+        [false, false, true, true],
+        "a Greek terminal question mark was refused or an internal or foreign semicolon escaped"
+    );
+}
+
+#[test]
+fn native_prose_cannot_append_an_ascii_period_to_an_armenian_full_stop() {
+    let lang = Language::from_codes("HY", "ID").unwrap();
+    let sentence =
+        "Տանը, բակում կամ անասնաբույժի մոտ՝ կենդանուն կերակրելիս կամ նրա մասին պատմելիս։";
+    let mut value = cat_response();
+    value["where"]["text"] = serde_json::json!(sentence);
+    let parts: Parts = serde_json::from_value(value).unwrap();
+    assert!(
+        compose(&tidy(&parts), &lang)
+            .lines()
+            .any(|line| line == sentence),
+        "the learner saw an extra period after a complete Armenian sentence"
+    );
+}
+
+#[test]
+fn native_prose_cannot_append_a_period_to_a_greek_question_or_reject_it() {
+    let lang = Language::from_codes("EL", "EN").unwrap();
+    let sentence = "Πού βρίσκεται η γάτα;";
+    let mut value = cat_response();
+    value["where"]["text"] = serde_json::json!(sentence);
+    let parts = tidy(&serde_json::from_value::<Parts>(value).unwrap());
+    let fails = judge(&reviewed_card("cat", "pet"), &parts, &lang)
+        .into_parts()
+        .0;
+    assert!(
+        compose(&parts, &lang).lines().any(|line| line == sentence)
+            && !fails.iter().any(|rule| rule.starts_with("semicolon:")),
+        "the Greek reader saw a double terminator or had a valid question rejected"
+    );
+}
+
+#[test]
+fn native_prose_cannot_drop_the_question_mark_on_either_side_of_a_greek_example() {
+    let flags=[
+        ("PT","EL","Θέλετε λίγο νερό","Você quer um pouco de água?"),
+        ("EL","EN","Would you like some water?","Θέλετε λίγο νερό"),
+        ("PT","EL","Θέλετε λίγο νερό;","Você quer um pouco de água?"),
+        ("EL","EN","Could I have some water?","Λίγο νερό, παρακαλώ."),
+        ("PT","EL","ένα ποτήρι νερό","um copo de água"),
+    ].map(|(reader,learning,text,translation)| {
+        let language=Language::from_codes(reader,learning).unwrap();
+        let mut value=cat_response();
+        value["where"]=serde_json::json!({"text":"A phrase heard in a restaurant.","example":{"text":text,"translation":translation}});
+        let parts=serde_json::from_value(value).unwrap();
+        judge(&reviewed_card("water","drink"),&parts,&language).into_parts().0.iter().any(|r|r.starts_with("example:"))
+    });
+    assert_eq!(
+        flags,
+        [true, true, false, false, false],
+        "a Greek question lost its terminal sign or a complete request or vocabulary phrase was refused"
+    );
+}

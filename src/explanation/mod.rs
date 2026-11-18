@@ -85,6 +85,16 @@ struct Nuance {
 }
 
 impl Parts {
+    /// Supply the selected situation that disambiguates a sentence without supplying its translation.
+    pub(crate) fn sense_context(&self) -> [&str; 2] {
+        [
+            self.meanings
+                .first()
+                .map_or("", |meaning| meaning.note.as_str()),
+            &self.r#where.text,
+        ]
+    }
+
     /// Supply only the learning examples for independent sentence translation.
     pub(crate) fn learning_examples(&self) -> [&str; 3] {
         self.sections().map(|(_, _, example)| example.text.as_str())

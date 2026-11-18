@@ -223,6 +223,52 @@ pub(crate) fn mixed_sentence_word<'a>(
     })
 }
 
+/// Recognize an Armenian full stop or a Greek question written with either equivalent sign.
+pub(crate) fn native_terminator(value: &str) -> bool {
+    value.ends_with('։')
+        || value.strip_suffix([';', ';']).is_some_and(|question| {
+            question
+                .chars()
+                .any(|ch| ch.script() == unicode_script::Script::Greek)
+        })
+}
+
+/// Identify prohibited semicolons while preserving a complete Greek question.
+pub(crate) fn example_semicolon(value: &str, scripts: &[unicode_script::Script]) -> bool {
+    let value = value.trim_end();
+    let body = if scripts.contains(&unicode_script::Script::Greek) {
+        value.strip_suffix([';', ';']).unwrap_or(value)
+    } else {
+        value
+    };
+    body.contains([';', ';', '；'])
+}
+
+/// Give both author and editor the local equivalent of a question mark.
+pub(crate) fn question_guidance(
+    known: &[unicode_script::Script],
+    learning: &[unicode_script::Script],
+) -> &'static str {
+    if known.contains(&unicode_script::Script::Greek)
+        || learning.contains(&unicode_script::Script::Greek)
+    {
+        " A complete Greek question ends with its native question mark (;). Keep it in standalone examples and translations."
+    } else {
+        ""
+    }
+}
+
+/// Diagnose an unpunctuated Greek question when its translation supplies the interrogative reading.
+pub(crate) fn missing_question(
+    value: &str,
+    scripts: &[unicode_script::Script],
+    other: &str,
+) -> bool {
+    scripts.contains(&unicode_script::Script::Greek)
+        && value.trim_end().ends_with(char::is_alphabetic)
+        && (other.trim_end().ends_with(['?', '？', '؟']) || other.contains('՞'))
+}
+
 /// Diagnose terminal punctuation in a complete learning-language example.
 pub(crate) fn example_punctuation(
     value: &str,
