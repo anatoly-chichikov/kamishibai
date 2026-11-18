@@ -8,7 +8,7 @@ Operation: {operation}. When the operation is create, this is a fresh card even 
 
 Show a spelling or usage fact through a tiny phrase in an everyday situation. Do not name tenses, word classes or grammatical forms, even in otherwise simple prose. Read each example translation as an independent {known} sentence: convey the intended meaning naturally instead of copying a figurative image or word order that sounds foreign in {known}.
 
-The example translation describes the same people and things as the learning sentence. Use the number and agreement natural in {known}, including inside translated idioms. A singular dictionary head does not stay singular in a sentence about several people. An unchanged or collective learning phrase does not require unchanged wording in the reader translation.
+The example translation describes the same people and things as the learning sentence. Use the number and agreement natural in {known}, including inside translated idioms. A singular dictionary head does not stay singular in a sentence about several people. First translate the whole example without looking at the head. When the sentence identifies several individuals, describe each of them naturally even if the learning term looks singular. Keep a collective reading only if the example treats them as one group.
 
 The explanation always has the same four sections under the same headings in the same order, so the learner knows where to look: {open}{meaning}{close}, {open}{where}{close}, {open}{limits}{close}, {open}{nuance}{close}. The app prints the headings. You write only what stands under each. A section says only what its heading promises, so the learner never wonders what a phrase is about. A section that has nothing real to say stays empty, and the app leaves it out together with its heading. Never fill a section to have it filled. An answer with the list and a single section is a whole answer: most words have nothing real for at least one of the other three.
 
@@ -16,7 +16,7 @@ You get one card:
 - "term" — the {learning} word or phrase;
 - "translation" — how the card translates it. Meanings are separated by ";", near-synonyms of one meaning by ",";
 - "sentence" and "sentence_known" — the sentence on the card and its translation. The card teaches the meaning used in this sentence;
-- "old" — the explanation that is being replaced. Take facts from it and check them against what you know. Its wording is what we are getting rid of: it repeats the translation, opens every section with the same words and fills empty sections with phrases about nothing.
+- "old" is {old_role}.
 
 When "senses" is present, it gives the meanings the learner has reviewed, each with its number, a short description and sometimes a label of style or field. Turn the label into plain words, never brackets. When "request" is nonempty, honor the learner's correction while keeping all rules.
 
@@ -32,6 +32,7 @@ You answer with JSON of five parts.
 - "note" says in a few plain words what this is: which things, what kind of situation. It is never a dictionary definition and never the head or the translation said again in other words. These {known} pairs show the difference:
 {note_examples}
   When a note names things, they are the two to four a person would think of first, with no rare or figurative one among them. Use the complete first head as the scope of its note, not merely a shared adjective. If the head names an ability, give a situation where that ability appears; do not list unrelated objects or other abilities to fill the note. Every item in the first note and every example must still fit the card's exact sentence sense.
+- Read each head with its note, including the later meanings. Write one natural {known} phrase a speaker could finish. If the note lists who acts or when something happens, supply the connecting words. A single idiomatic complement is enough. Shorten by dropping an item, never the words that connect it to the head.
 - The first line may take two rows of a phone screen: head, dash and note together take at most 62 characters. Its note does not use a word that is the head of another line. Every other line must fit one row: head, dash and note together take at most 30 characters, so the note is short, and it makes a whole phrase.
 {from_rule}
 - No labels in brackets and no abbreviations: a shade, such as rude, bookish or said only about people, is told in plain words inside the note.

@@ -1,10 +1,10 @@
 //! Bounded write, repair, edit, and review transaction over an injected provider.
 
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{Card, Language, Parts, judge, tidy};
+use super::{Card, Language, Parts, Sense, judge, tidy};
 use crate::prompt::PromptTemplate;
 
 /// The model boundary for an explanation request, including edits and repairs.
@@ -62,22 +62,32 @@ impl Task {
 
     /// Render a declared operation without inferring it from draft or request text.
     pub fn from_operation(input: Input, language: &Language, operation: Operation) -> Result<Self> {
-        let operation = match operation {
-            Operation::Create => "create",
-            Operation::Revise => "revise",
+        let (operation, old) = match operation {
+            Operation::Create => (
+                "create",
+                "an unverified metadata draft. Start from the card sentence and the reviewed senses when supplied. Check any useful fact independently. Write the notes and example translations afresh",
+            ),
+            Operation::Revise => (
+                "revise",
+                "the explanation that is being replaced. Check its facts against the sentence and the learner's request before reusing them",
+            ),
         };
+        let reviewed = !input.card.senses.is_empty();
         let values = |editor| {
-            let mut values = substitutions(language, !input.card.senses.is_empty(), editor);
+            let mut values = substitutions(language, reviewed, editor);
             values.push(("{operation}", operation.to_string()));
+            values.push(("{old_role}", old.to_string()));
             values
         };
-        let writer = PromptTemplate::new(include_str!("../../assets/explanation_task.txt"))
-            .render(&values(false))?;
-        let editor = PromptTemplate::new(include_str!("../../assets/explanation_edit.txt"))
-            .render(&values(true))?;
-        let examples =
-            crate::languages::explanation_pair(&language.names.reader, &language.names.learning)?;
-        let stamp = Sha256::digest(format!("{writer}\n{editor}{examples}"))
+        let examples = pair_examples(language, reviewed)?;
+        let render = |template, editor| -> Result<String> {
+            let mut instructions = PromptTemplate::new(template).render(&values(editor))?;
+            instructions.push_str(&examples);
+            Ok(instructions)
+        };
+        let writer = render(include_str!("../../assets/explanation_task.txt"), false)?;
+        let editor = render(include_str!("../../assets/explanation_edit.txt"), true)?;
+        let stamp = Sha256::digest(format!("{writer}\n{editor}"))
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
@@ -100,12 +110,9 @@ impl Task {
         instructions: &str,
         parts: Option<&Parts>,
         fails: &[String],
-        language: &Language,
     ) -> Result<String> {
-        let examples =
-            crate::languages::explanation_pair(&language.names.reader, &language.names.learning)?;
         let mut prompt = format!(
-            "{instructions}{examples}\n\nCard input:\n{}",
+            "{instructions}\n\nCard input:\n{}",
             serde_json::to_string_pretty(&self.input)?
         );
         if let Some(parts) = parts {
@@ -119,6 +126,43 @@ impl Task {
         }
         Ok(prompt)
     }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Calibration {
+    card: Card,
+    sentence_known: String,
+    parts: Parts,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_notes: Option<String>,
+}
+
+fn pair_examples(language: &Language, reviewed: bool) -> Result<String> {
+    let reader = &language.names.reader;
+    let learning = &language.names.learning;
+    let Some(mut text) = crate::languages::explanation_pair(reader, learning)? else {
+        return Ok(String::new());
+    };
+    if reviewed {
+        let mut samples: Vec<Calibration> = serde_json::from_str(&text)?;
+        for sample in &mut samples {
+            sample.card.senses = sample
+                .parts
+                .meanings
+                .iter_mut()
+                .enumerate()
+                .map(|(index, row)| {
+                    row.from = (index + 1).to_string();
+                    Sense::new(row.from.clone(), row.head.clone(), String::new())
+                })
+                .collect();
+        }
+        text = serde_json::to_string_pretty(&samples)?;
+    }
+    Ok(format!(
+        "\n\nComplete examples for this exact pair, reader {reader} and learning {learning}:\nRead each head together with its note. Each example translation describes the people in its own sentence. Use the examples for style and scope only. Review notes belong to the sample, never to your answer.\n{text}"
+    ))
 }
 
 fn quoted(value: &str, language: &Language) -> String {
@@ -308,22 +352,16 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
     if count > 5 {
         return Ok(None);
     }
-    let Some(mut current) = ask(writer, task.prompt(&task.writer, None, &[], language)?)? else {
+    let Some(mut current) = ask(writer, task.prompt(&task.writer, None, &[])?)? else {
         return Ok(None);
     };
     let (fails, _) = judge(&task.input.card, &current, language).into_parts();
     if !fails.is_empty()
-        && let Some(fixed) = ask(
-            writer,
-            task.prompt(&task.writer, Some(&current), &fails, language)?,
-        )?
+        && let Some(fixed) = ask(writer, task.prompt(&task.writer, Some(&current), &fails)?)?
     {
         current = fixed;
     }
-    if let Some(edited) = ask(
-        writer,
-        task.prompt(&task.editor, Some(&current), &[], language)?,
-    )? {
+    if let Some(edited) = ask(writer, task.prompt(&task.editor, Some(&current), &[])?)? {
         let accepted = judge(&task.input.card, &current, language)
             .into_parts()
             .0
@@ -354,10 +392,7 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
             } else {
                 revision(&original, &current)
             };
-            if let Some(fixed) = ask(
-                writer,
-                task.prompt(&task.editor, Some(&source), &fails, language)?,
-            )? {
+            if let Some(fixed) = ask(writer, task.prompt(&task.editor, Some(&source), &fails)?)? {
                 if accepted && !preserves(&original, &fixed, language) {
                     return Ok(None);
                 }
@@ -449,6 +484,8 @@ mod tests {
                     "She taught French for ten years.",
                     "He has a deep understanding of local history.",
                     "Those two players are dark horses.",
+                    "The museum admits visitors with tickets.",
+                    "Both men are her kin.",
                 ] {
                     if writer.0.contains(text) != expected {
                         faults.push(format!("{known}->{learning}: {text}"));
@@ -828,6 +865,79 @@ mod tests {
         assert!(
             missing.is_empty(),
             "writer lacks safeguards for observed semantic failures: {missing:?}"
+        );
+    }
+
+    fn calibrations(task: &Task, role: &str) -> Vec<super::Calibration> {
+        let prompt = task.prompt(role, None, &[]).unwrap();
+        let (instructions, _) = prompt.split_once("\n\nCard input:").unwrap();
+        let start = instructions.find("\n[").unwrap();
+        serde_json::from_str(&instructions[start..]).unwrap()
+    }
+
+    #[test]
+    fn reviewed_cards_cannot_show_translation_fragments_as_approved_sense_numbers() {
+        let language = language("ru", "en");
+        let mut input = task(&language).input;
+        input.card.senses = vec![super::Sense::new("1".into(), "кошка".into(), String::new())];
+        input.old = "Черновое объяснение".into();
+        let task = Task::from_input(input, &language).unwrap();
+        let consistent = [&task.writer, &task.editor].into_iter().all(|role| {
+            let samples = calibrations(&task, role);
+            !samples.is_empty()
+                && samples.iter().all(|sample| {
+                    let senses = &sample.card.senses;
+                    let rows = &sample.parts.meanings;
+                    senses.len() == rows.len()
+                        && rows
+                            .iter()
+                            .zip(senses)
+                            .enumerate()
+                            .all(|(index, (row, sense))| {
+                                row.from == (index + 1).to_string()
+                                    && sense.number == row.from
+                                    && !sense.understanding.is_empty()
+                            })
+                })
+        });
+        assert!(
+            consistent,
+            "the writer or editor demonstrated unreviewed rows for a reviewed card"
+        );
+    }
+
+    #[test]
+    fn unreviewed_cards_cannot_gain_numbered_anchors_from_pair_examples() {
+        let task = task(&language("ru", "en"));
+        let consistent =
+            calibrations(&task, &task.writer).into_iter().all(|sample| {
+                sample.card.senses.is_empty()
+                    && sample.parts.meanings.iter().all(|row| {
+                        row.from.is_empty() || sample.card.translation.contains(&row.from)
+                    })
+            });
+        assert!(
+            consistent,
+            "an unreviewed sample lost its translation anchors"
+        );
+    }
+
+    #[test]
+    fn fresh_cards_cannot_treat_metadata_prose_as_an_existing_explanation() {
+        let language = language("es", "fa");
+        let mut input = task(&language).input;
+        input.old = "unverified draft".into();
+        let creation = Task::from_input(input.clone(), &language).unwrap();
+        let revision = Task::from_operation(input, &language, super::Operation::Revise).unwrap();
+        assert!(
+            [&creation.writer, &creation.editor]
+                .iter()
+                .all(|role| role.contains("unverified metadata draft")
+                    && !role.contains("the explanation that is being replaced"))
+                && revision
+                    .writer
+                    .contains("the explanation that is being replaced"),
+            "creation and revision assigned the same authority to metadata prose"
         );
     }
 

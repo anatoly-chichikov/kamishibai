@@ -13,14 +13,14 @@ struct PairExample {
     text: String,
 }
 
-/// Render complete examples only when both catalog language names match.
-pub(crate) fn explanation_pair(reader: &str, learning: &str) -> Result<String> {
+/// Select calibration data only when both catalog language names match.
+pub(crate) fn explanation_pair(reader: &str, learning: &str) -> Result<Option<String>> {
     let examples: Vec<PairExample> =
         serde_json::from_str(include_str!("../../assets/explanation_pairs.json"))
             .context("could not decode explanation pair examples")?;
     let catalog = super::catalog();
     let mut seen = BTreeSet::new();
-    let mut result = String::new();
+    let mut result = None;
     for example in examples {
         let known = catalog.item(&example.reader)?.prompt;
         let target = catalog.item(&example.learning)?.prompt;
@@ -33,10 +33,7 @@ pub(crate) fn explanation_pair(reader: &str, learning: &str) -> Result<String> {
             "duplicate explanation pair {known} to {target}"
         );
         if known == reader && target == learning {
-            result = format!(
-                "\n\nComplete examples for this exact pair, reader {reader} and learning {learning}:\nThese examples calibrate scope, brevity and optional sections. Their reader prose is in {reader}; their marked phrases and example sentences are in {learning}. Copy the standard of accuracy, never their words or facts into another card. Notice that the first note stays within the sentence's sense, literal has no invented continuation, and empty sections stay empty. Review notes explain rejected claims; they are guidance, never part of the answer.\n{}",
-                example.text
-            );
+            result = Some(example.text);
         }
     }
     Ok(result)
