@@ -15,7 +15,7 @@ mod registry;
 
 pub(crate) use explanation_examples::{
     example_punctuation, example_semicolon, missing_question, mixed_sentence_word, native_scripted,
-    native_terminator, question_guidance,
+    native_terminator,
 };
 pub(crate) use explanation_pairs::explanation_pair;
 

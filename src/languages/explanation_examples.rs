@@ -244,20 +244,6 @@ pub(crate) fn example_semicolon(value: &str, scripts: &[unicode_script::Script])
     body.contains([';', ';', '；'])
 }
 
-/// Give both author and editor the local equivalent of a question mark.
-pub(crate) fn question_guidance(
-    known: &[unicode_script::Script],
-    learning: &[unicode_script::Script],
-) -> &'static str {
-    if known.contains(&unicode_script::Script::Greek)
-        || learning.contains(&unicode_script::Script::Greek)
-    {
-        " A complete Greek question ends with its native question mark (;). Keep it in standalone examples and translations."
-    } else {
-        ""
-    }
-}
-
 /// Diagnose an unpunctuated Greek question when its translation supplies the interrogative reading.
 pub(crate) fn missing_question(
     value: &str,

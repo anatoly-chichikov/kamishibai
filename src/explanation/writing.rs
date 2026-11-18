@@ -272,10 +272,6 @@ fn substitutions(language: &Language, reviewed: bool, editor: bool) -> Vec<(&'st
         ("{known}", known.clone()),
         ("{learning}", language.names.learning.clone()),
         ("{open}", open.clone()),
-        (
-            "{question_rule}",
-            crate::languages::question_guidance(&language.known, &language.learning).to_string(),
-        ),
         ("{close}", close.clone()),
         ("{limits}", headers[2].trim_end_matches('.').to_string()),
         ("{office}", joined(&block.voice.office, language)),
