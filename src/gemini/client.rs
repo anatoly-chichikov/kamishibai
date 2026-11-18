@@ -2699,6 +2699,133 @@ mod tests {
     }
 
     #[test]
+    fn reviewed_expressions_cannot_publish_the_dictionary_gloss_in_place_of_sentence_translations()
+    {
+        let cases: Vec<Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/sentence_translations.json"
+        ))
+        .unwrap();
+        let mut missed = Vec::new();
+        for case in cases {
+            let meta = &case["metadata"];
+            let parts = &case["parts"];
+            let translations = &case["translations"];
+            let term = case["term"].as_str().unwrap();
+            let candidate = WordCandidate::with_senses(
+                term,
+                case["senses"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|s| Sense::plain(s.as_str().unwrap()))
+                    .collect(),
+                0,
+                true,
+            );
+            let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("en", "ru"));
+            let transport = FakeTransport::new(vec![
+                text_body(meta),
+                phonetics_body(meta),
+                text_body(parts),
+                text_body(parts),
+                text_body(translations),
+            ]);
+            let mut charges = 0;
+            let settled = GeminiClient::new("key", transport.clone())
+                .generate_draft_meta_observed(&draft, None, |_| {
+                    charges += 1;
+                    Ok(())
+                })
+                .unwrap();
+            let settled = serde_json::to_value(settled).unwrap();
+            let actual = &settled["explanation"]["parts"];
+            let requests = transport.requests.borrow();
+            let blind = requests
+                .last()
+                .map(|body| serde_json::from_str::<Value>(body).unwrap())
+                .unwrap();
+            let prompt = blind["contents"][0]["parts"][0]["text"].as_str().unwrap();
+            let clean = charges == 5
+                && requests.len() == charges
+                && !prompt.contains(meta["source_sentence"].as_str().unwrap())
+                && !prompt.contains(case["senses"][0].as_str().unwrap())
+                && prompt.contains(meta["target_sentence"].as_str().unwrap())
+                && settled["source_sentence"] == translations["source_sentence"]
+                && settled["source_highlight"] == translations["source_highlight"]
+                && settled["target_sentence"] == meta["target_sentence"]
+                && settled["explanation"]["draft"] == meta["source_context"]
+                && actual["meanings"] == parts["meanings"]
+                && ["where", "limits", "nuance"]
+                    .iter()
+                    .enumerate()
+                    .all(|(i, key)| {
+                        actual[key]["example"]["text"] == parts[key]["example"]["text"]
+                            && actual[key]["example"]["translation"] == translations["examples"][i]
+                    });
+            if !clean {
+                missed.push(term.to_owned());
+            }
+        }
+        assert!(
+            missed.is_empty(),
+            "the real creation path lost a deadline, plural participants, provenance or a translation charge: {missed:?}"
+        );
+    }
+
+    #[test]
+    fn a_bad_independent_translation_cannot_publish_or_lose_its_charge() {
+        let cases: Vec<Value> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/sentence_translations.json"
+        ))
+        .unwrap();
+        let case = &cases[0];
+        let meta = &case["metadata"];
+        let parts = &case["parts"];
+        let outcomes = ["highlight", "example"].map(|defect| {
+            let mut bad = case["translations"].clone();
+            if defect == "highlight" {
+                bad["source_highlight"] = json!("несуществующий фрагмент");
+            } else {
+                bad["examples"][2] = json!("");
+            }
+            let candidate = WordCandidate::with_senses(
+                case["term"].as_str().unwrap(),
+                case["senses"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|s| Sense::plain(s.as_str().unwrap()))
+                    .collect(),
+                0,
+                true,
+            );
+            let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("en", "ru"));
+            let transport = FakeTransport::new(vec![
+                text_body(meta),
+                phonetics_body(meta),
+                text_body(parts),
+                text_body(parts),
+                text_body(&bad),
+            ]);
+            let mut charges = 0;
+            let result = GeminiClient::new("key", transport).generate_draft_meta_observed(
+                &draft,
+                None,
+                |_| {
+                    charges += 1;
+                    Ok(())
+                },
+            );
+            (result.is_err(), charges)
+        });
+        assert_eq!(
+            outcomes,
+            [(true, 5); 2],
+            "an invalid translation shipped partial metadata or disappeared from accounting"
+        );
+    }
+
+    #[test]
     fn explicit_metadata_and_phonetics_use_independent_stage_policies() {
         let value = card_meta_response(sentence_labels_response(
             "neutral",

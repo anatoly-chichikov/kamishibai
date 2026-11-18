@@ -637,6 +637,21 @@ impl CardMeta {
         self
     }
 
+    /// Install a whole-sentence translation with its exact, nonempty card-term highlight.
+    pub(crate) fn with_source_translation(
+        mut self,
+        sentence: String,
+        highlight: String,
+    ) -> Result<Self> {
+        anyhow::ensure!(
+            !highlight.trim().is_empty() && sentence.contains(&highlight),
+            "The translated term must occur in the reader sentence"
+        );
+        self.source_sentence = sentence;
+        self.source_highlight = highlight;
+        Ok(self)
+    }
+
     /// Return the metadata with only the reviewed term and sentence IPA replaced.
     #[must_use]
     pub(crate) fn with_phonetics(

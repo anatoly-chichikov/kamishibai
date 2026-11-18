@@ -85,6 +85,29 @@ struct Nuance {
 }
 
 impl Parts {
+    /// Supply only the learning examples for independent sentence translation.
+    pub(crate) fn learning_examples(&self) -> [&str; 3] {
+        self.sections().map(|(_, _, example)| example.text.as_str())
+    }
+
+    /// Install translations in their existing sections without changing the learning text.
+    pub(crate) fn with_translations(mut self, translations: [String; 3]) -> Result<Self> {
+        let examples = [
+            &mut self.r#where.example,
+            &mut self.limits.example,
+            &mut self.nuance.example,
+        ];
+        for (example, translated) in examples.into_iter().zip(translations) {
+            let translated = translated.trim();
+            anyhow::ensure!(
+                example.text.is_empty() == translated.is_empty(),
+                "Translated examples must match the populated sections"
+            );
+            example.translation = translated.to_string();
+        }
+        Ok(self)
+    }
+
     fn sections(&self) -> [(&str, &str, &Example); 3] {
         [
             ("where", &self.r#where.text, &self.r#where.example),

@@ -1128,6 +1128,21 @@ mod tests {
     }
 
     #[test]
+    fn a_mental_ability_note_cannot_be_just_a_list_of_people() {
+        let language = language("ru", "en");
+        let (input, _) = metadata_example();
+        let task = Task::from_input(input, &language).unwrap();
+        let sample = calibrations(&task, &task.prompts.writer)
+            .into_iter()
+            .find(|sample| sample.card.term == "bright")
+            .unwrap();
+        assert_eq!(
+            sample.parts.meanings[0].note, "быстро схватывает суть",
+            "the calibration substitutes people's roles for the ability the learner needs to recognize"
+        );
+    }
+
+    #[test]
     fn a_note_example_cannot_join_places_and_a_definition_after_the_same_head() {
         let language = language("ru", "en");
         let (input, _) = metadata_example();

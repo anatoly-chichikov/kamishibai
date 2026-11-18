@@ -1,0 +1,142 @@
+[
+  {
+    "term": "get the car fixed",
+    "senses": [
+      "отдать в сервис",
+      "починить в сервисе"
+    ],
+    "metadata": {
+      "pronunciation": "ɡɛt ðə kɑːr fɪkst",
+      "transcription": "aɪ niːd tu ɡɛt ðə kɑːr fɪkst bɪˈfɔːr ðə ˈwiːkend",
+      "meaning": "отдать машину в сервис",
+      "importance": 7,
+      "source_sentence": "Мне нужно отдать машину в сервис до выходных.",
+      "source_highlight": "отдать машину в сервис",
+      "source_hint": "Водитель оставляет неисправный автомобиль механикам в автомастерской.",
+      "source_context": "**Значение.**\n- **отдать в сервис**\n- починить в сервисе\n\n**Где встречается.**\nВыражение используют в повседневной речи, когда нужно организовать ремонт автомобиля у специалистов, а не чинить его самому.\n\n**Где неуместно.**\nУ этого выражения нет особых ограничений: оно нейтрально и подходит для любых повседневных разговоров и переписки.\n\n**Нюанс.**\nСлово «the car» всегда ставят между «get» и «fixed», а не после них: «Can you get the car fixed this week?» («Ты можешь отдать машину в сервис на этой неделе?»).",
+      "target_sentence": "I need to get the car fixed before the weekend.",
+      "labels": {
+        "register": "neutral",
+        "type": "statement",
+        "level": "a2",
+        "approx": []
+      }
+    },
+    "parts": {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "Когда ремонтируют машину своими руками, говорят ⟦fix the car⟧."
+      },
+      "literal": "",
+      "meanings": [
+        {
+          "from": "1",
+          "head": "отдать машину в сервис",
+          "note": "до поездки, после поломки"
+        },
+        {
+          "from": "2",
+          "head": "починить в сервисе",
+          "note": "у механика"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "I got the car fixed yesterday.",
+          "translation": "Вчера мне починили машину в сервисе."
+        },
+        "text": "О сделанной работе говорят ⟦I got the car fixed⟧.",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "В разговорах о поездках и расходах на дорогу."
+      }
+    },
+    "translations": {
+      "source_sentence": "Нужно, чтобы мне починили машину до выходных.",
+      "source_highlight": "починили машину",
+      "examples": [
+        "",
+        "",
+        "Вчера мне починили машину в сервисе."
+      ]
+    }
+  },
+  {
+    "term": "small fry",
+    "senses": [
+      "мелкая сошка",
+      "малыши"
+    ],
+    "metadata": {
+      "pronunciation": "smɔːl fraɪ",
+      "transcription": "ðə pəˈliːs ˈəʊnli kɔːt ðə smɔːl fraɪ waɪl ðə bɒs ɡɒt əˈweɪ",
+      "meaning": "мелкая сошка",
+      "importance": 5,
+      "source_sentence": "Полиция поймала лишь мелкую сошку, а босс скрылся.",
+      "source_highlight": "мелкую сошку",
+      "source_hint": "Рядовой исполнитель в наручниках, пока главарь банды остаётся на свободе.",
+      "source_context": "**Значение.**\n- **мелкая сошка**\n- малыши\n\n**Где встречается.**\nВ разговорной речи и рассказах о преступлениях или бизнесе, когда нужно подчеркнуть незначительность рядовых участников.\n\n**Где неуместно.**\nВ официальных документах и деловых отчётах оборот звучит слишком пренебрежительно; там лучше сказать «minor figures».\n\n**Нюанс.**\nВыражение может означать одного человека или группу, но к слову «fry» не добавляют окончание «-s»: \"They are small fry.\" — «Они мелкая сошка.»",
+      "target_sentence": "The police only caught the small fry, while the boss got away.",
+      "labels": {
+        "register": "casual",
+        "type": "statement",
+        "level": "b1",
+        "approx": []
+      }
+    },
+    "parts": {
+      "limits": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "В официальных отчётах звучит слишком пренебрежительно."
+      },
+      "literal": "«мелкая рыбёшка»",
+      "meanings": [
+        {
+          "from": "1",
+          "head": "мелкая сошка",
+          "note": "в банде или в конторе"
+        },
+        {
+          "from": "2",
+          "head": "малыши",
+          "note": "о детях"
+        }
+      ],
+      "nuance": {
+        "example": {
+          "text": "Those two clerks are small fry.",
+          "translation": "Эти двое клерков — мелкая сошка."
+        },
+        "text": "О нескольких людях говорят так же: ⟦they are small fry⟧.",
+        "why": ""
+      },
+      "where": {
+        "example": {
+          "text": "",
+          "translation": ""
+        },
+        "text": "В детективных историях и новостях о расследованиях."
+      }
+    },
+    "translations": {
+      "source_sentence": "Полиция поймала лишь мелких сошек, а главарю удалось скрыться.",
+      "source_highlight": "мелких сошек",
+      "examples": [
+        "",
+        "",
+        "Эти два клерка — мелкие сошки."
+      ]
+    }
+  }
+]
