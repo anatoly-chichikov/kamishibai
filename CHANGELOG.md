@@ -3,7 +3,9 @@
 ## 1.19.2
 
 - Enforce six text requests per metadata attempt and 24 over four attempts, including spelling repairs, explanation edits and independent translations.
-- Translate fresh cards with several reviewed meanings under the same rule in every language. Check the reader sentence and highlight before replacing the Anki front, and omit unchecked or copied bilingual examples.
+- Check the reader sentence and highlight on every new or rewritten card, including when the explanation falls back to the metadata draft. Try one independent translation within the request budget when the draft fails the check. Fail the card if the reader sentence still fails.
+- Keep matching names such as Ford in reader sentences. Reject copied learning sentences and untranslated study terms.
+- Independently translate fresh cards with several reviewed meanings and omit unchecked or copied bilingual examples.
 - Validate unmarked learning words and combining marks against their actual base letters. Preserve learning phrases the renderer quotes automatically when editing an accepted explanation.
 - Report the outcome of Ctrl+C during Anki history export. An early cancellation prints `export cancelled, nothing saved` after cleanup. A late interrupt prints `saved <path>` for the published ZIP.
 

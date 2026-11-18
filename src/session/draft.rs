@@ -637,29 +637,49 @@ impl CardMeta {
         self
     }
 
-    /// Select a reader-language sentence and verify its exact, nonempty card-term highlight.
+    /// Select the independent reader sentence when it passes the language check, then validate the final front.
     pub(crate) fn with_source_translation(
         mut self,
         translation: Option<(String, String)>,
         language: &crate::explanation::Language,
+        draft: &CardDraft,
     ) -> Result<Self> {
-        if let Some((sentence, highlight)) =
-            translation.filter(|(sentence, _)| language.translates(&self.target_sentence, sentence))
-        {
+        if let Some((sentence, highlight)) = translation.filter(|(sentence, _)| {
+            language.translates_sentence(
+                &self.target_sentence,
+                sentence,
+                draft.term(),
+                draft.understanding(),
+            )
+        }) {
             self.source_sentence = sentence;
             self.source_highlight = highlight;
-        } else {
-            anyhow::ensure!(
-                language.translates(&self.target_sentence, &self.source_sentence),
-                "The card has no usable reader-language sentence translation"
-            );
         }
+        self.validate_source_translation(language, draft)?;
+        Ok(self)
+    }
+
+    /// Check that the Anki front shows a reader sentence with an exact highlight.
+    pub(crate) fn validate_source_translation(
+        &self,
+        language: &crate::explanation::Language,
+        draft: &CardDraft,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            language.translates_sentence(
+                &self.target_sentence,
+                &self.source_sentence,
+                draft.term(),
+                draft.understanding()
+            ),
+            "The card has no usable reader-language sentence translation"
+        );
         anyhow::ensure!(
             !self.source_highlight.trim().is_empty()
                 && self.source_sentence.contains(&self.source_highlight),
             "The translated term must occur in the reader sentence"
         );
-        Ok(self)
+        Ok(())
     }
 
     /// Return the metadata with only the reviewed term and sentence IPA replaced.

@@ -1,6 +1,6 @@
 //! Accounted explanation requests after metadata and phonetics have settled.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -35,7 +35,7 @@ impl<T: Transport, F: FnMut(CostRecord) -> Result<()>> Writer for ExplanationWri
 }
 
 impl<T: Transport> GeminiClient<T> {
-    /// Compose an explanation and independently translate fresh cards with multiple reviewed senses.
+    /// Compose an explanation and check the reader sentence before returning generated metadata.
     pub(super) fn explanation_observed<F: FnMut(CostRecord) -> Result<()>>(
         &self,
         draft: &CardDraft,
@@ -81,17 +81,29 @@ impl<T: Transport> GeminiClient<T> {
             &task,
             &language,
         )?;
-        let (meta, parts) = match parts {
-            Some(parts)
-                if matches!(operation, Operation::Create) && draft.reviewed_senses().len() > 1 =>
-            {
-                let translation = self.translate(draft, &meta, &parts, attempt)?;
-                let (source, examples) = translation.map_or((None, None), |translation| {
-                    (
-                        Some((translation.source_sentence, translation.source_highlight)),
-                        Some(translation.examples),
-                    )
-                });
+        let translate_examples = matches!(operation, Operation::Create)
+            && draft.reviewed_senses().len() > 1
+            && parts.is_some();
+        let recover_sentence = meta.validate_source_translation(&language, draft).is_err();
+        let translation = if translate_examples || recover_sentence {
+            self.translate(draft, &meta, parts.as_ref(), attempt, !recover_sentence)
+        } else {
+            Ok(None)
+        };
+        let translation = if recover_sentence {
+            translation.context("The card has no usable reader-language sentence translation")?
+        } else {
+            translation?
+        };
+        let (source, examples) = translation.map_or((None, None), |translation| {
+            (
+                Some((translation.source_sentence, translation.source_highlight)),
+                Some(translation.examples),
+            )
+        });
+        let meta = meta.with_source_translation(source, &language, draft)?;
+        let parts = match parts {
+            Some(parts) if translate_examples => {
                 let mut parts = parts.with_translations(examples, &language)?;
                 task.omit_copies(&mut parts);
                 let (failures, _) = judge(&card, &parts, &language).into_parts();
@@ -100,12 +112,9 @@ impl<T: Transport> GeminiClient<T> {
                     "Translated examples failed explanation review: {}",
                     failures.join(", ")
                 );
-                (
-                    meta.with_source_translation(source, &language)?,
-                    Some(parts),
-                )
+                Some(parts)
             }
-            rest => (meta, rest),
+            rest => rest,
         };
         let context = parts
             .as_ref()
@@ -133,15 +142,18 @@ impl<T: Transport> GeminiClient<T> {
         &self,
         draft: &CardDraft,
         meta: &CardMeta,
-        parts: &Parts,
+        parts: Option<&Parts>,
         attempt: &mut MetaAttempt<F>,
+        retry: bool,
     ) -> Result<Option<Translations>> {
         if attempt.remaining == 0 {
             return Ok(None);
         }
         let input = json!({"learning_language": draft.pair().learning(), "reader_language": draft.pair().known(),
-            "term": draft.term(), "sentence": meta.target_sentence(), "examples": parts.learning_examples(), "sense_context": parts.sense_context(),
-            "example_context": parts.example_context()});
+            "term": draft.term(), "sentence": meta.target_sentence(),
+            "examples": parts.map_or([""; 3], Parts::learning_examples),
+            "sense_context": parts.map_or([""; 2], Parts::sense_context),
+            "example_context": parts.map_or([""; 3], Parts::example_context)});
         let mut prompt = String::from(
             "Translate each complete learning sentence independently into natural reader-language speech. The sense_context describes the selected situation. Use it when an example could describe either the intended figurative meaning or a literal one. For each example, read its own example_context at the same index. Establish who is speaking and who or what is being described before choosing reader words. Count those people or things in both languages, including the word used to describe them. If the dictionary wording would describe one person where the subject describes several, inflect or replace that wording. Preserve who actually performs the action: if another person does the work, the translation must keep that distinction clear. Preserve whether the sentence asks for, requires or reports a completed result. When there is a deadline, it applies to the same event in both languages. Booking, ordering or merely starting the work cannot stand in for the finished result. A dictionary head may need a different number, case or wording in a real sentence. Return source_sentence for the main sentence and source_highlight as its exact nonempty substring translating the term here. Return one reader translation per example in the original order, with an empty string for an empty input. Output only the requested JSON.",
         );
@@ -164,9 +176,10 @@ impl<T: Transport> GeminiClient<T> {
             attempt,
         )? {
             Some(raw) => Some(raw),
-            None => {
+            None if retry => {
                 self.explanation_request(prompt, config.with_max_output_tokens(16384), attempt)?
             }
+            None => None,
         };
         Ok(raw
             .map(|text| serde_json::from_str(super::unfence(text.trim())))

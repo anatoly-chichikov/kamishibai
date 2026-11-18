@@ -2700,6 +2700,288 @@ mod tests {
         (meta, calls)
     }
 
+    fn reader_front(draft: &CardDraft, meta: CardMeta) -> String {
+        use crate::anki::{CardModel, NoteFormat, VocabularyNote};
+        let entry = crate::session::to_entry(&draft.clone().with_meta(meta, None)).unwrap();
+        VocabularyNote::new(CardModel::new().model())
+            .note(&entry, "", "")
+            .fields
+            .remove(0)
+    }
+
+    #[test]
+    fn reader_sentence_for_one_sense_cannot_show_the_answer_on_the_anki_front() {
+        let mut case = translation_case(0);
+        case["senses"].as_array_mut().unwrap().truncate(1);
+        case["parts"]["meanings"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(1);
+        let draft = reviewed_draft(&case, "EN");
+        let mut meta = case["metadata"].clone();
+        meta["source_sentence"] = meta["target_sentence"].clone();
+        meta["source_highlight"] = case["term"].clone();
+        let mut translation = case["translations"].clone();
+        translation["examples"] = json!(["", "", ""]);
+        let transport = FakeTransport::new(vec![
+            text_body(&meta),
+            phonetics_body(&meta),
+            text_body(&case["parts"]),
+            text_body(&case["parts"]),
+            text_body(&translation),
+        ]);
+        let result = GeminiClient::new("fixture", transport.clone())
+            .generate_draft_meta(&draft, None)
+            .unwrap();
+        assert_eq!(
+            (
+                reader_front(&draft, result.clone()),
+                result.context_format(),
+                transport.requests.borrow().len()
+            ),
+            (
+                "Нужно, чтобы мне <strong><em>починили машину</em></strong> до выходных."
+                    .to_owned(),
+                crate::vocabulary::ContextFormat::ExplanationV1,
+                5
+            ),
+            "a single-sense card shipped the learning sentence or skipped its independent translation"
+        );
+    }
+
+    #[test]
+    fn reader_sentence_cannot_fall_back_to_the_answer_after_explanation_rejection() {
+        let case = translation_case(0);
+        let draft = reviewed_draft(&case, "EN");
+        let mut meta = case["metadata"].clone();
+        meta["source_sentence"] = meta["target_sentence"].clone();
+        meta["source_highlight"] = case["term"].clone();
+        let mut rejected = case["parts"].clone();
+        rejected["meanings"] = json!([]);
+        let transport = FakeTransport::new(vec![
+            text_body(&meta),
+            phonetics_body(&meta),
+            text_body(&rejected),
+            text_body(&rejected),
+            text_body(&rejected),
+            text_body(&rejected),
+        ]);
+        let result =
+            GeminiClient::new("fixture", transport.clone()).generate_draft_meta(&draft, None);
+        assert_eq!(
+            (
+                result.ok().map(|meta| reader_front(&draft, meta)),
+                transport.requests.borrow().len(),
+            ),
+            (None, 6),
+            "a rejected explanation shipped its unchecked draft Anki front or exceeded the attempt budget"
+        );
+    }
+
+    #[test]
+    fn reader_sentence_for_a_rewrite_cannot_keep_an_untranslated_metadata_draft() {
+        let case = translation_case(0);
+        let draft = reviewed_draft(&case, "EN");
+        let mut meta = case["metadata"].clone();
+        meta["source_sentence"] = meta["target_sentence"].clone();
+        meta["source_highlight"] = case["term"].clone();
+        meta["term"] = case["term"].clone();
+        meta["understanding"] = case["senses"][0].clone();
+        let mut translation = case["translations"].clone();
+        translation["examples"] = json!(["", "", ""]);
+        let transport = FakeTransport::new(vec![
+            text_body(&meta),
+            phonetics_body(&meta),
+            explanation_fallback_body(),
+            text_body(&translation),
+        ]);
+        let revision = GeminiClient::new("fixture", transport.clone())
+            .correct_card(&draft, "Keep this meaning", draft.pair())
+            .unwrap();
+        assert_eq!(
+            (
+                reader_front(&draft, revision.meta().clone()),
+                revision.meta().context_format(),
+                transport.requests.borrow().len()
+            ),
+            (
+                "Нужно, чтобы мне <strong><em>починили машину</em></strong> до выходных."
+                    .to_owned(),
+                crate::vocabulary::ContextFormat::Legacy,
+                4
+            ),
+            "a rewrite kept an unchecked fallback on its Anki front or skipped its independent translation"
+        );
+    }
+
+    #[test]
+    fn reader_sentence_with_ford_cannot_be_rejected_by_independent_translation() {
+        let mut case = translation_case(0);
+        case["metadata"]["target_sentence"] =
+            json!("I need to get the car fixed at Ford before the weekend.");
+        case["metadata"]["source_sentence"] =
+            json!("Мне нужно отремонтировать машину в Ford до выходных.");
+        case["metadata"]["source_highlight"] = json!("отремонтировать машину");
+        let draft = reviewed_draft(&case, "EN");
+        let mut translation = case["translations"].clone();
+        translation["source_sentence"] = json!("До выходных мне нужно починить машину в Ford.");
+        translation["source_highlight"] = json!("починить машину");
+        let (meta, calls) = translate_case(&case, &draft, &translation);
+        assert_eq!(
+            (reader_front(&draft, meta), calls),
+            (
+                "До выходных мне нужно <strong><em>починить машину</em></strong> в Ford."
+                    .to_owned(),
+                5
+            ),
+            "a matching Ford designation discarded the independently translated Anki front"
+        );
+    }
+
+    #[test]
+    fn reader_sentences_keep_matching_names_and_cannot_keep_the_learning_sentence() {
+        let cases = [
+            (
+                "RU",
+                "EN",
+                "brakes",
+                "They repair brakes at Ford.",
+                "В Ford ремонтируют тормоза.",
+                "тормоза",
+            ),
+            (
+                "RU",
+                "EN",
+                "borrow",
+                "Could I borrow your iPhone?",
+                "Можно одолжить твой iPhone?",
+                "одолжить",
+            ),
+            (
+                "RU",
+                "EN",
+                "moved",
+                "We moved to New York last winter.",
+                "Прошлой зимой мы переехали в New York.",
+                "переехали",
+            ),
+            (
+                "AR",
+                "EN",
+                "sold",
+                "They sold the car to Ford.",
+                "لقد باعوا السيارة لشركة Ford.",
+                "باعوا",
+            ),
+            (
+                "ZH",
+                "EN",
+                "repair",
+                "They repair cars at Ford.",
+                "他们在Ford修车。",
+                "修车",
+            ),
+            (
+                "RU",
+                "JA",
+                "運転",
+                "Fordで運転を学んだ。",
+                "В Ford научились водить.",
+                "водить",
+            ),
+        ];
+        let mut failures = Vec::new();
+        for (known, learning, term, target, translated, highlight) in cases {
+            let draft = CardDraft::new(term, highlight, LanguagePair::new(learning, known));
+            for (source, marked, expected) in [(translated, highlight, true), (target, term, false)]
+            {
+                let mut meta = translation_case(0)["metadata"].clone();
+                meta["target_sentence"] = target.into();
+                meta["source_sentence"] = source.into();
+                meta["source_highlight"] = marked.into();
+                let echo =
+                    json!({"source_sentence":target,"source_highlight":term,"examples":["","",""]});
+                let transport = FakeTransport::new(vec![
+                    text_body(&meta),
+                    phonetics_body(&meta),
+                    explanation_fallback_body(),
+                    text_body(&echo),
+                ]);
+                let result = GeminiClient::new("fixture", transport.clone())
+                    .generate_draft_meta(&draft, None);
+                if result
+                    .as_ref()
+                    .is_ok_and(|meta| meta.source_sentence() == translated)
+                    != expected
+                    || result.is_ok() != expected
+                    || transport.requests.borrow().len() != if expected { 3 } else { 4 }
+                {
+                    failures.push((known, learning, source, result.is_ok()));
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "a matching name was rejected or a copied learning sentence passed: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn reader_sentence_failure_cannot_spend_over_twenty_four_calls_per_card() {
+        use crate::session::{Artifact, SessionEngine};
+        let mut case = translation_case(0);
+        case["senses"].as_array_mut().unwrap().truncate(1);
+        case["parts"]["meanings"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(1);
+        let draft = reviewed_draft(&case, "EN");
+        let mut meta = case["metadata"].clone();
+        meta["source_sentence"] = meta["target_sentence"].clone();
+        meta["source_highlight"] = case["term"].clone();
+        let mut mixed = meta.clone();
+        mixed["target_sentence"] = json!("I neеd to get the car fixed before the weekend.");
+        let echo = json!({
+            "source_sentence": meta["source_sentence"],
+            "source_highlight": meta["source_highlight"],
+            "examples": ["", "", ""]
+        });
+        let replies = (0..4)
+            .flat_map(|_| {
+                [
+                    text_body(&mixed),
+                    text_body(&meta),
+                    phonetics_body(&meta),
+                    text_body(&case["parts"]),
+                    text_body(&case["parts"]),
+                    text_body(&echo),
+                ]
+            })
+            .collect();
+        let transport = FakeTransport::new(replies);
+        let client = GeminiClient::new("fixture", transport.clone());
+        let mut session = SessionEngine::start(vec![draft]);
+        let mut charges = 0;
+        while let Some((slot, Artifact::Meta)) = session.next_target() {
+            let result =
+                client.generate_draft_meta_observed(&session.drafts()[slot], None, |cost| {
+                    charges += cost.requests();
+                    Ok(())
+                });
+            session.applied_meta(slot, result.map(|meta| (meta, None)));
+        }
+        assert_eq!(
+            (
+                transport.requests.borrow().len(),
+                charges,
+                session.next_target(),
+                session.drafts()[0].meta().is_some(),
+            ),
+            (24, 24, None, false),
+            "the failed translation escaped the shared budget or advanced to media with unsafe metadata"
+        );
+    }
+
     #[test]
     fn release_review_metadata_repairs_and_translation_cannot_exceed_six_calls_per_attempt() {
         let case = translation_case(0);
@@ -3522,8 +3804,8 @@ mod tests {
             "sentence ipa",
             "a group",
             7,
-            "source",
-            "group",
+            "Это группа.",
+            "группа",
             "hint",
             original,
             "This is a set.",
