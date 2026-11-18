@@ -179,7 +179,7 @@ pub(super) fn render_card_meta_prompt(
             ),
         ],
     )?;
-    if !draft.reviewed_senses().is_empty() {
+    if draft.reviewed_senses().len() > 1 {
         prompt.push_str("\n\nBefore returning the card, translate the people and things in the whole sentence. The reviewed gloss identifies a sense. Its dictionary form need not fit the sentence. Keep distinct individuals distinct, and preserve whether an action was merely arranged or actually completed. Take source_highlight from that final translation.");
     }
     Ok(prompt)
@@ -759,8 +759,12 @@ mod tests {
 
     #[test]
     fn a_reviewed_dictionary_gloss_cannot_prescribe_the_number_of_the_sentence_translation() {
-        let candidate =
-            WordCandidate::with_senses("kin", vec![Sense::plain("родственник")], 0, true);
+        let candidate = WordCandidate::with_senses(
+            "small fry",
+            vec![Sense::plain("мелкая сошка"), Sense::plain("малыши")],
+            0,
+            true,
+        );
         let draft = CardDraft::from_candidate(&candidate, 0, LanguagePair::new("en", "ru"));
         let prompt = render_card_meta_prompt(&draft, None, &catalog()).unwrap();
         assert!(

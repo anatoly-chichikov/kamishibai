@@ -129,14 +129,16 @@ impl Task {
     fn prompt(
         &self,
         instructions: &str,
-        parts: Option<&Parts>,
+        review: Option<(&Parts, &Language)>,
         fails: &[String],
     ) -> Result<String> {
         let mut prompt = format!(
             "{instructions}\n\nCard input:\n{}",
             serde_json::to_string_pretty(&self.input)?
         );
-        if let Some(parts) = parts {
+        if let Some((parts, language)) = review {
+            prompt.push_str(&format!("\n\nRead the card as it will appear to the learner. Say each displayed line aloud before editing the JSON. If a list puts unlike things after the same dash, keep just one natural completion. If a sentence about how to say a phrase has no natural subject or verb in the reader language, show the phrase directly. Preserve who acts and whether the action is complete in both translations.\n{}",
+                super::compose(parts, language)));
             if self.input.card.senses.len() > 1 {
                 let rows: Vec<_> = self.input.card.senses.iter().filter_map(|sense| {
                     let row = parts.meanings.iter().find(|row| row.from == sense.number)?;
@@ -400,14 +402,14 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
     if !fails.is_empty()
         && let Some(fixed) = ask(
             writer,
-            task.prompt(&task.prompts.writer, Some(&current), &fails)?,
+            task.prompt(&task.prompts.writer, Some((&current, language)), &fails)?,
         )?
     {
         current = fixed;
     }
     if let Some(edited) = ask(
         writer,
-        task.prompt(&task.prompts.editor, Some(&current), &[])?,
+        task.prompt(&task.prompts.editor, Some((&current, language)), &[])?,
     )? {
         let accepted = judge(&task.input.card, &current, language)
             .into_parts()
@@ -441,7 +443,7 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
             };
             if let Some(fixed) = ask(
                 writer,
-                task.prompt(&task.prompts.editor, Some(&source), &fails)?,
+                task.prompt(&task.prompts.editor, Some((&source, language)), &fails)?,
             )? {
                 if accepted && !preserves(&original, &fixed, language) {
                     return Ok(None);
@@ -1077,9 +1079,10 @@ mod tests {
     #[test]
     fn an_editor_cannot_review_a_later_note_against_the_first_or_literal_sense() {
         let (input, parts) = metadata_example();
-        let task = Task::from_input(input, &language("ru", "en")).unwrap();
+        let language = language("ru", "en");
+        let task = Task::from_input(input, &language).unwrap();
         let prompt = task
-            .prompt(&task.prompts.editor, Some(&parts), &[])
+            .prompt(&task.prompts.editor, Some((&parts, &language)), &[])
             .unwrap();
         let rows: Option<Vec<serde_json::Value>> = prompt
             .split_once("Reviewed row check:\n")
@@ -1095,6 +1098,20 @@ mod tests {
                 serde_json::json!({"number": "2", "approved": "малыши", "head": "малыши", "note": "дети или мальки рыб"})
             ),
             "the editor was never asked to reconcile the fish gloss with the specific reviewed row"
+        );
+    }
+
+    #[test]
+    fn a_copyeditor_cannot_miss_the_rendered_head_and_note_the_reader_sees() {
+        let (input, parts) = metadata_example();
+        let language = language("ru", "en");
+        let task = Task::from_input(input, &language).unwrap();
+        let prompt = task
+            .prompt(&task.prompts.editor, Some((&parts, &language)), &[])
+            .unwrap();
+        assert!(
+            prompt.contains(&super::super::compose(&parts, &language)),
+            "the copyeditor only saw disconnected JSON fields instead of the actual reader text"
         );
     }
 
