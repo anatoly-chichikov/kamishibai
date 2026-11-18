@@ -3,8 +3,9 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use unicode_segmentation::UnicodeSegmentation;
 
-use super::{Card, Language, Parts, Sense, judge, tidy};
+use super::{Card, Example, Language, Parts, Sense, judge, tidy};
 use crate::prompt::PromptTemplate;
 
 /// The model boundary for an explanation request, including edits and repairs.
@@ -49,9 +50,15 @@ impl Input {
 #[derive(Clone, Debug)]
 pub struct Task {
     input: Input,
+    prompts: Prompts,
+    stamp: String,
+    draft_words: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct Prompts {
     writer: String,
     editor: String,
-    stamp: String,
 }
 
 impl Task {
@@ -62,10 +69,12 @@ impl Task {
 
     /// Render a declared operation without inferring it from draft or request text.
     pub fn from_operation(input: Input, language: &Language, operation: Operation) -> Result<Self> {
+        let draft_words =
+            matches!(operation, Operation::Create).then(|| format!(" {} ", words(&input.old)));
         let (operation, old) = match operation {
             Operation::Create => (
                 "create",
-                "an unverified metadata draft. Start from the card sentence and the reviewed senses when supplied. Check any useful fact independently. Write the notes and example translations afresh",
+                "an unverified metadata draft. Start from the card sentence and the reviewed senses when supplied. Check any useful fact independently. Compose a new example in a different situation. Do not borrow the wording, participants or translation of an illustration in this draft",
             ),
             Operation::Revise => (
                 "revise",
@@ -93,9 +102,9 @@ impl Task {
             .collect();
         Ok(Self {
             input,
-            writer,
-            editor,
+            prompts: Prompts { writer, editor },
             stamp,
+            draft_words,
         })
     }
 
@@ -103,6 +112,18 @@ impl Task {
     #[must_use]
     pub fn stamp(&self) -> &str {
         &self.stamp
+    }
+
+    fn copied(&self, example: &Example) -> bool {
+        let Some(draft) = &self.draft_words else {
+            return false;
+        };
+        let learning = words(&example.text);
+        let reader = words(&example.translation);
+        !learning.is_empty()
+            && !reader.is_empty()
+            && (draft.contains(&format!(" {learning} {reader} "))
+                || draft.contains(&format!(" {reader} {learning} ")))
     }
 
     fn prompt(
@@ -126,6 +147,13 @@ impl Task {
         }
         Ok(prompt)
     }
+}
+
+fn words(text: &str) -> String {
+    text.unicode_words()
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[derive(Deserialize, Serialize)]
@@ -352,16 +380,27 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
     if count > 5 {
         return Ok(None);
     }
-    let Some(mut current) = ask(writer, task.prompt(&task.writer, None, &[])?)? else {
+    let Some(mut current) = ask(writer, task.prompt(&task.prompts.writer, None, &[])?)? else {
         return Ok(None);
     };
-    let (fails, _) = judge(&task.input.card, &current, language).into_parts();
+    let (mut fails, _) = judge(&task.input.card, &current, language).into_parts();
+    for (section, _, example) in current.sections() {
+        if task.copied(example) {
+            fails.push(format!("{section} example: the entire bilingual example was copied from the unverified metadata draft. Write a fresh illustration in a different situation and translate the whole sentence independently, or omit this optional example"));
+        }
+    }
     if !fails.is_empty()
-        && let Some(fixed) = ask(writer, task.prompt(&task.writer, Some(&current), &fails)?)?
+        && let Some(fixed) = ask(
+            writer,
+            task.prompt(&task.prompts.writer, Some(&current), &fails)?,
+        )?
     {
         current = fixed;
     }
-    if let Some(edited) = ask(writer, task.prompt(&task.editor, Some(&current), &[])?)? {
+    if let Some(edited) = ask(
+        writer,
+        task.prompt(&task.prompts.editor, Some(&current), &[])?,
+    )? {
         let accepted = judge(&task.input.card, &current, language)
             .into_parts()
             .0
@@ -392,7 +431,10 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
             } else {
                 revision(&original, &current)
             };
-            if let Some(fixed) = ask(writer, task.prompt(&task.editor, Some(&source), &fails)?)? {
+            if let Some(fixed) = ask(
+                writer,
+                task.prompt(&task.prompts.editor, Some(&source), &fails)?,
+            )? {
                 if accepted && !preserves(&original, &fixed, language) {
                     return Ok(None);
                 }
@@ -400,6 +442,16 @@ pub fn write(writer: &mut impl Writer, task: &Task, language: &Language) -> Resu
             } else if !intact {
                 return Ok(None);
             }
+        }
+    }
+    for example in [
+        &mut current.r#where.example,
+        &mut current.limits.example,
+        &mut current.nuance.example,
+    ] {
+        if task.copied(example) {
+            example.text.clear();
+            example.translation.clear();
         }
     }
     let (fails, _) = judge(&task.input.card, &current, language).into_parts();
@@ -832,7 +884,7 @@ mod tests {
                 .take(2)
                 .map(serde_json::Value::to_string)
                 .collect(),
-            editor: task.editor.clone(),
+            editor: task.prompts.editor.clone(),
             reviewed: false,
         };
         let mut expected: super::Parts =
@@ -860,7 +912,7 @@ mod tests {
             "Check every letter of every learning phrase",
         ]
         .into_iter()
-        .filter(|rule| !task.writer.contains(rule))
+        .filter(|rule| !task.prompts.writer.contains(rule))
         .collect::<Vec<_>>();
         assert!(
             missing.is_empty(),
@@ -882,24 +934,25 @@ mod tests {
         input.card.senses = vec![super::Sense::new("1".into(), "кошка".into(), String::new())];
         input.old = "Черновое объяснение".into();
         let task = Task::from_input(input, &language).unwrap();
-        let consistent = [&task.writer, &task.editor].into_iter().all(|role| {
-            let samples = calibrations(&task, role);
-            !samples.is_empty()
-                && samples.iter().all(|sample| {
-                    let senses = &sample.card.senses;
-                    let rows = &sample.parts.meanings;
-                    senses.len() == rows.len()
-                        && rows
-                            .iter()
-                            .zip(senses)
-                            .enumerate()
-                            .all(|(index, (row, sense))| {
-                                row.from == (index + 1).to_string()
-                                    && sense.number == row.from
-                                    && !sense.understanding.is_empty()
-                            })
-                })
-        });
+        let consistent =
+            [&task.prompts.writer, &task.prompts.editor]
+                .into_iter()
+                .all(|role| {
+                    let samples = calibrations(&task, role);
+                    !samples.is_empty()
+                        && samples.iter().all(|sample| {
+                            let senses = &sample.card.senses;
+                            let rows = &sample.parts.meanings;
+                            senses.len() == rows.len()
+                                && rows.iter().zip(senses).enumerate().all(
+                                    |(index, (row, sense))| {
+                                        row.from == (index + 1).to_string()
+                                            && sense.number == row.from
+                                            && !sense.understanding.is_empty()
+                                    },
+                                )
+                        })
+                });
         assert!(
             consistent,
             "the writer or editor demonstrated unreviewed rows for a reviewed card"
@@ -909,8 +962,9 @@ mod tests {
     #[test]
     fn unreviewed_cards_cannot_gain_numbered_anchors_from_pair_examples() {
         let task = task(&language("ru", "en"));
-        let consistent =
-            calibrations(&task, &task.writer).into_iter().all(|sample| {
+        let consistent = calibrations(&task, &task.prompts.writer)
+            .into_iter()
+            .all(|sample| {
                 sample.card.senses.is_empty()
                     && sample.parts.meanings.iter().all(|row| {
                         row.from.is_empty() || sample.card.translation.contains(&row.from)
@@ -930,14 +984,84 @@ mod tests {
         let creation = Task::from_input(input.clone(), &language).unwrap();
         let revision = Task::from_operation(input, &language, super::Operation::Revise).unwrap();
         assert!(
-            [&creation.writer, &creation.editor]
+            [&creation.prompts.writer, &creation.prompts.editor]
                 .iter()
                 .all(|role| role.contains("unverified metadata draft")
                     && !role.contains("the explanation that is being replaced"))
                 && revision
+                    .prompts
                     .writer
                     .contains("the explanation that is being replaced"),
             "creation and revision assigned the same authority to metadata prose"
+        );
+    }
+
+    fn metadata_example() -> (Input, super::Parts) {
+        let case: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/explanation/metadata_example.json"
+        ))
+        .unwrap();
+        let source = &case["input"];
+        let input = Input::new(
+            serde_json::from_value(source.clone()).unwrap(),
+            source["sentence_known"].as_str().unwrap().into(),
+            source["old"].as_str().unwrap().into(),
+            String::new(),
+        );
+        (
+            input,
+            serde_json::from_value(case["parts"].clone()).unwrap(),
+        )
+    }
+
+    #[test]
+    fn a_fresh_card_cannot_publish_a_bilingual_example_copied_from_its_metadata_draft() {
+        let language = language("ru", "en");
+        let (input, mut parts) = metadata_example();
+        let task = Task::from_input(input, &language).unwrap();
+        let mut writer = Replies {
+            answers: vec![serde_json::to_string(&parts).unwrap(); 4].into(),
+        };
+        parts.nuance.example.text.clear();
+        parts.nuance.example.translation.clear();
+        assert_eq!(
+            super::write(&mut writer, &task, &language).unwrap(),
+            Some(parts),
+            "the complete copied bilingual example survived the fresh-card transaction"
+        );
+    }
+
+    #[test]
+    fn a_corrected_reader_translation_cannot_be_discarded_with_the_copied_example() {
+        let language = language("ru", "en");
+        let (input, mut parts) = metadata_example();
+        let task = Task::from_input(input, &language).unwrap();
+        let first = serde_json::to_string(&parts).unwrap();
+        parts.nuance.example.translation = "Они всего лишь мелкие сошки.".into();
+        let fixed = serde_json::to_string(&parts).unwrap();
+        let mut writer = Replies {
+            answers: [first, fixed.clone(), fixed].into(),
+        };
+        assert_eq!(
+            super::write(&mut writer, &task, &language).unwrap(),
+            Some(parts),
+            "the writer lost an independently translated example"
+        );
+    }
+
+    #[test]
+    fn a_revision_cannot_lose_its_existing_bilingual_example_to_the_freshness_check() {
+        let language = language("ru", "en");
+        let (input, parts) = metadata_example();
+        let task = Task::from_operation(input, &language, super::Operation::Revise).unwrap();
+        let answer = serde_json::to_string(&parts).unwrap();
+        let mut writer = Replies {
+            answers: [answer.clone(), answer].into(),
+        };
+        assert_eq!(
+            super::write(&mut writer, &task, &language).unwrap(),
+            Some(parts),
+            "the editor discarded a pre-existing example from a requested revision"
         );
     }
 
@@ -945,9 +1069,11 @@ mod tests {
     fn quality_editor_cannot_preserve_misspellings_as_untouchable_learning_text() {
         let task = task(&language("es", "fa"));
         assert!(
-            task.editor
+            task.prompts
+                .editor
                 .contains("Proofread the learning phrases and examples for standard spelling")
                 && task
+                    .prompts
                     .writer
                     .contains("Do not invent a respelling to illustrate pronunciation"),
             "the editor was told to preserve a writer's spelling error without checking it"
@@ -1008,7 +1134,7 @@ mod tests {
                     continue;
                 }
                 let task = task(&language);
-                let both = format!("{}\n{}", task.writer, task.editor);
+                let both = format!("{}\n{}", task.prompts.writer, task.prompts.editor);
                 for (field, value) in language.names.examples.guidance().strings() {
                     if !both.contains(value) {
                         faults.push(format!("{known}->{learning}: missing {field}"));
@@ -1065,7 +1191,7 @@ mod tests {
 
     fn task_with_target(language: &Language) -> (String, String) {
         let task = task(language);
-        (task.writer, task.editor)
+        (task.prompts.writer, task.prompts.editor)
     }
 
     #[test]
@@ -1157,9 +1283,15 @@ mod tests {
             .filter(|code| {
                 let language = language(code, "en");
                 let task = task(&language);
-                !task.writer.contains("longer than one short line of text")
-                    || task.writer.contains("longer than fourteen words")
-                    || !task.editor.contains("longer than one short line of text")
+                !task
+                    .prompts
+                    .writer
+                    .contains("longer than one short line of text")
+                    || task.prompts.writer.contains("longer than fourteen words")
+                    || !task
+                        .prompts
+                        .editor
+                        .contains("longer than one short line of text")
             })
             .collect::<Vec<_>>();
         assert!(
